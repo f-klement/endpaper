@@ -1508,21 +1508,28 @@ class TestTheKeyIsResolvedOncePerRequest:
     def key_phrase(self) -> str:
         return credentials.generate_phrase()
 
-    def test_the_shipping_roster_resolves_the_key_once_and_finds_nothing(
+    def test_the_shipping_roster_resolves_the_key_once_and_opens_no_envelope(
         self, db, monkeypatch
     ):
         """Nothing is patched, so this is the roster as it ships.
 
-        **It resolved nothing until the roster grew a credential door**, and the
-        arm that matters is unchanged by that: an install storing no credential
-        pays one resolution rather than one per source, and gets an empty
-        answer rather than a login it does not have. A tally above one here is
-        the defect this class exists for, arriving from the other side.
+        **The arm that matters has survived two changes to what the roster
+        answers**, and it is the tally rather than the mapping: an install
+        storing no credential pays one resolution and not one per source. A
+        tally above one here is the defect this class exists for, arriving from
+        the other side.
+
+        What the mapping holds did change, twice. It was empty while no door
+        carried a login at all; it was still empty once one did, because nobody
+        had entered one; and it now carries the shipped default, which costs no
+        resolution because it opens no envelope. So the roster as it ships pays
+        exactly what it paid before and sends a login it did not send.
         """
         tally = self._counted(monkeypatch)
 
-        assert books_router._catalogue_logins(db) == {}
+        resolved = books_router._catalogue_logins(db)
 
+        assert set(resolved) == sources.SHIPS_A_CREDENTIAL
         assert tally[0] == 1
 
     def test_two_sealed_logins_cost_what_one_costs(

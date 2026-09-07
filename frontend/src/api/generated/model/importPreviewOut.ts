@@ -7,6 +7,7 @@
  */
 import type { ImportPreviewOutMapping } from "./importPreviewOutMapping.ts";
 import type { ImportPreviewRow } from "./importPreviewRow.ts";
+import type { ImportReader } from "./importReader.ts";
 
 /**
  * What the file turned out to be, before anything is written.
@@ -20,8 +21,15 @@ export interface ImportPreviewOut {
   delimiter: string;
   /** @minimum 0 */
   distinct_tags?: number;
+  /**
+   * Rows the file itself marked as not wanted, such as a title deleted at the source. Read off the uploaded file alone, so unlike `skipped` on the result it discloses nothing about this instance
+   * @minimum 0
+   */
+  excluded?: number;
+  exclusion_column?: string | null;
   headers: string[];
   mapping: ImportPreviewOutMapping;
+  reader?: ImportReader;
   rows?: ImportPreviewRow[];
   /**
    * Rows with no title

@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from import_readers import ImportReader
+
 
 class ImportResultOut(BaseModel):
     """What an import actually did.
@@ -10,7 +12,7 @@ class ImportResultOut(BaseModel):
     already correct, or the row could not be acted on at all.
     """
 
-    rows_read: int = Field(ge=0, description="Rows with a title")
+    rows_read: int = Field(ge=0, description="Rows this import acted on")
     matched: int = Field(ge=0, description="Rows matched to a book already here")
     created: int = Field(ge=0, description="Books added from the file")
     statuses_updated: int = Field(ge=0, description="Statuses actually changed")
@@ -19,6 +21,14 @@ class ImportResultOut(BaseModel):
         description=(
             "Rows this import could not act on: no title, or an ISBN held by a "
             "book the caller cannot see"
+        ),
+    )
+    excluded: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Rows the file itself marked as not wanted, such as a title deleted "
+            "at the source"
         ),
     )
     # Capped by the router: a large export with nothing matching would
@@ -53,8 +63,31 @@ class ImportPreviewOut(BaseModel):
     #: What separated the columns. Worth showing: a tab-separated file read as
     #: CSV is the failure that looks like corrupt data.
     delimiter: str
+    #: Which reader read the file. Shown for the reason the mapping is: a file
+    #: read as the wrong service's export is invisible until after the import,
+    #: and `reader=` on the import is what corrects it.
+    #:
+    #: **Reported on every preview, the ordinary answer included.** A screen
+    #: that says nothing when the answer is the ordinary one cannot be checked,
+    #: because a wrong answer then looks exactly like the common case.
+    reader: ImportReader = ImportReader.GENERIC
     total_rows: int = Field(ge=0)
     skipped: int = Field(ge=0, description="Rows with no title")
+    excluded: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Rows the file itself marked as not wanted, such as a title deleted "
+            "at the source. Read off the uploaded file alone, so unlike "
+            "`skipped` on the result it discloses nothing about this instance"
+        ),
+    )
+    #: The header `excluded` was read from, null where the file has no such
+    #: column, and bounded in length like every other header this API hands
+    #: back. Shown with the count, since a count on its own cannot separate
+    #: "no such column" from "that column, and no row said yes", and the column
+    #: is honoured wherever it appears rather than for one service.
+    exclusion_column: str | None = None
     #: How many different tags this file carries. Shown next to the "bring the
     #: tags across" switch, because a count of this file beats a warning that
     #: says "often hundreds".

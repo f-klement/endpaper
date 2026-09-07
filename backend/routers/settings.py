@@ -11,6 +11,7 @@ import metadata
 import notifications
 import settings_store
 import sources
+import targets
 from auth import require_admin
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from dependencies import DbSession
@@ -188,19 +189,22 @@ async def set_login_image(
 def _credential_view(
     db: DbSession, source: CatalogueSource, state: credentials.KeyState
 ) -> dict[str, Any]:
-    """The three credential fields on one roster row, and no secret among them.
+    """The credential fields on one roster row, and no secret among them.
 
     **Built here rather than in `sources.describe`**, which is where the other
     derived fields come from. That module owns which catalogues are asked and in
     what order, holds no database by design, and a credential is neither of
     those things. Masking is here for the same reason it is here for the mail
     password: it is presentation, and `settings_store.mask` is the one rule.
+
+    **The row's own address is handed over**, because the ladder's bottom level
+    is bound to it: see `credentials.view`. `targets.SEEDED` is what the runtime
+    asks, so this is the same address a lookup would use.
     """
-    held = credentials.view(db, source.value, state)
+    held = credentials.view(db, source.value, targets.SEEDED[source].base_url, state)
     return {
-        "has_credential": held.has_credential,
+        "credential_provenance": held.provenance,
         "credential_username_preview": settings_store.mask(held.username),
-        "credential_from_env": held.from_env,
         "credential_unreadable": held.unreadable,
     }
 

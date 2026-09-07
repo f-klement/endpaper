@@ -429,9 +429,12 @@ def _catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credenti
     it bounds has not changed: the cost is **one** resolution per request now
     that there is a door, and it stays one however many doors the roster grows,
     where the defect this replaced was one per source. An install that has
-    stored no credential pays that one and gets an empty answer, and so does one
-    whose credentials are all pinned by the environment, because a pinned
-    credential never opens an envelope.
+    stored no credential pays that one and **opens no envelope**, and so does
+    one whose credentials are all pinned by the environment: neither a pinned
+    credential nor a login this build ships reaches the store. What comes back
+    is no longer empty, since `sources.SHIPS_A_CREDENTIAL` is not, and the two
+    are worth keeping apart here because what this paragraph bounds is the
+    resolution rather than the mapping.
     `tests/routers/test_books.py::TestTheKeyIsResolvedOncePerRequest` pins both
     ends.
 

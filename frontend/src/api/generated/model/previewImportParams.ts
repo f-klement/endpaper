@@ -5,10 +5,15 @@
  * Catalogue, lend and track a collection of physical books, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
+import type { ImportReader } from "./importReader.ts";
 
 export type PreviewImportParams = {
   /**
    * Correct a guessed column, as field=header pairs
    */
   overrides?: string | null;
+  /**
+   * Read the file as this service's export, rather than detecting
+   */
+  reader?: ImportReader | null;
 };

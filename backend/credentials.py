@@ -28,6 +28,20 @@ here.** Ownership changes the deletion rule, the visibility rule and the read
 path, all three; one table answering two access-control questions is how the
 answer to one of them gets applied to the other.
 
+## Four levels, one walk, and the shipped one is at the bottom
+
+`_resolve` is the ladder and everything asks it: the deployment's pinned
+variable, then a login an admin entered, then a login the catalogue publishes
+about itself and this build carries, then nothing. **The screen and the outbound
+request walk the same one**, so a source cannot authenticate as something other
+than what an admin is told.
+
+**Only the fourth level is a value in a published file, and that is the owner's
+decision of 2026-09-07 rather than a hole.** `targets.ShippedCredential` carries
+the argument and is where to read before removing one. What makes it safe is the
+order: a default that could beat an admin's entry would be the version of the
+feature that was refused.
+
 ## Where the key comes from
 
 **A seam, not one `os.environ` read**, and the environment is the first source
@@ -37,8 +51,11 @@ environment variable can come from either. `KEY_SOURCES` is the whole of that
 seam: a keychain reader is one more entry and touches neither the scheme, the
 generation tag nor the migration.
 
-**No default key, ever.** `key_material()` has no fallback constant, so a
-published artefact ships none.
+**No default key, ever, and that rule is untouched by the shipped login below.**
+`key_material()` has no fallback constant, so a published artefact ships none.
+The two are opposite cases and it is worth saying which is which: a shipped
+login is a value its own issuer published, and a shipped key would be the thing
+that opens every login this deployment sealed for itself.
 `tests/test_credentials.py::TestAKeyIsNeverInvented` is what stops one arriving.
 
 **An install with no key starts, and says what it cannot do.** Storing a
@@ -94,6 +111,8 @@ from mnemonic import Mnemonic
 from sqlalchemy.orm import Session
 
 import config
+import targets
+from enums import CatalogueSource, CredentialProvenance
 from models import CatalogueCredential
 
 logger = logging.getLogger("endpaper.credentials")
@@ -941,9 +960,20 @@ def from_env(source: str) -> tuple[str, str] | None:
     stored credential while the operator believed the environment was in force.
     An empty password is refused everywhere else in this application, and
     reading a typo as one would authenticate as somebody with nothing.
+
+    **Set to the empty string is set, and that arm cost a round.** The rule
+    above stopped one value short of the value an operator is most likely to
+    produce: `CATALOGUE_CREDENTIAL_BNA=` in a compose file, an `.env` line with
+    nothing after the `=`, or a Kubernetes `value: ""` all arrive here as `""`,
+    and reading that as unset walked past the level the deployment set. It
+    reached the stored login before a default shipped and it reaches the shipped
+    account now, which is the level nobody in the deployment chose. So the test
+    is `is None`, not truthiness. The consequence is deliberate and is what the
+    screen already says: such an install reports the variable as in force and
+    not a credential, by name.
     """
-    raw = os.getenv(env_variable_name(source), "")
-    if not raw:
+    raw = os.getenv(env_variable_name(source))
+    if raw is None:
         return None
     username, separator, password = raw.partition(":")
     if not separator or not username or not password:
@@ -954,6 +984,44 @@ def from_env(source: str) -> tuple[str, str] | None:
     return username, password
 
 
+def shipped(source: str, base_url: str) -> tuple[str, str] | None:
+    """The login this build ships for a source, at the address it ships it for.
+
+    **The bottom of the ladder, and the only level whose value is in a published
+    file.** `targets.ShippedCredential` is where that is argued; the rule here is
+    the address. A shipped default is the one credential nobody chose, so
+    nothing else records what it was meant for, and this compares the caller's
+    address with the roster row's own before handing the pair over.
+
+    **`origin_of` on both sides, not a string comparison, and not
+    `targets.origin`.** The two parsers disagree, which `origin_of` records
+    against a measurement, and a bound computed by a parser that is not the
+    requester's is a bound on a different string than the one sent.
+
+    None for a source outside this build's roster, which is a row an archive can
+    write: `catalogue_credentials` carries no foreign key on purpose.
+    """
+    try:
+        known = CatalogueSource(source)
+    except ValueError:
+        return None
+    target = targets.SEEDED.get(known)
+    if target is None or target.shipped_credential is None:
+        return None
+    published = origin_of(target.base_url)
+    # **Empty never matches**, which is `origin_of`'s own rule and is spelled
+    # here rather than relied on: two unparseable addresses compare equal, so a
+    # bare inequality hands the pair over on the one input the parser refused.
+    if not published or published != origin_of(base_url):
+        # Names neither address and no secret: the only way here is a caller
+        # asking one row's default about another row's address, which #130 makes
+        # reachable the day a `base_url` is editable. Withholding is the safe
+        # direction; the source then answers nothing rather than authenticating
+        # somewhere the library never published this pair for.
+        return None
+    return target.shipped_credential.username, target.shipped_credential.password
+
+
 def is_from_env(source: str) -> bool:
     """Whether the deployment pinned this one, so the app must not offer an edit.
 
@@ -962,11 +1030,29 @@ def is_from_env(source: str) -> bool:
     a variable somebody set: offering an edit there hides the mistake behind a
     field that appears to work.
 
+    **True for a variable set to the empty string**, for the reason `from_env`
+    gives at length: that is the commonest way of setting one wrongly, and it is
+    still a variable somebody set. `bool(...)` here read it as unset and let
+    `_resolve` walk to the level below.
+
     Reporting *where* a credential comes from is not reporting the credential,
-    which is what lets this be true for a secret. Same rule as
-    `settings_store.is_from_env`.
+    which is what lets this be true for a secret.
+
+    **`settings_store.is_from_env` still reads emptiness the other way, and the
+    reason is the sentinel rather than the subject.** `config.env_override`
+    returns a string and `settings_store.in_force` is `env_override(key) or
+    get_raw(db, key)`, so over there the empty string **is** "the environment
+    said nothing", for the ten keys in `config._ENV_OVERRIDES`, two of them
+    parsed as booleans, `MAIL_USE_TLS` and `MAIL_USE_SSL`, and one as an int,
+    `MAIL_PORT`. Aligning that one function alone would refuse the edit on a screen
+    while `in_force` went on using the stored row, which is the screen saying
+    pinned while the send uses the row: strictly worse than today and the exact
+    disagreement both modules exist to prevent. Underneath it there is a real
+    asymmetry: a credential may never be empty, refused here, by `put` and by
+    `targets.ShippedCredential`, so `""` can only be a mistake, where
+    `MAIL_USERNAME` against a server with no auth is legitimately empty.
     """
-    return bool(os.getenv(env_variable_name(source), ""))
+    return os.getenv(env_variable_name(source)) is not None
 
 
 # ── The store ─────────────────────────────────────────────────────────────────
@@ -1091,6 +1177,59 @@ def _material(state: KeyState | None) -> bytes:
     raise NoKeyConfigured(_NO_KEY)
 
 
+def _resolve(
+    db: Session, source: str, base_url: str, state: KeyState | None
+) -> tuple[CredentialProvenance, tuple[str, str] | None]:
+    """Which level supplies this source's login, and the pair it carries.
+
+    **One walk of the ladder, and both the screen and the request ask it.** The
+    two used to be separate chains that happened to agree, which is the shape
+    that produces a source silently authenticating as something other than what
+    the screen says. `view` reports which level this picked and `for_request`
+    sends what it carried, so the two cannot disagree about **which login**.
+
+    **`for_request` refuses one thing more, and that is deliberate rather than a
+    gap.** An address `origin_of` cannot parse binds no credential at all, which
+    is a fact about the address and not about the ladder, so it is checked there
+    and not here. Moving it in would make `view` report a source with a sealed
+    login as having none, which takes the Remove control off a screen for a row
+    that really does hold one; the honest report there is the login the library
+    entered, and the request still fails closed.
+
+    **The order is pinned, stored, shipped, and it is the whole of what makes a
+    shipped default safe.** The owner's decision of 2026-09-07 states
+    replaceability as a requirement rather than a consequence: a default that
+    could win over an admin's entry is the version of the feature that should
+    have been refused.
+
+    **The first level with anything to say wins whether or not it works**, and
+    that arm is the one worth stating. A pinned variable set to nonsense, and a
+    stored login sealed under a key that is gone, both keep the levels below
+    them: falling through would send a request as a different account while the
+    screen reports the one the admin configured, which is exactly the confusion
+    a shipped default is otherwise most likely to create. So an unusable level
+    answers `None` for the pair rather than deferring, and `view` turns that into
+    `unreadable`, whose remedy is on the key.
+
+    `None` for the pair therefore means "this level is in force and cannot be
+    used"; `CredentialProvenance.NONE` means no level is in force at all.
+    """
+    if is_from_env(source):
+        try:
+            return CredentialProvenance.ENV, from_env(source)
+        except CredentialError:
+            return CredentialProvenance.ENV, None
+    if stored_envelope(db, source):
+        try:
+            return CredentialProvenance.STORED, stored(db, source, state)
+        except CredentialError:
+            return CredentialProvenance.STORED, None
+    default = shipped(source, base_url)
+    if default is not None:
+        return CredentialProvenance.SHIPPED, default
+    return CredentialProvenance.NONE, None
+
+
 @dataclass(frozen=True)
 class CredentialView:
     """What a settings screen may be told, and it is never the secret.
@@ -1101,6 +1240,12 @@ class CredentialView:
     rule would be the same rule in two places. `field(repr=False)` for the
     reason `Credential`'s halves carry it.
 
+    **`provenance` is what tells an admin which login is in force**, and it is
+    one field rather than a flag per level for the reason `CredentialProvenance`
+    gives. `has_credential` is derived from it rather than sent beside it: two
+    fields answering "is there one" is two chances to disagree, and the flag was
+    the one a screen believed.
+
     **`unreadable` says a login is held and cannot be opened, and deliberately
     does not say why.** It used to be called `needs_reentry` and it caught every
     `CredentialError`, so a locked keychain and a deployment with no key at all
@@ -1108,16 +1253,30 @@ class CredentialView:
     the keychain or type the recovery phrase, either of which recovers all of
     them at once. The remedy for every one of those lives on the key, so the key
     is where it is reported: `KeyState.problem` and `CredentialKeyOut`.
+
+    A shipped default is never `unreadable`: it is a constant in this build, so
+    there is no key to lose and nothing to type again.
     """
 
-    has_credential: bool
-    from_env: bool
+    provenance: CredentialProvenance
     unreadable: bool
     username: str = field(default="", repr=False)
 
+    @property
+    def has_credential(self) -> bool:
+        """Whether any level supplies one, usable or not."""
+        return self.provenance is not CredentialProvenance.NONE
 
-def view(db: Session, source: str, state: KeyState | None = None) -> CredentialView:
-    """The three facts a settings screen needs, and no secret among them.
+
+def view(
+    db: Session, source: str, base_url: str, state: KeyState | None = None
+) -> CredentialView:
+    """What a settings screen may say about one source's login.
+
+    **`base_url` for the reason `for_request` takes one**: the shipped level is
+    bound to the address the library published it for, so a screen answering
+    without one would report a default the next request withholds. Both callers
+    hand over the roster row's own address.
 
     Pass `state` when asking about more than one source; see `KeyState`.
 
@@ -1129,23 +1288,12 @@ def view(db: Session, source: str, state: KeyState | None = None) -> CredentialV
     concerned and the edit must stay refused.
     """
     resolved = key_state() if state is None else state
-    try:
-        pinned = from_env(source)
-    except CredentialError:
-        return CredentialView(True, True, True, "")
-    if pinned is not None:
-        return CredentialView(True, True, False, pinned[0])
-    envelope = stored_envelope(db, source)
-    if not envelope:
-        return CredentialView(False, False, False, "")
-    if resolved.material is None:
-        return CredentialView(True, False, True, "")
-    try:
-        opened = unseal(resolved.material, source, envelope)
-    except CredentialError:
-        return CredentialView(True, False, True, "")
-    username, _, _ = opened.partition(":")
-    return CredentialView(True, False, False, username)
+    provenance, pair = _resolve(db, source, base_url, resolved)
+    return CredentialView(
+        provenance,
+        provenance is not CredentialProvenance.NONE and pair is None,
+        pair[0] if pair is not None else "",
+    )
 
 
 def unreadable_sources(db: Session, state: KeyState | None = None) -> list[str]:
@@ -1190,15 +1338,26 @@ def unreadable_sources(db: Session, state: KeyState | None = None) -> list[str]:
     return sorted(stranded)
 
 
-def is_held(db: Session, source: str, state: KeyState | None = None) -> bool:
-    """Whether a credential for this source is in force **and** readable.
+def is_held(
+    db: Session, source: str, base_url: str, state: KeyState | None = None
+) -> bool:
+    """Whether the next request to this source would actually carry a login.
 
-    The conjunction, because a stored credential under a rotated key is not a
-    credential this deployment has: reporting it as held would tell a screen the
-    source is ready and leave a member's search to discover otherwise.
+    **Asked through `for_request` and not through `view`, and the two are not
+    the same question.** This one's consumer is
+    `settings_store._sources_with_a_credential`, which decides whether a source
+    is ready to be asked, so it wants the sender's answer: a stored credential
+    under a rotated key is not a credential this deployment has, and reporting
+    it as held would tell a screen the source is ready and leave a member's
+    search to discover otherwise. `view`'s answer is the screen's, which keeps a
+    Remove control on a row that holds a sealed login even at an address nothing
+    can send to. They agree on every state but that one, which is exactly why
+    this must not be built on it.
+
+    True on a shipped default, which is what makes a stock install ask the one
+    source that has one.
     """
-    held = view(db, source, state)
-    return held.has_credential and not held.unreadable
+    return for_request(db, source, base_url, state) is not None
 
 
 def for_request(
@@ -1209,8 +1368,8 @@ def for_request(
     **Every outbound caller goes through here rather than reading the row**, the
     same rule `settings_store.in_force` states for a settable value: this answers
     "what will the next request send", and `stored_envelope` answers "what is on
-    the row". The environment's wins, exactly as it does for every other pinned
-    value.
+    the row". The ladder is `_resolve`, walked once here and once by the screen,
+    so the two cannot answer differently.
 
     Pass `state` when asking about more than one source; see `KeyState`. Without
     it this resolves the key again per call, which on the member request path is
@@ -1226,14 +1385,7 @@ def for_request(
         # An address this build cannot parse is one no credential may be bound
         # to. `origin_of` says why it fails closed rather than guessing.
         return None
-    try:
-        pinned = from_env(source)
-    except CredentialError:
+    _, pair = _resolve(db, source, base_url, state)
+    if pair is None:
         return None
-    if pinned is not None:
-        return Credential(origin, pinned[0], pinned[1])
-    try:
-        username, password = stored(db, source, state)
-    except CredentialError:
-        return None
-    return Credential(origin, username, password)
+    return Credential(origin, pair[0], pair[1])

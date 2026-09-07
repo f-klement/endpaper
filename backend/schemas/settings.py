@@ -3,7 +3,13 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
 
-from enums import CatalogueSource, Locale, OverdueNotifyReason, OverdueSender
+from enums import (
+    CatalogueSource,
+    CredentialProvenance,
+    Locale,
+    OverdueNotifyReason,
+    OverdueSender,
+)
 
 #: How far apart two reminders for the same loan may be, in days. The floor is
 #: 1 rather than 0: a zero would mean "resend on every tick", which is an hourly
@@ -114,7 +120,8 @@ class CatalogueSourceOut(BaseModel):
     #: and they take different things: Google Books an API key, the Biblioteca
     #: Nacional Argentina a username and password.
     needs_a_key: bool
-    #: Whether that credential is in force, from the environment or the table.
+    #: Whether that credential is in force, from the environment, the table, or
+    #: a login this build ships because the catalogue publishes it.
     #:
     #: **Sent beside `ready` rather than folded into it**, because they are two
     #: causes and a screen showing only the conjunction cannot tell them apart.
@@ -133,21 +140,32 @@ class CatalogueSourceOut(BaseModel):
     #: a field that went false only once the source was already enabled could
     #: not say so first. See `sources.describe`.
     ready: bool
-    #: Whether a login for this catalogue is in force, from the environment or
-    #: the table. **Not the same field as `has_key`**, which answers the Google
-    #: Books API key: that is this deployment's own secret in a query string,
-    #: and this is an institution's account at somebody else's server.
-    has_credential: bool = False
+    #: Which of the four levels supplies a login for this catalogue: the
+    #: deployment pinned one, an admin entered one, this build ships one the
+    #: library publishes about itself, or there is none.
+    #:
+    #: **Not the same field as `has_key`**, which answers the Google Books API
+    #: key: that is this deployment's own secret in a query string, and this is
+    #: an institution's account at somebody else's server.
+    #:
+    #: **One field rather than a flag per level**, because the levels are
+    #: ordered and flags are not: `has_credential` and `credential_from_env`
+    #: were two of the four answers spelled as two booleans, which is two
+    #: chances for a screen to disagree with what the next request sends. An
+    #: admin has to be able to read which login is in force, and this is the
+    #: field that says so. Reporting *where* a credential comes from is not
+    #: reporting the credential.
+    #:
+    #: `env` wins over everything and cannot be changed here, so the UI offers
+    #: no edit rather than one the server would 409. `shipped` may be replaced
+    #: by entering one, which is the property the owner's decision of
+    #: 2026-09-07 requires; see `targets.ShippedCredential`.
+    credential_provenance: CredentialProvenance = CredentialProvenance.NONE
     #: The username, masked. Enough to tell one account from another and
     #: nothing a browser could use, the rule every other secret here follows.
     #: Empty when none is held, and **also empty when one is held and cannot be
-    #: read**, which is what `credential_needs_reentry` beside it says.
+    #: read**, which is what `credential_unreadable` beside it says.
     credential_username_preview: str = ""
-    #: True when the deployment pinned it. It then wins over anything stored and
-    #: cannot be changed here, so the UI disables the field rather than offering
-    #: an edit the server would 409. Reporting *where* a credential comes from
-    #: is not reporting the credential.
-    credential_from_env: bool = False
     #: True when a login is held and cannot be opened, for any reason: the key
     #: was rotated, is not configured, the keychain is locked, or a pinned
     #: variable is set to something that is not a credential.
@@ -161,6 +179,12 @@ class CatalogueSourceOut(BaseModel):
     #: **A boolean rather than the envelope's key generation tag**, which is the
     #: other thing the server could send. The tag is derived from the key, and
     #: publishing key-derived material to every admin session buys nothing.
+    #:
+    #: **A second axis rather than a fifth provenance**, because a level can be
+    #: in force and broken: a pinned variable set to nonsense reads `env` and
+    #: unreadable at once, and the edit stays refused because the variable is
+    #: still what the deployment says. Never true of `shipped`, which is a
+    #: constant in this build.
     credential_unreadable: bool = False
     #: The ISBN registration groups this catalogue's collecting remit covers, as
     #: `978-960`, and empty for a catalogue with no remit to state.

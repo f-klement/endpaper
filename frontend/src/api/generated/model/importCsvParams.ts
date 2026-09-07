@@ -5,6 +5,7 @@
  * Catalogue, lend and track a collection of physical books, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
+import type { ImportReader } from "./importReader.ts";
 
 export type ImportCsvParams = {
   /**
@@ -19,4 +20,8 @@ export type ImportCsvParams = {
    * Correct a guessed column, as field=header pairs separated by commas, e.g. title=Book Name,author=Written By
    */
   overrides?: string | null;
+  /**
+   * Read the file as this service's export, rather than detecting
+   */
+  reader?: ImportReader | null;
 };

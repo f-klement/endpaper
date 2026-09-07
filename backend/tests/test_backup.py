@@ -20,10 +20,11 @@ import pytest
 import backup
 import credentials
 import filing
+import targets
 from authors import author_key
 from backup import RestoreError
 from database import Base, SessionLocal
-from enums import ClassificationScheme
+from enums import CatalogueSource, ClassificationScheme
 from models import (
     AuthorAlias,
     Book,
@@ -1539,7 +1540,12 @@ class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
         db.expire_all()
         with pytest.raises(credentials.WrongKeyGeneration):
             credentials.stored(db, "bne")
-        assert credentials.view(db, "bne").unreadable is True
+        assert (
+            credentials.view(
+                db, "bne", targets.SEEDED[CatalogueSource.BNE].base_url
+            ).unreadable
+            is True
+        )
 
     def test_an_archive_naming_a_source_shaped_like_a_path_is_refused(
         self, client, admin, stored

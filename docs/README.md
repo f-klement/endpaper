@@ -66,7 +66,8 @@ National Library and K10plus together, with Open Library, the Czech National Lib
 Spanish National Library, the National Library of Greece, the Austrian National Library, the
 Biblioteca Nacional Argentina and Google Books as fallbacks. Two of those need a credential
 before they answer anything, Google Books a key you supply and the Argentine catalogue a
-login the library publishes, so a stock install runs the other seven.
+login the library publishes and Endpaper ships, so a stock install runs eight of the nine
+and only Google Books needs anything typed.
 
 The frontend's API client and its React Query hooks are **generated** from the backend's
 OpenAPI schema, so the two halves cannot drift apart silently. Access to a book is decided

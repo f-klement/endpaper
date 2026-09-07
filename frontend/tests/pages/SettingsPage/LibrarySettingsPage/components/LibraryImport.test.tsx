@@ -172,6 +172,56 @@ describe("LibraryImport", () => {
       expect(props.onConfirm).not.toHaveBeenCalled();
     });
 
+    it("names the reader for an ordinary book list too", () => {
+      // Said only when it was not the ordinary reader, a wrong reading looked
+      // exactly like the common case: the screen went quiet on the one
+      // occasion somebody needed it to speak.
+      renderImport({ preview: preview() });
+      expect(
+        screen.getByText("Read as a plain table, with the columns guessed."),
+      ).toBeInTheDocument();
+    });
+
+    it("says which service's export it was read as, where that is not obvious", () => {
+      renderImport({ preview: preview({ reader: "librarything" }) });
+      expect(
+        screen.getByText("Read as a LibraryThing export."),
+      ).toBeInTheDocument();
+    });
+
+    it("says how many rows the file itself marks as deleted, and by which column", () => {
+      // The one number on this screen about books that will not arrive, and
+      // it is said before the write rather than after it. The column is named
+      // because it is honoured wherever it appears rather than for one
+      // service, so a member has to be able to find it in their own file.
+      renderImport({
+        preview: preview({ excluded: 3, exclusion_column: "HasBeenDeleted" }),
+      });
+      expect(
+        screen.getByText(
+          /3 rows are marked as deleted in this file's HasBeenDeleted column/,
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("says a count of zero rather than nothing when the file has such a column", () => {
+      // Zero and "no such column" are different answers, and a line shown only
+      // above zero says the same nothing for both.
+      renderImport({
+        preview: preview({ excluded: 0, exclusion_column: "HasBeenDeleted" }),
+      });
+      expect(
+        screen.getByText(/0 rows are marked as deleted/),
+      ).toBeInTheDocument();
+    });
+
+    it("says the file marks nothing as deleted when it has no such column", () => {
+      renderImport({ preview: preview({ excluded: 0 }) });
+      expect(
+        screen.getByText(/No column in this file marks a row as deleted/),
+      ).toBeInTheDocument();
+    });
+
     it("will not import a file with no rows in it", () => {
       renderImport({ preview: preview({ total_rows: 0, rows: [] }) });
       expect(
@@ -181,6 +231,20 @@ describe("LibraryImport", () => {
   });
 
   describe("afterwards", () => {
+    it("says how many rows the file itself marked as deleted", () => {
+      // The preview is cleared the moment the import succeeds, so the number
+      // has to be said again here, and in the past tense.
+      renderImport({ result: outcome({ excluded: 3 }) });
+      expect(
+        screen.getByText(/3 rows were marked as deleted in this file/),
+      ).toBeInTheDocument();
+    });
+
+    it("says nothing about deleted rows when the file marked none", () => {
+      renderImport({ result: outcome() });
+      expect(screen.queryByText(/marked as deleted/)).not.toBeInTheDocument();
+    });
+
     it("reports what the import did", () => {
       renderImport({ result: outcome() });
       expect(screen.getByText(/10 rows read/)).toBeInTheDocument();

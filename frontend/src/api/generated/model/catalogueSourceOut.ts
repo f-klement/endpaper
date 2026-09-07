@@ -6,6 +6,7 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { CatalogueSource } from "./catalogueSource.ts";
+import type { CredentialProvenance } from "./credentialProvenance.ts";
 
 /**
  * One catalogue, as the settings screen needs to draw it.
@@ -24,11 +25,10 @@ export interface CatalogueSourceOut {
   answers_lookup: boolean;
   answers_search: boolean;
   asked_first: boolean;
-  credential_from_env?: boolean;
+  credential_provenance?: CredentialProvenance;
   credential_unreadable?: boolean;
   credential_username_preview?: string;
   enabled: boolean;
-  has_credential?: boolean;
   has_key: boolean;
   needs_a_key: boolean;
   ready: boolean;

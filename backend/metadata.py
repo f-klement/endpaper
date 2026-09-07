@@ -2467,19 +2467,26 @@ def _nkp_record(
 #     on the ticket rather than here. So the ticket's parameter table, which
 #     says MARC21, describes the **Z39.50** route and not this one.
 #
-# **This tree ships no credential and that is a decision rather than an
-# oversight.** The library publishes a username and password on its own page for
-# librarians, `bn.gov.ar/bibliotecarios/protocoloZ3950`, so an install can
-# obtain one without an account anywhere; what it may not do is ship one. A
-# default in the source would be published by the mirror and baked into the
-# image, so every install would authenticate as the same account at somebody
-# else's server, an install with its own arrangement with the library could not
-# replace it, and `credentials.py` seals a credential at rest precisely because
-# a login at a third party is not this deployment's to hand out. So this row
-# declares `Capability.NEEDS_A_CREDENTIAL` and an admin enters the published
-# pair once, on the settings screen or through
-# `credentials.env_variable_name("bna")`. `sources.NEEDS_A_KEY` carries what
-# that costs the roster.
+# **This tree ships the credential the library publishes about itself**, on its
+# own page for librarians, `bn.gov.ar/bibliotecarios/protocoloZ3950`, beside a
+# contact address and with no stated restriction on use. Owner's decision of
+# 2026-09-07, taken against the refusal of the trio that added this row; both
+# sides are kept in `docs/decisions.md` and the argument is at
+# `targets.ShippedCredential`.
+#
+# **What makes it safe is that it loses to anything else.**
+# `credentials._resolve` walks a variable the deployment pinned, then a login an
+# admin entered, then this. An institution with its own arrangement with the
+# library uses that arrangement, and does not have to ask anyone to be allowed
+# to. Replaceability is a requirement of the decision rather than a consequence
+# of the implementation, so it is the property to check before changing anything
+# here.
+#
+# **What it costs, stated rather than left to be discovered.** Every install now
+# asks a plaintext Argentine catalogue about any ISBN the sources above it miss,
+# where before only an install that had entered a login did. This row declares
+# no remit in `sources.SERVES_GROUPS`, so that is every miss rather than the
+# Argentine ones, and narrowing it is a measurement nobody has taken.
 #
 # **A rotated credential has to read as a credential**, which is the ticket's
 # own requirement and was not true of this application before this row. Any SRU
@@ -2510,9 +2517,10 @@ def _nkp_record(
 # committed at `tests/fixtures/catalogue_survey_2026_08_31.json`, one serial
 # pass on 2026-09-07 with nothing else in flight:
 #
-#   * **10 of the 50**, and **4 of the 26 that the seven sources a stock install
-#     asks miss**. Seven and not eight: this source is free and is not one of
-#     them, because an install that has entered no login is not asking it.
+#   * **10 of the 50**, and **4 of the 26 that the seven sources needing no
+#     credential miss**. Seven and not eight: the eighth is this source, and
+#     a count of what it adds cannot count itself. A stock install asks this one
+#     too, because it ships its library's published login.
 #     The frame goes from 24 answered to 28.
 #   * Lookup latency min 0.496s, median 0.516s, p90 0.529s, max 0.530s, over all
 #     fifty, which is the tightest spread of any source here and is one Aleph
@@ -2582,11 +2590,18 @@ def _nkp_record(
 # did not, which is the question the fallback order turns on.
 #
 # **What this chain covers without a Google Books key, which is what a default
-# install runs.** Two sources need a credential (`sources.NEEDS_A_KEY`) and most
-# installations have neither, so the chain most deployments actually run is the
-# seven sources a stock install asks. Measured over 500 domestic ISBNs across ten
-# frames: the seven answer 395 and miss 105, and outside German language publishing
-# they miss 101 of 400. The same 500 books under the roster of three releases
+# install runs.** Two sources need a credential (`sources.NEEDS_A_KEY`), one of
+# them ships the login its library publishes and the other does not, so the
+# chain most deployments actually run is the eight sources a stock install asks.
+# Measured over 500 domestic ISBNs across ten frames, it answers 399 and misses
+# 101, and outside German language publishing it misses 97 of 400.
+#
+# The four books between that and the figure this module quoted before are the
+# Argentine row's: the seven sources that need nothing answer 395 and miss 105,
+# and the row above uniquely adds 4 of those.
+#
+# The same 500 books
+# under the roster of three releases
 # ago, and the previous `020` rule, answered 300. So a sentence anywhere in this module saying
 # the chain covers a country is a statement about a **keyed** install. #91
 # measured the size of that on the same books, Italy 36% missed keyless against

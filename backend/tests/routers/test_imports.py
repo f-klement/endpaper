@@ -910,3 +910,100 @@ class TestEndpapersOwnExportSurvivesItsOwnImporter:
             .one()
         )
         assert mine.status == ReadStatus.READ
+
+
+#: Amazon's Kindle document listing, header quoted in `tests/test_csv_import.py`
+#: from a real 2022 export. One row the member deleted at the source and one
+#: they did not, so every assertion below is on the flag rather than on a count.
+KINDLE = (
+    b"DocumentId,Title,DocumentProvider,HasBeenDeleted,EntryCreationDate\n"
+    b"AAAA,Solaris,Stanislaw Lem,true,2019-01-01\n"
+    b"BBBB,Roadside Picnic,Arkady Strugatsky,false,2019-01-02\n"
+)
+
+
+class TestATitleTheMemberDeletedAtTheSourceDoesNotComeBack:
+    """The half of the import that changes what a member sees.
+
+    A row exclusion names no field, so it cannot be a candidate header name
+    under any spelling, and the mapping's only row filter was: no title, so
+    skip. Left unread, `HasBeenDeleted` did nothing, and the book was then
+    created **visible to everyone on the instance**, because nothing on this
+    path sets `is_private` and `Book.is_private` defaults to false.
+
+    **It is the generic mapping's rule and no reader's**, so nothing here rests
+    on recognising whose export this is.
+
+    Tested through the route rather than at the parser, because that sentence
+    about visibility is about a row in the database and not about a parsed row.
+    """
+
+    def test_no_book_is_created_for_it(self, client, admin, db):
+        res = client.post(
+            "/api/imports/csv",
+            files={"file": ("Kindle.KindleDocs.DocumentMetadata.csv", KINDLE, "text/csv")},
+            headers=admin["headers"],
+            params={"create_missing": True},
+        )
+
+        assert res.status_code == 200, res.text
+        assert [book.title for book in db.query(Book).all()] == ["Roadside Picnic"]
+
+    def test_and_it_is_absent_rather_than_private(self, client, admin, db):
+        """The narrower fix would have been to create it and hide it, and it is
+        not what the member said. They deleted it.
+
+        Asserted as a count over the whole table, so a Book created private
+        would fail here as loudly as a Book created visible.
+        """
+        client.post(
+            "/api/imports/csv",
+            files={"file": ("Kindle.KindleDocs.DocumentMetadata.csv", KINDLE, "text/csv")},
+            headers=admin["headers"],
+            params={"create_missing": True},
+        )
+
+        assert db.query(Book).filter(Book.title == "Solaris").count() == 0
+
+    def test_the_result_says_how_many_rows_the_file_itself_refused(self, client, admin):
+        """A member who exported 400 titles and imported 380 is owed the other
+        twenty, and this number is read off their own upload, so unlike
+        `skipped` it discloses nothing about the instance."""
+        res = client.post(
+            "/api/imports/csv",
+            files={"file": ("Kindle.KindleDocs.DocumentMetadata.csv", KINDLE, "text/csv")},
+            headers=admin["headers"],
+            params={"create_missing": True},
+        )
+
+        body = res.json()
+        assert (body["excluded"], body["created"], body["skipped"]) == (1, 1, 0)
+
+    def test_the_preview_says_it_before_anything_is_written(self, client, admin, db):
+        """Which reader ran and what it will drop, both on the screen that
+        exists so a wrong reading is caught before the write."""
+        res = client.post(
+            "/api/imports/preview",
+            files={"file": ("Kindle.KindleDocs.DocumentMetadata.csv", KINDLE, "text/csv")},
+            headers=admin["headers"],
+        )
+
+        body = res.json()
+        assert (body["reader"], body["excluded"], body["total_rows"]) == ("generic", 1, 1)
+        assert body["exclusion_column"] == "HasBeenDeleted"
+        assert db.query(Book).count() == 0
+
+    def test_an_ordinary_export_is_read_generically_and_excludes_nothing(
+        self, client, admin
+    ):
+        """The other half of the diagonal: the assertions above pass on a route
+        that answered `excluded` for every file."""
+        res = client.post(
+            "/api/imports/preview",
+            files={"file": ("goodreads.csv", csv_bytes(goodreads_row("Dune", "read")), "text/csv")},
+            headers=admin["headers"],
+        )
+
+        body = res.json()
+        assert (body["reader"], body["excluded"]) == ("generic", 0)
+        assert body["exclusion_column"] is None

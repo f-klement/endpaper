@@ -1,6 +1,10 @@
 import { useState } from "react";
 
-import type { SettingsOut } from "../../../../api/generated/model";
+import type {
+  CatalogueSourceOut,
+  CredentialProvenance,
+  SettingsOut,
+} from "../../../../api/generated/model";
 import { ErrorState } from "../../../../components";
 import { useTranslation } from "../../../../i18n";
 import { catalogueName } from "../../../../lib/catalogueName";
@@ -24,6 +28,13 @@ import { useCredentialKeyStatus, useSourceCredentials } from "../hooks";
  * A login the deployment pinned is shown as such and cannot be edited here,
  * because there is nothing here to change: the environment's wins, and the
  * server refuses a write rather than storing something nothing will read.
+ *
+ * **Every row says which of the four levels its login came from**, and that is
+ * this section's job rather than a nicety. `credential_provenance` is the one
+ * field that answers it, and a shipped default drawn as a stored login would
+ * tell a library it had configured something it never did, which is the single
+ * confusion shipping a default can create. `backend/credentials.py` walks the
+ * ladder; this renders what it answered.
  */
 export default function CatalogueLoginsSection({
   settings,
@@ -38,7 +49,21 @@ export default function CatalogueLoginsSection({
   const [password, setPassword] = useState("");
 
   const rows = settings.catalogue_sources ?? [];
-  const held = rows.filter((row) => row.has_credential);
+  // **`?? "none"` and not a bare comparison.** The field is optional on the
+  // wire, so a browser holding a page from before it existed reads `undefined`,
+  // which is not `"none"`: the row would join `held`, fall past every arm below
+  // and draw as "A login is stored ()" with a Change button. The pair this
+  // replaced failed closed here because `has_credential` was falsy when absent.
+  //
+  // **Typed on the union, not on `string`.** A parameter of
+  // `{ credential_provenance?: string }` infers a `string` return, and the eight
+  // comparisons below then accept any literal at all: measured with this
+  // project's own `tsc`, `=== "shiped"` is TS2367 against the field and clean
+  // against a `string`. Closing the runtime hole must not open the compile time
+  // one in the same edit.
+  const provenanceOf = (row: CatalogueSourceOut): CredentialProvenance =>
+    row.credential_provenance ?? "none";
+  const held = rows.filter((row) => provenanceOf(row) !== "none");
   const editing = rows.find((row) => row.source === adding);
   // A login cannot be stored without a key, and the control that makes one is
   // in the section below this. Saying so here is cheaper than a 409 the reader
@@ -81,9 +106,9 @@ export default function CatalogueLoginsSection({
               <p className="text-sm font-medium">
                 {t(catalogueName(row.source))}
               </p>
-              {row.credential_from_env && row.credential_unreadable ? (
+              {provenanceOf(row) === "env" && row.credential_unreadable ? (
                 // Both true is a variable somebody set to something that is not
-                // a credential. Testing `from_env` first told them it was
+                // a credential. Testing the provenance first told them it was
                 // supplied by the server and working, which is the exact
                 // reassurance this state exists to remove.
                 <p className="text-xs text-danger-700 dark:text-danger-200">
@@ -91,7 +116,7 @@ export default function CatalogueLoginsSection({
                     variable: `CATALOGUE_CREDENTIAL_${row.source.toUpperCase()}`,
                   })}
                 </p>
-              ) : row.credential_from_env ? (
+              ) : provenanceOf(row) === "env" ? (
                 <p className="text-xs text-amber-800 dark:text-amber-200">
                   {t("settings.credentialFromEnv", {
                     variable: `CATALOGUE_CREDENTIAL_${row.source.toUpperCase()}`,
@@ -101,6 +126,16 @@ export default function CatalogueLoginsSection({
                 <p className="text-xs text-amber-800 dark:text-amber-200">
                   {t("settings.credentialUnreadable")}
                 </p>
+              ) : provenanceOf(row) === "shipped" ? (
+                // **Named rather than drawn as a stored login**, which is what
+                // `credentialSet` below would have made it: a masked username
+                // beside "a login is stored" reads as something this library
+                // typed, and an admin who believes that has no reason to enter
+                // the account they actually hold. The line is the whole of how
+                // the four levels are told apart on this screen.
+                <p className="text-xs text-paper-600 dark:text-paper-400">
+                  {t("settings.credentialShipped")}
+                </p>
               ) : (
                 <p className="text-xs text-paper-600 dark:text-paper-400">
                   {t("settings.credentialSet", {
@@ -109,23 +144,40 @@ export default function CatalogueLoginsSection({
                 </p>
               )}
             </div>
-            {!row.credential_from_env && (
+            {provenanceOf(row) !== "env" && (
               <div className="flex gap-2">
+                {/* **Disabled without a key, exactly as the picker is.** The
+                    picker was the only guard while a keyless install had
+                    nothing in `held` at all, so this control was unreachable
+                    by accident. A shipped default puts a row in `held` on
+                    every install, and an enabled Save there is the 409 this
+                    section exists to answer before somebody provokes it. */}
                 <button
                   type="button"
+                  disabled={needsKeyFirst}
                   onClick={() => setAdding(row.source)}
-                  className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium hover:bg-paper-100 transition-colors dark:border-paper-700 dark:hover:bg-paper-800"
+                  className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium hover:bg-paper-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors dark:border-paper-700 dark:hover:bg-paper-800"
                 >
-                  {t("settings.credentialChange")}
+                  {t(
+                    provenanceOf(row) === "shipped"
+                      ? "settings.credentialUseOwn"
+                      : "settings.credentialChange",
+                  )}
                 </button>
-                <button
-                  type="button"
-                  disabled={credentials.isWorking}
-                  onClick={() => credentials.remove(row.source)}
-                  className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-danger-600 hover:bg-danger-100 disabled:opacity-40 transition-colors dark:border-paper-700 dark:text-danger-300"
-                >
-                  {t("settings.credentialClear")}
-                </button>
+                {/* **Only where there is a row to delete.** A shipped default
+                    is a constant in this build, so Remove would either do
+                    nothing or read as a way to switch the catalogue off, which
+                    is what the provider list above is for. */}
+                {provenanceOf(row) === "stored" && (
+                  <button
+                    type="button"
+                    disabled={credentials.isWorking}
+                    onClick={() => credentials.remove(row.source)}
+                    className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-danger-600 hover:bg-danger-100 disabled:opacity-40 transition-colors dark:border-paper-700 dark:text-danger-300"
+                  >
+                    {t("settings.credentialClear")}
+                  </button>
+                )}
               </div>
             )}
           </li>
@@ -148,7 +200,7 @@ export default function CatalogueLoginsSection({
         >
           <option value="">{t("settings.credentialAddChoose")}</option>
           {rows
-            .filter((row) => !row.credential_from_env && !row.has_credential)
+            .filter((row) => provenanceOf(row) === "none")
             .map((row) => (
               <option key={row.source} value={row.source}>
                 {t(catalogueName(row.source))}

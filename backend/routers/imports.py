@@ -15,6 +15,13 @@ service they are leaving and writes their reading record. `/marc` reads another
 institution's catalogue and writes no reading record at all: see
 `importing.MarcImport` for why that makes them two appliers rather than one
 with a flag. MARC is a library mode feature and the routes enforce it.
+
+**`/csv` is one route over several readers**, not one parser. Which reader ran
+is chosen from the file and reported back on every preview, and `reader=` names
+one by hand: `import_readers.py` is the contract and says why a service whose
+compound cell no candidate header name can express gets its own reader rather
+than a pre-pass. A row the file marks as deleted is dropped by every one of
+them, so that is not what choosing a reader decides.
 """
 
 import logging
@@ -29,6 +36,7 @@ import settings_store
 from classifications import bounded_headings
 from config import MAX_UPLOAD_BYTES
 from dependencies import CurrentUser, DbSession
+from import_readers import ImportReader
 from importing import Import, MarcImport, MarcIndex, bounded_fields
 from ratelimit import import_limiter
 from schemas import (
@@ -63,9 +71,13 @@ def _read_upload(file: UploadFile) -> bytes:
     return content
 
 
-def _parse(content: bytes, overrides: dict[str, str] | None = None) -> csv_import.ParsedFile:
+def _parse(
+    content: bytes,
+    overrides: dict[str, str] | None = None,
+    reader: ImportReader | None = None,
+) -> csv_import.ParsedFile:
     try:
-        return csv_import.parse(content, overrides)
+        return csv_import.parse(content, overrides, reader)
     except csv_import.ImportError_ as error:
         # A readable explanation beats "0 books imported" for somebody who
         # picked the wrong file.
@@ -81,6 +93,10 @@ def preview_import(
         str | None,
         Query(description="Correct a guessed column, as field=header pairs"),
     ] = None,
+    reader: Annotated[
+        ImportReader | None,
+        Query(description="Read the file as this service's export, rather than detecting"),
+    ] = None,
 ) -> ImportPreviewOut:
     """Read a file and report what it turned out to be, writing nothing.
 
@@ -88,6 +104,17 @@ def preview_import(
     import is too late: undoing it means finding and deleting a few hundred
     books. So the mapping is shown first, against the file's real header list,
     with the first few rows as the parser actually read them.
+
+    **`reader` is reported as well as the mapping, on every preview**, because a
+    file read as the wrong service's export is the same class of silent wrong
+    answer a column guessed wrong is, and it is corrected the same way: name the
+    right one here and on the import that follows. Reported when it is the
+    ordinary reader too: a screen that says nothing when the answer is ordinary
+    cannot be checked at all.
+
+    `excluded` and `exclusion_column` are reported the same way, count included
+    when it is zero, so "this file marks nothing as deleted" is a different
+    screen from "this file has no such column".
 
     Rate limited together with the import itself, so a preview and the import
     that follows it spend two of the three a minute allows.
@@ -103,14 +130,17 @@ def preview_import(
     # The same overrides the import will use. Without them a reader who
     # corrects a mapping cannot see the corrected result, which defeats the
     # point of looking before anything is written.
-    parsed = _parse(_read_upload(file), _parse_overrides(overrides))
+    parsed = _parse(_read_upload(file), _parse_overrides(overrides), reader)
 
     return ImportPreviewOut(
         headers=parsed.headers,
         mapping=parsed.mapping,
         delimiter=parsed.delimiter,
+        reader=parsed.reader,
         total_rows=len(parsed.rows),
         skipped=parsed.skipped,
+        excluded=parsed.excluded,
+        exclusion_column=parsed.exclusion_column,
         # A count of this file rather than "often hundreds", so the warning
         # about bringing tags across is about the file in hand.
         distinct_tags=len({tag.lower() for row in parsed.rows for tag in row.tags}),
@@ -146,6 +176,10 @@ def import_csv(
             )
         ),
     ] = None,
+    reader: Annotated[
+        ImportReader | None,
+        Query(description="Read the file as this service's export, rather than detecting"),
+    ] = None,
 ) -> ImportResultOut:
     """Apply a library export from Goodreads, LibraryThing, StoryGraph, Libib
     or anything else with a title column.
@@ -171,10 +205,17 @@ def import_csv(
     tag column is its shelves, which for most people is a few hundred one-off
     names, and turning all of them into tags here buries the curated list under
     somebody's filing habits from another app.
+
+    `reader` names which reader reads the file, and is left out for all but a
+    file the detector reads as the wrong service's. A row the file's own
+    exclusion column marks as deleted is dropped and counted in `excluded`
+    whichever reader runs, so naming one never brings those titles back: the
+    column is read wherever it appears, and the preview shows the count and the
+    column before anything is written.
     """
     import_limiter.check(current_user.username)
 
-    parsed = _parse(_read_upload(file), _parse_overrides(overrides))
+    parsed = _parse(_read_upload(file), _parse_overrides(overrides), reader)
 
     return Import.for_member(db, current_user.id).apply(
         parsed, create_missing=create_missing, apply_tags=apply_tags

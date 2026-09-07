@@ -701,6 +701,15 @@ export const en = {
     "A login is stored for this catalogue and cannot be read. See the encryption key below.",
   "settings.credentialFromEnvBroken":
     "{variable} is set to something that is not a username and a password separated by a colon, so no login is being sent.",
+  // **Says it is not this library's own login, and points at the one control
+  // that replaces it.** A shipped default an admin mistakes for something they
+  // configured is the one confusion this feature can create, so the line names
+  // where the login came from rather than reporting a stored one. It may not
+  // send anybody to the picker below: a catalogue that already has a login is
+  // not among its options, which is the rule for a stored login too.
+  "settings.credentialShipped":
+    "This catalogue publishes a login for everyone to use, and Endpaper is using it. If this library has an account of its own here, use the button beside this line to enter it instead.",
+  "settings.credentialUseOwn": "Use this library's own login",
 
   "settings.credentialKey": "Encryption key",
   "settings.credentialKeyHint":
@@ -1283,6 +1292,14 @@ export const en = {
   "import.result":
     "{rowsRead} rows read, {matched} matched, {created} added, {statusesUpdated} statuses updated.",
   "import.skipped": "{count} rows had no title and were skipped.",
+  "import.excluded":
+    "{count} rows are marked as deleted in this file's {column} column and will not be imported.",
+  "import.excludedNoColumn":
+    "No column in this file marks a row as deleted, so every row is on its way.",
+  "import.excludedResult":
+    "{count} rows were marked as deleted in this file and were not imported.",
+  "import.readAs": "Read as a {service} export.",
+  "import.readAsGeneric": "Read as a plain table, with the columns guessed.",
   "import.unmatched": "Not found in the catalogue:",
 
   // ── MARC (library mode) ─────────────────────────────────────────────────

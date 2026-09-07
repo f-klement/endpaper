@@ -13,7 +13,8 @@ import metadata
 import notifications
 import settings_store
 import sources
-from enums import OverdueNotifyReason, OverdueSender
+import targets
+from enums import CatalogueSource, OverdueNotifyReason, OverdueSender
 from routers import settings as settings_router
 from schemas import RecoveryPhraseOut
 from tests.helpers import JPEG_BYTES, NOT_AN_IMAGE, PNG_BYTES, WEBP_BYTES
@@ -1433,7 +1434,6 @@ class TestASourceThatCannotAnswerSaysSo:
         scanning a barcode sent the ISBN to Google with the feature switched
         off, and with no key stored it went anonymously rather than not at all.
         """
-        from enums import CatalogueSource
 
         assert (
             CatalogueSource.GOOGLE_BOOKS
@@ -1828,7 +1828,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
     def test_a_roster_row_starts_with_none(self, client, admin):
         body = client.get("/api/settings", headers=admin["headers"]).json()
         row = self._row(body, "bne")
-        assert row["has_credential"] is False
+        assert row["credential_provenance"] == "none"
         assert row["credential_username_preview"] == ""
         assert row["credential_unreadable"] is False
 
@@ -1839,7 +1839,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
             headers=keyed["headers"],
         ).json()
         row = self._row(body, "bne")
-        assert row["has_credential"] is True
+        assert row["credential_provenance"] == "stored"
         assert row["credential_username_preview"].endswith("name")
         assert "hunter2" not in str(body)
 
@@ -1870,7 +1870,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
         credentials.store_key(credentials.generate_phrase())
         body = client.get("/api/settings", headers=keyed["headers"]).json()
         row = self._row(body, "bne")
-        assert row["has_credential"] is True
+        assert row["credential_provenance"] == "stored"
         assert row["credential_unreadable"] is True
         assert row["credential_username_preview"] == ""
 
@@ -1893,7 +1893,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
         body = client.delete(
             "/api/settings/catalogue-sources/bne/credential", headers=keyed["headers"]
         ).json()
-        assert self._row(body, "bne")["has_credential"] is False
+        assert self._row(body, "bne")["credential_provenance"] == "none"
 
     def test_removing_one_that_is_not_there_is_not_an_error(self, client, keyed):
         response = client.delete(
@@ -1926,7 +1926,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob")
         body = client.get("/api/settings", headers=keyed["headers"]).json()
         row = self._row(body, "bne")
-        assert row["credential_from_env"] is True
+        assert row["credential_provenance"] == "env"
         assert row["credential_unreadable"] is True
 
     def test_a_stored_login_for_a_source_the_roster_lost_can_still_be_removed(
@@ -1966,9 +1966,63 @@ class TestACredentialIsStoredSealedAndShownMasked:
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
         body = client.get("/api/settings", headers=keyed["headers"]).json()
         row = self._row(body, "bne")
-        assert row["credential_from_env"] is True
-        assert row["has_credential"] is True
+        assert row["credential_provenance"] == "env"
         assert "correcthorse" not in str(body)
+
+    def test_a_shipped_login_reads_as_shipped_on_a_fresh_install(self, client, admin):
+        """**And not as "a login is stored"**, which is the same sentence the
+        screen uses for one this library typed. An admin who cannot tell them
+        apart has no reason to enter the account they actually hold."""
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+        row = self._row(body, "bna")
+        assert row["credential_provenance"] == "shipped"
+        assert row["credential_unreadable"] is False
+
+    def test_a_shipped_login_makes_its_source_ready_without_anybody_typing(
+        self, client, admin
+    ):
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+        row = self._row(body, "bna")
+        assert (row["needs_a_key"], row["has_key"], row["ready"]) == (True, True, True)
+
+    def test_entering_one_replaces_it_and_the_screen_says_so(self, client, keyed):
+        body = client.put(
+            "/api/settings/catalogue-sources/bna/credential",
+            json={"username": "a-long-username", "password": "hunter2"},
+            headers=keyed["headers"],
+        ).json()
+        row = self._row(body, "bna")
+        assert row["credential_provenance"] == "stored"
+        assert row["credential_username_preview"].endswith("name")
+
+    def test_and_removing_it_falls_back_to_the_shipped_one(self, client, keyed):
+        client.put(
+            "/api/settings/catalogue-sources/bna/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=keyed["headers"],
+        )
+        body = client.delete(
+            "/api/settings/catalogue-sources/bna/credential", headers=keyed["headers"]
+        ).json()
+        row = self._row(body, "bna")
+        assert row["credential_provenance"] == "shipped"
+        assert row["ready"] is True
+
+    def test_a_pinned_variable_still_wins_over_the_shipped_one(
+        self, client, admin, monkeypatch
+    ):
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNA", "bob:correcthorse")
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+        assert self._row(body, "bna")["credential_provenance"] == "env"
+
+    def test_no_shipped_password_reaches_the_settings_response(self, client, admin):
+        """A shipped pair is published and is still not a thing a response body
+        hands out: the rule is the shape of the answer, not the value's secrecy,
+        and a screen that printed one would be the place the next pair leaks."""
+        shipped = targets.SEEDED[CatalogueSource.BNA].shipped_credential
+        assert shipped is not None
+        body = client.get("/api/settings", headers=admin["headers"]).text
+        assert shipped.password not in body
 
     def test_the_write_is_admin_only(self, client, member):
         response = client.put(

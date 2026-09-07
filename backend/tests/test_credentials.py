@@ -16,8 +16,17 @@ import keyring.errors
 import pytest
 
 import credentials
-from enums import CatalogueSource
+import targets
+from enums import CatalogueSource, CredentialProvenance
 from models import CatalogueCredential
+
+#: The address the roster holds for the source these tests use.
+#:
+#: **The roster's own, not an invented one**, because `view` and `for_request`
+#: both compare what they are handed with the row: a made up address would test
+#: the ladder against a case no caller produces. The BNE ships no default, so
+#: every test below that is not about one is unaffected by which address it is.
+BNE_URL = targets.SEEDED[CatalogueSource.BNE].base_url
 
 
 class _InMemoryKeyring(keyring.backend.KeyringBackend):
@@ -528,33 +537,33 @@ class TestTheStoreSealsWhatItIsGiven:
 
 class TestTheScreenIsToldWhetherOneIsUsableRatherThanOnlyWhetherOneExists:
     def test_nothing_stored(self, db):
-        held = credentials.view(db, "bne")
+        held = credentials.view(db, "bne", BNE_URL)
         assert (held.has_credential, held.unreadable) == (False, False)
 
     def test_one_stored_and_readable(self, db):
         credentials.generate_key(db)
         credentials.put(db, "bne", "alice", "hunter2")
-        held = credentials.view(db, "bne")
+        held = credentials.view(db, "bne", BNE_URL)
         assert (held.has_credential, held.unreadable, held.username) == (
             True,
             False,
             "alice",
         )
-        assert credentials.is_held(db, "bne") is True
+        assert credentials.is_held(db, "bne", BNE_URL) is True
 
     def test_one_stored_under_a_key_that_is_gone(self, db):
         credentials.generate_key(db)
         credentials.put(db, "bne", "alice", "hunter2")
         credentials.store_key(credentials.generate_phrase())
-        held = credentials.view(db, "bne")
+        held = credentials.view(db, "bne", BNE_URL)
         assert (held.has_credential, held.unreadable, held.username) == (True, True, "")
-        assert credentials.is_held(db, "bne") is False
+        assert credentials.is_held(db, "bne", BNE_URL) is False
 
     def test_one_stored_with_no_key_configured_at_all(self, db):
         credentials.generate_key(db)
         credentials.put(db, "bne", "alice", "hunter2")
         credentials.key_file().unlink()
-        held = credentials.view(db, "bne")
+        held = credentials.view(db, "bne", BNE_URL)
         assert (held.has_credential, held.unreadable) == (True, True)
 
 
@@ -600,6 +609,327 @@ class TestAnUnreadableCredentialIsNotSentRatherThanRaising:
         request = credentials.for_request(db, "bne", "https://catalogue.example/sru")
         assert request is not None
         assert request.origin == "https://catalogue.example:443"
+
+
+#: The one source this build ships a login for, and where it goes.
+#:
+#: **Read off the roster rather than named**, so a second shipped default is
+#: covered by every test below on the day it is added, and so a default removed
+#: from the row fails these rather than quietly passing them.
+#: `TestThisBuildShipsExactlyTheDefaultsItSaysItDoes` is what keeps the set
+#: itself honest.
+SHIPPING = [
+    source
+    for source, target in targets.SEEDED.items()
+    if target.shipped_credential is not None
+]
+
+
+def _url(source: CatalogueSource) -> str:
+    return targets.SEEDED[source].base_url
+
+
+def _a_key(db) -> None:
+    """A key, without caring whether one of these tests already made it.
+
+    The loops below run once per shipped default and `generate_key` refuses when
+    a key exists, so a bare call would pass today and fail on the day a second
+    catalogue publishes its login, which is exactly the day these tests are for.
+    """
+    if credentials.key_material() is None:
+        credentials.generate_key(db)
+
+
+class TestThisBuildShipsExactlyTheDefaultsItSaysItDoes:
+    """The set of shipped logins, and what a row carrying one has to be.
+
+    **The census, not a spot check.** A default arriving on a row nobody
+    intended is the failure that has no symptom: the source simply starts
+    working, and nothing on any screen says which account it is working as.
+    """
+
+    def test_exactly_one_row_ships_a_login_today(self):
+        assert SHIPPING == [CatalogueSource.BNA]
+
+    def test_a_row_that_ships_one_is_a_row_that_needs_one(self):
+        for source in SHIPPING:
+            assert targets.SEEDED[source].needs_key is True
+
+    def test_and_the_construction_refuses_the_other_way_round(self):
+        """The rule is enforced at construction, not only true of the roster."""
+        row = targets.SEEDED[CatalogueSource.BNE]
+        with pytest.raises(ValueError, match="needs no credential"):
+            dataclasses.replace(
+                row, shipped_credential=targets.ShippedCredential("u", "p")
+            )
+
+    @pytest.mark.parametrize(
+        "username, password", [("", "p"), ("u", ""), ("a:b", "p")]
+    )
+    def test_a_shipped_pair_follows_the_rule_every_other_pair_follows(
+        self, username, password
+    ):
+        """One representation for the shipped, sealed and pinned spellings."""
+        with pytest.raises(ValueError):
+            targets.ShippedCredential(username, password)
+
+    def test_every_shipped_pair_would_be_accepted_by_the_store(self, db):
+        """What ships has to be enterable, or an admin cannot reproduce it."""
+        _a_key(db)
+        for source in SHIPPING:
+            pair = targets.SEEDED[source].shipped_credential
+            assert pair is not None
+            credentials.put(db, source.value, pair.username, pair.password)
+
+
+class TestAShippedLoginLosesToEverythingElse:
+    """The ladder, level by level and transition by transition.
+
+    **This is the property the owner's decision of 2026-09-07 states as a
+    requirement**, so it is tested as a chain rather than as three independent
+    facts: an institution with its own arrangement with the library has to be
+    able to use it, and each step of getting there has to land where a person
+    would expect.
+    """
+
+    def test_a_stock_install_sends_the_shipped_pair(self, db):
+        for source in SHIPPING:
+            shipped = targets.SEEDED[source].shipped_credential
+            assert shipped is not None
+            request = credentials.for_request(db, source.value, _url(source))
+            assert request is not None
+            assert (request.username, request.password) == (
+                shipped.username,
+                shipped.password,
+            )
+
+    def test_a_login_an_admin_enters_wins_over_it(self, db):
+        for source in SHIPPING:
+            _a_key(db)
+            credentials.put(db, source.value, "alice", "hunter2")
+            request = credentials.for_request(db, source.value, _url(source))
+            assert request is not None
+            assert (request.username, request.password) == ("alice", "hunter2")
+
+    def test_a_login_the_deployment_pins_wins_over_both(self, db, monkeypatch):
+        for source in SHIPPING:
+            _a_key(db)
+            credentials.put(db, source.value, "alice", "hunter2")
+            monkeypatch.setenv(
+                credentials.env_variable_name(source.value), "bob:correcthorse"
+            )
+            request = credentials.for_request(db, source.value, _url(source))
+            assert request is not None
+            assert (request.username, request.password) == ("bob", "correcthorse")
+
+    def test_removing_the_pin_falls_back_to_what_the_admin_entered(
+        self, db, monkeypatch
+    ):
+        for source in SHIPPING:
+            _a_key(db)
+            credentials.put(db, source.value, "alice", "hunter2")
+            variable = credentials.env_variable_name(source.value)
+            monkeypatch.setenv(variable, "bob:correcthorse")
+            monkeypatch.delenv(variable)
+            request = credentials.for_request(db, source.value, _url(source))
+            assert request is not None
+            assert (request.username, request.password) == ("alice", "hunter2")
+
+    def test_removing_the_admins_login_finds_the_shipped_one_underneath(self, db):
+        """**Not nothing**, which is the transition a screen most easily lies about."""
+        for source in SHIPPING:
+            shipped = targets.SEEDED[source].shipped_credential
+            assert shipped is not None
+            _a_key(db)
+            credentials.put(db, source.value, "alice", "hunter2")
+            credentials.forget(db, source.value)
+            request = credentials.for_request(db, source.value, _url(source))
+            assert request is not None
+            assert (request.username, request.password) == (
+                shipped.username,
+                shipped.password,
+            )
+
+    def test_a_stored_login_that_cannot_be_opened_does_not_fall_through(self, db):
+        """**The arm that would send a request as the wrong account.**
+
+        A sealed login under a key that is gone is what the admin configured, so
+        the source stops answering and the screen says the key is the problem.
+        Falling back to the shipped pair would authenticate as somebody else
+        while the screen reported a login this library entered.
+        """
+        for source in SHIPPING:
+            _a_key(db)
+            credentials.put(db, source.value, "alice", "hunter2")
+            credentials.store_key(credentials.generate_phrase())
+            assert credentials.for_request(db, source.value, _url(source)) is None
+            held = credentials.view(db, source.value, _url(source))
+            assert (held.provenance, held.unreadable) == (
+                CredentialProvenance.STORED,
+                True,
+            )
+
+    @pytest.mark.parametrize("value", ["", " ", "bob", "bob:", ":hunter2"])
+    def test_a_pinned_variable_set_to_nonsense_does_not_fall_through_either(
+        self, db, monkeypatch, value
+    ):
+        """**Parametrised, and the empty string is why.**
+
+        This arm asserted one spelling, `bob:`, and the spelling it did not
+        carry was the one that fell through: a variable set to nothing read as
+        unset, so the shipped account went out under a deployment that had said
+        something about this source. A battery enumerating the ways a value can
+        be wrong is only as good as its emptiest member.
+        """
+        for source in SHIPPING:
+            monkeypatch.setenv(credentials.env_variable_name(source.value), value)
+            assert credentials.for_request(db, source.value, _url(source)) is None
+            held = credentials.view(db, source.value, _url(source))
+            assert (held.provenance, held.unreadable) == (
+                CredentialProvenance.ENV,
+                True,
+            )
+
+
+class TestTheScreenIsToldWhichOfTheFourIsInForce:
+    """An admin who cannot tell a shipped login from one they entered is the
+    confusion this feature exists not to create."""
+
+    def test_a_source_with_no_login_anywhere_says_so(self, db):
+        held = credentials.view(db, "bne", BNE_URL)
+        assert held.provenance is CredentialProvenance.NONE
+        assert held.has_credential is False
+
+    def test_a_shipped_one_is_named_as_shipped_rather_than_as_stored(self, db):
+        for source in SHIPPING:
+            held = credentials.view(db, source.value, _url(source))
+            assert held.provenance is CredentialProvenance.SHIPPED
+            assert (held.has_credential, held.unreadable) == (True, False)
+
+    def test_and_it_reports_no_stored_envelope_behind_it(self, db):
+        """The row is what a Remove control acts on, and there is none."""
+        for source in SHIPPING:
+            assert credentials.stored_envelope(db, source.value) == ""
+
+    def test_one_an_admin_entered_is_named_as_stored(self, db):
+        for source in SHIPPING:
+            _a_key(db)
+            credentials.put(db, source.value, "alice", "hunter2")
+            held = credentials.view(db, source.value, _url(source))
+            assert held.provenance is CredentialProvenance.STORED
+            assert held.username == "alice"
+
+    def test_a_pinned_one_is_named_as_pinned(self, db, monkeypatch):
+        for source in SHIPPING:
+            monkeypatch.setenv(
+                credentials.env_variable_name(source.value), "bob:correcthorse"
+            )
+            held = credentials.view(db, source.value, _url(source))
+            assert held.provenance is CredentialProvenance.ENV
+            assert held.username == "bob"
+
+    def test_a_shipped_source_counts_as_ready_on_an_install_that_typed_nothing(
+        self, db
+    ):
+        for source in SHIPPING:
+            assert credentials.is_held(db, source.value, _url(source)) is True
+
+
+class TestAShippedLoginGoesOnlyWhereItsLibraryPublishedIt:
+    """The origin binding, which is the shipped level's own rule.
+
+    **Separate from `Credential.header_for`**, which binds whatever pair it was
+    built with to whatever origin it was built for. This decides whether the
+    pair is handed over at all, and it answers off the roster row rather than
+    off the caller, so an address that is not the published one loses the
+    default rather than carrying it there.
+    """
+
+    def test_it_is_handed_over_at_the_address_the_roster_holds(self):
+        for source in SHIPPING:
+            assert credentials.shipped(source.value, _url(source)) is not None
+
+    def test_a_different_path_at_the_same_origin_is_still_the_same_origin(self):
+        """The binding is the origin, not the address: the library publishes one
+        server and this app builds more than one path against it."""
+        assert credentials.shipped("bna", "http://200.123.191.9:9991/other") is not None
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://evil.test:9991/BNA01",
+            "https://200.123.191.9:9991/BNA01",
+            "http://200.123.191.9:9992/BNA01",
+            "http://200.123.191.9@evil.test:9991/BNA01",
+            "",
+            "not a url",
+        ],
+    )
+    def test_and_nowhere_else(self, url):
+        assert credentials.shipped("bna", url) is None
+
+    def test_and_the_request_path_withholds_it_there_too(self, db):
+        assert credentials.for_request(db, "bna", "http://evil.test:9991/x") is None
+
+    def test_two_addresses_the_parser_refuses_do_not_compare_equal(
+        self, monkeypatch
+    ):
+        """**Empty never matches**, which is `origin_of`'s own rule.
+
+        Unreachable from today's roster, whose addresses all parse, so it is
+        driven rather than left stated: a row whose `base_url` the parser
+        refuses would otherwise hand the pair to any other address the parser
+        also refuses, both sides comparing equal at the empty string.
+        """
+        row = targets.SEEDED[CatalogueSource.BNA]
+        broken = dataclasses.replace(row, base_url="http://[::1")
+        monkeypatch.setitem(targets.SEEDED, CatalogueSource.BNA, broken)
+        assert credentials.origin_of(broken.base_url) == ""
+        assert credentials.shipped("bna", "http://[::1") is None
+        assert credentials.shipped("bna", "not a url either") is None
+
+    def test_the_screen_and_the_sender_part_company_at_an_address_nothing_parses(
+        self, db, monkeypatch
+    ):
+        """**`is_held` answers the sender; `view` answers the screen.**
+
+        The whole of what `is_held` gained by asking `for_request` rather than
+        `view` is this one state, and nothing on the shipping roster reaches it:
+        all eleven addresses parse, so reverting `is_held` to the `view` form
+        left the suite green. Driven here with the same instrument the arm above
+        uses, and it pins both halves of the claim at once.
+
+        Its consumer, `settings_store._sources_with_a_credential`, decides
+        whether an ISBN is sent to a third party. Reporting a source ready when
+        nothing can be sent to it is what that function's own docstring says it
+        exists to stop.
+
+        A pinned variable rather than a sealed login, so this needs no key.
+        """
+        row = targets.SEEDED[CatalogueSource.BNA]
+        broken = dataclasses.replace(row, base_url="http://[::1")
+        monkeypatch.setitem(targets.SEEDED, CatalogueSource.BNA, broken)
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNA", "bob:correcthorse")
+        assert credentials.origin_of(broken.base_url) == ""
+
+        # The screen keeps the login the deployment pinned, and with it the
+        # sentence naming the variable. Answering "none" here would take that
+        # off a screen for a source that really is configured.
+        seen = credentials.view(db, "bna", broken.base_url)
+        assert (seen.provenance, seen.has_credential, seen.unreadable) == (
+            CredentialProvenance.ENV,
+            True,
+            False,
+        )
+        # The sender answers no, because nothing can be sent to that address.
+        assert credentials.for_request(db, "bna", broken.base_url) is None
+        assert credentials.is_held(db, "bna", broken.base_url) is False
+
+    def test_a_source_this_build_does_not_know_ships_nothing(self):
+        assert credentials.shipped("../../books/5?", _url(CatalogueSource.BNA)) is None
+
+    def test_and_neither_does_one_that_ships_no_default(self):
+        assert credentials.shipped("bne", BNE_URL) is None
 
 
 class TestThePurposeStringNamesExactlyOneSource:
@@ -705,25 +1035,36 @@ class TestTheKeyFileIsWrittenSafelyOrNotAtAll:
 
 
 class TestAPinnedCredentialThatIsSetAndUnusableIsReported:
-    """Silently ignoring it offered an edit on a screen and used the stored one."""
+    """Silently ignoring it offered an edit on a screen and used the stored one.
 
-    @pytest.mark.parametrize("value", ["bob", "bob:", ":hunter2", ":"])
+    **The empty string is in both batteries and was in neither**, which is the
+    hole a security seat measured on 2026-09-07: it is the commonest way of
+    setting one of these wrongly and it was the one spelling read as unset. The
+    level below was a stored login before a default shipped and is an account
+    nobody in the deployment chose now.
+    """
+
+    @pytest.mark.parametrize("value", ["", " ", "bob", "bob:", ":hunter2", ":"])
     def test_a_value_that_is_not_a_credential_raises(self, monkeypatch, value):
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", value)
         with pytest.raises(credentials.CredentialError):
             credentials.from_env("bne")
 
-    @pytest.mark.parametrize("value", ["bob", "bob:", ":hunter2"])
+    @pytest.mark.parametrize("value", ["", " ", "bob", "bob:", ":hunter2"])
     def test_and_the_deployment_still_counts_as_having_pinned_it(
         self, monkeypatch, value
     ):
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", value)
         assert credentials.is_from_env("bne") is True
 
+    def test_an_unset_variable_is_still_told_apart_from_an_empty_one(self):
+        assert credentials.is_from_env("bne") is False
+        assert credentials.from_env("bne") is None
+
     def test_the_screen_is_told_it_is_pinned_and_unusable(self, db, monkeypatch):
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:")
-        held = credentials.view(db, "bne")
-        assert (held.has_credential, held.from_env, held.unreadable) == (True, True, True)
+        held = credentials.view(db, "bne", BNE_URL)
+        assert (held.provenance, held.unreadable) == (CredentialProvenance.ENV, True)
 
     def test_and_nothing_is_sent(self, db, monkeypatch):
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:")
@@ -744,8 +1085,8 @@ class TestTheKeyIsResolvedOncePerCaller:
         credentials.put(db, "bne", "alice", "hunter2")
         state = credentials.key_state()
         credentials.key_file().unlink()
-        assert credentials.view(db, "bne", state).username == "alice"
-        assert credentials.view(db, "bne").unreadable is True
+        assert credentials.view(db, "bne", BNE_URL, state).username == "alice"
+        assert credentials.view(db, "bne", BNE_URL).unreadable is True
 
     def test_a_configuration_problem_is_a_sentence_rather_than_a_raise(
         self, db, monkeypatch
@@ -876,7 +1217,7 @@ class TestWhatCannotBeOpenedIsCountedOffTheTableAndNotTheRoster:
         credentials.forget_key()
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
 
-        assert credentials.view(db, "bne").unreadable is False
+        assert credentials.view(db, "bne", BNE_URL).unreadable is False
         assert credentials.unreadable_sources(db) == ["bne"]
         with pytest.raises(credentials.KeyConfigurationError):
             credentials.generate_key(db)

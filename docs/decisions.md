@@ -8162,10 +8162,11 @@ unclassified scan fails on its first run at that scale and is switched off withi
 
 **This register is inside its own subject**, and the pruning of 2026-09-05 is what proves the
 arrangement works: entries were rewritten, the sentences several verdicts were written for went
-with them, and the guard failed rather than going quiet. The census raises 3 candidates in it.
-**0** are live claims the guard now checks against `sources.py`; **3** are not the roster,
-being this entry's own worked examples and a sentence about what a shared pattern would have
-changed. All three figures are recomputed from the verdict table rather than reread.
+with them, and the guard failed rather than going quiet. The census raises 4 candidates in it.
+**0** are live claims the guard now checks against `sources.py`; **4** are not the roster,
+being this entry's own worked examples, a sentence about what a shared pattern would have
+changed, and a survey of national libraries in the Z39.50 transport entry. All three figures
+are recomputed from the verdict table rather than reread.
 
 **Rejected: an enumeration of sites.** A list of regexes goes stale exactly like the numbers
 and does it silently: the site nobody adds is the site nobody checks. `CLAIMS` is not that
@@ -10787,9 +10788,11 @@ roster was also the only bill. The Argentine national library is free and needs 
   expression is `LOOKUP_SOURCES - NEEDS_A_KEY`.
 
 **A credential this library publishes about itself is a third kind of secret**, beside the
-deployment's own and a member's, and nothing in the tree carries that distinction yet. It is
-why no default ships: a shipped login would make every install authenticate as one account at
-somebody else's server, with no way for an install with its own arrangement to replace it.
+deployment's own and a member's. It is what the entry "The catalogue that publishes its own
+login ships with it" turns on, and the objection it had to answer is the one recorded here:
+a shipped login makes every install authenticate as one account at somebody else's server.
+What answers it is the order, `credentials._resolve`, which puts a shipped default below a
+login an admin entered and below one a deployment pinned.
 
 ## A login on a plaintext connection, accepted with the residual stated in three places
 
@@ -10805,7 +10808,222 @@ origin the credential was set for, so a redirect cannot carry it elsewhere even 
 `fetch._same_host_hop` were bypassed, and the two guards are deliberately separate.
 
 **The residual is an install that has its own arrangement with a library**, which the design
-anticipates: shipping a default is refused precisely so such an install can replace one. That
-install puts a private login on an unencrypted connection. It is said beside the field on the
+anticipates: a login an admin enters replaces the shipped one, which is what leaves room for
+such an install. That install puts a private login on an unencrypted connection. It is said beside the field on the
 settings screen, in `docs/security.md` and in the row's own block, and it is not fixable here:
 the catalogue offers nothing else.
+
+## A row exclusion belongs to the generic mapping, not to a service's reader
+
+Owner's decision, 2026-09-07, settling the one question the reader seam left open.
+
+A claim recognising one service's export by naming two of its headers has two failure
+directions and both are bad in different ways. Measured on the export in question: rename
+either header and the file falls through to the generic reader, so every row the member
+deleted at the source comes back and the excluded count reads zero; name only one and a file
+claimed wrongly loses eleven of the twelve fields an import row carries.
+
+**So the exclusion stops depending on recognising anybody.** The generic mapping honours a
+row exclusion column wherever it appears, which needs no detection and therefore has no
+width to get wrong. The half that changes what a member sees is the half that no longer
+rests on a guess.
+
+**This is not the pre pass that was refused on 2026-09-06**, and the difference is the whole
+of why it is allowed here. That design detected which service wrote a file and then did two
+jobs on the strength of that guess. This detects nothing: a column either appears or it does
+not. A reader still exists for the services that need one, because a compound cell genuinely
+cannot be read without knowing whose dialect it is.
+
+The consequence is accepted rather than hidden: the reader written for the service whose
+export carries that column now has no job, so that service turns out not to need a reader.
+A seam justified by three services and used by two is the right size; one kept busy by
+giving it work that did not need it is not.
+
+## A preview names the reader it used, including when it used the generic one
+
+Owner's decision, 2026-09-07. The import preview named a reader only when it was not the
+generic one, and showed the excluded count only when that count was above zero. Both are the
+same mistake: a screen that says nothing when the answer is the ordinary one, so a detection
+miss is indistinguishable from a file with nothing to exclude.
+
+**A default that is invisible cannot be checked.** Naming the reader every time, and showing
+the count at zero, costs two lines on a screen and converts a silent wrong answer into a
+visible one. It is worth having whatever the detection rule is, which is why it was settled
+separately from it.
+
+## The catalogue that publishes its own login ships with it
+
+Owner's decision, 2026-09-07, taken against the implementing trio's refusal and against the
+recommendation that followed it. The reasoning on both sides is kept, because the costs are
+real and the decision is what balances them.
+
+**What was argued against it.** The mirror is public, so the credential is published by
+this project as well as by the library. The image bakes it, so every install authenticates
+as one account at a third party, and the library sees one identity for all of them.
+
+**What decides it the other way.** The library published the pair itself, on its own page
+for librarians, with a contact address beside it and no stated restriction on use. A
+credential a catalogue publishes so that people will use it is not a secret this project is
+keeping, and treating it as one costs every household an admin step on a settings screen
+most of them will never open. The source that answers nothing until somebody finds that
+screen is, for most installs, a source that never answers.
+
+**The property that makes it safe is replaceability, and it is a requirement rather than a
+consequence.** A shipped default must lose to a credential an admin has entered and to one
+an operator has pinned, in that order, so an institution with its own arrangement with the
+library uses it. A default that could not be replaced would be the version of this that
+should have been refused.
+
+## The Z39.50 client is the one already built, promoted rather than chosen
+
+Owner's decision, 2026-09-07. Five routes were researched and the one in the tree wins on
+what it does not do: it returns records as bytes rather than a formatted dump, so no display
+format sits in the trust path, and it spawns no process per query. The alternative built on
+an unmaintained BER decoder was refused on that criterion rather than on liveness, since the
+decoder would be parsing remote responses.
+
+**One target justifies it.** Of eight national catalogues surveyed, five need no client at
+all and are reachable as ordinary rows, two more became reachable once a credential could be
+held, and one refuses every HTTP shape tried while answering an order of magnitude inside
+the fan out budget. A transport built for one target is worth stating as such, because the
+next person to read the roster will otherwise assume it earned its place across the set.
+
+Its costs are accepted and named: an FFI boundary this project owns, and a second desktop
+build, since the container's library is compiled against a different libc. No native route
+serves the mobile client, which is a paired instance regardless.
+
+## A shipped login is the bottom of one ladder, and the ladder is walked once
+
+Four levels, `credentials._resolve`: the variable a deployment pins, a login an admin sealed,
+a login the catalogue publishes about itself and this build carries, nothing. **The settings
+screen and the outbound request walk the same function**, so a source cannot authenticate as
+something other than what an admin is shown. That was two chains before, which happened to
+agree; a shipped default is what makes agreeing by coincidence expensive.
+
+**The first level with anything to say wins whether or not it works.** A pinned variable set
+to nonsense and a sealed login under a key that is gone both keep the levels below them out.
+Falling through would send a request as a different account while the screen reported the one
+the admin configured, which is precisely the confusion a shipped default is otherwise most
+likely to create. `unreadable` is a second axis beside the provenance rather than a fifth
+value, because a level can be in force and broken.
+
+## The pair lives on the target row, so the origin it is bound to is not stored twice
+
+A shipped default is the one credential nobody chose, so nothing else records what it was
+published for. Held in `credentials.py` it would have been an address beside `Target.base_url`,
+kept equal by a guard duplicating what it checks. On the row, `credentials.shipped` compares
+the caller's address with the row's own and withholds the pair at any other origin, which is
+the guard #130 makes reachable the day a `base_url` is editable. It is a third guard beside
+`Credential.header_for` and `fetch._same_host_hop`, deliberately separate from both.
+
+## The provenance is one field, because the levels are ordered and booleans are not
+
+`has_credential` and `credential_from_env` were two of four answers spelled as two flags,
+which admits combinations the ladder cannot produce and leaves a screen deciding which flag to
+believe. `CatalogueSourceOut.credential_provenance` replaces both and `has_credential` is
+derived from it. What the old pair refused and the new field does not is nothing: every state
+the two booleans could express maps onto one provenance plus `unreadable`, and two states they
+could express (`from_env` without `has_credential`, and the reverse) were unreachable.
+
+## A stock install and a set that needs no credential are two different names
+
+They were one expression, `LOOKUP_SOURCES - NEEDS_A_KEY`, and a source that needs a login and
+ships one separates them: an install that has typed nothing asks eight, and seven need nothing.
+That name has now been wrong twice in the other direction as well, having read
+`LOOKUP_SOURCES - METERED` while the only credential was also the only bill.
+
+**A measurement keeps the name it was taken over.** The 395 of 500 pass ran against the seven,
+so it stays bound to them; `sources.STOCK_INSTALL_ASKS` is eight and answers 399, the four
+between them being the Argentine row's own measured contribution to the same committed sample.
+Adding a row to `sources.MEASURED` without re-running the pass was refused: `Measured` promises
+its columns are comparable, and a figure from a later pass is not.
+
+## The import seam is a reader per service, and selection is shown rather than trusted
+
+Built 2026-09-07 under the owner's decision of 2026-09-06, and reshaped the same day by the
+decisions above it. Three things were settled while building it that neither decision fixed.
+
+**A reader is handed decoded text, not the bytes.** Decoding is the one question every reader
+asks and this application has measured its answer: one byte that is not UTF-8 costs its own
+character rather than re-encoding a library, bounded by a stray run budget. A reader that
+decoded for itself would be a second answer to that. The cost is that a reader for a
+serialisation with its own encoding declaration would have to be handed text decoded by this
+rule, which for the JSON case is right and would want revisiting for anything else.
+
+**Selection is a guess that is reported, which is the same contract the column mapping already
+has.** What makes the choice safe is not that it is accurate: generic is the fallback, so a miss
+leaves the file with the reader that reads it today, the chosen reader is on the preview beside
+the mapping, and `reader=` overrides it. Since the row exclusion left the readers, a wrong guess
+costs one compound cell rather than a member's deleted titles.
+
+## A claim is a predicate over the front of the file, not a set of header names
+
+Google Play Books' export has no header row, so a signature written as a set of names would have
+forced the JSON reader to change what a signature is rather than to add one. `HeaderNames` is
+the only implementation there is today.
+
+**The cost is what the type stopped bounding.** A set of names could only ask one question about
+one line; a predicate is free to walk a 5 MB upload once per claim on a route reachable three
+times a minute. `detect` cuts one window and hands every claim that, and the window is read off
+`csv.field_size_limit`, which is already what bounds a cell `_read_table` will accept. What is
+given up is a claim about a marker past the window, and a header row with a newline inside a
+quoted field: both go to the generic reader, which is the fallback direction.
+
+## A row exclusion is honoured wherever the column appears, and a repeated one is refused
+
+The owner's decision of 2026-09-07 settles where the rule lives. Two things were settled while
+implementing it.
+
+**The candidate is written as the header the export carries and reduced at import**, which is
+the opposite of `COLUMN_GUESSES`, where the form is a rule a test enforces over a table too
+large to reduce at import. It buys two things: a name added later is quoted from the artefact
+rather than transcribed into another form, and the reduction is load bearing today rather than
+the day a second name arrives, since the attested spelling matches no normalised header without
+it. Deleting it fails eighteen tests.
+
+**A file naming the column twice is refused, and it is the one place in that module where
+refusing beats reading.** `csv.DictReader` keys a row on the header string, so two columns of
+one name collapse to one value, the last one's, and the first column's answer is gone before any
+row is seen. Read that way, a row the file marked deleted was imported with the count reading
+zero and the column named beside it, which is the silent miss the decision was taken to remove.
+Refusing destroys nothing: the member removes a column. Where a file spells the name two
+different ways they are two columns, both are read, and one saying yes drops the row, because a
+column saying the row is deleted is what the file says and a silent one takes nothing back.
+
+**What the reported column is, and is not.** It is disclosure and not a bound: `/csv` parses on
+its own and needs no preview, so the only thing bounding the rule's reach is the name itself,
+which is one no field of an import row can be. The column is reported because a count a member
+cannot trace to a column of their own file is a number they cannot check, and because it
+separates "no such column" from "that column, and no row said yes".
+
+## A figure two instruments disagree about is cut, not caveated
+
+A guard's docstring in a published test tree stated 24.511 s against 0.029 for a scan the
+guard cannot see, and a second reading of the same claim was 8.856 against 0.002. The two
+agree that the shape is quadratic and orders of magnitude worse than the linear code, and
+they are **five times apart on the ratio itself**, 845 against 4428, against a run to run
+spread of 38 percent measured on that machine.
+
+**The disagreement is what decided it, not either number.** A figure whose two derivations
+differ by five times on the quantity being claimed is not a measurement anybody should copy,
+and the sentence it served needed only the guard's own unit: the scan compares one element
+per header, which is below what the linear code compares, so the instrument reads the
+expensive shape as the cheaper one. That is true under either reading and needs no caveat.
+The seconds stay at the site in `csv_import.py`, where the caveat that the ratio is the claim
+already lives, and are not restated anywhere else.
+
+## Amazon's `DocumentProvider` is not read as the author
+
+A finding answered rather than fixed, and it survives the reader that raised it. It held the
+author on every row the 2026-09-05 audit saw, and it means a document's provider, which on a
+sideloaded file is whoever sideloaded it. A wrong author is worse than none, so no candidate
+name matches it and the preview reports the field as unread. A member who wants it mapped says
+so with a column correction, and every reader honours one.
+
+## An excluded row is counted in the open, where a blocked row is not
+
+`ImportResultOut.skipped` folds "no title" together with "the ISBN belongs to a Book this member
+cannot see", because separating them is an oracle for whether such a Book exists. The `excluded`
+count is deliberately not folded in with them: it is derived entirely from the member's own
+upload and says nothing about the instance, and a member who exported 400 titles and imported
+380 is owed the other twenty.

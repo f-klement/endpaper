@@ -21,12 +21,17 @@ export interface ImportResultOut {
    */
   created: number;
   /**
+   * Rows the file itself marked as not wanted, such as a title deleted at the source
+   * @minimum 0
+   */
+  excluded?: number;
+  /**
    * Rows matched to a book already here
    * @minimum 0
    */
   matched: number;
   /**
-   * Rows with a title
+   * Rows this import acted on
    * @minimum 0
    */
   rows_read: number;

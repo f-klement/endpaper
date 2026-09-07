@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 import config
 import credentials
 import sources
+import targets
 from enums import CatalogueSource, Locale, SettingKey
 from models import Setting
 
@@ -276,17 +277,22 @@ _SECRET_IS_A_SETTINGS_ROW: Final[frozenset[CatalogueSource]] = frozenset(
 
 
 def _sources_with_a_credential(db: Session) -> set[CatalogueSource]:
-    """Which credential-needing sources hold a readable sealed login.
+    """Which credential-needing sources hold a readable login, from any level.
 
     **One source today, and that is a fact about the roster rather than about
     this function.** It was empty while `sources.NEEDS_A_KEY` was Google Books
     alone, whose secret is a settings row; the Biblioteca Nacional Argentina is
-    the second member and the first whose secret is sealed, so the loop runs
+    the second member and the first whose secret is not one, so the loop runs
     once and the key is resolved on every call that reaches here. It was written
     for the set rather than for the member, which is why that cost the roster
     nothing to arrive at.
     `tests/test_settings_store.py` exercises it against a roster with a second
     such source in it.
+
+    **Not "holds a sealed row", which is what this used to say.** `is_held` asks
+    the whole ladder, so a source whose login this build ships answers true with
+    nothing in `catalogue_credentials` at all. Reading the table here instead
+    would report a stock install as unable to ask the one source it can.
 
     **Readable, not merely stored.** A credential written under a rotated key
     would otherwise report the source as ready and leave a member's search to
@@ -299,7 +305,13 @@ def _sources_with_a_credential(db: Session) -> set[CatalogueSource]:
     if not sealed:
         return set()
     state = credentials.key_state()
-    return {source for source in sealed if credentials.is_held(db, source.value, state)}
+    return {
+        source
+        for source in sealed
+        if credentials.is_held(
+            db, source.value, targets.SEEDED[source].base_url, state
+        )
+    }
 
 
 def source_credentials(db: Session) -> frozenset[CatalogueSource]:
@@ -310,6 +322,11 @@ def source_credentials(db: Session) -> frozenset[CatalogueSource]:
     Books card off has the credential and is not ready. Reporting only the
     conjunction told it to add a key it already had, which is exactly the
     sentence this feature exists to stop somebody hunting for.
+
+    **In force, whoever supplied it**, which since 2026-09-07 includes a login
+    this build ships because its catalogue publishes one. `credentials.is_held`
+    is the one function that answers that, so this set does not have to know how
+    many levels there are.
     """
     held = set(sources.DEFAULT_ORDER) - sources.NEEDS_A_KEY
     if google_books_api_key(db):

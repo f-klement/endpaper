@@ -26,6 +26,20 @@ const FIELDS: { keys: string[]; label: MessageKey }[] = [
   { keys: ["tags"], label: "import.fieldTags" },
 ];
 
+/**
+ * What each reader is called on screen.
+ *
+ * Proper nouns, so they are not in the catalogue: `LibraryThing` is
+ * `LibraryThing` in every language. A reader with no entry falls back to the
+ * name the server sent, which is what stops a reader added on the server from
+ * showing nothing at all here. The generic reader is not a service and is not
+ * here: it gets a sentence of its own, in the catalogue.
+ */
+const SERVICE_NAMES: Record<string, string> = {
+  librarything: "LibraryThing",
+  openreads: "Openreads",
+};
+
 /** The header that filled a field, from whichever of its keys matched. */
 function columnFor(
   mapping: Record<string, string | null>,
@@ -53,6 +67,15 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
   // The schema defaults it to an empty list, but the generated type keeps it
   // optional, so the page does not have to care which.
   const rows = preview.rows ?? [];
+  // Named on every preview, the ordinary answer included: a reader named only
+  // when it was not the ordinary one made a wrong reading look exactly like the
+  // common case, so the screen went quiet on the one occasion it was needed.
+  const service =
+    preview.reader && preview.reader !== "generic" ? preview.reader : null;
+  const excluded = preview.excluded ?? 0;
+  // Null where the file has no such column, which is a different answer from
+  // that column with no row saying yes. The count alone cannot separate them.
+  const exclusionColumn = preview.exclusion_column ?? null;
 
   return (
     <div className="rounded-xl border border-paper-200 bg-paper-50 p-3 text-sm dark:border-paper-700 dark:bg-paper-900">
@@ -73,6 +96,12 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
           ) : null;
         })}
       </dl>
+
+      <p className="mt-2 text-xs text-paper-600 dark:text-paper-400">
+        {service
+          ? t("import.readAs", { service: SERVICE_NAMES[service] ?? service })
+          : t("import.readAsGeneric")}
+      </p>
 
       {unmatched.length > 0 && (
         <p className="mt-2 text-xs text-paper-600 dark:text-paper-400">
@@ -121,6 +150,17 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
           {t("import.skipped", { count: preview.skipped })}
         </p>
       )}
+
+      {/* Said before the write, because it is the one number on this screen
+          about books that will not arrive, and said at zero: a count shown
+          only when it is above zero cannot be told apart from a file nothing
+          read. A member who exported 400 titles and imported 380 is owed the
+          other twenty. */}
+      <p className="mt-2 text-xs text-paper-600 dark:text-paper-400">
+        {exclusionColumn
+          ? t("import.excluded", { count: excluded, column: exclusionColumn })
+          : t("import.excludedNoColumn")}
+      </p>
     </div>
   );
 }

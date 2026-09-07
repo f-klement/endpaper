@@ -922,3 +922,30 @@ class VerificationProvenance(StrEnum):
     #: A directory authenticated the account, so this app was never the one
     #: holding the credential and has nothing of its own to verify.
     DIRECTORY = "directory"
+
+
+class CredentialProvenance(StrEnum):
+    """Which of the four levels supplies a catalogue's login, if any.
+
+    **One field rather than a booleans per level, because the levels are ordered
+    and a set of booleans is not.** `credential_from_env` and `has_credential`
+    were two of the four answers spelled as two flags, which admits combinations
+    the ladder cannot produce and leaves a screen deciding which flag to believe.
+    `credentials._resolve` walks the ladder once and this is what it answers.
+
+    **Not a claim that the credential works.** `unreadable` beside it is that,
+    and the two are separate axes: a level in force can be in force and broken,
+    which is what a pinned variable set to nonsense and a stored login under a
+    rotated key both are.
+    """
+
+    #: Nothing supplies one. The source cannot authenticate.
+    NONE = "none"
+    #: The deployment pinned it, `CATALOGUE_CREDENTIAL_<SOURCE>`. Wins over
+    #: everything and cannot be edited from a screen.
+    ENV = "env"
+    #: An admin entered it and it is sealed in `catalogue_credentials`.
+    STORED = "stored"
+    #: The catalogue publishes its own login and this build carries it. The
+    #: bottom of the ladder by construction: see `targets.ShippedCredential`.
+    SHIPPED = "shipped"

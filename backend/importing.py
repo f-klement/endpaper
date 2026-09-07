@@ -269,6 +269,12 @@ class Import:
             # import could not act on, and separating them out would be the
             # oracle again.
             skipped=parsed.skipped + tally.unmatched_private,
+            # Passed through rather than folded into `skipped`, and the reason
+            # is the reverse of the one above: a row the file itself marked as
+            # gone is read off the member's own upload and says nothing about
+            # what this instance holds, so it is not an oracle and does not have
+            # to hide inside a wider count. See `csv_import.ParsedFile.excluded`.
+            excluded=parsed.excluded,
             unmatched_titles=tally.unmatched,
         )
 
@@ -437,8 +443,17 @@ class Import:
 
         The parser has been reading "My Review" all along and the import threw
         it away, which is the same waste the rating and the finish date used to
-        be. A review is personal, and `Note` is already per Member and per
-        Book, so it lands there rather than on the Book itself.
+        be. A review is written by one Member about one Book, and `Note` is the
+        row that is keyed that way, so it lands there rather than on the Book.
+
+        **`Note` is per Member and is not private to them**, which this sentence
+        used to claim by arguing from "a review is personal" to a destination
+        that is not: `routers/books.py::get_notes` filters on the Book alone, so
+        every Member of the Library reads what an import wrote here. That is a
+        filed defect with an owner's decision behind it and is migration
+        bearing, so it is not fixed at this site; what is fixed is the reason
+        stated here, because a comment that argues for a property the code does
+        not have is what stops the next reader noticing.
 
         Skipped when this Member already has a note on the Book: an import is
         not a reason to append the same paragraph on every re-run.

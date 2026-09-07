@@ -15,14 +15,19 @@ for the pool, and `TestTheCandidateTableIsWellFormed` for the two properties
 of the table that decide whether either can work at all.
 """
 
+from datetime import date, datetime
+
 import pytest
 
 import csv_import
 from csv_import import (
+    CLAIMS,
     COLUMN_GUESSES,
+    HeaderNames,
     ImportError_,
     build_mapping,
     decode,
+    detect,
     flip_catalogue_name,
     match_format,
     match_status,
@@ -32,6 +37,7 @@ from csv_import import (
     unwrap_excel_formula,
 )
 from enums import BookFormat, ReadStatus
+from import_readers import ImportReader
 
 GOODREADS = b'''Book Id,Title,Author,Author l-f,ISBN,ISBN13,My Rating,Publisher,Binding,\
 Number of Pages,Year Published,Date Read,Bookshelves,Exclusive Shelf,My Review
@@ -804,6 +810,17 @@ BBBB,Roadside Picnic,Arkady Strugatsky,picnic.azw3,application/x-mobipocket-eboo
 documentType = document,false,2019-01-02
 '''
 
+#: A Goodreads export with a row exclusion column bolted onto it, and one row
+#: marked deleted. **Derived rather than quoted**: no service is attested as
+#: writing both this header row and that column, and a file no service writes is
+#: exactly what the rule now has to answer for.
+GOODREADS_WITH_AN_EXCLUSION = GOODREADS.replace(b"My Review", b"HasBeenDeleted").replace(
+    b"A desert planet.", b"true"
+) + (
+    b'2,Solaris,Stanislaw Lem,"Lem, Stanislaw",="0156027607",="9780156027601",4,'
+    b"Harvest,Paperback,204,2002,2021/04/15,sci-fi,read,false\n"
+)
+
 
 class TestTheCloudExports:
     """What #197's two candidates actually look like when handed to `parse`."""
@@ -817,40 +834,829 @@ class TestTheCloudExports:
         """No ASIN and no ISBN. The ASIN is in the reading session log instead."""
         assert all(row.isbn is None for row in parse(KINDLE_DOCUMENTS).rows)
 
-    def test_a_document_amazon_marks_deleted_arrives_beside_the_rest(self):
-        """The finding, and it is not a name that fixes it.
-
-        The fixture holds one row with `HasBeenDeleted` true and one with it
-        false, and both come back. The module has one row filter, "no title, so
-        skip", and a row level exclusion cannot be expressed as a candidate
-        header name. Asserted on the titles, not on a count, so the flag is
-        load bearing in the test that is named for it.
-
-        Where those rows land matters as much as that they arrive: an import
-        never sets `is_private`, which defaults to false, so a title the member
-        deleted at the source comes back visible to the whole instance.
-        """
-        titles = [row.title for row in parse(KINDLE_DOCUMENTS).rows]
-        assert titles == ["Solaris", "Roadside Picnic"]
-
     def test_a_json_library_file_is_refused_rather_than_read_as_a_table(self):
         """Google Play's book list is `Library.json`, so somebody will upload it."""
         with pytest.raises(ImportError_):
             parse(b'[{"libraryDoc": {"doc": {"documentType": "Book"}}}]\n')
 
 
+class TestOneCellCannotBuyUnboundedWork:
+    """The parts of a compound cell are bounded by the upload and by nothing
+    about a publication or a reading session.
+
+    Measured with `time.process_time()` on files of `MAX_UPLOAD_BYTES`,
+    20,000 rows, the bound switched off and on in the same process on the same
+    bytes: `readings` **21.472 s** of CPU against **0.776 s**, `publication`
+    **4.174 s** against **0.710 s**. The same file read generically costs
+    0.393 s, which is the floor either number is heading for. On a route any
+    member may reach three times a minute, and the preview writes nothing at
+    all.
+
+    **The machine is not named here**, because this file is published and its
+    name is not: the figures are a ratio measured twice in one process rather
+    than a comparison with any number taken elsewhere.
+
+    **Asserted below as a count of calls rather than as a duration**, because a
+    duration measured in a throttled pod says nothing, and because the count is
+    what the bound is: `parse_date` costs 16.56 microseconds on a miss and the
+    shape gate in front of it costs 0.21.
+
+    A single enormous cell is not the shape of this: `csv.field_size_limit`
+    refuses one over 131,072 characters, and the file above spends its budget
+    across the rows instead.
+    """
+
+    def test_a_cell_of_rubbish_reaches_the_date_parser_and_not_the_date_format(
+        self, monkeypatch
+    ):
+        """The gate is in `parse_date` rather than in the unpacker, so it covers
+        every caller that loops over parts, including one written later."""
+        calls = 0
+
+        class Counting:
+            """`datetime.strptime` cannot be patched on the class itself, which
+            is immutable, so the module's name for it is what is replaced."""
+
+            @staticmethod
+            def strptime(text, pattern):
+                nonlocal calls
+                calls += 1
+                return datetime.strptime(text, pattern)
+
+        monkeypatch.setattr(csv_import, "datetime", Counting)
+
+        content = (
+            b"title,book_format,readings\nPiranesi,paperback,"
+            + b"a|" * 20_000
+            + b"\n"
+        )
+        [row] = parse(content).rows
+
+        assert row.date_read is None
+        assert calls == 0
+
+    def test_finding_the_exclusion_columns_never_scans_the_header_row_twice(self):
+        """The same shape one level up: a file's columns, not a cell's parts.
+
+        Scanning the header row per header it is asked about is quadratic in a
+        column count nothing bounds but the upload, and the refusal for a
+        repeated exclusion column was written that way. The figures, and the
+        caveat that decides what they mean, are at the site in `csv_import.py`
+        and are not copied here: a number copied is a number that stops being
+        re-derived, and the copy is the one without the caveat.
+
+        **Counted as element comparisons, not as calls of one named method**,
+        which is the difference between a guard and a guard for one spelling.
+        Measured per header at 500 columns: what ships compares 4, and
+        `headers.count`, `found.count` and a hand written loop compare 500, 499
+        and 501. `found.count` is the one that matters, since it is one word
+        from what ships, reads as a tidy up, is the same quadratic, and reaches
+        a list this test never handed anybody.
+
+        **What this sees is a quadratic that compares the header objects it was
+        handed, and nothing else.** Two shapes are outside it, stated rather
+        than answered with another arm, because the fix for both is an
+        instrument that watches the row instead of its elements and that cannot
+        be a `list`. A pair of `list.index` calls compares 4 per header, being
+        quadratic in copying rather than in comparing. A scan over the
+        normalised forms compares **1** per header, which is below what ships,
+        because `_normalise_term` returns a plain `str` and the counting type
+        never reaches the comparison. It is the same quadratic the comment at
+        that site measures, so the instrument reads the expensive shape as the
+        cheaper one.
+
+        **Comparisons rather than a duration**, for the reason this class
+        already gives: a duration in a throttled pod says nothing.
+        """
+        compared = 0
+
+        class Counting(str):
+            """A header that says when anything compared it.
+
+            `__hash__` is delegated because defining `__eq__` drops it, and the
+            tally this guards is built by hashing the row.
+            """
+
+            def __eq__(self, other):
+                nonlocal compared
+                compared += 1
+                return str.__eq__(self, other)
+
+            def __hash__(self):
+                return str.__hash__(self)
+
+        # Distinct objects, because `list.count` and `in` shortcut on identity
+        # and a row of one repeated object would compare nothing at all.
+        headers: list[str] = [
+            Counting("Title"),
+            *(Counting("HasBeenDeleted") for _ in range(500)),
+        ]
+
+        with pytest.raises(ImportError_, match="more than one column"):
+            csv_import._exclusion_columns(headers)
+
+        assert compared < 10 * len(headers)
+
+    def test_a_real_date_still_reaches_it(self):
+        """The other half of the diagonal: a gate that rejected everything would
+        pass the row above and lose every date in every file."""
+        [row] = parse(OPENREADS_READINGS).rows
+        assert row.date_read == date(2024, 3, 4)
+
+    def test_a_publication_cell_of_commas_is_tried_a_bounded_number_of_times(
+        self, monkeypatch
+    ):
+        calls = 0
+        real = csv_import.match_format
+
+        def counted(raw):
+            nonlocal calls
+            calls += 1
+            return real(raw)
+
+        monkeypatch.setattr(csv_import, "match_format", counted)
+
+        content = (
+            "Title\tPrimary Author\tPublication\n"
+            "Le Grand Meaulnes\tFournier, Alain\t(1979)" + "," * 20_000 + "\n"
+        ).encode()
+        [row] = parse(content).rows
+
+        assert row.format is None
+        # One call over and above the bound: every row asks the mapped `format`
+        # column, which this file does not have, before the cell is unpacked.
+        assert calls <= csv_import._FORMAT_PARTS_SCANNED + 1
+
+    def test_a_format_after_a_comma_or_two_is_still_found(self):
+        """The diagonal for the bound: scanning nothing would pass the row above
+        and lose the field the reader exists for."""
+        content = (
+            b"Title\tPrimary Author\tPublication\n"
+            b"Le Grand Meaulnes\tFournier, Alain\tGallimard (1979), Poche, Paperback\n"
+        )
+        [row] = parse(content).rows
+        assert row.format is BookFormat.PAPERBACK
+
+
 class TestARefusalDoesNotEchoTheFileBack:
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="`headers[:12]` bounds the count, nothing bounds each header's length.",
-    )
+    def test_a_file_broken_on_its_first_line_is_refused_rather_than_a_500(self):
+        """Reading the header row is what parses it, so a file whose FIRST line
+        is the malformed one used to raise past the handler that turns a
+        `csv.Error` into a refusal, and `routers/imports.py` catches only the
+        refusal. A file is not more readable for being broken on line one.
+        """
+        with pytest.raises(ImportError_, match="could not be read as a table"):
+            parse(b"Title,HasBeenDeleted\rSolaris,true\r")
+        with pytest.raises(ImportError_, match="could not be read as a table"):
+            parse(b'"' + b"A" * 200_000 + b'",Title\nx,y\n')
+
     def test_a_file_that_is_not_a_table_gets_a_short_refusal(self):
         """A file with no delimiters has one enormous first line, and it is a header.
 
-        Measured: a 100,000 character line produces a 100,108 character message,
-        and `routers/imports.py` makes it the `detail` of a 400.
+        Measured before each header was bounded: a 100,000 character line
+        produced a 100,108 character message, and `routers/imports.py` makes it
+        the `detail` of a 400, so a file that is not a table was quoted back to
+        its sender in full.
         """
         with pytest.raises(ImportError_) as error:
             parse(("x" * 100_000 + "\ny\n").encode())
         assert len(str(error.value)) < 2_000
+
+    def test_the_headers_it_does_quote_are_still_useful(self):
+        """The other half: bounding a quote to nothing would pass the row above.
+
+        Twelve headers of forty characters is the ceiling, and a real header row
+        is well inside it, so the message that helps somebody pick the right
+        column is unchanged.
+        """
+        with pytest.raises(ImportError_) as error:
+            parse(b"Work Id,Edition Id,Bookshelf\nOL1W,OL2M,Already Read\n")
+        assert "Work Id, Edition Id, Bookshelf" in str(error.value)
+
+
+# ── The readers ───────────────────────────────────────────────────────────────
+#
+# Two export shapes cannot be a candidate header name, so two services have a
+# reader of their own. A row exclusion is a third shape no name can carry and
+# needs no reader: `_ROW_EXCLUSIONS` is honoured by every one of them, which is
+# `TestARowTheFileMarksAsDeletedDoesNotComeBack` below. `import_readers.py` is
+# the contract and `tests/test_import_readers.py` guards it; what is here is
+# what each reader reads, and how a file is recognised as one service's.
+
+#: LibraryThing's compound cell. **`Publication` and the shape of its value are
+#: quoted from the importer audit of 2026-09-05**, which read a real export;
+#: `Primary Author` is the same file's author column and is already quoted in
+#: `LIBRARYTHING` above, off `bookwyrm/tests/data/librarything.tsv`. As
+#: everywhere here the header row is quoted and the book row is invented.
+LIBRARYTHING_PUBLICATION = (
+    b"Title\tPrimary Author\tPublication\tPage Count\n"
+    b"Le Grand Meaulnes\tFournier, Alain\tGallimard (1979), Paperback\t250\n"
+)
+
+#: Openreads' compound cell. **`readings` is quoted from the same audit and the
+#: separator between two sessions is not**: what was quoted is one session,
+#: `start|finish|`. The `;` below is therefore invented, which is exactly why
+#: `test_the_session_separator_does_not_decide_the_answer` exists and why the
+#: reader is written not to depend on it. `book_format` is quoted off
+#: `bookwyrm/tests/data/openreads-csv-example.csv`, committed 2025-03-31.
+OPENREADS_READINGS = (
+    b"title,author,status,book_format,readings\n"
+    b"Piranesi,Susanna Clarke,finished,paperback,"
+    b"2021-01-02|2021-02-03|;2024-01-01|2024-03-04|\n"
+)
+
+
+class TestEachServicesOwnReaderIsTheOneThatRunsOnItsOwnFile:
+    """The diagonal: every fixture in this file, against every reader.
+
+    A fixture named for a service is not evidence that the service's reader ran
+    on it, so the check is each file against its own answer **and** each
+    claim taken apart one name at a time. A claim that fired on something else
+    in the file would survive the first half and not the second.
+    """
+
+    def test_each_file_gets_the_reader_it_is_for(self):
+        expected = {
+            ImportReader.GENERIC: (
+                GOODREADS,
+                LIBRARYTHING,
+                STORYGRAPH,
+                LIBIB,
+                LIBIB_TEMPLATE,
+                OPENREADS,
+                OPEN_LIBRARY,
+                BOOKWYRM,
+                ENDPAPER_OWN,
+                LIBRARYTHING_DIMENSIONS,
+                KINDLE_DOCUMENTS,
+            ),
+            ImportReader.LIBRARYTHING: (LIBRARYTHING_PUBLICATION,),
+            ImportReader.OPENREADS: (OPENREADS_READINGS,),
+        }
+        for reader, files in expected.items():
+            for content in files:
+                assert parse(content).reader is reader, content[:40]
+
+    @pytest.mark.parametrize(
+        ("content", "reader"),
+        [
+            (LIBRARYTHING_PUBLICATION, ImportReader.LIBRARYTHING),
+            (OPENREADS_READINGS, ImportReader.OPENREADS),
+        ],
+    )
+    def test_every_name_of_a_claim_is_load_bearing(self, content, reader):
+        """Each name dropped in turn, and the file must fall back to generic.
+
+        This is what tells a claim apart from a fixture that happens to be
+        recognised by one distinctive word: a name that could be removed with
+        the answer unchanged is a name doing nothing.
+        """
+        claim = dict(CLAIMS)[reader]
+        assert isinstance(claim, HeaderNames)
+        headers = parse(content).headers
+
+        for name in claim.names:
+            [header] = [h for h in headers if csv_import._normalise_term(h) == name]
+            without = content.replace(header.encode(), b"Something Else")
+            assert parse(without).reader is ImportReader.GENERIC, name
+
+    def test_a_column_one_service_shares_no_longer_routes_a_file_anywhere(self):
+        """What the exclusion moving out of a reader took off this table.
+
+        A Goodreads export carrying a column of that one name used to be the
+        shape a claim could wrongly fire on, and the reader it would have gone
+        to read the title alone, so such a file lost eleven of the twelve fields
+        `ImportRow` carries. No claim mentions that name now, so the file is read
+        generically and reads whole. What the
+        column does to its rows is
+        `TestARowTheFileMarksAsDeletedDoesNotComeBack`, and it is not detection.
+        """
+        content = GOODREADS.replace(b"My Review", b"HasBeenDeleted")
+
+        parsed = parse(content)
+
+        assert parsed.reader is ImportReader.GENERIC
+        assert parsed.rows[0].author == "Frank Herbert"
+        claimed = {
+            name
+            for _, claim in CLAIMS
+            if isinstance(claim, HeaderNames)
+            for name in claim.names
+        }
+        assert "hasbeendeleted" not in claimed
+
+    def test_a_compound_readers_column_is_one_of_the_names_that_found_the_file(self):
+        """The column a reader unpacks is also half of what recognises the file,
+        so the two are one constant and this is what holds them together.
+
+        Written twice they drift into a file that is detected as a service's and
+        then unpacks nothing at all, silently.
+        """
+        for reader, column in (
+            (ImportReader.LIBRARYTHING, csv_import._PUBLICATION),
+            (ImportReader.OPENREADS, csv_import._READINGS),
+        ):
+            claim = dict(CLAIMS)[reader]
+            assert isinstance(claim, HeaderNames)
+            assert column in claim.names
+
+    def test_a_claim_may_be_about_something_other_than_a_header_row(
+        self, monkeypatch
+    ):
+        """The property the next reader needs, run rather than asserted.
+
+        Google Play Books' library export is nested JSON, so no set of header
+        names could ever claim it and its first line may be a single `{`. This
+        registers the claim that reader would carry, over text past line one and
+        not a `HeaderNames` at all, and asks `detect` to route to it.
+
+        Asserting that every claim is callable would pass on the table this
+        replaces, since `HeaderNames` is callable too. The routing is the claim.
+        """
+        library_json = '{\n  "libraryDoc": {\n    "documentType": "Book"\n  }\n}\n'
+
+        monkeypatch.setattr(
+            csv_import,
+            "CLAIMS",
+            ((ImportReader.OPENREADS, lambda text: '"documentType": "Book"' in text),),
+        )
+
+        assert detect(library_json) is ImportReader.OPENREADS
+
+    def test_a_claim_is_handed_the_window_and_never_the_file(self, monkeypatch):
+        """What the type accepts that a set of header names refused.
+
+        A set of names could only ask about one line, so the work was bounded by
+        what a claim was. A predicate is free to walk a 5 MB upload once per
+        claim, on a route reachable three times a minute, and `detect` is where
+        that is stopped rather than in a sentence each claim keeps to itself.
+        """
+        seen: list[int] = []
+
+        def record(text: str) -> bool:
+            seen.append(len(text))
+            return False
+
+        monkeypatch.setattr(csv_import, "CLAIMS", ((ImportReader.OPENREADS, record),))
+
+        detect("x" * (csv_import._CLAIM_WINDOW * 3))
+
+        assert seen == [csv_import._CLAIM_WINDOW]
+
+    def test_a_file_with_no_newline_in_it_does_not_cost_the_whole_file(self):
+        """The one input that reaches `_headers_of`'s fallback.
+
+        A file with no delimiter at all is one enormous header, which is this
+        module's own pathological input, and a slice ending at `find + 1` ends
+        at zero for it. Read as the whole file, three claims over 5 MB cost 108
+        ms and 25.5 MB of peak allocation against 20 ms and 1.3 MB. **Both
+        halves are one instrument's run**, so the pair is a comparison; three
+        instruments read the unwindowed side and the other two put it at 132 ms
+        and at 437.8 ms, so the figure written is the lowest of the three and a
+        floor. An ordinary export with a newline in it is 0.06 ms either way.
+        `_headers_of` is what this asserts, because `detect` windows the text
+        before any claim sees it and would hide the fallback.
+        """
+        # Asserted on the whole answer, not on `[0]`'s length. Indexing it made
+        # the old spelling go red by `IndexError` instead: a 500,000 character
+        # field is over `csv.field_size_limit`, so `_headers_of` caught the
+        # `csv.Error` and answered `[]` before any length was compared. The name,
+        # the docstring and the assertion were three claims and the assertion was
+        # the one that never ran.
+        assert csv_import._headers_of("x" * 500_000) == ["x" * csv_import._CLAIM_WINDOW]
+
+    def test_a_file_nothing_claims_is_read_generically(self):
+        """The fallback is what bounds a detection miss: a file no claim fires
+        on is read by the reader that reads it today, never by nothing."""
+        assert detect("Title,Author\nDune,Frank Herbert\n") is ImportReader.GENERIC
+
+    def test_the_member_may_name_a_reader_over_the_detector(self):
+        parsed = parse(LIBRARYTHING_PUBLICATION, None, ImportReader.GENERIC)
+        assert parsed.reader is ImportReader.GENERIC
+        assert parsed.rows[0].publisher is None
+
+    def test_a_file_the_detector_cannot_read_falls_back_rather_than_raising(self):
+        """Detection runs before the file is known to be a table at all."""
+        assert detect("") is ImportReader.GENERIC
+
+
+class TestARowTheFileMarksAsDeletedDoesNotComeBack:
+    """The half of this that changes what a member sees.
+
+    A row exclusion names no field, so it cannot be a candidate header name
+    under any spelling. Left unread, a title the member deleted at the source
+    came back, and came back visible to everyone on the instance: nothing on the
+    import path sets `is_private` and `Book.is_private` defaults to false.
+
+    **It is the generic mapping's, not one service's reader's.** The column is
+    honoured wherever it appears, so nothing has to be right about which service
+    wrote the file. Owner's decision, 2026-09-07.
+
+    The attested fixture carries one row with the flag true and one with it
+    false, so every assertion below is on the flag rather than on a count.
+    """
+
+    def test_the_row_the_member_deleted_does_not_come_back(self):
+        assert [row.title for row in parse(KINDLE_DOCUMENTS).rows] == ["Roadside Picnic"]
+
+    def test_it_is_counted_rather_than_dropped_silently(self):
+        """A member who exported 400 titles and imported 380 is owed the other
+        twenty, so the numbers still add up to the lines in the file."""
+        parsed = parse(KINDLE_DOCUMENTS)
+        assert (parsed.excluded, parsed.skipped, len(parsed.rows)) == (1, 0, 1)
+
+    def test_a_value_outside_the_vocabulary_keeps_the_row(self):
+        """The direction that does not destroy data.
+
+        The attested column is written `true` and `false`, so a word outside
+        that is a file this module has not seen, and inventing an exclusion out
+        of it would drop books nobody deleted.
+        """
+        odd = KINDLE_DOCUMENTS.replace(b",true,", b",unknown,")
+        parsed = parse(odd)
+        assert [row.title for row in parsed.rows] == ["Solaris", "Roadside Picnic"]
+        assert parsed.excluded == 0
+
+    def test_a_row_with_no_title_is_still_the_other_count(self):
+        """Two refusals, and they stay apart: the exclusion is what the file
+        says, and the skip is what the row lacks."""
+        untitled = KINDLE_DOCUMENTS.replace(b"BBBB,Roadside Picnic,", b"BBBB,,")
+        parsed = parse(untitled)
+        assert (parsed.excluded, parsed.skipped, parsed.rows) == (1, 1, [])
+
+    def test_a_row_that_is_deleted_and_untitled_counts_as_deleted(self):
+        """The one row that says which of the two is asked first, and without
+        it the order is a comment.
+
+        A row lacking a title is dropped either way, so the mutation that reads
+        the title first is invisible on every other row in the file: the counts
+        are the only place it shows, and a member reading them is owed the
+        file's own answer rather than this module's.
+        """
+        both = KINDLE_DOCUMENTS.replace(b"AAAA,Solaris,", b"AAAA,,")
+        parsed = parse(both)
+        assert (parsed.excluded, parsed.skipped) == (1, 0)
+        assert [row.title for row in parsed.rows] == ["Roadside Picnic"]
+
+    @pytest.mark.parametrize("yes", ["true", "TRUE", " true ", "1", "yes", "y"])
+    def test_every_spelling_of_yes_drops_the_row(self, yes):
+        """The vocabulary decides what a file destroys, and it decides that for
+        every file now rather than for one service's, so it is pinned rather
+        than stated. Case and surrounding space belong to the file.
+        """
+        content = KINDLE_DOCUMENTS.replace(b",true,", f",{yes},".encode())
+        assert [row.title for row in parse(content).rows] == ["Roadside Picnic"]
+
+    @pytest.mark.parametrize("no", ["false", "0", "no", "", "deleted"])
+    def test_everything_else_keeps_the_row(self, no):
+        """The other half of the diagonal, and the direction that does not
+        destroy data. `deleted` is in it deliberately: a word that reads like
+        the answer is still not the answer the column is written with.
+        """
+        content = KINDLE_DOCUMENTS.replace(b",true,", f",{no},".encode())
+        parsed = parse(content)
+        assert [row.title for row in parsed.rows] == ["Solaris", "Roadside Picnic"]
+        assert parsed.excluded == 0
+
+    def test_naming_a_reader_does_not_bring_them_back(self):
+        """What the old rule allowed and this one does not, pinned as such.
+
+        The exclusion used to belong to one reader, so asking for the generic
+        one read the same file as a plain table and every deleted title
+        returned. It belongs to the mapping every reader shares now, so naming a
+        reader decides how the cells are read and never whether the row exists.
+        The way to import a row the file marks as deleted is to change the file,
+        which is the member's own upload.
+        """
+        parsed = parse(KINDLE_DOCUMENTS, None, ImportReader.GENERIC)
+        assert [row.title for row in parsed.rows] == ["Roadside Picnic"]
+        assert parsed.excluded == 1
+
+    def test_a_service_reader_honours_it_and_still_reads_its_own_cell(self):
+        """Not one reader's rule and not bought with another reader's job.
+
+        Openreads' file, read by Openreads' reader, with the column present: the
+        deleted row goes and the compound cell of the row that stays is still
+        unpacked.
+        """
+        content = (
+            b"title,author,status,book_format,readings,HasBeenDeleted\n"
+            b"Piranesi,Susanna Clarke,finished,paperback,2021-01-02|2021-02-03|,true\n"
+            b"Solaris,Stanislaw Lem,finished,paperback,2024-01-01|2024-03-04|,false\n"
+        )
+
+        parsed = parse(content)
+
+        assert parsed.reader is ImportReader.OPENREADS
+        assert (parsed.excluded, [row.title for row in parsed.rows]) == (1, ["Solaris"])
+        assert parsed.rows[0].date_read == date(2024, 3, 4)
+
+    def test_any_service_writing_the_column_is_honoured_and_reads_whole(self):
+        """**What the old rule refused and this one accepts**, stated as a test.
+
+        The exclusion used to need a claim naming two of Amazon's headers, so a
+        file from anywhere else carrying that column kept every row. It is
+        honoured wherever the column appears now, which is wider by exactly this
+        shape, and the widening is bounded by the name being one no field can
+        be: the rest of such a file is still read as the plain table it is.
+        """
+        parsed = parse(GOODREADS_WITH_AN_EXCLUSION)
+
+        assert parsed.reader is ImportReader.GENERIC
+        assert (parsed.excluded, [row.title for row in parsed.rows]) == (1, ["Solaris"])
+        assert parsed.rows[0].author == "Stanislaw Lem"
+        assert parsed.rows[0].publisher == "Harvest"
+
+    def test_a_file_naming_the_column_twice_is_refused_rather_than_read(self):
+        """The one place in this module where refusing beats reading.
+
+        `csv.DictReader` keys a row on the header string, so two columns of the
+        same name collapse into one value, the last one's. Read that way the row
+        below, which the file marks deleted in its first such column, was
+        imported with the count reading zero and the column named beside it,
+        which is the silent miss this rule exists to remove. Refusing destroys
+        nothing.
+        """
+        twice = b"Title,HasBeenDeleted,HasBeenDeleted\nSolaris,true,false\n"
+        with pytest.raises(ImportError_, match="more than one column"):
+            parse(twice)
+
+    def test_that_refusal_names_the_column_rather_than_a_run_of_spaces(self):
+        """Padding is stripped before a name is reduced, so a file has as many
+        spellings of this column as it has lengths of padding.
+
+        Unbounded in what it stripped, the message named forty spaces and told
+        a member to remove a column it had not identified. These all reduce to
+        one name, so this is the half about stripping; the count is below.
+        """
+        padded = [" " * length + "HasBeenDeleted" for length in range(200)]
+        header = ",".join(["Title", *padded, *padded])
+        row = ",".join(["Solaris", *["true"] * (2 * len(padded))])
+
+        with pytest.raises(ImportError_) as error:
+            parse(f"{header}\n{row}\n".encode())
+
+        assert "HasBeenDeleted" in str(error.value)
+        assert len(str(error.value)) < 2_000
+
+    def test_that_refusal_names_a_bounded_number_of_them(self):
+        """The other half, and it needs names that do not reduce to one.
+
+        Case is not a separator, so fifteen case spellings are fifteen distinct
+        columns of one name, and quoting every one of them is how a refusal
+        quotes a file back to its sender. The count is asserted rather than the
+        message's length, because a length passes on a file that never reaches
+        the cap.
+        """
+        name = "hasbeendeleted"
+        spellings = [name[:index].upper() + name[index:] for index in range(15)]
+        assert len(set(spellings)) == 15
+        # Tied to the constant, not to 15: raise the cap above the fixture and
+        # the assertion below becomes an identity that observes nothing.
+        assert len(spellings) > csv_import._MAX_HEADERS_QUOTED
+        header = ",".join(["Title", *spellings, *spellings])
+        row = ",".join(["Solaris", *["true"] * (2 * len(spellings))])
+
+        with pytest.raises(ImportError_) as error:
+            parse(f"{header}\n{row}\n".encode())
+
+        named = str(error.value).split("called ")[1].split(", so which")[0]
+        assert len(named.split(", ")) == csv_import._MAX_HEADERS_QUOTED
+
+    def test_a_name_longer_than_a_header_may_be_quoted_at_is_cut(
+        self, monkeypatch
+    ):
+        """The length bound, which today's one name cannot reach.
+
+        A header that reduces to `hasbeendeleted` carries no separator, so it is
+        fourteen characters stripped and the cut cannot show. A longer name can
+        be added at any time and the cut is what stops a `csv.field_size_limit`
+        long header reaching a member, so it is asserted against a name of that
+        shape rather than left to the day one arrives.
+        """
+        long_name = "has been deleted at the source by the member themselves"
+        assert len(long_name) > csv_import._MAX_HEADER_QUOTED
+        monkeypatch.setattr(
+            csv_import,
+            "_ROW_EXCLUSIONS",
+            tuple(csv_import._normalise_term(name) for name in (long_name,)),
+        )
+
+        parsed = parse(f"Title,{long_name}\nSolaris,true\nDune,false\n".encode())
+
+        assert parsed.excluded == 1
+        assert parsed.exclusion_column == long_name[: csv_import._MAX_HEADER_QUOTED]
+
+    def test_every_column_that_marks_deletion_is_read_and_not_only_the_first(self):
+        """Two spellings of the name are two columns, and they disagree in one
+        direction only: a column saying the member deleted this row is what the
+        file says, and a second column silent about it takes nothing back."""
+        both = (
+            b"Title,HasBeenDeleted,hasbeendeleted\n"
+            b"Solaris,false,true\n"
+            b"Roadside Picnic,false,false\n"
+        )
+        parsed = parse(both)
+        assert (parsed.excluded, [row.title for row in parsed.rows]) == (
+            1,
+            ["Roadside Picnic"],
+        )
+
+    def test_a_name_written_with_separators_is_the_same_name(self, monkeypatch):
+        """The reduction every header goes through is applied to the candidate
+        at import rather than asked of whoever adds one.
+
+        The candidate is written as the header the export carries, so the
+        reduction is already load bearing: without it `HasBeenDeleted` matches
+        no normalised header and every other test in this class goes red. This
+        is the half that has no subject until a second name arrives, run against
+        the module's own expression rather than left as a sentence.
+        """
+        monkeypatch.setattr(
+            csv_import,
+            "_ROW_EXCLUSIONS",
+            tuple(csv_import._normalise_term(name) for name in ("has_been_deleted",)),
+        )
+
+        parsed = parse(b"Title,Has Been Deleted\nSolaris,true\nRoadside Picnic,false\n")
+
+        assert [row.title for row in parsed.rows] == ["Roadside Picnic"]
+
+    def test_the_reported_column_still_names_the_column_and_stays_bounded(self):
+        """A header is as long as the file makes it, and a 100,108 character
+        400 is a refusal this module has already paid for once. Padding is what
+        makes an arbitrarily long header still normalise to this name.
+
+        **Asserted on what a member can read, not only on the length.** A bound
+        that slices from the left of a padded header holds at exactly the right
+        number of characters and reports forty spaces, which is the count beside
+        a blank this whole change was taken against.
+        """
+        padded = ("Title," + " " * 200 + "HasBeenDeleted\nSolaris,true\n").encode()
+
+        parsed = parse(padded)
+
+        assert parsed.excluded == 1
+        assert parsed.exclusion_column == "HasBeenDeleted"
+        assert len(parsed.exclusion_column or "") <= csv_import._MAX_HEADER_QUOTED
+
+    def test_the_column_it_was_read_from_is_reported(self):
+        """A count a member cannot trace to a column of their own file is a
+        number they cannot check, and the column is not one service's now."""
+        assert parse(KINDLE_DOCUMENTS).exclusion_column == "HasBeenDeleted"
+
+    def test_a_file_with_no_such_column_says_so_rather_than_saying_nothing(self):
+        """Which is a different answer from "that column, and no row said yes",
+        and the count alone cannot tell them apart."""
+        parsed = parse(GOODREADS)
+        assert (parsed.exclusion_column, parsed.excluded) == (None, 0)
+
+    def test_a_column_correction_reaches_such_a_file(self):
+        """The refusal that used to meet this call had one subject and it has
+        gone.
+
+        `DocumentProvider` means a document's provider, which is a sideloader on
+        a sideloaded file, so no guess maps it. A member who wants it as the
+        author says so, and the reader that guesses columns is the only kind
+        there is.
+        """
+        parsed = parse(KINDLE_DOCUMENTS, {"author": "DocumentProvider"})
+        assert [row.author for row in parsed.rows] == ["Arkady Strugatsky"]
+
+    def test_the_columns_nothing_guesses_are_reported_as_unread(self):
+        """`DocumentProvider` held the author on the rows the audit saw and
+        means a document's provider, so no candidate name matches it. The
+        preview says so rather than leaving somebody looking for the bug."""
+        parsed = parse(KINDLE_DOCUMENTS)
+        assert parsed.mapping["title"] == "Title"
+        assert parsed.mapping["author"] is None
+
+
+class TestLibraryThingsPublicationCellIsThreeFields:
+    def test_the_publisher_the_year_and_the_format_all_come_out(self):
+        [row] = parse(LIBRARYTHING_PUBLICATION).rows
+        assert (row.publisher, row.year, row.format) == (
+            "Gallimard",
+            1979,
+            BookFormat.PAPERBACK,
+        )
+
+    def test_the_rest_of_the_file_is_read_the_way_it_always_was(self):
+        """A reader of its own is not a second parser: the candidate names, the
+        catalogue order author and the tab delimiter all still apply."""
+        [row] = parse(LIBRARYTHING_PUBLICATION).rows
+        assert (row.title, row.author, row.pages) == ("Le Grand Meaulnes", "Alain Fournier", 250)
+
+    def test_a_publisher_whose_name_holds_a_comma_survives(self):
+        """The bracketed year is the anchor for exactly this reason: splitting
+        this cell on its punctuation reads half a name as a binding."""
+        content = LIBRARYTHING_PUBLICATION.replace(
+            b"Gallimard (1979), Paperback", b"Farrar, Straus and Giroux (1979)"
+        )
+        [row] = parse(content).rows
+        assert (row.publisher, row.year) == ("Farrar, Straus and Giroux", 1979)
+
+    def test_the_last_bracketed_year_is_the_year_of_publication(self):
+        """The position of the anchor, asserted rather than described.
+
+        A publisher whose own name carries a bracketed year takes the anchor if
+        the first is read instead, and then the year is the wrong one and the
+        publisher is half a name. A mutation harness found this untested: both
+        `found[0]` and `found[-1]` passed every other row in this class, because
+        no other cell here has two.
+        """
+        content = LIBRARYTHING_PUBLICATION.replace(
+            b"Gallimard (1979), Paperback", b"Editions (1901) Ltd (1979), Paperback"
+        )
+        [row] = parse(content).rows
+        assert (row.publisher, row.year) == ("Editions (1901) Ltd", 1979)
+
+    def test_a_cell_with_no_bracketed_year_invents_none(self):
+        """The conservative half. Read the other way round, `Gallimard, Poche`
+        would produce a year out of nothing, and a wrong value here is worse
+        than an absent one."""
+        content = LIBRARYTHING_PUBLICATION.replace(
+            b"Gallimard (1979), Paperback", b"Gallimard, Poche"
+        )
+        [row] = parse(content).rows
+        assert (row.publisher, row.year, row.format) == ("Gallimard, Poche", None, None)
+
+    def test_a_column_of_its_own_beats_the_compound_cell(self):
+        """Gaps are filled and nothing is overwritten, which is the rule
+        `importing._fill_gaps` applies for the same reason."""
+        content = (
+            "Title\tPrimary Author\tPublication\tPublisher\n"
+            "Le Grand Meaulnes\tFournier, Alain\tGallimard (1979)\tEmecé\n"
+        ).encode()
+        [row] = parse(content).rows
+        assert (row.publisher, row.year) == ("Emecé", 1979)
+
+    def test_an_empty_publication_cell_leaves_the_row_alone(self):
+        content = LIBRARYTHING_PUBLICATION.replace(b"Gallimard (1979), Paperback", b"")
+        [row] = parse(content).rows
+        assert (row.publisher, row.year, row.format) == (None, None, None)
+
+
+class TestOpenreadsReadingsCellIsAFinishDate:
+    def test_the_latest_finish_is_the_date_read(self):
+        """A book read twice has two, and the later one is when this member
+        last finished it."""
+        [row] = parse(OPENREADS_READINGS).rows
+        assert row.date_read == date(2024, 3, 4)
+
+    def test_the_session_separator_does_not_decide_the_answer(self):
+        """The separator between two sessions was not attested, so the reading
+        is written not to depend on it: the finishes are the odd numbered parts
+        whatever glues two sessions together.
+
+        Four separators, one answer, and the fourth is a newline, which arrives
+        quoted because an unquoted one ends the row. Reading structure that was
+        not attested is how a start becomes a finish.
+        """
+        answers = set()
+        for separator in (b";", b"/", b" "):
+            content = OPENREADS_READINGS.replace(b"|;2024", b"|" + separator + b"2024")
+            [row] = parse(content).rows
+            answers.add(row.date_read)
+
+        quoted = OPENREADS_READINGS.replace(
+            b"2021-01-02|2021-02-03|;2024-01-01|2024-03-04|",
+            b'"2021-01-02|2021-02-03|\n2024-01-01|2024-03-04|"',
+        )
+        [row] = parse(quoted).rows
+        answers.add(row.date_read)
+
+        assert answers == {date(2024, 3, 4)}
+
+    def test_an_open_session_never_becomes_a_finish(self):
+        """A session somebody is part way through carries a start and no finish,
+        and the day they began is not the day they finished."""
+        content = OPENREADS_READINGS.replace(b";2024-01-01|2024-03-04|", b";2024-01-01|")
+        [row] = parse(content).rows
+        assert row.date_read == date(2021, 2, 3)
+
+    def test_a_row_with_only_an_open_session_gets_no_date_at_all(self):
+        content = OPENREADS_READINGS.replace(
+            b"2021-01-02|2021-02-03|;2024-01-01|2024-03-04|", b"2024-01-01|"
+        )
+        [row] = parse(content).rows
+        assert row.date_read is None
+
+    def test_a_date_column_of_its_own_beats_the_compound_cell(self):
+        content = (
+            b"title,status,book_format,readings,date_read\n"
+            b"Piranesi,finished,paperback,2024-01-01|2024-03-04|,2020-05-06\n"
+        )
+        [row] = parse(content).rows
+        assert row.date_read == date(2020, 5, 6)
+
+    def test_a_finish_out_of_the_cell_can_still_say_the_book_was_read(self):
+        """The status rule runs after the cell is unpacked, which is the reason
+        it is a function rather than a line inside the row builder: this date
+        does not exist yet while the row is being built."""
+        content = (
+            b"title,book_format,readings\n"
+            b"Piranesi,paperback,2024-01-01|2024-03-04|\n"
+        )
+        [row] = parse(content).rows
+        assert (row.status, row.date_read) == (ReadStatus.READ, date(2024, 3, 4))

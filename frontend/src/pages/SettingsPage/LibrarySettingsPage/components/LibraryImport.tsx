@@ -172,6 +172,15 @@ export default function LibraryImport({
               {t("import.skipped", { count: result.skipped })}
             </p>
           )}
+          {/* Said here as well as on the preview, and in the past tense,
+              because the preview is cleared the moment the import succeeds and
+              this is the point at which the number is a fact. A member who
+              exported 400 titles and imported 380 is owed the other twenty. */}
+          {(result.excluded ?? 0) > 0 && (
+            <p className="text-xs text-paper-600 dark:text-paper-400">
+              {t("import.excludedResult", { count: result.excluded ?? 0 })}
+            </p>
+          )}
           {result.unmatched_titles && result.unmatched_titles.length > 0 && (
             <div className="text-xs text-paper-600 dark:text-paper-400">
               <p className="font-medium">{t("import.unmatched")}</p>

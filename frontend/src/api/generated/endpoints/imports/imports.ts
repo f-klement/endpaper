@@ -72,6 +72,13 @@ export const getImportCsvUrl = (params?: ImportCsvParams) => {
  * tag column is its shelves, which for most people is a few hundred one-off
  * names, and turning all of them into tags here buries the curated list under
  * somebody's filing habits from another app.
+ *
+ * `reader` names which reader reads the file, and is left out for all but a
+ * file the detector reads as the wrong service's. A row the file's own
+ * exclusion column marks as deleted is dropped and counted in `excluded`
+ * whichever reader runs, so naming one never brings those titles back: the
+ * column is read wherever it appears, and the preview shows the count and the
+ * column before anything is written.
  * @summary Import Csv
  */
 export const importCsv = async (
@@ -434,6 +441,17 @@ export const getPreviewImportUrl = (params?: PreviewImportParams) => {
  * import is too late: undoing it means finding and deleting a few hundred
  * books. So the mapping is shown first, against the file's real header list,
  * with the first few rows as the parser actually read them.
+ *
+ * **`reader` is reported as well as the mapping, on every preview**, because a
+ * file read as the wrong service's export is the same class of silent wrong
+ * answer a column guessed wrong is, and it is corrected the same way: name the
+ * right one here and on the import that follows. Reported when it is the
+ * ordinary reader too: a screen that says nothing when the answer is ordinary
+ * cannot be checked at all.
+ *
+ * `excluded` and `exclusion_column` are reported the same way, count included
+ * when it is zero, so "this file marks nothing as deleted" is a different
+ * screen from "this file has no such column".
  *
  * Rate limited together with the import itself, so a preview and the import
  * that follows it spend two of the three a minute allows.

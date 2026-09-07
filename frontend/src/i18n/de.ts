@@ -644,6 +644,9 @@ export const de: Messages = {
     "Für diesen Katalog ist ein Zugang gespeichert, der sich nicht lesen lässt. Siehe den Verschlüsselungsschlüssel weiter unten.",
   "settings.credentialFromEnvBroken":
     "{variable} enthält keinen Benutzernamen und kein Passwort, getrennt durch einen Doppelpunkt, deshalb wird kein Zugang gesendet.",
+  "settings.credentialShipped":
+    "Dieser Katalog veröffentlicht einen Zugang für alle, und Endpaper verwendet ihn. Hat diese Bibliothek hier ein eigenes Konto, lässt es sich über die Schaltfläche neben dieser Zeile eintragen und wird dann stattdessen verwendet.",
+  "settings.credentialUseOwn": "Eigenen Zugang dieser Bibliothek verwenden",
 
   "settings.credentialKey": "Verschlüsselungsschlüssel",
   "settings.credentialKeyHint":
@@ -1183,6 +1186,14 @@ export const de: Messages = {
     "{rowsRead} Zeilen gelesen, {matched} zugeordnet, {created} angelegt, {statusesUpdated} Lesestände aktualisiert.",
   "import.skipped":
     "{count} Zeilen hatten keinen Titel und wurden übersprungen.",
+  "import.excluded":
+    "{count} Zeilen sind in der Spalte {column} dieser Datei als gelöscht markiert und werden nicht importiert.",
+  "import.excludedNoColumn":
+    "Keine Spalte dieser Datei markiert Zeilen als gelöscht, es kommt also jede Zeile mit.",
+  "import.excludedResult":
+    "{count} Zeilen waren in dieser Datei als gelöscht markiert und wurden nicht importiert.",
+  "import.readAs": "Als Export von {service} gelesen.",
+  "import.readAsGeneric": "Als einfache Tabelle gelesen, die Spalten geraten.",
   "import.unmatched": "Nicht im Katalog gefunden:",
 
   // ── MARC (Bibliotheksmodus) ─────────────────────────────────────────────

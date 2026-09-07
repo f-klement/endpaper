@@ -2114,10 +2114,9 @@
             "title": "Asked First",
             "type": "boolean"
           },
-          "credential_from_env": {
-            "default": false,
-            "title": "Credential From Env",
-            "type": "boolean"
+          "credential_provenance": {
+            "$ref": "#/components/schemas/CredentialProvenance",
+            "default": "none"
           },
           "credential_unreadable": {
             "default": false,
@@ -2131,11 +2130,6 @@
           },
           "enabled": {
             "title": "Enabled",
-            "type": "boolean"
-          },
-          "has_credential": {
-            "default": false,
-            "title": "Has Credential",
             "type": "boolean"
           },
           "has_key": {
@@ -2629,6 +2623,17 @@
         "title": "CredentialKeyOut",
         "type": "object"
       },
+      "CredentialProvenance": {
+        "description": "Which of the four levels supplies a catalogue's login, if any.\n\n**One field rather than a booleans per level, because the levels are ordered\nand a set of booleans is not.** `credential_from_env` and `has_credential`\nwere two of the four answers spelled as two flags, which admits combinations\nthe ladder cannot produce and leaves a screen deciding which flag to believe.\n`credentials._resolve` walks the ladder once and this is what it answers.\n\n**Not a claim that the credential works.** `unreadable` beside it is that,\nand the two are separate axes: a level in force can be in force and broken,\nwhich is what a pinned variable set to nonsense and a stored login under a\nrotated key both are.",
+        "enum": [
+          "none",
+          "env",
+          "stored",
+          "shipped"
+        ],
+        "title": "CredentialProvenance",
+        "type": "string"
+      },
       "CustomFieldCreate": {
         "description": "A field the Library is defining.\n\nThe kind is chosen here and never afterwards. Changing it would reinterpret\nevery value already under it: a TEXT field turned URL would start linking\nstrings nobody wrote as links, and the other direction would silently\nunmake links people are using. Delete and redefine is the honest version of\nthat, and it says out loud that the values go.",
         "properties": {
@@ -2950,6 +2955,24 @@
             "title": "Distinct Tags",
             "type": "integer"
           },
+          "excluded": {
+            "default": 0,
+            "description": "Rows the file itself marked as not wanted, such as a title deleted at the source. Read off the uploaded file alone, so unlike `skipped` on the result it discloses nothing about this instance",
+            "minimum": 0.0,
+            "title": "Excluded",
+            "type": "integer"
+          },
+          "exclusion_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclusion Column"
+          },
           "headers": {
             "items": {
               "type": "string"
@@ -2970,6 +2993,10 @@
             },
             "title": "Mapping",
             "type": "object"
+          },
+          "reader": {
+            "$ref": "#/components/schemas/ImportReader",
+            "default": "generic"
           },
           "rows": {
             "default": [],
@@ -3048,6 +3075,16 @@
         "title": "ImportPreviewRow",
         "type": "object"
       },
+      "ImportReader": {
+        "description": "The reader an uploaded export is read with.\n\nClosed, and adding a member is the only part of adding a service that is\nstill code. A service that fits the candidate header names is not a member\nhere: it is names added to `csv_import.COLUMN_GUESSES` and no code at all,\nwhich is what `GENERIC` is for and what keeps this set from growing one\nmember per service anybody has heard of.\n\n**A member exists only where a name cannot express what the file does and\na reader is the only way to express it.** A row exclusion is not a name\neither and is not here, because it needs no reader: `csv_import.py` honours\nthat column in the generic mapping, wherever it appears.",
+        "enum": [
+          "generic",
+          "librarything",
+          "openreads"
+        ],
+        "title": "ImportReader",
+        "type": "string"
+      },
       "ImportResultOut": {
         "description": "What an import actually did.\n\nReported field by field rather than as a single count, because the useful\nquestion afterwards is \"why did it not pick up book X?\" and the answer is\nalmost always one of: the book is not in the catalogue, the status was\nalready correct, or the row could not be acted on at all.",
         "properties": {
@@ -3057,6 +3094,13 @@
             "title": "Created",
             "type": "integer"
           },
+          "excluded": {
+            "default": 0,
+            "description": "Rows the file itself marked as not wanted, such as a title deleted at the source",
+            "minimum": 0.0,
+            "title": "Excluded",
+            "type": "integer"
+          },
           "matched": {
             "description": "Rows matched to a book already here",
             "minimum": 0.0,
@@ -3064,7 +3108,7 @@
             "type": "integer"
           },
           "rows_read": {
-            "description": "Rows with a title",
+            "description": "Rows this import acted on",
             "minimum": 0.0,
             "title": "Rows Read",
             "type": "integer"
@@ -10067,7 +10111,7 @@
     },
     "/api/imports/csv": {
       "post": {
-        "description": "Apply a library export from Goodreads, LibraryThing, StoryGraph, Libib\nor anything else with a title column.\n\n**Declared `def`, not `async def`, and that is load bearing.** Everything\nbelow is blocking: SQLAlchemy has no async here. An `async` handler runs on\nthe event loop, so a running import stops the whole application answering.\nMeasured on a 3000 row file: `GET /api/books` went from 7ms to **14.4\nseconds**, and exactly one such request completed for the duration.\nFastAPI runs a `def` handler in a threadpool instead, which costs nothing\nand keeps the app alive while a library comes across.\n\nStatuses are **personal**, so this only ever writes the importing member's\nown `user_books` rows. Importing your shelves does not change what anyone\nelse has read, and two members can import their own exports without\nfighting over the same books.\n\nBooks created by `create_missing` are marked `ownership=unknown`: a reading\nhistory is not evidence of possession. They are then confirmed together\nfrom the library view, which is what the bulk ownership endpoint is for.\n\n`apply_tags` is off by default and deliberately so. A Goodreads export's\ntag column is its shelves, which for most people is a few hundred one-off\nnames, and turning all of them into tags here buries the curated list under\nsomebody's filing habits from another app.",
+        "description": "Apply a library export from Goodreads, LibraryThing, StoryGraph, Libib\nor anything else with a title column.\n\n**Declared `def`, not `async def`, and that is load bearing.** Everything\nbelow is blocking: SQLAlchemy has no async here. An `async` handler runs on\nthe event loop, so a running import stops the whole application answering.\nMeasured on a 3000 row file: `GET /api/books` went from 7ms to **14.4\nseconds**, and exactly one such request completed for the duration.\nFastAPI runs a `def` handler in a threadpool instead, which costs nothing\nand keeps the app alive while a library comes across.\n\nStatuses are **personal**, so this only ever writes the importing member's\nown `user_books` rows. Importing your shelves does not change what anyone\nelse has read, and two members can import their own exports without\nfighting over the same books.\n\nBooks created by `create_missing` are marked `ownership=unknown`: a reading\nhistory is not evidence of possession. They are then confirmed together\nfrom the library view, which is what the bulk ownership endpoint is for.\n\n`apply_tags` is off by default and deliberately so. A Goodreads export's\ntag column is its shelves, which for most people is a few hundred one-off\nnames, and turning all of them into tags here buries the curated list under\nsomebody's filing habits from another app.\n\n`reader` names which reader reads the file, and is left out for all but a\nfile the detector reads as the wrong service's. A row the file's own\nexclusion column marks as deleted is dropped and counted in `excluded`\nwhichever reader runs, so naming one never brings those titles back: the\ncolumn is read wherever it appears, and the preview shows the count and the\ncolumn before anything is written.",
         "operationId": "import_csv",
         "parameters": [
           {
@@ -10110,6 +10154,24 @@
               ],
               "description": "Correct a guessed column, as field=header pairs separated by commas, e.g. title=Book Name,author=Written By",
               "title": "Overrides"
+            }
+          },
+          {
+            "description": "Read the file as this service's export, rather than detecting",
+            "in": "query",
+            "name": "reader",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ImportReader"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Read the file as this service's export, rather than detecting",
+              "title": "Reader"
             }
           }
         ],
@@ -10266,7 +10328,7 @@
     },
     "/api/imports/preview": {
       "post": {
-        "description": "Read a file and report what it turned out to be, writing nothing.\n\nA column guessed wrong is invisible until after the import, and after the\nimport is too late: undoing it means finding and deleting a few hundred\nbooks. So the mapping is shown first, against the file's real header list,\nwith the first few rows as the parser actually read them.\n\nRate limited together with the import itself, so a preview and the import\nthat follows it spend two of the three a minute allows.",
+        "description": "Read a file and report what it turned out to be, writing nothing.\n\nA column guessed wrong is invisible until after the import, and after the\nimport is too late: undoing it means finding and deleting a few hundred\nbooks. So the mapping is shown first, against the file's real header list,\nwith the first few rows as the parser actually read them.\n\n**`reader` is reported as well as the mapping, on every preview**, because a\nfile read as the wrong service's export is the same class of silent wrong\nanswer a column guessed wrong is, and it is corrected the same way: name the\nright one here and on the import that follows. Reported when it is the\nordinary reader too: a screen that says nothing when the answer is ordinary\ncannot be checked at all.\n\n`excluded` and `exclusion_column` are reported the same way, count included\nwhen it is zero, so \"this file marks nothing as deleted\" is a different\nscreen from \"this file has no such column\".\n\nRate limited together with the import itself, so a preview and the import\nthat follows it spend two of the three a minute allows.",
         "operationId": "preview_import",
         "parameters": [
           {
@@ -10285,6 +10347,24 @@
               ],
               "description": "Correct a guessed column, as field=header pairs",
               "title": "Overrides"
+            }
+          },
+          {
+            "description": "Read the file as this service's export, rather than detecting",
+            "in": "query",
+            "name": "reader",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ImportReader"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Read the file as this service's export, rather than detecting",
+              "title": "Reader"
             }
           }
         ],

@@ -25,6 +25,28 @@ of being declared per service, because a file arrives here as an upload with no
 label saying where it came from. LibraryThing exports are tab separated and
 UTF-8 with a few bytes that are not, and asking somebody to know that is asking
 them to debug a CSV.
+
+## Where the candidate names end, and what stands there instead
+
+Two export shapes cannot be a candidate name, so this module holds more than
+one reader. `import_readers.py` is the contract and says why; the readers
+themselves are at the foot of this file, behind `READERS`.
+
+* **A compound cell.** LibraryThing packs a publisher, a year and a format into
+  `Publication`, and Openreads packs a start and a finish per session into
+  `readings`. No candidate name reaches inside a cell.
+* **A file that is not a table.** Google Play Books exports nested JSON. Not
+  read here yet, and the seam is shaped so that it is a reader rather than a
+  second door.
+
+**A row exclusion is a third shape no candidate name can carry, and it is a
+reason this module holds fewer readers rather than more.** It names no field, so
+it is not in `COLUMN_GUESSES`; it needs no reader either, because nothing has to
+be right about which service wrote the file. `_ROW_EXCLUSIONS` is where it
+lives, and every reader honours it.
+
+**The generic reader is still the answer for every service that fits**, and
+most do. A member here is names in `COLUMN_GUESSES` and no code at all.
 """
 
 import codecs
@@ -32,12 +54,14 @@ import csv
 import io
 import logging
 import re
-from collections.abc import Iterator
+from collections import Counter
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Final
 
 from enums import BookFormat, ReadStatus
+from import_readers import Extraction, ImportReader
 from isbn import parse as parse_isbn
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
 
@@ -265,6 +289,34 @@ class ParsedFile:
     #: Rows with no title. Counted rather than dropped silently, so the summary
     #: adds up to the number of lines in the file.
     skipped: int = 0
+    #: Which reader read the file. Reported for the reason the mapping is: a
+    #: file read as the wrong service's export is invisible until afterwards,
+    #: and afterwards the fix is deleting a few hundred books.
+    reader: ImportReader = ImportReader.GENERIC
+    #: Rows the file itself says are not wanted, read off whichever of
+    #: `_ROW_EXCLUSIONS` the file carries.
+    #:
+    #: **A separate count from `skipped` rather than folded into it**, which is
+    #: the opposite of what `importing.py` does with the row whose ISBN belongs
+    #: to an invisible Book, and the difference is what the number discloses.
+    #: That one is an oracle for "does a Book with this ISBN exist in this
+    #: house" and has to be hidden inside a wider count. This one is read
+    #: entirely off the member's own upload and says nothing about the instance,
+    #: so it can be reported plainly, and it has to be: a member who exported
+    #: 400 titles and imported 380 is owed the other twenty.
+    excluded: int = 0
+    #: The header `excluded` was read from, stripped and truncated to what a
+    #: header may be quoted at, or None where the file has no such column. Where a file names
+    #: more than one such column every one of them is honoured and the first is
+    #: what this names.
+    #:
+    #: **Reported because the column is honoured wherever it appears.** Nothing
+    #: detects whose export a file is any more, so the count is the only thing a
+    #: member would see, and a count with no column beside it is a number they
+    #: cannot check against their own file. It also separates "no such column"
+    #: from "such a column, and none of its rows said yes", which the count
+    #: alone cannot.
+    exclusion_column: str | None = None
 
 
 class ImportError_(Exception):
@@ -537,6 +589,26 @@ def _int(
     return number if minimum <= number <= maximum else None
 
 
+#: The shape every pattern below can accept, and nothing narrower.
+#:
+#: **A gate in front of `strptime`, and it is a bound on work rather than a
+#: parse.** A caller that loops over the parts of one cell pays this per part,
+#: and `strptime` is expensive on a miss: measured, 16.56 microseconds against
+#: **0.21** for this pattern, so an unpacker walking the 1.25 million parts a
+#: 5 MB upload admits fell from 23.2 seconds of CPU to 0.22. A route any member
+#: can reach three times a minute.
+#:
+#: **It is a superset, checked rather than reasoned about.** `%Y` is four digits
+#: exactly and `%m` and `%d` are one or two, and `strptime` tolerates whitespace
+#: around a component (`8/ 7/9455` parses), which is why the `\s*` are there and
+#: why the first version of this pattern was wrong. Derived by comparing the
+#: gated function against the ungated one over 716,655 strings: every random
+#: string up to fourteen characters over the digits, the three separators,
+#: space, tab and one letter, plus every pattern's own output for 3,333 years.
+#: No disagreement.
+_A_DATE_SHAPE: Final = re.compile(r"\s*\d{1,4}\s*[-/.]\s*\d{1,2}\s*[-/.]\s*\d{1,4}\s*")
+
+
 def parse_date(raw: str) -> date | None:
     """A date in whichever shape the exporting service or spreadsheet used.
 
@@ -544,7 +616,7 @@ def parse_date(raw: str) -> date | None:
     date, because it lands in "books finished in 2021" and nobody notices.
     """
     text = raw.strip()
-    if not text:
+    if not text or _A_DATE_SHAPE.fullmatch(text) is None:
         return None
     # Day first before month first: an unambiguous US date still parses by
     # falling through, and the ambiguous middle (03/04/2021) is far more often
@@ -590,42 +662,67 @@ def _limited(reader: csv.DictReader[str]) -> Iterator[dict[str, str]]:
         yield row
 
 
-def parse(content: bytes, overrides: dict[str, str] | None = None) -> ParsedFile:
-    """Read an export into rows this app can act on.
+# ── The readers ───────────────────────────────────────────────────────────────
+#
+# `import_readers.py` is the contract and says why there is more than one of
+# these. What is here is the implementations, the registry they are reached
+# through, and the claims a file is recognised by.
+#
+# Everything above this line is shared by every reader, which is why the three
+# below are one factory: decoding, sniffing, the candidate table, the small
+# matchers and the row exclusion. A reader is still a whole reader rather than a
+# hook on one path, and the next one, for a file that is not a table at all,
+# will share almost none of it.
 
-    `overrides` replaces a guessed column with one the reader picked, which is
-    the escape hatch for a file whose headers are in a language or a shape the
-    guesses do not cover. An override naming a header that is not in the file
-    is ignored rather than raising: it describes a file that is not this one.
+
+#: How much of one header a refusal may quote.
+#:
+#: `headers[:12]` bounds how many and nothing bounded how long. Measured: a file
+#: with no delimiter at all is one enormous header, and a 100,000 character line
+#: produced a 100,108 character message, which `routers/imports.py` hands back
+#: as the `detail` of a 400. So a file that is not a table was echoed to the
+#: caller in full.
+_MAX_HEADER_QUOTED: Final = 40
+
+#: How many headers a refusal may quote.
+_MAX_HEADERS_QUOTED: Final = 12
+
+
+@dataclass
+class _Table:
+    """A file read as rows of cells, before any field means anything.
+
+    The half every table reader shares. What each of them does with it is the
+    half that differs, which is why this is not a `ParsedFile`.
     """
-    text = decode(content)
-    if not text.strip():
-        raise ImportError_("That file is empty.")
 
+    headers: list[str]
+    delimiter: str
+    rows: list[dict[str, str]]
+
+
+def _read_table(text: str) -> _Table:
+    """The file as a table, or a refusal naming what is wrong with it."""
     delimiter = sniff_delimiter(text)
     reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
-    headers = list(reader.fieldnames or [])
-    if not headers:
-        raise ImportError_("That file has no header row, so its columns cannot be read.")
-
-    mapping = build_mapping(headers)
-    for field_name, header in (overrides or {}).items():
-        if field_name in mapping and header in headers:
-            mapping[field_name] = header
-
-    if mapping["title"] is None:
-        raise ImportError_(
-            "No title column was found. Export a CSV from your old app, or pick "
-            f"the right column by hand. This file has: {', '.join(headers[:12])}"
-        )
-
-    parsed = ParsedFile(mapping=mapping, headers=headers, delimiter=delimiter)
 
     # The `csv` module raises on structural problems the caller can do
-    # something about: a field over its 128k limit, a NUL in the stream. Those
-    # describe the file, not a bug here, so they become the same refusal every
-    # other unreadable file gets rather than a 500.
+    # something about: a field over its 128k limit, a NUL in the stream, a bare
+    # carriage return in an unquoted field. Those describe the file, not a bug
+    # here, so they become the same refusal every other unreadable file gets
+    # rather than a 500.
+    #
+    # **`fieldnames` is inside this, and that is the half that was wrong.**
+    # Reading it is what parses the header row, so a file whose FIRST line is
+    # the malformed one raised past this handler and reached a member as a 500:
+    # measured, a CR terminated file and a 200,000 character quoted header both
+    # did. A file is not more readable for being broken on line one.
     try:
+        headers = list(reader.fieldnames or [])
+        if not headers:
+            raise ImportError_(
+                "That file has no header row, so its columns cannot be read."
+            )
         rows = list(_limited(reader))
     except csv.Error as error:
         raise ImportError_(
@@ -633,54 +730,558 @@ def parse(content: bytes, overrides: dict[str, str] | None = None) -> ParsedFile
             "a CSV at all."
         ) from error
 
-    for row in rows:
+    return _Table(headers=headers, delimiter=delimiter, rows=rows)
 
-        def cell(name: str, _row: dict[str, str] = row) -> str:
-            """One mapped field of this row.
 
-            `_row` is bound as a default argument rather than closed over: a
-            closure here captures the loop variable, so every call would read
-            whichever row the loop had reached last.
-            """
-            header = mapping.get(name)
-            return _clean(_row.get(header)) if header else ""
+def _headers_of(text: str) -> list[str]:
+    """The header row alone, for a detector that must not pay for the file.
 
-        title = cell("title")
-        if not title:
-            parsed.skipped += 1
-            continue
+    **The first line is sliced off before anything reads it**, because
+    `sniff_delimiter` splits whatever it is handed into every line, and every
+    claim in `CLAIMS` asks this question again. Over the whole text that is one
+    list of every line in a 5 MB upload per claim.
 
-        # ISBN-13 first: it is the canonical form and the one books here carry.
-        # `parse_isbn` converts a 10 and rejects anything that is not an ISBN,
-        # so a UID column holding something else contributes nothing.
-        isbn = parse_isbn(cell("isbn13")) or parse_isbn(cell("isbn"))
+    **A file with no newline in it at all is the one that pays**, and it is this
+    module's own pathological input rather than a hypothetical: it is the file
+    `_MAX_HEADER_QUOTED` exists for. `find` answers -1 there, so a slice ending
+    at `find + 1` ends at zero and an `or` on the empty string hands the whole
+    file back, which is the bug this spelling replaces. The `or` is on the index
+    now, where -1 + 1 is falsy and a newline at k gives k + 1, which is not.
 
-        rating = _int(cell("rating"), minimum=1, maximum=5)
-        date_read = parse_date(cell("date_read"))
+    Measured over 5 MB with no newline, three claims, `time.process_time` and
+    `tracemalloc`: **108 ms and 25.5 MB** of peak allocation, against 20 ms and
+    1.3 MB with the window. **Both halves are one instrument's run**, which is
+    what makes the pair a comparison; three instruments read the unwindowed side
+    and the other two landed at 132 ms and at 437.8 ms, so the figure written
+    here is the lowest of the three and a floor rather than a number to
+    reproduce to the digit. With one newline in the file it is 0.06 ms either
+    way, which is the shape every real export has.
 
-        # A file may name a collection where a status should be ("Your
-        # library"), or carry no status column at all. A read date says the
-        # book was read whatever the other column claims, which is how
-        # BookWyrm recovers a shelf from a LibraryThing export.
-        status = match_status(cell("status"))
-        if status is None and date_read is not None:
-            status = ReadStatus.READ
+    The cost is a header row with a newline inside a quoted field, which is
+    truncated here and read correctly by `_read_table` afterwards. That sends
+    such a file to the generic reader, which is the fallback direction.
 
-        parsed.rows.append(
-            ImportRow(
-                title=title[:500],
-                author=flip_catalogue_name(cell("author"))[:500] or None,
-                isbn=isbn,
-                status=status,
-                rating=rating,
-                date_read=date_read,
-                publisher=cell("publisher")[:255] or None,
-                year=_year(cell("year")),
-                pages=_int(cell("pages")),
-                format=match_format(cell("format")),
-                tags=_split_tags(cell("tags")),
-                notes=cell("notes") or None,
-            )
+    Anything unreadable is no headers, because the detector's answer for a file
+    it cannot read is the reader that already refuses it.
+    """
+    line = text[: text.find("\n") + 1 or _CLAIM_WINDOW]
+    try:
+        return next(csv.reader(io.StringIO(line), delimiter=sniff_delimiter(line)), [])
+    except csv.Error:
+        return []
+
+
+def _by_normalised_name(headers: list[str]) -> dict[str, str]:
+    """Normalised header name to the header itself, first of a repeat winning.
+
+    First wins, matching `build_mapping`'s pool, which hands a repeated name to
+    the earlier column.
+    """
+    found: dict[str, str] = {}
+    for header in headers:
+        found.setdefault(_normalise_term(header), header)
+    return found
+
+
+def _guessed_mapping(headers: list[str], overrides: Mapping[str, str]) -> dict[str, str | None]:
+    """The guessed mapping, corrected, and refused if it found no title.
+
+    An override naming a header that is not in the file is ignored rather than
+    raising: it describes a file that is not this one.
+    """
+    mapping = build_mapping(headers)
+    for field_name, header in overrides.items():
+        if field_name in mapping and header in headers:
+            mapping[field_name] = header
+
+    if mapping["title"] is None:
+        quoted = ", ".join(
+            header[:_MAX_HEADER_QUOTED] for header in headers[:_MAX_HEADERS_QUOTED]
         )
+        raise ImportError_(
+            "No title column was found. Export a CSV from your old app, or pick "
+            f"the right column by hand. This file has: {quoted}"
+        )
+    return mapping
 
-    return parsed
+
+def _cells(raw: dict[str, str], mapping: Mapping[str, str | None]) -> Callable[[str], str]:
+    """A reader of one row's mapped fields."""
+
+    def cell(name: str) -> str:
+        header = mapping.get(name)
+        return _clean(raw.get(header)) if header else ""
+
+    return cell
+
+
+def _row_from(raw: dict[str, str], mapping: dict[str, str | None]) -> ImportRow | None:
+    """One row in this app's terms, or None where it has no title."""
+    cell = _cells(raw, mapping)
+
+    title = cell("title")
+    if not title:
+        return None
+
+    # ISBN-13 first: it is the canonical form and the one books here carry.
+    # `parse_isbn` converts a 10 and rejects anything that is not an ISBN,
+    # so a UID column holding something else contributes nothing.
+    isbn = parse_isbn(cell("isbn13")) or parse_isbn(cell("isbn"))
+
+    return ImportRow(
+        title=title[:500],
+        author=flip_catalogue_name(cell("author"))[:500] or None,
+        isbn=isbn,
+        status=match_status(cell("status")),
+        rating=_int(cell("rating"), minimum=1, maximum=5),
+        date_read=parse_date(cell("date_read")),
+        publisher=cell("publisher")[:255] or None,
+        year=_year(cell("year")),
+        pages=_int(cell("pages")),
+        format=match_format(cell("format")),
+        tags=_split_tags(cell("tags")),
+        notes=cell("notes") or None,
+    )
+
+
+def _infer_status_from_the_date(row: ImportRow) -> None:
+    """A file may name a collection where a status should be ("Your library"),
+    or carry no status column at all. A read date says the book was read
+    whatever the other column claims, which is how BookWyrm recovers a shelf
+    from a LibraryThing export.
+
+    **Applied after a compound cell has been unpacked, and that is the reason it
+    is a function.** Openreads' finish date arrives out of `readings` rather
+    than out of a mapped column, so a rule applied while the row was being built
+    would have run before the date existed. One home, both callers.
+    """
+    if row.status is None and row.date_read is not None:
+        row.status = ReadStatus.READ
+
+
+#: Header names that mark a row the file itself says is not wanted.
+#:
+#: **Written as the header the export actually carries, and reduced here**,
+#: which is the opposite of `COLUMN_GUESSES`, where the form is a rule a test
+#: enforces over a table too large to reduce at import. Two things come of it:
+#: a name added later is quoted from the artefact rather than transcribed into
+#: another form, and the reduction is load bearing today rather than the day a
+#: second name arrives, since `HasBeenDeleted` matches no normalised header
+#: without it. Transcribed by hand and got wrong it would be the failure this
+#: whole rule exists to remove: deleted rows back, with the count reading zero.
+#:
+#: **Honoured wherever the column appears.** Nothing detects which service wrote
+#: a file, so there is no detection width to get wrong: the column is there or
+#: it is not. Owner's decision, 2026-09-07, and `docs/decisions.md` carries
+#: what it settled.
+#:
+#: **It cannot be a candidate header name.** A name in `COLUMN_GUESSES` says
+#: which column fills a field of `ImportRow`; this one says whether the row
+#: exists at all, and no field means "do not import me".
+#:
+#: Amazon's Kindle document listing is the one attested spelling. A second
+#: service is a name here and no code, which is the same shape adding a service
+#: to `COLUMN_GUESSES` has.
+#:
+#: **This is the half that changes what a member sees**, so every doubt keeps
+#: the row: an unrecognised value keeps it, a file with no such column loses
+#: nothing, and the count and the column are both on the preview before
+#: anything is written.
+_ROW_EXCLUSIONS: Final = tuple(
+    _normalise_term(header) for header in ("HasBeenDeleted",)
+)
+
+#: Cell values a row exclusion column is written with when it means yes.
+#:
+#: **Anything else keeps the row**, which is the direction that does not destroy
+#: data. The attested column's vocabulary is `true` and `false`, so a word
+#: outside it describes a file this module has not seen, and inventing an
+#: exclusion from an unrecognised word would drop books nobody deleted. The
+#: opposite default loses a member's library to a spelling.
+_MEANS_DELETED: Final = frozenset({"true", "1", "yes", "y"})
+
+
+def _means_deleted(value: str | None) -> bool:
+    """Whether an exclusion cell says the member deleted this at the source."""
+    return _clean(value).lower() in _MEANS_DELETED
+
+
+def _exclusion_columns(headers: list[str]) -> list[str]:
+    """Every header that marks deleted rows, in the file's own order.
+
+    **Every one of them and not the first**, because they disagree in only one
+    direction that matters: a column saying the member deleted this row is what
+    the file says, and a second column silent about it takes nothing back. The
+    first is what the count is reported against.
+
+    **A name repeated exactly is a refusal rather than a guess**, and this is
+    the one place in this module where refusing beats reading. `csv.DictReader`
+    keys a row on the header string, so two columns with the same name collapse
+    to one value, the last one's, and the first column's answer is gone before
+    any row is seen. Measured: `Title,HasBeenDeleted,HasBeenDeleted` with
+    `true,false` on the row imported the row the file marked deleted, with the
+    count reading zero and the column named beside it, which is the silent miss
+    this whole rule exists to remove. Refusing destroys nothing: the member
+    removes a duplicated column and imports again.
+    """
+    wanted = set(_ROW_EXCLUSIONS)
+    found = [header for header in headers if _normalise_term(header) in wanted]
+
+    # **Tallied once, not counted per header.** `list.count` scans the whole
+    # header row for each header it is asked about, and nothing bounds how many
+    # columns a file has: `MAX_ROWS` bounds rows, `csv.field_size_limit` bounds
+    # one field, and the column count is bounded only by `MAX_UPLOAD_BYTES`.
+    # Measured on one machine, so the ratio is the claim and not the seconds,
+    # and read by two instruments rather than one: 80,000 such columns, 1.68 MB
+    # and inside that limit, cost **155.42 s** of CPU counted per header against
+    # 0.112 s as this stands; 30,000 columns read 23.35 s against 0.069 through
+    # one instrument and 15.5 s against 0.040 through the other. Duplicates are
+    # not needed to pay it, only to be refused afterwards, and the route it is
+    # reachable on writes nothing and allows three a minute.
+    seen = Counter(headers)
+    repeated = {header for header in found if seen[header] > 1}
+    if repeated:
+        # Bounded in both dimensions, like the refusal above and for the same
+        # reason: a header is as long as the file makes it, and there are as
+        # many spellings of one name as there are lengths of padding, so a 5 MB
+        # upload of padded duplicates quoted every one of them. Stripped before
+        # slicing, because the left of a padded header is padding and a message
+        # naming forty spaces tells a member to remove a column it has not
+        # named.
+        quoted = ", ".join(
+            sorted({header.strip()[:_MAX_HEADER_QUOTED] for header in repeated})[
+                :_MAX_HEADERS_QUOTED
+            ]
+        )
+        raise ImportError_(
+            f"That file has more than one column called {quoted}, so which "
+            "rows it marks as deleted cannot be read. Remove the repeated "
+            "columns and import it again."
+        )
+    return found
+
+
+#: What a compound cell reader is handed: the cell, and the row so far.
+UnpackCell = Callable[[str, ImportRow], None]
+
+
+def _guessing_reader(column: str | None = None, unpack: UnpackCell | None = None) -> ReaderFn:
+    """The generic reader, optionally reaching inside one named cell as well.
+
+    **The row exclusion is here rather than in a service's own reader**, so a
+    file marking its deleted rows is honoured whoever wrote it and whichever
+    reader was asked for. It used to be one reader's, reached only when a claim
+    recognised that service by two of its headers, so renaming either header
+    brought every deleted title back with the count reading zero.
+
+    **A factory rather than three near identical readers**, because a compound
+    cell is a family and not an example: two services need one already, and the
+    two differ only in which column and what it holds. A third is an unpacker
+    and one line here.
+
+    `column` is a **normalised** header name, matched the way every other name
+    in this module is, so `Publication` and `publication` are one name.
+
+    The unpacker fills gaps and never overwrites: a service that ships both a
+    compound cell and a plain column for one of its parts must keep the plain
+    one, which is the same rule `importing._fill_gaps` applies for the same
+    reason.
+    """
+
+    def read(text: str, extraction: Extraction) -> ParsedFile:
+        table = _read_table(text)
+        mapping = _guessed_mapping(table.headers, extraction.overrides)
+        compound = _by_normalised_name(table.headers).get(column or "")
+        exclusions = _exclusion_columns(table.headers)
+
+        parsed = ParsedFile(
+            mapping=mapping,
+            headers=table.headers,
+            delimiter=table.delimiter,
+            reader=extraction.reader,
+            # Stripped, then bounded like every other header this module hands
+            # back. One header is as long as `csv.field_size_limit` allows, and
+            # a 100,000 character 400 is a refusal this module has paid for
+            # once; slicing a padded header from the left reports its padding,
+            # which is a count beside a blank on the one file the bound is for.
+            exclusion_column=(
+                exclusions[0].strip()[:_MAX_HEADER_QUOTED] if exclusions else None
+            ),
+        )
+        for raw in table.rows:
+            # Before the title is looked at, so the two counts stay apart: what
+            # the file asked for is `excluded`, what a row lacks is `skipped`,
+            # and a deleted row with no title is the file's answer rather than
+            # this module's.
+            if any(_means_deleted(raw.get(header)) for header in exclusions):
+                parsed.excluded += 1
+                continue
+            row = _row_from(raw, mapping)
+            if row is None:
+                parsed.skipped += 1
+                continue
+            if unpack is not None and compound is not None:
+                unpack(_clean(raw.get(compound)), row)
+            _infer_status_from_the_date(row)
+            parsed.rows.append(row)
+        return parsed
+
+    return read
+
+
+#: The two compound cells, named once each.
+#:
+#: Each is both the column its reader reaches inside and half of what recognises
+#: the file, and written twice they drift into a file that is detected and then
+#: unpacks nothing, silently.
+#: `tests/test_csv_import.py::test_a_compound_readers_column_is_one_of_the_names_that_found_the_file`
+#: is what holds the two together for a reader added later.
+_PUBLICATION: Final = "publication"
+_READINGS: Final = "readings"
+
+#: A year inside brackets, which is what tells a LibraryThing `Publication`
+#: apart from a publisher's name.
+_BRACKETED_YEAR: Final = re.compile(r"\((\d{4})\)")
+
+#: How many comma separated parts after the year may be tried as a format.
+_FORMAT_PARTS_SCANNED: Final = 8
+
+
+def _unpack_publication(value: str, row: ImportRow) -> None:
+    """`Gallimard (1979), Poche`: a publisher, a year and a format in one cell.
+
+    **The bracketed year is the anchor, and nothing is read without it.** A
+    publisher's name carries commas of its own (`Farrar, Straus and Giroux`), so
+    splitting on punctuation reads part of a name as a year or as a binding. The
+    year in brackets is the one token in this cell whose shape says what it is,
+    so the publisher is what stands before it and the format is what stands
+    after it.
+
+    **With no bracketed year the whole cell is the publisher**, which is the
+    conservative half: a cell that is only a name is a name. Read the other way
+    round, `Gallimard, Poche` would invent a year out of nothing, and this
+    module already says a wrong value is worse than an absent one.
+    """
+    text = value.strip()
+    if not text:
+        return
+
+    found = list(_BRACKETED_YEAR.finditer(text))
+    if not found:
+        if row.publisher is None:
+            row.publisher = text[:255] or None
+        return
+
+    # The last, not the first: a publisher named after a year would otherwise
+    # take the anchor, and the year of publication is written last here.
+    year_at = found[-1]
+    if row.year is None:
+        row.year = _int(year_at.group(1), minimum=1, maximum=2200)
+
+    if row.publisher is None:
+        row.publisher = text[: year_at.start()].strip().rstrip(",").strip()[:255] or None
+
+    if row.format is None:
+        # Bounded, because the parts of this cell are bounded by the upload and
+        # not by anything about a publication. `match_format` costs 1.46
+        # microseconds on a miss, so an unbounded scan over a 5 MB file of
+        # commas was 6.1 seconds of CPU on a route any member can reach three
+        # times a minute. No real cell carries a format past the eighth comma.
+        for part in text[year_at.end() :].split(",")[:_FORMAT_PARTS_SCANNED]:
+            row.format = match_format(part)
+            if row.format is not None:
+                break
+
+
+def _unpack_readings(value: str, row: ImportRow) -> None:
+    """`start|finish|` per reading session, and the finish is what is wanted.
+
+    **The finishes are the odd numbered parts, which holds whatever separates
+    two sessions.** One session is written `start|finish|`, so two of them are
+    `start|finish|Xstart|finish|` for whatever X is; split on the pipe, and the
+    separator glues itself to the front of the next session's start. Index 1, 3,
+    5 are finishes either way. The session separator was not attested in the
+    artefact this was written against, and reading structure that was not
+    attested is how a start becomes a finish.
+
+    **The latest finish, not the first.** A book read twice has two, and the
+    later one is when this member last finished it.
+
+    **A start is never read as a finish**, which is the property the odd index
+    buys: an open session contributes a start and no finish, and a book somebody
+    is part way through does not get a finish date out of the day they began.
+    """
+    if row.date_read is not None:
+        return
+    finishes = [parse_date(part) for part in value.split("|")[1::2]]
+    dates = [finish for finish in finishes if finish is not None]
+    if dates:
+        row.date_read = max(dates)
+
+
+#: What every reader is, and the signature is the enforcement.
+#:
+#: Text and an `Extraction`, never bytes, a filename, an upload or a session.
+#: A reader that named any of those fails the type check on `READERS` below,
+#: which is the contract in `import_readers.py` held by mypy rather than by a
+#: reviewer.
+ReaderFn = Callable[[str, "Extraction"], "ParsedFile"]
+
+
+def _complete(readers: dict[ImportReader, ReaderFn]) -> dict[ImportReader, ReaderFn]:
+    """The registry, refused unless it covers the closed set.
+
+    **This is the whole of what adding a reader costs, so it is the thing that
+    must not be forgettable.** A member added to `ImportReader` and not wired up
+    here would be selectable by name over the API and raise `KeyError` on
+    dispatch, which reaches a member as a 500.
+
+    Derived by asking the enum what its members are rather than by listing them,
+    so the check grows with the set instead of going stale beside it. It runs at
+    import, so the failure is the application not starting.
+    """
+    missing = set(ImportReader) - set(readers)
+    if missing:
+        raise RuntimeError(
+            "import readers with no implementation: "
+            + ", ".join(sorted(reader.value for reader in missing))
+        )
+    return readers
+
+
+#: Every reader, by the member of the closed set that names it.
+READERS: Final[dict[ImportReader, ReaderFn]] = _complete(
+    {
+        ImportReader.GENERIC: _guessing_reader(),
+        ImportReader.LIBRARYTHING: _guessing_reader(_PUBLICATION, _unpack_publication),
+        ImportReader.OPENREADS: _guessing_reader(_READINGS, _unpack_readings),
+    }
+)
+
+
+#: How much of a file a claim is handed.
+#:
+#: **Borrowed from `csv.field_size_limit` rather than chosen, and it is not the
+#: same bound.** That one is per field and this is per file, so a header row of
+#: many small fields can be longer than this and is read rather than refused:
+#: measured, a header of 40,003 fields and 160,031 characters parses, and a
+#: LibraryThing export shaped that way is a claim miss. What the borrowing buys is a
+#: number of the right order that moves with the module's own limits instead of
+#: a new one nobody can size. Read at import, so a runtime change to that limit
+#: moves `_read_table` and not this; both directions are safe, since raising it
+#: makes claims miss and lowering it makes `_read_table` refuse first.
+#:
+#: **A header row past the window is a miss, which is the fallback direction**,
+#: and truncation is monotone on detection: it can take names away from what a
+#: claim sees and never add one, so it cannot make a claim fire that would not
+#: have.
+#:
+#: **The bound is on the type rather than on today's claims, and that is the
+#: point.** A set of header names could only ask one question about one line, so
+#: the work was bounded by what a claim was. A predicate over the text is free to
+#: walk a 5 MB upload, once per claim, on a route reachable three times a minute,
+#: and a sentence saying it does not is the bottom rung. Every claim today reads
+#: the first line and the next one cannot: a pretty printed `Library.json` opens
+#: with a single `{`.
+_CLAIM_WINDOW: Final = csv.field_size_limit()
+
+#: What a claim is: a predicate over the front of the decoded file.
+#:
+#: **Over the text and not over a header row**, which is the one thing this seam
+#: promises about the second service. Google Play Books' library export is
+#: nested JSON, so no set of header names could ever claim it, and a claim about
+#: something other than a header row has to be a row in `CLAIMS` rather than a
+#: change to what a claim is.
+#:
+#: It is handed `_CLAIM_WINDOW` characters, never the file.
+Claim = Callable[[str], bool]
+
+
+@dataclass(frozen=True)
+class HeaderNames:
+    """A claim that a file's header row carries all of these names.
+
+    The only kind of claim there is today, and a class rather than a closure so
+    the names stay readable: the guard below takes each one away in turn, and a
+    compound reader's column is checked against them.
+    """
+
+    names: frozenset[str]
+
+    def __call__(self, text: str) -> bool:
+        return self.names <= {_normalise_term(header) for header in _headers_of(text)}
+
+
+#: How a file is recognised as one service's export, in the order tried.
+#:
+#: The generic reader is not in here: it has no claim because it is what a file
+#: gets when nothing claims it.
+#:
+#: **What a miss costs and what a wrong claim costs are both small now, and one
+#: of them was not.** A miss leaves a file with the reader that reads it today.
+#: A wrong claim hands it to a reader that reads everything the generic one
+#: reads and additionally unpacks one named cell, so it costs that cell misread.
+#: Each claim names two headers, which is what stops a service that happens to
+#: share one of them paying for it.
+#:
+#: **Nothing here decides whether a member's deleted titles come back.** That
+#: was the largest cost on this table and it is not on it any more: the row
+#: exclusion is `_ROW_EXCLUSIONS`, honoured by the generic mapping wherever the
+#: column appears, so a claim that misses costs a cell rather than a library.
+#:
+#: Ordered, and the first claim that fires wins.
+CLAIMS: Final[tuple[tuple[ImportReader, Claim], ...]] = (
+    (ImportReader.LIBRARYTHING, HeaderNames(frozenset({_PUBLICATION, "primary author"}))),
+    (ImportReader.OPENREADS, HeaderNames(frozenset({_READINGS, "book format"}))),
+)
+
+
+def detect(text: str) -> ImportReader:
+    """Which reader a file is for, from the file itself.
+
+    Consulted only when the member did not name one.
+
+    **The window is cut once here and every claim is handed that**, so what a
+    detection costs is a property of this function rather than a promise each
+    claim makes about itself. `_CLAIM_WINDOW` says why the promise is not where
+    it belongs.
+    """
+    head = text[:_CLAIM_WINDOW]
+    for reader, claims in CLAIMS:
+        if claims(head):
+            return reader
+    return ImportReader.GENERIC
+
+
+def parse(
+    content: bytes,
+    overrides: dict[str, str] | None = None,
+    reader: ImportReader | None = None,
+) -> ParsedFile:
+    """Read an export into rows this app can act on.
+
+    **The one door, and the only place an `Extraction` is built from an
+    upload.** Decoding happens here and once, because every reader wants the
+    same answer about the encoding and this application has measured that answer
+    already.
+
+    `reader` names one explicitly and is the escape hatch for a file the
+    detector reads as the wrong service's. Left out, `detect` chooses and
+    `ParsedFile.reader` reports what it chose.
+
+    `overrides` replaces a guessed column with one the reader picked, which is
+    the escape hatch for a file whose headers are in a language or a shape the
+    guesses do not cover. An override naming a header that is not in the file is
+    ignored rather than raising: it describes a file that is not this one.
+
+    **A row the file's own exclusion column marks as deleted is dropped whoever
+    reads it**, so naming a reader is not a way to bring those rows back. The
+    file itself is: it is the member's own upload, and the column is theirs to
+    remove.
+    """
+    text = decode(content)
+    if not text.strip():
+        raise ImportError_("That file is empty.")
+
+    chosen = reader if reader is not None else detect(text)
+    return READERS[chosen](text, Extraction(reader=chosen, overrides=overrides or {}))

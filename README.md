@@ -55,8 +55,10 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
   because it alone answers for Spanish language books published outside Spain.
   Seven are free and need nothing. Two need a login: Google Books takes an API key you
   supply and bills for what it answers, and the Argentine National Library takes a username
-  and password that the library publishes itself and charges nothing for. A stock install
-  has neither and runs the other seven.
+  and password that the library publishes itself and charges nothing for. Endpaper carries
+  that published pair, so a stock install runs eight of the nine and only Google Books needs
+  anything typed. A library with its own account at the Argentine National Library enters it
+  under Settings and that is what gets used instead.
   A catalogue's Dewey number is kept and read as a suggested tag, so a German record and an
   English one suggest the same one
 - **Covers are downloaded and served from here**, not linked to somebody else's server, so
@@ -64,7 +66,8 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
   fetches the ones already missing, and your browser never tells a third party which books
   the library holds
 - **Library import**: bring a library across from Goodreads, LibraryThing, StoryGraph,
-  Libib or Openreads. The columns are worked out for you and shown before anything is saved
+  Libib or Openreads. The columns are worked out for you and shown before anything is
+  saved, and a title your old app says you deleted is not brought back
 - **Per-book privacy**: a book can be yours alone inside a shared library catalogue.
   Nobody else sees it, in listings, in search, in stats or by guessing a URL
 - **Reading status**: per-person "unread / want to read / reading / read / did not finish",
@@ -210,7 +213,7 @@ Phone (PWA) ──► FastAPI ──► scan an ISBN:  DNB + K10plus  (together,
                   │                       ↳ Spanish National Library (fallback)
                   │                       ↳ National Library of Greece (Greek ISBNs)
                   │                       ↳ Austrian National Library (978-3 ISBNs)
-                  │                       ↳ Argentine National Library (needs a login)
+                  │                       ↳ Argentine National Library (login shipped)
                   │                       ↳ Google Books  (needs a key)
                   │
                   │          search a title: Open Library + K10plus + DNB
@@ -239,7 +242,7 @@ Environment variables:
 | `SERVE_FRONTEND` | `true` | `false` runs the API without mounting the compiled frontend. For a host with no reader; an unmatched path is then a plain 404, because there are no client routes to serve the shell for |
 | `CREDENTIAL_ENCRYPTION_KEY` | none | The 24 word recovery phrase that encrypts catalogue logins. Leave it unset and the app makes one for itself the first time you ask it to |
 | `CREDENTIAL_ENCRYPTION_KEY_FILE` | `$DATA_DIR/credential-key` | Read the phrase from this file instead. A Docker secret and a Kubernetes Secret both arrive this way |
-| `CATALOGUE_CREDENTIAL_<SOURCE>` | none | Pins one catalogue's login, as `username:password`, e.g. `CATALOGUE_CREDENTIAL_BNE` |
+| `CATALOGUE_CREDENTIAL_<SOURCE>` | none | Pins one catalogue's login, as `username:password`, e.g. `CATALOGUE_CREDENTIAL_BNA`. Wins over one entered in Settings, which in turn wins over one Endpaper ships. **Setting it to nothing pins it as unusable rather than clearing it**, so `- CATALOGUE_CREDENTIAL_BNA=${LOGIN}` with `LOGIN` unset stops that catalogue answering; unset the variable to fall back |
 
 **Where a credential lives.** By default an admin pastes it into Settings and it is stored
 in the database. Setting the matching environment variable instead hands that job to the
@@ -254,6 +257,13 @@ this deployment's own secrets; a catalogue login is an account at somebody else'
 held here on its behalf. Those go in their own table as sealed envelopes, and the key is
 never written to the database, so a backup archive carries logins that nobody can read
 without it.
+
+**One catalogue's login ships with Endpaper, and it is the last resort rather than the
+first.** The Argentine National Library publishes a username and password on its own page for
+librarians, so carrying that pair discloses nothing the library has not, and the source
+answers on a stock install. A login entered in Settings replaces it and the environment
+variable replaces both; removing the one in Settings falls back to the shipped pair rather
+than to nothing. The Settings screen names which of the three is being used.
 
 The key is **24 words**, in the shape a wallet recovery phrase takes, and it is checksummed:
 a mistyped or misread word is refused rather than quietly becoming a different key. With no

@@ -4,15 +4,37 @@
 
 ### Added
 
+- **The importer has a reader per service where a service needs one.** Two export shapes cannot
+  be a candidate header name: a cell packing a publisher, a year and a format into one value,
+  and a library export that is nested JSON. `backend/import_readers.py` is the contract, a
+  reader is handed the decoded text and nothing about how the file arrived, and a service that
+  fits the candidate names is still names alone and no code. Which reader read a file is chosen
+  from its header row, reported on the preview, and can be named by hand.
+- **The import preview says how it read your file, every time.** Which reader ran, including
+  the ordinary one, and how many rows the file marks as deleted, including none, with the column
+  that marks them. A screen that says nothing when the answer is the ordinary one cannot be
+  checked, and a wrong reading then looks exactly like the common case.
+- **LibraryThing's `Publication` becomes a publisher, a year and a format.** One cell,
+  `Gallimard (1979), Poche`, that was previously read as nothing at all. The bracketed year is
+  the anchor, so a publisher whose own name holds a comma survives, and a cell with no bracketed
+  year is a publisher and never an invented year.
+- **Openreads' `readings` becomes a finish date.** The finishes are the odd numbered parts of
+  the cell, so a start is never read as a finish and a book part way through gains no finish
+  date.
 - **The Biblioteca Nacional Argentina joins the catalogue chain**, asked about an ISBN and
-  never about a title. It is the first source that is free and needs a login: the library
-  publishes a username and password on its own page for librarians, and Endpaper ships
-  neither, so the source answers once an admin enters that pair under Settings, or the
-  deployment pins `CATALOGUE_CREDENTIAL_BNA`. Until then it sits in the provider list saying
-  it needs one, the way Google Books does for its key. Measured against the 500 ISBN sample
-  this
-  repository already holds: of the fifty Argentine ISBNs, it answers ten, four of which no
-  other free source in the chain holds.
+  never about a title. It is the first source that is free and needs a login, and the first
+  whose login ships: the library publishes a username and password on its own page for
+  librarians, and Endpaper carries that pair, so the source answers on a stock install.
+  A library with its own account at that library enters it under Settings and that is what
+  gets used instead, and a deployment can pin `CATALOGUE_CREDENTIAL_BNA` over both. The
+  settings screen names which of the three is in force. Measured against the 500 ISBN sample
+  this repository already holds: of the fifty Argentine ISBNs, it answers ten, four of which
+  no other free source in the chain holds.
+- **A catalogue's own published login can ship with the build**, below anything a library or
+  a deployment supplies. One source has one today. Removing a login entered under Settings
+  falls back to the shipped one rather than to nothing, and a login that is in force and
+  cannot be read never falls back at all, so a rotated key stops a source answering instead
+  of quietly authenticating as somebody else.
 - **A password reset that does not need a mail server.** A member who cannot sign in asks
   from the login screen; an admin approves it under Settings, Data and accounts and is shown
   a one time code once, which they pass to the member out of band. The member spends it on a
@@ -80,6 +102,33 @@
 
 ### Fixed
 
+- **A title your old app says you deleted is not imported back.** An export can carry a column
+  marking what the member deleted at the source, and nothing read it, so such a book came back,
+  and came back visible to everyone on the instance: nothing on the import path sets the private
+  flag and a book defaults to visible. Such a row is now dropped and counted, on the preview and
+  on the result, so the numbers still add up to the lines in the file. The column is honoured
+  wherever it appears, whichever service wrote the file and whichever reader reads it, so it
+  rests on nothing being recognised. A file naming that column twice is refused rather than
+  guessed at, because two columns of one name collapse into one value when the table is read.
+- **One cell of an upload can no longer buy unbounded work.** An unpacker walks the parts of a
+  compound cell, and the parts are bounded by the upload rather than by anything about a
+  publication or a reading session, so a 5 MB file to a route that writes nothing and is
+  reachable three times a minute cost 21.5 seconds of CPU. A date is now checked for shape
+  before `strptime` sees it, and the scan for a format after a publication's year is bounded.
+  Measured on one file with each bound switched off and on in the same process: 21.472 s against
+  0.776, and 4.174 against 0.710.
+- **A refusal no longer quotes a file back to its sender.** A file with no delimiter at all is
+  one enormous header, and a 100,000 character line produced a 100,108 character 400. Every
+  refusal in that path now bounds both how many headers it names and how long each may be.
+- **A file broken on its first line is refused rather than answered with a 500.** Reading the
+  header row is what parses it, and that read sat outside the handler that turns a malformed
+  file into a refusal, so a file with bare carriage returns, or an oversized quoted header,
+  reached a member as a server error.
+- **A file of many columns no longer costs the import route minutes of CPU.** Deciding whether
+  an exclusion column is repeated scanned the whole header row once per column, and nothing
+  bounds a file's column count but the upload size: 80,000 such columns, inside the upload
+  limit, cost 155.42 s of CPU against 0.112 s tallied once. On a route that writes nothing and
+  allows three requests a minute.
 - The credential encryption key no longer prints when a `KeyState` is rendered. The bytes
   are the recovery phrase, so one rendering disclosed the key that opens every stored
   credential.

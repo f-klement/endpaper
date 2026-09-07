@@ -659,10 +659,16 @@ source and much the slowest, which is why it is here rather than in phase one.
 last two are where they are. Google Books has a key, a quota and a bill attached, so it is
 last and an ordinary lookup spends no quota at all. The Biblioteca Nacional Argentina needs
 a login and charges nothing: the library publishes a username and password on its own page
-for librarians, Endpaper ships neither, and an install that has not entered one is not
-asking it, so it sits after every source measured on that sample and before the one with
-the bill. It answers ten of the fifty Argentine ISBNs in that sample, four of which no
-other free source in the chain holds.
+for librarians and Endpaper carries that pair, so every install asks it, and it sits after
+every source measured on that sample and before the one with the bill. It answers ten of
+the fifty Argentine ISBNs in that sample, four of which no other free source in the chain
+holds.
+
+**A login this library enters wins over the one Endpaper ships, and a login the deployment
+pins wins over both.** So an institution with its own arrangement with the Biblioteca
+Nacional Argentina uses that arrangement. The settings screen says which of the three a
+catalogue is using, and removing one an admin entered falls back to the shipped pair rather
+than to nothing.
 
 **A national catalogue is never in phase one**, however well it does on the whole sample.
 Phase one is paid on every lookup by every install, and what a national catalogue answers
@@ -712,12 +718,19 @@ it is a different axis from the order: a national catalogue below phase one is a
 the registration groups it collects and no others. The bound on that is zero books, so the
 sentence above holds in practice as well as in principle.
 
-**What the chain covers with no credential at all, which is what a stock install runs.**
-Seven of the nine need none. Google Books takes an API key you supply and the Argentine
-catalogue a login the library publishes. Measured over 500
-domestic ISBNs across ten countries, the seven sources a stock install asks answer **395 and
-miss 105**,
-and outside German language publishing they miss **101 of 400**. The same books under an
+**What the chain covers on a stock install, which is one that has typed nothing.**
+Seven of the nine need no credential at all, an eighth ships the one its library publishes,
+and only Google Books takes a key you supply. Measured over 500
+domestic ISBNs across ten countries, the eight sources a stock install asks answer **399 and
+miss 101**,
+and outside German language publishing they miss **97 of 400**.
+
+Four of those books are the Argentine catalogue's, which is the difference between that
+figure and the one this page quoted before: the seven sources that need nothing answer
+**395 and miss 105**, and the four the Argentine catalogue uniquely adds are all in its own
+frame.
+
+The same books under an
 earlier release answered 300: the three national catalogues added since, the NLG, the NKP
 and the BNE, account for part of that and a fix to how a qualified `020` is read accounts
 for the rest, 51 records that three sources already held and this app was refusing. So a statement that this chain covers a given country is
@@ -912,7 +925,7 @@ fixed statement budget that a test reads out of its own docstring.
 | Method | Path | Access | Notes |
 |---|---|---|---|
 | POST | `/api/imports/preview` | user | Reads the file and reports what it is. Writes nothing |
-| POST | `/api/imports/csv` | user | Applies it. `create_missing`, `apply_tags`, `overrides` |
+| POST | `/api/imports/csv` | user | Applies it. `create_missing`, `apply_tags`, `overrides`, `reader` |
 | POST | `/api/imports/marc/preview` | user | Reads a MARCXML file and reports what it holds. Writes nothing. **403** without library mode |
 | POST | `/api/imports/marc` | user | Applies it. `create_missing`, default **true**. **403** without library mode |
 
@@ -948,6 +961,42 @@ import, and after the import the fix is finding and deleting a few hundred
 books. `overrides` (`title=Book Name,author=Written By`) corrects a guess; a
 pair naming a header the file does not have is ignored rather than raising,
 since it describes a different file.
+
+**Two export shapes are not a header name, so there is more than one reader.**
+A compound cell packing a publisher, a year and a format into one value, and a
+library export that is nested JSON rather than a table.
+`backend/import_readers.py` is the contract: a reader is handed the decoded text
+and nothing about how the file arrived, `ImportReader` is the closed set of
+them, and a service that fits the candidate names is names alone and no reader
+at all.
+
+Which reader read a file is chosen by a claim over the file itself, reported as
+`reader` on **every** preview, and named by hand with `reader=` on either route.
+**Generic is the fallback**, so a file no claim fires on is read by the reader
+that reads it today, and a miss is never a regression to nothing. A claim that
+fires wrongly hands the file to a reader that reads everything the generic one
+reads and additionally unpacks one named cell, so it costs that cell rather than
+the file. A correction is honoured by every reader there is.
+
+**A row the file itself marks as deleted is not imported.** That is the generic
+mapping's rule and not one reader's: the column is honoured wherever it appears,
+so nothing has to be right about which service wrote the file. Amazon's Kindle
+document listing is the attested spelling, `HasBeenDeleted`. Nothing on this
+path sets `is_private` and `Book.is_private` defaults to false, so such a row
+used to arrive visible to everyone on the instance, and naming a reader is not a
+way to bring one back.
+
+A file naming that column twice is a **400** rather than a guess: two columns of
+one name collapse to one value when the table is read, so the first column's
+answer is gone, and reading the survivor imports rows the file marked deleted.
+Removing the duplicate column is the way through, and a refusal destroys nothing.
+
+The count is `excluded`, on the preview and on the result, and the preview also
+carries `exclusion_column`, the header it was read from or null. Both are
+reported at zero, because a line shown only above zero says the same nothing for
+"this file marks none" as for "this file has no such column". `excluded` is read
+off the uploaded file alone, which is why it is reported plainly where `skipped`
+on the result folds two refusals together.
 
 `apply_tags` is **off by default**. A Goodreads export's tag column is its
 shelves, which for most people is a few hundred one-off names, and turning all
@@ -1425,12 +1474,27 @@ key**, deliberately and distinctly from omitting it.
 
 A catalogue login is not one of this deployment's own secrets: it is an account at somebody
 else's library, held here on its behalf. So it is not a settings field. It lives in its own
-table as a sealed envelope, and `GET /api/settings` reports four things about each roster
-row and none of the login itself: `has_credential`, a masked `credential_username_preview`,
-`credential_from_env`, and `credential_unreadable`.
+table as a sealed envelope, and `GET /api/settings` reports three things about each roster
+row and none of the login itself: `credential_provenance`, a masked
+`credential_username_preview`, and `credential_unreadable`.
 
-That last one is the interesting field. **A login can be held and unopenable**, and a screen
-that could only say "one is stored" would leave a member's search to discover the difference.
+**`credential_provenance` says which of four levels supplies the login**, because there are
+four and they are ordered: `env` for a variable the deployment pinned, `stored` for one an
+admin entered, `shipped` for one the catalogue publishes about itself and this build carries,
+`none` for a source that has none. The order is the whole of what makes shipping one safe: an
+institution with its own arrangement with a library enters it and that is what gets sent, and
+removing it falls back to the shipped pair rather than to nothing. It is one field rather than
+a flag per level, because a set of booleans is not ordered and two of them can disagree about
+which login the next request will carry. Reporting where a credential comes from is not
+reporting the credential.
+
+**`credential_unreadable` is a second axis and not a fifth provenance**, because a level can
+be in force and broken: a pinned variable set to nonsense is still what the deployment says,
+so the edit stays refused and no lower level takes over. A shipped login is never unreadable,
+being a constant in the build rather than something sealed.
+
+**A login can be held and unopenable**, and a screen that could only say "one is stored"
+would leave a member's search to discover the difference.
 The envelope records which key generation wrote it, which is what turns a silent failure into
 a sentence somebody can act on.
 
@@ -1484,6 +1548,11 @@ than a nicety: a stored login for a pinned source is still sealed ciphertext, so
 only exit was unsetting the variable and restarting. Deleting a sealed row does not touch the
 pinned value: the environment still supplies the credential and the next request still
 carries it.
+
+**Deleting a stored login for a source this build ships one for falls back to the shipped
+pair rather than to nothing**, and the response says so: the row's `credential_provenance`
+comes back `shipped`. It is the same rule as the pinned case one level up, which is why the
+delete is honest about it rather than reporting a source with no login at all.
 
 The login image GET is public because the login page renders before anyone is signed in.
 `/api/users` is readable by every member because the book detail page needs it for the

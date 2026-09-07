@@ -1051,11 +1051,12 @@ and its lookup surface is the half that is checked.
 the same.** The Argentine national library answers only over plaintext and only to an
 authenticated request, so a lookup there puts an HTTP Basic header on an unencrypted
 connection. What that credential opens is a public catalogue and nothing else: the library
-publishes the pair itself and this build ships no default, so an install using the
-published pair puts nothing on the wire its issuer has not already disclosed. **An install
-that has its own arrangement with a library is putting a private login on an unencrypted
-connection**, which is stated here and beside the field because that install is anticipated
-rather than hypothetical: shipping no default is what leaves room for it. The header is
+publishes the pair itself, and this build ships that published pair, so a stock install puts
+nothing on the wire its issuer has not already disclosed. **An install that has its own
+arrangement with a library is putting a private login on an unencrypted connection**, which
+is stated here and beside the field because that install is anticipated rather than
+hypothetical: a login an admin enters replaces the shipped one, which is what leaves room
+for it, and the exposure is the price of using it here. The header is
 computed per hop from the origin the credential was set for, so a redirect cannot carry it
 elsewhere even if the hop check were bypassed, and a diagnostic from that target is logged
 as its URI alone because the target's own error text quotes the user name back.
@@ -1176,8 +1177,11 @@ app cannot write to is refused rather than skipped when it is asked to discard o
 skipping it reported a key as discarded while it stayed in force.
 
 **An install with no key starts.** Credentials cannot be stored, any already stored are
-reported as held and unopenable, and nothing outbound carries one. **No default key is shipped**, in
-any artefact. Creating one is a deliberate act on the settings screen, and it is the one
+reported as held and unopenable, and a shipped default is unaffected, because it is a
+constant in the build rather than something sealed. **No default key is shipped**, in
+any artefact, and that rule is untouched by the shipped login below: a shipped login is a
+value its own issuer published, and a shipped key would open every login a deployment
+sealed for itself. Creating one is a deliberate act on the settings screen, and it is the one
 route in this application whose response body carries a secret: it returns the phrase and
 refuses when a key already exists, so "shown once" is a property of the server rather than a
 promise the browser makes.
@@ -1189,6 +1193,25 @@ The recovery phrase mitigates the cost rather than removing it. Said beside the 
 settings screen, not only here. On a machine nobody
 administers this is also the restore story: a backup carries the sealed rows and never the
 key, so restoring onto a new machine needs the phrase. That is why there is one.
+
+**One catalogue's login ships with the build, and it is the bottom of a ladder of four.**
+The Biblioteca Nacional Argentina publishes a username and password on its own page for
+librarians, beside a contact address and with no stated restriction on use, so carrying that
+pair discloses nothing the issuing library has not. Owner's decision of 2026-09-07;
+`docs/decisions.md`, "The catalogue that publishes its own login ships with it", keeps the
+case against it as well.
+
+**What makes it safe is that it loses to everything else, and that is a requirement rather
+than a consequence.** `credentials._resolve` walks `CATALOGUE_CREDENTIAL_<SOURCE>`, then a
+login an admin sealed, then the shipped pair, then nothing, and both the settings screen and
+the outbound request walk that one function, so a source cannot authenticate as something
+other than what an admin is shown. Removing a login an admin entered falls back to the
+shipped pair rather than to nothing, and the screen names which of the four is in force.
+Two further properties are worth stating because they are what a reader would otherwise
+have to check: a level that is in force and broken does not fall through to the level below,
+so a pinned variable set to nonsense never silently becomes the shipped account; and a
+shipped pair is bound to the address the library published it for, so it is withheld from a
+request to any other origin.
 
 **A hosted deployment serving more than one tenant may offer this, and the operator can
 then decrypt every credential on the instance.** The key is on the operator's machine

@@ -265,6 +265,57 @@ def cql_phrase(terms: list[str]) -> str:
 
 
 @dataclass(frozen=True)
+class ShippedCredential:
+    """A login a catalogue publishes about itself, carried in this source tree.
+
+    **This is a credential in a published file, deliberately, and it is the one
+    place in this application where that is not a defect.** Everything in
+    `credentials.py` exists to keep a login out of a published place: the
+    envelope is sealed, the key never travels in an archive, `Credential`
+    refuses to render itself. A reader taking this type for an oversight and
+    deleting the row that uses it is reversing the owner's decision of
+    2026-09-07, which is in `docs/decisions.md` under "The catalogue that
+    publishes its own login ships with it". That entry keeps the case against as
+    well as the case for, so it is the thing to read before undoing this.
+
+    **What makes it different is who published it.** A pair its issuing library
+    prints on its own page, beside a contact address and with no stated
+    restriction on use, is not a secret this project is keeping. Shipping it
+    discloses nothing that library has not, and it saves every household an
+    admin step on a screen most of them never open. A row carrying one names
+    where the library published it.
+
+    **It is the bottom of the ladder and it must stay there.**
+    `credentials._resolve` walks pinned, stored, shipped, and the decision states
+    replaceability as a requirement rather than a consequence: an institution
+    with its own arrangement with the library has to be able to use that instead.
+
+    **Both halves print, and that is the point rather than an oversight.**
+    Suppressing them would be this file claiming a secrecy it contradicts three
+    lines up. The rule that a login is never rendered belongs to
+    `credentials.Credential`, which is what an outbound request actually carries
+    and what a stored login becomes, and it is unchanged: a pair from here
+    reaches a request through that type like any other.
+    """
+
+    username: str
+    password: str
+
+    def __post_init__(self) -> None:
+        # One representation for the shipped pair, the sealed pair and the
+        # pinned variable, so there is one rule to state. RFC 7617 forbids a
+        # colon in the user-id, and `credentials.from_env` splits on the first
+        # one, so a colon here would make the three spellings disagree about
+        # where the username ends. Empty is refused for the reason
+        # `credentials.put` refuses it: it authenticates as somebody with
+        # nothing.
+        if not self.username or not self.password:
+            raise ValueError("a shipped login needs both a username and a password")
+        if ":" in self.username:
+            raise ValueError("a username may not contain a colon; RFC 7617 forbids one")
+
+
+@dataclass(frozen=True)
 class Target:
     """One catalogue, as a row.
 
@@ -312,6 +363,21 @@ class Target:
     #: Needs a credential the household supplies. `sources.NEEDS_A_KEY` derives
     #: from this.
     needs_key: bool
+    #: The login this build ships for the target, where the library publishes
+    #: one about itself. None everywhere else, which is every row but one.
+    #:
+    #: **On the row rather than in `credentials.py`, so the address is not a
+    #: fact stored twice.** A shipped default has to be bound to the origin it
+    #: was published for, and the row is that origin: `credentials.shipped` reads
+    #: the pair back only for a `base_url` whose origin matches this row's, so a
+    #: row pointed somewhere else loses the default rather than carrying it
+    #: there. Written as a second constant it would be an address beside an
+    #: address, kept equal by a guard that duplicates what it checks.
+    #:
+    #: **Below a stored login and below a pinned one, and that ordering is the
+    #: whole of what makes shipping one safe.** `credentials._resolve` is the one
+    #: walk, and `ShippedCredential` says why it may exist at all.
+    shipped_credential: ShippedCredential | None = None
 
     # ── SRU, and empty for every other transport ──────────────────────────────
 
@@ -455,6 +521,15 @@ class Target:
         ):
             raise ValueError(
                 f"{self.source}: only the DNB may waive the ISBN identity check"
+            )
+        if self.shipped_credential is not None and not self.needs_key:
+            # A default on a row that authenticates nothing is a credential
+            # published for no reason, and it would put the source in
+            # `credentials`' ladder while `sources.NEEDS_A_KEY` says the source
+            # asks for nothing. Refused at construction rather than ignored,
+            # which is the rule the bespoke fields above already follow.
+            raise ValueError(
+                f"{self.source}: a shipped login on a row that needs no credential"
             )
 
     def _check_sru(self) -> None:
@@ -845,12 +920,23 @@ SEEDED: Final[dict[CatalogueSource, Target]] = {
         # with two hits answers two `<zs:record>` elements and **one**
         # `recordData`, at `maximumRecords=5`. Measured 2026-09-07.
         answers_search=False,
-        # **Free and credentialled, which nothing here was before.** The library
-        # publishes the login itself, so this costs nothing per request and
-        # still answers nothing until an install enters one. See
-        # `sources.NEEDS_A_KEY`.
+        # **Free and credentialled, which nothing here was before.** It costs
+        # nothing per request and answers nothing to a request that does not
+        # authenticate. See `sources.NEEDS_A_KEY`.
         metered=False,
         needs_key=True,
+        # **The library publishes this pair itself**, on its page for
+        # librarians, `bn.gov.ar/bibliotecarios/protocoloZ3950`, beside a contact
+        # address and with no stated restriction on use. It is the whole of the
+        # argument for carrying it here, and `ShippedCredential` is where that
+        # argument is written down: read it before removing this line, because
+        # removing it is reversing the owner's decision of 2026-09-07 rather
+        # than tidying a secret out of a published file.
+        #
+        # Verified by hand against the live target on 2026-09-07, not from a
+        # test: unauthenticated the endpoint answers SRU diagnostic 1/3,
+        # `Authentication error`, and with this pair it answers records.
+        shipped_credential=ShippedCredential("Z39.50", "Z39.50"),
         sru_version="1.1",
         query_parameter="x-pquery",
         query_language=QueryLanguage.PQF,

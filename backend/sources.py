@@ -86,14 +86,19 @@ class Measured:
     largest_frame: int
 
 
-#: What each source a stock install asks does, measured 2026-08-30, except the
-#: BNE's row.
+#: What each lookup source that needs no credential does, measured 2026-08-30,
+#: except the BNE's row.
 #:
-#: **A source a stock install does not ask is not in this table**, and that is
-#: not the same rule as costing money: a source that is free and needs a login
-#: is asked by nobody who has entered nothing, so there is nothing to measure
-#: about it here. `tests/test_sources.py` binds this set to
-#: `LOOKUP_SOURCES - NEEDS_A_KEY` so a source cannot quietly go unmeasured.
+#: **The set is the seven that need nothing, which is one short of what a stock
+#: install asks**, and the gap is the whole of what this heading has to be
+#: careful about. The Biblioteca Nacional Argentina needs a login and ships one,
+#: so a household that has typed nothing does ask it; it is absent here because
+#: these figures come from one pass and it was not in that pass, and adding a row
+#: without re-running the pass would put a number here that `Measured` promises is
+#: comparable with its neighbours and is not. What it answers over the same
+#: committed sample is measured in `metadata`'s block for it.
+#: `tests/test_sources.py` binds this set to `LOOKUP_SOURCES - NEEDS_A_KEY` so a
+#: source cannot quietly go unmeasured.
 #:
 #: **The sample**: ten frames of 50 domestic ISBNs, 500 in all, so a source with
 #: a national remit is measured on the books it is for rather than on a global
@@ -253,6 +258,12 @@ FIRST_TIER_BUDGET_SECONDS: Final = 1.0
 #: seven candidate orders against the 500 ISBN sample, **395 of 500 under every
 #: one of them**. A reorder is never the fix for a book the chain misses.
 #:
+#: **That modelling ran over the sources that need no credential**, which is one
+#: short of what a stock install asks since the Argentine row began shipping the
+#: login its library publishes. It is left as measured rather than bumped: the
+#: conclusion is that permutation does not move coverage, and adding a source
+#: the modelling never permuted would not support it.
+#:
 #: **The first tier is a latency budget.** `ALWAYS_ASKED` sources are gathered,
 #: so the tier costs its slowest member rather than their sum, and membership is
 #: *most likely to answer inside `FIRST_TIER_BUDGET_SECONDS` in more than one
@@ -378,24 +389,70 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset(
 #: had to be checked rather than assumed when they came apart.
 #:
 #: **This is much of the chain's coverage, and most installs do not have it.**
-#: The seven sources a stock install asks answer 395 of the 500 ISBNs behind `MEASURED` and miss
-#: 105, and outside German language publishing they miss 101 of 400. #91
+#: The eight sources a stock install asks answer 399 of the 500 ISBNs behind `MEASURED` and miss
+#: 101, and outside German language publishing they miss 97 of 400. #91
 #: measured the same books with a key: Italy 36% missed keyless against 0% with
 #: one, Greece 86% against 54%. So "the chain covers this country" is a claim
 #: about a keyed install, and it is worth saying wherever the chain's coverage
 #: is described rather than being left for a household to discover.
 #:
+#: **399 and not 395, and which four books moved is measured rather than
+#: assumed.** The eighth source is the Biblioteca Nacional Argentina, which ships
+#: the login its own library publishes, and `metadata`'s block for it measures
+#: **4** books it answers that the rest miss, over the same committed sample. All
+#: four are Argentine, so the figure outside German language publishing moves by
+#: the same four.
+#:
+#: The 395 stays stated because it is what was measured and because it is the
+#: figure for an install that pins `CATALOGUE_CREDENTIAL_BNA` to something it
+#: cannot use: the seven sources that need no credential at all answer 395 of the
+#: 500 and miss 105.
+#:
 #: **"Most of the chain's coverage" was true when it was written and is not
-#: now**, which is why this paragraph says "much". Three things moved the free
-#: figure from 300 to 395 on the same 500 books: three national catalogues, and
-#: the `020 $q` rule in `metadata._isbn_entries`, which was refusing 51 records
-#: the sources already held. The Greek figure above is the sharpest case, and it moved in
+#: now**, which is why this paragraph says "much". Four things moved the free
+#: figure from 300 to 399 on the same 500 books: three national catalogues, the
+#: `020 $q` rule in `metadata._isbn_entries`, which was refusing 51 records
+#: the sources already held, and a fourth catalogue arriving with its login. The
+#: Greek figure above is the sharpest case, and it moved in
 #: two steps rather than one: **7 of 50 keyless before either change, 8 with the
 #: `020` fix alone, and 39 with the NLG**, none of it involving a key.
 NEEDS_A_KEY: Final[frozenset[CatalogueSource]] = frozenset(
     target.source
     for target in targets.SEEDED.values()
     if target.can(Capability.NEEDS_A_CREDENTIAL)
+)
+
+#: The sources this build carries a login for, because their library publishes
+#: one about itself.
+#:
+#: **A subset of `NEEDS_A_KEY`, not a third thing.** Needing a credential is a
+#: property of the catalogue and does not change when a default ships; what
+#: changes is whether a household that has typed nothing has one. So this is the
+#: difference between "asks for a login" and "has not got one", and it is why
+#: `STOCK_INSTALL_ASKS` below is not `LOOKUP_SOURCES - NEEDS_A_KEY`.
+#:
+#: `targets.ShippedCredential` is why any of these exist. Derived from the rows,
+#: so a second one is a field on a row rather than a list to remember.
+SHIPS_A_CREDENTIAL: Final[frozenset[CatalogueSource]] = frozenset(
+    target.source
+    for target in targets.SEEDED.values()
+    if target.shipped_credential is not None
+)
+
+#: The lookup sources a household that has configured nothing actually asks.
+#:
+#: **Named because it stopped being expressible as a subtraction.** It was
+#: `LOOKUP_SOURCES - NEEDS_A_KEY`, then `- METERED` before that, and each time
+#: the two expressions had never disagreed until one source arrived that
+#: separated them. A source that needs a login **and ships one** is that source
+#: here, so the set an install runs is larger than the set that needs nothing.
+#:
+#: **Coverage sentences bind to a name, and the name has to mean what it says.**
+#: `tests/test_roster_counts.py` holds the register; a measurement taken over one
+#: set does not become a measurement over a larger one because the set grew, so
+#: what needs no credential keeps a name of its own beside this one.
+STOCK_INSTALL_ASKS: Final[frozenset[CatalogueSource]] = LOOKUP_SOURCES - (
+    NEEDS_A_KEY - SHIPS_A_CREDENTIAL
 )
 
 #: How many enabled lookup sources are asked **together** before the rest are
@@ -452,6 +509,23 @@ ALWAYS_ASKED: Final = 2
 #: phases: **1.435s mean today, 1.336s with this table**, for the same **395**
 #: books, with **673** tail requests instead of **872**. Per frame it runs from
 #: 0.000s, where the leading pair answers before the tail is reached, to 0.231s.
+#:
+#: **Those figures are the chain of sources that need no credential**, and this
+#: table is one row short of the chain a stock install now runs: the Argentine
+#: catalogue is asked on every miss and has no entry here, so the tail request
+#: count is an understatement by construction.
+#:
+#: **Which way the saving itself moves is not stated, because nobody measured
+#: it and the mechanism does not settle it.** An unfiltered source is reached
+#: more often in the filtered arm than in the unfiltered one, since this table
+#: sends an out of remit ISBN further down the chain, so adding one would raise
+#: the 673 by more than the 872 and the gap would narrow rather than widen. That
+#: is an argument and not a measurement, and it accounts for neither how often
+#: the skipped catalogue would have answered first nor latency as against
+#: request count, which is exactly why the sentence that used to call the saving
+#: a floor was wrong to name a direction at all. Re-running
+#: the model is what moves it; adding a row here without measuring is what the
+#: paragraph below refuses.
 #:
 #: **A remit is only listed where there is no book the source alone answers
 #: outside it.** That is why the Czech National Library carries none: the rule is
