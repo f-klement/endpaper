@@ -1117,12 +1117,13 @@
         "type": "object"
       },
       "BookFormat": {
-        "description": "What kind of object the copy is.\n\nSeparate from everything else because \"do we own this\" has a different\nanswer per format: a library can hold the audiobook and not the paperback,\nand a reader looking for something to take on a train cares which. Reviews\nof every competitor in this space ask for it by name, usually as \"where is\naudiobook\".\n\nOTHER exists so the list can stay short. A boxed set, a magazine or a\npamphlet is a real thing on a real shelf and does not need its own value.",
+        "description": "What kind of object the copy is.\n\nSeparate from everything else because \"do we own this\" has a different\nanswer per format: a library can hold the audiobook and not the paperback,\nand a reader looking for something to take on a train cares which. Reviews\nof every competitor in this space ask for it by name, usually as \"where is\naudiobook\".\n\nOTHER exists so the list can stay short. A boxed set, a magazine or a\npamphlet is a real thing on a real shelf and does not need its own value.\n\n**What a sixth value has to have is a file container of its own**, and that\nis a harder test than how common the thing is or than what an importer's\nvocabulary can be taught: a table of spellings is one line to extend, and a\ncontainer has to exist in the world. COMIC has `.cbz`, which is written for\ncomics and for nothing else, so a comic files itself. A magazine has no such\ncontainer, so a MAGAZINE member could only ever be typed, and a value only a\nperson can distinguish is what OTHER already holds.\n\n**HARDCOVER, PAPERBACK, EBOOK and AUDIOBOOK predate that test**, and they\nare the axis this enum was made for: what a copy physically is. Nothing here\nis arguing they would pass it.\n\nCOMIC is the umbrella over a single issue and a collected volume, and it\ndoes not separate them, because the metadata a comic carries does not\neither. `frontend/src/lib/cbz.ts` states what a file says about which of the\ntwo it is, and what it does not.",
         "enum": [
           "hardcover",
           "paperback",
           "ebook",
           "audiobook",
+          "comic",
           "other"
         ],
         "title": "BookFormat",
@@ -11045,7 +11046,7 @@
         ]
       },
       "put": {
-        "description": "Rename a server, or point it somewhere else.\n\n**Moving it to a different origin drops the stored login**, and what that\nbuys changed when the envelope started carrying its origin: the login can no\nlonger be sent to the new address, because it does not open there. What this\nstill does is make the row honest. A login left behind would report as held\nand unreadable for the rest of its life, which reads as a damaged row and\nsends somebody to the recovery phrase. The response reports the credential\nas gone, so nothing has to be inferred from silence.\n\nA rename, or an edit that keeps the same scheme, host and port, keeps the\nlogin: it is the same machine, and making somebody retype a password to fix\na path would teach them to keep the row wrong.",
+        "description": "Rename a server, or point it somewhere else.\n\n**Moving it to a different origin drops the stored login**, and what that\nbuys changed when the envelope started carrying its origin: the login can no\nlonger be sent to the new address, because it does not open there. That is\ntrue of a household server's envelope at every version, because the\nsuperseded scheme is refused outright for one: `credentials._may_open_unbound`\nopens such an envelope only at the address this build published for its own\nroster source, and a household server has neither. What this\nstill does is make the row honest. A login left behind would report as held\nand unreadable for the rest of its life, which reads as a damaged row and\nsends somebody to the recovery phrase. The response reports the credential\nas gone, so nothing has to be inferred from silence.\n\nA rename, or an edit that keeps the same scheme, host and port, keeps the\nlogin: it is the same machine, and making somebody retype a password to fix\na path would teach them to keep the row wrong.",
         "operationId": "edit_server",
         "parameters": [
           {

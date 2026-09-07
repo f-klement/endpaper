@@ -1,14 +1,15 @@
 import { DEFAULT_FILTERS } from "../../lib/bookFilters";
 import type { BookFilters } from "../../lib/bookFilters";
 import {
-  BookFormat,
   BookSort,
   LendingWillingness,
   OwnershipStatus,
   ReadStatus,
 } from "../../api/generated/model";
+import type { BookFormat } from "../../api/generated/model";
 import type { MessageKey } from "../../i18n";
 import type { LibraryView } from "../../lib/libraryView";
+import { FORMAT_LABELS, FORMAT_ORDER } from "../types";
 
 // `BookFilters` and `DEFAULT_FILTERS` live in `lib/bookFilters.ts` and are
 // re-exported here. The shape moved because nothing in it is view state: the
@@ -88,16 +89,19 @@ export const OWNERSHIP_FILTERS: {
   { label: "ownership.not_owned", value: OwnershipStatus.not_owned },
 ];
 
+/**
+ * **Built from `pages/types.ts` rather than written out again.** The filter
+ * offering a different set of formats from the editor is a library a member
+ * can file a book into and then not find, and a hand written copy is how that
+ * happens: a value added to the enum reaches the editor by the type and
+ * reaches a list like this only if somebody remembered.
+ */
 export const FORMAT_FILTERS: {
   label: MessageKey;
   value: BookFormat | null;
 }[] = [
   { label: "format.filterAll", value: null },
-  { label: "copy.format.hardcover", value: BookFormat.hardcover },
-  { label: "copy.format.paperback", value: BookFormat.paperback },
-  { label: "copy.format.ebook", value: BookFormat.ebook },
-  { label: "copy.format.audiobook", value: BookFormat.audiobook },
-  { label: "copy.format.other", value: BookFormat.other },
+  ...FORMAT_ORDER.map((value) => ({ label: FORMAT_LABELS[value], value })),
 ];
 
 export const LENDING_FILTERS: {

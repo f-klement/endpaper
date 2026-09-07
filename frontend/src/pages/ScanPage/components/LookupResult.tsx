@@ -1,11 +1,15 @@
 import { Link } from "react-router-dom";
 
 import { ApiError } from "../../../api/mutator";
-import { BookFormat } from "../../../api/generated/model";
-import type { LocationOut, TagOut } from "../../../api/generated/model";
+import type {
+  BookFormat,
+  LocationOut,
+  TagOut,
+} from "../../../api/generated/model";
 import { ErrorState } from "../../../components";
 import { useTranslation, type MessageKey } from "../../../i18n";
 import { CoverImage, LocationField, TagPicker } from "../../components";
+import { FORMAT_LABELS, FORMAT_ORDER } from "../../types";
 import type { BookDraft, PendingBook } from "../types";
 
 interface LookupResultProps {
@@ -43,13 +47,12 @@ interface LookupResultProps {
  * Shows a read-only summary when a source knew the ISBN, and editable fields
  * when neither did. Presentational, used only by ScanPage.
  */
-const FORMATS: { value: BookFormat; label: MessageKey }[] = [
-  { value: BookFormat.hardcover, label: "copy.format.hardcover" },
-  { value: BookFormat.paperback, label: "copy.format.paperback" },
-  { value: BookFormat.ebook, label: "copy.format.ebook" },
-  { value: BookFormat.audiobook, label: "copy.format.audiobook" },
-  { value: BookFormat.other, label: "copy.format.other" },
-];
+// Built from the shared tables in `pages/types.ts` rather than restated, the
+// way `BookDetail/components/CopyPanel.tsx` already is. A format written out
+// here and not there is one this card offers and the book editor does not.
+const FORMATS: { value: BookFormat; label: MessageKey }[] = FORMAT_ORDER.map(
+  (value) => ({ value, label: FORMAT_LABELS[value] }),
+);
 
 export default function LookupResult({
   pending,

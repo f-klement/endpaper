@@ -50,10 +50,20 @@ import { parseIsbn, normalise as normaliseIsbn } from "./isbn";
  * eight that are out on 2026-09-05, and a format joining it is a ticket rather
  * than a file somebody drops in a folder.
  *
- * **`.mp3` is the one format in that table with no extension here.** One tagged
- * MP3 audiobook is many files and the grouping rule is its own ticket's work, so
- * admitting the extension now would file a 200 track audiobook as 200 books.
- * `.m4b` is one file per book and is admitted.
+ * **`lib/audiobook.ts` names the same two audio extensions again**, because it
+ * answers a question this map cannot: whether one file of a kind is a whole
+ * book or one track of one. `tests/lib/fileName.test.ts` asserts the two sets
+ * equal in both directions.
+ *
+ * **`.mp3` is here because the grouping rule now exists.** It was held out while
+ * one tagged MP3 audiobook was still many rows: admitting it then would have
+ * filed a 200 track audiobook as 200 books. `lib/audiobookGroups.ts` is the rule
+ * that made it safe, and the picker files a folder of chapters as one candidate.
+ *
+ * **The cost of admitting it, stated rather than discovered**: a folder of music
+ * is a folder of `.mp3`, and pointing the picker at one produces candidate
+ * audiobooks. Nothing is written until the member confirms, and the queue says
+ * how many files each candidate was made of.
  *
  * **`.fb2.zip` is one extension and is matched whole**, because a FictionBook
  * archive is not a zip that happens to hold one. The match is `endsWith`, so
@@ -70,6 +80,7 @@ export const SUPPORTED_EXTENSIONS = [
   ".fb2",
   ".m4b",
   ".cbz",
+  ".mp3",
   ".pdf",
 ] as const;
 
@@ -81,10 +92,16 @@ export type SupportedExtension = (typeof SUPPORTED_EXTENSIONS)[number];
  * A total map, so an extension added above without an answer here is a compile
  * error rather than a row filed as whatever the last arm said.
  *
- * **A comic gets no format and that is not an oversight.** `BookFormat` has no
- * member for one yet: the epic settled that a comic is a book here and gets its
- * own member, and until that ships a blank is the honest answer. `format` is
- * nullable precisely so that nothing guesses it.
+ * **A comic gets `BookFormat.comic`, and it is evidence rather than a guess.**
+ * A `.cbz` is a comic the way a `.m4b` is an audiobook: the container is only
+ * ever written for one kind of object, so the extension answers this without
+ * anything being opened. `backend/enums.py` states what a value has to be able
+ * to do to earn a place in that set, and this is the half of it that is here.
+ *
+ * **`""` is still in the value type and nothing takes it today.** It is what an
+ * extension whose object has no member says, which is what `.cbz` said until
+ * the enum grew one; the column is nullable precisely so that an extension can
+ * answer that rather than be filed as the nearest thing.
  */
 export const FORMAT_FOR_EXTENSION: Record<SupportedExtension, BookFormat | ""> =
   {
@@ -96,7 +113,8 @@ export const FORMAT_FOR_EXTENSION: Record<SupportedExtension, BookFormat | ""> =
     ".fb2.zip": BookFormat.ebook,
     ".pdf": BookFormat.ebook,
     ".m4b": BookFormat.audiobook,
-    ".cbz": "",
+    ".mp3": BookFormat.audiobook,
+    ".cbz": BookFormat.comic,
   };
 
 /**
@@ -332,6 +350,27 @@ function queryFrom(stem: string, isbn: string | null): string | null {
   const cut = points.slice(0, QUERY_CEILING).join("");
   const space = cut.lastIndexOf(" ");
   return space > QUERY_CEILING * 0.75 ? cut.slice(0, space) : cut;
+}
+
+/**
+ * What the catalogue is asked about a piece of text that is not a file name.
+ *
+ * **Here rather than at the caller, because the bound is here.** The scan
+ * page's audiobook path has a title and an author out of a file's tags rather
+ * than out of its name, and it needs the same cleaning, the same floor and the
+ * same cut in code points that a derived query gets. It called `readName` for
+ * them, which also applied every rule this module has about **names**: it
+ * stripped a trailing supported extension off an album and hunted an ISBN
+ * through the author line.
+ *
+ * **`SEPARATORS` is not applied either, and that is the third name rule.** A
+ * file name writes a space as a `_` or a `.`; a tag writes a space. Measured:
+ * with it, `S.P.Q.R. Mary Beard` becomes six terms of which four are one
+ * letter, and the server ANDs the terms it is given, so an initialism that a
+ * catalogue holds whole finds nothing.
+ */
+export function queryFor(text: string): string | null {
+  return queryFrom(collapse(clean(text)), null);
 }
 
 /** Everything the name and its folders were able to say about the book. */

@@ -50,8 +50,10 @@ value outside that is a bug here rather than a household's input.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Final
 from urllib.parse import urlsplit
 
@@ -749,270 +751,301 @@ FAMILY: Final = SourceFamily.CATALOGUE
 #: The measurement behind every address, index and record count is in
 #: `metadata.py`'s per source block for that source. It is not repeated here: a
 #: figure written twice is a figure that stops being re-derived.
-SEEDED: Final[dict[CatalogueSource, Target]] = {
-    CatalogueSource.DNB: Target(
-        source=CatalogueSource.DNB,
-        rank=0,
-        transport=Transport.SRU,
-        base_url="https://services.dnb.de/sru/dnb",
-        reader=Reader.MARC_GND,
-        answers_lookup=True,
-        answers_search=True,
-        metered=False,
-        needs_key=False,
-        sru_version="1.1",
-        query_parameter="query",
-        query_language=QueryLanguage.CQL,
-        record_schema="MARC21-xml",
-        isbn_index="num",
-        title_index="WOE",
-        title_query_shape=TitleQuery.WORD_SEQUENCE,
-        lookup_records=5,
-        search_multiplier=3,
-        search_cap=50,
-        # `num=` matches a cross reference, so a record that does not name the
-        # ISBN in its own 020 is ranked below one that does rather than refused.
-        # The only row in the roster that waives it. See `requires_isbn_claim`.
-        requires_isbn_claim=False,
-        reads_author_identifiers=True,
-    ),
-    CatalogueSource.K10PLUS: Target(
-        source=CatalogueSource.K10PLUS,
-        rank=1,
-        transport=Transport.SRU,
-        base_url="https://sru.k10plus.de/opac-de-627",
-        reader=Reader.MARC_PLAIN,
-        answers_lookup=True,
-        answers_search=True,
-        metered=False,
-        needs_key=False,
-        sru_version="1.1",
-        query_parameter="query",
-        query_language=QueryLanguage.CQL,
-        record_schema="marcxml",
-        isbn_index="pica.isb",
-        title_index="pica.all",
-        title_query_shape=TitleQuery.ANDED_TERMS,
-        lookup_records=5,
-        search_multiplier=3,
-        search_cap=50,
-    ),
-    CatalogueSource.OPEN_LIBRARY: Target(
-        source=CatalogueSource.OPEN_LIBRARY,
-        rank=2,
-        transport=Transport.BESPOKE,
-        base_url="https://openlibrary.org",
-        reader=Reader.OPEN_LIBRARY,
-        answers_lookup=True,
-        answers_search=True,
-        metered=False,
-        needs_key=False,
-    ),
-    CatalogueSource.NKP: Target(
-        source=CatalogueSource.NKP,
-        rank=3,
-        transport=Transport.SRU,
-        # The database path is load bearing: `aleph.nkp.cz:9991` alone, and
-        # `/biblios`, both answer SRU diagnostic 1/235, "database does not
-        # exist". Measured 2026-08-31.
-        base_url="http://aleph.nkp.cz:9991/NKC",
-        reader=Reader.DUBLIN_CORE_BARE,
-        answers_lookup=True,
-        # One populated record per response whatever page size is asked for, so
-        # ten candidates would be ten sequential requests inside a shared 4.0s
-        # deadline. See `answers_search`.
-        answers_search=False,
-        metered=False,
-        needs_key=False,
-        sru_version="1.1",
-        query_parameter="x-pquery",
-        query_language=QueryLanguage.PQF,
-        # No `recordSchema`: this target answers with its own Dublin Core
-        # whatever is asked for.
-        record_schema="",
-        isbn_attribute=z3950.USE_ISBN,
-        lookup_records=1,
-    ),
-    CatalogueSource.BNE: Target(
-        source=CatalogueSource.BNE,
-        rank=4,
-        transport=Transport.SRU,
-        # **The OPAC hostname, and that is the whole finding.** This library was
-        # recorded as having no open interface, measured against
-        # `z3950.bne.es`, which authenticates and answers every database name
-        # with the identical access control failure. `catalogo.bne.es` is Alma
-        # fronted: `/sru` answers an Ex Libris error report and Alma's own SRU
-        # path answers a 186,457 byte explain. Measured 2026-09-05.
-        base_url="https://catalogo.bne.es/view/sru/34BNE_INST",
-        reader=Reader.MARC_GND,
-        answers_lookup=True,
-        # **Its search works and nobody has measured what it would find**,
-        # which are two different facts and only the second decides this. 30
-        # records answers in 1.117s median over 15 samples; 50 records costs
-        # 2.448 to 5.911s against a 4.0s whole fan out. No incumbent search
-        # source has that measurement either, so this is a conservative default
-        # for a new source rather than a bar the others passed. The full
-        # argument is on `sources.SEARCH_SOURCES`.
-        answers_search=False,
-        metered=False,
-        needs_key=False,
-        sru_version="1.2",
-        query_parameter="query",
-        query_language=QueryLanguage.CQL,
-        record_schema="marcxml",
-        isbn_index="alma.isbn",
-        lookup_records=5,
-        # 15 of 400 live records on 2026-09-05 are leader/07 `a`, 3.8%. Lower
-        # than the OENB's 55.4% and higher than the NLG's zero, and refused for
-        # the reason that covers all three: an article is never a book.
-        refuses_component_parts=True,
-    ),
-    CatalogueSource.NLG: Target(
-        source=CatalogueSource.NLG,
-        rank=5,
-        transport=Transport.SRU,
-        # Plaintext by necessity: port 210 speaks no TLS, and
-        # `https://catalogue.nlg.gr` on 443 is a different service that answers
-        # 404 to this path. Both measured 2026-08-30. `metadata`'s NLG block
-        # carries what that exposes and what stands in front of it.
-        base_url="http://catalogue.nlg.gr:210/biblios",
-        reader=Reader.MARC_GND,
-        answers_lookup=True,
-        answers_search=True,
-        metered=False,
-        needs_key=False,
-        sru_version="1.1",
-        query_parameter="query",
-        query_language=QueryLanguage.CQL,
-        record_schema="marcxml",
-        isbn_index="dc.isbn",
-        title_index="dc.title",
-        title_query_shape=TitleQuery.ANDED_TERMS,
-        lookup_records=5,
-        search_multiplier=3,
-        # This endpoint does not clamp `maximumRecords`, so this is the only
-        # bound there is: asking for 200 returns 200, measured 2026-08-30, where
-        # the OENB silently caps at 50.
-        search_cap=50,
-        refuses_component_parts=True,
-    ),
-    CatalogueSource.OENB: Target(
-        source=CatalogueSource.OENB,
-        rank=6,
-        transport=Transport.SRU,
-        base_url="https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB",
-        reader=Reader.MARC_GND,
-        answers_lookup=True,
-        answers_search=True,
-        metered=False,
-        needs_key=False,
-        sru_version="1.2",
-        query_parameter="query",
-        query_language=QueryLanguage.CQL,
-        record_schema="marcxml",
-        isbn_index="alma.isbn",
-        title_index="alma.title",
-        title_query_shape=TitleQuery.ANDED_TERMS,
-        lookup_records=5,
-        search_multiplier=3,
-        search_cap=50,
-        refuses_component_parts=True,
-    ),
-    CatalogueSource.BNA: Target(
-        source=CatalogueSource.BNA,
-        rank=7,
-        transport=Transport.SRU,
-        # **Plaintext by necessity and an IP address by necessity**, which are
-        # two separate compromises: port 9991 speaks no TLS, and the library
-        # publishes a bare address with no hostname behind it. `metadata`'s
-        # block carries what a plaintext catalogue connection exposes; what is
-        # different here is that the request carries an `Authorization` header,
-        # so `credentials.Credential.header_for` binding the login to this
-        # origin is load bearing rather than defence in depth.
-        base_url="http://200.123.191.9:9991/BNA01",
-        reader=Reader.DUBLIN_CORE_BARE,
-        answers_lookup=True,
-        # One populated record per response whatever page size is asked for, the
-        # Czech National Library's property measured at this target too: an ISBN
-        # with two hits answers two `<zs:record>` elements and **one**
-        # `recordData`, at `maximumRecords=5`. Measured 2026-09-07.
-        answers_search=False,
-        # **Free and credentialled, which nothing here was before.** It costs
-        # nothing per request and answers nothing to a request that does not
-        # authenticate. See `sources.NEEDS_A_KEY`.
-        metered=False,
-        needs_key=True,
-        # **The library publishes this pair itself**, on its page for
-        # librarians, `bn.gov.ar/bibliotecarios/protocoloZ3950`, beside a contact
-        # address and with no stated restriction on use. It is the whole of the
-        # argument for carrying it here, and `ShippedCredential` is where that
-        # argument is written down: read it before removing this line, because
-        # removing it is reversing the owner's decision of 2026-09-07 rather
-        # than tidying a secret out of a published file.
-        #
-        # Verified by hand against the live target on 2026-09-07, not from a
-        # test: unauthenticated the endpoint answers SRU diagnostic 1/3,
-        # `Authentication error`, and with this pair it answers records.
-        shipped_credential=ShippedCredential("Z39.50", "Z39.50"),
-        sru_version="1.1",
-        query_parameter="x-pquery",
-        query_language=QueryLanguage.PQF,
-        # No `recordSchema`: `recordSchema=marcxml` answers SRU diagnostic 1/66
-        # and the target renders its own Dublin Core regardless.
-        record_schema="",
-        isbn_attribute=z3950.USE_ISBN,
-        lookup_records=1,
-    ),
-    CatalogueSource.GOOGLE_BOOKS: Target(
-        source=CatalogueSource.GOOGLE_BOOKS,
-        rank=8,
-        transport=Transport.BESPOKE,
-        base_url="https://www.googleapis.com/books/v1/volumes",
-        reader=Reader.GOOGLE_BOOKS,
-        answers_lookup=True,
-        answers_search=True,
-        metered=True,
-        needs_key=True,
-    ),
-    CatalogueSource.BNF: Target(
-        source=CatalogueSource.BNF,
-        rank=9,
-        transport=Transport.SRU,
-        base_url="https://catalogue.bnf.fr/api/SRU",
-        reader=Reader.DUBLIN_CORE,
-        answers_lookup=False,
-        answers_search=True,
-        metered=False,
-        needs_key=False,
-        sru_version="1.2",
-        query_parameter="query",
-        query_language=QueryLanguage.CQL,
-        record_schema="dublincore",
-        title_index="bib.anywhere",
-        title_query_shape=TitleQuery.QUOTED_ALL,
-        search_multiplier=2,
-        search_cap=20,
-    ),
-    CatalogueSource.LOC: Target(
-        source=CatalogueSource.LOC,
-        rank=10,
-        transport=Transport.SRU,
-        base_url="http://lx2.loc.gov:210/lcdb",
-        reader=Reader.MODS,
-        answers_lookup=False,
-        answers_search=True,
-        metered=False,
-        needs_key=False,
-        sru_version="1.1",
-        query_parameter="query",
-        query_language=QueryLanguage.CQL,
-        record_schema="mods",
-        title_index="dc.title",
-        title_query_shape=TitleQuery.QUOTED_PHRASE,
-        search_multiplier=2,
-        search_cap=20,
-    ),
-}
+#: The roster, read only, and the immutability is load bearing rather than tidy.
+#:
+#: **`credentials._may_open_unbound` compares an address against this one**, so
+#: an envelope from the scheme before addresses were bound opens exactly where
+#: this says its source lives. Both sides of that comparison read this mapping,
+#: so a write here moves the baseline and the envelope opens wherever the write
+#: said. Measured 2026-09-07 by both critic seats independently and reproduced:
+#: a single `SEEDED[DNB] = replace(row, base_url=...)` opened a superseded
+#: envelope at that address.
+#:
+#: **The literal is inline and there is no private alias**, which is the second
+#: half of the same finding. `Final` stops a rebinding and stops nothing else,
+#: `Target` is frozen so a field cannot be set, and a proxy guards the view and
+#: not the dict, so a name bound to that dict is the same hole one indirection
+#: along: `SLF` is not in this project's ruff selection, so `targets._SEEDED[k]`
+#: would have passed every check in the gate. Reproduced before removing it.
+#:
+#: **The bound, because immutability is claimed for this**: a proxy is not a
+#: security boundary. `gc.get_referents` on it yields the wrapped dict and that
+#: dict is writable. What this buys is that every write **through a name** is
+#: refused, at runtime and under mypy, so no ordinary line reaches it.
+#:
+#: **This is what makes the ticket that edits a catalogue row a code change.**
+#: Serving the roster from the table takes one of two shapes and they are
+#: refused by different things: replacing this object from another module is a
+#: rebinding, which `Final` refuses; changing the initialiser here is not, and
+#: what refuses that is `test_credentials.py` holding this module to importing
+#: nothing that can reach a database. Either way it is the point at which the
+#: superseded scheme must stop being opened at all.
+SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
+    {
+        CatalogueSource.DNB: Target(
+            source=CatalogueSource.DNB,
+            rank=0,
+            transport=Transport.SRU,
+            base_url="https://services.dnb.de/sru/dnb",
+            reader=Reader.MARC_GND,
+            answers_lookup=True,
+            answers_search=True,
+            metered=False,
+            needs_key=False,
+            sru_version="1.1",
+            query_parameter="query",
+            query_language=QueryLanguage.CQL,
+            record_schema="MARC21-xml",
+            isbn_index="num",
+            title_index="WOE",
+            title_query_shape=TitleQuery.WORD_SEQUENCE,
+            lookup_records=5,
+            search_multiplier=3,
+            search_cap=50,
+            # `num=` matches a cross reference, so a record that does not name the
+            # ISBN in its own 020 is ranked below one that does rather than refused.
+            # The only row in the roster that waives it. See `requires_isbn_claim`.
+            requires_isbn_claim=False,
+            reads_author_identifiers=True,
+        ),
+        CatalogueSource.K10PLUS: Target(
+            source=CatalogueSource.K10PLUS,
+            rank=1,
+            transport=Transport.SRU,
+            base_url="https://sru.k10plus.de/opac-de-627",
+            reader=Reader.MARC_PLAIN,
+            answers_lookup=True,
+            answers_search=True,
+            metered=False,
+            needs_key=False,
+            sru_version="1.1",
+            query_parameter="query",
+            query_language=QueryLanguage.CQL,
+            record_schema="marcxml",
+            isbn_index="pica.isb",
+            title_index="pica.all",
+            title_query_shape=TitleQuery.ANDED_TERMS,
+            lookup_records=5,
+            search_multiplier=3,
+            search_cap=50,
+        ),
+        CatalogueSource.OPEN_LIBRARY: Target(
+            source=CatalogueSource.OPEN_LIBRARY,
+            rank=2,
+            transport=Transport.BESPOKE,
+            base_url="https://openlibrary.org",
+            reader=Reader.OPEN_LIBRARY,
+            answers_lookup=True,
+            answers_search=True,
+            metered=False,
+            needs_key=False,
+        ),
+        CatalogueSource.NKP: Target(
+            source=CatalogueSource.NKP,
+            rank=3,
+            transport=Transport.SRU,
+            # The database path is load bearing: `aleph.nkp.cz:9991` alone, and
+            # `/biblios`, both answer SRU diagnostic 1/235, "database does not
+            # exist". Measured 2026-08-31.
+            base_url="http://aleph.nkp.cz:9991/NKC",
+            reader=Reader.DUBLIN_CORE_BARE,
+            answers_lookup=True,
+            # One populated record per response whatever page size is asked for, so
+            # ten candidates would be ten sequential requests inside a shared 4.0s
+            # deadline. See `answers_search`.
+            answers_search=False,
+            metered=False,
+            needs_key=False,
+            sru_version="1.1",
+            query_parameter="x-pquery",
+            query_language=QueryLanguage.PQF,
+            # No `recordSchema`: this target answers with its own Dublin Core
+            # whatever is asked for.
+            record_schema="",
+            isbn_attribute=z3950.USE_ISBN,
+            lookup_records=1,
+        ),
+        CatalogueSource.BNE: Target(
+            source=CatalogueSource.BNE,
+            rank=4,
+            transport=Transport.SRU,
+            # **The OPAC hostname, and that is the whole finding.** This library was
+            # recorded as having no open interface, measured against
+            # `z3950.bne.es`, which authenticates and answers every database name
+            # with the identical access control failure. `catalogo.bne.es` is Alma
+            # fronted: `/sru` answers an Ex Libris error report and Alma's own SRU
+            # path answers a 186,457 byte explain. Measured 2026-09-05.
+            base_url="https://catalogo.bne.es/view/sru/34BNE_INST",
+            reader=Reader.MARC_GND,
+            answers_lookup=True,
+            # **Its search works and nobody has measured what it would find**,
+            # which are two different facts and only the second decides this. 30
+            # records answers in 1.117s median over 15 samples; 50 records costs
+            # 2.448 to 5.911s against a 4.0s whole fan out. No incumbent search
+            # source has that measurement either, so this is a conservative default
+            # for a new source rather than a bar the others passed. The full
+            # argument is on `sources.SEARCH_SOURCES`.
+            answers_search=False,
+            metered=False,
+            needs_key=False,
+            sru_version="1.2",
+            query_parameter="query",
+            query_language=QueryLanguage.CQL,
+            record_schema="marcxml",
+            isbn_index="alma.isbn",
+            lookup_records=5,
+            # 15 of 400 live records on 2026-09-05 are leader/07 `a`, 3.8%. Lower
+            # than the OENB's 55.4% and higher than the NLG's zero, and refused for
+            # the reason that covers all three: an article is never a book.
+            refuses_component_parts=True,
+        ),
+        CatalogueSource.NLG: Target(
+            source=CatalogueSource.NLG,
+            rank=5,
+            transport=Transport.SRU,
+            # Plaintext by necessity: port 210 speaks no TLS, and
+            # `https://catalogue.nlg.gr` on 443 is a different service that answers
+            # 404 to this path. Both measured 2026-08-30. `metadata`'s NLG block
+            # carries what that exposes and what stands in front of it.
+            base_url="http://catalogue.nlg.gr:210/biblios",
+            reader=Reader.MARC_GND,
+            answers_lookup=True,
+            answers_search=True,
+            metered=False,
+            needs_key=False,
+            sru_version="1.1",
+            query_parameter="query",
+            query_language=QueryLanguage.CQL,
+            record_schema="marcxml",
+            isbn_index="dc.isbn",
+            title_index="dc.title",
+            title_query_shape=TitleQuery.ANDED_TERMS,
+            lookup_records=5,
+            search_multiplier=3,
+            # This endpoint does not clamp `maximumRecords`, so this is the only
+            # bound there is: asking for 200 returns 200, measured 2026-08-30, where
+            # the OENB silently caps at 50.
+            search_cap=50,
+            refuses_component_parts=True,
+        ),
+        CatalogueSource.OENB: Target(
+            source=CatalogueSource.OENB,
+            rank=6,
+            transport=Transport.SRU,
+            base_url="https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB",
+            reader=Reader.MARC_GND,
+            answers_lookup=True,
+            answers_search=True,
+            metered=False,
+            needs_key=False,
+            sru_version="1.2",
+            query_parameter="query",
+            query_language=QueryLanguage.CQL,
+            record_schema="marcxml",
+            isbn_index="alma.isbn",
+            title_index="alma.title",
+            title_query_shape=TitleQuery.ANDED_TERMS,
+            lookup_records=5,
+            search_multiplier=3,
+            search_cap=50,
+            refuses_component_parts=True,
+        ),
+        CatalogueSource.BNA: Target(
+            source=CatalogueSource.BNA,
+            rank=7,
+            transport=Transport.SRU,
+            # **Plaintext by necessity and an IP address by necessity**, which are
+            # two separate compromises: port 9991 speaks no TLS, and the library
+            # publishes a bare address with no hostname behind it. `metadata`'s
+            # block carries what a plaintext catalogue connection exposes; what is
+            # different here is that the request carries an `Authorization` header,
+            # so `credentials.Credential.header_for` binding the login to this
+            # origin is load bearing rather than defence in depth.
+            base_url="http://200.123.191.9:9991/BNA01",
+            reader=Reader.DUBLIN_CORE_BARE,
+            answers_lookup=True,
+            # One populated record per response whatever page size is asked for, the
+            # Czech National Library's property measured at this target too: an ISBN
+            # with two hits answers two `<zs:record>` elements and **one**
+            # `recordData`, at `maximumRecords=5`. Measured 2026-09-07.
+            answers_search=False,
+            # **Free and credentialled, which nothing here was before.** It costs
+            # nothing per request and answers nothing to a request that does not
+            # authenticate. See `sources.NEEDS_A_KEY`.
+            metered=False,
+            needs_key=True,
+            # **The library publishes this pair itself**, on its page for
+            # librarians, `bn.gov.ar/bibliotecarios/protocoloZ3950`, beside a contact
+            # address and with no stated restriction on use. It is the whole of the
+            # argument for carrying it here, and `ShippedCredential` is where that
+            # argument is written down: read it before removing this line, because
+            # removing it is reversing the owner's decision of 2026-09-07 rather
+            # than tidying a secret out of a published file.
+            #
+            # Verified by hand against the live target on 2026-09-07, not from a
+            # test: unauthenticated the endpoint answers SRU diagnostic 1/3,
+            # `Authentication error`, and with this pair it answers records.
+            shipped_credential=ShippedCredential("Z39.50", "Z39.50"),
+            sru_version="1.1",
+            query_parameter="x-pquery",
+            query_language=QueryLanguage.PQF,
+            # No `recordSchema`: `recordSchema=marcxml` answers SRU diagnostic 1/66
+            # and the target renders its own Dublin Core regardless.
+            record_schema="",
+            isbn_attribute=z3950.USE_ISBN,
+            lookup_records=1,
+        ),
+        CatalogueSource.GOOGLE_BOOKS: Target(
+            source=CatalogueSource.GOOGLE_BOOKS,
+            rank=8,
+            transport=Transport.BESPOKE,
+            base_url="https://www.googleapis.com/books/v1/volumes",
+            reader=Reader.GOOGLE_BOOKS,
+            answers_lookup=True,
+            answers_search=True,
+            metered=True,
+            needs_key=True,
+        ),
+        CatalogueSource.BNF: Target(
+            source=CatalogueSource.BNF,
+            rank=9,
+            transport=Transport.SRU,
+            base_url="https://catalogue.bnf.fr/api/SRU",
+            reader=Reader.DUBLIN_CORE,
+            answers_lookup=False,
+            answers_search=True,
+            metered=False,
+            needs_key=False,
+            sru_version="1.2",
+            query_parameter="query",
+            query_language=QueryLanguage.CQL,
+            record_schema="dublincore",
+            title_index="bib.anywhere",
+            title_query_shape=TitleQuery.QUOTED_ALL,
+            search_multiplier=2,
+            search_cap=20,
+        ),
+        CatalogueSource.LOC: Target(
+            source=CatalogueSource.LOC,
+            rank=10,
+            transport=Transport.SRU,
+            base_url="http://lx2.loc.gov:210/lcdb",
+            reader=Reader.MODS,
+            answers_lookup=False,
+            answers_search=True,
+            metered=False,
+            needs_key=False,
+            sru_version="1.1",
+            query_parameter="query",
+            query_language=QueryLanguage.CQL,
+            record_schema="mods",
+            title_index="dc.title",
+            title_query_shape=TitleQuery.QUOTED_PHRASE,
+            search_multiplier=2,
+            search_cap=20,
+        ),
+    }
+)
 
 
 def origin(base_url: str) -> str:

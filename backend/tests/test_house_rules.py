@@ -2957,6 +2957,11 @@ class TestNoModuleHardCodesASourceOrder:
     ALLOWED = {
         "sources.py": {"DEFAULT_ORDER", "MEASURED", "TAIL_MARGINAL", "SERVES_GROUPS"},
         "metadata.py": {"_MATCH_PRECEDENCE", "_BESPOKE_LOOKUPS"},
+        # The literal is inline in the `MappingProxyType` call, so the exempt
+        # name and the literal are the same assignment again. Naming the view
+        # when it wrapped a separate private dict exempted nothing, because a
+        # `Call` has no literal behind it; the private name is gone now, and
+        # `test_every_exemption_still_exists_to_be_exempted` is what said so.
         "targets.py": {"SEEDED"},
     }
 

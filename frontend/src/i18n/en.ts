@@ -1165,11 +1165,15 @@ export const en = {
   "file.pickLabel": "Book files",
   "file.readingFiles": "Reading the files you picked...",
   "file.notAnEpub": "Not an EPUB file.",
+  "file.notAMobi": "Not a Kindle or Mobipocket file.",
+  "file.notAnFb2": "Not a FictionBook file.",
+  "file.notAComic": "Not a comic archive.",
+  "file.notAPdf": "Not a PDF file.",
   "file.damaged": "This file is damaged and could not be opened.",
   "file.protected": "This file is protected, so its metadata cannot be read.",
   "file.tooLarge": "This file is too large to read here.",
   "file.unsupported": "This file uses a format Endpaper cannot open.",
-  "file.noInflate": "This browser is too old to read EPUB files.",
+  "file.noInflate": "This browser is too old to read compressed book files.",
   "file.noTitle": "This file carries no title.",
   "file.unreadable": "This file could not be read.",
 
@@ -1202,6 +1206,16 @@ export const en = {
   "fallback.useFor": "Use the record for {title}",
   "fallback.keep": "Keep the name",
   "fallback.pickFolderLabel": "A whole folder of books",
+
+  // ── Audiobooks, where one book is many files ────────────────────────────
+  // Written so that one and many read the same, like every count above.
+  // **Not "added".** Nothing on this screen is written until "Add all", and
+  // past tense on a row above that button reads as a write that has happened.
+  "audio.grouped": "{count} files, as one audiobook. Show them.",
+  "audio.split": "Add them as separate books instead",
+  "audio.splitFor": "Add the files of {label} as separate books instead",
+  "audio.noTags": "This audio file carries no tags.",
+  "audio.unreadable": "This audio file's tags could not be read.",
 
   // ── Loan due dates ──────────────────────────────────────────────────────
   "loans.dueDate": "Due back",
@@ -1260,6 +1274,7 @@ export const en = {
   "copy.format.paperback": "Paperback",
   "copy.format.ebook": "Ebook",
   "copy.format.audiobook": "Audiobook",
+  "copy.format.comic": "Comic",
   "copy.format.other": "Other",
   "copy.condition": "Condition",
   "copy.condition.unset": "Not recorded",

@@ -134,6 +134,25 @@ describe("what kind of object the copy is", () => {
     expect(formatOf(book({ formats: ["EPUB", "M4B"] }))).toBe("ebook");
   });
 
+  it("is a comic when every file it holds is a comic archive", () => {
+    // The same file picked on the scan page is a comic, and one question with
+    // two answers is what this stops. `lib/fileName.FORMAT_FOR_EXTENSION` is
+    // the other half.
+    expect(formatOf(book({ formats: ["CBZ"] }))).toBe("comic");
+  });
+
+  it("calls a CBR a comic although nothing here will parse one", () => {
+    // This answers what the copy is, not what can be read. The refusal in
+    // `lib/cbz.ts` is a refusal of a parser rather than of the format.
+    expect(formatOf(book({ formats: ["CBR"] }))).toBe("comic");
+  });
+
+  it("is an ebook when the library holds a readable file and a comic", () => {
+    // The same rule the audio pair follows: a record with a readable file is a
+    // book to read, and one comic file among several does not rename it.
+    expect(formatOf(book({ formats: ["EPUB", "CBZ"] }))).toBe("ebook");
+  });
+
   it("says nothing for a record with no file at all", () => {
     // Not an ebook. A Calibre record with no file is a book somebody
     // catalogued, and answering `ebook` asserts something the library does not.

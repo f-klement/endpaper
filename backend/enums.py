@@ -60,6 +60,20 @@ class OwnershipStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+# **This docstring is the API's own description of the type.** FastAPI copies it
+# into `frontend/openapi.json`, which is served at `/openapi.json` and mirrored
+# into the generated TypeScript client, so what belongs in it is what a reader
+# of the API needs. Where a maintenance note has to live beside the values, it
+# goes in a comment like this one, which stops at the file.
+#
+# No migration is needed for a new value: the column is a plain `String(20)`
+# with no check constraint, so the closed set is enforced here and in the schema
+# rather than in the database. That is checked against the database a deployment
+# has rather than against this comment, by
+# `tests/test_schema.py::TestTheBookFormatColumnOnAMigratedDatabase`, which
+# migrates to head, reads the constraints off the built table and then stores
+# every member. A revision that constrained the column fails there rather than
+# at a member's import.
 class BookFormat(StrEnum):
     """What kind of object the copy is.
 
@@ -71,12 +85,30 @@ class BookFormat(StrEnum):
 
     OTHER exists so the list can stay short. A boxed set, a magazine or a
     pamphlet is a real thing on a real shelf and does not need its own value.
+
+    **What a sixth value has to have is a file container of its own**, and that
+    is a harder test than how common the thing is or than what an importer's
+    vocabulary can be taught: a table of spellings is one line to extend, and a
+    container has to exist in the world. COMIC has `.cbz`, which is written for
+    comics and for nothing else, so a comic files itself. A magazine has no such
+    container, so a MAGAZINE member could only ever be typed, and a value only a
+    person can distinguish is what OTHER already holds.
+
+    **HARDCOVER, PAPERBACK, EBOOK and AUDIOBOOK predate that test**, and they
+    are the axis this enum was made for: what a copy physically is. Nothing here
+    is arguing they would pass it.
+
+    COMIC is the umbrella over a single issue and a collected volume, and it
+    does not separate them, because the metadata a comic carries does not
+    either. `frontend/src/lib/cbz.ts` states what a file says about which of the
+    two it is, and what it does not.
     """
 
     HARDCOVER = "hardcover"
     PAPERBACK = "paperback"
     EBOOK = "ebook"
     AUDIOBOOK = "audiobook"
+    COMIC = "comic"
     OTHER = "other"
 
 

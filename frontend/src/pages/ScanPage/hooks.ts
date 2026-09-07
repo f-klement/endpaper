@@ -40,10 +40,16 @@ import type {
 } from "../../api/generated/model";
 import { QUERY_FLOOR } from "../../lib/bookBounds";
 import { useTranslation, type MessageKey } from "../../i18n";
-import type { EpubFailure } from "../../lib/epub";
+import type { FileFailure } from "../../lib/fileReaders";
+import type { AudioFailure, AudioTags } from "../../lib/audiobook";
+import type {
+  AudiobookGroup,
+  AudioFileNaming,
+} from "../../lib/audiobookGroups";
 import {
   FORMAT_FOR_EXTENSION,
   plainName,
+  queryFor,
   readName,
   supportedExtension,
   type FileNaming,
@@ -57,6 +63,7 @@ import {
 import {
   blankDraft,
   blankPending,
+  draftFromAudiobook,
   draftFromFile,
   draftFromName,
   draftFromMatch,
@@ -70,17 +77,34 @@ import {
 /**
  * What a member is told about a file that yielded nothing.
  *
- * A total mapping of `EpubFailure` rather than a switch, so a reason added to
+ * A total mapping of `FileFailure` rather than a switch, so a reason added to
  * that closed union is a compile error here instead of a file reported with
  * whatever the last arm said.
  */
-const FILE_FAILURES: Record<EpubFailure, MessageKey> = {
+const FILE_FAILURES: Record<FileFailure, MessageKey> = {
   "not-an-epub": "file.notAnEpub",
+  "not-a-mobi": "file.notAMobi",
+  "not-an-fb2": "file.notAnFb2",
+  "not-a-comic": "file.notAComic",
+  "not-a-pdf": "file.notAPdf",
   damaged: "file.damaged",
   protected: "file.protected",
   "too-large": "file.tooLarge",
   unsupported: "file.unsupported",
   "no-inflate": "file.noInflate",
+};
+
+/**
+ * What a member is told about an audio file that said nothing about itself.
+ *
+ * Its own total mapping rather than an arm of `FILE_FAILURES`, because the two
+ * unions are closed separately: an audio file that carries no tags is an
+ * ordinary file rather than a broken one, and it still becomes a candidate
+ * under whatever its folder is called.
+ */
+const AUDIO_FAILURES: Record<AudioFailure, MessageKey> = {
+  "no-tags": "audio.noTags",
+  unreadable: "audio.unreadable",
 };
 
 /** Below this, a search is noise rather than a query. Matches the API bound. */
@@ -650,6 +674,70 @@ export interface ScannedEntry {
    * catalogue nobody reached has answered nothing and is worth asking again.
    */
   answered?: "nothing" | "records";
+  /**
+   * The audio files this one candidate was made of, and the rule that said so.
+   *
+   * **Present only for an audiobook**, and it is the whole of the inversion
+   * this format brings: every other row here is one file, and one audiobook is
+   * usually a folder of chapter files. `lib/audiobookGroups.ts` holds the rule.
+   *
+   * Carried rather than counted, for two reasons that are the same reason: the
+   * queue shows the member which files a candidate claims before anything is
+   * added, and `splitApart` needs them back to undo a grouping the member
+   * disagrees with. It is also what dedup is decided on, so picking the same
+   * folder twice queues nothing twice.
+   */
+  group?: AudiobookGroup;
+  /**
+   * The picked files this row claims, where it came from files.
+   *
+   * **Set before the grouping is known and kept afterwards**, which is the one
+   * job it has: an audiobook's rows cannot be made until every file in the pick
+   * has been read, and in that window the queue still has to be able to say
+   * that those files are spoken for. Picking the same folder twice queues
+   * nothing twice because of this.
+   *
+   * **Only the reading row carries it.** Once the files are grouped, `group`
+   * holds them and is where the claim is read from: setting both would be one
+   * fact in two fields that agree by construction and by nothing else.
+   */
+  claims?: readonly string[];
+}
+
+/**
+ * Every picked file an entry claims.
+ *
+ * One entry is one file everywhere except an audiobook, where it is many. Read
+ * off the entries rather than kept beside them, because a second record of what
+ * has been queued is a second record to keep in step.
+ */
+function claimedKeys(entries: readonly ScannedEntry[]): Set<string> {
+  const keys = new Set<string>();
+  for (const entry of entries) {
+    const claimed = entry.group?.files.map((file) => file.key) ??
+      entry.claims ?? [entry.key];
+    for (const key of claimed) keys.add(key);
+  }
+  return keys;
+}
+
+/**
+ * Whether a file of this extension is one part of an audiobook.
+ *
+ * **The format map decides which route a file takes**, so an extension filed as
+ * an audiobook is one the grouping rule owns and one filed as an ebook is one
+ * the ordinary per file path owns.
+ *
+ * **`lib/audiobook.ts` holds a second list, `AUDIO_EXTENSIONS`, and the two are
+ * asserted equal rather than said to agree.** That module has to answer a
+ * question this one cannot, which is whether one file of a kind is a whole book
+ * or one track of one, and the answer is a property of the container rather
+ * than of the walk. `tests/lib/fileName.test.ts` compares the two sets in both
+ * directions, because an extension in this map and not in that one would be
+ * routed here and read by nothing.
+ */
+function isAudio(extension: SupportedExtension): boolean {
+  return FORMAT_FOR_EXTENSION[extension] === BookFormat.audiobook;
 }
 
 /** The queue key for a scanned barcode. One book, one ISBN, one entry. */
@@ -773,6 +861,18 @@ export interface UseRapidIntakeResult {
   /** Stop the paced run after the call in flight. */
   stopLookingUp: () => void;
   isLookingUp: boolean;
+  /**
+   * File one audiobook candidate's parts as a book each.
+   *
+   * **The one way back out of the grouping rule**, and it is one way rather
+   * than two on purpose: the rule exists to refuse thirty rows from one
+   * audiobook, so the mistake it can make is putting together files that are
+   * not one book, and this undoes exactly that. There is no merge, because
+   * merging would be a member asserting something their files deny.
+   *
+   * Does nothing for anything that is not a group of several.
+   */
+  splitApart: (key: string) => void;
   /** Take one of the records the catalogue offered for a file. */
   chooseFor: (key: string, match: BookMatch) => void;
   /** Reject all of them and keep what the name said. */
@@ -898,6 +998,11 @@ export function useRapidIntake(): UseRapidIntakeResult {
    * of what the file itself could not say. Only a name that reduces to nothing
    * is a failure now.
    *
+   * **Audio takes a different route and the docstring above says why it must.**
+   * One file is one book for every format here except an audiobook, which is
+   * usually a folder of chapter files, so its rows cannot be made until every
+   * file in the pick has been read and grouped. `readAudio` is that route.
+   *
    * The already-queued check happens inside the updater and starts the reads
    * from there, which is the shape `capture` uses and for the same reason: the
    * queue is the only record of what has been picked, so asking anything else
@@ -918,14 +1023,26 @@ export function useRapidIntake(): UseRapidIntakeResult {
     );
 
     setEntries((current) => {
-      const queued = new Set(current.map((entry) => entry.key));
-      const fresh = supported.filter(
+      const queued = claimedKeys(current);
+      const unqueued = supported.filter(
         (walk) => !queued.has(pickedKey(walk.file)),
       );
-      if (fresh.length === 0) return current;
+      // **The audio half gets one row for the whole pick, not one each.** Which
+      // files are one book is decided by what they say, so nothing can be
+      // grouped until every one of them has been read. The row claims them
+      // meanwhile, which is what keeps a second pick of the same folder from
+      // queueing them again, and `readAudio` replaces it with the books.
+      const audio = unqueued.filter((walk) => isAudio(walk.extension));
+      const fresh = unqueued.filter((walk) => !isAudio(walk.extension));
+      const pending = audio.length > 0 ? pendingAudio(audio) : null;
+      if (pending) void readAudio(audio, pending.key);
+      if (fresh.length === 0) {
+        return pending ? [...current, pending] : current;
+      }
       void readFiles(fresh.map((walk) => walk.file));
       return [
         ...current,
+        ...(pending ? [pending] : []),
         ...fresh.map((walk) => ({
           key: pickedKey(walk.file),
           // Cleaned for the reason every derived value is: a name is somebody
@@ -934,14 +1051,41 @@ export function useRapidIntake(): UseRapidIntakeResult {
           isbn: "",
           // The extension answers this, and it is the same kind of evidence a
           // zip container is rather than the guess `format` is nullable to
-          // refuse. A comic gets a blank, because the enum has no member for
-          // one yet.
+          // refuse.
           format: FORMAT_FOR_EXTENSION[walk.extension],
           state: "reading" as const,
           draft: null,
         })),
       ];
     });
+  }
+
+  /**
+   * The one row a pick of audio files stands as while they are being read.
+   *
+   * **A row rather than a flag beside the queue.** A pick of forty chapter
+   * files has nothing to show until it has been grouped, and a picker
+   * that shows nothing reads as one that is broken. It also carries the claim
+   * on those files, so nothing else has to remember them.
+   *
+   * Named after the folder they came from where there is one, which is what a
+   * person named after the book, and after the first file where there is not.
+   */
+  function pendingAudio(
+    picked: readonly { file: File; extension: SupportedExtension }[],
+  ): ScannedEntry {
+    const first = picked[0]!.file;
+    const folders = foldersOf(first);
+    const keys = picked.map((walk) => pickedKey(walk.file));
+    return {
+      key: `audio:${[...keys].sort()[0]}:${keys.length}`,
+      label: plainName(folders.at(-1) ?? first.name),
+      isbn: "",
+      format: BookFormat.audiobook,
+      state: "reading",
+      draft: null,
+      claims: keys,
+    };
   }
 
   /**
@@ -954,7 +1098,10 @@ export function useRapidIntake(): UseRapidIntakeResult {
   function fromTheName(
     naming: FileNaming,
     note: string | undefined,
-  ): Partial<ScannedEntry> {
+    // **The state is in the return type rather than merely in both arms.** A
+    // caller spreading this over a row has to end with one, and a `Partial`
+    // says it might not, which is a row with no state and no compiler to say so.
+  ): Partial<ScannedEntry> & Pick<ScannedEntry, "state"> {
     const clues = readName(naming);
     const draft = draftFromName(clues);
     if (draft.title === "") {
@@ -970,19 +1117,17 @@ export function useRapidIntake(): UseRapidIntakeResult {
   }
 
   async function readFiles(files: readonly File[]) {
-    const { readEpub } = await import("../../lib/epub");
+    const { readerFor } = await import("../../lib/fileReaders");
     for (const file of files) {
       const key = pickedKey(file);
       let note: string | undefined;
       try {
-        // **EPUB is the only reader that has shipped**, and every other
-        // supported extension falls through to its name, which is this path's
-        // whole point: for a PDF an unusable metadata block is the common case
-        // rather than the exception. A reader for another format joins here.
-        const reading =
-          supportedExtension(file.name) === ".epub"
-            ? await readEpub(file)
-            : null;
+        // **Which reader opens this is `lib/fileReaders.ts`'s question, not
+        // this loop's.** An extension with no reader falls through to its name,
+        // which is this path's whole point: for a PDF an unusable metadata
+        // block is the common case rather than the exception.
+        const reader = await readerFor(file.name);
+        const reading = reader ? await reader(file) : null;
         if (reading && !reading.ok) {
           note = t(FILE_FAILURES[reading.failure]);
         } else if (reading) {
@@ -1004,6 +1149,174 @@ export function useRapidIntake(): UseRapidIntakeResult {
         fromTheName({ name: file.name, folders: foldersOf(file) }, note),
       );
     }
+  }
+
+  /**
+   * Read the picked audio files, then queue the **books** they are.
+   *
+   * **Every file first, rows afterwards**, which is the inversion this format
+   * brings: which files are one book is decided by what they say, so nothing
+   * can be shown until the whole pick has been read. That is affordable only
+   * because the reader seeks to the tags rather than reading the file:
+   * `lib/audiobook.ts` carries the measurement.
+   *
+   * **One file's failure is a note on the candidate, never the end of it.** A
+   * folder of untagged chapter MP3s is still one book, named after the folder,
+   * which is the ordinary case for anything a person ripped themselves.
+   */
+  async function readAudio(
+    picked: readonly { file: File; extension: SupportedExtension }[],
+    pendingKey: string,
+  ) {
+    const [audiobook, groups] = await Promise.all([
+      import("../../lib/audiobook"),
+      import("../../lib/audiobookGroups"),
+    ]);
+
+    const read: AudioFileNaming[] = [];
+    for (const { file, extension } of picked) {
+      // **Nothing is dropped here, and the loop used to drop it.** A file the
+      // reader has no arm for is still a file the member picked and still has a
+      // name, and skipping it took it out of the pick with no row and no count:
+      // a pick made entirely of them replaced its own reading row with nothing.
+      const audio = audiobook.isAudioExtension(extension) ? extension : null;
+      let tags: AudioTags | null = null;
+      // `file.unsupported`, not an audio reason: a file routed here that this
+      // has no arm for is not an audio file that said nothing.
+      let note: string | undefined = audio ? undefined : t("file.unsupported");
+      if (audio) {
+        try {
+          const reading = await audiobook.readAudioTags(file, audio);
+          if (reading.ok) tags = reading.tags;
+          else note = t(AUDIO_FAILURES[reading.failure]);
+        } catch {
+          // A bug in the reader rather than anything the file did. The file is
+          // still one part of a book and its name still says something.
+          note = t("file.unreadable");
+        }
+      }
+      read.push({
+        key: pickedKey(file),
+        name: file.name,
+        folders: foldersOf(file),
+        tags,
+        // **`true` for a file the reader has no arm for**, so it is a
+        // candidate on its own rather than a member of whatever untagged book
+        // shares its folder: `entryForGroup` shows a note only for a group of
+        // one, so the other way round computes a reason nobody sees and adds a
+        // file to a book's count that is not part of the book. Unreachable
+        // while `tests/lib/fileName.test.ts` holds the two extension sets
+        // equal, which is what makes this a defence rather than a path.
+        whole: audio === null || audiobook.AUDIO_EXTENSIONS[audio] === "book",
+        note,
+      });
+    }
+
+    const candidates = groups.groupAudiobooks(read).map(entryForGroup);
+    // **In the pending row's place, and only if it is still there.** A member
+    // who discarded the queue while this was reading gets an empty queue rather
+    // than rows arriving into the one they just emptied, and nothing else has
+    // to know that a discard happened.
+    setEntries((current) =>
+      current.flatMap((entry) =>
+        entry.key === pendingKey ? candidates : [entry],
+      ),
+    );
+  }
+
+  /**
+   * One candidate book, from the files the grouping rule put together.
+   *
+   * **The queue key is the group's smallest member key and its size**, not a
+   * digest of them: the smallest key is claimed by exactly one entry, and the
+   * size is what makes a split's rows different keys from the group they came
+   * from.
+   *
+   * **What the files said is preferred to what they are called**, and only
+   * where they said nothing does this fall to the folder name through the same
+   * `fromTheName` every other picked file uses.
+   */
+  function entryForGroup(group: AudiobookGroup): ScannedEntry {
+    const keys = group.files.map((file) => file.key);
+    const base = {
+      key: `audio:${[...keys].sort()[0]}:${keys.length}`,
+      isbn: "",
+      // Not read off an extension, because a group has several. `isAudio` is
+      // the test every member file passed to get here, and it is exactly this
+      // answer from `FORMAT_FOR_EXTENSION`.
+      format: BookFormat.audiobook,
+      group,
+      draft: null,
+    };
+    // Only from a group of one. A note from one file of forty describes that
+    // file and would read as though the whole book had failed.
+    const note = group.files.length === 1 ? group.files[0]!.note : undefined;
+
+    const draft = draftFromAudiobook(group);
+    if (draft !== null) {
+      return {
+        ...base,
+        label: draft.title,
+        state: "derived",
+        draft,
+        // **Through `queryFor`, not through a second bounding written here.**
+        // What the catalogue is asked is a title and an author, which is what
+        // `q` takes, and the cleaning, the floor and the cut in code points all
+        // live in one place already. Not through `readName`, which is a rule
+        // about a **file name**: it would strip a trailing `.mp3` off an album
+        // and hunt an ISBN through the author line.
+        query:
+          queryFor([draft.title, draft.author].filter(Boolean).join(" ")) ??
+          undefined,
+        reason: note,
+      };
+    }
+
+    const naming = groupNaming(group);
+    return {
+      ...base,
+      label: plainName(naming.name),
+      ...fromTheName(naming, note),
+    };
+  }
+
+  /**
+   * File one candidate's parts as a book each.
+   *
+   * **The group is replaced in place rather than removed and re-picked**, so
+   * the member does not lose the shelf, the queue position or anything the
+   * catalogue has already answered for the rows around it.
+   *
+   * Nothing happens for a row that is not a group of several, which is what a
+   * button pressed twice does.
+   */
+  async function splitTheGroup(key: string) {
+    const groups = await import("../../lib/audiobookGroups");
+    setEntries((current) =>
+      current.flatMap((entry) => {
+        if (entry.key !== key || !entry.group) return [entry];
+        if (entry.group.files.length < 2) return [entry];
+        return groups.splitApart(entry.group).map(entryForGroup);
+      }),
+    );
+  }
+
+  /**
+   * The name a group with no usable tags derives its book from.
+   *
+   * The folder for several files and the file itself for one, which is what a
+   * person named after the book in each case: a chapter file is named after its
+   * chapter, and the folder over it after the work.
+   */
+  function groupNaming(group: AudiobookGroup): FileNaming {
+    const first = group.files[0]!;
+    if (group.files.length === 1) {
+      return { name: first.name, folders: first.folders };
+    }
+    const own = first.folders.at(-1);
+    return own === undefined
+      ? { name: first.name, folders: [] }
+      : { name: own, folders: first.folders.slice(0, -1) };
   }
 
   /**
@@ -1239,6 +1552,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
       }),
     remove: (key) =>
       setEntries((current) => current.filter((entry) => entry.key !== key)),
+    splitApart: (key) => void splitTheGroup(key),
     clear: () => {
       setEntries([]);
       // The count goes with the queue it described. Leaving it would tell

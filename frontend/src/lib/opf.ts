@@ -77,7 +77,23 @@ export interface OpfRecord {
 
 /** Children of `parent` whose local name matches, in document order. */
 function childrenNamed(parent: Element, local: string): Element[] {
-  return [...parent.children].filter((child) => child.localName === local);
+  // **A sibling walk, not a spread of `parent.children`.** That collection is
+  // live, and indexing one is not required to be constant time: spreading it
+  // costs whatever the host's implementation charges per index, which for a
+  // list the file's own length decides is a cost the file chooses. Measured
+  // 2026-09-07 under this file's jsdom: 4 times the creators took 14.8 times
+  // the wall clock, which is the quadratic signature, and the walk below took
+  // it to linear. A browser may charge less; the point is that this does not
+  // depend on which.
+  const found: Element[] = [];
+  for (
+    let child = parent.firstElementChild;
+    child !== null;
+    child = child.nextElementSibling
+  ) {
+    if (child.localName === local) found.push(child);
+  }
+  return found;
 }
 
 /**
@@ -187,13 +203,28 @@ function readTitles(
  * role at all and dropping those would leave most books authorless.
  */
 function readAuthors(metadata: Element, index: Refinements): string[] {
+  // **A `Set` and not an array scan, because the count is the file's choice.**
+  // `authors.includes(name)` inside this loop is quadratic in a number a member
+  // supplied file decides: a minimal `dc:creator` is 26 bytes and
+  // `MAX_PACKAGE_BYTES` is 4 MiB, so 161,319 of them fit inside every bound this
+  // reader declares. Measured 2026-09-07 on builder: 50,000 distinct names took
+  // 57,863 ms of frozen main thread against 16 ms for this, and the shape is
+  // quadratic, so the bound's own ceiling is minutes rather than seconds.
+  //
+  // Found by the MOBI reader's review, which had the identical defect and a
+  // tighter bound. The insertion order is still the file's, which is what the
+  // array was for; the `Set` only answers whether a name has been seen.
+  const seen = new Set<string>();
   const authors: string[] = [];
   for (const creator of dcChildren(metadata, "creator")) {
     const role =
       opfAttribute(creator, "role") ?? refinement(index, creator, "role");
     if (role !== null && role.trim().toLowerCase() !== "aut") continue;
     const name = text(creator);
-    if (name !== null && !authors.includes(name)) authors.push(name);
+    if (name !== null && !seen.has(name)) {
+      seen.add(name);
+      authors.push(name);
+    }
   }
   return authors;
 }

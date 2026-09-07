@@ -1067,13 +1067,18 @@ export const de: Messages = {
   "file.pickLabel": "Buchdateien",
   "file.readingFiles": "Die ausgewählten Dateien werden gelesen...",
   "file.notAnEpub": "Keine EPUB-Datei.",
+  "file.notAMobi": "Keine Kindle- oder Mobipocket-Datei.",
+  "file.notAnFb2": "Keine FictionBook-Datei.",
+  "file.notAComic": "Kein Comic-Archiv.",
+  "file.notAPdf": "Keine PDF-Datei.",
   "file.damaged": "Diese Datei ist beschädigt und ließ sich nicht öffnen.",
   "file.protected":
     "Diese Datei ist geschützt, die Metadaten lassen sich nicht lesen.",
   "file.tooLarge": "Diese Datei ist zu groß, um sie hier zu lesen.",
   "file.unsupported":
     "Diese Datei liegt in einem Format vor, das Endpaper nicht öffnen kann.",
-  "file.noInflate": "Dieser Browser ist zu alt, um EPUB-Dateien zu lesen.",
+  "file.noInflate":
+    "Dieser Browser ist zu alt, um komprimierte Buchdateien zu lesen.",
   "file.noTitle": "Diese Datei enthält keinen Titel.",
   "file.unreadable": "Diese Datei ließ sich nicht lesen.",
 
@@ -1100,6 +1105,15 @@ export const de: Messages = {
   "fallback.useFor": "Den Eintrag für {title} übernehmen",
   "fallback.keep": "Dateinamen behalten",
   "fallback.pickFolderLabel": "Ein ganzer Ordner mit Büchern",
+
+  // ── Hörbücher, bei denen ein Buch aus vielen Dateien besteht ────────────
+  "audio.grouped": "{count} Dateien, als ein Hörbuch. Anzeigen.",
+  "audio.split": "Stattdessen als einzelne Bücher übernehmen",
+  "audio.splitFor":
+    "Die Dateien von {label} stattdessen als einzelne Bücher übernehmen",
+  "audio.noTags": "Diese Audiodatei enthält keine Tags.",
+  "audio.unreadable":
+    "Die Tags dieser Audiodatei konnten nicht gelesen werden.",
 
   // ── Rückgabefristen ─────────────────────────────────────────────────────
   "loans.dueDate": "Zurück bis",
@@ -1146,6 +1160,7 @@ export const de: Messages = {
   "copy.format.paperback": "Taschenbuch",
   "copy.format.ebook": "E-Book",
   "copy.format.audiobook": "Hörbuch",
+  "copy.format.comic": "Comic",
   "copy.format.other": "Sonstiges",
   "copy.condition": "Zustand",
   "copy.condition.unset": "Nicht erfasst",

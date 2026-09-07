@@ -8,6 +8,8 @@ ordinary round trips.
 """
 
 import dataclasses
+from pathlib import Path
+from types import MappingProxyType
 
 import httpx
 import keyring
@@ -410,51 +412,50 @@ class TestAnEnvelopeIsBoundToTheAddressItIsFor:
         assert len({credentials._purpose(*pair) for pair in pairs}) == len(pairs)
 
 
-class TestAnEnvelopeSealedBeforeTheBindingIsRefusedAndSaysWhy:
-    """The migration path, and it is a product decision rather than a detail.
+class TestAnEnvelopeSealedBeforeTheBindingIsOpenedAndCarriedForward:
+    """The upgrade path, and it is a product decision rather than a detail.
 
-    Nothing re-seals an existing envelope: the key is a deployment fact a
-    migration cannot depend on, and re-sealing from the address the row already
-    names would launder a move a hostile archive had already made. So every
-    login stored before this is invalidated and typed again, and the deployment
-    meets that where a person can act on it rather than in a release note.
+    **Owner's decision, 2026-09-07: a household upgrading may not lose its
+    stored logins.** An earlier version of this work deleted every envelope
+    written before the origin binding, which is what these tests used to pin.
+
+    What makes carrying them forward safe is a split the deletion took the wrong
+    half of. A `v1` envelope is bound to its source and not to its address, so
+    being opened beside an address somebody else wrote needs somebody able to
+    write one. For a roster catalogue nobody is: the address is
+    `targets.SEEDED[...].base_url`, a module constant. For a household OPDS
+    server somebody is, which is why the binding was made, and none of those has
+    ever been released.
     """
 
-    def test_it_is_refused_rather_than_opened(self, key: bytes):
+    def test_it_opens_at_its_own_version(self, key: bytes):
         envelope = sealed_before_the_origin_was_bound(key, "bne", "alice:hunter2")
-        with pytest.raises(credentials.UnboundCredential):
-            credentials.unseal(key, "bne", BNE_URL, envelope)
+        assert credentials.unseal(key, "bne", BNE_URL, envelope) == "alice:hunter2"
 
-    def test_the_refusal_names_the_remedy_and_not_the_key(self, key: bytes):
-        envelope = sealed_before_the_origin_was_bound(key, "bne", "alice:hunter2")
-        with pytest.raises(credentials.UnboundCredential) as refusal:
-            credentials.unseal(key, "bne", BNE_URL, envelope)
-        assert "Enter it again" in str(refusal.value)
-        assert "recovery phrase" not in str(refusal.value)
-
-    def test_it_is_told_apart_from_a_rotated_key(self, key: bytes):
-        """The version is read before the generation, deliberately.
-
-        A `v1` envelope is to be typed again whatever key this machine holds, so
-        reporting `WrongKeyGeneration` would send somebody after a recovery
-        phrase that opens nothing.
-        """
+    def test_and_still_refuses_the_wrong_key(self, key: bytes):
         envelope = sealed_before_the_origin_was_bound(key, "bne", "alice:hunter2")
         other = credentials.phrase_to_key(credentials.generate_phrase())
-        with pytest.raises(credentials.UnboundCredential):
+        with pytest.raises(credentials.WrongKeyGeneration):
             credentials.unseal(other, "bne", BNE_URL, envelope)
+
+    def test_and_still_refuses_a_damaged_row(self, key: bytes):
+        envelope = sealed_before_the_origin_was_bound(key, "bne", "alice:hunter2")
+        version, generation, nonce, sealed = envelope.split(".")
+        damaged = ".".join([version, generation, nonce, sealed[:-4] + "AAAA"])
+        with pytest.raises(credentials.UnreadableCredential):
+            credentials.unseal(key, "bne", BNE_URL, damaged)
 
     def test_it_is_still_recognised_as_an_envelope(self, key: bytes):
         """Or `backup._parse_row` refuses an archive taken before the upgrade.
 
-        The whole restore would fail over logins whose only remedy is to be
-        typed again, which is the failure the missing foreign key exists to
-        avoid.
+        The whole restore would fail over logins that now open perfectly well,
+        which is the failure the missing foreign key exists to avoid.
         """
         envelope = sealed_before_the_origin_was_bound(key, "bne", "alice:hunter2")
         assert credentials.generation_of(envelope) == credentials.generation_of_key(key)
 
-    def test_the_key_section_lists_it_so_it_can_be_removed(self, db, key: bytes):
+    def test_the_key_section_does_not_list_it_as_unreadable(self, db, key: bytes):
+        """It used to, and that was right while no key opened it."""
         credentials.store_key(credentials.key_to_phrase(key))
         db.add(
             CatalogueCredential(
@@ -462,9 +463,9 @@ class TestAnEnvelopeSealedBeforeTheBindingIsRefusedAndSaysWhy:
             )
         )
         db.commit()
-        assert credentials.unreadable_sources(db) == ["bne"]
+        assert credentials.unreadable_sources(db) == []
 
-    def test_and_the_row_reports_itself_held_and_unreadable(self, db, key: bytes):
+    def test_and_the_row_reports_itself_held_and_readable(self, db, key: bytes):
         credentials.store_key(credentials.key_to_phrase(key))
         db.add(
             CatalogueCredential(
@@ -476,10 +477,10 @@ class TestAnEnvelopeSealedBeforeTheBindingIsRefusedAndSaysWhy:
         assert (seen.provenance, seen.has_credential, seen.unreadable) == (
             CredentialProvenance.STORED,
             True,
-            True,
+            False,
         )
 
-    def test_and_nothing_outbound_carries_it(self, db, key: bytes):
+    def test_and_an_outbound_request_carries_it(self, db, key: bytes):
         credentials.store_key(credentials.key_to_phrase(key))
         db.add(
             CatalogueCredential(
@@ -487,7 +488,483 @@ class TestAnEnvelopeSealedBeforeTheBindingIsRefusedAndSaysWhy:
             )
         )
         db.commit()
-        assert credentials.for_request(db, "bne", BNE_URL) is None
+        assert credentials.for_request(db, "bne", BNE_URL) is not None
+
+    def test_reading_it_carries_it_forward_to_the_current_scheme(self, db, key: bytes):
+        """The old scheme empties itself, which is why no migration deletes.
+
+        The key is proven by the open that just succeeded, and the address is
+        the one the caller is about to use, so the re-seal binds it to that
+        rather than to anything a lookup might have disagreed about.
+        """
+        credentials.store_key(credentials.key_to_phrase(key))
+        db.add(
+            CatalogueCredential(
+                source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b")
+            )
+        )
+        db.commit()
+
+        assert credentials.stored(db, "bne", BNE_URL) == ("a", "b")
+        after = credentials.stored_envelope(db, "bne")
+        assert after.split(".")[0] == credentials.VERSION
+        assert credentials.stored(db, "bne", BNE_URL) == ("a", "b")
+
+    def test_and_the_carried_forward_envelope_is_bound_to_the_address(self, db, key: bytes):
+        """Which is the whole point of carrying it forward rather than keeping it."""
+        credentials.store_key(credentials.key_to_phrase(key))
+        db.add(
+            CatalogueCredential(
+                source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b")
+            )
+        )
+        db.commit()
+        credentials.stored(db, "bne", BNE_URL)
+
+        after = credentials.stored_envelope(db, "bne")
+        with pytest.raises(credentials.UnreadableCredential):
+            credentials.unseal(key, "bne", "https://elsewhere.invalid", after)
+
+
+class TestTheSupersededSchemeIsRefusedWhereTheAddressIsARow:
+    """The half the acceptance was missing, found by the design seat.
+
+    **`unseal` accepted the older scheme for every source, including a household
+    OPDS server, whose address is `opds_servers.base_url` and is a row.** So the
+    acceptance was wider than the argument for it: measured, a `v1` envelope for
+    an `opds-` source opened at an address of the reader's choosing exactly as at
+    its own. That is the case the origin binding was made for.
+    """
+
+    def test_a_household_server_envelope_from_the_old_scheme_is_refused(
+        self, key: bytes
+    ):
+        source = "opds-9685983b245e650e"
+        envelope = sealed_before_the_origin_was_bound(key, source, "house:pw")
+        with pytest.raises(credentials.UnboundCredential):
+            credentials.unseal(key, source, "https://calibre.lan:8080/opds", envelope)
+
+    def test_and_refused_at_an_address_somebody_else_chose(self, key: bytes):
+        """The arm that was open: it used to return the password here."""
+        source = "opds-9685983b245e650e"
+        envelope = sealed_before_the_origin_was_bound(key, source, "house:pw")
+        with pytest.raises(credentials.UnboundCredential):
+            credentials.unseal(key, source, "https://evil.invalid/opds", envelope)
+
+    def test_while_a_roster_envelope_from_the_old_scheme_still_opens(self, key: bytes):
+        """The control: the refusal is about the address being a row, not about
+        the version, or the upgrade path this was all built for would be gone."""
+        envelope = sealed_before_the_origin_was_bound(key, "bne", "alice:hunter2")
+        assert credentials.unseal(key, "bne", BNE_URL, envelope) == "alice:hunter2"
+
+
+class TestASupersededEnvelopeOpensAtOneAddressAndNoOther:
+    """The pair rule, over both axes at once.
+
+    **Two predicates preceded this and each covered one axis.** One asked only
+    whether the source was a household server, so a roster envelope opened at
+    any address at all; the other asked only whether the address was some roster
+    origin, so a household server's envelope opened as soon as an archive
+    pointed its row at one. The security seat measured five hostile cases
+    between them.
+    """
+
+    def _hostile(self):
+        dnb = targets.SEEDED[CatalogueSource.DNB].base_url
+        bne = targets.SEEDED[CatalogueSource.BNE].base_url
+        return [
+            ("a roster source at another roster's address", "dnb", bne),
+            ("a roster source at an address a row could supply", "dnb", "https://evil.invalid/sru"),
+            ("a household server at its own address", "opds-9685983b245e650e", "https://calibre.lan:8080/opds"),
+            ("a household server pointed at a roster origin", "opds-9685983b245e650e", dnb),
+            ("an orphan source an archive restored", "notasource", dnb),
+        ]
+
+    def test_it_opens_at_the_address_this_build_published_for_its_source(self, key: bytes):
+        dnb = targets.SEEDED[CatalogueSource.DNB].base_url
+        envelope = sealed_before_the_origin_was_bound(key, "dnb", "alice:hunter2")
+        assert credentials.unseal(key, "dnb", dnb, envelope) == "alice:hunter2"
+
+    def test_and_nowhere_else(self, key: bytes):
+        for name, source, address in self._hostile():
+            envelope = sealed_before_the_origin_was_bound(key, source, "a:b")
+            with pytest.raises(credentials.UnboundCredential, match="cannot be opened"):
+                credentials.unseal(key, source, address, envelope)
+            # Named in the failure, because five cases in one loop otherwise
+            # report as one line that does not say which admitted the envelope.
+            assert not credentials._may_open_unbound(source, address), name
+
+    def test_and_every_roster_source_still_opens_at_its_own(self):
+        """The control. A rule that refused everything would pass the arm above
+        and lose the upgrade path this whole change exists for."""
+        opening = [
+            source.value
+            for source, target in targets.SEEDED.items()
+            if credentials._may_open_unbound(source.value, target.base_url)
+        ]
+        assert len(opening) == len(targets.SEEDED)
+
+    def test_the_address_free_question_is_the_rule_asked_at_its_own_address(self):
+        """The diagonal, recomputed from the roster rather than stated.
+
+        `_is_a_roster_source` is what `_openable_by` applies, having no address.
+        It has to be the rule and not a restatement of half of it: a restatement
+        agreed on every seeded row by accident of the data, and split the moment
+        one seeded address stopped parsing.
+        """
+        for source, target in targets.SEEDED.items():
+            assert credentials._is_a_roster_source(source.value) is (
+                credentials._may_open_unbound(source.value, target.base_url)
+            ), source.value
+        for absent in ("opds-9685983b245e650e", "notasource", ""):
+            assert credentials._is_a_roster_source(absent) is False, absent
+
+    def test_a_refused_source_is_still_reported_as_unreadable(self, db, key: bytes):
+        """Or the household gets a login that is dead and invisible at once.
+
+        `_openable_by` answers without an address, so it applies the half of the
+        rule that needs none. It briefly did not, and then `unreadable_sources`
+        listed nothing while `unseal` refused the row for every key and address.
+        """
+        credentials.store_key(credentials.key_to_phrase(key))
+        db.add(
+            CatalogueCredential(
+                source="opds-9685983b245e650e",
+                envelope=sealed_before_the_origin_was_bound(key, "opds-9685983b245e650e", "a:b"),
+            )
+        )
+        db.commit()
+        assert credentials.unreadable_sources(db) == ["opds-9685983b245e650e"]
+
+
+class TestAVersionWithNoPurposeShapeIsRefusedRatherThanInvented:
+    """`_purpose` was two arms over an open set with a silent default.
+
+    Anything that was not the superseded version got the current shape, so a
+    third version would have been sealed over a string carrying its own number
+    and nothing would have failed.
+    """
+
+    def test_every_openable_version_has_a_shape(self):
+        for version in credentials._OPENABLE_VERSIONS:
+            assert credentials._purpose("bne", "https://h.invalid", version)
+
+    def test_and_a_version_with_none_raises(self):
+        with pytest.raises(credentials.CredentialError):
+            credentials._purpose("bne", "https://h.invalid", "v3")
+
+    def test_recognising_and_opening_are_asked_separately(self):
+        """They coincide today. The names exist for the day they do not, and
+        pointing `unseal` at the wrong one is the defect this pins."""
+        assert set(credentials._OPENABLE_VERSIONS) <= set(credentials.KNOWN_VERSIONS)
+
+
+class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
+    """The condition under which a `v1` envelope may still be opened at all.
+
+    **A `v1` envelope is bound to its source and not to its address**, so opening
+    one beside an address somebody else chose needs somebody able to choose one.
+    For a roster catalogue nobody is: every address comes from `targets.SEEDED`,
+    which is a module constant. For a household OPDS server somebody is, which
+    is the case the binding was made for, and `routers/opds.py` is where that
+    lives.
+
+    **This is the guard that ends the acceptance, and it is tied to the work
+    that ends it rather than to a date.** Owner's decision, 2026-09-07. When the
+    ticket that makes a catalogue row editable lands, this fails, and the fix is
+    to stop opening `v1` rather than to adjust the test.
+
+    **It watches the table rather than the call sites, and the first version of
+    it watched the call sites and was worthless.** That one read a single file
+    and matched a single line, so it saw 1 of the 3 resolver calls that exist and
+    neither of the two written across lines; a real `#130` shaped change, taking
+    the address from `db.get(CatalogueTarget, ...)`, passed it. The signal is
+    upstream of every call site: a roster address stops being code the moment
+    anything reads that column back.
+    """
+
+    #: Every module that may name the roster table in code.
+    #:
+    #: **This is an inclusion list and that is deliberate here**, which is the
+    #: opposite of what this repository usually wants. The set it describes is
+    #: closed by design: the model that defines the table, the seeder that
+    #: reconciles it against `targets.SEEDED` on each start, and the archive that
+    #: copies it. A fourth entry is the event being watched for, so the list
+    #: going stale **is** the signal rather than the failure.
+    #: None of the three hands a `base_url` off a row to anything.
+    #:
+    #: A fourth module using it is the roster becoming row decided, which is
+    #: `#130`. **`#131`, a typeable host, is the other trigger and these walks
+    #: cannot see it**: a typed address names no ORM class, rebinds nothing and
+    #: writes no table name. `targets.py` says either one is the day. What
+    #: covers that case is not here but in `unseal`, which refuses the
+    #: superseded scheme at any address other than the one this build published
+    #: for that very source. These three are belt to that brace, and they are
+    #: early warning rather than the guard: measured by the security seat, four
+    #: shapes `#130` could take survive all three, and the rule in `unseal` is
+    #: what refuses every one of them. Growing this list is not the fix; dropping
+    #: `_UNBOUND_VERSION` from `credentials._OPENABLE_VERSIONS` is.
+    #:
+    #: **The bound, measured rather than assumed**: this watches for the ORM
+    #: name. Attacked 2026-09-07 with four shapes, three caught, and the one that
+    #: survives is a raw `SELECT base_url FROM catalogue_targets`, which names no
+    #: identifier at all. That shape exists nowhere in this backend, whose only
+    #: raw statement is a liveness `SELECT 1`, so it is a gap and not a hole
+    #: today. Closing it means watching the table name in string literals too,
+    #: which is a second instrument rather than a further arm on this one.
+    MAY_USE_THE_ROSTER_TABLE = {"models.py", "main.py", "backup.py"}
+
+    #: What the walk does not read, stated rather than a list of what it does.
+    #:
+    #: The tests, which name the table in order to check it, the migrations,
+    #: which are its history and necessarily name it, and **the virtualenv,
+    #: which is not this project's code at all**. Measured 2026-09-07: without
+    #: that last entry the walk read 3,148 files of which 3,068, or 97.5%, were
+    #: third party, so a dependency shipping a class of the same name, or a file
+    #: this Python cannot parse, would redden a guard about this repository. Everything else under
+    #: `backend/` is read, at every depth: the first version of this walk read
+    #: the top level only, so `routers/` was invisible and the exact change it
+    #: guards against passed it.
+    NOT_READ = {"tests", "migrations", "__pycache__", ".venv"}
+
+    def _modules_naming_it_in_code(self) -> set[str]:
+        """Which backend modules name `CatalogueTarget` as code, not as prose.
+
+        `ast` rather than a text search, because six modules mention it in a
+        docstring or a comment and none of those is a reader.
+        """
+        import ast
+
+        backend = Path(__file__).resolve().parents[1]
+        found = set()
+        # **`rglob`, and the first version of this said `glob`.** That reads the
+        # top level only, so `routers/` was not scanned at all and the mutation
+        # this guard exists to catch, a resolver reading the address off a row in
+        # `routers/books.py`, walked past it. Excluded: the tests, which name the
+        # table to check it, and the migrations, which are the history of it.
+        for path in sorted(backend.rglob("*.py")):
+            parts = set(path.relative_to(backend).parts)
+            if parts & self.NOT_READ:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                named = (
+                    (isinstance(node, ast.Name) and node.id == "CatalogueTarget")
+                    or (isinstance(node, ast.Attribute) and node.attr == "CatalogueTarget")
+                    # The definition, which `models.py` is and which is not a
+                    # `Name` node. Counted so the module holding the class is in
+                    # the set rather than exempt from it: a reader added there
+                    # would otherwise be the one place this cannot see.
+                    or (isinstance(node, ast.ClassDef) and node.name == "CatalogueTarget")
+                    or (isinstance(node, ast.alias) and node.name == "CatalogueTarget")
+                )
+                if named:
+                    found.add(path.name)
+        return found
+
+    def test_only_the_model_the_seeder_and_the_archive_use_the_roster_table(self):
+        using = self._modules_naming_it_in_code()
+        assert using == self.MAY_USE_THE_ROSTER_TABLE, (
+            f"{sorted(using - self.MAY_USE_THE_ROSTER_TABLE)} now uses the roster "
+            "table. If a catalogue address can be edited, an envelope bound to a "
+            "source alone can be opened at an address somebody chose, so "
+            "credentials.unseal must stop opening _UNBOUND_VERSION. Widening this "
+            "set is not the fix."
+        )
+
+    def test_the_walk_finds_something(self):
+        """A parse that matched nothing would make the test above pass forever."""
+        assert self._modules_naming_it_in_code(), "the ast walk found no user at all"
+
+    #: What `targets.py` may not import, stated as the exclusion.
+    #:
+    #: **The rule underneath is that the roster cannot be built from the table**,
+    #: and this is the only arm that covers the shape the other three cannot
+    #: see: changing the initialiser inside `targets.py` itself. That is not a
+    #: rebinding, so `Final` permits it, and the rebind walk excludes that file
+    #: by name, so nothing else would look. A helper import puts the naming in an
+    #: allowlisted module and leaves all three walks green.
+    #:
+    #: Green today: `targets.py` imports `re`, `collections.abc`, `dataclasses`,
+    #: `enum`, `types`, `typing`, `urllib.parse`, `z3950`, `decoders` and
+    #: `enums`, none of which can reach a database.
+    CANNOT_REACH_THE_DATABASE = ("models", "main", "backup", "sqlalchemy", "database")
+
+    def test_the_roster_module_cannot_reach_the_table_it_is_seeded_into(self):
+        """The arm that covers a roster built inside `targets.py`.
+
+        Found by the design seat, 2026-09-07, against a claim of mine that
+        `Final` and the rebind walk refuse serving the roster from the table.
+        Neither does, for the one shape that change would actually take.
+        """
+        import ast
+
+        source = (Path(__file__).resolve().parents[1] / "targets.py").read_text()
+        imported: set[str] = set()
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+        assert imported, "no import found, so this guard reads nothing"
+        offenders = sorted(imported & set(self.CANNOT_REACH_THE_DATABASE))
+        assert offenders == [], (
+            f"targets.py imports {offenders}, so the roster can be built from the "
+            "table inside the module that declares it. `Final` permits that and the "
+            "rebind walk does not look here, so credentials._OPENABLE_VERSIONS must "
+            "drop _UNBOUND_VERSION."
+        )
+
+    def test_nothing_outside_targets_rebinds_the_roster(self):
+        """The second instrument, and it watches assignment rather than naming.
+
+        **Belt to a brace that is now self enforcing.** Both seats measured that
+        this misses the two shapes that can actually reach `main.py`, an item
+        assignment and an `update`, while the rebinding it does catch is already
+        a mypy error under `Final`. That is a guard whose own mutation test
+        picked the covered case. The roster being a `MappingProxyType` is what
+        closes it; this stays because a rebinding is still worth naming loudly.
+
+        **`main.py` is allowed to name the table, so the first arm cannot see
+        the seeder feeding rows back into `targets.SEEDED`.** Run in process,
+        2026-09-07: rebinding it from the rows the seeder had just reconciled
+        left that arm green, and "none of the three hands a `base_url` off a row
+        to anything" would have been false with nothing red.
+
+        A different question rather than a further arm on the same one, which is
+        why it is its own test.
+        """
+        import ast
+
+        backend = Path(__file__).resolve().parents[1]
+        offenders = []
+        for path in sorted(backend.rglob("*.py")):
+            parts = set(path.relative_to(backend).parts)
+            if parts & self.NOT_READ or path.name == "targets.py":
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    continue
+                written = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for one in written:
+                    if isinstance(one, ast.Name) and one.id == "SEEDED":
+                        offenders.append(f"{path.name}: SEEDED")
+                    elif isinstance(one, ast.Attribute) and one.attr == "SEEDED":
+                        offenders.append(f"{path.name}: .SEEDED")
+        assert offenders == [], (
+            f"{offenders} rebinds the roster. A roster address is then whatever "
+            "was written there, so credentials._OPENABLE_VERSIONS must drop "
+            "_UNBOUND_VERSION."
+        )
+
+    def test_no_module_reaches_the_roster_table_by_name_in_sql(self):
+        """The third instrument, closing the one shape the first two miss.
+
+        A raw `SELECT base_url FROM catalogue_targets` names no identifier, so
+        the `ast` walk over `CatalogueTarget` cannot see it.
+
+        **The bound**: this recognises a statement by having whitespace in it,
+        so a query assembled from fragments across separate constants passes,
+        and so would a one word statement if SQL had one. Nothing here builds
+        SQL that way. The failure direction is a loud false positive on prose
+        naming the table outside a docstring, of which there are none. Attacked in process,
+        2026-09-07: that shape survived both other arms.
+
+        This backend's only raw statement is a liveness `SELECT 1`, so the check
+        costs nothing today and the table name is what it watches.
+        """
+        import ast
+
+        backend = Path(__file__).resolve().parents[1]
+        offenders = []
+        for path in sorted(backend.rglob("*.py")):
+            parts = set(path.relative_to(backend).parts)
+            # **Not exempting the three allowed modules, unlike the walk
+            # above.** They may name the ORM class, which is what they are
+            # allowed for; reaching the column by raw statement is a different
+            # act and none of them does it. Exempting them here was free scope
+            # given away for nothing.
+            if parts & self.NOT_READ:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            # Docstrings are `ast.Constant` too, and five modules discuss this
+            # table in prose. Prose is not a query, so they are collected by
+            # identity and skipped rather than matched around.
+            prose = set()
+            for holder in ast.walk(tree):
+                if isinstance(holder, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                    first = next(iter(getattr(holder, "body", [])), None)
+                    if (
+                        isinstance(first, ast.Expr)
+                        and isinstance(first.value, ast.Constant)
+                        and isinstance(first.value.value, str)
+                    ):
+                        prose.add(id(first.value))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    if id(node) in prose:
+                        continue
+                    text = node.value
+                    if "catalogue_targets" not in text:
+                        continue
+                    # **A name is one token; a statement has whitespace in it.**
+                    # No module is exempt from this arm: exempting the three
+                    # that may name the ORM class was scope given away, since
+                    # none of them queries the column. But dropping the
+                    # exemption alone fires on the table's own definition, on
+                    # `__tablename__` and on four constraint names, none of
+                    # which reads anything.
+                    #
+                    # **Whitespace rather than a list of SQL verbs**, which is
+                    # what this first was. Measured 2026-09-07 over the whole
+                    # backend: the six non docstring constants naming this table
+                    # are all bare identifiers, and every statement shape tried
+                    # has a space, `REPLACE INTO` included, which the verb list
+                    # missed. So this enumerates nothing and covers more.
+                    if len(text.split()) > 1:
+                        offenders.append(f"{path.name}: {text[:60]}")
+        assert offenders == [], (
+            f"{offenders} names the roster table in SQL. See the assertion above "
+            "for what that means for _OPENABLE_VERSIONS."
+        )
+
+    def test_the_roster_is_read_only_and_not_merely_a_constant_name(self):
+        """The premise `_may_open_unbound` rests on, made self enforcing.
+
+        **It asserted `isinstance(dict)`, which is what the roster must not
+        behave like.** `Final` stops a rebinding and stops nothing else, and both
+        critic seats measured the same inversion independently: one subscript
+        write on the roster moves the published side of the comparison, so a
+        superseded envelope opens at whatever the write said, with the projection
+        moving along and nothing reporting anything.
+
+        A `MappingProxyType` refuses every in place write at runtime, and mypy
+        refuses the two shapes statically. The walks below are early warning
+        again rather than the control for this.
+        """
+        from collections.abc import Mapping
+        from types import MappingProxyType
+
+        assert isinstance(targets.SEEDED, Mapping) and targets.SEEDED
+        assert isinstance(targets.SEEDED, MappingProxyType), (
+            "the roster is writable, so an edited row moves the address a "
+            "superseded envelope opens at"
+        )
+        for target in targets.SEEDED.values():
+            assert isinstance(target.base_url, str) and target.base_url
+
+    def test_and_no_write_to_it_is_accepted(self):
+        """The three shapes, two of which every ast walk here missed."""
+        import dataclasses
+
+        source, row = next(iter(targets.SEEDED.items()))
+        moved = dataclasses.replace(row, base_url="https://evil.invalid/sru")
+        with pytest.raises((TypeError, AttributeError)):
+            targets.SEEDED[source] = moved  # type: ignore[index]
+        with pytest.raises((TypeError, AttributeError)):
+            targets.SEEDED.update({source: moved})  # type: ignore[attr-defined]
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            row.base_url = "https://evil.invalid/sru"  # type: ignore[misc]
 
 
 class TestTheEnvelopeRuleAndItsConstraintAgree:
@@ -1205,7 +1682,21 @@ class TestAShippedLoginGoesOnlyWhereItsLibraryPublishedIt:
         """
         row = targets.SEEDED[CatalogueSource.BNA]
         broken = dataclasses.replace(row, base_url="http://[::1")
-        monkeypatch.setitem(targets.SEEDED, CatalogueSource.BNA, broken)
+        # **Replace the mapping rather than write through it**, which is the
+        # code change the register names as the trigger rather than a way
+        # around it. The literal is never bound to a name at all, so there
+        # is nothing any module could write through, tests included.
+        #
+        # `targets.SEEDED_ORIGINS` is computed at import and still describes
+        # the shipped roster, so a test substituting a row is measuring a world
+        # where the two disagree. Nothing reads that constant today, and this
+        # is the reason to replace the object rather than reach past it when
+        # something does.
+        monkeypatch.setattr(
+            targets,
+            "SEEDED",
+            MappingProxyType({**targets.SEEDED, CatalogueSource.BNA: broken}),
+        )
         assert credentials.origin_of(broken.base_url) == ""
         assert credentials.shipped("bna", "http://[::1") is None
         assert credentials.shipped("bna", "not a url either") is None
@@ -1230,7 +1721,21 @@ class TestAShippedLoginGoesOnlyWhereItsLibraryPublishedIt:
         """
         row = targets.SEEDED[CatalogueSource.BNA]
         broken = dataclasses.replace(row, base_url="http://[::1")
-        monkeypatch.setitem(targets.SEEDED, CatalogueSource.BNA, broken)
+        # **Replace the mapping rather than write through it**, which is the
+        # code change the register names as the trigger rather than a way
+        # around it. The literal is never bound to a name at all, so there
+        # is nothing any module could write through, tests included.
+        #
+        # `targets.SEEDED_ORIGINS` is computed at import and still describes
+        # the shipped roster, so a test substituting a row is measuring a world
+        # where the two disagree. Nothing reads that constant today, and this
+        # is the reason to replace the object rather than reach past it when
+        # something does.
+        monkeypatch.setattr(
+            targets,
+            "SEEDED",
+            MappingProxyType({**targets.SEEDED, CatalogueSource.BNA: broken}),
+        )
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNA", "bob:correcthorse")
         assert credentials.origin_of(broken.base_url) == ""
 
@@ -1282,15 +1787,15 @@ class TestAKeyIsNotMintedOverLoginsItCannotOpen:
             credentials.generate_key(db)
         assert "recovery phrase" in str(refusal.value)
 
-    def test_a_login_from_before_the_binding_is_not_blamed_on_the_key(
+    def test_a_login_from_before_the_binding_is_blamed_on_the_key_too(
         self, db, key: bytes
     ):
-        """The phrase hunt `UnboundCredential` exists to prevent, one door along.
+        """It used to get its own sentence, and that was right while no key
+        opened it. The phrase now does, so sending somebody to remove it would
+        be sending them to destroy a login that is about to work.
 
-        Reached only by restoring an archive taken before the binding, which is
-        the ordinary move-to-a-new-machine case. Told that the key is at fault,
-        an admin finds the phrase, watches it be accepted, and finds the login
-        still shut.
+        Reached by restoring an archive taken before the binding, which is the
+        ordinary move-to-a-new-machine case.
         """
         db.add(
             CatalogueCredential(
@@ -1303,12 +1808,27 @@ class TestAKeyIsNotMintedOverLoginsItCannotOpen:
         with pytest.raises(credentials.KeyConfigurationError) as refusal:
             credentials.generate_key(db)
 
-        assert "recovery phrase" not in str(refusal.value)
-        assert "enter them again" in str(refusal.value)
+        said = str(refusal.value)
+        assert "recovery phrase" in said
+        assert "sealed before" not in said
 
-    def test_and_a_login_under_a_lost_key_still_is(self, db, key: bytes):
-        """The diagonal: both causes at once get both sentences, each naming
-        only its own source, or one arm would pass on the other's case."""
+    def test_and_the_phrase_then_opens_it(self, db, key: bytes):
+        """The half that makes the sentence above true rather than convenient."""
+        db.add(
+            CatalogueCredential(
+                source="bne",
+                envelope=sealed_before_the_origin_was_bound(key, "bne", "alice:hunter2"),
+            )
+        )
+        db.commit()
+        credentials.store_key(credentials.key_to_phrase(key))
+        assert credentials.stored(db, "bne", BNE_URL) == ("alice", "hunter2")
+
+    def test_both_kinds_of_stranded_login_are_named_in_one_sentence(
+        self, db, key: bytes
+    ):
+        """One cause now, so one sentence naming both sources rather than two
+        sentences splitting them."""
         credentials.store_key(credentials.key_to_phrase(key))
         credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         db.add(
@@ -1325,10 +1845,7 @@ class TestAKeyIsNotMintedOverLoginsItCannotOpen:
 
         said = str(refusal.value)
         assert "recovery phrase" in said
-        assert "enter them again" in said
-        before, _, after = said.partition("no longer has.")
-        assert "bne" in before and "dnb" not in before
-        assert "dnb" in after and "bne" not in after
+        assert "bne" in said and "dnb" in said
 
     def test_the_phrase_opens_them_again(self, db):
         phrase, _ = credentials.generate_key(db)

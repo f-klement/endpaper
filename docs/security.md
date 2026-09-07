@@ -1143,8 +1143,10 @@ additional authenticated data naming its kind, its subject and the origin it may
 (`endpaper/v2/catalogue-credential/<source>/<origin>`), so a ciphertext moved between rows,
 between kinds, between subjects, or beside an address a hand-edited archive wrote, fails
 authentication instead of decrypting into somebody else's request. **An envelope written under
-the previous version is refused rather than read**: upgrading removes every login stored before
-the origin was bound, and they are entered again.
+the previous version is opened and carried forward rather than refused**, at the one address this
+build published for its own catalogue source: it is re-sealed to the current one the first time
+it is read, so upgrading costs no stored catalogue login. A household server's is refused, and
+none of those has been released.
 
 **AES-256-GCM, one key, and the key is never in the database.** The archive therefore
 carries ciphertext that is useless without something the archive does not contain, which is
@@ -1192,12 +1194,28 @@ promise the browser makes.
 again. That cost is new**, and saying so is part of the design: the arrangement this
 replaced held no catalogue credential at all, so there was nothing a lost key could destroy.
 
-**Upgrading to the release that bound the origin has the same cost once, and it is not the
-key's.** Every login stored before it is removed by the migration and is entered again.
-Re-sealing them was refused rather than skipped: it needs the key, which is a deployment fact
-a migration cannot depend on, and it would re-seal from the address the row already names, so
-a deployment whose row had been moved by a hostile archive would have the migration launder
-that move into a valid binding.
+**Upgrading to the release that bound the origin costs no stored catalogue login.** An envelope
+written under the previous scheme is opened at its own version and re-sealed to the current one
+the first time it is read, so the old scheme empties itself as logins are used. It opens at one
+address only, the one this build published for that very source, so a roster catalogue carries
+forward and a household server, which has no published address, does not.
+
+Re-sealing inside the migration was refused rather than skipped: it needs the key, which is a
+deployment fact a migration cannot depend on, and it would re-seal from the address the row
+already names, so a deployment whose row had been moved by a hostile archive would have the
+migration launder that move into a valid binding. On the read path neither holds: the key is
+proven by the open that just succeeded, and the address is the one the caller is about to use.
+
+**What makes accepting the older scheme safe is that nobody can choose the address it would be
+opened beside.** Such an envelope is bound to its source and not to its address, so it is opened
+only where the two are the same thing: at the address this build published for that very source,
+which is a constant in the code. Every other address is refused, including another catalogue's,
+including one a row supplies, and including every address for a household server, which has no
+published address at all.
+
+**The rule is a pair and is checked as a pair**, over the source and the address together.
+Either half alone admits a case the other refuses.
+
 The recovery phrase mitigates the cost rather than removing it. Said beside the field on the
 settings screen, not only here. On a machine nobody
 administers this is also the restore story: a backup carries the sealed rows and never the
@@ -1307,11 +1325,13 @@ and a pinned variable set to something that is not a credential all present as o
 unreadable login, and for those four the fix is on the key and recovers every login at
 once. So the row says only that it cannot be read, and the diagnosis sits on the key.
 
-**There is a fifth cause whose remedy is not on the key**, and it is the one to state
-separately because every other sentence here sends the reader to the key: a login sealed
-before the origin was bound. The key is intact and no phrase opens it. Upgrading removes
-these, so it is reachable only by restoring an archive taken before that release, and the
-remedy is on the row: remove it and enter the login again.
+**A login sealed before the origin was bound is a fifth cause only for a household server.**
+Such an envelope opens at one address, the one this build published for its own catalogue
+source, and is re-sealed on that read; for those the key is the whole diagnosis again. A
+household server has no published address, so its envelope is refused at every address: the key
+is intact, no phrase opens it, and the remedy is the row. **A restore is the one route that
+cannot produce one**, since restoring drops every household login; it is reached by a deployment
+that stored one before the binding and then upgraded, and no released version could.
 
 **A key can be discarded.** Closing the tab on the phrase leaves a deployment behind a key
 protecting nothing, so `DELETE /api/settings/credential-key` clears it and names the logins

@@ -215,9 +215,15 @@ function fileReaders(): string[] {
  * evasion was measured on this file: removing two names left every test green.
  */
 const FILE_READERS = [
+  "lib/audiobook.ts",
   "lib/calibre.ts",
+  "lib/cbz.ts",
   "lib/epub.ts",
+  "lib/fb2.ts",
+  "lib/fileReaders.ts",
+  "lib/mobi.ts",
   "lib/opf.ts",
+  "lib/pdf.ts",
   "lib/sqlite.ts",
   "lib/zip.ts",
 ];
@@ -300,21 +306,34 @@ describe("a member's book file cannot leave the browser", () => {
   });
 
   it("keeps the picked file out of the value a request is built from", () => {
-    // `draftFromFile` is the seam between the reading path and the request
-    // path, and the property is its parameter: it takes the parsed record, so a
-    // `File` has nowhere to travel. Taking a `File` here would compile, would
+    // The `draftFrom*` family is the seam between the reading path and the
+    // request path, and the property is the parameter: each takes what was
+    // parsed, so a `File` has nowhere to travel. Taking one would compile, would
     // pass every other test, and would put the bytes one spread away from a
     // body.
+    //
+    // **Every one of them, matched by shape rather than by name.** This asserted
+    // `draftFromFile` alone while there were two of them and now there are five,
+    // and the next reader is added by somebody writing a format, which is not
+    // the moment anybody rereads this file.
     const types = entries().find(([path]) =>
       path.endsWith("pages/ScanPage/types.ts"),
     );
     expect(types).toBeDefined();
 
-    const signature = withoutProse(types![1]).match(
-      /export function draftFromFile\(([^)]*)\)/,
-    );
-    expect(signature).not.toBeNull();
-    expect(signature![1]).not.toMatch(/\bFile\b/);
+    const signatures = [
+      ...withoutProse(types![1]).matchAll(
+        /export function (draftFrom\w+)\(([^)]*)\)/g,
+      ),
+    ];
+    // A regex that matched nothing would make the assertion below pass for
+    // ever, and renaming the family is exactly how that happens.
+    expect(signatures.length).toBeGreaterThan(1);
+    expect(
+      signatures
+        .filter((match) => /\bFile\b/.test(match[2]!))
+        .map((match) => match[1]),
+    ).toEqual([]);
   });
 });
 

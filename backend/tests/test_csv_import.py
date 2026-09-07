@@ -322,6 +322,16 @@ class TestFieldParsing:
             ("Hardcover", BookFormat.HARDCOVER),
             ("Kindle Edition", BookFormat.EBOOK),
             ("audiobook", BookFormat.AUDIOBOOK),
+            ("Graphic Novel", BookFormat.COMIC),
+            ("manga", BookFormat.COMIC),
+            ("CBZ", BookFormat.COMIC),
+            # The container this app refuses to parse still names the shelf it
+            # sits on. `frontend/src/lib/cbz.ts` carries the refusal.
+            ("cbr", BookFormat.COMIC),
+            # A collected comic and an ordinary novel are both sold in this
+            # binding, and this table sees only the word, so it stays where it
+            # was rather than following the comic vocabulary.
+            ("Trade Paperback", BookFormat.PAPERBACK),
             ("Unknown Binding", None),
         ],
     )

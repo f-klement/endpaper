@@ -9,6 +9,7 @@ import { AUTHOR_SEPARATOR, boundNumber, boundText } from "../../lib/bookBounds";
 import { normaliseLocation } from "../../lib/lastLocation";
 import type { OpfRecord } from "../../lib/opf";
 import type { NameClues } from "../../lib/fileName";
+import type { AudiobookGroup } from "../../lib/audiobookGroups";
 
 /**
  * What the confirm step is editing.
@@ -240,6 +241,42 @@ export function draftFromName(clues: NameClues): BookDraft {
     year: boundNumber("year", clues.year),
     // A name names neither, and an empty list is what the confirm step and the
     // batch both already handle.
+    classifications: [],
+    suggested_tag_ids: [],
+    notFound: true,
+  };
+}
+
+/**
+ * The confirm step, prefilled from **several files that are one audiobook**.
+ *
+ * The fourth sibling of `draftFromLookup`, and the only one whose input is more
+ * than one file: an audiobook is usually a folder of chapters, and
+ * `lib/audiobookGroups.ts` holds the rule that decided which ones.
+ *
+ * **The album is the title and the artists are the authors**, which is what the
+ * corpus says and is also why this is a function rather than a spread: the
+ * mapping is a claim about real files and it belongs beside the other three.
+ *
+ * **Every distinct artist, joined**, because a collection is one audiobook by
+ * ten writers and taking the first would file nine of them under the wrong one.
+ * `boundText` cuts the line at what `BookCreate.author` holds.
+ *
+ * **`null` when the files named no book**, and the caller then derives the same
+ * draft from the folder's name instead. Returning a blank title here would be a
+ * row the API refuses in the middle of somebody's batch.
+ *
+ * **No year**, and it is the one omission worth naming here as well as at the
+ * reader: an audiobook's date tag is the year of the recording, not of the
+ * book. `lib/audiobook.ts` carries the measurement.
+ */
+export function draftFromAudiobook(group: AudiobookGroup): BookDraft | null {
+  const title = boundText("title", group.album ?? group.title);
+  if (title === null) return null;
+  return {
+    isbn: "",
+    title,
+    author: boundText("author", group.authors.join(AUTHOR_SEPARATOR)),
     classifications: [],
     suggested_tag_ids: [],
     notFound: true,

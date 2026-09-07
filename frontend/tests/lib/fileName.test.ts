@@ -22,12 +22,14 @@
 
 import { describe, expect, it } from "vitest";
 
+import { AUDIO_EXTENSIONS } from "../../src/lib/audiobook";
 import {
   FORMAT_FOR_EXTENSION,
   plainName,
   QUERY_CEILING,
   readName,
   SUPPORTED_EXTENSIONS,
+  queryFor,
   supportedExtension,
 } from "../../src/lib/fileName";
 import { BookFormat } from "../../src/api/generated/model";
@@ -63,10 +65,11 @@ describe("which files the walk considers", () => {
     }
   });
 
-  it("passes over a tagged MP3, because one audiobook is many files", () => {
-    // Admitting the extension before the grouping rule exists would file a two
-    // hundred track audiobook as two hundred books.
-    expect(supportedExtension("chapter 01.mp3")).toBeNull();
+  it("takes a tagged MP3, now that a folder of them is one book", () => {
+    // Held out until the grouping rule existed, because admitting it before
+    // would have filed a two hundred track audiobook as two hundred books.
+    // `lib/audiobookGroups.ts` is that rule.
+    expect(supportedExtension("chapter 01.mp3")).toBe(".mp3");
   });
 
   it("passes over a file with no extension at all", () => {
@@ -84,15 +87,87 @@ describe("which files the walk considers", () => {
     );
   });
 
-  it("calls an M4B an audiobook and a PDF an ebook", () => {
+  it("has an audio reader for exactly the extensions it calls audiobooks", () => {
+    // **Two lists, so the equality is the guard.** `lib/audiobook.ts` has to
+    // answer whether one file of a kind is a whole book or one track of one,
+    // which this map cannot say. An extension here and not there is routed to
+    // the grouping path and read by nothing; one there and not here is a reader
+    // nothing reaches. Asserted both ways, because either alone admits the
+    // other, and this file is where a format joins.
+    const audio = SUPPORTED_EXTENSIONS.filter(
+      (extension) => FORMAT_FOR_EXTENSION[extension] === BookFormat.audiobook,
+    );
+
+    expect([...audio].sort()).toEqual(Object.keys(AUDIO_EXTENSIONS).sort());
+  });
+
+  it("calls both audio containers audiobooks and a PDF an ebook", () => {
+    // This map decides which route a file takes; the test above holds it level
+    // with the reader's own set, which decides what a container is. A third
+    // audio format answers in both.
     expect(FORMAT_FOR_EXTENSION[".m4b"]).toBe(BookFormat.audiobook);
+    expect(FORMAT_FOR_EXTENSION[".mp3"]).toBe(BookFormat.audiobook);
     expect(FORMAT_FOR_EXTENSION[".pdf"]).toBe(BookFormat.ebook);
   });
 
-  it("leaves a comic's format blank rather than guessing one", () => {
-    // `BookFormat` has no member for a comic yet, and a blank is what the
-    // column is nullable for.
-    expect(FORMAT_FOR_EXTENSION[".cbz"]).toBe("");
+  it("calls a CBZ a comic", () => {
+    // A container written for one kind of object answers this without anything
+    // being opened, which is the same evidence `.m4b` is. `backend/enums.py`
+    // states what a `BookFormat` member has to be able to do to earn a place.
+    expect(FORMAT_FOR_EXTENSION[".cbz"]).toBe(BookFormat.comic);
+  });
+});
+
+describe("a query built from something that is not a file name", () => {
+  it("asks the catalogue for the text it was given", () => {
+    expect(queryFor("Robinson Crusoe Daniel Defoe")).toBe(
+      "Robinson Crusoe Daniel Defoe",
+    );
+  });
+
+  it("keeps an initialism whole, which the file name rules would not", () => {
+    // **The reason this is not `readName`.** A file name writes a space as a
+    // `.` or a `_`; a tag writes a space. Splitting on them would hand the fan
+    // out four one letter terms, and the server ANDs the terms it is given.
+    expect(queryFor("S.P.Q.R. Mary Beard")).toBe("S.P.Q.R. Mary Beard");
+  });
+
+  it("keeps an extension that is part of the title, for the same reason", () => {
+    expect(queryFor("Reading a book.epub")).toBe("Reading a book.epub");
+  });
+
+  it("takes out what is not text, each half its own way", () => {
+    // The split this module makes and the reason for it: a control separates
+    // two things and becomes a space, a format control sits inside one word and
+    // is deleted. U+200B is the one format control on the other side of it,
+    // because it is the only word separator Thai, Khmer, Lao and Burmese have.
+    expect(queryFor("Dune\u0000Frank\u200CHerbert")).toBe("Dune FrankHerbert");
+    expect(queryFor("Dune\u200BFrank Herbert")).toBe("Dune Frank Herbert");
+  });
+
+  it("answers nothing for text below what the endpoint will take", () => {
+    // The same floor the search box enforces, which is the API's own.
+    expect(queryFor("a")).toBeNull();
+    expect(queryFor("   ")).toBeNull();
+  });
+
+  it("cuts a long one on a word boundary where there is one in reach", () => {
+    // A query cut mid word asks for a term that is not a word. Asserted as the
+    // property rather than as the length: the ceiling is `QUERY_CEILING` and a
+    // literal here would be a fourth copy of a number this file recomputes.
+    const long = queryFor(`${"a".repeat(190)} boundary here`) ?? "";
+
+    expect([...long].length).toBeLessThanOrEqual(QUERY_CEILING);
+    expect(long.endsWith("boundary")).toBe(true);
+  });
+
+  it("cuts in code points rather than in UTF-16 units", () => {
+    // The fault `lib/bookBounds.ts` records costing a whole book to a 422: a
+    // cut between the halves of a pair is a lone surrogate no encoder emits.
+    const cut = queryFor("\u{1F4DA}".repeat(300)) ?? "";
+
+    expect([...cut]).toHaveLength(200);
+    expect(new TextDecoder().decode(new TextEncoder().encode(cut))).toBe(cut);
   });
 });
 

@@ -373,3 +373,50 @@ describe("the rest of the record", () => {
     expect(record?.publisher).toBeNull();
   });
 });
+
+describe("a file that names very many authors", () => {
+  it("dedupes them in time the file cannot choose", () => {
+    // **The count is the file's choice, so the cost of deduping must not be.**
+    // The array scan this replaced was quadratic in it: a minimal `dc:creator`
+    // is 26 bytes and `MAX_PACKAGE_BYTES` is 4 MiB, so 161,319 fit inside every
+    // bound the reader declares, and 50,000 measured 57,863 ms of frozen main
+    // thread on builder against 16 ms for the `Set`.
+    //
+    // **Two defects, and only one of them was the one reported.** The array
+    // scan was quadratic in any host. Spreading `parent.children`, a live
+    // collection whose index access is not required to be constant time, was
+    // quadratic in this file's jsdom: measured here, 4 times the creators took
+    // 14.8 times the wall clock before the sibling walk and 1.4 times after,
+    // and 4,000 creators went from 1,999 ms to 32 ms.
+    //
+    // **Bounded in wall clock rather than by asserting the implementation**,
+    // because what matters is that a member's tab survives, not which container
+    // was used. The ceiling is generous against what this measures so it does
+    // not redden on a loaded shared runner; the failure it catches is orders of
+    // magnitude away, not a factor of two.
+    const many = Array.from(
+      { length: 20000 },
+      (_, i) => `<dc:creator>Author Number ${i}</dc:creator>`,
+    ).join("");
+
+    const started = performance.now();
+    const record = readOpf(epub2(many));
+    const elapsed = performance.now() - started;
+
+    expect(record?.authors).toHaveLength(20000);
+    expect(elapsed).toBeLessThan(3000);
+  });
+
+  it("keeps the file's order and drops only repeats", () => {
+    // The array was doing two jobs and only one of them was the scan. Order is
+    // the file's, which is what an author list means.
+    const record = readOpf(
+      epub2(
+        "<dc:creator>Ursula K. Le Guin</dc:creator>" +
+          "<dc:creator>Joanna Russ</dc:creator>" +
+          "<dc:creator>Ursula K. Le Guin</dc:creator>",
+      ),
+    );
+    expect(record?.authors).toEqual(["Ursula K. Le Guin", "Joanna Russ"]);
+  });
+});

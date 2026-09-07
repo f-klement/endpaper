@@ -76,10 +76,11 @@ export const OWNERSHIP_LABELS: Record<OwnershipStatus, MessageKey> = {
 /**
  * What each format and condition is called.
  *
- * Here rather than in the copy editor because four things name them now: the
- * editor's dropdowns, the card's fold out, the table view and its column. Four
- * copies of a five-key table drift, and the copy that drifts is the one nobody
- * is looking at.
+ * Here rather than in the copy editor because a page's worth of things name
+ * them, and a list of which ones is the thing that goes stale: the version of
+ * this sentence that named four was already short by two. Copies of this table
+ * drift, and the copy that drifts is the one nobody is looking at, so every one
+ * of them is built from this pair rather than written out again.
  *
  * `Record<...>` and not a lookup with a default, for the same reason
  * `TAG_PILL_CLASSES` is: a value added to the backend enum has to be a compile
@@ -90,15 +91,24 @@ export const FORMAT_LABELS: Record<BookFormat, MessageKey> = {
   [BookFormat.paperback]: "copy.format.paperback",
   [BookFormat.ebook]: "copy.format.ebook",
   [BookFormat.audiobook]: "copy.format.audiobook",
+  [BookFormat.comic]: "copy.format.comic",
   [BookFormat.other]: "copy.format.other",
 };
 
-/** The order they are offered in, coarsest first. */
+/**
+ * The order they are offered in, coarsest first.
+ *
+ * **A list, so the type cannot see a missing value the way `FORMAT_LABELS`
+ * can**, and every dropdown and filter in the app is built from it: a format
+ * left out here is one a member can never choose and never filter by, with
+ * nothing red anywhere. `tests/pages/types.test.ts` asserts it covers the enum.
+ */
 export const FORMAT_ORDER: readonly BookFormat[] = [
   BookFormat.hardcover,
   BookFormat.paperback,
   BookFormat.ebook,
   BookFormat.audiobook,
+  BookFormat.comic,
   BookFormat.other,
 ];
 

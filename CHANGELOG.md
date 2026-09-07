@@ -6,11 +6,12 @@
 
 - A stored catalogue or OPDS login is now sealed against the address it may be sent to as well
   as against its source, so an envelope cannot be opened beside an address a hand edited archive
-  or a stray `UPDATE` put next to it. **Upgrading removes every login stored before this, and
-  they have to be entered again.** They are removed rather than reported, because a login left
-  behind is reported as unreadable and every sentence that says so points at the encryption key,
-  which in this case is not what is wrong. The key itself is untouched: the recovery phrase is
-  not involved and does not help.
+  or a stray `UPDATE` put next to it. **Upgrading costs you no catalogue login**: one stored
+  under the previous scheme is opened and re-sealed the first time it is used, at the address
+  this build publishes for that catalogue and nowhere else, so nothing has to be entered again
+  and no key or recovery phrase is involved. A login for your own OPDS server stored under that
+  scheme is refused rather than carried over, because its address is one somebody can edit; no
+  released version could store one.
 
 ### Added
 
@@ -90,6 +91,52 @@
   the catalogues answer. The lookup is offered rather than automatic and paced, so a folder of
   three hundred does not spend a morning's search budget in a minute. Files in formats Endpaper
   does not read are counted and reported rather than ignored.
+- **Read a `.mobi`, `.azw` or `.azw3` picked on the scan page.** The three are one Palm
+  Database container and one reader: the metadata is in the EXTH block inside record 0 and
+  needs no decompression, so it costs no dependency and no WebAssembly. Title, authors,
+  publisher, ISBN, publication year, language and description, all in your own browser.
+  **The ISBN arrives as its own typed record** rather than as a string to be sniffed, which
+  is worth more here than the same fact anywhere else in this set. A Palm Database that is
+  not a MOBI, from eReader, Plucker or PalmDOC, and a KFX container, are each refused as one
+  entry rather than breaking the import.
+- **A folder of chapter files is one audiobook, not thirty books.** The picker reads M4B and
+  tagged MP3 in your browser and groups the files that are one work before anything is
+  queued: files naming an album belong to that album on the folder they share, files naming
+  none belong to their own folder, and an M4B naming none is a book on its own. The queue
+  says how many files each candidate was made of, lists them, and offers to file them
+  separately. Nothing is written until you press Add all.
+- **`.mp3` joins the file picker**, which it could not do before the grouping rule existed:
+  admitting it earlier would have filed two hundred tracks as two hundred books.
+- **FictionBook files are read on the scan page**, `.fb2` and `.fb2.zip` both. FB2 separates
+  what every other format in the set runs together: each author arrives as first, middle and
+  last name rather than as one line, and a series arrives with its position beside it. Title,
+  ISBN, publisher, year, language and the annotation come too. It is the first format Endpaper
+  reads that carries a series as a typed field. Nothing is uploaded: a `.fb2` is read a header
+  at a time off the front of the file, and a `.fb2.zip` through the same archive reader the
+  EPUB path uses.
+- **A comic is a book with a format of its own, and Endpaper reads a CBZ.** `Comic` joins
+  Hardcover, Paperback, Ebook and Audiobook, so a comic can be filed, filtered and imported as
+  what it is rather than as `Other`. A `.cbz` picked on the add-from-a-file panel is read in
+  your own browser: where it carries a `ComicInfo.xml` it yields the series, the issue number,
+  the writer, the publisher, the year, the language and the summary, and where it does not,
+  which is the ordinary comic, the file name and the folder above it take over. An importer's
+  `Comic`, `Graphic novel`, `Manga`, `CBZ` or `CBR` column lands on the same format.
+- **CBR is not read, and that is a licence rather than a gap.** A CBR is a RAR archive and the
+  standard decoder's licence forbids using it to recreate RAR compression, which is not
+  something a published image can carry. A CBR named in an export, or attached to a book in an
+  imported Calibre library, still files as a comic.
+- **A PDF picked in the importer is read for what it says about the book, and handed to the
+  filename lookup when it says nothing**, which is the common case rather than the broken one.
+  Measured by the reader that ships over 123 PDFs from four folders of one household's book
+  share: **66 of them, 53.7%, carry a title worth using, and 3, 2.4%, carry an identifier of any
+  kind**, two of those three being a DOI rather than an ISBN. Where the file names a title, an author, a publisher, a language,
+  a year or a description, the draft is filled from it; where it names nothing usable, the file
+  goes to the catalogue under its own name, which is the path that was already there. A PDF
+  that is encrypted, damaged or not a PDF at all is one failed entry with a reason, never a
+  stopped import. **Nothing was added to the bundle**: the reader is the app's own and ships as
+  5,520 bytes gzipped, loaded only when a `.pdf` is picked, against pdf-lib 1.17.1 at 179,941
+  and pdfjs-dist 6.3.289 at 502,948, the cheaper of which would have read fewer fields than
+  this does.
 
 ### Changed
 
@@ -184,6 +231,14 @@
   It had no draft, so it was not in the batch, and the queue was then replaced by the failures
   alone: the book was gone between the shelf and the catalogue with nothing on screen saying so.
   Everything the batch was never offered now stays in the queue.
+- **A hostile ebook can no longer freeze the tab.** Two paths in the EPUB metadata reader
+  grew with the square of a count the file itself chooses: deduplicating authors, and reading
+  a parent's child elements. A file naming many authors took nearly a minute of frozen page
+  where it now takes milliseconds, and both paths sat inside every size bound the reader
+  declares.
+- **What an audiobook's tags are not read for.** The album artist holds the narrator in real
+  files and the date holds the year of the recording rather than of the book, so neither
+  reaches a row rather than filing a wrong fact.
 
 ## v0.13.0
 

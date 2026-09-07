@@ -179,7 +179,11 @@ def edit_server(
 
     **Moving it to a different origin drops the stored login**, and what that
     buys changed when the envelope started carrying its origin: the login can no
-    longer be sent to the new address, because it does not open there. What this
+    longer be sent to the new address, because it does not open there. That is
+    true of a household server's envelope at every version, because the
+    superseded scheme is refused outright for one: `credentials._may_open_unbound`
+    opens such an envelope only at the address this build published for its own
+    roster source, and a household server has neither. What this
     still does is make the row honest. A login left behind would report as held
     and unreadable for the rest of its life, which reads as a damaged row and
     sends somebody to the recovery phrase. The response reports the credential

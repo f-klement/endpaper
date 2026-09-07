@@ -11216,28 +11216,79 @@ was not sealed for, whichever writer moved the row. The restore filter stays as 
 costs nothing once the binding holds and it refuses one step earlier, at the archive rather than
 at the send.
 
-**Existing envelopes are invalidated at migration time by removal, and that is a product
-decision rather than a detail.** An operator upgrading with logins stored loses all of them and
-enters them again; the encryption key is untouched, so the recovery phrase is not involved and
-does not help.
+**Existing envelopes are carried forward rather than invalidated, and that is a product
+decision rather than a detail.** An earlier version of this work deleted every one at migration
+time, so a household upgrading lost every catalogue login it had stored. **Owner's decision,
+2026-09-07: that is not an acceptable upgrade.**
 
-Re-sealing at migration time was refused for a reason rather than for effort: it needs the key,
-which is a deployment fact a migration cannot depend on, and it would re-seal from the address
-the row already names, so a deployment whose row had already been moved by a hostile archive
-would have the migration launder that move into a valid binding. Re-sealing on first successful
-use closes nothing, because it needs the old scheme kept openable.
+**The deletion took the wrong half of a split.** An envelope from the older scheme is bound to
+its source and not to its address, so opening one beside an address somebody else chose requires
+somebody who can choose one. For a roster catalogue nobody can: the address is
+`targets.SEEDED[...].base_url`, a module constant. For a household OPDS server somebody can,
+which is the case the binding was made for, and no release has ever contained one. So the
+envelopes that exist in the field are the only ones eligible to be carried forward, and
+eligibility is not sufficient: each opens at one address and not at any other roster address.
 
-**Leaving the rows to be reported was preferred until it was measured**, and this is the finding
-that changed it: there is no OPDS server screen in the frontend, so a household's invalidated
-login would surface as a bare `opds-` and sixteen hex characters in the encryption key section,
-with no name and no way to tell which machine it was for. Every sentence an admin reads for an
-unreadable login begins at the key, which here is intact. A row left behind would have been
-reported wrongly, and anonymously.
+**The split has to be enforced and not merely argued, and it took three attempts.** The first
+predicate took a source and never read the address, so a catalogue envelope opened anywhere,
+including at another catalogue's address. The second read only the address, which reopened the
+household case as soon as an archive pointed a row at a catalogue's address. Each covered one
+axis of a two axis rule, and each was measured open by a critic seat.
 
-`credentials.UnboundCredential` remains for the one route that still brings a pre-binding
-envelope back: restoring an archive taken before the upgrade. So `v1` stays in the set that is
-recognised as an envelope at all, while `VERSION` is the only thing `unseal` opens. Conflating
-those two sets is the mistake to avoid.
+**`credentials._may_open_unbound` is the rule**: a superseded envelope opens at the address this
+build published for that very source, and nowhere else. It is the rule `shipped` already applies
+to a value that ships with the build, which is the argument for it being that one rather than a
+third invention. `UnboundCredential` is the refusal.
+
+Recorded because the argument was right twice while the code implemented half of it, which is
+the pairing a reader agrees with and reads past.
+
+**The re-seal happens on the read path and not in the migration**, and both refusals that ruled
+out a migration are answered there. It needs the key, which a migration cannot depend on: on the
+read path the key is proven by the open that just succeeded. And it would re-seal from the
+address the row already names, laundering a move a hostile archive had made: on the read path
+the address is the one the caller is about to use, which is what `unseal` is already bound to.
+
+**What ends the older scheme's acceptance is the address rule, and the rule rests on one
+premise.** An envelope opens only at the address this build publishes for its own source, so a
+typed or edited address is refused without anything having to notice. That covers a catalogue
+row somebody edits and a host somebody types, **in the shape where the runtime is handed such an
+address**. Three `ast` walks watch for either landing anyway, as early warning, and the class
+docstring names the shapes they cannot see.
+
+**The premise is that the roster itself is code, and both critic seats found independently that
+it was guarded by nothing.** The rule reads `targets.SEEDED` on the published side of its own
+comparison, so a write there moves the baseline and the envelope opens wherever the write said,
+with the address free projection moving along and nothing reporting anything. One subscript
+assignment inverted it. The walk that watched for this caught only a rebinding, which `Final`
+already refuses under mypy, and missed both shapes that can reach the seeder: an item assignment
+and an `update`. A guard whose covered case was the one already covered.
+
+`targets.SEEDED` is a `MappingProxyType` with its literal inline, so no writable name is bound
+to the mapping at any point: every write through a name raises, and mypy refuses both shapes
+statically. **A proxy is not a security boundary**, and the bound is stated at the code: the
+wrapped dict remains reachable through the garbage collector and remains writable. What this
+buys is that no ordinary line reaches it.
+
+**A private alias was the first repair and reopened the finding one indirection along**, because
+`SLF` is not in this project's ruff selection, so `targets._SEEDED[k] = v` passed every check in
+the gate. The seats then differed on the second repair, deleting the name against inlining the
+literal, and the tree settled it: deleting left the house rules exempting a constant that no
+longer existed, which `test_every_exemption_still_exists_to_be_exempted` exists to catch.
+
+Serving the roster from the table therefore takes one of two shapes, and they are refused by
+different things. **Replacing the object from outside `targets.py`** is a rebinding, which
+`Final` refuses under mypy and the rebind walk names loudly. **Changing the initialiser inside
+that module** is not a rebinding, so `Final` permits it and the walk excludes that file by name;
+what refuses it is that `targets.py` may import nothing that can reach a database, which is an
+arm of its own. Either way it is a code change, and it is the point at which the superseded
+scheme has to stop being opened at all.
+
+**The downgrade still deletes and the asymmetry is deliberate.** Going back narrows the
+constraint, so a row the narrowed one cannot hold has to go or the whole downgrade fails on the
+copy a batch rebuild performs. Upgrading is the ordinary thing to do and must cost nothing;
+downgrading to a build that cannot open the current scheme costs those rows whatever happens, so
+deleting them names it rather than leaving rows no build can read.
 
 **Both defects came from a fix round rather than from the original work**, which is the shape
 this process expects: the replacement was better in the dimension it was designed for, the
@@ -11325,3 +11376,164 @@ bounds would not catch it, 101 being inside the column's range.
 244 more carrying only an identifier this schema cannot hold, of which the largest group is
 Calibre's own internal id. Recorded rather than fixed: a second identifier column is a schema
 change nobody has asked for, and the count is what would justify it.
+
+## Which sibling audio files are one book
+
+For every other format one file is one book. For an audiobook a book is usually a folder of
+chapter files, and a picker keeping that assumption produces thirty rows from one work.
+
+**The rule: a book's identity is what its files claim, and its folder is where the claim is
+trusted.** A file naming an album belongs to that album among the files on the same **shelf**,
+the folder one level above its own; a file naming none is its own folder's book if it is a
+track container, and a book on its own if it is a book container.
+
+**The shelf is the only chosen part.** The album says which book; the shelf stops two different
+books sharing a title from merging, and one level up is where a library on disk puts an author,
+a series or its own root. It is also what holds `Book/CD1` and `Book/CD2` together.
+
+**The two wrong directions are not symmetric.** Over grouping is undone by the member, who is
+shown the file list and offered a split before anything is written. Under grouping files a
+folder as thirty books, which is the failure the ticket says makes the feature worse than not
+having it. So the rule is confirmed rather than trusted, and nothing is written until it is.
+
+## What real audiobook files say that the ticket did not
+
+**The household library holds no audio at all**, established rather than assumed: `find /books`
+for every audio extension returned zero. The corpus is LibriVox, public domain by that
+collection's own policy, plus three podcasts by other producers read only for container shape.
+
+**The album artist is not a second author: it is the narrator.** A file carries the author in
+`TPE1` beside the LibriVox reader in `TPE2`. Neither that nor its M4B equivalent is read.
+
+**The date tag is the year of the recording, not of the book.** Defoe's Robinson Crusoe carries
+2006 and Mommsen's Römische Geschichte 2008, wrong by 287 and 152 years. No year is taken from
+an audio tag; a year in the file **name** still is.
+
+**A prefix read does not reach an M4B's tags.** The container's user data sits at the end of
+its metadata box, past the sample tables: the tags of a 193 MB file begin 4,248,408 bytes in.
+The reader seeks box by box and takes under 4 KB of a file of any size, which is why the
+ticket's implied prefix read would have found nothing.
+
+**A published LibriVox folder holds every chapter twice, at two bitrates**, so its file counts
+are double its chapter counts. Worth knowing before quoting one as a chapter count.
+
+## What MOBI cannot supply, and where its ISBN comes from
+
+**MOBI has no series, subtitle or page count, and that is the format rather than the reader.**
+EXTH carries no record for any of them in either independent implementation, and Calibre, which
+invented the EPUB 2 spelling of a series because that format lacked one too, writes nothing for
+it here. Do not add a heuristic pulling a series out of a title.
+
+**The ISBN is read from EXTH 104 and from nowhere else**, which is the opposite of the EPUB
+reader. An EPUB's ISBN arrives undeclared, so that reader has to try every identifier; here it
+arrives typed, and of 69 real files not one carried an ISBN shaped value in any other record.
+
+**EXTH 113 and 112 are not read though 61 and 60 of 69 files carry them.** The format calls 113
+the ASIN; not one of the 61 holds an Amazon identifier, because Calibre writes its own library
+uuid there and Standard Ebooks a content hash. 112 is a provenance URL. Both identify the
+production of the file rather than the book.
+
+**A year window was needed because of a value real files carry.** Calibre writes a date meaning
+"none" that parses to the year 101, and 2 of 69 files carry it. That year is inside the column's
+own range, so nothing downstream would have stopped it.
+
+## A measurement in published prose names its corpus and its instrument in the same clause
+
+Raised by a security seat, 2026-09-07, after one change attached a correct number to the wrong
+thing three times: a count of null slices credited to 69 real files when it came from 224,769
+fuzzed inputs, two durations credited by proximity to one node when they were measured on
+another, and a header length credited to 35 of 69 files when the two values were 30 and 36.
+
+**Nobody invented a figure.** Each time the count survived being moved and its provenance did
+not, which is why re-reading never caught one and re-deriving caught all three.
+
+This is not the existing rule that a number stops being re-derived once written down. It is the
+sentence after it: a guard that recomputes a number from its own source is worth more than a
+careful reader, and **none of these three numbers can have one**. Keeping the attribution inside
+the same clause as the count is the cheapest thing that survives a copy.
+
+## `BookFormat.COMIC` earned a value where a magazine did not
+
+The enum's own docstring said the list stays short and named a magazine and a pamphlet as
+things that do not earn one. The owner settled on 2026-09-05 that a comic does. What was
+missing was a criterion, without which the next reader reads the sixth member as licence for
+a seventh.
+
+**The criterion is a file container of its own.** Not how common the thing is, and not what an
+importer's vocabulary can be taught: `csv_import.FORMAT_GUESSES` is one line to extend, so a
+criterion resting on it forbids nothing. A container has to exist in the world. `.cbz` is
+written for comics and for nothing else, so a comic files itself; a magazine has no such
+container and a `MAGAZINE` member could only ever be typed, which is what `OTHER` already
+holds. `HARDCOVER`, `PAPERBACK`, `EBOOK` and `AUDIOBOOK` predate the test and are the axis the
+enum was made for, and the enum says so rather than implying they would pass it.
+
+**No migration, checked against the database a deployment has.** `books.format` is a plain
+`String(20)` with no check constraint, so the closed set lives in Python and in the schema. The
+reasoning is a `#` comment above the class rather than in its docstring, because FastAPI copies
+the docstring into `openapi.json` and serves it: a maintenance note is not part of the API's
+description of the type.
+`tests/test_schema.py::TestTheBookFormatColumnOnAMigratedDatabase` migrates to head and then
+stores every member, so a later revision that constrained the column fails there rather than at
+somebody's import.
+
+## A CBZ carrying no metadata is not a failure
+
+Measured 2026-09-07 over 81 CBZ archives in the Internet Archive's `comics` collection, read
+through that site's zip listing endpoint: 6 carry a `ComicInfo.xml` and 75 do not. The six come
+from three uploads between them, so the figure says the document is rare and does not say how
+rare; the presence of the document was confirmed on a 17 archive subsample by reading each
+archive's own central directory over range requests, which agreed on 16 and could not read 1.
+
+So `lib/cbz.ts` returns an empty record for an archive that says nothing and reserves its one
+failure for a file that is not an archive at all. It also never checks that the entries are
+images, because the set of image formats is open and refusing an unlisted one would refuse a
+real comic.
+
+## A comic's title is the file's own, and the series is not repeated into it
+
+**The file's `Title` is the title, and the series and the number go to `series_name` and
+`series_index`**, which is what an EPUB's `dc:title` already does. `Saga #12` is what a comic
+catalogue calls an issue and it is the wrong value for this column, because the library list,
+the table's series column and the book page's heading each already print `Saga, book 12` beside
+whatever the title is: composing it in as well spells the same two facts twice on three
+surfaces.
+
+**The composition survives for a file that gives no `Title`**, which is most single issues and
+where the series and the number are the only name the object has.
+
+**A collected volume comes through identically to a single issue**, because the format carries
+no field that separates the two: `Series` plus `Number` means "the Nth thing in this series"
+for both, and Endpaper's two columns say exactly that and no more.
+
+## A PDF that opens and names no title still says so
+
+57 of the corpus's 123 reach it. The row is `derived` rather than `failed`, it renders in the
+muted colour beside "from the name", and the note is there to say where the title came from.
+Dropping it for PDF alone would make one surface behave per format for no gain; dropping it
+everywhere would take the explanation away from EPUB and MOBI, where a missing title is a
+surprise. Raised by the design seat 2026-09-08 and answered rather than taken.
+
+## A PDF's `/CreationDate` is not read as a publication year
+
+112 of the 123 carry one with a plausible year and reading it would look like a large gain. It
+is the date the file was made: where a file carries both, it disagrees with the file's own XMP
+date in 5 of the 13, and a scan of a 1960s book made in 2015 would be filed under 2015. The
+catalogue lookup answers the year instead.
+
+## Encryption is decided by `/Encrypt` resolving to a dictionary, not by the key being present
+
+1 of the 123 carries `/Encrypt null` in its trailer, left by a revision that removed the
+encryption, and its strings are plaintext and correct. pypdf 6.10.2 does not make the
+distinction and fails that file with an unhandled `AttributeError`.
+
+## Two readers' corpora were re-derived, and both named the wrong population
+
+`fb2.ts` credited a count of 2,372 files to the household's Calibre library and `pdf.ts`
+credited 123 PDFs to the household's library. Re-derived 2026-09-08 against the running
+`calibre-web` pod, by extension histogram and again by name: 2,372 is the whole books share,
+the Calibre library on its own is 2,078, and the share holds 243 PDFs of which the PDF corpus
+is the 123 outside Calibre. **Every count was right and both attributions were wrong**, which
+is the shape the entry above on naming a corpus and its instrument in one clause describes, and
+it arrived in the same wave that entry was written. Neither can carry a guard: the corpus is
+not in this repository. What is cheap is stating the exclusion, so both now say what they are
+**not** counting.

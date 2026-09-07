@@ -19,7 +19,35 @@ import {
 } from "../../../src/pages/ScanPage/hooks";
 import { makeBook, resetIds } from "../../factories";
 import { epubFile, packageDocument } from "../../zipFixtures";
+import { id3v2, mp3, plainFrame } from "../../audioFixtures";
 import { mockApi, renderHookWithProviders, type MockApi } from "../../utils";
+
+/**
+ * One chapter of an audiobook, tagged the way the measured LibriVox files are.
+ *
+ * `TALB` is the book, `TPE1` the author and `TIT2` this chapter, and the file
+ * sits in a folder named after the book, which is how one is on disk.
+ */
+function chapterFile(index: number, album: string) {
+  const file = new File(
+    [
+      mp3({
+        head: id3v2({
+          frames: [
+            plainFrame("TALB", album),
+            plainFrame("TPE1", "Daniel Defoe"),
+            plainFrame("TIT2", `Chapter ${index}`),
+          ],
+        }),
+      }),
+    ],
+    `chapter ${index}.mp3`,
+  );
+  Object.defineProperty(file, "webkitRelativePath", {
+    value: `${album}/chapter ${index}.mp3`,
+  });
+  return file;
+}
 
 let api: MockApi;
 
@@ -1119,7 +1147,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     });
   });
 
-  it("files an M4B as an audiobook and a comic as neither", async () => {
+  it("files an M4B as an audiobook and a CBZ as a comic", async () => {
     const { result } = renderRapid();
 
     act(() =>
@@ -1130,9 +1158,11 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     );
     await settled(result);
 
+    // The audio row is queued first and filled in once the pick has been read,
+    // because which audio files are one book is not known until then.
     expect(result.current.entries.map((entry) => entry.format)).toEqual([
       "audiobook",
-      "",
+      "comic",
     ]);
   });
 
@@ -1157,6 +1187,126 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     ).searchParams;
     expect(query.get("q")).toBe("The Dispossessed");
     expect(result.current.entries[0]?.matches).toHaveLength(1);
+  });
+
+  it("makes one row of a folder of chapter files, not one each", async () => {
+    // The whole ticket. Thirty seven rows from one audiobook is a mess
+    // proportional to the size of a library.
+    const chapters = Array.from({ length: 37 }, (_, index) =>
+      chapterFile(index, "Robinson Crusoe"),
+    );
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles(chapters));
+    await settled(result);
+
+    expect(result.current.entries).toHaveLength(1);
+    expect(result.current.entries[0]).toMatchObject({
+      format: "audiobook",
+      state: "derived",
+      draft: { title: "Robinson Crusoe", author: "Daniel Defoe" },
+    });
+  });
+
+  it("says how many files the row was made of, before anything is added", async () => {
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([
+        chapterFile(0, "Robinson Crusoe"),
+        chapterFile(1, "Robinson Crusoe"),
+      ]),
+    );
+    await settled(result);
+
+    expect(result.current.entries[0]?.group?.files).toHaveLength(2);
+  });
+
+  it("files the parts as separate books when the member says so", async () => {
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([
+        chapterFile(0, "Mixed"),
+        chapterFile(1, "Mixed"),
+      ]),
+    );
+    await settled(result);
+    const key = result.current.entries[0]!.key;
+
+    act(() => result.current.splitApart(key));
+    await waitFor(() => expect(result.current.entries).toHaveLength(2));
+
+    // The album they shared is gone with the grouping the member rejected, so
+    // each is named after its own chapter.
+    expect(result.current.entries.map((entry) => entry.draft?.title)).toEqual([
+      "Chapter 0",
+      "Chapter 1",
+    ]);
+  });
+
+  it("queues nothing twice when the same folder is picked again", async () => {
+    const chapters = [chapterFile(0, "Dune"), chapterFile(1, "Dune")];
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles(chapters));
+    await settled(result);
+    act(() => result.current.pickFiles(chapters));
+    await settled(result);
+
+    expect(result.current.entries).toHaveLength(1);
+  });
+
+  it("shows the picker as busy while a pick is being read", async () => {
+    // A folder of chapter files has nothing to show until it has been grouped,
+    // and a picker that shows nothing meanwhile reads as one that is broken.
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([chapterFile(0, "Dune")]));
+
+    expect(result.current.isReading).toBe(true);
+    await settled(result);
+  });
+
+  it("falls back to the folder's name when the files carry no tags", async () => {
+    // The ordinary case for anything somebody ripped themselves.
+    const { result } = renderRapid();
+    const files = [0, 1].map((index) => {
+      const file = new File([mp3()], `${index}.mp3`);
+      Object.defineProperty(file, "webkitRelativePath", {
+        value: `The Hobbit/${index}.mp3`,
+      });
+      return file;
+    });
+
+    act(() => result.current.pickFiles(files));
+    await settled(result);
+
+    expect(result.current.entries).toHaveLength(1);
+    expect(result.current.entries[0]?.draft?.title).toBe("The Hobbit");
+  });
+
+  it("adds one audiobook rather than one book per chapter", async () => {
+    api.on("/api/books/scan", { body: makeBook() });
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([
+        chapterFile(0, "Robinson Crusoe"),
+        chapterFile(1, "Robinson Crusoe"),
+        chapterFile(2, "Robinson Crusoe"),
+      ]),
+    );
+    await settled(result);
+
+    act(() => result.current.addAll());
+
+    await waitFor(() => expect(result.current.result?.added).toBe(1));
+    expect(api.lastCall("/api/books/scan", "POST")?.body).toMatchObject({
+      title: "Robinson Crusoe",
+      author: "Daniel Defoe",
+      format: "audiobook",
+    });
   });
 
   it("takes an ISBN in the name to the lookup, never to the fan out", async () => {

@@ -21,8 +21,10 @@ import {
   BookFormat,
   ClassificationScheme,
 } from "../../../src/api/generated/model";
+import type { AudiobookGroup } from "../../../src/lib/audiobookGroups";
 import {
   blankPending,
+  draftFromAudiobook,
   draftFromFile,
   toCopyRequest,
   toScanRequest,
@@ -547,6 +549,77 @@ const CARRIES_A_BOOK = /\b(?:File|Blob|ArrayBuffer|Uint8Array)\b/;
  * instrument twice. A count of one string over the source has no signature to
  * parse and no spelling to enumerate.
  */
+
+describe("draftFromAudiobook", () => {
+  /** One candidate book, as `groupAudiobooks` describes it. */
+  function group(over: Partial<AudiobookGroup> = {}): AudiobookGroup {
+    return {
+      files: [],
+      by: "album",
+      album: "Robinson Crusoe",
+      authors: ["Daniel Defoe"],
+      title: null,
+      ...over,
+    };
+  }
+
+  it("takes the album as the book and the artists as its authors", () => {
+    expect(draftFromAudiobook(group())).toMatchObject({
+      title: "Robinson Crusoe",
+      author: "Daniel Defoe",
+      isbn: "",
+      notFound: true,
+    });
+  });
+
+  it("joins every author with the separator the server splits on", () => {
+    // A collection is one audiobook by ten writers, and the line has to round
+    // trip through `backend/authors.py`, which splits on a comma and nothing
+    // else.
+    const many = group({ authors: ["Saki", "Mark Twain", "Kate Chopin"] });
+
+    expect(draftFromAudiobook(many)?.author).toBe(
+      "Saki, Mark Twain, Kate Chopin",
+    );
+  });
+
+  it("falls back to the one file's own title when no album was named", () => {
+    expect(
+      draftFromAudiobook(group({ album: null, title: "Mort" }))?.title,
+    ).toBe("Mort");
+  });
+
+  it("answers null when the files named no book at all", () => {
+    // The caller then derives the same draft from the folder's name. A blank
+    // title here would be a 422 in the middle of somebody's batch.
+    expect(draftFromAudiobook(group({ album: null, title: null }))).toBeNull();
+  });
+
+  it("answers null for a title that is only whitespace", () => {
+    expect(draftFromAudiobook(group({ album: "   ", title: null }))).toBeNull();
+  });
+
+  it("cuts a title the column could not hold rather than losing the book", () => {
+    const long = draftFromAudiobook(group({ album: "x".repeat(600) }));
+
+    expect(long?.title).toHaveLength(500);
+  });
+
+  it("cuts an author line the column could not hold", () => {
+    // Cut rather than dropped, the same as every other path into `BookCreate`:
+    // `author` is in `CUT_TO_FIT`, and a cut author line still names the first
+    // of them.
+    const long = draftFromAudiobook(group({ authors: ["y".repeat(600)] }));
+
+    expect(long?.author).toHaveLength(500);
+  });
+
+  it("names no year, because an audio tag's year is the recording's", () => {
+    // Measured: Defoe's Robinson Crusoe carries `TYER 2006`. `lib/audiobook.ts`
+    // does not read one, and this is the other end of that decision.
+    expect(draftFromAudiobook(group())).not.toHaveProperty("year");
+  });
+});
 
 describe("this module names a File exactly once", () => {
   const SOURCE = import.meta.glob(

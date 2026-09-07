@@ -1702,9 +1702,18 @@ class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
 
         assert response.status_code == 200, response.text
         db.expire_all()
-        with pytest.raises(credentials.UnboundCredential):
-            credentials.stored(db, "bne", BNE_URL)
-        assert credentials.view(db, "bne", BNE_URL).unreadable is True
+
+        # **And it opens, which it did not when this test was written.** Owner's
+        # decision, 2026-09-07: an upgrade may not cost a household its logins,
+        # so an envelope from the older scheme is opened at its own version
+        # rather than refused. Restoring an archive taken before the binding is
+        # the ordinary move-to-a-new-machine case, and it now costs nothing.
+        assert credentials.stored(db, "bne", BNE_URL) == ("alice", "hunter2")
+        assert credentials.view(db, "bne", BNE_URL).unreadable is False
+
+        # The read carried it forward, so the restored row is bound to the
+        # address like any other and the older scheme is empty again.
+        assert credentials.stored_envelope(db, "bne").split(".")[0] == credentials.VERSION
 
     def test_an_archive_naming_a_source_shaped_like_a_path_is_refused(
         self, client, admin, stored

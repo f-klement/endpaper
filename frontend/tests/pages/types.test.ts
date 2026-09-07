@@ -10,11 +10,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
+  BookFormat,
   LendingWillingness,
   Locale,
   TagCategory,
 } from "../../src/api/generated/model";
 import {
+  FORMAT_LABELS,
+  FORMAT_ORDER,
   LENDING_LABELS,
   LENDING_ORDER,
   MODE_LABELS,
@@ -48,6 +51,32 @@ describe("TAG_CATEGORY_ORDER", () => {
       TagCategory.age,
       TagCategory.custom,
     ]);
+  });
+});
+
+describe("FORMAT_ORDER", () => {
+  it("covers every format", () => {
+    // **The list the type cannot check.** `FORMAT_LABELS` is a total `Record`,
+    // so a format with no name is a compile error; this is a plain array, and
+    // every dropdown and filter in the app is built from it. A format left out
+    // is one a member can never choose and never filter by, with nothing red.
+    expect(new Set(FORMAT_ORDER)).toEqual(new Set(Object.values(BookFormat)));
+  });
+
+  it("offers each one once", () => {
+    // A duplicate is two identical options in every dropdown built from this.
+    expect(FORMAT_ORDER).toHaveLength(new Set(FORMAT_ORDER).size);
+  });
+
+  it("keeps the catch-all last", () => {
+    // Wherever the rest end up, "Other" is not a peer of the ones above it.
+    expect(FORMAT_ORDER.at(-1)).toBe(BookFormat.other);
+  });
+
+  it("names every one of them", () => {
+    for (const format of FORMAT_ORDER) {
+      expect(FORMAT_LABELS[format]).toBeTruthy();
+    }
   });
 });
 

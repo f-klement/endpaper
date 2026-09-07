@@ -30,6 +30,15 @@ interface RapidQueueProps {
   onStopLookUp: () => void;
   onChoose: (key: string, match: BookMatch) => void;
   onKeepName: (key: string) => void;
+  /**
+   * File one audiobook candidate's parts as a book each.
+   *
+   * **The one control that can undo the grouping rule**, and the reason every
+   * grouped row says how many files it is: a member who is shown "40 files, as
+   * one audiobook" and disagrees has somewhere to press. Without it the only way
+   * out is to remove the row and pick the files one at a time.
+   */
+  onSplit: (key: string) => void;
 }
 
 /**
@@ -58,6 +67,7 @@ export default function RapidQueue({
   onStopLookUp,
   onChoose,
   onKeepName,
+  onSplit,
 }: RapidQueueProps) {
   const { t } = useTranslation();
 
@@ -205,6 +215,39 @@ export default function RapidQueue({
                 ×
               </button>
             </div>
+
+            {/* **What a candidate is made of, and the way out of it.** For
+                every other format one file is one book, so a row that stands
+                for forty files has to say so before the batch runs:
+                nothing here is written until "Add all", and this is the moment
+                a member can see the grouping was wrong and undo it. */}
+            {entry.group && entry.group.files.length > 1 && (
+              <div className="mt-1.5 text-xs">
+                <details>
+                  <summary className="cursor-pointer text-paper-600 dark:text-paper-400">
+                    {t("audio.grouped", { count: entry.group.files.length })}
+                  </summary>
+                  <ul className="mt-1 ml-3 space-y-0.5 max-h-32 overflow-y-auto text-paper-600 dark:text-paper-400">
+                    {entry.group.files.map((file) => (
+                      <li key={file.key} className="truncate">
+                        {file.name}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+                <button
+                  type="button"
+                  onClick={() => onSplit(entry.key)}
+                  disabled={busy}
+                  // The visible words are the same on every grouped row and the
+                  // accessible name is not, for the reason the match rows give.
+                  aria-label={t("audio.splitFor", { label: entry.label })}
+                  className="mt-1 text-paper-600 underline hover:text-paper-800 disabled:opacity-50 dark:text-paper-400 dark:hover:text-paper-200"
+                >
+                  {t("audio.split")}
+                </button>
+              </div>
+            )}
 
             {/* Accept or reject, per file. The ranking already put the likeliest
                 record first, and the rest are here to be disagreed with. */}

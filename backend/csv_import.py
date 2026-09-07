@@ -255,6 +255,24 @@ FORMAT_GUESSES: Final[dict[BookFormat, tuple[str, ...]]] = {
     ),
     BookFormat.EBOOK: ("ebook", "e book", "kindle edition", "epub", "digital"),
     BookFormat.AUDIOBOOK: ("audiobook", "audio", "audible audio", "audio cd", "hoerbuch"),
+    # A container name is a format vocabulary here, the way `epub` already is
+    # for EBOOK: a Calibre or Komga export writes `CBZ` in the column where
+    # Goodreads writes `Paperback`. `cbr` earns a spelling for the reason its
+    # refusal is stated in `frontend/src/lib/cbz.ts`: this app will not parse
+    # one, and a member who owns one still owns a comic.
+    #
+    # **`trade paperback` is deliberately not here** and stays with PAPERBACK,
+    # where it already is. It is the binding of a collected comic and it is
+    # also the binding of an ordinary novel, and this table sees only the word.
+    BookFormat.COMIC: (
+        "comic",
+        "comics",
+        "comic book",
+        "graphic novel",
+        "manga",
+        "cbz",
+        "cbr",
+    ),
 }
 
 

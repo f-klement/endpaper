@@ -184,8 +184,9 @@ class PublicBookOut(BaseModel):
     series_index: float | None = None
     language: str | None = None
     page_count: int | None = None
-    #: Paperback, hardback, ebook, audiobook. A fact about the object, and the
-    #: one such fact that decides whether a patron can use it at all.
+    #: What kind of object the copy is, from `enums.BookFormat` rather than
+    #: listed again here. A fact about the object, and the one such fact that
+    #: decides whether a patron can use it at all.
     format: BookFormat | None = None
     categories: list[str] = []
     #: This library's own vocabulary for the work.

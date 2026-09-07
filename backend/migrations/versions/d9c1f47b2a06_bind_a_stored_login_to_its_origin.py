@@ -17,69 +17,37 @@ The envelope now carries the origin, so it is unopenable at an address it was
 not sealed for **whichever writer moved the row**, rather than only through the
 one route that was measured.
 
-## What this migration actually does, and what it deliberately does not
+## What this migration actually does
 
-It widens `ck_catalogue_credentials_envelope` by one version and deletes every
-envelope the new scheme cannot open.
+It widens `ck_catalogue_credentials_envelope` by one version. That is all of it.
 
-**No row is decrypted here, and that was the alternative.** Re-sealing an
-existing envelope at migration time would need the key, which is a deployment
-fact this file cannot depend on: a key may sit in an environment variable, a
-keychain or a file, and a machine that has none upgrades exactly as one that
-has. A migration whose behaviour depends on that is one that silently does
-different things on two deployments. Worse, it would re-seal from **the address
-the row already names**, so a deployment whose `opds_servers` row had already
-been moved by a hostile archive would have this migration launder the move into
-a valid binding. Re-sealing on first successful use was the third option and it
-is the one that closes nothing: it needs the old scheme kept openable, which is
-the hole.
+**No row is decrypted here and no row is removed.** An earlier draft deleted
+every envelope the new scheme could not open, which meant a household upgrading
+lost every catalogue login it had stored. Owner's decision, 2026-09-07: that is
+not an acceptable upgrade, and the reasoning that produced it took the wrong
+half of a split.
 
-## What an upgrading deployment sees, stated because it is a product decision
+**The split.** A roster catalogue's address is `targets.SEEDED[...].base_url`, a
+module constant with no writer, so an envelope bound to the source alone cannot
+be opened beside an address somebody else chose: nobody can choose one. A
+household OPDS server's address is a row, which is the case that made the
+binding necessary, and `backup.restore` already drops those credentials. So the
+envelopes that exist in the field are exactly the ones that can be carried
+forward safely, and the ones that could not be were never released.
 
-**Every login stored before this is invalidated and has to be typed again.**
-The rows are removed here rather than left to be reported, and leaving them was
-the first choice: a row that survives can say "this cannot be read, enter it
-again" beside the name, where a row that is gone says nothing at all.
+**Re-sealing happens on the read path instead, not here.** `credentials.unseal`
+opens a `v1` envelope at its own version and the caller re-seals it, so the old
+scheme empties itself as logins are used and the key is already proven by the
+open that just succeeded. A migration cannot prove that: a key may sit in an
+environment variable, a keychain or a file, and a machine upgrading without one
+would have lost the logins anyway. Re-sealing here would also have taken the
+address **the row already names**, which is the laundering this design refuses.
 
-**What decided it was measuring what a person would actually be shown.** There
-is no screen for a household's OPDS servers: `credential_unreadable` is
-rendered in one place, the catalogue logins section, which lists roster sources
-only. A household's invalidated login would therefore surface as a bare
-`opds-<16 hex>` in the encryption key section with no name and no way to tell
-which machine it was for. And the two sentences an admin reads for an
-unreadable login both begin at the key, because for four of the five causes
-that is where the remedy is; for this one the key is intact and the phrase
-opens nothing. So a row left behind would be reported wrongly, and for a
-household's server it would be reported anonymously.
+**What ends the old scheme's acceptance is a guard rather than a date.** It is
+safe only while a roster address is a module constant, so
+`test_credentials.py` fails when the ticket that makes a catalogue row editable
+lands. `credentials._UNBOUND_VERSION` carries the condition.
 
-Removed, every screen already renders the result correctly: the source has no
-login, and entering one is the same action it would have been. The loss is
-stated in the changelog and here, which is where a deployment goes to find out
-what an upgrade did.
-
-**`credentials.UnboundCredential` stays, because this is not the only way a
-`v1` envelope arrives.** Restoring an archive taken before this upgrade brings
-them back, and that path has to be legible: the refusal names the cause and is
-separate from a rotated key and from a damaged row on purpose, since those
-three have three different remedies and only this one is "type it again" with
-nothing else to check.
-
-## Why `v1` is still admitted by the constraint
-
-An archive taken before this upgrade carries `v1` rows, and `backup.restore`
-inserts them through Core. Refusing them at the insert would fail an entire
-restore over logins whose only remedy is to be typed again, which is the failure
-`models.CatalogueCredential`'s missing foreign key exists to avoid. So the shape
-check admits both and `credentials.unseal` opens one. The two sets have names:
-`credentials.KNOWN_VERSIONS` and `credentials.VERSION`.
-
-## What the downgrade loses
-
-Every login stored since this ran. The old constraint admits `v1` alone, and a
-batch rebuild copies the rows through it, so a `v2` row would fail the copy and
-take the whole downgrade with it. They are deleted first, deliberately and in
-the open: there is no second copy, because the plaintext was never written
-anywhere, which is the point of the table.
 """
 
 from collections.abc import Sequence
@@ -117,17 +85,32 @@ def _swap(wanted: str) -> None:
 
 
 def upgrade() -> None:
-    # Before the rebuild, for the reason the downgrade gives: the copy a batch
-    # rebuild performs is an INSERT and enforces whatever constraint is being
-    # created. Here it would pass either way, and doing it in the same order
-    # both directions is one rule rather than two.
-    op.execute(sa.text("DELETE FROM catalogue_credentials WHERE envelope NOT GLOB 'v2.*'"))
+    # **This deletes nothing, and that is the point of it.** An earlier draft
+    # removed every envelope written before the origin binding, which meant a
+    # household upgrading lost every catalogue login it had stored. Owner's
+    # decision, 2026-09-07: that is not an acceptable upgrade.
+    #
+    # Nothing has to be removed here because nothing has to be converted here.
+    # `credentials.unseal` opens a `v1` envelope at its own version and the read
+    # path re-seals it, so the old scheme empties itself as the logins are used,
+    # with the key already proven by the open that just succeeded. A migration
+    # cannot prove that: the key may be in an environment variable, a keychain
+    # or a file, and a machine upgrading without it would have lost them anyway.
+    #
+    # So the whole upgrade is widening the constraint to admit both versions.
     _swap(_ENVELOPE_AFTER)
 
 
 def downgrade() -> None:
-    # Before the rebuild, not after: the copy the batch performs is an INSERT
-    # and enforces the narrowed constraint, so a `v2` row left here fails the
-    # whole downgrade rather than being reported.
+    # **The downgrade still deletes, and it is not symmetric with the upgrade
+    # above.** Going back narrows the constraint to `v1` only, and the copy a
+    # batch rebuild performs is an INSERT that enforces it, so a `v2` row left
+    # here fails the whole downgrade rather than being reported.
+    #
+    # The asymmetry is the direction of the loss. Upgrading must not cost a
+    # household its logins, because it is the ordinary thing to do. Downgrading
+    # to a build that cannot open a `v2` envelope costs the ones re-sealed since
+    # the upgrade whatever this does, so deleting them is naming that rather
+    # than leaving rows no build can read.
     op.execute(sa.text("DELETE FROM catalogue_credentials WHERE envelope GLOB 'v2.*'"))
     _swap(_ENVELOPE_BEFORE)

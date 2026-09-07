@@ -147,6 +147,7 @@ export default function ScanPage() {
             onStopLookUp={rapid.stopLookingUp}
             onChoose={rapid.chooseFor}
             onKeepName={rapid.keepTheName}
+            onSplit={rapid.splitApart}
           />
         </>
       )}

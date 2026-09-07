@@ -14,8 +14,8 @@ what people read first and gets corrected first.
 ## The catalogue
 
 **A book** records ISBN, title, subtitle, author, publisher, year, description,
-cover, page count, language, categories, series name and index, format
-(hardcover, paperback, ebook, audiobook), condition, and where it is shelved.
+cover, page count, language, categories, series name and index, format,
+condition, and where it is shelved.
 
 **Adding a book** by ISBN, by barcode scan in the browser, by free text search,
 or by hand. ISBN lookup chains several sources so a European or pre-ISBN book

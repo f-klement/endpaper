@@ -20,7 +20,7 @@ import models  # noqa: F401  (registers the tables on Base.metadata)
 import schema
 import targets
 from database import Base, engine
-from enums import AuthorityScheme, ClassificationScheme
+from enums import AuthorityScheme, BookFormat, ClassificationScheme
 from migrations.versions import (
     f1c30ab27d84_store_the_shelf_key_beside_the_number as revision,
 )
@@ -1673,27 +1673,24 @@ class TestTheEnvelopeConstraintOnAMigratedDatabase:
 
         assert "ck_catalogue_credentials_source" in str(refusal.value)
 
-    def test_the_upgrade_removes_a_login_it_can_no_longer_open(self):
-        """The migration path, as a migration rather than as prose.
+    def test_the_upgrade_keeps_a_login_stored_under_the_older_scheme(self):
+        """The upgrade path, as a migration rather than as prose.
 
-        Every login stored before the binding is invalidated and has to be
-        typed again. It is removed rather than left to be reported, because
-        there is no screen that could name a household's `opds-<hex>` row and
-        the sentences an admin reads for an unreadable login all start at the
-        key, which is intact here. The revision's docstring carries the whole
-        argument.
+        **It used to delete this row**, and the owner refused that on
+        2026-09-07: a household upgrading may not lose its stored logins. The
+        row is carried forward on the read path instead, where the key is
+        already proven, so the migration widens the constraint and touches no
+        data. The revision's docstring carries the whole argument.
 
-        **The scoping half cannot be driven from this side**: a `v2` row cannot
-        exist before the upgrade, because the constraint it replaces admits
-        `v1` alone. `test_the_downgrade_clears_the_rows_it_narrows_past` is
-        where a delete scoped by version is exercised against a table holding
-        both.
+        The asymmetry with the downgrade is deliberate and is stated there: it
+        narrows the constraint, so a row the narrowed one cannot hold has to go
+        or the whole downgrade fails on the copy.
         """
         from alembic import command
 
         drop_everything()
         command.upgrade(schema._alembic_config(), "c8b3e5017d4a")
-        older = next(v for v in credentials.KNOWN_VERSIONS if v != credentials.VERSION)
+        older = credentials._UNBOUND_VERSION
         with engine.connect() as connection:
             connection.execute(text(self._insert("'bne'", self._envelope(older))))
             connection.commit()
@@ -1701,9 +1698,11 @@ class TestTheEnvelopeConstraintOnAMigratedDatabase:
         command.upgrade(schema._alembic_config(), "d9c1f47b2a06")
 
         with engine.connect() as connection:
-            assert connection.execute(
-                text("SELECT count(*) FROM catalogue_credentials")
-            ).scalar() == 0
+            kept = connection.execute(
+                text("SELECT envelope FROM catalogue_credentials")
+            ).scalars().all()
+        assert len(kept) == 1
+        assert kept[0].split(".")[0] == older
 
     def test_the_downgrade_clears_the_rows_it_narrows_past(self):
         """A `v2` row left in place fails the copy the batch rebuild performs,
@@ -1714,7 +1713,7 @@ class TestTheEnvelopeConstraintOnAMigratedDatabase:
         from alembic import command
 
         self._migrated()
-        older = next(v for v in credentials.KNOWN_VERSIONS if v != credentials.VERSION)
+        older = credentials._UNBOUND_VERSION
         with engine.connect() as connection:
             connection.execute(
                 text(self._insert("'bne'", self._envelope(credentials.VERSION)))
@@ -2335,3 +2334,75 @@ class TestTheStoredShelfKey:
         ]
 
         assert mismatches == []
+
+
+@pytest.mark.usefixtures("restore_schema")
+class TestTheBookFormatColumnOnAMigratedDatabase:
+    """`BookFormat` is closed in Python and open in the database, asserted.
+
+    The enum's docstring says a new member needs no migration, and that claim
+    is about the schema a deployment has rather than about `models.py`. So it
+    is checked against a database built by `upgrade_to_head`, which is the one
+    instrument that can see a check constraint a revision added and the model
+    never declared.
+
+    **Every case recomputes from `BookFormat` itself**, so a seventh member is
+    covered the moment somebody writes it and a stale count cannot pass here.
+    """
+
+    @staticmethod
+    def _migrated() -> None:
+        drop_everything()
+        schema.upgrade_to_head()
+
+    @staticmethod
+    def _format_column():
+        return next(
+            column
+            for column in inspect(engine).get_columns("books")
+            if column["name"] == "format"
+        )
+
+    def test_no_check_constraint_governs_the_column(self):
+        """The whole of the claim. A migration adding one would make a new
+        member a schema change, and the failure would land on a member's import
+        rather than here."""
+        self._migrated()
+
+        governing = [
+            constraint
+            for constraint in inspect(engine).get_check_constraints("books")
+            if "format" in str(constraint.get("sqltext", ""))
+        ]
+
+        assert governing == []
+
+    def test_every_member_fits_the_width_the_column_declares(self):
+        """Read off the migrated column rather than off the literal `20`.
+
+        SQLite does not enforce a `VARCHAR` width, so nothing else in this file
+        would notice a member too long for the column until the same schema ran
+        on a database that does.
+        """
+        width = self._format_column()["type"].length
+        assert width, "the column declares no width, so this asserts nothing"
+
+        assert [one for one in BookFormat if len(one.value) > width] == []
+
+    def test_every_member_the_enum_offers_is_storable(self):
+        """The behavioural half, and the one a narrowed column breaks."""
+        self._migrated()
+
+        with engine.connect() as connection:
+            for one in BookFormat:
+                connection.execute(
+                    text("INSERT INTO books (title, format) VALUES (:title, :format)"),
+                    {"title": f"a book on {one.value}", "format": one.value},
+                )
+            connection.commit()
+            stored = {
+                row[0]
+                for row in connection.execute(text("SELECT format FROM books")).fetchall()
+            }
+
+        assert stored == {one.value for one in BookFormat}

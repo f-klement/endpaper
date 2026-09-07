@@ -1501,10 +1501,10 @@ a sentence somebody can act on.
 **It says that it cannot be read and not why**, because the remedy is not the row's. A
 rotated key, an absent key, a locked keychain and a pinned variable set to something that is
 not a credential all present here as one unreadable login, and for those the fix is on the key
-and recovers every login at once. **A fifth cause does not follow that rule**: a login sealed
-before the origin was bound, where the key is intact and the remedy is to remove the row and
-enter the login again. Upgrading removes these, so it is reachable only by restoring an
-archive taken before that release. `GET /api/settings/credential-key` carries the
+and recovers every login at once. A login sealed before the origin was bound is a fifth
+cause only for a household server: a catalogue login opens at the address this build published
+for it and is re-sealed on that read, while a household server's has no such address and is
+refused, with the key intact and the remedy on the row. `GET /api/settings/credential-key` carries the
 diagnosis: `configured`, `location` as a token, `problem`, and `unreadable_sources`.
 
 **`unreadable_sources` names them rather than counting them, and is read off the credentials

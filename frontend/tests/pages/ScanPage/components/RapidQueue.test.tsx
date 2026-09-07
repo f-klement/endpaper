@@ -27,6 +27,7 @@ function renderQueue(
     onStopLookUp: vi.fn(),
     onChoose: vi.fn(),
     onKeepName: vi.fn(),
+    onSplit: vi.fn(),
     ...overrides,
   };
   renderLocalised(<RapidQueue {...props} />);
@@ -52,6 +53,36 @@ function scanned(
   };
 }
 
+/**
+ * One audiobook candidate, of several files.
+ *
+ * The shape `entryForGroup` builds: the book's own title as the label, the
+ * files it claims carried on `group`, and the format the container answers.
+ */
+function grouped(names: readonly string[], title: string): ScannedEntry {
+  return {
+    key: `audio:file:${names[0]}:10:0:${names.length}`,
+    label: title,
+    isbn: "",
+    format: BookFormat.audiobook,
+    state: "derived",
+    draft: { isbn: "", title, suggested_tag_ids: [], notFound: true },
+    group: {
+      by: "album",
+      album: title,
+      authors: [],
+      title: null,
+      files: names.map((name) => ({
+        key: `file:${name}:10:0`,
+        name,
+        folders: [title],
+        tags: null,
+        whole: false,
+      })),
+    },
+  };
+}
+
 /** A picked file's entry, keyed and labelled the way `pickFiles` does. */
 function picked(
   entry: Omit<ScannedEntry, "key" | "label" | "format" | "isbn">,
@@ -73,6 +104,63 @@ const found: ScannedEntry = scanned({
 });
 
 describe("RapidQueue", () => {
+  it("says how many files an audiobook row was made of", () => {
+    // **The confirm this ticket is about.** For every other format one file is
+    // one book, so a row standing for twenty of them has to say so before the
+    // batch runs, and nothing here is written until "Add all".
+    renderQueue({
+      entries: [grouped(["01.mp3", "02.mp3", "03.mp3"], "Robinson Crusoe")],
+    });
+
+    expect(
+      screen.getByText("3 files, as one audiobook. Show them."),
+    ).toBeInTheDocument();
+  });
+
+  it("lists the files that row claims", () => {
+    renderQueue({ entries: [grouped(["01.mp3", "02.mp3"], "Dune")] });
+
+    expect(screen.getByText("01.mp3")).toBeInTheDocument();
+    expect(screen.getByText("02.mp3")).toBeInTheDocument();
+  });
+
+  it("offers to file them separately, naming the book it is about", () => {
+    // The visible words are the same on every grouped row and the accessible
+    // name is not, which is the convention the match rows already follow.
+    renderQueue({ entries: [grouped(["01.mp3", "02.mp3"], "Dune")] });
+
+    expect(
+      screen.getByRole("button", {
+        name: "Add the files of Dune as separate books instead",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("splits the row the member pressed", async () => {
+    const props = renderQueue({
+      entries: [grouped(["01.mp3", "02.mp3"], "Dune")],
+    });
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Add the files of Dune as separate books instead",
+      }),
+    );
+
+    expect(props.onSplit).toHaveBeenCalledWith(props.entries[0]!.key);
+  });
+
+  it("says none of it for a row that is one file", () => {
+    // One file is one book for every other format, and a row that says "1 file,
+    // as one audiobook" is a screen explaining something that did not happen.
+    renderQueue({ entries: [grouped(["Mort.m4b"], "Mort")] });
+
+    expect(screen.queryByText(/as one audiobook/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /separate books/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it("says when nothing has been scanned", () => {
     renderQueue();
     expect(screen.getByText("Nothing scanned yet")).toBeInTheDocument();
