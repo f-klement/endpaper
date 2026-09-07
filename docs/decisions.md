@@ -11140,10 +11140,18 @@ and then compared to that configured origin, never to the previous hop, so a cha
 one host at a time. `fetch._same_host_hop` refuses a redirect off the host and
 `credentials.Credential.header_for` refuses to attach the login anywhere else.
 
-**Left open deliberately, and it is the owner's:** link local is the one range that is never a
-household's own server and is the range holding the cloud metadata endpoint, so the argument
-above is true of loopback and RFC 1918 and not of it. Refusing the literal would not refuse a
-name that resolves there, which is why it is not a one line fix.
+**Left open, and the owner closed it on 2026-09-07: wait for resolve-then-pin, do not refuse
+the literal.** Link local is the one range that is never a household's own server and is the
+range holding the cloud metadata endpoint, so the argument above is true of loopback and RFC
+1918 and not of it. The reason a literal refusal was refused anyway is that it does not refuse
+a name resolving into that range, so it would guard the accident and read as though it guarded
+the attacker. **A control that reads stronger than it is was judged worse than the stated gap**,
+which is the same reasoning this file applies to a bound that stops guarding without failing.
+
+So it is an accepted risk until the outbound policy work lands resolve-then-pin at connect
+time. What limits it meanwhile: configuration is admin only, an admin already restores backups
+and reads every secret, a member can only sync an address an admin chose, and no response body
+reaches the caller.
 
 ## An entitlement is not a holding
 
@@ -11200,10 +11208,14 @@ machine loses these logins and they are typed again. That is the bargain `backup
 already describes for a restore onto a new machine, applied one case earlier, and it fails in
 the safe direction.
 
-**Raised, not taken: sealing a household login against its origin as well as its source.** That
-would make an envelope unopenable at an address it was not sealed for, whichever writer moved
-the row, and the restore filter would become belt to that brace with no same machine cost. It is
-a change to the credential scheme rather than to this feature.
+**Raised, and the owner took it on 2026-09-07: seal a household login against its origin as
+well as its source.** That makes an envelope unopenable at an address it was not sealed for,
+whichever writer moved the row, rather than blocking the one route through a restore that was
+measured. The restore filter stays and becomes the belt to that brace.
+
+**The cost is accepted rather than discovered**: it changes how every stored credential is
+sealed, so an envelope written before it needs a migration path, and deciding what happens to
+one is the substance of that work rather than a detail of it.
 
 **Both defects came from a fix round rather than from the original work**, which is the shape
 this process expects: the replacement was better in the dimension it was designed for, the
