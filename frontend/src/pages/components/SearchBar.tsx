@@ -1,3 +1,4 @@
+import { QUERY_FLOOR } from "../../lib/bookBounds";
 import { useEffect, useRef, useState } from "react";
 
 import { Icon } from "../../components";
@@ -21,7 +22,10 @@ export const DEBOUNCE_MS = 500;
  * the answer is useless. Clearing the box is still passed through, since that
  * is how someone gets back to the full shelf.
  */
-export const MIN_QUERY_LENGTH = 2;
+// The search endpoint's own floor, owned by `lib/bookBounds.ts` and recomputed
+// there from `openapi.json`. Kept exported under this name because callers and
+// tests import it from here.
+export const MIN_QUERY_LENGTH = QUERY_FLOOR;
 
 interface SearchBarProps {
   onSearch: (query: string) => void;

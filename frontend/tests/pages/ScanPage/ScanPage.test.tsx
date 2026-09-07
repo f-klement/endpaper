@@ -79,7 +79,7 @@ describe("ScanPage", () => {
   describe("a file is the fourth way of choosing which book", () => {
     it("offers the picker beside the camera and the search box", () => {
       renderWithProviders(<ScanPage />);
-      expect(screen.getByLabelText("EPUB files")).toBeInTheDocument();
+      expect(screen.getByLabelText("Book files")).toBeInTheDocument();
     });
 
     it("shows no queue until something is in it", () => {
@@ -95,7 +95,7 @@ describe("ScanPage", () => {
       const file = await epubFile("dune.epub");
       renderWithProviders(<ScanPage />);
 
-      await user.upload(screen.getByLabelText("EPUB files"), file);
+      await user.upload(screen.getByLabelText("Book files"), file);
 
       await waitFor(() => expect(screen.getByText("Dune")).toBeInTheDocument());
       expect(screen.getByText("1 in the queue")).toBeInTheDocument();
@@ -104,19 +104,68 @@ describe("ScanPage", () => {
       ).toBeInTheDocument();
     });
 
-    it("names a file it could not read rather than dropping it", async () => {
+    it("keeps a file it could not read, under the name it had", async () => {
+      // A dead end until the filename fallback shipped: the file is still a
+      // book and the name is what is left to go on.
       const user = userEvent.setup();
       renderWithProviders(<ScanPage />);
 
       await user.upload(
-        screen.getByLabelText("EPUB files"),
+        screen.getByLabelText("Book files"),
         new File(["not an epub"], "broken.epub"),
       );
 
       await waitFor(() =>
-        expect(screen.getByText(/broken.epub/)).toBeInTheDocument(),
+        expect(screen.getByText(/From the file name/)).toBeInTheDocument(),
       );
       expect(screen.getByText(/Not an EPUB file/)).toBeInTheDocument();
+    });
+
+    it("offers a whole folder as well as single files", async () => {
+      // Only a folder pick carries the path, and the folder above a file is
+      // often the one thing that names its author.
+      renderWithProviders(<ScanPage />);
+      expect(
+        screen.getByLabelText("A whole folder of books"),
+      ).toBeInTheDocument();
+    });
+
+    it("offers the catalogue lookup rather than running it", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ScanPage />);
+
+      await user.upload(
+        screen.getByLabelText("Book files"),
+        new File(["%PDF-1.4"], "The Dispossessed.pdf"),
+      );
+
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Look up 1 by name" }),
+        ).toBeInTheDocument(),
+      );
+      expect(api.lastCall("/api/books/search")).toBeUndefined();
+    });
+
+    it("says what it passed over rather than showing an empty queue", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ScanPage />);
+
+      // Through the folder input, which is where a format the picker filters
+      // out actually arrives: a browser applies `accept` to a file dialog and
+      // to no directory pick anywhere.
+      await user.upload(
+        screen.getByLabelText("A whole folder of books"),
+        new File(["a"], "watchmen.cbr"),
+      );
+
+      await waitFor(() =>
+        expect(
+          screen.getByText(
+            "1 passed over, because Endpaper reads no format of theirs.",
+          ),
+        ).toBeInTheDocument(),
+      );
     });
   });
 

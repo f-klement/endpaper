@@ -1718,6 +1718,25 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         # no such rule, and a source joining or leaving it moves both halves.
         Counts("SEARCH_SOURCES", near="a title search fans out to"),
     ],
+    # The same fact, restated where the filename fallback tells a member why a
+    # book kept its file name. Three sites, one in the module and two in the
+    # tests that pin what the member is told, and all three count the search fan
+    # out rather than the roster.
+    #
+    # **They arrived from a frontend only trio**, which never ran the backend
+    # suite this census lives in, so the figure reached three files with no
+    # verdict and the merge is where it surfaced. That is the census working
+    # rather than failing: the alternative is the number going stale in a screen
+    # nobody re-reads.
+    ("frontend/src/pages/ScanPage/hooks.ts", "{n} sources"): [
+        Counts("SEARCH_SOURCES")
+    ],
+    ("frontend/tests/pages/ScanPage/components/RapidQueue.test.tsx", "{n} sources"): [
+        Counts("SEARCH_SOURCES")
+    ],
+    ("frontend/tests/pages/ScanPage/hooks.test.tsx", "{n} sources"): [
+        Counts("SEARCH_SOURCES")
+    ],
     # The owner's decision of 2026-09-07 on the Z39.50 transport, which surveyed
     # eight national libraries rather than counting this roster. **This entry is a
     # pre-existing gap rather than one this ticket opened**: 8 has been a live

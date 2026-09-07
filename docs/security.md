@@ -1139,10 +1139,12 @@ The third does not exist yet and will **not** be a nullable column on the second
 ownership changes the deletion rule, the visibility rule and the read path, and one table
 answering two access-control questions is how the answer to one gets applied to the other.
 The distinction is enforced rather than described. Every sealed value is bound to
-additional authenticated data naming its kind and its subject
-(`endpaper/v1/catalogue-credential/<source>`), so a ciphertext moved between rows, between
-kinds or between subjects by a hand-edited archive fails authentication instead of
-decrypting into somebody else's request.
+additional authenticated data naming its kind, its subject and the origin it may be sent to
+(`endpaper/v2/catalogue-credential/<source>/<origin>`), so a ciphertext moved between rows,
+between kinds, between subjects, or beside an address a hand-edited archive wrote, fails
+authentication instead of decrypting into somebody else's request. **An envelope written under
+the previous version is refused rather than read**: upgrading removes every login stored before
+the origin was bound, and they are entered again.
 
 **AES-256-GCM, one key, and the key is never in the database.** The archive therefore
 carries ciphertext that is useless without something the archive does not contain, which is
@@ -1189,6 +1191,13 @@ promise the browser makes.
 **A lost or rotated key makes every stored credential unreadable, and they must be entered
 again. That cost is new**, and saying so is part of the design: the arrangement this
 replaced held no catalogue credential at all, so there was nothing a lost key could destroy.
+
+**Upgrading to the release that bound the origin has the same cost once, and it is not the
+key's.** Every login stored before it is removed by the migration and is entered again.
+Re-sealing them was refused rather than skipped: it needs the key, which is a deployment fact
+a migration cannot depend on, and it would re-seal from the address the row already names, so
+a deployment whose row had been moved by a hostile archive would have the migration launder
+that move into a valid binding.
 The recovery phrase mitigates the cost rather than removing it. Said beside the field on the
 settings screen, not only here. On a machine nobody
 administers this is also the restore story: a backup carries the sealed rows and never the
@@ -1295,8 +1304,14 @@ rejected value on these routes is a password or a recovery phrase.
 **A login that is held and cannot be opened is reported as exactly that**, and not as "type
 it in again". The remedy differs by cause: a rotated key, an absent key, a locked keychain
 and a pinned variable set to something that is not a credential all present as one
-unreadable login, and for three of the four the fix is on the key and recovers every login
-at once. So the row says only that it cannot be read, and the diagnosis sits on the key.
+unreadable login, and for those four the fix is on the key and recovers every login at
+once. So the row says only that it cannot be read, and the diagnosis sits on the key.
+
+**There is a fifth cause whose remedy is not on the key**, and it is the one to state
+separately because every other sentence here sends the reader to the key: a login sealed
+before the origin was bound. The key is intact and no phrase opens it. Upgrading removes
+these, so it is reachable only by restoring an archive taken before that release, and the
+remedy is on the row: remove it and enter the login again.
 
 **A key can be discarded.** Closing the tab on the phrase leaves a deployment behind a key
 protecting nothing, so `DELETE /api/settings/credential-key` clears it and names the logins
@@ -1316,10 +1331,22 @@ per-source answer stops at the pin without reading the envelope.
 `Referrer-Policy: no-referrer`, a `Permissions-Policy` allowing only the camera (the
 barcode scanner needs it), and a CSP.
 
-In the CSP, `script-src` is `'self'` with **no** `unsafe-inline`. That is the half that
-blunts XSS. `style-src` does allow `'unsafe-inline'`, and that is deliberate: React
-applies the login background through an inline `style` attribute, and inline styles cannot
-be nonced the way scripts can.
+In the CSP, `script-src` is `'self' 'wasm-unsafe-eval'` with **no** `unsafe-inline` and
+**no** `unsafe-eval`. Those two absences are the half that blunts XSS. `'wasm-unsafe-eval'`
+permits compiling WebAssembly and nothing else, and it is there for one thing: the Calibre
+library import reads a `metadata.db` in the member's own browser, and a browser refuses to
+compile WebAssembly under a bare `'self'`. What it newly admits is that a script which has
+already achieved execution may compile WebAssembly it assembles itself; it admits no new
+source of script, because `'self'` still decides where every byte comes from.
+
+`style-src` does allow `'unsafe-inline'`, and that is deliberate: React applies the login
+background through an inline `style` attribute, and inline styles cannot be nonced the way
+scripts can.
+
+The whole policy string is pinned by exact equality in
+`backend/tests/test_middleware.py`, and a second test there requires the WebAssembly grant
+and a `.wasm` import under `frontend/src` to be present or absent together, so the
+relaxation cannot outlive the feature it was added for.
 
 HSTS is sent **only** when the request arrived over HTTPS (directly or per
 `X-Forwarded-Proto`). Sending it unconditionally on a LAN deployment with no certificate

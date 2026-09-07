@@ -14,6 +14,7 @@ from sqlalchemy import String, inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
+import credentials
 import filing
 import models  # noqa: F401  (registers the tables on Base.metadata)
 import schema
@@ -1599,6 +1600,139 @@ class TestTheMigrationsAndTheModelsAgree:
         missing = {table.name for table in Base.metadata.sorted_tables} - set(migrated)
 
         assert not missing, f"declared but never migrated: {sorted(missing)}"
+
+
+class TestTheEnvelopeConstraintOnAMigratedDatabase:
+    """Revision `d9c1f47b2a06`, against the schema production runs.
+
+    A batch rebuild on SQLite drops the table and recreates it from what
+    SQLAlchemy reflected, so a revision that swaps one CHECK can silently take
+    the other with it. `TestTheMigrationsAndTheModelsAgree` compares columns and
+    would not see that; `tests/test_credentials.py` asserts the same refusals
+    against `create_all`, which is the schema only the suite ever has.
+    """
+
+    @staticmethod
+    def _envelope(version: str) -> str:
+        """A shape the check admits, for one version, as a SQL literal."""
+        return "'" + version + "." + "a" * 40 + ".b.c'"
+
+    @staticmethod
+    def _migrated() -> None:
+        drop_everything()
+        schema.upgrade_to_head()
+
+    @staticmethod
+    def _insert(source: str, envelope: str) -> str:
+        return (
+            "INSERT INTO catalogue_credentials (source, envelope) VALUES "
+            f"({source}, {envelope})"
+        )
+
+    @pytest.mark.parametrize("version", credentials.KNOWN_VERSIONS)
+    def test_every_version_this_build_recognises_is_storable(self, version):
+        """Derived from the constant, not listed: `v2` is what this build writes
+        and the arm that fails on a deployment if the revision is forgotten,
+        since the constraint admitted `v1` alone and every write was an
+        IntegrityError; `v1` is what an archive taken before the binding
+        carries, and refusing it fails a whole restore."""
+        self._migrated()
+
+        with engine.connect() as connection:
+            connection.execute(text(self._insert("'bne'", self._envelope(version))))
+            connection.commit()
+
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT count(*) FROM catalogue_credentials")
+            ).scalar() == 1
+
+    def test_a_plaintext_password_is_still_refused(self):
+        self._migrated()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
+            connection.execute(text(self._insert("'bne'", "'hunter2'")))
+
+        assert "ck_catalogue_credentials_envelope" in str(refusal.value)
+
+    def test_the_source_constraint_survived_the_rebuild(self):
+        """The half a batch rebuild loses if reflection missed it.
+
+        Both CHECKs are on one table and the revision swaps one of them, so the
+        other is only still there because SQLAlchemy read it back out of the
+        table's DDL. Nothing else in this suite would notice it gone: the model
+        still declares it, and every write in the application comes through a
+        validated path.
+        """
+        self._migrated()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
+            connection.execute(
+                text(self._insert("'../../books/5?'", self._envelope(credentials.VERSION)))
+            )
+
+        assert "ck_catalogue_credentials_source" in str(refusal.value)
+
+    def test_the_upgrade_removes_a_login_it_can_no_longer_open(self):
+        """The migration path, as a migration rather than as prose.
+
+        Every login stored before the binding is invalidated and has to be
+        typed again. It is removed rather than left to be reported, because
+        there is no screen that could name a household's `opds-<hex>` row and
+        the sentences an admin reads for an unreadable login all start at the
+        key, which is intact here. The revision's docstring carries the whole
+        argument.
+
+        **The scoping half cannot be driven from this side**: a `v2` row cannot
+        exist before the upgrade, because the constraint it replaces admits
+        `v1` alone. `test_the_downgrade_clears_the_rows_it_narrows_past` is
+        where a delete scoped by version is exercised against a table holding
+        both.
+        """
+        from alembic import command
+
+        drop_everything()
+        command.upgrade(schema._alembic_config(), "c8b3e5017d4a")
+        older = next(v for v in credentials.KNOWN_VERSIONS if v != credentials.VERSION)
+        with engine.connect() as connection:
+            connection.execute(text(self._insert("'bne'", self._envelope(older))))
+            connection.commit()
+
+        command.upgrade(schema._alembic_config(), "d9c1f47b2a06")
+
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT count(*) FROM catalogue_credentials")
+            ).scalar() == 0
+
+    def test_the_downgrade_clears_the_rows_it_narrows_past(self):
+        """A `v2` row left in place fails the copy the batch rebuild performs,
+        which takes the whole downgrade with it rather than reporting anything.
+        A `v1` row must survive: it is what the narrowed constraint still
+        admits, and taking it would lose a login the caller did not ask to lose.
+        """
+        from alembic import command
+
+        self._migrated()
+        older = next(v for v in credentials.KNOWN_VERSIONS if v != credentials.VERSION)
+        with engine.connect() as connection:
+            connection.execute(
+                text(self._insert("'bne'", self._envelope(credentials.VERSION)))
+            )
+            connection.execute(text(self._insert("'dnb'", self._envelope(older))))
+            connection.commit()
+
+        command.downgrade(schema._alembic_config(), "c8b3e5017d4a")
+
+        with engine.connect() as connection:
+            left = [
+                row[0]
+                for row in connection.execute(
+                    text("SELECT source FROM catalogue_credentials")
+                )
+            ]
+
+        assert left == ["dnb"]
 
 
 class TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase:

@@ -1,9 +1,9 @@
 # Backend test coverage
 
-**6237 tests**, in 95 files, recounted with `--collect-only` on 2026-09-07.
+**6291 tests**, in 95 files, recounted with `--collect-only` on 2026-09-07.
 
 **The headline equals the passed count today, and that is a fact about the tree rather than
-a simplification.** The gate reports `6237 passed`, with no skip and no `xfail`: the strict
+a simplification.** The gate reports `6291 passed`, with no skip and no `xfail`: the strict
 `xfail` that recorded a defect in the CSV importer is gone, because the work that closed the
 defect closed it.
 
@@ -15,7 +15,7 @@ the skip once made the check undoable, and a rule rewritten as `collected == pas
 the tree happens to have neither is one that fails for the wrong reason the day somebody adds
 either.
 
-**The rows below sum to 6188, forty nine short, and the shortfall is deliberate.** Those
+**The rows below sum to 6242, forty nine short, and the shortfall is deliberate.** Those
 tests live in six files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -66,10 +66,10 @@ why the helper uses regexes.
 | `test_isbn.py` | 60 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms |
 | `conformance/test_isbn.py` | 33 | **The Python half of the shared fixture set.** Holds no ISBN expectation of its own: `conformance/cases/isbn.json` is the specification, and this is a dispatch table plus the guards that stop the suite passing while testing nothing |
 | `test_ddc.py` | 29 | **Dewey headings.** That a number splits from its caption and a year does not, that the segmentation prime is stripped rather than rejected, that the projection reads the number |
-| `test_backup.py` | 93 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores. |
+| `test_backup.py` | 94 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores. |
 | `test_lending.py` | 17 | **The loan clock.** Overdue, days overdue and days out, each arm of each; that a returned loan stops counting at its return; that `days_out`'s clamp is the reachable one |
 | `test_opds.py` | 81 | **The OPDS reader.** Which addresses this server will open, what one Atom entry becomes, the identifier the census says is not there, the doctype refusal, the decoder-on-a-file property, and the origin pin over paging. `TestNoResponseMovesTheOrigin` is the one to read first |
-| `routers/test_opds.py` | 39 | **The OPDS routes.** The admin gate on configuration against a member's right to sync, the credential lifecycle, and that deleting a server or moving it to another origin takes its login with it |
+| `routers/test_opds.py` | 44 | **The OPDS routes.** The admin gate on configuration against a member's right to sync, the credential lifecycle, and that deleting a server or moving it to another origin takes its login with it |
 | `test_marc.py` | 61 | **The MARCXML reader and writer.** That MARC is read through `metadata.py`'s parser rather than a second one, what the importer refuses that a lookup does not |
 | `test_metadata.py` | 466 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache, that a stored login reaches the request it was stored for and no other, that every door needing one declares it, and which transport actually carries one |
 | `test_errors.py` | 38 | Content-negotiated errors, the 500 handler, API-vs-SPA routing |
@@ -83,7 +83,7 @@ why the helper uses regexes.
 | `test_decoders.py` | 26 | **What a decoder is, and what it is never told.** The contract, a catalogue decoder reading a record off a file with no `Target`, and the two family refusal |
 | `test_sru.py` | 205 | **The SRU server: the protocol, driven as a function over a query string.** That no index reaches a private or a trashed book |
 | `test_settings_store.py` | 43 | Typed reads and writes over the key/value table |
-| `test_credentials.py` | 201 | **Somebody else's login, sealed.** The envelope and its key generation, the three key sources, the recovery phrase and its checksum, and the origin a credential is bound to |
+| `test_credentials.py` | 241 | **Somebody else's login, sealed.** The envelope and its key generation, the three key sources, the recovery phrase and its checksum, and the origin a credential is bound to |
 | `test_auth.py` | 22 | Password hashing, JWT creation and the auth dependencies |
 | `test_accounts.py` | 66 | **Recovery and confirmation, where the rules live rather than where they are served.** That one function builds a reset request so an admin can approve but never start one, that redeeming ends every session on the account, that a code is single use and expires, and that both branches of a resend cost the same. |
 | `test_recover.py` | 7 | The command line reset, which is the path for a library whose only admin has nobody to approve their request. |
@@ -98,7 +98,7 @@ why the helper uses regexes.
 | `test_auth_backends_bindguard.py` | 20 | **The empty-password guards**, at all three layers |
 | `test_ratelimit.py` | 37 | The sliding window, and the login/registration limits |
 | `test_uploads.py` | 25 | Content-sniffed image validation and the size cap |
-| `test_middleware.py` | 25 | Security headers, CSP contents, HSTS conditions |
+| `test_middleware.py` | 27 | Security headers, CSP contents, HSTS conditions |
 | `test_main.py` | 59 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan, what the built files say about being reused, the shell that has to answer a client route |
 | `test_house_rules.py` | 219 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter |
 | `test_scratch_report.py` | 4 | **The scratch report names the filesystem the databases landed on.** `conftest._fastest_scratch()` falls back from `/dev/shm` to disk silently |
@@ -106,7 +106,7 @@ why the helper uses regexes.
 | `schemas/test_book.py` | 39 | **Two request bodies writing one column must agree about it.** `BookMatch` bounded four of its seventeen fields while `merge_into` wrote them all |
 | `schemas/test_settings.py` | 2 | **A row the router builds must carry every field the source describes.** The settings row is built by splatting the description into the response model |
 | `test_serialisation.py` | 47 | Assembling `BookOut`: the per-request fields, the tag suggestion by caption and by DDC number, that a tag name inside a longer word is not a caption match |
-| `test_schema.py` | 113 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial |
+| `test_schema.py` | 119 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial |
 | `test_env_example.py` | 4 | **Operator documentation that goes stale silently.** That every environment name `config.py` reads appears in `.env.example` and nothing appears there that the code ignores |
 | `test_database.py` | 27 | Engine setup and the session dependency |
 | `test_fetch.py` | 65 | **The only door outwards.** That the body cap counts raw wire bytes and compression is never requested |

@@ -37,6 +37,14 @@ from models import (
     Tag,
     UserBook,
 )
+from tests.helpers import sealed_before_the_origin_was_bound
+
+#: The roster's address for the source these tests seal a login for.
+#:
+#: **The roster's own rather than an invented one**, because an envelope is
+#: sealed over the origin it may be sent to: a made up address would open
+#: nowhere a caller asks about.
+BNE_URL = targets.SEEDED[CatalogueSource.BNE].base_url
 
 
 def read_manifest(data: bytes) -> dict:
@@ -373,7 +381,7 @@ class TestRoundTrip:
         """
         import credentials
 
-        credentials.put(db, "bne", "library-account", "librarypw")
+        credentials.put(db, "bne", BNE_URL, "library-account", "librarypw")
         data = client.get("/api/backup", headers=admin["headers"]).content
         credentials.forget(db, "bne")
 
@@ -1609,7 +1617,7 @@ class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
     @pytest.fixture
     def stored(self, client, admin, db):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         return client.get("/api/backup", headers=admin["headers"]).content
 
     def test_the_row_is_in_the_manifest(self, stored):
@@ -1622,7 +1630,7 @@ class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
 
     def test_what_it_carries_is_an_envelope(self, stored):
         rows = read_manifest(stored)["tables"]["catalogue_credentials"]
-        assert rows[0]["envelope"].startswith("v1.")
+        assert rows[0]["envelope"].startswith(f"{credentials.VERSION}.")
 
     def test_a_restore_brings_it_back_openable_under_the_same_key(
         self, client, admin, db, stored
@@ -1638,7 +1646,7 @@ class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
         assert response.status_code == 200, response.text
         assert response.json()["catalogue_credentials"] == 1
         db.expire_all()
-        assert credentials.stored(db, "bne") == ("alice", "hunter2")
+        assert credentials.stored(db, "bne", BNE_URL) == ("alice", "hunter2")
 
     def test_a_restore_under_a_different_key_says_so_rather_than_returning_nonsense(
         self, client, admin, db, stored
@@ -1654,13 +1662,49 @@ class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
         assert response.status_code == 200, response.text
         db.expire_all()
         with pytest.raises(credentials.WrongKeyGeneration):
-            credentials.stored(db, "bne")
+            credentials.stored(db, "bne", BNE_URL)
         assert (
             credentials.view(
                 db, "bne", targets.SEEDED[CatalogueSource.BNE].base_url
             ).unreadable
             is True
         )
+
+    def test_an_archive_taken_before_the_origin_was_bound_still_restores(
+        self, client, admin, db, stored
+    ):
+        """The reason `ck_catalogue_credentials_envelope` still admits `v1`.
+
+        `backup._parse_row` asks `credentials.generation_of` whether a row is an
+        envelope at all, and the constraint asks the same question in SQL.
+        Narrowing either to the version this build writes would fail an entire
+        restore over logins whose only remedy is to be typed again, which is
+        what the missing foreign key on this table exists to avoid.
+        """
+        material = credentials.key_material()
+        assert material is not None
+        manifest = read_manifest(stored)
+        manifest["tables"]["catalogue_credentials"] = [
+            {
+                "source": "bne",
+                "envelope": sealed_before_the_origin_was_bound(
+                    material, "bne", "alice:hunter2"
+                ),
+            }
+        ]
+
+        response = client.post(
+            "/api/backup/restore",
+            files={"file": ("backup.zip", rewrite(stored, manifest), "application/zip")},
+            params={"confirm": True},
+            headers=admin["headers"],
+        )
+
+        assert response.status_code == 200, response.text
+        db.expire_all()
+        with pytest.raises(credentials.UnboundCredential):
+            credentials.stored(db, "bne", BNE_URL)
+        assert credentials.view(db, "bne", BNE_URL).unreadable is True
 
     def test_an_archive_naming_a_source_shaped_like_a_path_is_refused(
         self, client, admin, stored

@@ -96,6 +96,39 @@ export const KEPT_WHOLE: ReadonlySet<BoundedText> = new Set<BoundedText>([
  * The same class is already fixed twice in this tree, at `notifications.py` and
  * `z3950.py`; this is the third place it can happen.
  */
+/**
+ * How several authors become the one line `BookCreate.author` holds.
+ *
+ * **`backend/authors.py` splits on a comma and on nothing else**, so this is
+ * the separator that survives the round trip rather than a formatting choice.
+ *
+ * **The exclusion, because it is real**: a creator whose own name contains a
+ * comma arrives as two authors. Measured over 79 real EPUB files, 2 of 79
+ * creator strings contained one and both were the same corporate name. The fix
+ * is a wire field carrying authors separately, which is a schema change.
+ *
+ * **Here rather than in a page folder, because two of them had it.** The scan
+ * page's file path and the Calibre import each declared it, each restating the
+ * backend rule beside it, and a third reader would have made a third copy.
+ */
+export const AUTHOR_SEPARATOR = ", ";
+
+/**
+ * What the search endpoint will take as a query.
+ *
+ * **Here rather than beside either caller, because three had it.** The scan
+ * page's search box, the shared search bar and the filename derivation each
+ * declared the floor as a literal `2` against the same schema bound, so the
+ * number had three homes and no owner. A file named for what a request will
+ * hold is the home; a module named for filenames was the wrong one for a search
+ * box's floor, and so was a component.
+ *
+ * Recomputed from `openapi.json` by `tests/lib/bookBounds.test.ts` the way every
+ * ceiling above it is, so it cannot drift from the endpoint that enforces it.
+ */
+export const QUERY_FLOOR = 2;
+export const QUERY_CEILING = 200;
+
 export function boundText(
   field: BoundedText,
   value: string | null | undefined,

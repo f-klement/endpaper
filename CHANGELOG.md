@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Security
+
+- A stored catalogue or OPDS login is now sealed against the address it may be sent to as well
+  as against its source, so an envelope cannot be opened beside an address a hand edited archive
+  or a stray `UPDATE` put next to it. **Upgrading removes every login stored before this, and
+  they have to be entered again.** They are removed rather than reported, because a login left
+  behind is reported as unreadable and every sentence that says so points at the encryption key,
+  which in this case is not what is wrong. The key itself is untouched: the recovery phrase is
+  not involved and does not help.
+
 ### Added
 
 - **The importer has a reader per service where a service needs one.** Two export shapes cannot
@@ -68,6 +78,18 @@
   one and by title otherwise, and a sync fills gaps and never overwrites what somebody wrote.
   Only an entry saying the member holds the book is taken: a title a server offers to sell or
   lend is passed over, because an entitlement is not a holding.
+- **Import a Calibre library from its own index.** Settings, Your library: choose a copy of
+  `metadata.db` and every book in it is read in your own browser, with the ISBN, the series and
+  the position in it, the publisher, the language, the description and whether the book has a
+  file. The `metadata.opf` beside each book is an optional second pick that fills in what the
+  index left empty. Nothing is written until the counts have been shown. **Copy the file first
+  and import the copy**: a Calibre library has exactly one writer and the card says so where
+  you are standing.
+- **A file whose own metadata says nothing is offered a catalogue lookup.** The scan page's file
+  pick takes a whole folder, reads what the name and the folders above it carry, and offers what
+  the catalogues answer. The lookup is offered rather than automatic and paced, so a folder of
+  three hundred does not spend a morning's search budget in a minute. Files in formats Endpaper
+  does not read are counted and reported rather than ignored.
 
 ### Changed
 
@@ -117,6 +139,10 @@
   decrypt every one of them. It also says the only way to withhold the feature, and warns
   that a read only key file is not it. The recipe has tests, where published operator
   guidance of this kind had none.
+- **The content security policy grants `script-src 'wasm-unsafe-eval'`**, which is what lets a
+  browser compile the SQLite engine the Calibre import reads with. `'unsafe-eval'` and
+  `'unsafe-inline'` are still refused for scripts, and the whole policy is now pinned by exact
+  equality in a test.
 
 ### Fixed
 

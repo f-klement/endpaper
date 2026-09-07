@@ -17,8 +17,10 @@ import pytest
 
 import credentials
 import targets
+from database import Base
 from enums import CatalogueSource, CredentialProvenance
 from models import CatalogueCredential
+from tests.helpers import sealed_before_the_origin_was_bound
 
 #: The address the roster holds for the source these tests use.
 #:
@@ -27,6 +29,17 @@ from models import CatalogueCredential
 #: the ladder against a case no caller produces. The BNE ships no default, so
 #: every test below that is not about one is unaffected by which address it is.
 BNE_URL = targets.SEEDED[CatalogueSource.BNE].base_url
+
+#: A second roster address, for the tests that move a ciphertext between rows.
+DNB_URL = targets.SEEDED[CatalogueSource.DNB].base_url
+
+#: An address for the orphan source the missing foreign key permits.
+#:
+#: **Invented, because there is nothing to look it up in**, which is the whole
+#: point of those tests: a row can name a source this build's roster no longer
+#: has. The address a login was sealed for is the caller's to remember, so a
+#: test that keeps one is a test in the shape a caller is in.
+ORPHAN_URL = "https://catalogue.invalid/opds"
 
 
 class _InMemoryKeyring(keyring.backend.KeyringBackend):
@@ -242,30 +255,30 @@ class TestAKeyIsShownOnceAndNeverAgain:
 
 class TestAnEnvelopeRecordsWhichKeyWroteIt:
     def test_the_generation_can_be_read_without_any_key(self, key: bytes):
-        envelope = credentials.seal(key, "bne", "alice:hunter2")
+        envelope = credentials.seal(key, "bne", BNE_URL, "alice:hunter2")
         assert credentials.generation_of(envelope) == credentials.generation_of_key(key)
 
     def test_a_wrong_key_says_so_rather_than_failing_like_a_damaged_row(self, key: bytes):
-        envelope = credentials.seal(key, "bne", "alice:hunter2")
+        envelope = credentials.seal(key, "bne", BNE_URL, "alice:hunter2")
         other = credentials.phrase_to_key(credentials.generate_phrase())
         with pytest.raises(credentials.WrongKeyGeneration):
-            credentials.unseal(other, "bne", envelope)
+            credentials.unseal(other, "bne", BNE_URL, envelope)
 
     def test_the_tag_cannot_be_rewritten_to_a_second_key(self, key: bytes):
         """It is inside the authenticated data as well as in the text."""
-        envelope = credentials.seal(key, "bne", "alice:hunter2")
+        envelope = credentials.seal(key, "bne", BNE_URL, "alice:hunter2")
         other = credentials.phrase_to_key(credentials.generate_phrase())
         version, _, nonce, sealed = envelope.split(".")
         forged = ".".join((version, credentials.generation_of_key(other), nonce, sealed))
         with pytest.raises(credentials.UnreadableCredential):
-            credentials.unseal(other, "bne", forged)
+            credentials.unseal(other, "bne", BNE_URL, forged)
 
     def test_something_that_is_not_an_envelope_reports_no_generation(self):
         assert credentials.generation_of("hunter2") == ""
 
     def test_and_is_refused_rather_than_parsed(self, key: bytes):
         with pytest.raises(credentials.UnreadableCredential):
-            credentials.unseal(key, "bne", "hunter2")
+            credentials.unseal(key, "bne", BNE_URL, "hunter2")
 
 
 class TestAnEnvelopeIsBoundToItsSourceAndItsKind:
@@ -277,16 +290,303 @@ class TestAnEnvelopeIsBoundToItsSourceAndItsKind:
     """
 
     def test_a_credential_moved_to_another_source_does_not_open(self, key: bytes):
-        envelope = credentials.seal(key, "bne", "alice:hunter2")
+        envelope = credentials.seal(key, "bne", BNE_URL, "alice:hunter2")
         with pytest.raises(credentials.UnreadableCredential):
-            credentials.unseal(key, "dnb", envelope)
+            credentials.unseal(key, "dnb", DNB_URL, envelope)
 
     def test_it_opens_on_the_source_it_was_written_for(self, key: bytes):
-        envelope = credentials.seal(key, "bne", "alice:hunter2")
-        assert credentials.unseal(key, "bne", envelope) == "alice:hunter2"
+        envelope = credentials.seal(key, "bne", BNE_URL, "alice:hunter2")
+        assert credentials.unseal(key, "bne", BNE_URL, envelope) == "alice:hunter2"
 
     def test_the_purpose_names_the_kind_and_not_only_the_subject(self):
-        assert credentials._purpose("bne") == "endpaper/v1/catalogue-credential/bne"
+        assert (
+            credentials._purpose("bne", "https://a.invalid:443")
+            == "endpaper/v2/catalogue-credential/bne/https://a.invalid:443"
+        )
+
+
+class TestAnEnvelopeIsBoundToTheAddressItIsFor:
+    """The binding that makes a moved row a refusal rather than an exfiltration.
+
+    The source alone was enough while every caller passed a module constant.
+    `opds_servers.base_url` is a row, `backup.restore` writes it through Core,
+    and an archive keeping a legitimate key beside an address of its own sent a
+    household's sealed login to a host the archive named: the attacker needed
+    the archive and not the key, which is what sealing was bought to prevent.
+    """
+
+    def test_a_credential_asked_for_at_another_address_does_not_open(self, key: bytes):
+        envelope = credentials.seal(key, "bne", BNE_URL, "alice:hunter2")
+        with pytest.raises(credentials.UnreadableCredential):
+            credentials.unseal(key, "bne", "https://elsewhere.invalid/opds", envelope)
+
+    def test_it_opens_at_the_address_it_was_sealed_for(self, key: bytes):
+        envelope = credentials.seal(key, "bne", BNE_URL, "alice:hunter2")
+        assert credentials.unseal(key, "bne", BNE_URL, envelope) == "alice:hunter2"
+
+    @pytest.mark.parametrize(
+        ("sealed_at", "asked_at"),
+        [
+            ("https://host.invalid/opds", "https://host.invalid:443/other/path"),
+            ("http://host.invalid/opds", "http://host.invalid:80/"),
+            ("https://HOST.invalid/opds", "https://host.invalid/opds"),
+        ],
+    )
+    def test_the_same_machine_written_differently_is_one_address(
+        self, key: bytes, sealed_at, asked_at
+    ):
+        """The origin is bound, not the URL, or a path edit would cost a retype.
+
+        `origin_of` is what decides, and `PUT /api/opds/servers/{id}` keeps the
+        login on exactly the edits this admits.
+        """
+        envelope = credentials.seal(key, "bne", sealed_at, "alice:hunter2")
+        assert credentials.unseal(key, "bne", asked_at, envelope) == "alice:hunter2"
+
+    @pytest.mark.parametrize(
+        ("sealed_at", "asked_at"),
+        [
+            ("https://host.invalid/opds", "http://host.invalid/opds"),
+            ("https://host.invalid/opds", "https://host.invalid:8443/opds"),
+            ("https://host.invalid/opds", "https://other.invalid/opds"),
+            ("https://host.invalid/opds", "https://user@other.invalid/opds"),
+        ],
+    )
+    def test_scheme_host_port_and_userinfo_each_make_it_another_machine(
+        self, key: bytes, sealed_at, asked_at
+    ):
+        envelope = credentials.seal(key, "bne", sealed_at, "alice:hunter2")
+        with pytest.raises(credentials.UnreadableCredential):
+            credentials.unseal(key, "bne", asked_at, envelope)
+
+    @pytest.mark.parametrize("address", ["", "not a url", "file:///etc/passwd", "://x"])
+    def test_an_address_this_build_cannot_parse_seals_nothing(self, key: bytes, address):
+        """Refused rather than folded to the empty string, which is the hole.
+
+        `origin_of` answers `""` for all of these and two of those compare
+        equal, so an envelope sealed over one would open beside **any** address
+        this build cannot parse.
+        """
+        with pytest.raises(credentials.CredentialError):
+            credentials.seal(key, "bne", address, "alice:hunter2")
+
+    def test_and_opens_nothing(self, key: bytes):
+        envelope = credentials.seal(key, "bne", BNE_URL, "alice:hunter2")
+        with pytest.raises(credentials.CredentialError):
+            credentials.unseal(key, "bne", "not a url", envelope)
+
+    def test_two_addresses_it_cannot_parse_are_not_one_address(self, key: bytes):
+        """The arm the empty string would have made pass.
+
+        **Written as the whole round trip rather than as the refusal
+        `_associated` happens to raise first**, because which end refuses is an
+        implementation choice and a test pinned to the seal alone goes green the
+        day it moves. Driven by removing that refusal: sealing over `"not a
+        url"` and opening over `"file:///etc/passwd"` then round trips, because
+        `origin_of` answers `""` for both and two empty origins compare equal.
+        """
+        with pytest.raises(credentials.CredentialError):
+            envelope = credentials.seal(key, "bne", "not a url", "alice:hunter2")
+            credentials.unseal(key, "bne", "file:///etc/passwd", envelope)
+
+    @pytest.mark.parametrize("source", ["bne/https:", "a b", "", "BNE", "x" * 33])
+    def test_a_source_that_is_not_a_source_seals_nothing(self, key: bytes, source):
+        """What keeps the purpose string one string rather than two readings.
+
+        A source may not contain a slash and an origin always does, so the pair
+        is unambiguous only while `is_safe_source` holds. `put` never checked
+        it: the column's CHECK did, one layer later.
+        """
+        with pytest.raises(credentials.CredentialError):
+            credentials.seal(key, source, BNE_URL, "alice:hunter2")
+
+    def test_no_two_source_and_address_pairs_share_a_purpose_string(self):
+        pairs = [
+            ("bne", "https://a.invalid:443"),
+            ("bne", "https://b.invalid:443"),
+            ("dnb", "https://a.invalid:443"),
+            ("dnb", "https://b.invalid:443"),
+        ]
+        assert len({credentials._purpose(*pair) for pair in pairs}) == len(pairs)
+
+
+class TestAnEnvelopeSealedBeforeTheBindingIsRefusedAndSaysWhy:
+    """The migration path, and it is a product decision rather than a detail.
+
+    Nothing re-seals an existing envelope: the key is a deployment fact a
+    migration cannot depend on, and re-sealing from the address the row already
+    names would launder a move a hostile archive had already made. So every
+    login stored before this is invalidated and typed again, and the deployment
+    meets that where a person can act on it rather than in a release note.
+    """
+
+    def test_it_is_refused_rather_than_opened(self, key: bytes):
+        envelope = sealed_before_the_origin_was_bound(key, "bne", "alice:hunter2")
+        with pytest.raises(credentials.UnboundCredential):
+            credentials.unseal(key, "bne", BNE_URL, envelope)
+
+    def test_the_refusal_names_the_remedy_and_not_the_key(self, key: bytes):
+        envelope = sealed_before_the_origin_was_bound(key, "bne", "alice:hunter2")
+        with pytest.raises(credentials.UnboundCredential) as refusal:
+            credentials.unseal(key, "bne", BNE_URL, envelope)
+        assert "Enter it again" in str(refusal.value)
+        assert "recovery phrase" not in str(refusal.value)
+
+    def test_it_is_told_apart_from_a_rotated_key(self, key: bytes):
+        """The version is read before the generation, deliberately.
+
+        A `v1` envelope is to be typed again whatever key this machine holds, so
+        reporting `WrongKeyGeneration` would send somebody after a recovery
+        phrase that opens nothing.
+        """
+        envelope = sealed_before_the_origin_was_bound(key, "bne", "alice:hunter2")
+        other = credentials.phrase_to_key(credentials.generate_phrase())
+        with pytest.raises(credentials.UnboundCredential):
+            credentials.unseal(other, "bne", BNE_URL, envelope)
+
+    def test_it_is_still_recognised_as_an_envelope(self, key: bytes):
+        """Or `backup._parse_row` refuses an archive taken before the upgrade.
+
+        The whole restore would fail over logins whose only remedy is to be
+        typed again, which is the failure the missing foreign key exists to
+        avoid.
+        """
+        envelope = sealed_before_the_origin_was_bound(key, "bne", "alice:hunter2")
+        assert credentials.generation_of(envelope) == credentials.generation_of_key(key)
+
+    def test_the_key_section_lists_it_so_it_can_be_removed(self, db, key: bytes):
+        credentials.store_key(credentials.key_to_phrase(key))
+        db.add(
+            CatalogueCredential(
+                source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b")
+            )
+        )
+        db.commit()
+        assert credentials.unreadable_sources(db) == ["bne"]
+
+    def test_and_the_row_reports_itself_held_and_unreadable(self, db, key: bytes):
+        credentials.store_key(credentials.key_to_phrase(key))
+        db.add(
+            CatalogueCredential(
+                source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b")
+            )
+        )
+        db.commit()
+        seen = credentials.view(db, "bne", BNE_URL)
+        assert (seen.provenance, seen.has_credential, seen.unreadable) == (
+            CredentialProvenance.STORED,
+            True,
+            True,
+        )
+
+    def test_and_nothing_outbound_carries_it(self, db, key: bytes):
+        credentials.store_key(credentials.key_to_phrase(key))
+        db.add(
+            CatalogueCredential(
+                source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b")
+            )
+        )
+        db.commit()
+        assert credentials.for_request(db, "bne", BNE_URL) is None
+
+
+class TestTheEnvelopeRuleAndItsConstraintAgree:
+    """`credentials.KNOWN_VERSIONS` in SQL, because models.py cannot import it.
+
+    Two spellings of one set, and the pair this project expects to come apart.
+    The candidates are derived from the constant rather than listed, so adding a
+    version to it and not to the constraint fails here rather than at a write on
+    somebody's deployment.
+
+    **Against a table built here from `Base.metadata`, and not against the `db`
+    fixture, which cannot answer this question.** `conftest._schema_once` calls
+    `create_all`, but `main.py` calls `upgrade_to_head()` at startup and the app
+    is imported first, so `create_all` finds every table already built and does
+    nothing: the suite's database is the **migrations'**. Measured by widening
+    this constraint in `models.py` alone and running this class, which passed,
+    and by reading back `sqlite_master`, which returned the quoted table name a
+    batch rebuild produces rather than the unquoted one `create_all` emits. A
+    version added to `models.py` and forgotten in the migration is what
+    `tests/test_schema.py::TestTheEnvelopeConstraintOnAMigratedDatabase` covers
+    from the other side.
+    """
+
+    @staticmethod
+    def _accepted(envelope: str) -> bool:
+        """Whether the table **the models declare** takes this envelope."""
+        import sqlalchemy as sa
+        from sqlalchemy.exc import IntegrityError
+
+        engine = sa.create_engine("sqlite://")
+        # Through the metadata rather than `__table__`, which the ORM types as
+        # a `FromClause`. Same object, and the name comes off the model.
+        Base.metadata.tables[CatalogueCredential.__tablename__].create(engine)
+        statement = sa.text(
+            "INSERT INTO catalogue_credentials (source, envelope) VALUES ('bne', :e)"
+        )
+        with engine.connect() as connection:
+            try:
+                connection.execute(statement, {"e": envelope})
+            except IntegrityError:
+                return False
+        return True
+
+    def test_the_version_this_build_writes_is_one_it_recognises(self):
+        assert credentials.VERSION in credentials.KNOWN_VERSIONS
+
+    @pytest.mark.parametrize("version", credentials.KNOWN_VERSIONS)
+    def test_every_recognised_version_is_storable(self, version):
+        assert self._accepted(f"{version}." + "a" * 40 + ".b.c")
+
+    def test_the_constraint_names_exactly_the_versions_this_build_recognises(self):
+        """Read off the SQL, because a sweep only sees the shapes it enumerates.
+
+        The arm this replaced tried `v0` to `v9`. It caught a constraint widened
+        to admit `v3` and could not see one widened to `w1`, `v10` or `v2x`, and
+        a list of spellings is the guard shape this project keeps replacing.
+        Comparing the two sets fails in **both** directions: a version in the
+        constant and not the SQL, which is a write every deployment refuses, and
+        a version in the SQL and not the constant, which is a format this build
+        stores and cannot open.
+        """
+        import re
+
+        clause = str(
+            next(
+                constraint
+                for constraint in CatalogueCredential.__table_args__
+                if getattr(constraint, "name", "") == "ck_catalogue_credentials_envelope"
+            ).sqltext
+        )
+        named = set(re.findall(r"GLOB '([^.']+)\.", clause))
+
+        assert named == set(credentials.KNOWN_VERSIONS)
+
+    def test_and_refuses_every_one_outside_that_set(self):
+        """The behavioural half, and it is a sweep rather than one candidate.
+
+        **The structural read above enumerates the SQL operator where the arm it
+        replaced enumerated candidate strings**, so the two miss different
+        things and neither is the other's superset. Measured against the clause
+        widened with `OR envelope LIKE 'v4.%'`: the regex still harvests
+        `{v1, v2}` and the structural assert passes, because it can only see a
+        widening spelled `GLOB '<version>.`. A sweep of insertions sees any
+        spelling and cannot see a version it did not think to try, which is why
+        both are here. Candidates computed from the constant, not listed.
+        """
+        unknown = [f"v{n}" for n in range(10) if f"v{n}" not in credentials.KNOWN_VERSIONS]
+        assert unknown, "every one-digit version is recognised; widen the sweep"
+
+        accepted = [
+            version
+            for version in unknown
+            if self._accepted(f"{version}." + "a" * 40 + ".b.c")
+        ]
+
+        assert accepted == []
+
+    def test_a_plaintext_password_is_refused(self):
+        assert not self._accepted("hunter2")
 
 
 class TestACredentialNeverLeavesTheOriginItWasSetFor:
@@ -345,6 +645,18 @@ class TestACredentialNeverLeavesTheOriginItWasSetFor:
     def test_an_address_that_cannot_be_parsed_binds_nothing(self):
         assert credentials.origin_of("https://") == ""
         assert credentials.origin_of("not a url") == ""
+
+    def test_an_address_with_no_scheme_binds_nothing_either(self):
+        """No scheme is not another scheme, and the difference is now sealable.
+
+        `httpx` reads `://x` as an empty scheme with a host of `x`, so this
+        answered the bindable origin `://x`. Harmless while an origin was only
+        compared; an origin goes into the associated data now, so it is a value
+        an envelope can be sealed over, and nothing here can send to an address
+        with no scheme.
+        """
+        assert credentials.origin_of("://x") == ""
+        assert httpx.URL("://x").host == "x"
 
     def test_and_an_unbindable_credential_sends_nothing(self):
         assert credentials.Credential("", "alice", "hunter2").header_for(
@@ -487,46 +799,46 @@ class TestAnOperatorCanWithholdTheFeatureEntirely:
 class TestTheStoreSealsWhatItIsGiven:
     def test_a_credential_round_trips(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
-        assert credentials.stored(db, "bne") == ("alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
+        assert credentials.stored(db, "bne", BNE_URL) == ("alice", "hunter2")
 
     def test_a_password_containing_colons_survives(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "a:b:c")
-        assert credentials.stored(db, "bne") == ("alice", "a:b:c")
+        credentials.put(db, "bne", BNE_URL, "alice", "a:b:c")
+        assert credentials.stored(db, "bne", BNE_URL) == ("alice", "a:b:c")
 
     def test_nothing_readable_reaches_the_row(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         row = db.get(CatalogueCredential, "bne")
         assert "alice" not in row.envelope
         assert "hunter2" not in row.envelope
-        assert row.envelope.startswith("v1.")
+        assert row.envelope.startswith(f"{credentials.VERSION}.")
 
     def test_a_second_write_replaces_the_first(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
-        credentials.put(db, "bne", "bob", "correcthorse")
-        assert credentials.stored(db, "bne") == ("bob", "correcthorse")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "bob", "correcthorse")
+        assert credentials.stored(db, "bne", BNE_URL) == ("bob", "correcthorse")
 
     def test_a_username_with_a_colon_is_refused(self, db):
         credentials.generate_key(db)
         with pytest.raises(credentials.CredentialError):
-            credentials.put(db, "bne", "alice:smith", "hunter2")
+            credentials.put(db, "bne", BNE_URL, "alice:smith", "hunter2")
 
     def test_an_empty_half_is_refused(self, db):
         credentials.generate_key(db)
         with pytest.raises(credentials.CredentialError):
-            credentials.put(db, "bne", "alice", "")
+            credentials.put(db, "bne", BNE_URL, "alice", "")
 
     def test_storing_one_without_a_key_is_refused(self, db):
         with pytest.raises(credentials.NoKeyConfigured):
-            credentials.put(db, "bne", "alice", "hunter2")
+            credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
 
     def test_forgetting_one_needs_no_key(self, db):
         """The credential nobody can read is the one somebody most wants gone."""
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         credentials.store_key(credentials.generate_phrase())
         assert credentials.forget(db, "bne") is True
         assert credentials.stored_envelope(db, "bne") == ""
@@ -542,7 +854,7 @@ class TestTheScreenIsToldWhetherOneIsUsableRatherThanOnlyWhetherOneExists:
 
     def test_one_stored_and_readable(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         held = credentials.view(db, "bne", BNE_URL)
         assert (held.has_credential, held.unreadable, held.username) == (
             True,
@@ -553,7 +865,7 @@ class TestTheScreenIsToldWhetherOneIsUsableRatherThanOnlyWhetherOneExists:
 
     def test_one_stored_under_a_key_that_is_gone(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         credentials.store_key(credentials.generate_phrase())
         held = credentials.view(db, "bne", BNE_URL)
         assert (held.has_credential, held.unreadable, held.username) == (True, True, "")
@@ -561,7 +873,7 @@ class TestTheScreenIsToldWhetherOneIsUsableRatherThanOnlyWhetherOneExists:
 
     def test_one_stored_with_no_key_configured_at_all(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         credentials.key_file().unlink()
         held = credentials.view(db, "bne", BNE_URL)
         assert (held.has_credential, held.unreadable) == (True, True)
@@ -570,7 +882,7 @@ class TestTheScreenIsToldWhetherOneIsUsableRatherThanOnlyWhetherOneExists:
 class TestADeploymentMayPinOneInstead:
     def test_a_pinned_credential_wins_over_the_stored_one(self, db, monkeypatch):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
         request = credentials.for_request(db, "bne", "https://catalogue.example/sru")
         assert request is not None
@@ -599,16 +911,26 @@ class TestAnUnreadableCredentialIsNotSentRatherThanRaising:
 
     def test_a_rotated_key_answers_none(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         credentials.store_key(credentials.generate_phrase())
         assert credentials.for_request(db, "bne", "https://catalogue.example") is None
 
-    def test_a_readable_one_is_bound_to_the_target_address(self, db):
+    def test_a_readable_one_is_bound_to_the_address_it_was_sealed_for(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
-        request = credentials.for_request(db, "bne", "https://catalogue.example/sru")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
+        request = credentials.for_request(db, "bne", BNE_URL)
         assert request is not None
-        assert request.origin == "https://catalogue.example:443"
+        assert request.origin == credentials.origin_of(BNE_URL)
+
+    def test_and_asking_about_another_address_answers_none(self, db):
+        """It used to answer the login, bound to whichever address was asked.
+
+        That is the defect this binding closes: the caller's address decided
+        where a sealed login went, and one caller's address is a row.
+        """
+        credentials.generate_key(db)
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
+        assert credentials.for_request(db, "bne", "https://catalogue.example/sru") is None
 
 
 #: The one source this build ships a login for, and where it goes.
@@ -679,7 +1001,7 @@ class TestThisBuildShipsExactlyTheDefaultsItSaysItDoes:
         for source in SHIPPING:
             pair = targets.SEEDED[source].shipped_credential
             assert pair is not None
-            credentials.put(db, source.value, pair.username, pair.password)
+            credentials.put(db, source.value, targets.SEEDED[source].base_url, pair.username, pair.password)
 
 
 class TestAShippedLoginLosesToEverythingElse:
@@ -706,7 +1028,7 @@ class TestAShippedLoginLosesToEverythingElse:
     def test_a_login_an_admin_enters_wins_over_it(self, db):
         for source in SHIPPING:
             _a_key(db)
-            credentials.put(db, source.value, "alice", "hunter2")
+            credentials.put(db, source.value, targets.SEEDED[source].base_url, "alice", "hunter2")
             request = credentials.for_request(db, source.value, _url(source))
             assert request is not None
             assert (request.username, request.password) == ("alice", "hunter2")
@@ -714,7 +1036,7 @@ class TestAShippedLoginLosesToEverythingElse:
     def test_a_login_the_deployment_pins_wins_over_both(self, db, monkeypatch):
         for source in SHIPPING:
             _a_key(db)
-            credentials.put(db, source.value, "alice", "hunter2")
+            credentials.put(db, source.value, targets.SEEDED[source].base_url, "alice", "hunter2")
             monkeypatch.setenv(
                 credentials.env_variable_name(source.value), "bob:correcthorse"
             )
@@ -727,7 +1049,7 @@ class TestAShippedLoginLosesToEverythingElse:
     ):
         for source in SHIPPING:
             _a_key(db)
-            credentials.put(db, source.value, "alice", "hunter2")
+            credentials.put(db, source.value, targets.SEEDED[source].base_url, "alice", "hunter2")
             variable = credentials.env_variable_name(source.value)
             monkeypatch.setenv(variable, "bob:correcthorse")
             monkeypatch.delenv(variable)
@@ -741,7 +1063,7 @@ class TestAShippedLoginLosesToEverythingElse:
             shipped = targets.SEEDED[source].shipped_credential
             assert shipped is not None
             _a_key(db)
-            credentials.put(db, source.value, "alice", "hunter2")
+            credentials.put(db, source.value, targets.SEEDED[source].base_url, "alice", "hunter2")
             credentials.forget(db, source.value)
             request = credentials.for_request(db, source.value, _url(source))
             assert request is not None
@@ -760,7 +1082,7 @@ class TestAShippedLoginLosesToEverythingElse:
         """
         for source in SHIPPING:
             _a_key(db)
-            credentials.put(db, source.value, "alice", "hunter2")
+            credentials.put(db, source.value, targets.SEEDED[source].base_url, "alice", "hunter2")
             credentials.store_key(credentials.generate_phrase())
             assert credentials.for_request(db, source.value, _url(source)) is None
             held = credentials.view(db, source.value, _url(source))
@@ -814,7 +1136,7 @@ class TestTheScreenIsToldWhichOfTheFourIsInForce:
     def test_one_an_admin_entered_is_named_as_stored(self, db):
         for source in SHIPPING:
             _a_key(db)
-            credentials.put(db, source.value, "alice", "hunter2")
+            credentials.put(db, source.value, targets.SEEDED[source].base_url, "alice", "hunter2")
             held = credentials.view(db, source.value, _url(source))
             assert held.provenance is CredentialProvenance.STORED
             assert held.username == "alice"
@@ -936,7 +1258,10 @@ class TestThePurposeStringNamesExactlyOneSource:
     """What stops an envelope opening on a row it was not written for."""
 
     def test_the_purpose_string_differs_per_source(self):
-        purposes = {credentials._purpose(source.value) for source in CatalogueSource}
+        purposes = {
+            credentials._purpose(source.value, "https://a.invalid:443")
+            for source in CatalogueSource
+        }
         assert len(purposes) == len(list(CatalogueSource))
 
 
@@ -951,22 +1276,70 @@ class TestAKeyIsNotMintedOverLoginsItCannotOpen:
 
     def test_making_a_key_is_refused_while_sealed_logins_exist(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         credentials.forget_key()
         with pytest.raises(credentials.KeyConfigurationError) as refusal:
             credentials.generate_key(db)
         assert "recovery phrase" in str(refusal.value)
 
+    def test_a_login_from_before_the_binding_is_not_blamed_on_the_key(
+        self, db, key: bytes
+    ):
+        """The phrase hunt `UnboundCredential` exists to prevent, one door along.
+
+        Reached only by restoring an archive taken before the binding, which is
+        the ordinary move-to-a-new-machine case. Told that the key is at fault,
+        an admin finds the phrase, watches it be accepted, and finds the login
+        still shut.
+        """
+        db.add(
+            CatalogueCredential(
+                source="bne",
+                envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b"),
+            )
+        )
+        db.commit()
+
+        with pytest.raises(credentials.KeyConfigurationError) as refusal:
+            credentials.generate_key(db)
+
+        assert "recovery phrase" not in str(refusal.value)
+        assert "enter them again" in str(refusal.value)
+
+    def test_and_a_login_under_a_lost_key_still_is(self, db, key: bytes):
+        """The diagonal: both causes at once get both sentences, each naming
+        only its own source, or one arm would pass on the other's case."""
+        credentials.store_key(credentials.key_to_phrase(key))
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
+        db.add(
+            CatalogueCredential(
+                source="dnb",
+                envelope=sealed_before_the_origin_was_bound(key, "dnb", "a:b"),
+            )
+        )
+        db.commit()
+        credentials.forget_key()
+
+        with pytest.raises(credentials.KeyConfigurationError) as refusal:
+            credentials.generate_key(db)
+
+        said = str(refusal.value)
+        assert "recovery phrase" in said
+        assert "enter them again" in said
+        before, _, after = said.partition("no longer has.")
+        assert "bne" in before and "dnb" not in before
+        assert "dnb" in after and "bne" not in after
+
     def test_the_phrase_opens_them_again(self, db):
         phrase, _ = credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         credentials.forget_key()
         credentials.store_key(phrase)
-        assert credentials.stored(db, "bne") == ("alice", "hunter2")
+        assert credentials.stored(db, "bne", BNE_URL) == ("alice", "hunter2")
 
     def test_removing_the_logins_clears_the_way_for_a_new_key(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         credentials.forget_key()
         credentials.forget(db, "bne")
         assert len(credentials.generate_key(db)[0].split()) == 24
@@ -1082,7 +1455,7 @@ class TestTheKeyIsResolvedOncePerCaller:
         answers.
         """
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         state = credentials.key_state()
         credentials.key_file().unlink()
         assert credentials.view(db, "bne", BNE_URL, state).username == "alice"
@@ -1183,13 +1556,13 @@ class TestWhatCannotBeOpenedIsCountedOffTheTableAndNotTheRoster:
 
     def test_a_row_outside_the_roster_is_still_counted(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "a-catalogue-that-went-away", "alice", "hunter2")
+        credentials.put(db, "a-catalogue-that-went-away", ORPHAN_URL, "alice", "hunter2")
         credentials.store_key(credentials.generate_phrase())
         assert credentials.unreadable_sources(db) == ["a-catalogue-that-went-away"]
 
     def test_and_still_blocks_a_new_key_with_a_number_that_matches(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "a-catalogue-that-went-away", "alice", "hunter2")
+        credentials.put(db, "a-catalogue-that-went-away", ORPHAN_URL, "alice", "hunter2")
         credentials.forget_key()
         with pytest.raises(credentials.KeyConfigurationError) as refusal:
             credentials.generate_key(db)
@@ -1213,7 +1586,7 @@ class TestWhatCannotBeOpenedIsCountedOffTheTableAndNotTheRoster:
         went green on the covered case.
         """
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         credentials.forget_key()
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
 
@@ -1224,22 +1597,62 @@ class TestWhatCannotBeOpenedIsCountedOffTheTableAndNotTheRoster:
 
     def test_and_the_phrase_still_opens_it_afterwards(self, db, monkeypatch):
         phrase, _ = credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         credentials.forget_key()
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
         monkeypatch.delenv("CATALOGUE_CREDENTIAL_BNE")
         credentials.store_key(phrase)
-        assert credentials.stored(db, "bne") == ("alice", "hunter2")
+        assert credentials.stored(db, "bne", BNE_URL) == ("alice", "hunter2")
 
     def test_a_readable_login_is_not_counted(self, db):
         credentials.generate_key(db)
-        credentials.put(db, "bne", "alice", "hunter2")
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         assert credentials.unreadable_sources(db) == []
+
+    def test_a_damaged_envelope_on_a_pinned_source_is_no_longer_listed(
+        self, db, monkeypatch
+    ):
+        """The accepted loss, pinned so that it stays a decision.
+
+        An envelope is sealed over its address now, and this function has none,
+        so it answers from the version and the generation tag. A `v2` envelope
+        of this key's generation whose ciphertext an archive damaged passes that
+        and is not listed, where opening it used to fail and list it. `view`
+        covers every row it is asked about and is not asked about a pinned
+        source, so this is one of the two places the loss lands.
+        `unreadable_sources`' docstring carries the reasoning and why restoring
+        it would cost an arm per kind of row.
+        """
+        credentials.generate_key(db)
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
+        row = db.get(CatalogueCredential, "bne")
+        version, generation, nonce, sealed = row.envelope.split(".")
+        row.envelope = ".".join((version, generation, nonce, "AAAA" + sealed[4:]))
+        db.commit()
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
+
+        assert credentials.unreadable_sources(db) == []
+        assert credentials.view(db, "bne", BNE_URL).unreadable is False
+        with pytest.raises(credentials.UnreadableCredential):
+            credentials.stored(db, "bne", BNE_URL)
+
+    def test_but_a_key_that_cannot_open_it_still_lists_it(self, db):
+        """The arm the test above must not be read as weakening.
+
+        What `unreadable_sources` answers is still the key's question, and that
+        is the one `generate_key` asks. Rotating the key lists the same row.
+        """
+        credentials.generate_key(db)
+        credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
+        credentials.store_key(credentials.generate_phrase())
+
+        assert credentials.unreadable_sources(db) == ["bne"]
 
     def test_they_are_reported_in_a_stable_order(self, db):
         credentials.generate_key(db)
         for source in ("dnb", "bne", "loc"):
-            credentials.put(db, source, "alice", "hunter2")
+            address = targets.SEEDED[CatalogueSource(source)].base_url
+            credentials.put(db, source, address, "alice", "hunter2")
         credentials.store_key(credentials.generate_phrase())
         assert credentials.unreadable_sources(db) == ["bne", "dnb", "loc"]
 

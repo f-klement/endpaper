@@ -457,3 +457,30 @@ def enable_google_books(db: Any, key: str = "a-test-key") -> None:
 
     settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_ENABLED, "true")
     settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, key)
+
+
+def sealed_before_the_origin_was_bound(material: bytes, source: str, secret: str) -> str:
+    """A `v1` envelope, exactly as `credentials.seal` wrote one before `v2`.
+
+    **The one definition of what the old scheme was**, wanted by the tests that
+    cover the migration path and by the one that covers restoring an archive
+    taken before it. Reconstructed rather than captured, because the generation
+    tag is a function of the key and every test generates its own.
+
+    The associated data is the old scheme's verbatim: the version, the
+    generation, and a purpose string with no origin in it. It is written out
+    rather than built from `credentials._purpose`, which is the point: this
+    stays what `v1` was when that function changes again.
+    """
+    import secrets
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    import credentials
+
+    generation = credentials.generation_of_key(material)
+    associated = f"v1.{generation}.endpaper/v1/catalogue-credential/{source}".encode()
+    nonce = secrets.token_bytes(12)
+    box = AESGCM(credentials._expand(material, credentials._ENCRYPTION_INFO, 32))
+    sealed = box.encrypt(nonce, secret.encode("utf-8"), associated)
+    return ".".join(("v1", generation, credentials._b64(nonce), credentials._b64(sealed)))

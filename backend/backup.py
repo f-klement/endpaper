@@ -750,29 +750,32 @@ def _settle_restored_accounts(db: Session) -> None:
 def _without_household_logins(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Every credential in the archive except a household server's own.
 
-    **The address a household login is sent to is decided by a row in the same
-    archive, and that is what makes this one different from a roster
-    catalogue's.** `credentials.for_request` binds a stored credential to the
-    `base_url` it is **asked** about, and `routers/opds.sync_server` asks about
-    `opds_servers.base_url`, which `restore` writes with no validating arm. So
-    an archive could keep a legitimate `opds-` key and change only the address
-    beside it, and the next sync would send the household's login for its own
-    server to a host the archive named. A roster catalogue's address is a module
-    constant (`targets.SEEDED`), so its credential has no such writer.
+    **The belt, and `credentials.seal` is the brace.** An envelope now carries
+    the origin it was sealed for, so one lifted beside an address somebody else
+    wrote fails authentication rather than opening: the loss below is closed by
+    construction, whichever writer moved the row. This filter is kept because it
+    is cheap once that is true and because it refuses one step earlier, at the
+    archive rather than at the send.
 
-    **`PUT /api/opds/servers/{id}` refuses exactly this**, dropping the login
-    before an address moves to a different origin. Without this, the archive
-    path did what that route exists to refuse, for an admin the route refuses
-    it to. Measured by a critic: with a real generated key, a sealed
+    **What it was bought for.** The address a household login is sent to is
+    decided by a row in the same archive, which is what makes this one different
+    from a roster catalogue's: `credentials.for_request` binds a stored
+    credential to the `base_url` it is **asked** about, and
+    `routers/opds.sync_server` asks about `opds_servers.base_url`, which
+    `restore` writes with no validating arm. So an archive could keep a
+    legitimate `opds-` key and change only the address beside it, and the next
+    sync sent the household's login for its own server to a host the archive
+    named. Measured by a critic: with a real generated key, a sealed
     `house:housepw` and the address rewritten, `for_request` bound the pair to
-    the attacker's origin and `header_for` emitted it.
+    the attacker's origin and `header_for` emitted it. A roster catalogue's
+    address is a module constant (`targets.SEEDED`), so its credential never had
+    such a writer.
 
     **The cost is stated rather than hidden**: a restore onto the same machine
     loses OPDS logins this deployment's key could still have opened, and they
     are typed again. That is the bargain `_TABLES` already describes for a
     restore onto a new machine, applied one case earlier, and it is the safe
-    direction: the alternative loses somebody else's password to a host they
-    did not choose.
+    direction.
 
     **Why dropping the row is sufficient, which is not a property of this
     function.** The delete loop above runs over every entry of `_TABLES`
@@ -782,12 +785,6 @@ def _without_household_logins(rows: list[dict[str, Any]]) -> list[dict[str, Any]
     own `opds-` envelope in place and pair it with an `opds_servers` row of its
     choosing, which is this attack one step around this filter. The two do not
     otherwise name each other, so it is said here.
-
-    **The residue this leaves.** `credentials.seal` takes the source alone as
-    associated data, so an envelope opens at whatever address the row beside it
-    names, and this filter is what stands in for a binding the envelope does not
-    carry. That is a property of the credential scheme rather than of this
-    module.
     """
     return [
         row

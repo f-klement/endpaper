@@ -5,7 +5,7 @@
  * plain values and callbacks.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -15,7 +15,9 @@ import { ApiError } from "../../api/mutator";
 
 import {
   getLookupIsbnQueryKey,
+  getSearchBooksQueryKey,
   lookupIsbn,
+  searchBooks,
   getListTagsQueryKey,
   useAddBookTag,
   useAddCopy,
@@ -36,8 +38,17 @@ import type {
   LocationOut,
   TagOut,
 } from "../../api/generated/model";
+import { QUERY_FLOOR } from "../../lib/bookBounds";
 import { useTranslation, type MessageKey } from "../../i18n";
 import type { EpubFailure } from "../../lib/epub";
+import {
+  FORMAT_FOR_EXTENSION,
+  plainName,
+  readName,
+  supportedExtension,
+  type FileNaming,
+  type SupportedExtension,
+} from "../../lib/fileName";
 import {
   normaliseLocation,
   readLastLocation,
@@ -47,6 +58,7 @@ import {
   blankDraft,
   blankPending,
   draftFromFile,
+  draftFromName,
   draftFromMatch,
   draftFromLookup,
   toCopyRequest,
@@ -72,7 +84,68 @@ const FILE_FAILURES: Record<EpubFailure, MessageKey> = {
 };
 
 /** Below this, a search is noise rather than a query. Matches the API bound. */
-const MIN_QUERY_LENGTH = 2;
+const MIN_QUERY_LENGTH = QUERY_FLOOR;
+
+/**
+ * How many catalogue calls a minute the filename fallback may start.
+ *
+ * **Priced against the limiter the same member is already spending, not against
+ * the deadline.** `backend/ratelimit.py`'s `METADATA_LIMIT` allows 60 metadata
+ * calls a minute per member, and it is the limiter on the ISBN lookup behind
+ * every scanned barcode and on the title search box as well as on this. So the
+ * fallback takes half of it and leaves the other half to the page it runs on:
+ * a folder of three hundred files must not be able to answer 429 to the barcode
+ * somebody scans in the middle of it.
+ *
+ * **Half is chosen rather than measured**, and what it is chosen against is
+ * stated so the next reader can move it: the other paths on this page.
+ *
+ * The wall clock it buys, for 300 files: 10.0 minutes here, against 6.0 to 9.0
+ * serialised at the 1.2s to 1.8s a healthy search measures by
+ * `metadata.SEARCH_DEADLINE_SECONDS`' own figure, which is 33 to 50 starts a
+ * minute and over this share. So the pace costs at most four minutes and the
+ * interval is above the slowest healthy search, which is why one call in flight
+ * is never what binds.
+ *
+ * `tests/pages/ScanPage/hooks.test.tsx` recomputes the interval from the
+ * backend's own constant rather than restating it.
+ */
+export const FALLBACK_STARTS_PER_MINUTE = 30;
+
+/** One start per this long, which is the whole of the pace. */
+export const FALLBACK_INTERVAL_MS = 60_000 / FALLBACK_STARTS_PER_MINUTE;
+
+/**
+ * How many candidates one file is offered.
+ *
+ * Five rather than the ten a typed search shows, because these are rendered
+ * one row per file down a queue that may hold hundreds: the ranking already
+ * puts the answer first, and the rest are there to be disagreed with.
+ */
+const FALLBACK_MATCH_LIMIT = 5;
+
+/**
+ * A pause the paced run can be cut short.
+ *
+ * **The resolver is handed back rather than the wait being polled.** The gap
+ * between two calls is the whole of the pace, so a stop that only lands when the
+ * gap ends is a button that does nothing for two seconds, which is longer than a
+ * member waits before pressing it again. `stopLookingUp` ends the wait itself.
+ */
+function delay(
+  ms: number,
+  hold: { current: (() => void) | null },
+): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      hold.current = null;
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    hold.current = finish;
+  });
+}
 
 /**
  * The shelves already in use, for the location suggestions.
@@ -531,10 +604,52 @@ export interface ScannedEntry {
    * barcode carries no such evidence and stays blank.
    */
   format: BookFormat | "";
-  state: "looking-up" | "reading" | "found" | "not-found" | "failed";
+  /**
+   * Where this entry has got to.
+   *
+   * **`derived` is a book, not a failure, and that is the decision behind the
+   * whole fallback path.** A file whose own metadata said nothing still has a
+   * name, and a row carrying what the name said is added by `addAll` rather
+   * than skipped. It is the same call the OPDS sync makes for a holding with no
+   * description: reported as created, because it is.
+   */
+  state:
+    | "looking-up"
+    | "reading"
+    | "derived"
+    | "searching"
+    | "choosing"
+    | "found"
+    | "not-found"
+    | "failed";
   draft: BookDraft | null;
   /** Why it could not be read, or could not be added once the batch has run. */
   reason?: string;
+  /**
+   * What to ask the catalogue about this file, derived from its name.
+   *
+   * Absent for a barcode, which needs no such thing, and for a file whose name
+   * reduced to nothing a catalogue could be asked about.
+   */
+  query?: string;
+  /** What the catalogue offered for it, for the member to accept or reject. */
+  matches?: BookMatch[];
+  /**
+   * What the catalogue answered, where the answer left the row under its own
+   * name.
+   *
+   * **Two values rather than one flag**, because the two ways a row keeps its
+   * file name are different sentences to the member. `"nothing"` is a catalogue
+   * with no record, which for a title that exists only as a file is the ordinary
+   * outcome and is what `fallback.aboutEbooks` explains. `"records"` is a
+   * catalogue that had some and a member who preferred the name, and saying
+   * anything about ebooks to them would describe something that did not happen.
+   *
+   * **Absent means nothing has been asked**, which is what the run and the count
+   * both read, and it is what a call that could not be made leaves behind: a
+   * catalogue nobody reached has answered nothing and is worth asking again.
+   */
+  answered?: "nothing" | "records";
 }
 
 /** The queue key for a scanned barcode. One book, one ISBN, one entry. */
@@ -551,6 +666,45 @@ function scannedKey(isbn: string): string {
  */
 function pickedKey(file: File): string {
   return `file:${file.name}:${file.size}:${file.lastModified}`;
+}
+
+/**
+ * The folders above a picked file, outermost first.
+ *
+ * `webkitRelativePath` is the browser's own answer and it is relative to the
+ * folder the member chose, so nothing above that folder is visible here and no
+ * path off their disk can be read. A file picked one at a time carries none at
+ * all, which is the ordinary case and reads as no folders.
+ *
+ * Outermost first is what `readName` wants: in a library on disk the author is
+ * the folder **above** the book, and the folder immediately over a file is
+ * usually named for the book itself.
+ */
+function foldersOf(file: File): string[] {
+  return file.webkitRelativePath
+    ? file.webkitRelativePath.split("/").slice(0, -1).filter(Boolean)
+    : [];
+}
+
+/** An entry with records offered and neither taken nor refused. */
+function isBeingDecided(entry: ScannedEntry): boolean {
+  return entry.state === "choosing";
+}
+
+/**
+ * An entry the catalogue has not been asked about and could be.
+ *
+ * One predicate rather than a filter written twice, because the count on the
+ * button and the list the run walks have to be the same set: a button offering
+ * to look up twelve and a run that looks up nine is a screen reporting
+ * something the page did not do.
+ */
+function needsALookup(entry: ScannedEntry): boolean {
+  return (
+    entry.state === "derived" &&
+    entry.answered === undefined &&
+    (entry.isbn !== "" || entry.query !== undefined)
+  );
 }
 
 export interface UseRapidIntakeResult {
@@ -582,6 +736,47 @@ export interface UseRapidIntakeResult {
   pickFiles: (files: readonly File[]) => void;
   /** True while any picked file is still being read. */
   isReading: boolean;
+  /**
+   * How many picked files the walk passed over, because Endpaper reads no
+   * format of theirs.
+   *
+   * **Counted rather than ignored**, which is the whole of the interface here: a
+   * member who points at a folder of CBR or DJVU files and sees nothing appear
+   * deserves to know why. Deduplicated by the queue's own key, so pointing at
+   * the same folder twice does not count it twice.
+   */
+  skipped: number;
+  /** Files whose name is all that is left to ask the catalogue about. */
+  waiting: number;
+  /**
+   * Files with records offered and neither taken nor refused.
+   *
+   * **Derived from the predicate `addAll` excludes, not from a second one
+   * spelled the same.** The screen says how many rows the batch is going to
+   * leave where they are, so a predicate written twice is a screen that can
+   * report something the page did not do. Same reason `needsALookup` is one
+   * function rather than a filter at each site.
+   */
+  deciding: number;
+  /** Roughly how long looking all of them up would take, in minutes. */
+  paceMinutes: number;
+  /**
+   * Ask the catalogue about every file that has only its name.
+   *
+   * **Offered, never automatic**, and it is one press for the queue as it stood
+   * when it was pressed. Two reasons, and the second is the one that decides it:
+   * several hundred files is several hundred fan outs, which is not something a
+   * page may spend somebody's rate limit on because they picked a folder; and no
+   * name a member did not choose to look up ever leaves the browser.
+   */
+  lookUpTheNames: () => void;
+  /** Stop the paced run after the call in flight. */
+  stopLookingUp: () => void;
+  isLookingUp: boolean;
+  /** Take one of the records the catalogue offered for a file. */
+  chooseFor: (key: string, match: BookMatch) => void;
+  /** Reject all of them and keep what the name said. */
+  keepTheName: (key: string) => void;
   remove: (key: string) => void;
   clear: () => void;
 
@@ -606,6 +801,20 @@ export function useRapidIntake(): UseRapidIntakeResult {
   const [isActive, setIsActive] = useState(false);
   const [entries, setEntries] = useState<ScannedEntry[]>([]);
   const [isAdding, setIsAdding] = useState(false);
+  const [isLookingUp, setIsLookingUp] = useState(false);
+  // **What the last pick passed over, rather than a running total.** A total
+  // has no way down: the notice sits beside the picker rather than the queue,
+  // precisely so it can be shown when nothing was queued at all, and a member
+  // who picks a folder of comics and nothing else would carry the number for the
+  // rest of the session. A count of the last pick is also the one a member can
+  // act on, since it is the pick they just made.
+  const [skipped, setSkipped] = useState(0);
+  // A ref rather than state: the paced run reads it between calls, and a state
+  // read inside a running loop is the value it started with.
+  const stopRequested = useRef(false);
+  // How to end the wait between two calls early. Null whenever the run is not
+  // waiting, which is every moment a stop has nothing to interrupt.
+  const endTheWait = useRef<(() => void) | null>(null);
   const [location, setLocation] = useState(readLastLocation);
   const [result, setResult] = useState<{
     added: number;
@@ -617,8 +826,10 @@ export function useRapidIntake(): UseRapidIntakeResult {
   const scanAdd = useScanAdd();
   const locations = useKnownLocations();
   // For the per-row failure reason: a rejected fetch has no message worth
-  // showing, so `errorText` needs the catalogue to supply one.
-  const { t } = useTranslation();
+  // showing, so `errorText` needs the catalogue to supply one. The locale is
+  // for the paced lookup, which breaks ties towards the reader's own printing
+  // exactly as the search box does.
+  const { t, locale } = useTranslation();
 
   /** Rewrite the one entry with this key, leaving every other alone. */
   function settle(key: string, patch: Partial<ScannedEntry>) {
@@ -677,28 +888,55 @@ export function useRapidIntake(): UseRapidIntakeResult {
    * cached after the first await, and asking per file would serialise every
    * read behind something already in memory.
    *
-   * **A file that cannot be read stays in the queue as a named failure.** It is
-   * one entry's failure and never the batch's, which is what lets somebody
-   * point at a folder holding one broken file and still get the rest.
+   * **A file the walk does not read is counted, never dropped in silence.** The
+   * formats epic settled which extensions are in and which are out, so a folder
+   * of CBR or DJVU produces a count and an explanation rather than an empty
+   * queue that reads as a broken picker.
+   *
+   * **A file that cannot be read is no longer the end of it.** Its name is still
+   * a signal, so it becomes a candidate carrying what the name said, with a note
+   * of what the file itself could not say. Only a name that reduces to nothing
+   * is a failure now.
    *
    * The already-queued check happens inside the updater and starts the reads
    * from there, which is the shape `capture` uses and for the same reason: the
    * queue is the only record of what has been picked, so asking anything else
-   * would be a second one to keep in step.
+   * would be a second one to keep in step. The skipped count is taken **before**
+   * it, because an updater that counts is an updater run twice under a strict
+   * render counting twice.
    */
   function pickFiles(files: readonly File[]) {
+    const walked = files.map((file) => ({
+      file,
+      extension: supportedExtension(file.name),
+    }));
+    setSkipped(walked.filter((walk) => walk.extension === null).length);
+
+    const supported = walked.filter(
+      (walk): walk is { file: File; extension: SupportedExtension } =>
+        walk.extension !== null,
+    );
+
     setEntries((current) => {
       const queued = new Set(current.map((entry) => entry.key));
-      const fresh = files.filter((file) => !queued.has(pickedKey(file)));
+      const fresh = supported.filter(
+        (walk) => !queued.has(pickedKey(walk.file)),
+      );
       if (fresh.length === 0) return current;
-      void readFiles(fresh);
+      void readFiles(fresh.map((walk) => walk.file));
       return [
         ...current,
-        ...fresh.map((file) => ({
-          key: pickedKey(file),
-          label: file.name,
+        ...fresh.map((walk) => ({
+          key: pickedKey(walk.file),
+          // Cleaned for the reason every derived value is: a name is somebody
+          // else's text, and this one is printed beside a title that was.
+          label: plainName(walk.file.name),
           isbn: "",
-          format: BookFormat.ebook,
+          // The extension answers this, and it is the same kind of evidence a
+          // zip container is rather than the guess `format` is nullable to
+          // refuse. A comic gets a blank, because the enum has no member for
+          // one yet.
+          format: FORMAT_FOR_EXTENSION[walk.extension],
           state: "reading" as const,
           draft: null,
         })),
@@ -706,38 +944,183 @@ export function useRapidIntake(): UseRapidIntakeResult {
     });
   }
 
+  /**
+   * The entry a file's own name makes, and the note saying why it came to that.
+   *
+   * A name reducing to nothing is the one way a picked file still fails: the API
+   * requires a title, and saying so here is better than a 422 halfway through
+   * somebody's batch.
+   */
+  function fromTheName(
+    naming: FileNaming,
+    note: string | undefined,
+  ): Partial<ScannedEntry> {
+    const clues = readName(naming);
+    const draft = draftFromName(clues);
+    if (draft.title === "") {
+      return { state: "failed", reason: note ?? t("file.noTitle") };
+    }
+    return {
+      state: "derived",
+      isbn: draft.isbn,
+      draft,
+      query: clues.query ?? undefined,
+      reason: note,
+    };
+  }
+
   async function readFiles(files: readonly File[]) {
     const { readEpub } = await import("../../lib/epub");
     for (const file of files) {
       const key = pickedKey(file);
+      let note: string | undefined;
       try {
-        const reading = await readEpub(file);
-        if (!reading.ok) {
-          settle(key, {
-            state: "failed",
-            reason: t(FILE_FAILURES[reading.failure]),
-          });
-          continue;
+        // **EPUB is the only reader that has shipped**, and every other
+        // supported extension falls through to its name, which is this path's
+        // whole point: for a PDF an unusable metadata block is the common case
+        // rather than the exception. A reader for another format joins here.
+        const reading =
+          supportedExtension(file.name) === ".epub"
+            ? await readEpub(file)
+            : null;
+        if (reading && !reading.ok) {
+          note = t(FILE_FAILURES[reading.failure]);
+        } else if (reading) {
+          const draft = draftFromFile(reading.metadata);
+          if (draft.title !== "") {
+            settle(key, { state: "found", isbn: draft.isbn, draft });
+            continue;
+          }
+          // The file opened and named no title, so what is left is its name.
+          note = t("file.noTitle");
         }
-        const draft = draftFromFile(reading.metadata);
-        // A title is the one field the API requires, so a file naming none
-        // carried no usable metadata. Said here rather than left to a 422
-        // halfway through somebody's batch.
-        if (draft.title === "") {
-          settle(key, { state: "failed", reason: t("file.noTitle") });
-          continue;
-        }
-        settle(key, { state: "found", isbn: draft.isbn, draft });
       } catch {
         // A bug in the reader rather than anything the file did. Still one
-        // entry: a batch is not the place to find that out.
-        settle(key, { state: "failed", reason: t("file.unreadable") });
+        // entry, and the name is still a signal.
+        note = t("file.unreadable");
       }
+      settle(
+        key,
+        fromTheName({ name: file.name, folders: foldersOf(file) }, note),
+      );
+    }
+  }
+
+  /**
+   * Ask the catalogue about one file, and never twice about the same one.
+   *
+   * **One call per file, which is what makes the pace's arithmetic true.** A
+   * name carrying an ISBN takes the route a barcode takes, because an ISBN is an
+   * identifier rather than a guess; anything else is a title search. Neither
+   * falls back to the other on a miss, since a second call per file would double
+   * a budget that was priced on one.
+   *
+   * **A miss leaves a book rather than an error.** The entry keeps the draft its
+   * name produced and says the catalogues did not have it, which for a title
+   * that exists only as a file is the ordinary outcome: six of the eight sources
+   * a title search fans out to refuse a record that says it is electronic.
+   */
+  async function lookUpTheName(entry: ScannedEntry) {
+    try {
+      if (entry.isbn) {
+        const lookup = await queryClient.fetchQuery({
+          queryKey: getLookupIsbnQueryKey({ isbn: entry.isbn }),
+          queryFn: () => lookupIsbn({ isbn: entry.isbn }),
+          staleTime: 60_000,
+        });
+        settle(entry.key, { state: "found", draft: draftFromLookup(lookup) });
+        return;
+      }
+      if (!entry.query) return;
+      const params = {
+        q: entry.query,
+        limit: FALLBACK_MATCH_LIMIT,
+        lang: locale,
+      };
+      const answer = await queryClient.fetchQuery({
+        queryKey: getSearchBooksQueryKey(params),
+        queryFn: () => searchBooks(params),
+        // The same five minutes the search box holds, and for the same reason:
+        // a member who stops a run and starts it again should not re-spend a
+        // quota to be told what it was just told.
+        staleTime: 5 * 60_000,
+      });
+      if (answer.matches.length === 0) {
+        settle(entry.key, {
+          state: "derived",
+          answered: "nothing",
+          reason: t("fallback.notInCatalogues"),
+        });
+        return;
+      }
+      settle(entry.key, { state: "choosing", matches: answer.matches });
+    } catch (error) {
+      // **A 404 is an answer and everything else is a failure to ask**, which
+      // `_lookup_failure` in the books router separates deliberately: 404 is
+      // nobody knowing the ISBN, 503 is no source having been reachable. The
+      // barcode path in this file reads the same throw the same way. Collapsing
+      // the two offered the retry that buys nothing and withheld the one that
+      // does.
+      const unknown = error instanceof ApiError && error.status === 404;
+      settle(entry.key, {
+        state: "derived",
+        answered: unknown ? "nothing" : undefined,
+        reason: t(
+          unknown ? "fallback.notInCatalogues" : "fallback.lookupFailed",
+        ),
+      });
+    }
+  }
+
+  /**
+   * The paced run over everything that has only a name.
+   *
+   * **Sequential, with a floor of `FALLBACK_INTERVAL_MS` between starts.** The
+   * floor is measured from the start of the previous call rather than its end,
+   * so a slow catalogue spends the wait instead of adding to it, and the last
+   * file does not wait for a file that is not there.
+   *
+   * **Over the queue as it stood when the press happened**, which is what makes
+   * the figure on the button true. A file picked during a run joins the next
+   * one.
+   */
+  async function lookUpTheNames() {
+    // **The rendered state, and a ref was tried here and taken back out.** A
+    // press is a discrete event, which React flushes before it delivers the
+    // next, so a second press cannot see this as it was. Two calls inside one
+    // tick can, and a ref refused the second, but nothing observes the
+    // difference it makes: both loops walk the same list, ask the same query
+    // keys, and React Query answers the second from the first's flight. A guard
+    // nothing can watch go wrong is a guard nothing can watch go missing.
+    if (isLookingUp) return;
+    const waiting = entries.filter(needsALookup);
+    if (waiting.length === 0) return;
+
+    stopRequested.current = false;
+    setIsLookingUp(true);
+    try {
+      for (const [index, entry] of waiting.entries()) {
+        if (stopRequested.current) break;
+        settle(entry.key, { state: "searching" });
+        const startedAt = Date.now();
+        await lookUpTheName(entry);
+        if (index === waiting.length - 1) break;
+        const remaining = FALLBACK_INTERVAL_MS - (Date.now() - startedAt);
+        if (remaining > 0) await delay(remaining, endTheWait);
+      }
+    } finally {
+      setIsLookingUp(false);
     }
   }
 
   async function addAll() {
-    const ready = entries.filter((entry) => entry.draft !== null);
+    // **A row still being decided is not offered**, for the reason a row with no
+    // draft is not: it is exactly what somebody still has to decide about, and
+    // filing it under its file name would throw away every record the catalogue
+    // found for it with nothing said on screen.
+    const ready = entries.filter(
+      (entry) => entry.draft !== null && !isBeingDecided(entry),
+    );
     if (ready.length === 0) return;
 
     setIsAdding(true);
@@ -799,6 +1182,11 @@ export function useRapidIntake(): UseRapidIntakeResult {
     setResult({ added, failed: failures.length });
   }
 
+  // One filter, read twice. Two would let the count on the button and the
+  // figure beside it disagree the first time either is edited.
+  const waiting = entries.filter(needsALookup).length;
+  const deciding = entries.filter(isBeingDecided).length;
+
   return {
     isActive,
     start: () => {
@@ -816,9 +1204,47 @@ export function useRapidIntake(): UseRapidIntakeResult {
     // and drifts the first time a read ends on a path that forgets to decrement
     // it; the queue already says which entries are still being read.
     isReading: entries.some((entry) => entry.state === "reading"),
+    skipped,
+    waiting,
+    deciding,
+    // Derived from the pace rather than carried beside it, so the figure on the
+    // button cannot say one thing while the run does another. A floor of one
+    // minute, because "about 0 minutes" is not a wait anybody recognises.
+    paceMinutes: Math.max(
+      1,
+      Math.ceil((waiting * FALLBACK_INTERVAL_MS) / 60_000),
+    ),
+    lookUpTheNames: () => void lookUpTheNames(),
+    stopLookingUp: () => {
+      stopRequested.current = true;
+      // The run may be between two calls rather than inside one, and the loop
+      // reads the flag only at its top. Without this the button is inert for up
+      // to a whole interval.
+      endTheWait.current?.();
+    },
+    isLookingUp,
+    chooseFor: (key, match) =>
+      settle(key, {
+        state: "found",
+        isbn: match.isbn13 ?? "",
+        draft: draftFromMatch(match),
+        matches: undefined,
+      }),
+    keepTheName: (key) =>
+      settle(key, {
+        state: "derived",
+        answered: "records",
+        matches: undefined,
+        reason: t("fallback.keptTheName"),
+      }),
     remove: (key) =>
       setEntries((current) => current.filter((entry) => entry.key !== key)),
-    clear: () => setEntries([]),
+    clear: () => {
+      setEntries([]);
+      // The count goes with the queue it described. Leaving it would tell
+      // somebody starting again what happened to a pick they discarded.
+      setSkipped(0);
+    },
     addAll: () => void addAll(),
     isAdding,
     result,

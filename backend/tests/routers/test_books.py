@@ -16,6 +16,7 @@ import respx
 import catalogue
 import credentials
 import sources
+import targets
 from enums import CatalogueSource
 from models import (
     DESCRIPTION_MAX,
@@ -1502,7 +1503,8 @@ class TestTheKeyIsResolvedOncePerRequest:
     def _seal(db, key_phrase, monkeypatch, *names: str) -> None:
         monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", key_phrase)
         for name in names:
-            credentials.put(db, name, "alice", "hunter2")
+            address = targets.SEEDED[CatalogueSource(name)].base_url
+            credentials.put(db, name, address, "alice", "hunter2")
 
     @pytest.fixture
     def key_phrase(self) -> str:
@@ -1544,7 +1546,13 @@ class TestTheKeyIsResolvedOncePerRequest:
         assert len(books_router._catalogue_logins(db)) == 1
         one = tally[0]
 
-        credentials.put(db, "k10plus", "alice", "hunter2")
+        credentials.put(
+            db,
+            "k10plus",
+            targets.SEEDED[CatalogueSource.K10PLUS].base_url,
+            "alice",
+            "hunter2",
+        )
         monkeypatch.setattr(
             sources,
             "NEEDS_A_KEY",

@@ -5,6 +5,7 @@ import pytest
 import credentials
 import settings_store
 import sources
+import targets
 from enums import CatalogueSource, Locale, SettingKey
 
 
@@ -237,14 +238,26 @@ class TestACredentialMakesASourceReady:
 
     def test_storing_one_makes_it_both(self, db, needs_a_credential):
         credentials.generate_key(db)
-        credentials.put(db, needs_a_credential.value, "alice", "hunter2")
+        credentials.put(
+            db,
+            needs_a_credential.value,
+            targets.SEEDED[needs_a_credential].base_url,
+            "alice",
+            "hunter2",
+        )
         assert needs_a_credential in settings_store.source_credentials(db)
         assert needs_a_credential in settings_store.ready_sources(db)
 
     def test_a_credential_under_a_lost_key_makes_it_neither(self, db, needs_a_credential):
         """Reporting it as ready leaves a member's search to discover otherwise."""
         credentials.generate_key(db)
-        credentials.put(db, needs_a_credential.value, "alice", "hunter2")
+        credentials.put(
+            db,
+            needs_a_credential.value,
+            targets.SEEDED[needs_a_credential].base_url,
+            "alice",
+            "hunter2",
+        )
         credentials.store_key(credentials.generate_phrase())
         assert needs_a_credential not in settings_store.source_credentials(db)
         assert needs_a_credential not in settings_store.ready_sources(db)
@@ -256,5 +269,11 @@ class TestACredentialMakesASourceReady:
     def test_google_books_is_still_decided_by_its_own_key(self, db):
         """Its credential is an API key in a query string, not a login."""
         credentials.generate_key(db)
-        credentials.put(db, CatalogueSource.GOOGLE_BOOKS.value, "alice", "hunter2")
+        credentials.put(
+            db,
+            CatalogueSource.GOOGLE_BOOKS.value,
+            targets.SEEDED[CatalogueSource.GOOGLE_BOOKS].base_url,
+            "alice",
+            "hunter2",
+        )
         assert CatalogueSource.GOOGLE_BOOKS not in settings_store.source_credentials(db)

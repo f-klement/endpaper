@@ -177,12 +177,13 @@ def edit_server(
 ) -> OpdsServerOut:
     """Rename a server, or point it somewhere else.
 
-    **Moving it to a different origin drops the stored login**, and that is the
-    security rule rather than tidiness. `credentials.for_request` binds a
-    credential to the address it is **asked** about, so a login sealed for one
-    machine would be sent to whatever address this row is edited to name. The
-    response reports the credential as gone, so nothing has to be inferred from
-    silence.
+    **Moving it to a different origin drops the stored login**, and what that
+    buys changed when the envelope started carrying its origin: the login can no
+    longer be sent to the new address, because it does not open there. What this
+    still does is make the row honest. A login left behind would report as held
+    and unreadable for the rest of its life, which reads as a damaged row and
+    sends somebody to the recovery phrase. The response reports the credential
+    as gone, so nothing has to be inferred from silence.
 
     A rename, or an edit that keeps the same scheme, host and port, keeps the
     login: it is the same machine, and making somebody retype a password to fix
@@ -192,14 +193,15 @@ def edit_server(
     address = _checked_address(payload.base_url)
     moved = credentials.origin_of(address) != credentials.origin_of(row.base_url)
     if moved:
-        # **Before the address moves, and the order is the security rule rather
-        # than tidiness.** `credentials.forget` commits on its own, so forgetting
-        # afterwards leaves a window, and permanently if the second commit never
-        # runs, in which this row names the new machine and still holds the old
-        # machine's sealed login. `for_request` binds a credential to the address
-        # it is asked about, so that window sends the login to the new host.
-        # Failing here instead leaves the login gone on an unchanged address,
-        # which is the safe direction. Found by a critic reading the two commits.
+        # **Before the address moves, and the order is still worth keeping.**
+        # `credentials.forget` commits on its own, so forgetting afterwards
+        # leaves a window, and permanently if the second commit never runs, in
+        # which this row names the new machine and still holds the old machine's
+        # sealed login. That window no longer sends the login anywhere, since
+        # the envelope is sealed over the old origin and does not open at the
+        # new one; it leaves a row reporting an unreadable login instead.
+        # Failing here leaves the login gone on an unchanged address, which is
+        # still the safe direction. Found by a critic reading the two commits.
         credentials.forget(db, row.credential_key)
     row.name = payload.name
     row.base_url = address
@@ -237,8 +239,9 @@ def set_server_credential(
 ) -> OpdsServerOut:
     """Store this server's login, sealed.
 
-    Sealed against the row's own credential key, so a ciphertext moved between
-    rows by a hand edited archive fails authentication rather than decrypting
+    Sealed against the row's own credential key **and its address**, so a
+    ciphertext moved between rows by a hand edited archive, or left beside an
+    address that archive rewrote, fails authentication rather than decrypting
     into a request aimed at a different machine. `credentials.seal` carries the
     argument.
 
@@ -247,7 +250,9 @@ def set_server_credential(
     """
     row = _server(db, server_id)
     try:
-        credentials.put(db, row.credential_key, payload.username, payload.password)
+        credentials.put(
+            db, row.credential_key, row.base_url, payload.username, payload.password
+        )
     except credentials.KeyConfigurationError as refusal:
         raise HTTPException(status_code=409, detail=str(refusal)) from None
     except credentials.NoKeyConfigured as refusal:

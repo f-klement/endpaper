@@ -29,10 +29,36 @@ from routers.public import PUBLIC_PAGE_PREFIX, PUBLIC_PREFIX
 # the login background through an inline `style` attribute, and inline styles
 # cannot be nonced the way scripts can. Scripts are NOT granted it, which is
 # the half that matters for XSS.
+#
+# `script-src` grants 'wasm-unsafe-eval' and that is the whole of the
+# relaxation. The Calibre import reads a `metadata.db` in the member's own
+# browser, which means compiling WebAssembly, and a browser refuses to compile
+# any under a bare 'self'. What the token admits is `WebAssembly.compile` and
+# `WebAssembly.instantiate` on bytes the page already has; it admits no new
+# source of script, so the same-origin rule below still decides where every
+# byte came from. **'unsafe-eval' is still refused and is the one this is not**:
+# it would have admitted `eval` and `new Function` over arbitrary strings, and
+# the engine this app loads contains neither, scanned at the version
+# `frontend/src/lib/sqlite.ts` names.
+#
+# The exposure it does add, stated: a script that has already achieved
+# execution can compile WebAssembly it assembles itself, which makes some
+# exploitation techniques available that a bare 'self' withheld. That is a
+# second order gain for an attacker who is already running code, against a
+# route the owner decided to build for the 568 identifiers it recovers.
+#
+# **The engine version the measurement was taken against is not written here.**
+# `frontend/src/lib/sqlite.ts` is the site that needs the grant, carries the
+# scan and names the version, and a frontend test holds that version to
+# `package.json`. A second copy of it in this file would be the copy nobody
+# updates when a bot bumps the dependency.
+#
+# `tests/test_middleware.py` pins the resulting policy by exact equality, so
+# widening it again is a failing test rather than a diff nobody reads.
 _CSP: Final = "; ".join(
     [
         "default-src 'self'",
-        "script-src 'self'",
+        "script-src 'self' 'wasm-unsafe-eval'",
         "style-src 'self' 'unsafe-inline'",
         " ".join(("img-src", "'self'", "data:", *COVER_HOSTS)),
         "connect-src 'self'",

@@ -560,12 +560,13 @@ export const getEditServerUrl = (serverId: number) => {
 /**
  * Rename a server, or point it somewhere else.
  *
- * **Moving it to a different origin drops the stored login**, and that is the
- * security rule rather than tidiness. `credentials.for_request` binds a
- * credential to the address it is **asked** about, so a login sealed for one
- * machine would be sent to whatever address this row is edited to name. The
- * response reports the credential as gone, so nothing has to be inferred from
- * silence.
+ * **Moving it to a different origin drops the stored login**, and what that
+ * buys changed when the envelope started carrying its origin: the login can no
+ * longer be sent to the new address, because it does not open there. What this
+ * still does is make the row honest. A login left behind would report as held
+ * and unreadable for the rest of its life, which reads as a damaged row and
+ * sends somebody to the recovery phrase. The response reports the credential
+ * as gone, so nothing has to be inferred from silence.
  *
  * A rename, or an edit that keeps the same scheme, host and port, keeps the
  * login: it is the same machine, and making somebody retype a password to fix
@@ -769,8 +770,9 @@ export const getSetServerCredentialUrl = (serverId: number) => {
 /**
  * Store this server's login, sealed.
  *
- * Sealed against the row's own credential key, so a ciphertext moved between
- * rows by a hand edited archive fails authentication rather than decrypting
+ * Sealed against the row's own credential key **and its address**, so a
+ * ciphertext moved between rows by a hand edited archive, or left beside an
+ * address that archive rewrote, fails authentication rather than decrypting
  * into a request aimed at a different machine. `credentials.seal` carries the
  * argument.
  *

@@ -1161,8 +1161,8 @@ export const en = {
   // ── Adding books from their files ───────────────────────────────────────
   "file.title": "Add from a file",
   "file.explain":
-    "Pick EPUB files and Endpaper reads the title, authors and series out of them. The files are read here in your browser and are never uploaded.",
-  "file.pickLabel": "EPUB files",
+    "Pick book files, or a whole folder, and Endpaper reads what it can out of them. Anything a file does not say is looked up by its name. The files are read here in your browser and are never uploaded.",
+  "file.pickLabel": "Book files",
   "file.readingFiles": "Reading the files you picked...",
   "file.notAnEpub": "Not an EPUB file.",
   "file.damaged": "This file is damaged and could not be opened.",
@@ -1172,6 +1172,36 @@ export const en = {
   "file.noInflate": "This browser is too old to read EPUB files.",
   "file.noTitle": "This file carries no title.",
   "file.unreadable": "This file could not be read.",
+
+  // ── The filename and folder fallback ────────────────────────────────────
+  // Every count here is written so that one and many read the same, because
+  // this catalogue has no plural rules and is not getting any.
+  "fallback.skipped":
+    "{count} passed over, because Endpaper reads no format of theirs.",
+  "fallback.lookUp": "Look up {count} by name",
+  // **The disclosure lives on the control that does it.** The panel above says
+  // the files are never uploaded, which is true and, read next to a button
+  // offering a lookup, invites the reading that the lookup is local too. It is
+  // not: the names go to the same public catalogues a title search reaches.
+  "fallback.pace":
+    "The file names, not the files, are sent to the catalogues Endpaper searches. Paced, so that one folder cannot spend a whole library's budget at once. Roughly {minutes} min.",
+  "fallback.stop": "Stop looking up",
+  "fallback.searching": "Asking the catalogues...",
+  "fallback.fromTheName": "From the file name",
+  "fallback.notInCatalogues":
+    "Not in the catalogues, kept under its file name.",
+  "fallback.lookupFailed":
+    "The catalogues could not be reached, kept under its file name.",
+  "fallback.keptTheName": "Kept under its file name.",
+  "fallback.aboutEbooks":
+    "Most catalogues list printed books, so a book that exists only as a file is often in none of them. Nothing has failed: those are added with the name they had, and can be edited afterwards.",
+  "fallback.matches": "Possible matches: {count}",
+  "fallback.stillToDecide":
+    "{count} still to decide. Add all leaves those in the queue.",
+  "fallback.use": "Use",
+  "fallback.useFor": "Use the record for {title}",
+  "fallback.keep": "Keep the name",
+  "fallback.pickFolderLabel": "A whole folder of books",
 
   // ── Loan due dates ──────────────────────────────────────────────────────
   "loans.dueDate": "Due back",
@@ -1340,6 +1370,42 @@ export const en = {
   "marc.result": "{rowsRead} records read, {matched} matched, {created} added.",
   "marc.resultSkipped":
     "{count} records were left out: no title, or an ISBN that belongs to a book this account cannot see.",
+
+  // ── Calibre library import ─────────────────────────────────────────
+  "calibre.title": "Bring a Calibre library across",
+  "calibre.explain":
+    "Calibre keeps its index in a file called metadata.db at the root of the library folder. It carries what the feed does not: the ISBN and every other identifier, the series and the position in it, and whether a book has a file.",
+  "calibre.safety":
+    "Copy metadata.db somewhere else first and choose the copy. A Calibre library has one writer, and reading the live file while something is writing to it gives a half written copy. Do not start the Calibre desktop to do this.",
+  "calibre.chooseFile": "Choose a copy of metadata.db",
+  "calibre.reading": "Reading the library...",
+  "calibre.previewTitle":
+    "{total} books in the library, {importable} with a title.",
+  "calibre.withIsbn": "{count} carry an ISBN.",
+  "calibre.withSeries": "{count} are part of a series.",
+  "calibre.withFile": "{count} have a file in the library.",
+  "calibre.crossCheck": "Check against the files beside the books",
+  "calibre.crossCheckHint":
+    "Optional. Point at the library folder and every metadata.opf in it is read, filling in what the index left empty. The browser will ask before it hands over a folder this large.",
+  "calibre.crossCheckResult":
+    "{checked} books had a file beside them: {filled} fields filled in, {disagreed} where the two disagreed and the index was kept.",
+  "calibre.progress": "{done} of {total}",
+  "calibre.confirm": "Import {count} books",
+  "calibre.importing": "Importing...",
+  "calibre.stop": "Stop",
+  "calibre.result": "{added} books added.",
+  "calibre.resultStopped": "Stopped. {added} books were added before that.",
+  "calibre.resultFailures": "{count} could not be added:",
+  "calibre.duplicate": "already in the catalogue",
+  "calibre.notAdded": "not added",
+  "calibre.failureNotADatabase": "That file is not a SQLite database.",
+  "calibre.failureDamaged":
+    "That copy is damaged. A copy taken while the library was being written to looks like this: take another one.",
+  "calibre.failureTooLarge": "That file is too large to read in a browser.",
+  "calibre.failureNoEngine":
+    "This browser could not load the reader for SQLite files.",
+  "calibre.failureNotCalibre": "That database is not a Calibre library.",
+  "calibre.failureEmpty": "That Calibre library has no books in it.",
 
   // ── Backup ──────────────────────────────────────────────────────────────
   "backup.title": "Backup",

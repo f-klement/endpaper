@@ -5,11 +5,13 @@ import { useTranslation } from "../../../i18n";
 import { SettingsSection } from "../../components";
 import SettingsSubPage from "../components/SettingsSubPage";
 import { useSettings } from "../hooks";
+import CalibreImport from "./components/CalibreImport";
 import CoversSection from "./components/CoversSection";
 import CustomFieldsSection from "./components/CustomFieldsSection";
 import LibraryImport from "./components/LibraryImport";
 import MarcImport from "./components/MarcImport";
 import {
+  useCalibreImport,
   useCoverBackfill,
   useCustomFields,
   useLibraryImport,
@@ -32,6 +34,11 @@ import {
  *
  * The covers card reads next to the import because it is what an import leaves
  * undone: a CSV carries no cover, so a library that arrived that way has none.
+ *
+ * **The Calibre card sits with the other imports and not on the scan page**,
+ * which is the other place a file is read in this app. A Calibre library is a
+ * library, not a book: what the scan page reads is one file a member is holding,
+ * and what this reads is somebody's whole shelf.
  */
 export default function LibrarySettingsPage() {
   const { t } = useTranslation();
@@ -40,6 +47,7 @@ export default function LibrarySettingsPage() {
   const coverBackfill = useCoverBackfill();
   const customFields = useCustomFields();
   const marcImport = useMarcImport();
+  const calibreImport = useCalibreImport();
   // **The card is drawn only in library mode, and the server refuses the route
   // in any case.** Hiding a control is advice to one client; the 403 is the
   // guarantee. What this decides is whether a household is shown an exchange
@@ -64,6 +72,23 @@ export default function LibrarySettingsPage() {
           onConfirm={libraryImport.confirm}
           onCancel={libraryImport.reset}
           onReviewUnconfirmed={() => navigate("/?ownership=unknown")}
+        />
+      </SettingsSection>
+
+      <SettingsSection title={t("calibre.title")} icon="book">
+        <CalibreImport
+          isReading={calibreImport.isReading}
+          isImporting={calibreImport.isImporting}
+          preview={calibreImport.preview}
+          progress={calibreImport.progress}
+          result={calibreImport.result}
+          failure={calibreImport.failure}
+          error={calibreImport.error}
+          onChoose={calibreImport.choose}
+          onCrossCheck={calibreImport.crossCheck}
+          onConfirm={calibreImport.confirm}
+          onStop={calibreImport.stop}
+          onCancel={calibreImport.reset}
         />
       </SettingsSection>
 

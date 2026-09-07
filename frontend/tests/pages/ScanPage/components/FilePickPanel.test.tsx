@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import FilePickPanel from "../../../../src/pages/ScanPage/components/FilePickPanel";
+import { SUPPORTED_EXTENSIONS } from "../../../../src/lib/fileName";
 import { renderLocalised } from "../../../utils";
 
 function renderPanel(
@@ -15,13 +16,18 @@ function renderPanel(
   // type and takes `.mock` with it.
   const onPick = vi.fn<(files: File[]) => void>();
   renderLocalised(
-    <FilePickPanel onPick={onPick} isReading={false} {...overrides} />,
+    <FilePickPanel
+      onPick={onPick}
+      isReading={false}
+      skipped={0}
+      {...overrides}
+    />,
   );
   return { onPick };
 }
 
 function input(): HTMLInputElement {
-  return screen.getByLabelText("EPUB files") as HTMLInputElement;
+  return screen.getByLabelText("Book files") as HTMLInputElement;
 }
 
 describe("FilePickPanel", () => {
@@ -76,5 +82,47 @@ describe("FilePickPanel", () => {
   it("says so while a pick is being read", () => {
     renderPanel({ isReading: true });
     expect(screen.getByRole("status")).toHaveTextContent("Reading the files");
+  });
+
+  it("offers a whole folder, which is the only thing that carries a path", () => {
+    // The folder above a file is often the one thing that names its author, and
+    // a single file pick carries no path at all.
+    renderPanel();
+    // Told apart by something a sighted member can read, not only by a name a
+    // screen reader gets: no browser draws a different button for a directory
+    // input, so two bare file inputs look like the same control twice.
+    expect(screen.getByText("A whole folder of books").tagName).toBe("LABEL");
+    expect(screen.getByText("Book files").tagName).toBe("LABEL");
+    const folder = screen.getByLabelText(
+      "A whole folder of books",
+    ) as HTMLInputElement;
+    expect(folder.type).toBe("file");
+    expect(folder.getAttribute("webkitdirectory")).toBe("");
+  });
+
+  it("offers every format the walk considers, not only EPUB", () => {
+    // A filter on the dialog and never a check, but a filter that greys out a
+    // format the walk would have read is a picker that lies about itself.
+    renderPanel();
+    const accepted = input().accept.split(",");
+    for (const extension of SUPPORTED_EXTENSIONS) {
+      expect(accepted).toContain(extension);
+    }
+  });
+
+  it("says what it passed over, where a queue would not exist to say it", () => {
+    // A folder of CBR files produces no queue at all, so a message beside the
+    // queue would be absent in exactly the case it is for.
+    renderPanel({ skipped: 3 });
+    expect(
+      screen.getByText(
+        "3 passed over, because Endpaper reads no format of theirs.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about passing anything over when it passed nothing", () => {
+    renderPanel();
+    expect(screen.queryByText(/passed over/)).not.toBeInTheDocument();
   });
 });

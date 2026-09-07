@@ -1,5 +1,8 @@
 """Tests for backend/middleware.py: the response hardening headers."""
 
+import re
+from pathlib import Path
+
 import pytest
 
 
@@ -37,13 +40,87 @@ class TestContentSecurityPolicy:
             for part in headers["content-security-policy"].split(";")
         }
 
-    def test_scripts_are_same_origin_only(self, csp):
-        assert csp["script-src"] == "script-src 'self'"
+    def test_the_whole_policy_is_what_it_is(self, headers):
+        """The policy, pinned by exact equality.
 
-    def test_scripts_are_not_granted_unsafe_inline(self, csp):
-        """This is the half of the policy that actually blunts XSS."""
-        assert "unsafe-inline" not in csp["script-src"]
-        assert "unsafe-eval" not in csp["script-src"]
+        **A literal rather than something derived**, and it is the one place in
+        this file that restates the code. Every other assertion here answers a
+        question about one directive, so a policy that changed in a way nobody
+        thought to ask about passes all of them. This one fails, which is what a
+        pin on a security header is for: adding a cover host is one line here
+        and a moment confirming the rest of the policy did not move with it.
+        """
+        assert headers["content-security-policy"] == (
+            "default-src 'self'; "
+            "script-src 'self' 'wasm-unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https://covers.openlibrary.org "
+            "https://portal.dnb.de https://books.google.com "
+            "https://*.googleusercontent.com https://archive.org "
+            "https://*.us.archive.org; "
+            "connect-src 'self'; "
+            "font-src 'self'; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'; "
+            "frame-ancestors 'none'"
+        )
+
+    def test_scripts_are_same_origin_and_may_compile_webassembly(self, csp):
+        """Two source expressions and no third one.
+
+        The list rather than a membership test: `'self'` being present says
+        nothing about what else was added beside it, and this directive is the
+        one the Calibre import widened.
+        """
+        assert csp["script-src"].split()[1:] == ["'self'", "'wasm-unsafe-eval'"]
+
+    def test_scripts_are_not_granted_unsafe_inline_or_unsafe_eval(self, csp):
+        """This is the half of the policy that actually blunts XSS.
+
+        **Compared as tokens and never as substrings**, which is what this
+        assertion was before `'wasm-unsafe-eval'` existed. `"unsafe-eval" not in
+        directive` is satisfied by no policy that grants the wasm token, because
+        the wasm token contains those characters: the check would have gone red
+        on a policy that was correct, and had it been written the other way
+        round it would have gone green on one that was not.
+        """
+        tokens = set(csp["script-src"].split())
+        assert "'unsafe-inline'" not in tokens
+        assert "'unsafe-eval'" not in tokens
+
+    def test_webassembly_is_granted_only_while_something_compiles_it(self):
+        """The grant and its reason, tied together so neither outlives the other.
+
+        `'wasm-unsafe-eval'` is in the policy for exactly one thing: the Calibre
+        import reads a `metadata.db` in the browser, and a browser will not
+        compile WebAssembly under a bare `'self'`. A relaxation whose reason has
+        been deleted is the shape that stays for years, so this reads the
+        frontend source for a `.wasm` import and requires the two to agree in
+        both directions.
+
+        Stated as an exclusion rather than a list of files: every `.ts` and
+        `.tsx` under `frontend/src` is read, so a second module reaching for
+        WebAssembly is covered without this test learning its name.
+
+        **An import line, not the substring `.wasm` anywhere.** The first
+        version of this matched the substring, which the docstrings either side
+        of the real import satisfy on their own: deleting the import would have
+        left the grant tied to a comment, which is exactly the failure this
+        test is for. `^import` is anchored at column zero, where a top level
+        import is and where a docstring's continuation line, ` * ...`, is not.
+        """
+        import middleware
+
+        root = Path(__file__).resolve().parents[2]
+        source = root / "frontend" / "src"
+        compilers = sorted(
+            path.relative_to(root).as_posix()
+            for path in source.rglob("*.ts*")
+            if re.search(r"^import\b.*\.wasm", path.read_text(encoding="utf-8"), re.M)
+        )
+        granted = "'wasm-unsafe-eval'" in middleware._CSP
+        assert granted == bool(compilers), compilers
 
     def test_styles_are_granted_unsafe_inline_deliberately(self, csp):
         # React applies the login background through an inline style attribute,

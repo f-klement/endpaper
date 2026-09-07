@@ -1063,8 +1063,8 @@ export const de: Messages = {
   // ── Bücher aus ihren Dateien hinzufügen ─────────────────────────────────
   "file.title": "Aus einer Datei hinzufügen",
   "file.explain":
-    "Wähle EPUB-Dateien aus, dann liest Endpaper Titel, Autoren und Reihe daraus. Die Dateien werden hier im Browser gelesen und niemals hochgeladen.",
-  "file.pickLabel": "EPUB-Dateien",
+    "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht. Die Dateien werden hier im Browser gelesen und niemals hochgeladen.",
+  "file.pickLabel": "Buchdateien",
   "file.readingFiles": "Die ausgewählten Dateien werden gelesen...",
   "file.notAnEpub": "Keine EPUB-Datei.",
   "file.damaged": "Diese Datei ist beschädigt und ließ sich nicht öffnen.",
@@ -1076,6 +1076,30 @@ export const de: Messages = {
   "file.noInflate": "Dieser Browser ist zu alt, um EPUB-Dateien zu lesen.",
   "file.noTitle": "Diese Datei enthält keinen Titel.",
   "file.unreadable": "Diese Datei ließ sich nicht lesen.",
+
+  // ── Rückfall auf Dateiname und Ordner ───────────────────────────────────
+  "fallback.skipped":
+    "{count} übersprungen, weil Endpaper kein Format davon liest.",
+  "fallback.lookUp": "{count} über den Dateinamen suchen",
+  "fallback.pace":
+    "Die Dateinamen gehen an die Kataloge, in denen Endpaper sucht, die Dateien selbst nicht. Zeitlich gestreckt, damit ein einzelner Ordner nicht das ganze Budget einer Bibliothek auf einmal verbraucht. Ungefähr {minutes} min.",
+  "fallback.stop": "Suche beenden",
+  "fallback.searching": "Die Kataloge werden gefragt...",
+  "fallback.fromTheName": "Aus dem Dateinamen",
+  "fallback.notInCatalogues":
+    "In keinem Katalog gefunden, bleibt unter dem Dateinamen.",
+  "fallback.lookupFailed":
+    "Die Kataloge waren nicht erreichbar, bleibt unter dem Dateinamen.",
+  "fallback.keptTheName": "Bleibt unter dem Dateinamen.",
+  "fallback.aboutEbooks":
+    "Die meisten Kataloge führen gedruckte Bücher. Ein Buch, das nur als Datei existiert, steht deshalb oft in keinem davon. Nichts ist fehlgeschlagen: solche Bücher werden mit dem Namen übernommen, den die Datei hatte, und lassen sich danach bearbeiten.",
+  "fallback.matches": "Mögliche Treffer: {count}",
+  "fallback.stillToDecide":
+    "{count} noch zu entscheiden. Alle hinzufügen lässt diese in der Liste.",
+  "fallback.use": "Übernehmen",
+  "fallback.useFor": "Den Eintrag für {title} übernehmen",
+  "fallback.keep": "Dateinamen behalten",
+  "fallback.pickFolderLabel": "Ein ganzer Ordner mit Büchern",
 
   // ── Rückgabefristen ─────────────────────────────────────────────────────
   "loans.dueDate": "Zurück bis",
@@ -1239,6 +1263,44 @@ export const de: Messages = {
     "{rowsRead} Datensätze gelesen, {matched} zugeordnet, {created} angelegt.",
   "marc.resultSkipped":
     "{count} Datensätze blieben unberücksichtigt: kein Titel, oder eine ISBN, die zu einem für dieses Konto nicht sichtbaren Buch gehört.",
+
+  // ── Calibre library import ─────────────────────────────────────────
+  "calibre.title": "Eine Calibre-Bibliothek übernehmen",
+  "calibre.explain":
+    "Calibre legt seinen Index in einer Datei namens metadata.db im Wurzelverzeichnis der Bibliothek ab. Darin steht, was der Feed nicht hat: die ISBN und jede weitere Kennung, die Reihe und die Position darin, und ob ein Buch eine Datei hat.",
+  "calibre.safety":
+    "Zuerst eine Kopie von metadata.db an einer anderen Stelle anlegen und diese Kopie wählen. Eine Calibre-Bibliothek hat genau einen Schreiber, und wer die Datei liest, während gerade geschrieben wird, bekommt eine halb geschriebene Kopie. Dafür nicht den Calibre-Desktop starten.",
+  "calibre.chooseFile": "Eine Kopie von metadata.db wählen",
+  "calibre.reading": "Bibliothek wird gelesen...",
+  "calibre.previewTitle":
+    "{total} Bücher in der Bibliothek, {importable} davon mit Titel.",
+  "calibre.withIsbn": "{count} haben eine ISBN.",
+  "calibre.withSeries": "{count} gehören zu einer Reihe.",
+  "calibre.withFile": "{count} haben eine Datei in der Bibliothek.",
+  "calibre.crossCheck": "Mit den Dateien neben den Büchern abgleichen",
+  "calibre.crossCheckHint":
+    "Optional. Den Bibliotheksordner wählen, dann wird jede metadata.opf darin gelesen und ergänzt, was der Index offen gelassen hat. Der Browser fragt nach, bevor er einen so großen Ordner freigibt.",
+  "calibre.crossCheckResult":
+    "Bei {checked} Büchern lag eine Datei daneben: {filled} Felder ergänzt, {disagreed} mit abweichendem Wert, bei denen der Index behalten wurde.",
+  "calibre.progress": "{done} von {total}",
+  "calibre.confirm": "{count} Bücher importieren",
+  "calibre.importing": "Wird importiert...",
+  "calibre.stop": "Anhalten",
+  "calibre.result": "{added} Bücher hinzugefügt.",
+  "calibre.resultStopped":
+    "Angehalten. Vorher wurden {added} Bücher hinzugefügt.",
+  "calibre.resultFailures": "{count} konnten nicht hinzugefügt werden:",
+  "calibre.duplicate": "bereits im Katalog",
+  "calibre.notAdded": "nicht hinzugefügt",
+  "calibre.failureNotADatabase": "Diese Datei ist keine SQLite-Datenbank.",
+  "calibre.failureDamaged":
+    "Diese Kopie ist beschädigt. So sieht eine Kopie aus, die entstand, während in die Bibliothek geschrieben wurde: bitte eine neue anlegen.",
+  "calibre.failureTooLarge":
+    "Diese Datei ist zu groß, um sie im Browser zu lesen.",
+  "calibre.failureNoEngine":
+    "Dieser Browser konnte den Leser für SQLite-Dateien nicht laden.",
+  "calibre.failureNotCalibre": "Diese Datenbank ist keine Calibre-Bibliothek.",
+  "calibre.failureEmpty": "Diese Calibre-Bibliothek enthält keine Bücher.",
 
   // ── Sicherung ───────────────────────────────────────────────────────────
   "backup.title": "Sicherung",

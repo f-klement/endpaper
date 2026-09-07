@@ -68,6 +68,11 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 - **Library import**: bring a library across from Goodreads, LibraryThing, StoryGraph,
   Libib or Openreads. The columns are worked out for you and shown before anything is
   saved, and a title your old app says you deleted is not brought back
+- **Calibre import**: point it at a copy of a Calibre library's `metadata.db` and the whole
+  library is read in your own browser, with the ISBN, the series and the position in it that
+  a feed does not carry. The file beside each book is an optional second pass that fills in
+  what the index left blank. The file itself never leaves your browser, only the records it
+  turned out to hold, and nothing is written to the library
 - **Per-book privacy**: a book can be yours alone inside a shared library catalogue.
   Nobody else sees it, in listings, in search, in stats or by guessing a URL
 - **Reading status**: per-person "unread / want to read / reading / read / did not finish",

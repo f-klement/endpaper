@@ -164,7 +164,86 @@ describe("no control draws its own focus ring", () => {
  * legitimately does both. A new reader is added to this list by the ticket that
  * writes it, which is the moment somebody is thinking about the rule.
  */
-const FILE_READERS = ["lib/zip.ts", "lib/epub.ts", "lib/opf.ts"];
+/**
+ * What makes a module a reader, so the list below is checked and not trusted.
+ *
+ * **Derived, because an inclusion list is what goes stale when the repository
+ * grows a file.** A reader is a module under `src/lib/` that handles bytes or
+ * parses a document. Every way this app's readers get hold of either is named:
+ * `File` and `Blob` are what a picker hands over, `ArrayBuffer`, `Uint8Array`
+ * and `ReadableStream` are what those become, and `DOMParser` is the document.
+ * Everything else in that directory works on values somebody already read.
+ *
+ * **Two exclusions, and the one that matters is the directory.** Measured over
+ * this tree: 20 modules outside `src/lib/` meet the same criterion, 7 of them
+ * generated multipart body types under `src/api/generated/`, and the other 13 a
+ * page or a page's hook, every one of which legitimately both reads a file and
+ * makes a request. A network rule cannot tell those two apart,
+ * which is the whole reason this one sits where only the first exists. The seam
+ * is that a reader lives in `lib/`, so a new one belongs there rather than
+ * here, and a reader written outside it is outside this rule until it moves.
+ *
+ * The second exclusion is a `.d.ts`, which declares and executes nothing and so
+ * is not a reader however many of these names it mentions.
+ *
+ * `Blob` and `ReadableStream` derive the same five modules as the shorter list
+ * did, measured, so they cost nothing today and close the case of a reader that
+ * takes a `Blob` and never names a typed array. **It is still an enumeration of
+ * an open set**: `DataView` and `FileReader` are not in it, and a further arm is
+ * not the fix. What bounds it is the directory: a module in `lib/` reaching the
+ * network is refused whichever of these it names, and one that names none of
+ * them is not in the derived set at all, which is the hole the equality below
+ * makes visible rather than closes.
+ */
+const READS_BYTES =
+  /\b(Uint8Array|ArrayBuffer|ReadableStream|DOMParser|File|Blob)\b/;
+
+function fileReaders(): string[] {
+  return entries()
+    .filter(([path]) => path.startsWith("lib/") && !path.endsWith(".d.ts"))
+    .filter(([, source]) => READS_BYTES.test(withoutProse(source)))
+    .map(([path]) => path)
+    .sort();
+}
+
+/**
+ * The readers there are today, which the derivation above has to reproduce.
+ *
+ * Both directions are the point. A reader added to `src/lib/` and not named
+ * here fails, which is the prompt to ask whether it is one; a name deleted from
+ * here fails too, which is the evasion that a plain inclusion list allows. That
+ * evasion was measured on this file: removing two names left every test green.
+ */
+const FILE_READERS = [
+  "lib/calibre.ts",
+  "lib/epub.ts",
+  "lib/opf.ts",
+  "lib/sqlite.ts",
+  "lib/zip.ts",
+];
+
+/**
+ * The one network call a reader may make, written as the expression rather than
+ * as a file on an exemption list.
+ *
+ * `sqlite.ts` fetches the WebAssembly asset Vite emitted, by the URL Vite
+ * emitted, with no body: it carries nothing out and there is nowhere for a
+ * member's database to go. Exempting the file would have exempted a second
+ * `fetch` in it as well, which is the one this rule would need to catch.
+ */
+const ENGINE_FETCH = /fetch\(wasmUrl\)/g;
+const ENGINE_READER = "lib/sqlite.ts";
+
+/**
+ * Where `wasmUrl` has to come from, asserted beside the exemption.
+ *
+ * The exemption strips an expression, and an expression names a binding rather
+ * than a value: a local `const wasmUrl = "https://…" + btoa(theDatabase)` would
+ * make an exfiltrating GET exempt by name. This pins the binding to the build
+ * asset Vite emitted, which is the fact that makes the call carry nothing.
+ */
+const ENGINE_URL_IMPORT =
+  'import wasmUrl from "sql.js/dist/sql-wasm-browser.wasm?url"';
 
 /** Anything by which a module could put bytes on the wire. */
 const REACHES_THE_NETWORK =
@@ -182,21 +261,42 @@ describe("a member's book file cannot leave the browser", () => {
     // image, and the page legitimately sends the second. This one does not need
     // to, because it sits where only the first exists.
     const offenders = entries()
-      .filter(([path]) => FILE_READERS.some((name) => path.endsWith(name)))
-      .filter(([, source]) => REACHES_THE_NETWORK.test(withoutProse(source)))
+      .filter(([path]) => fileReaders().includes(path))
+      .filter(([path, source]) => {
+        const code = withoutProse(source);
+        return REACHES_THE_NETWORK.test(
+          path.endsWith(ENGINE_READER) ? code.replace(ENGINE_FETCH, "") : code,
+        );
+      })
       .map(([path]) => path);
 
     expect(offenders).toEqual([]);
   });
 
-  it("is watching something", () => {
-    // The list above is the failure this test is for: a reader that is renamed
-    // or added, and silently stops being covered. So assert the paths resolve
-    // to real files rather than trusting that they do.
-    const seen = entries().map(([path]) => path);
-    for (const name of FILE_READERS) {
-      expect(seen.filter((path) => path.endsWith(name))).toHaveLength(1);
-    }
+  it("is watching every reader there is, and only those", () => {
+    // The failure this test is for: a reader added, renamed, or quietly taken
+    // off the list, and silently stopping being covered. Asserted as an
+    // equality in both directions rather than as "every name resolves", which
+    // a shortened list satisfies.
+    expect(fileReaders()).toEqual(FILE_READERS);
+  });
+
+  it("makes the one exempt call, so the exemption is not silently unused", () => {
+    // An exemption for an expression that no longer exists is an exemption
+    // waiting to cover something else. This is the half that notices.
+    const engine = entries().find(([path]) => path.endsWith(ENGINE_READER));
+    expect(engine).toBeDefined();
+    const code = withoutProse(engine![1]);
+    expect(code.match(ENGINE_FETCH)).toHaveLength(1);
+    expect(code).toContain(ENGINE_URL_IMPORT);
+    // **The count, not a list of the ways a name can be rebound.** The import
+    // existing is not the same as the name at the fetch site being it, and the
+    // first attempt at this refused `const`, `let` and `var`, which is three
+    // arms of an open set: a destructured `const { wasmUrl } = …` and a
+    // parameter named `wasmUrl` both slip past and both shadow the import.
+    // There are two occurrences today, the import and the fetch, so a third of
+    // any spelling is what this refuses.
+    expect(code.match(/\bwasmUrl\b/g)).toHaveLength(2);
   });
 
   it("keeps the picked file out of the value a request is built from", () => {

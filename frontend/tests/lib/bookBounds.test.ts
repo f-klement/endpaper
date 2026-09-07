@@ -22,6 +22,8 @@ import {
   CUT_TO_FIT,
   KEPT_WHOLE,
   NUMBER_RANGES,
+  QUERY_CEILING,
+  QUERY_FLOOR,
   TEXT_CEILINGS,
 } from "../../src/lib/bookBounds";
 
@@ -186,5 +188,48 @@ describe("boundNumber", () => {
     expect(boundNumber("year", undefined)).toBeNull();
     expect(boundNumber("year", Number.NaN)).toBeNull();
     expect(boundNumber("year", Number.POSITIVE_INFINITY)).toBeNull();
+  });
+});
+
+/** The `q` parameter of `GET /api/books/search`, read off the schema. */
+function searchQueryConstraint(): { maxLength: number; minLength: number } {
+  const raw = SCHEMA["../../openapi.json"] ?? "";
+  // A glob that matched nothing would make both assertions below pass forever.
+  expect(raw.length).toBeGreaterThan(1000);
+  const schema = JSON.parse(raw) as {
+    paths: Record<
+      string,
+      {
+        get: {
+          parameters: {
+            name: string;
+            schema: { maxLength?: number; minLength?: number };
+          }[];
+        };
+      }
+    >;
+  };
+  const parameter = schema.paths["/api/books/search"]?.get.parameters.find(
+    (candidate) => candidate.name === "q",
+  );
+  expect(parameter).toBeDefined();
+  const { maxLength, minLength } = parameter!.schema;
+  expect(maxLength).toBeDefined();
+  expect(minLength).toBeDefined();
+  return { maxLength: maxLength!, minLength: minLength! };
+}
+
+describe("the query bounds", () => {
+  it("are the search endpoint's own, recomputed rather than restated", () => {
+    // The same reason every ceiling above has: a bound
+    // copied out of a schema stops being true the first time the schema moves,
+    // and it fails in the quiet direction, by asking for less than it could.
+    //
+    // Moved here with the constants themselves: it was written beside the
+    // filename derivation, which was one of the three places that declared
+    // the floor rather than the place that owns it.
+    const { maxLength, minLength } = searchQueryConstraint();
+    expect(QUERY_CEILING).toBe(maxLength);
+    expect(QUERY_FLOOR).toBe(minLength);
   });
 });

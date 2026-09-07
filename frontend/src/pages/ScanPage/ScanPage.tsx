@@ -139,6 +139,14 @@ export default function ScanPage() {
             onRemove={rapid.remove}
             onAddAll={rapid.addAll}
             onDiscard={rapid.clear}
+            waiting={rapid.waiting}
+            deciding={rapid.deciding}
+            paceMinutes={rapid.paceMinutes}
+            isLookingUp={rapid.isLookingUp}
+            onLookUp={rapid.lookUpTheNames}
+            onStopLookUp={rapid.stopLookingUp}
+            onChoose={rapid.chooseFor}
+            onKeepName={rapid.keepTheName}
           />
         </>
       )}
@@ -239,7 +247,11 @@ export default function ScanPage() {
               the member already owns rather than from a catalogue. It fills the
               same queue as rapid scanning: a file answers the same question a
               barcode does. */}
-          <FilePickPanel onPick={rapid.pickFiles} isReading={rapid.isReading} />
+          <FilePickPanel
+            onPick={rapid.pickFiles}
+            isReading={rapid.isReading}
+            skipped={rapid.skipped}
+          />
         </>
       )}
 

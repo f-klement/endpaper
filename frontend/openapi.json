@@ -11045,7 +11045,7 @@
         ]
       },
       "put": {
-        "description": "Rename a server, or point it somewhere else.\n\n**Moving it to a different origin drops the stored login**, and that is the\nsecurity rule rather than tidiness. `credentials.for_request` binds a\ncredential to the address it is **asked** about, so a login sealed for one\nmachine would be sent to whatever address this row is edited to name. The\nresponse reports the credential as gone, so nothing has to be inferred from\nsilence.\n\nA rename, or an edit that keeps the same scheme, host and port, keeps the\nlogin: it is the same machine, and making somebody retype a password to fix\na path would teach them to keep the row wrong.",
+        "description": "Rename a server, or point it somewhere else.\n\n**Moving it to a different origin drops the stored login**, and what that\nbuys changed when the envelope started carrying its origin: the login can no\nlonger be sent to the new address, because it does not open there. What this\nstill does is make the row honest. A login left behind would report as held\nand unreadable for the rest of its life, which reads as a damaged row and\nsends somebody to the recovery phrase. The response reports the credential\nas gone, so nothing has to be inferred from silence.\n\nA rename, or an edit that keeps the same scheme, host and port, keeps the\nlogin: it is the same machine, and making somebody retype a password to fix\na path would teach them to keep the row wrong.",
         "operationId": "edit_server",
         "parameters": [
           {
@@ -11153,7 +11153,7 @@
         ]
       },
       "put": {
-        "description": "Store this server's login, sealed.\n\nSealed against the row's own credential key, so a ciphertext moved between\nrows by a hand edited archive fails authentication rather than decrypting\ninto a request aimed at a different machine. `credentials.seal` carries the\nargument.\n\n409 when no encryption key is configured: there is nowhere to put a secret,\nand the message names the variables that would supply one.",
+        "description": "Store this server's login, sealed.\n\nSealed against the row's own credential key **and its address**, so a\nciphertext moved between rows by a hand edited archive, or left beside an\naddress that archive rewrote, fails authentication rather than decrypting\ninto a request aimed at a different machine. `credentials.seal` carries the\nargument.\n\n409 when no encryption key is configured: there is nowhere to put a secret,\nand the message names the variables that would supply one.",
         "operationId": "set_server_credential",
         "parameters": [
           {

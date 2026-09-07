@@ -5,9 +5,10 @@ import type {
   BookMatch,
   CopyCreate,
 } from "../../api/generated/model";
-import { boundNumber, boundText } from "../../lib/bookBounds";
+import { AUTHOR_SEPARATOR, boundNumber, boundText } from "../../lib/bookBounds";
 import { normaliseLocation } from "../../lib/lastLocation";
 import type { OpfRecord } from "../../lib/opf";
+import type { NameClues } from "../../lib/fileName";
 
 /**
  * What the confirm step is editing.
@@ -172,21 +173,6 @@ export function draftFromMatch(match: BookMatch): BookDraft {
 }
 
 /**
- * How the authors of one book are joined onto the one line the API takes.
- *
- * **A comma, because `backend/authors.py` splits on a comma and on nothing
- * else**, deliberately: "Simon and Garfunkel" is one act. So this is the one
- * separator that round trips, and any other would file two authors as one.
- *
- * The exclusion, because it is real: a creator whose own name contains a comma
- * arrives as two authors. Measured over 79 real EPUB files, 2 of 79 creator
- * strings contained one and both were the same corporate name,
- * `W3C® (MIT, ERCIM, Keio)`. The fix is a wire field carrying authors
- * separately, which is a schema change and is not this ticket.
- */
-const AUTHOR_SEPARATOR = ", ";
-
-/**
  * The confirm step, prefilled from a file the member picked.
  *
  * A sibling of `draftFromLookup` and `draftFromMatch` rather than a branch of
@@ -222,6 +208,38 @@ export function draftFromFile(record: OpfRecord): BookDraft {
     series_index: boundNumber("series_index", record.seriesIndex),
     // The file names neither, and an empty list is what the confirm step and
     // the batch both already handle.
+    classifications: [],
+    suggested_tag_ids: [],
+    notFound: true,
+  };
+}
+
+/**
+ * The confirm step, prefilled from what a file's **name** said.
+ *
+ * The third sibling of `draftFromLookup` and `draftFromMatch`, and it is here
+ * for the reason the other two are: this module is where what the app holds
+ * becomes what the request carries. Every value is bounded on the way through
+ * for the reason `draftFromFile` states, and more so: a name is somebody else's
+ * text with no producer at all behind it.
+ *
+ * **A name answers four of the minimum field set and the exclusion is the
+ * point**: title, author, ISBN and year, and never publisher, language, series,
+ * description or page count. That is what the catalogue lookup is for, and what
+ * a member sees when the catalogue answers nothing is a row that says only what
+ * the name said.
+ *
+ * `notFound` is set, so the confirm step shows editable fields: no catalogue has
+ * been asked yet, and the member is the one who can correct a name.
+ */
+export function draftFromName(clues: NameClues): BookDraft {
+  return {
+    isbn: boundText("isbn", clues.isbn) ?? "",
+    title: boundText("title", clues.title) ?? "",
+    author: boundText("author", clues.author),
+    year: boundNumber("year", clues.year),
+    // A name names neither, and an empty list is what the confirm step and the
+    // batch both already handle.
     classifications: [],
     suggested_tag_ids: [],
     notFound: true,

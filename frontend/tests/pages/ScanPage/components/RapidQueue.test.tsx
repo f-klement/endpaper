@@ -19,6 +19,14 @@ function renderQueue(
     onRemove: vi.fn(),
     onAddAll: vi.fn(),
     onDiscard: vi.fn(),
+    waiting: 0,
+    deciding: 0,
+    paceMinutes: 1,
+    isLookingUp: false,
+    onLookUp: vi.fn(),
+    onStopLookUp: vi.fn(),
+    onChoose: vi.fn(),
+    onKeepName: vi.fn(),
     ...overrides,
   };
   renderLocalised(<RapidQueue {...props} />);
@@ -198,5 +206,215 @@ describe("RapidQueue", () => {
 
     expect(screen.getByRole("status")).toBeInTheDocument();
     expect(screen.getByText("9780441013593")).toBeInTheDocument();
+  });
+});
+
+/**
+ * The rows the filename fallback puts in this queue.
+ *
+ * A derived entry is a book rather than a failure, so it is rendered as one:
+ * the title it derived, in the same ink a found book gets, and a note saying
+ * where the title came from.
+ */
+describe("RapidQueue and a book taken from its file name", () => {
+  const MATCH = {
+    google_books_id: "abc",
+    title: "The Dispossessed",
+    author: "Ursula K. Le Guin",
+    year: 1974,
+    isbn13: "9780060512750",
+    suggested_tag_ids: [],
+  };
+
+  const derived: ScannedEntry = picked(
+    {
+      state: "derived",
+      draft: {
+        title: "The Dispossessed",
+        isbn: "",
+        suggested_tag_ids: [],
+        notFound: true,
+      },
+      query: "The Dispossessed",
+    },
+    "The Dispossessed.pdf",
+  );
+
+  it("shows the title the name gave and says where it came from", () => {
+    renderQueue({ entries: [derived] });
+
+    expect(screen.getByText("The Dispossessed")).toBeInTheDocument();
+    expect(screen.getByText(/From the file name/)).toBeInTheDocument();
+  });
+
+  it("says what the file itself could not say, beside it", () => {
+    renderQueue({
+      entries: [{ ...derived, reason: "Not an EPUB file." }],
+    });
+
+    expect(screen.getByText(/Not an EPUB file/)).toBeInTheDocument();
+  });
+
+  it("offers the lookup rather than running it, and says what it costs", () => {
+    renderQueue({ entries: [derived], waiting: 1, paceMinutes: 3 });
+
+    expect(
+      screen.getByRole("button", { name: "Look up 1 by name" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Roughly 3 min/)).toBeInTheDocument();
+  });
+
+  it("offers nothing to look up when nothing is waiting", () => {
+    renderQueue({ entries: [derived], waiting: 0 });
+
+    expect(
+      screen.queryByRole("button", { name: /Look up/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers a way out of a run that is already going", () => {
+    // A run over three hundred files is minutes long, so it has to be
+    // stoppable without discarding the queue.
+    renderQueue({ entries: [derived], waiting: 1, isLookingUp: true });
+
+    expect(
+      screen.queryByRole("button", { name: /Look up/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Stop looking up" }),
+    ).toBeInTheDocument();
+  });
+
+  it("holds the batch while a run is going", () => {
+    // Adding halfway through would file the rows the run had not reached under
+    // their file names.
+    renderQueue({ entries: [derived], isLookingUp: true });
+
+    expect(screen.getByRole("button", { name: "Add all" })).toBeDisabled();
+  });
+
+  it("says it is asking, per file", () => {
+    renderQueue({ entries: [{ ...derived, state: "searching" }] });
+
+    expect(screen.getByText("Asking the catalogues...")).toBeInTheDocument();
+  });
+
+  it("offers each record, for one file, to be taken or left", () => {
+    const onChoose = vi.fn();
+    const onKeepName = vi.fn();
+    renderQueue({
+      entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
+      onChoose,
+      onKeepName,
+    });
+
+    expect(screen.getByText("Possible matches: 1")).toBeInTheDocument();
+    expect(
+      screen.getByText("The Dispossessed, Ursula K. Le Guin (1974)"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Use the record for The Dispossessed",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Keep the name" }),
+    ).toBeInTheDocument();
+  });
+
+  it("names the record a member takes", async () => {
+    const user = userEvent.setup();
+    const onChoose = vi.fn();
+    const entry = { ...derived, state: "choosing" as const, matches: [MATCH] };
+    renderQueue({ entries: [entry], onChoose });
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Use the record for The Dispossessed",
+      }),
+    );
+
+    expect(onChoose).toHaveBeenCalledWith(entry.key, MATCH);
+  });
+
+  it("names the file whose records a member rejects", async () => {
+    const user = userEvent.setup();
+    const onKeepName = vi.fn();
+    const entry = { ...derived, state: "choosing" as const, matches: [MATCH] };
+    renderQueue({ entries: [entry], onKeepName });
+
+    await user.click(screen.getByRole("button", { name: "Keep the name" }));
+
+    expect(onKeepName).toHaveBeenCalledWith(entry.key);
+  });
+
+  it("says why a book stayed under its file name, once and not per row", () => {
+    // Six of the eight sources a title search reaches refuse a record that says
+    // it is electronic, so this is the ordinary outcome for a title that only
+    // exists as a file. Said once a catalogue has actually answered nothing:
+    // explaining beforehand would apologise for something that may not happen.
+    renderQueue({
+      entries: [
+        {
+          ...derived,
+          answered: "nothing" as const,
+          reason: "Not in the catalogues.",
+        },
+        {
+          ...derived,
+          key: "file:other.pdf:10:0",
+          answered: "nothing" as const,
+        },
+      ],
+    });
+
+    expect(
+      screen.getAllByText(/Most catalogues list printed books/),
+    ).toHaveLength(1);
+  });
+
+  it("does not say it to a member who was offered records and refused", () => {
+    // The catalogues answered, with records. Telling that member the catalogues
+    // do not list ebooks describes something that did not happen.
+    renderQueue({
+      entries: [
+        {
+          ...derived,
+          answered: "records" as const,
+          reason: "Kept under its file name.",
+        },
+      ],
+    });
+
+    expect(
+      screen.queryByText(/Most catalogues list printed books/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says how many rows the batch is about to leave where they are", () => {
+    // The cost of not filing an undecided row under its file name, named on
+    // screen rather than left for somebody to notice afterwards.
+    renderQueue({
+      entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
+      deciding: 1,
+    });
+
+    expect(
+      screen.getByText("1 still to decide. Add all leaves those in the queue."),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about deciding when nothing is being decided", () => {
+    renderQueue({ entries: [derived] });
+
+    expect(screen.queryByText(/still to decide/)).not.toBeInTheDocument();
+  });
+
+  it("says nothing about ebooks before a catalogue has answered", () => {
+    renderQueue({ entries: [derived] });
+
+    expect(
+      screen.queryByText(/Most catalogues list printed books/),
+    ).not.toBeInTheDocument();
   });
 });

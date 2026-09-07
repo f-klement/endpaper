@@ -2250,8 +2250,21 @@ class CatalogueCredential(Base):
     __tablename__ = "catalogue_credentials"
 
     __table_args__ = (
+        # **Both versions, and the older one is admitted on purpose.** `v2` is
+        # what this build writes and the only one `credentials.unseal` opens;
+        # `v1` predates a credential being sealed over the address it may be
+        # sent to. Refusing `v1` here would fail an entire restore of an archive
+        # taken before that change, over logins whose only remedy is to be typed
+        # again, which is the failure the missing foreign key above exists to
+        # avoid. A `v1` row that lands is reported as needing re-entry rather
+        # than opened. The shape check is not a parser: `credentials.unseal` is,
+        # and `credentials.KNOWN_VERSIONS` is the set this restates in SQL
+        # because this module cannot import that one.
+        # `tests/test_credentials.py::TestTheEnvelopeRuleAndItsConstraintAgree`
+        # walks the two together.
         CheckConstraint(
-            "envelope GLOB 'v1.*.*.*' AND length(envelope) >= 40",
+            "(envelope GLOB 'v1.*.*.*' OR envelope GLOB 'v2.*.*.*') "
+            "AND length(envelope) >= 40",
             name="ck_catalogue_credentials_envelope",
         ),
         # **This column travels, which is why its values are closed.** The
@@ -2281,7 +2294,9 @@ class CatalogueCredential(Base):
 
     #: The `catalogue_targets.source` this credential is for.
     source: Mapped[str] = mapped_column(String(32), primary_key=True)
-    #: `v1.<generation>.<nonce>.<ciphertext>`. See `backend/credentials.py`.
+    #: `<version>.<generation>.<nonce>.<ciphertext>`, base64url without padding.
+    #: The version is what this build can open rather than what it recognises;
+    #: see `credentials.VERSION` and `credentials.KNOWN_VERSIONS`.
     envelope: Mapped[str] = mapped_column(Text, nullable=False)
 
 
@@ -2308,8 +2323,14 @@ def new_opds_credential_key() -> str:
     would otherwise ship with.** SQLite reuses `max(rowid) + 1` after a delete
     unless the column is declared `AUTOINCREMENT`, so a key of `opds-<id>` would
     give a newly added server the sealed login of the one that used to have that
-    id, and `credentials.for_request` would bind it to the **new** address and
-    send it there. Sixteen hex characters cannot be reused.
+    id. Sixteen hex characters cannot be reused.
+
+    **The origin binding narrows that to the case a reused key still reaches,
+    and it does not close it.** An envelope is sealed over the address it was
+    entered for, so a new server at a **different** address cannot open the old
+    one's login. A new server the household points at the **same** address can,
+    which is a household's own two rows for one machine and is exactly the
+    accident an id derived key produces.
 
     `OpdsServer.delete` has no hook, so the route forgets the credential as
     well. The two guards are independent on purpose: one stops the reuse and the
@@ -2376,11 +2397,17 @@ class OpdsServer(Base):
         #
         # What that admitted, measured end to end by a critic: a row with
         # `credential_key='bne'` and a `base_url` the archive names passes the
-        # charset rule, and `credentials.for_request` then binds the library's
-        # sealed BNE login to **that** address and `header_for` sends it. The
+        # charset rule, and `credentials.for_request` then bound the library's
+        # sealed BNE login to **that** address and `header_for` sent it. The
         # attacker needs a copy of the archive and not the key, which is exactly
-        # the loss sealing was bought to prevent. `stored()` is keyed on the
-        # source alone; only `shipped()` re-checks a published origin.
+        # the loss sealing was bought to prevent.
+        #
+        # **That envelope no longer opens beside an address it was not sealed
+        # for**, because `credentials.seal` binds the origin, so this clause is
+        # no longer the only thing between an archive and that plaintext. It
+        # stays because it is a different rule: it keeps the two key spaces
+        # apart, so a household's server cannot be handed a roster catalogue's
+        # row at all, whether or not the envelope would open.
         #
         # The guard above this, that no `CatalogueSource` is spelled with the
         # prefix, is a property of the enum. This is the same rule on the column

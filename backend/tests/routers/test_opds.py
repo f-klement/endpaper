@@ -16,6 +16,9 @@ from models import CatalogueCredential, OpdsServer
 
 BASE = "http://library.invalid:8083/opds/books"
 
+#: Where a writer that is not a route moves a server to.
+MOVED = "http://attacker.invalid:8083/opds/books"
+
 FEED = (
     '<?xml version="1.0" encoding="UTF-8"?>'
     '<feed xmlns="http://www.w3.org/2005/Atom">'
@@ -190,9 +193,14 @@ class TestAddingAndEditingAServer:
 
 
 class TestALoginNeverFollowsAServerToADifferentMachine:
-    """`credentials.for_request` binds a credential to the address it is asked
-    about, so a row edited to name a new host would send the old host's login to
-    it. Both routes that can produce that are covered."""
+    """A moved row must not keep a login that names the machine it left.
+
+    The envelope is sealed over its origin, so a login left behind could not be
+    sent to the new address anyway. What this route buys is an honest row: a
+    login kept across a move reports as held and unreadable for the rest of its
+    life, which reads as a damaged row and sends somebody after a recovery
+    phrase. Both edits that can produce a move are covered.
+    """
 
     def test_a_rename_keeps_the_login(self, client, admin, encryption_key):
         server = make_server(client, admin)
@@ -255,6 +263,82 @@ class TestALoginNeverFollowsAServerToADifferentMachine:
 
         assert edited["credential_provenance"] == "none"
         assert db.query(CatalogueCredential).count() == 0
+
+
+
+
+class TestAnEnvelopeDoesNotOpenBesideAnAddressAnotherWriterChose:
+    """What holds when the route above is not the writer, which is the point.
+
+    `PUT /api/opds/servers/{id}` drops the login on a move and
+    `backup._without_household_logins` drops it out of an archive, but neither
+    is the last writer this column will ever have: `backup.restore` already
+    inserts through Core with no validating arm, and a stray `UPDATE` needs no
+    route at all. `credentials.seal` binds the origin, so a moved row makes the
+    envelope unopenable rather than making the request go somewhere else.
+    """
+
+    @staticmethod
+    def _move(db, server_id: int, address: str) -> OpdsServer:
+        """Straight onto the column, which is what a restore and an UPDATE both do."""
+        db.query(OpdsServer).filter(OpdsServer.id == server_id).update(
+            {OpdsServer.base_url: address}
+        )
+        db.commit()
+        db.expire_all()
+        return db.get(OpdsServer, server_id)
+
+    @pytest.fixture
+    def sealed(self, client, admin, encryption_key):
+        server = make_server(client, admin)
+        client.put(
+            f"/api/opds/servers/{server['id']}/credential",
+            json={"username": "sam", "password": "hunter2"},
+            headers=admin["headers"],
+        )
+        return server
+
+    def test_the_login_still_opens_at_the_address_it_was_entered_for(self, db, sealed):
+        row = db.get(OpdsServer, sealed["id"])
+        held = credentials.for_request(db, row.credential_key, row.base_url)
+        assert held is not None
+        assert held.header_for(BASE) != {}
+
+    def test_a_row_moved_under_it_carries_nothing(self, db, sealed):
+        row = self._move(db, sealed["id"], MOVED)
+        assert credentials.for_request(db, row.credential_key, row.base_url) is None
+
+    def test_and_the_envelope_is_still_there_to_be_removed(self, db, sealed):
+        self._move(db, sealed["id"], MOVED)
+        assert db.query(CatalogueCredential).count() == 1
+
+    def test_the_screen_reports_it_held_and_unreadable_rather_than_gone(
+        self, client, admin, db, sealed
+    ):
+        """Or an admin is told the login vanished and types it in again blind."""
+        self._move(db, sealed["id"], MOVED)
+        listed = client.get("/api/opds/servers", headers=admin["headers"]).json()
+        assert (listed[0]["credential_provenance"], listed[0]["credential_unreadable"]) == (
+            "stored",
+            True,
+        )
+
+    @respx.mock
+    def test_and_a_sync_of_the_moved_row_sends_no_authorization_header(
+        self, client, admin, db, sealed
+    ):
+        """The measurement the ticket was raised on, run the other way round.
+
+        With the source alone as associated data this request carried the
+        household's `Basic` header to a host the archive named.
+        """
+        route = respx.get(MOVED).respond(text=FEED)
+        self._move(db, sealed["id"], MOVED)
+
+        client.post(f"/api/opds/servers/{sealed['id']}/sync", headers=admin["headers"])
+
+        assert "authorization" not in route.calls[0].request.headers
+
 
 
 class TestTheCredentialLifecycle:

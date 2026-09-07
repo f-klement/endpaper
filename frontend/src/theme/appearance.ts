@@ -8,8 +8,8 @@
  * avoid.
  *
  * The usual fix for that, an inline blocking `<script>` in the HTML, is not
- * available here: `backend/middleware.py` sets `script-src 'self'` with no
- * nonce, so an inline script would need a per-build hash in the CSP and
+ * available here: `backend/middleware.py` grants scripts no `'unsafe-inline'`
+ * and no nonce, so an inline script would need a per-build hash in the CSP and
  * `middleware.py` would have to be generated from the frontend bundle. That was
  * considered and rejected: it couples the security headers to the asset
  * pipeline to save a network round trip that only a new account on a new device

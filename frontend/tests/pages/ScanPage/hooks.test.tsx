@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BookMatch } from "../../../src/api/generated/model";
 import {
+  FALLBACK_INTERVAL_MS,
+  FALLBACK_STARTS_PER_MINUTE,
   useBookSearch,
   useRapidIntake,
   useScanFlow,
@@ -620,7 +622,10 @@ describe("useRapidIntake and a picked file", () => {
     expect(result.current.entries[0]?.isbn).toBe("");
   });
 
-  it("keeps a file it could not read, named, rather than failing the batch", async () => {
+  it("keeps a file it could not read as a candidate under its own name", async () => {
+    // It was a dead end until the filename fallback shipped. The file is still
+    // a book, its name is still a signal, and what the file itself could not
+    // say becomes a note beside it rather than the end of it.
     const { result } = renderRapid();
     const broken = new File(["not an epub at all"], "broken.epub");
 
@@ -628,9 +633,9 @@ describe("useRapidIntake and a picked file", () => {
     await settled(result);
 
     expect(result.current.entries[0]).toMatchObject({
-      state: "failed",
+      state: "derived",
       label: "broken.epub",
-      draft: null,
+      draft: { title: "broken" },
     });
     expect(result.current.entries[0]?.reason).toBe("Not an EPUB file.");
   });
@@ -646,14 +651,18 @@ describe("useRapidIntake and a picked file", () => {
     await settled(result);
 
     expect(result.current.entries.map((entry) => entry.state)).toEqual([
-      "failed",
+      "derived",
       "found",
     ]);
   });
 
-  it("refuses a file that carries no title, because the API requires one", async () => {
+  it("fails a file only when its name says nothing either", async () => {
+    // A title is the one field the API requires, and both instruments have to
+    // come up empty before a picked file is a failure now: the file opened and
+    // named no title, and the name reduces to nothing once its extension is
+    // taken off.
     const { result } = renderRapid();
-    const untitled = await epubFile("untitled.epub", {
+    const untitled = await epubFile(".epub", {
       opf: packageDocument(`<dc:creator>Frank Herbert</dc:creator>`),
     });
 
@@ -726,16 +735,14 @@ describe("useRapidIntake and a picked file", () => {
     api.on("/api/books/scan", { body: makeBook() });
     const { result } = renderRapid();
     const good = await epubFile("dune.epub");
-    act(() =>
-      result.current.pickFiles([new File(["nope"], "broken.epub"), good]),
-    );
+    act(() => result.current.pickFiles([new File(["nope"], ".epub"), good]));
     await settled(result);
 
     act(() => result.current.addAll());
 
     await waitFor(() => expect(result.current.result?.added).toBe(1));
     expect(result.current.entries.map((entry) => entry.label)).toEqual([
-      "broken.epub",
+      ".epub",
     ]);
   });
 });
@@ -912,5 +919,575 @@ describe("the shelf location carries over", () => {
     await waitFor(() =>
       expect(result.current.locations[0]?.name).toBe("Living room shelf 3"),
     );
+  });
+});
+
+/**
+ * The filename and folder fallback.
+ *
+ * The floor under every format reader: what happens to a file whose own bytes
+ * said nothing, or that no reader here opens at all.
+ */
+describe("useRapidIntake and a file with no usable metadata", () => {
+  function renderRapid() {
+    return renderHookWithProviders(() => useRapidIntake());
+  }
+
+  async function settled(result: { current: { isReading: boolean } }) {
+    await waitFor(() => expect(result.current.isReading).toBe(false));
+  }
+
+  /** A file picked out of a folder, which is the only way a path arrives. */
+  function inFolder(name: string, path: string): File {
+    const file = new File(["%PDF-1.4"], name);
+    Object.defineProperty(file, "webkitRelativePath", { value: path });
+    return file;
+  }
+
+  const MATCH = {
+    google_books_id: "abc",
+    title: "The Dispossessed",
+    author: "Ursula K. Le Guin",
+    year: 1974,
+    isbn13: "9780060512750",
+    suggested_tag_ids: [],
+  };
+
+  function searchCalls(): number {
+    return api.calls.filter((call) => call.url.includes("/api/books/search"))
+      .length;
+  }
+
+  it("queues a format no reader here opens, from its name", async () => {
+    // The whole point of the path: without it a PDF is a dead end, and for a
+    // PDF an unusable metadata block is the common case rather than the
+    // exception.
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([new File(["%PDF-1.4"], "Dune (1965).pdf")]),
+    );
+    await settled(result);
+
+    expect(result.current.entries[0]).toMatchObject({
+      state: "derived",
+      draft: { title: "Dune", year: 1965 },
+    });
+  });
+
+  it("asks no catalogue while reading, because the lookup is offered", async () => {
+    // Several hundred files is several hundred fan outs, and a page may not
+    // spend somebody's rate limit because they pointed at a folder.
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([new File(["%PDF"], "Dune.pdf")]));
+    await settled(result);
+
+    expect(searchCalls()).toBe(0);
+    expect(result.current.waiting).toBe(1);
+  });
+
+  it("counts what the walk passed over rather than ignoring it", async () => {
+    // A member who points at a folder of CBR files and sees nothing appear
+    // deserves to know why.
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([
+        new File(["a"], "one.cbr"),
+        new File(["b"], "two.djvu"),
+        new File(["c"], "three.pdf"),
+      ]),
+    );
+    await settled(result);
+
+    expect(result.current.skipped).toBe(2);
+    expect(result.current.entries).toHaveLength(1);
+  });
+
+  it("counts what the last pick passed over, not every pick ever made", async () => {
+    // A running total has no way down, and this notice sits beside the picker
+    // rather than the queue precisely so it can be shown when nothing was
+    // queued at all: a member who picks a folder of comics and nothing else
+    // would otherwise carry the number for the rest of the session.
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([
+        new File(["a"], "one.cbr"),
+        new File(["b"], "two.cbr"),
+      ]),
+    );
+    await settled(result);
+    expect(result.current.skipped).toBe(2);
+
+    act(() => result.current.pickFiles([new File(["c"], "three.djvu")]));
+    await settled(result);
+
+    expect(result.current.skipped).toBe(1);
+  });
+
+  it("strips a picked name before printing it, as it does every title", async () => {
+    // A bidirectional override renders as nothing and reverses what a reader
+    // sees after it. The label is printed beside a title that was cleaned, and
+    // it is what a removal is announced by.
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([new File(["%PDF"], "Du\u202ene.pdf")]));
+    await settled(result);
+
+    expect(result.current.entries[0]?.label).toBe("Dune.pdf");
+  });
+
+  it("reads the author off the folder when the name repeats it", async () => {
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([
+        inFolder(
+          "Le Guin - The Dispossessed.pdf",
+          "Le Guin/The Dispossessed/Le Guin - The Dispossessed.pdf",
+        ),
+      ]),
+    );
+    await settled(result);
+
+    expect(result.current.entries[0]?.draft).toMatchObject({
+      author: "Le Guin",
+      title: "The Dispossessed",
+    });
+  });
+
+  it("falls back to the name when a file it can open says nothing", async () => {
+    // It used to be a dead end. The file is still a book and its name is still
+    // a signal, so what the file could not say becomes a note beside it.
+    const { result } = renderRapid();
+    const untitled = await epubFile("Dune (1965).epub", {
+      opf: packageDocument(`<dc:creator>Frank Herbert</dc:creator>`),
+    });
+
+    act(() => result.current.pickFiles([untitled]));
+    await settled(result);
+
+    expect(result.current.entries[0]).toMatchObject({
+      state: "derived",
+      reason: "This file carries no title.",
+      draft: { title: "Dune" },
+    });
+  });
+
+  it("falls back to the name for a file that would not open at all", async () => {
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([new File(["nope"], "The Dispossessed.epub")]),
+    );
+    await settled(result);
+
+    expect(result.current.entries[0]).toMatchObject({
+      state: "derived",
+      reason: "Not an EPUB file.",
+      draft: { title: "The Dispossessed" },
+    });
+  });
+
+  it("still fails a file whose name reduces to nothing", async () => {
+    // A title is the one field the API requires, and this is the only way a
+    // picked file arrives without one now.
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([new File(["%PDF"], ".pdf")]));
+    await settled(result);
+
+    expect(result.current.entries[0]?.state).toBe("failed");
+  });
+
+  it("adds what the name said when nothing else did", async () => {
+    // Created rather than skipped, which is the same call the OPDS sync makes
+    // for a holding with no description.
+    api.on("/api/books/scan", { body: makeBook() });
+    const { result } = renderRapid();
+    act(() => result.current.pickFiles([new File(["%PDF"], "Dune.pdf")]));
+    await settled(result);
+
+    act(() => result.current.addAll());
+
+    await waitFor(() => expect(result.current.result?.added).toBe(1));
+    expect(api.lastCall("/api/books/scan", "POST")?.body).toMatchObject({
+      title: "Dune",
+      format: "ebook",
+    });
+  });
+
+  it("files an M4B as an audiobook and a comic as neither", async () => {
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([
+        new File(["a"], "Dune.m4b"),
+        new File(["b"], "Watchmen.cbz"),
+      ]),
+    );
+    await settled(result);
+
+    expect(result.current.entries.map((entry) => entry.format)).toEqual([
+      "audiobook",
+      "",
+    ]);
+  });
+
+  it("searches by the derived name once it is asked to", async () => {
+    api.on("/api/books/search", {
+      body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
+    });
+    const { result } = renderRapid();
+    act(() =>
+      result.current.pickFiles([new File(["%PDF"], "The Dispossessed.pdf")]),
+    );
+    await settled(result);
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.state).toBe("choosing"),
+    );
+    const query = new URL(
+      api.lastCall("/api/books/search")!.url,
+      "http://localhost",
+    ).searchParams;
+    expect(query.get("q")).toBe("The Dispossessed");
+    expect(result.current.entries[0]?.matches).toHaveLength(1);
+  });
+
+  it("takes an ISBN in the name to the lookup, never to the fan out", async () => {
+    // An ISBN is an identifier rather than a guess, and one call per file is
+    // what makes the pace's arithmetic true.
+    api.on("/api/books/lookup", {
+      body: {
+        isbn: "9780441013593",
+        title: "Dune",
+        author: "Frank Herbert",
+        suggested_tag_ids: [],
+      },
+    });
+    const { result } = renderRapid();
+    act(() =>
+      result.current.pickFiles([new File(["%PDF"], "Dune 9780441013593.pdf")]),
+    );
+    await settled(result);
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() => expect(result.current.entries[0]?.state).toBe("found"));
+    expect(result.current.entries[0]?.draft?.author).toBe("Frank Herbert");
+    expect(searchCalls()).toBe(0);
+  });
+
+  it("keeps the book when the catalogues have never heard of it", async () => {
+    // Six of the eight sources a title search reaches refuse a record that says
+    // it is electronic, so this is the ordinary outcome for a born digital
+    // title rather than a failure.
+    api.on("/api/books/search", {
+      body: { matches: [], asked: ["open_library"], unasked: [] },
+    });
+    const { result } = renderRapid();
+    act(() => result.current.pickFiles([new File(["%PDF"], "Dune.pdf")]));
+    await settled(result);
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.reason).toBe(
+        "Not in the catalogues, kept under its file name.",
+      ),
+    );
+    expect(result.current.entries[0]).toMatchObject({
+      state: "derived",
+      draft: { title: "Dune" },
+    });
+  });
+
+  it("does not offer to look that one up again", async () => {
+    // The catalogue answered. Offering the same call a second time would spend
+    // the same budget to be told the same thing.
+    api.on("/api/books/search", {
+      body: { matches: [], asked: ["open_library"], unasked: [] },
+    });
+    const { result } = renderRapid();
+    act(() => result.current.pickFiles([new File(["%PDF"], "Dune.pdf")]));
+    await settled(result);
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() => expect(result.current.waiting).toBe(0));
+  });
+
+  it("takes a 404 from the ISBN lookup as an answer, not as a failure", async () => {
+    // The books router splits the two deliberately: a 404 is nobody knowing the
+    // ISBN and a 503 is no source having been reachable. Reading them as one
+    // offered the retry that buys nothing and withheld the one that does.
+    api.on("/api/books/lookup", { status: 404, body: { detail: "unknown" } });
+    const { result } = renderRapid();
+    act(() =>
+      result.current.pickFiles([new File(["%PDF"], "Dune 9780441013593.pdf")]),
+    );
+    await settled(result);
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.reason).toBe(
+        "Not in the catalogues, kept under its file name.",
+      ),
+    );
+    expect(result.current.waiting).toBe(0);
+  });
+
+  it("offers a lookup again when the catalogues could not be reached", async () => {
+    api.on("/api/books/lookup", { status: 503, body: { detail: "down" } });
+    const { result } = renderRapid();
+    act(() =>
+      result.current.pickFiles([new File(["%PDF"], "Dune 9780441013593.pdf")]),
+    );
+    await settled(result);
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.state).toBe("derived"),
+    );
+    expect(result.current.waiting).toBe(1);
+  });
+
+  it(
+    "leaves a file still being decided out of the batch",
+    async () => {
+      // Adding it would file it under its file name and throw away every record
+      // the catalogue found for it, with nothing said on screen. It stays queued,
+      // for the reason an entry with no draft stays queued.
+      //
+      // **Two files, and the second one is what makes this a test.** With one the
+      // batch has nothing to add, returns before it writes anything, and every
+      // assertion about what was written passes whether the row was excluded or
+      // not. Measured: the mutation that drops the exclusion was not caught until
+      // a row that does get added was put beside it.
+      api.on("/api/books/search", (url) =>
+        url.includes("dispossessed")
+          ? { body: { matches: [MATCH], asked: ["open_library"], unasked: [] } }
+          : { body: { matches: [], asked: ["open_library"], unasked: [] } },
+      );
+      api.on("/api/books/scan", { body: makeBook() });
+      const { result } = renderRapid();
+      act(() =>
+        result.current.pickFiles([
+          new File(["%PDF"], "dispossessed.pdf"),
+          new File(["%PDF"], "Dune.pdf"),
+        ]),
+      );
+      await settled(result);
+      // **Both ends, because one value pins no function.** Asserted only where
+      // it is 1, a constant 1 passes; asserted only where it is 0, a constant 0
+      // does. The diagonal is what makes this a measurement of the predicate
+      // rather than of the moment it was read.
+      expect(result.current.deciding).toBe(0);
+
+      act(() => result.current.lookUpTheNames());
+      await waitFor(
+        () => expect(result.current.entries[1]?.answered).toBe("nothing"),
+        { timeout: FALLBACK_INTERVAL_MS * 2 },
+      );
+
+      // The number the queue says this out of, taken from the predicate the
+      // batch excludes rather than from a second one spelled the same way.
+      expect(result.current.deciding).toBe(1);
+
+      act(() => result.current.addAll());
+
+      await waitFor(() => expect(result.current.result?.added).toBe(1));
+      expect(result.current.entries).toHaveLength(1);
+      expect(result.current.entries[0]?.state).toBe("choosing");
+      expect(result.current.deciding).toBe(1);
+    },
+    FALLBACK_INTERVAL_MS * 4,
+  );
+
+  it("offers it again when nothing could be reached", async () => {
+    // Nothing was learned, so the file is still worth asking about.
+    api.on("/api/books/search", { status: 503, body: { detail: "down" } });
+    const { result } = renderRapid();
+    act(() => result.current.pickFiles([new File(["%PDF"], "Dune.pdf")]));
+    await settled(result);
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.reason).toBe(
+        "The catalogues could not be reached, kept under its file name.",
+      ),
+    );
+    expect(result.current.waiting).toBe(1);
+  });
+
+  it("takes the record a member chooses over the name", async () => {
+    api.on("/api/books/search", {
+      body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
+    });
+    const { result } = renderRapid();
+    act(() =>
+      result.current.pickFiles([new File(["%PDF"], "dispossessed.pdf")]),
+    );
+    await settled(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() =>
+      expect(result.current.entries[0]?.state).toBe("choosing"),
+    );
+
+    const entry = result.current.entries[0]!;
+    act(() => result.current.chooseFor(entry.key, entry.matches![0]!));
+
+    expect(result.current.entries[0]).toMatchObject({
+      state: "found",
+      isbn: "9780060512750",
+      draft: { title: "The Dispossessed", author: "Ursula K. Le Guin" },
+    });
+  });
+
+  it("keeps the name when a member rejects every record offered", async () => {
+    api.on("/api/books/search", {
+      body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
+    });
+    const { result } = renderRapid();
+    act(() =>
+      result.current.pickFiles([new File(["%PDF"], "dispossessed.pdf")]),
+    );
+    await settled(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() =>
+      expect(result.current.entries[0]?.state).toBe("choosing"),
+    );
+
+    act(() => result.current.keepTheName(result.current.entries[0]!.key));
+
+    expect(result.current.entries[0]).toMatchObject({
+      state: "derived",
+      draft: { title: "dispossessed" },
+    });
+    expect(result.current.waiting).toBe(0);
+  });
+
+  it(
+    "paces the run rather than asking about every file at once",
+    async () => {
+      // The decision this ticket had to answer. Without a pace the second call
+      // follows the first within a microtask, and three hundred files would
+      // answer 429 to the member's own next barcode.
+      api.on("/api/books/search", {
+        body: { matches: [], asked: ["open_library"], unasked: [] },
+      });
+      const { result } = renderRapid();
+      act(() =>
+        result.current.pickFiles([
+          new File(["a"], "Dune.pdf"),
+          new File(["b"], "Neuromancer.pdf"),
+        ]),
+      );
+      await settled(result);
+
+      act(() => result.current.lookUpTheNames());
+      await waitFor(() => expect(searchCalls()).toBe(1));
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100);
+      });
+      // A tenth of the interval in, the first has long since answered.
+      expect(searchCalls()).toBe(1);
+
+      // And it is a pace rather than a stop.
+      await waitFor(() => expect(searchCalls()).toBe(2), {
+        timeout: FALLBACK_INTERVAL_MS * 2,
+      });
+    },
+    FALLBACK_INTERVAL_MS * 4,
+  );
+
+  it(
+    "stops the run inside the wait rather than at the end of it",
+    async () => {
+      // **Both halves in one assertion, and neither had a test before.** The
+      // loop reads the flag at its top, so without the flag the run carries on
+      // and a second call lands; without the wait being woken the flag is not
+      // read for a further two seconds, which is longer than a member waits
+      // before pressing again. The timeout below is half an interval, so a stop
+      // that only lands when the gap ends fails it.
+      api.on("/api/books/search", {
+        body: { matches: [], asked: ["open_library"], unasked: [] },
+      });
+      const { result } = renderRapid();
+      act(() =>
+        result.current.pickFiles([
+          new File(["a"], "Dune.pdf"),
+          new File(["b"], "Neuromancer.pdf"),
+          new File(["c"], "Solaris.pdf"),
+        ]),
+      );
+      await settled(result);
+
+      act(() => result.current.lookUpTheNames());
+      await waitFor(() => expect(searchCalls()).toBe(1));
+      act(() => result.current.stopLookingUp());
+
+      await waitFor(() => expect(result.current.isLookingUp).toBe(false), {
+        timeout: FALLBACK_INTERVAL_MS / 2,
+      });
+      expect(searchCalls()).toBe(1);
+      // The two it never reached are still there to be asked about.
+      expect(result.current.waiting).toBe(2);
+    },
+    FALLBACK_INTERVAL_MS * 4,
+  );
+
+  it("says how long the run it is offering would take", async () => {
+    const { result } = renderRapid();
+    const files = Array.from(
+      { length: 45 },
+      (_unused, index) => new File(["a"], `Book number ${index}.pdf`),
+    );
+
+    act(() => result.current.pickFiles(files));
+    await settled(result);
+
+    // 45 files at one start per two seconds is 90 seconds.
+    expect(result.current.waiting).toBe(45);
+    expect(result.current.paceMinutes).toBe(2);
+  });
+});
+
+/**
+ * The pace, against the budget it was priced on.
+ *
+ * @see backend/ratelimit.py
+ */
+describe("the fallback's share of the metadata budget", () => {
+  const LIMITER = import.meta.glob("../../../../backend/ratelimit.py", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+
+  it("is half of it, recomputed from the limiter rather than restated", () => {
+    // **A number, once written down, stops being re-derived and starts being
+    // copied.** The limiter is shared with the ISBN lookup behind every scanned
+    // barcode and with the search box, so a fallback taking all of it would
+    // answer 429 to the page it runs on. Half is the choice; that it is half of
+    // *this* number is what this recomputes.
+    const source = LIMITER["../../../../backend/ratelimit.py"] ?? "";
+    expect(source.length).toBeGreaterThan(1000);
+    const declared = source.match(
+      /METADATA_LIMIT = RateLimit\(max_attempts=(\d+), window_seconds=(\d+)\)/,
+    );
+    expect(declared).not.toBeNull();
+
+    const perMinute = (Number(declared![1]) * 60) / Number(declared![2]);
+    expect(FALLBACK_STARTS_PER_MINUTE).toBe(perMinute / 2);
+    expect(FALLBACK_INTERVAL_MS).toBe(60_000 / (perMinute / 2));
   });
 });

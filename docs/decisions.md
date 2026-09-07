@@ -11193,11 +11193,11 @@ which is neither cheap nor reproducible from a suite that refuses the network.
 row, and a sync reports it under `created` rather than `skipped`, so it does not read as an
 import that half failed.
 
-## A restore drops every household login, because the envelope is not bound to an address
+## An envelope is bound to the origin it may be sent to, and a restore drops household logins as the belt
 
 Archiving `opds_servers` made two of its columns archive writable, and each opened a path to the
-same loss. `credentials.seal` takes the source alone as associated data, so an envelope opens at
-whatever address the row beside it names, and `backup.restore` re-inserts through Core with no
+same loss. `credentials.seal` **took** the source alone as associated data, so an envelope opened
+at whatever address the row beside it named, and `backup.restore` re-inserts through Core with no
 validating arm. An archive could name a roster catalogue's credential key beside an address of
 its choosing, or keep a legitimate key and move only the address; either way the next sync sends
 a sealed login to a host the archive picked. An attacker needs a copy of the archive and not the
@@ -11208,16 +11208,120 @@ machine loses these logins and they are typed again. That is the bargain `backup
 already describes for a restore onto a new machine, applied one case earlier, and it fails in
 the safe direction.
 
-**Raised, and the owner took it on 2026-09-07: seal a household login against its origin as
-well as its source.** That makes an envelope unopenable at an address it was not sealed for,
-whichever writer moved the row, rather than blocking the one route through a restore that was
-measured. The restore filter stays and becomes the belt to that brace.
+**Resolved on the owner's decision and shipped the same day, 2026-09-07.**
+`credentials.seal` takes the address the credential is for and seals its origin into the
+associated data, which went from `endpaper/v1/catalogue-credential/<source>` to
+`endpaper/v2/catalogue-credential/<source>/<origin>`. An envelope is unopenable at an address it
+was not sealed for, whichever writer moved the row. The restore filter stays as the belt: it
+costs nothing once the binding holds and it refuses one step earlier, at the archive rather than
+at the send.
 
-**The cost is accepted rather than discovered**: it changes how every stored credential is
-sealed, so an envelope written before it needs a migration path, and deciding what happens to
-one is the substance of that work rather than a detail of it.
+**Existing envelopes are invalidated at migration time by removal, and that is a product
+decision rather than a detail.** An operator upgrading with logins stored loses all of them and
+enters them again; the encryption key is untouched, so the recovery phrase is not involved and
+does not help.
+
+Re-sealing at migration time was refused for a reason rather than for effort: it needs the key,
+which is a deployment fact a migration cannot depend on, and it would re-seal from the address
+the row already names, so a deployment whose row had already been moved by a hostile archive
+would have the migration launder that move into a valid binding. Re-sealing on first successful
+use closes nothing, because it needs the old scheme kept openable.
+
+**Leaving the rows to be reported was preferred until it was measured**, and this is the finding
+that changed it: there is no OPDS server screen in the frontend, so a household's invalidated
+login would surface as a bare `opds-` and sixteen hex characters in the encryption key section,
+with no name and no way to tell which machine it was for. Every sentence an admin reads for an
+unreadable login begins at the key, which here is intact. A row left behind would have been
+reported wrongly, and anonymously.
+
+`credentials.UnboundCredential` remains for the one route that still brings a pre-binding
+envelope back: restoring an archive taken before the upgrade. So `v1` stays in the set that is
+recognised as an envelope at all, while `VERSION` is the only thing `unseal` opens. Conflating
+those two sets is the mistake to avoid.
 
 **Both defects came from a fix round rather than from the original work**, which is the shape
 this process expects: the replacement was better in the dimension it was designed for, the
 archive being complete, and weaker in one nobody re-checked. The question that found them was
 what the old arrangement refused that the new one accepts.
+
+## Reading a Calibre library through SQLite in the browser, not on the server
+
+Decided by the owner 2026-09-05 against the coordinator's recommendation, and the measurement
+is the reason: 568 of 897 books in the reference library carry an ISBN typed identifier and 812
+carry an identifier of some type, where the OPDS route carries none at all across seven servers.
+The two routes are complementary and both ship.
+
+**The browser rather than the server, and the safety rule decides it rather than a preference
+about where code runs.** A Calibre library has exactly one writer: a book present as a file but
+absent from the index is invisible to every reader, so something must do the registering and
+only one process may do it. A `File` handed over by a file input is a snapshot the page cannot
+write back to, and the bytes are copied into WebAssembly memory before a statement runs, so the
+route **cannot be a second writer by construction**. A server side reader would take a path, and
+a path can be the live library.
+
+`PRAGMA query_only` on every connection is the second half and `PRAGMA integrity_check` is the
+third: the reference library is in a rollback journal mode, so a copy taken mid write is a file
+with partly written pages and no journal, and SQLite answers from it rather than refusing it.
+The refusal has to be asked for.
+
+## The content security policy grants `'wasm-unsafe-eval'` and nothing else
+
+Before: `script-src 'self'`. After: `script-src 'self' 'wasm-unsafe-eval'`.
+
+`'unsafe-eval'` is still refused and so is `'unsafe-inline'`. The engine contains no `eval(` and
+no `new Function`, scanned over its own bundled source, so the wider grant would have bought
+nothing.
+
+**What it newly admits, stated rather than left to be found**: a script that has already
+achieved execution may compile WebAssembly it assembles itself. That is a second order gain for
+an attacker already running code, and it adds no new source of script, because `'self'` still
+decides where every byte comes from.
+
+The resulting policy is pinned by exact equality, and a second test ties the grant to a `.wasm`
+import existing under the frontend source in both directions, so the relaxation cannot outlive
+its reason. **The assertion it replaced was a substring test** for `'unsafe-eval'` being absent,
+which the new token satisfies wrongly; it is token based now.
+
+## The Calibre index wins and the OPF fills its gaps, with two exceptions
+
+The same rule the MARC import already has: an import may add what a record is missing and may
+not replace what is already there. Two exceptions, each with a checkable criterion rather than a
+preference: the ISBN is whichever of the two passes its own check digit, since a number failing
+it names no book; and the series index moves with the series name, since pairing one source's
+number with the other's name invents a volume neither claims.
+
+**Disagreements are counted and reported rather than resolved.** Resolving them means guessing
+which of two values is wrong.
+
+## What the reference library actually contains, measured rather than quoted
+
+The trio that built the import could not reach the library: its session was refused `kubectl
+exec` and pod creation, so every household figure in its work was quoted from the ticket. The
+main session had that route and took the census at merge, over a copy read only, integrity
+checked before use.
+
+**The two figures the decision rested on are exact**: 568 of 897 with an ISBN typed identifier,
+812 with an identifier of any type. Beyond them, per 897 books: title 897, an author row 897,
+language 835, description 629, publisher 611.
+
+**Three things the census says that the ticket did not.**
+
+**No book in the reference library is in a series, so the series path is unexercised by the
+corpus.** Every one of the 897 rows carries `series_index` 1.0 and none is in a series, which
+confirms that refusing that value as a placeholder is right and makes it unanimous rather than
+common. It also means "measured against the household library" cannot be said of the series
+handling at all, and a second corpus is needed before it can be.
+
+**The `Unknown` refusal is asymmetric here.** The literal appears as an author's name on 40
+books and as a title on none, so the title arm of that refusal matches nothing in this library
+and the author arm matches one book in twenty two.
+
+**The year 101 placeholder is real and rare**: 29 of 897. Worth keeping precisely because the
+bounds would not catch it, 101 being inside the column's range.
+
+## Identifiers other than the ISBN have nowhere to go
+
+`BookCreate` has one identifier column. On the reference library that is 568 books served and
+244 more carrying only an identifier this schema cannot hold, of which the largest group is
+Calibre's own internal id. Recorded rather than fixed: a second identifier column is a schema
+change nobody has asked for, and the count is what would justify it.

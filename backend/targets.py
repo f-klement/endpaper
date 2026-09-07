@@ -345,6 +345,13 @@ class Target:
     #: a request goes**, and the reason `fetch.ALLOWED_HOSTS` exists: a row is
     #: not a module constant, so the host it names is checked against a closed
     #: set held in code.
+    #:
+    #: **Changing this in a release invalidates every deployment's stored login
+    #: for that source**, because a login is sealed against the origin it may be
+    #: sent to and an origin that moved no longer matches. The affected admins
+    #: enter theirs again, and nothing warns them first. Stated here rather than
+    #: only at `credentials.put`, where the seal happens, because this is the
+    #: line somebody edits and that one is not.
     base_url: str
     reader: Reader
     #: Whether this target answers an ISBN lookup, a title search, or both.

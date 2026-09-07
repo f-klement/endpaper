@@ -506,3 +506,97 @@ describe("draftFromFile", () => {
     expect(body).not.toHaveProperty("notFound");
   });
 });
+
+/**
+ * What a value has to be typed as to carry a member's book.
+ *
+ * `File` extends `Blob`, and both of the array views are what a reader hands
+ * back, so naming only the first is the weaker of two spellings of one rule.
+ * `tests/lib/fileName.test.ts` holds the same literal over the derivation
+ * module, and the test below asserts it does.
+ */
+const CARRIES_A_BOOK = /\b(?:File|Blob|ArrayBuffer|Uint8Array)\b/;
+
+/**
+ * One `File` in this module, and it is the cover the page sends on purpose.
+ *
+ * `tests/houseRules.test.ts` holds this over `draftFromFile` by name, and gives
+ * the reason: taking a `File` there would compile, would pass every other test
+ * in the tree, and would put a member's book one spread away from a request
+ * body. That guard stays. This one is the same property over the whole module,
+ * because a rule naming one member of a family is the shape the working
+ * agreement says to fix structurally rather than by adding an arm.
+ *
+ * **It is about a mention, not about custody.** A `File` does reach
+ * `toScanRequest` and `toCopyRequest`, inside `PendingBook.coverFile`, and the
+ * page sends a cover on purpose. `houseRules.test.ts` says so. What this refuses
+ * is a second one appearing anywhere without somebody deciding it should, and a
+ * new field or parameter naming one is meant to fail here and be argued for.
+ *
+ * **What counts as carrying a book is `CARRIES_A_BOOK` and is explained there**,
+ * once.
+ *
+ * **Written as the one line rather than as a parser, because the parser was
+ * evaded twice.** This block shipped for one commit matching
+ * `export function \w+\(([^)]*)\)` and asserting the match count against a
+ * second reading. Both arms went green on `(clues: NameClues, done: () => void,
+ * cover: File)`, since `[^)]*` stops at the first bracket and truncates what it
+ * captures without changing how many matches there are; and both went green on
+ * `export const draftFromBytes = (file: File) => ...`, since the "second
+ * reading" anchored on the same literal `export function` and so was the same
+ * instrument twice. A count of one string over the source has no signature to
+ * parse and no spelling to enumerate.
+ */
+
+describe("this module names a File exactly once", () => {
+  const SOURCE = import.meta.glob(
+    ["../../../src/pages/ScanPage/types.ts", "../../lib/fileName.test.ts"],
+    { query: "?raw", import: "default", eager: true },
+  ) as Record<string, string>;
+
+  /** The source with comments removed, so a rule cannot be satisfied by prose. */
+  function withoutProse(source: string): string {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+  }
+
+  function code(): string {
+    const source = SOURCE["../../../src/pages/ScanPage/types.ts"] ?? "";
+    // A glob that matched nothing would make the assertion below pass on an
+    // empty string, which names no File at all.
+    expect(source.length).toBeGreaterThan(1000);
+    return withoutProse(source);
+  }
+
+  it("is reading the module it claims to", () => {
+    expect(code()).toContain("export function draftFromName");
+  });
+
+  it("spells the refusal the way the reader side guard spells it", () => {
+    // **Two files hold this rule and one literal defines it.** The two shipped
+    // one commit apart naming different sets, `File` here and `File|Blob`
+    // there, and both critic seats found the gap: a `File` is a `Blob`, so the
+    // narrower one admitted a parameter taking a member's book with no cast.
+    // Two spellings of one rule is the defect `backend/targets.py` records
+    // shipping once already, so this asserts the other file carries this exact
+    // source text rather than trusting that somebody kept them level.
+    const sibling = SOURCE["../../lib/fileName.test.ts"] ?? "";
+    expect(sibling.length).toBeGreaterThan(1000);
+    // **Stripped, like every other reading here.** Against the raw source the
+    // sibling satisfies this with a comment: narrow its pattern and leave the
+    // full literal in a trailing comment on the same line, and the check passes
+    // while the guard is weaker. That is exactly what `withoutProse` exists for.
+    expect(withoutProse(sibling)).toContain(CARRIES_A_BOOK.source);
+  });
+
+  it("names a file type on the cover line and nowhere else", () => {
+    // Word bounded, so `draftFromFile` and `FileNaming` are not mentions of the
+    // type. Asserted as the line rather than as a count, because a count that
+    // stays right while the line moves is a guard that has stopped watching.
+    const named = code()
+      .split("\n")
+      .filter((line) => CARRIES_A_BOOK.test(line))
+      .map((line) => line.trim());
+
+    expect(named).toEqual(["coverFile: File | null;"]);
+  });
+});

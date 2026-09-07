@@ -681,7 +681,13 @@ def set_source_credential(
             ),
         )
     try:
-        credentials.put(db, known.value, payload.username, payload.password)
+        credentials.put(
+            db,
+            known.value,
+            targets.SEEDED[known].base_url,
+            payload.username,
+            payload.password,
+        )
     except credentials.NoKeyConfigured as refusal:
         raise HTTPException(status_code=409, detail=str(refusal)) from None
     except credentials.KeyConfigurationError as refusal:

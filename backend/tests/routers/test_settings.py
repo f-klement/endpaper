@@ -1933,7 +1933,13 @@ class TestACredentialIsStoredSealedAndShownMasked:
         self, client, keyed, db
     ):
         """No foreign key, on purpose, so an orphan must be removable."""
-        credentials.put(db, "a-catalogue-that-went-away", "alice", "hunter2")
+        credentials.put(
+            db,
+            "a-catalogue-that-went-away",
+            "https://catalogue.invalid/opds",
+            "alice",
+            "hunter2",
+        )
         response = client.delete(
             "/api/settings/catalogue-sources/a-catalogue-that-went-away/credential",
             headers=keyed["headers"],

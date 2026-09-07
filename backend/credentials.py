@@ -18,10 +18,22 @@ there would sit unmasked in every archive an admin can download.
 | A member's own login | one member | **its own table** | that member | deleted with them |
 
 **Distinguished by construction rather than by being named.** Every envelope is
-sealed against an additional-authenticated-data string carrying its kind and its
-subject (`_purpose`). A ciphertext moved between rows, between kinds or between
-subjects, by a hand-edited archive or a stray `UPDATE`, fails authentication
-loudly instead of decrypting into somebody else's request.
+sealed against an additional-authenticated-data string carrying its kind, its
+subject and **the origin it is for** (`_purpose`). A ciphertext moved between
+rows, between kinds, between subjects or beside an address somebody else wrote,
+by a hand-edited archive or a stray `UPDATE`, fails authentication loudly
+instead of decrypting into somebody else's request.
+
+**The origin is in there because the address stopped being a constant.** While
+every caller passed `targets.SEEDED[...].base_url` the source alone was enough:
+a module constant has no writer. `opds_servers.base_url` is a row, and
+`backup.restore` inserts through Core, so an archive keeping a legitimate key
+and changing only the address beside it sent a household's sealed login to a
+host the archive named. The attacker needed a copy of the archive and not the
+key, which is the loss sealing was bought to prevent. Bound here, an envelope is
+unopenable at an address it was not sealed for **whichever writer moved the
+row**, rather than only through the one route that was measured.
+`backup._without_household_logins` stays as the belt to this brace.
 
 **The third kind gets its own table when it arrives, not a nullable column
 here.** Ownership changes the deletion rule, the visibility rule and the read
@@ -147,6 +159,23 @@ class WrongKeyGeneration(CredentialError):
 
 class UnreadableCredential(CredentialError):
     """The envelope is malformed, or the current key does not authenticate it."""
+
+
+class UnboundCredential(CredentialError):
+    """Sealed before a credential carried the address it may be sent to.
+
+    **A refusal of its own rather than an unreadable row, because the remedy
+    differs and nothing else could say so.** A `v1` envelope fails the current
+    scheme's authentication for a reason that is neither a rotated key nor a
+    damaged row: it was written correctly under a scheme that bound less. Told
+    apart from the key, the sentence is "type this login again"; folded into
+    `UnreadableCredential` it reads as corruption, and folded into
+    `WrongKeyGeneration` it sends somebody looking for a recovery phrase that
+    would not help.
+
+    **Readable without any key**, which is what lets `unreadable_sources`
+    answer without an address: the version is in the clear.
+    """
 
 
 #: A key is exactly this many bytes, and it is always written as a phrase.
@@ -554,13 +583,47 @@ def generate_key(db: Session) -> tuple[str, str]:
         )
     stranded = unreadable_sources(db)
     if stranded:
-        raise KeyConfigurationError(
-            f"Catalogue logins are stored for {', '.join(stranded)} and were sealed "
+        raise KeyConfigurationError(_stranded_refusal(db, stranded))
+    phrase = generate_phrase()
+    return phrase, store_key(phrase)
+
+
+def _stranded_refusal(db: Session, stranded: list[str]) -> str:
+    """Why a new key is refused, and it is two causes with two remedies.
+
+    **The version is in the clear, which is what lets this tell them apart with
+    no key in hand**, and telling them apart is the whole reason the tag and the
+    version sit outside the ciphertext. An envelope sealed before a credential
+    carried its address is opened by no key at all, so naming the recovery
+    phrase for one sends somebody to find the phrase, watch it be accepted, and
+    discover the login still shut. That is the sentence `UnboundCredential`
+    exists to prevent, and it reaches a person here rather than at `unseal`,
+    because this message is written before anything is opened.
+
+    Only a restore of an archive taken before the binding produces the second
+    kind: revision `d9c1f47b2a06` removed the rows it found. That is the
+    ordinary move-to-a-new-machine case `backup._TABLES` describes, which is
+    exactly the one this refusal exists for.
+    """
+    superseded = [
+        source
+        for source in stranded
+        if stored_envelope(db, source).split(".")[0] != VERSION
+    ]
+    said: list[str] = []
+    if keyed := [source for source in stranded if source not in superseded]:
+        said.append(
+            f"Catalogue logins are stored for {', '.join(keyed)} and were sealed "
             "with a key this machine no longer has. Enter the recovery phrase to "
             "open them. If it is lost, remove those logins and then make a new key."
         )
-    phrase = generate_phrase()
-    return phrase, store_key(phrase)
+    if superseded:
+        said.append(
+            f"Catalogue logins are stored for {', '.join(superseded)} and were "
+            "sealed before a credential carried the address it may be sent to, so "
+            "no key opens them. Remove those logins and enter them again."
+        )
+    return " ".join(said)
 
 
 def forget_key() -> int:
@@ -696,9 +759,28 @@ def generate_phrase() -> str:
     return _WORDS.generate(strength=KEY_BYTES * 8)
 
 
-#: The envelope's only version. Written into the additional authenticated data
-#: as well as into the text, so it cannot be rewritten on a stored row.
-VERSION: Final = "v1"
+#: The version this build writes and the only one it can open.
+#:
+#: Written into the additional authenticated data as well as into the text, so
+#: it cannot be rewritten on a stored row. **`v2` is `v1` plus the origin in the
+#: associated data**, and the bump is what makes a pre-binding envelope
+#: legible without a key: the alternative, changing the associated data under
+#: `v1`, leaves an envelope that fails authentication for a reason nothing can
+#: distinguish from a damaged row.
+VERSION: Final = "v2"
+
+#: Every version this build recognises **as an envelope**, newest last.
+#:
+#: **Recognising is not opening, and the two are deliberately different sets.**
+#: `unseal` opens `VERSION` alone; this is the shape question, asked by
+#: `generation_of` and therefore by `backup._parse_row`, which is what stands
+#: between a hand edited archive and a plaintext password in this column. An
+#: archive taken before the bump carries `v1` rows, and refusing them at the
+#: insert would fail an entire restore over logins that are merely to be typed
+#: again. `ck_catalogue_credentials_envelope` carries the same set in SQL and
+#: `tests/test_credentials.py::TestTheEnvelopeRuleAndItsConstraintAgree` walks
+#: the two together, because models.py cannot import this module.
+KNOWN_VERSIONS: Final[tuple[str, ...]] = ("v1", "v2")
 
 #: Info strings for the two derivations. **Different on purpose**: the tag is
 #: written where anyone holding the database can read it, and it must not be a
@@ -748,28 +830,70 @@ def _unb64(text: str) -> bytes:
     return urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
-def _purpose(source: str) -> str:
-    """What this envelope is for, and whose it is.
+def _purpose(source: str, origin: str) -> str:
+    """What this envelope is for, whose it is, and where it may be sent.
 
-    **The kind and the subject, and it is sealed over rather than stored beside.**
-    A credential lifted onto another source's row, or into a table for a
-    different kind of secret, fails authentication rather than being sent to a
-    host it was never set for.
+    **The kind, the subject and the origin, sealed over rather than stored
+    beside.** A credential lifted onto another source's row, into a table for a
+    different kind of secret, or beside an address somebody else wrote, fails
+    authentication rather than being sent to a host it was never set for.
+
+    **Unambiguous because an origin carries exactly two slashes and a source
+    carries none**, so the first slash after `catalogue-credential/` splits the
+    pair whatever either side holds. `origin_of` is what fixes the origin's
+    shape: it emits `scheme://host` or `scheme://host:port` and nothing else,
+    measured over every Unicode codepoint as a host character with **0** outputs
+    at any other slash count. `is_safe_source`, refused in `_associated`, is
+    what fixes the source's, and it is the half that has a writer: the column is
+    written by `backup.restore` through Core and `put` never checked it.
     """
-    return f"endpaper/{VERSION}/catalogue-credential/{source}"
+    return f"endpaper/{VERSION}/catalogue-credential/{source}/{origin}"
 
 
-def seal(material: bytes, source: str, secret: str) -> str:
-    """`v1.<generation>.<nonce>.<ciphertext>`, base64url without padding.
+def _associated(material: bytes, source: str, base_url: str) -> bytes:
+    """The additional authenticated data, and the two refusals that make it one string.
+
+    **Built in one place because `seal` and `unseal` must not be able to
+    disagree**, and both of the refusals below are what an envelope openable at
+    an address nobody chose would need.
+
+    **An address this build cannot parse binds nothing, so it is refused rather
+    than folded to the empty string.** `origin_of` answers `""` for an
+    unparseable address, and two of those compare equal: sealing over one would
+    write an envelope that opens beside **any** address this build cannot
+    parse. The same rule is spelled at `shipped`, which met it first.
+
+    **The origin is computed here from the address rather than taken as one**,
+    so no caller can hand over a half parsed value. `origin_of` says why it is
+    `httpx.URL` and not `urllib`, and it is the parser that makes the request.
+    """
+    if not is_safe_source(source):
+        raise CredentialError("That is not a catalogue source.")
+    origin = origin_of(base_url)
+    if not origin:
+        raise CredentialError(
+            "A credential cannot be bound to an address this server cannot parse."
+        )
+    return f"{VERSION}.{generation_of_key(material)}.{_purpose(source, origin)}".encode()
+
+
+def seal(material: bytes, source: str, base_url: str, secret: str) -> str:
+    """`v2.<generation>.<nonce>.<ciphertext>`, base64url without padding.
 
     **The generation tag is outside the ciphertext and inside the additional
     authenticated data.** Outside, because the whole point is reading it without
     the key; inside, because a tag that could be rewritten on a stored row would
     turn "re-enter this" into "silently try the wrong key".
+
+    **`base_url` is the address this credential may be sent to**, and it is
+    sealed over rather than stored beside: see `_associated`. The origin is not
+    written into the envelope in the clear, because it is not something a reader
+    without the key needs and every field that is readable is a field an archive
+    can rewrite.
     """
     nonce = secrets.token_bytes(_NONCE_BYTES)
     generation = generation_of_key(material)
-    associated = f"{VERSION}.{generation}.{_purpose(source)}".encode()
+    associated = _associated(material, source, base_url)
     box = AESGCM(_expand(material, _ENCRYPTION_INFO, 32))
     sealed = box.encrypt(nonce, secret.encode("utf-8"), associated)
     return ".".join((VERSION, generation, _b64(nonce), _b64(sealed)))
@@ -778,34 +902,65 @@ def seal(material: bytes, source: str, secret: str) -> str:
 def generation_of(envelope: str) -> str:
     """Which key wrote this envelope, read without holding any key.
 
-    Empty for anything that is not an envelope of a version this build knows.
+    Empty for anything that is not an envelope of a version this build knows,
+    which is `KNOWN_VERSIONS` and not `VERSION`: the question here is the shape,
+    and `backup._parse_row` asks it of an archive that may predate the bump.
     That is what lets a settings screen say "written under a different key" on a
     deployment that has no key configured at all.
     """
     parts = envelope.split(".")
-    if len(parts) != 4 or parts[0] != VERSION:
+    if len(parts) != 4 or parts[0] not in KNOWN_VERSIONS:
         return ""
     return parts[1]
 
 
-def unseal(material: bytes, source: str, envelope: str) -> str:
-    """The secret back, or a refusal that says which kind of wrong this is.
+def _openable_by(material: bytes, envelope: str) -> bool:
+    """Whether this key could open this envelope at all, address aside.
 
-    **Three outcomes, not two, and the middle one is why the tag exists.**
-    AES-GCM refuses a wrong key and a corrupted row identically, so without the
-    tag an admin looking at an unreadable credential cannot tell "the key
-    changed, type it again" from "this row is damaged". A wrong generation is
-    reported before any decryption is attempted.
+    **Everything `unseal` decides before it needs an address**: the version is
+    one this build opens and the generation tag is this key's. It deliberately
+    does not answer whether the ciphertext is intact or whether the origin
+    matches, both of which need the key applied to a particular address.
+    `unreadable_sources` is the caller and says what that costs.
     """
     parts = envelope.split(".")
-    if len(parts) != 4 or parts[0] != VERSION:
+    return (
+        len(parts) == 4
+        and parts[0] == VERSION
+        and parts[1] == generation_of_key(material)
+    )
+
+
+def unseal(material: bytes, source: str, base_url: str, envelope: str) -> str:
+    """The secret back, or a refusal that says which kind of wrong this is.
+
+    **Four outcomes, not two, and the two middle ones are why the version and
+    the tag are in the clear.** AES-GCM refuses a wrong key, an envelope from an
+    older scheme and a corrupted row identically, so without them an admin
+    looking at an unreadable credential cannot tell "the key changed, type it
+    again" from "this predates the binding, type it again" from "this row is
+    damaged". Both are reported before any decryption is attempted.
+
+    **`base_url` is the address this credential is being asked for, and it is
+    the one it must have been sealed for.** Not the address on some row looked
+    up here: this is what the caller is about to send to, so an envelope opens
+    only where `Credential.header_for` would then let it go. A lookup would be a
+    second route to the same fact and could disagree with the request.
+    """
+    parts = envelope.split(".")
+    if len(parts) != 4 or parts[0] not in KNOWN_VERSIONS:
         raise UnreadableCredential("The stored credential is not in a known format.")
-    _, generation, nonce, sealed = parts
+    version, generation, nonce, sealed = parts
+    if version != VERSION:
+        raise UnboundCredential(
+            "This login was stored before a credential carried the address it may "
+            "be sent to, and cannot be opened. Enter it again."
+        )
     if generation != generation_of_key(material):
         raise WrongKeyGeneration(
             "This credential was stored under a different encryption key and cannot be read. Enter it again."
         )
-    associated = f"{VERSION}.{generation}.{_purpose(source)}".encode()
+    associated = _associated(material, source, base_url)
     box = AESGCM(_expand(material, _ENCRYPTION_INFO, 32))
     try:
         return box.decrypt(_unb64(nonce), _unb64(sealed), associated).decode("utf-8")
@@ -830,6 +985,13 @@ def origin_of(url: str) -> str:
     scheme it is compared as written, because nothing here knows what that
     scheme's default is and guessing would make two addresses look like one.
 
+    **No scheme at all is not another scheme, and it answers empty.** `httpx`
+    reads `://x` as an empty scheme with a host of `x`, which produced the
+    bindable origin `://x`. That was only ever a comparison string before the
+    origin went into the associated data; now it is a value an envelope can be
+    **sealed** over, and an address with no scheme is one nothing here can send
+    to. Measured 2026-09-07 against `httpx.URL("://x")`.
+
     **Empty on anything that cannot be parsed, and empty never matches**, which
     is what `Credential.header_for` and `for_request` both check. Userinfo is
     dropped by `.host`, which is the point: a base URL written
@@ -848,7 +1010,7 @@ def origin_of(url: str) -> str:
         # here and both must fail closed rather than produce a comparable
         # origin.
         return ""
-    if not host:
+    if not host or not scheme:
         return ""
     if port is None and scheme in ("http", "https"):
         port = 443 if scheme == "https" else 80
@@ -1064,13 +1226,28 @@ def stored_envelope(db: Session, source: str) -> str:
     return row.envelope if row is not None else ""
 
 
-def put(db: Session, source: str, username: str, password: str) -> None:
+def put(db: Session, source: str, base_url: str, username: str, password: str) -> None:
     """Seal a credential onto a source's row, replacing whatever was there.
 
     The username is sealed with the password rather than stored beside it. It is
     half of a login at somebody else's server, the archive carries this table,
     and a masked username on a screen costs one decryption on a page an admin
     opens by hand.
+
+    **`base_url` is the address this login is for, and it is required rather
+    than looked up.** Both callers already hold it: the roster screen hands over
+    `targets.SEEDED[source].base_url` and the OPDS route hands over the row's
+    own, which is the same value each will later ask `for_request` about. A
+    lookup here would be a second route to that fact, and the two could
+    disagree in exactly the direction that matters: sealing for the address a
+    row names while the request goes to the address a caller was handed.
+
+    **A release that moves a roster row's address invalidates every deployment's
+    stored login for that source**, because the envelope was sealed over the old
+    origin and nothing re-seals it. That is the binding working: a login entered
+    for one machine is not a login for another. It is worth knowing before the
+    literal in `targets.SEEDED` is edited, because the symptom lands on a
+    deployment rather than in a test.
     """
     if not username or not password:
         raise CredentialError("A credential needs both a username and a password.")
@@ -1080,7 +1257,7 @@ def put(db: Session, source: str, username: str, password: str) -> None:
         # which is why splitting on the first one loses nothing a target could
         # have accepted over Basic anyway.
         raise CredentialError("A username may not contain a colon; HTTP Basic forbids one (RFC 7617).")
-    envelope = seal(require_key(), source, f"{username}:{password}")
+    envelope = seal(require_key(), source, base_url, f"{username}:{password}")
     row = db.get(CatalogueCredential, source)
     if row is None:
         db.add(CatalogueCredential(source=source, envelope=envelope))
@@ -1099,15 +1276,22 @@ def forget(db: Session, source: str) -> bool:
     return True
 
 
-def stored(db: Session, source: str, state: KeyState | None = None) -> tuple[str, str]:
+def stored(
+    db: Session, source: str, base_url: str, state: KeyState | None = None
+) -> tuple[str, str]:
     """The stored username and password, opened. Raises rather than returning blanks.
+
+    **`base_url` is the address the caller is about to use**, and an envelope
+    sealed for another one does not open: see `unseal`. So this cannot answer
+    with a login for a machine other than the one being asked about, which is
+    what a row deciding an address made possible.
 
     Pass `state` when asking about more than one source; see `KeyState`.
     """
     envelope = stored_envelope(db, source)
     if not envelope:
         raise UnreadableCredential("No credential is stored for this source.")
-    opened = unseal(_material(state), source, envelope)
+    opened = unseal(_material(state), source, base_url, envelope)
     username, _, password = opened.partition(":")
     return username, password
 
@@ -1188,13 +1372,16 @@ def _resolve(
     the screen says. `view` reports which level this picked and `for_request`
     sends what it carried, so the two cannot disagree about **which login**.
 
-    **`for_request` refuses one thing more, and that is deliberate rather than a
-    gap.** An address `origin_of` cannot parse binds no credential at all, which
-    is a fact about the address and not about the ladder, so it is checked there
-    and not here. Moving it in would make `view` report a source with a sealed
-    login as having none, which takes the Remove control off a screen for a row
-    that really does hold one; the honest report there is the login the library
-    entered, and the request still fails closed.
+    **An address `origin_of` cannot parse now reaches the stored level rather
+    than only `for_request`**, and that is the binding rather than a second
+    guard. `unseal` refuses to build associated data over an unparseable
+    address, so such a row answers `None` for the pair here and `view` reports
+    it as held and unreadable. That is the honest answer once the origin is
+    sealed over: the login genuinely cannot be opened. The Remove control stays,
+    because the provenance is still `STORED` and `has_credential` reads that
+    rather than the pair. `for_request` still refuses the address itself, which
+    is a fact about the address rather than about the ladder and is what keeps
+    a `Credential` from ever being built with no origin.
 
     **The order is pinned, stored, shipped, and it is the whole of what makes a
     shipped default safe.** The owner's decision of 2026-09-07 states
@@ -1221,7 +1408,7 @@ def _resolve(
             return CredentialProvenance.ENV, None
     if stored_envelope(db, source):
         try:
-            return CredentialProvenance.STORED, stored(db, source, state)
+            return CredentialProvenance.STORED, stored(db, source, base_url, state)
         except CredentialError:
             return CredentialProvenance.STORED, None
     default = shipped(source, base_url)
@@ -1253,6 +1440,12 @@ class CredentialView:
     the keychain or type the recovery phrase, either of which recovers all of
     them at once. The remedy for every one of those lives on the key, so the key
     is where it is reported: `KeyState.problem` and `CredentialKeyOut`.
+
+    **There is a fifth cause now and its remedy is the row's, not the key's.**
+    An envelope sealed before a credential carried its address, which reaches a
+    deployment only by restoring an archive taken before that change, since the
+    migration removed the rows it found. The key is intact and the recovery
+    phrase opens nothing; the only way out is entering the login again.
 
     A shipped default is never `unreadable`: it is a constant in this build, so
     there is no key to lose and nothing to type again.
@@ -1307,8 +1500,8 @@ def unreadable_sources(db: Session, state: KeyState | None = None) -> list[str]:
     the settings screen denied and name logins the screen showed nothing to
     remove.
 
-    **The envelope is opened here, not `view`, and that difference is a
-    regression this function already caused once.** `view` answers the screen's
+    **The question here is the envelope's and not the screen's, and that
+    difference is a regression this function already caused once.** `view` answers the screen's
     question, "is this source's login usable", and short-circuits on a pinned
     credential before it ever reads the row, because a pinned source is not
     broken from the screen's point of view. Built on `view`, this function
@@ -1319,6 +1512,45 @@ def unreadable_sources(db: Session, state: KeyState | None = None) -> list[str]:
     replaced, a plain row count, refused it.** So the question here is the
     envelope's and not the screen's: what would a new key strand.
 
+    **Asked of the key and the version, not by opening the envelope, and that
+    is forced rather than chosen.** An envelope is now sealed over the address
+    it may be sent to, and this function has none: the only ways to get one
+    would be to look the source up in `catalogue_targets` or in `opds_servers`,
+    which would make this module enumerate the kinds of row that may own a
+    credential. `CatalogueCredential.source` is deliberately not keyed to the
+    enum so that a curated registry or a typed host gets a credential with no
+    migration, and an arm per kind here is exactly what that reversed.
+
+    **What that stops reporting, and it is a loss rather than a wash.** An
+    envelope of this version and this key's generation whose ciphertext an
+    archive damaged, or whose address has moved under it, answers True here and
+    is no longer listed. `view` catches it wherever a screen asks `view`, which
+    today is the catalogue logins section and nothing else. Three kinds of
+    source are therefore left, and they are what this loses:
+
+    * a **pinned** source, where `_resolve` returns at `is_from_env` before it
+      reads the row, so `view` reports the row as fine and this list was the one
+      place its sealed row could be removed from;
+    * an **orphan**, a source neither the roster nor `opds_servers` names, which
+      nothing asks `view` about at all;
+    * a **household's OPDS server**, which `routers/opds._out` does ask about,
+      on `GET /api/opds/servers`, a route no screen calls today. The report
+      exists in the API and reaches nobody.
+
+    All three are inert, and for three reasons: a pinned source resolves to the
+    variable, an orphan is asked by nothing, and a household's server no longer
+    opens its envelope at all, so `for_request` answers None and a sync sends no
+    header. `TestAnEnvelopeDoesNotOpenBesideAnAddressAnotherWriterChose`, in
+    `tests/routers/test_opds.py`, measures that last one end to end. What is lost
+    is the affordance for removing a row an archive damaged, not a login going
+    anywhere.
+    `TestWhatCannotBeOpenedIsCountedOffTheTableAndNotTheRoster` pins that so it
+    stays a decision rather than a surprise.
+
+    **`generate_key`'s refusal is untouched.** It is reachable only with no key
+    configured, where `material is None` strands every stored envelope before
+    this predicate is consulted.
+
     Sources rather than a count, so a screen can say which. A count beside a
     list is the same fact twice.
     """
@@ -1328,12 +1560,7 @@ def unreadable_sources(db: Session, state: KeyState | None = None) -> list[str]:
         envelope = stored_envelope(db, source)
         if not envelope:
             continue
-        if resolved.material is None:
-            stranded.append(source)
-            continue
-        try:
-            unseal(resolved.material, source, envelope)
-        except CredentialError:
+        if resolved.material is None or not _openable_by(resolved.material, envelope):
             stranded.append(source)
     return sorted(stranded)
 
