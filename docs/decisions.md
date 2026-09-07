@@ -8162,11 +8162,12 @@ unclassified scan fails on its first run at that scale and is switched off withi
 
 **This register is inside its own subject**, and the pruning of 2026-09-05 is what proves the
 arrangement works: entries were rewritten, the sentences several verdicts were written for went
-with them, and the guard failed rather than going quiet. The census raises 4 candidates in it.
-**0** are live claims the guard now checks against `sources.py`; **4** are not the roster,
+with them, and the guard failed rather than going quiet. The census raises 5 candidates in it.
+**1** is a live claim the guard now checks against `sources.py`; **4** are not the roster,
 being this entry's own worked examples, a sentence about what a shared pattern would have
-changed, and a survey of national libraries in the Z39.50 transport entry. All three figures
-are recomputed from the verdict table rather than reread.
+changed, and a survey of national libraries in the Z39.50 transport entry. The live one is the
+OPDS entry's statement of how much of the title search fan out refuses an electronic record.
+All three figures are recomputed from the verdict table rather than reread.
 
 **Rejected: an enumeration of sites.** A list of regexes goes stale exactly like the numbers
 and does it silently: the site nobody adds is the site nobody checks. `CLAIMS` is not that
@@ -8670,10 +8671,11 @@ refuses a control character.
 Adopted from Koha's `z3950servers` without copying it, and narrowed to what this project
 actually varies. **Koha transforms records with XSLT and this project will not**: the
 parsers here produce a typed `Record` and carry refusals a stylesheet cannot express, so
-they became a closed set of **seven readers** chosen by a row rather than one stylesheet
+they became a **closed set of readers** chosen by a row rather than one stylesheet
 per target.
 
-**MARC21 is two of those seven and that is the whole reason the count is not four.**
+**MARC21 is two readers rather than one, which is why there are more of them than there
+are serialisations.**
 `_dnb_record` harvests GND identified headings across five tags and refuses a title naming
 a volume slot; `_k10plus_record` joins `650 $a` and `$x` into one subject and does neither.
 Folding them would change answers rather than restructure code.
@@ -11078,3 +11080,132 @@ a member of the household, and building two would be storing one fact twice.
 Harvested rows are not private: an institution cataloguing its holdings is publishing them,
 which is the whole point of the harvest, and a bulk import that lands three thousand private
 rows only defers the same decision to whoever has to unprivate them.
+
+## The competitor register's reference counts get a stated command and no guard
+
+Both critic seats on the Koha electronic holdings read converged on the same question,
+which is why the answer is recorded rather than left in the round: why is a number
+written into prose not enforced by a test, when this tree's habit is that a guard
+recomputing a figure from its own source is worth more than a careful reader.
+
+**Because there is no second instrument available here.** That register is on the
+`DENY` list, so it ships in neither test tree. A test asserting a number
+against prose it also reads is the same reader twice, not a second route. The command in
+the header is the rung actually available, and naming the rung is the honest move where
+the ladder stops.
+
+**The proportion in that header is stated as a difference between two endpoints rather
+than as a percentage**, and the reason generalises past this file. Each endpoint sits in
+its own denominator, so both move on any edit to the paragraph stating them, while the
+difference between them barely does: 3.90 points at one commit and 3.88 two commits
+later. Measured 2026-09-07 during one fix round, four figures in that header moved: the
+total went 176, 179, 181, 182 as edits added references, and the proportion went 85.10,
+85.03, 85.10.
+
+**A number that cannot be written down correctly for the length of one commit should not
+be written down.** Write the difference, which is stable, or write the command, which
+recomputes. Not the figure.
+
+## A household's own OPDS server is its own table, not a row in `catalogue_targets`
+
+`catalogue_targets.source` is the closed `CatalogueSource` enum and is the primary key.
+`sources.Plan.parse` validates a stored settings row against that enum and every door onto the
+ISBN lookup path is keyed on it, so a household typed host in that key space is one member's
+private holdings able to be selected as a source answering another member's scan. That is what
+`enums.SourceFamily` exists to refuse.
+
+Widening `ck_catalogue_targets_transport` was the alternative and is the smaller half of the
+work. What it does not do is make the row belong there: `main.seed_catalogue_targets`
+reconciles every seeded row against `targets.SEEDED` on each start and would need a second rule
+to skip these, and of that table's twenty two columns a server here fills one.
+
+**The evidence that this was the intended shape is that the credential side needed no decision
+at all.** `catalogue_credentials.source` was deliberately not keyed to the enum so that a row
+added by a curated registry, or a typed host, gets a credential with no migration, and this is
+that row arriving.
+
+## An OPDS server gets no address range refusal, and what stands in its place
+
+A household's own server is on the household's own network, so a loopback address and a
+private range address are the ordinary case rather than the attack, and refusing private space
+would refuse the feature.
+
+A literal address range test on the URL text was considered and refused. Done properly it needs
+resolve-then-pin at connect time, which this transport does not do, so a name resolving into
+private space walks past it; done on the text it is a stated bound that guards nothing.
+
+**What stands in its place is that no byte of any response may move the origin.** The address is
+fixed when an admin saves the server; a paging link is resolved against the page it came from
+and then compared to that configured origin, never to the previous hop, so a chain cannot walk
+one host at a time. `fetch._same_host_hop` refuses a redirect off the host and
+`credentials.Credential.header_for` refuses to attach the login anywhere else.
+
+**Left open deliberately, and it is the owner's:** link local is the one range that is never a
+household's own server and is the range holding the cloud metadata endpoint, so the argument
+above is true of loopback and RFC 1918 and not of it. Refusing the literal would not refuse a
+name that resolves there, which is why it is not a one line fix.
+
+## An entitlement is not a holding
+
+OPDS defines six acquisition relations and they do not make one claim. The generic one and
+`/open-access` say the file is there to be taken; `/borrow` is a lending entitlement, `/buy` an
+offer of sale, `/subscribe` a subscription and `/sample` an excerpt. This route's only assertion
+is ownership, so `opds.HOLDING_RELS` admits the first two and passes over the rest.
+
+**Arrived from Koha rather than from the specification**, in the same wave: Koha keeps licensed
+platform titles out of the catalogue entirely, because the library licenses them rather than
+holding them. The first version of this reader matched the relation by **prefix** and would have
+recorded a title a server offers for sale as one the household owns.
+
+**Enumerated rather than matched by prefix**, so a relation the specification adds later is
+refused by construction rather than admitted by a prefix nobody revisited.
+
+## A born digital title depends on two of the title search sources
+
+Of the eight sources a title search fans out to, six refuse a record that says it is electronic:
+five decide it from codes, the four MARC ones on their carrier codes and the Library of Congress
+on its MODS form, and the BnF from format prose. Only Open Library and Google Books apply no
+such rule.
+
+**The first version of this paragraph said four, one and three**, and a critic seat measured the
+BnF. Recorded because the correction ran against the paragraph's own argument, which is the kind
+that survives a reading.
+
+**And the premise it was raised from needed correcting too.** `_NOT_A_BOOK_FORMS_OF_ITEM` at
+MARC 008/23 was named as what refuses a born digital title. Measured over 2,605 live records,
+that row refuses **0** the 007 and the leader do not already refuse, and it is kept because 007
+is optional. So widening that frozenset alone would change nothing: the refusal comes from the
+carrier codes as a set.
+
+**What was not measured, stated rather than estimated:** the fraction of a real feed's holdings
+that resolve. That needs live requests to every source in that fan out for a real server's titles,
+which is neither cheap nor reproducible from a suite that refuses the network.
+
+**The outcome is deliberate rather than incidental.** A book with no description is a complete
+row, and a sync reports it under `created` rather than `skipped`, so it does not read as an
+import that half failed.
+
+## A restore drops every household login, because the envelope is not bound to an address
+
+Archiving `opds_servers` made two of its columns archive writable, and each opened a path to the
+same loss. `credentials.seal` takes the source alone as associated data, so an envelope opens at
+whatever address the row beside it names, and `backup.restore` re-inserts through Core with no
+validating arm. An archive could name a roster catalogue's credential key beside an address of
+its choosing, or keep a legitimate key and move only the address; either way the next sync sends
+a sealed login to a host the archive picked. An attacker needs a copy of the archive and not the
+key, which is the loss sealing was bought to prevent.
+
+**Taken: `backup.restore` drops every `opds-` prefixed credential.** A restore onto the same
+machine loses these logins and they are typed again. That is the bargain `backup._TABLES`
+already describes for a restore onto a new machine, applied one case earlier, and it fails in
+the safe direction.
+
+**Raised, not taken: sealing a household login against its origin as well as its source.** That
+would make an envelope unopenable at an address it was not sealed for, whichever writer moved
+the row, and the restore filter would become belt to that brace with no same machine cost. It is
+a change to the credential scheme rather than to this feature.
+
+**Both defects came from a fix round rather than from the original work**, which is the shape
+this process expects: the replacement was better in the dimension it was designed for, the
+archive being complete, and weaker in one nobody re-checked. The question that found them was
+what the old arrangement refused that the new one accepts.

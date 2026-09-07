@@ -28,6 +28,7 @@ import {
   useUploadCover,
 } from "../../api/generated/endpoints/books/books";
 import { useGetFeatureFlags } from "../../api/generated/endpoints/settings/settings";
+import { BookFormat } from "../../api/generated/model";
 import type {
   BookMatch,
   BookSearchOut,
@@ -35,7 +36,8 @@ import type {
   LocationOut,
   TagOut,
 } from "../../api/generated/model";
-import { useTranslation } from "../../i18n";
+import { useTranslation, type MessageKey } from "../../i18n";
+import type { EpubFailure } from "../../lib/epub";
 import {
   normaliseLocation,
   readLastLocation,
@@ -44,6 +46,7 @@ import {
 import {
   blankDraft,
   blankPending,
+  draftFromFile,
   draftFromMatch,
   draftFromLookup,
   toCopyRequest,
@@ -51,6 +54,22 @@ import {
   type BookDraft,
   type PendingBook,
 } from "./types";
+
+/**
+ * What a member is told about a file that yielded nothing.
+ *
+ * A total mapping of `EpubFailure` rather than a switch, so a reason added to
+ * that closed union is a compile error here instead of a file reported with
+ * whatever the last arm said.
+ */
+const FILE_FAILURES: Record<EpubFailure, MessageKey> = {
+  "not-an-epub": "file.notAnEpub",
+  damaged: "file.damaged",
+  protected: "file.protected",
+  "too-large": "file.tooLarge",
+  unsupported: "file.unsupported",
+  "no-inflate": "file.noInflate",
+};
 
 /** Below this, a search is noise rather than a query. Matches the API bound. */
 const MIN_QUERY_LENGTH = 2;
@@ -487,13 +506,51 @@ export function useBookSearch(): UseBookSearchResult {
   };
 }
 
-/** One book caught by the rapid scanner, and how it has gone so far. */
+/** One book caught by the rapid scanner or picked as a file, and how it has gone so far. */
 export interface ScannedEntry {
+  /**
+   * Identity in the queue, and what a removal names.
+   *
+   * **Not the ISBN, and that is the whole reason this field exists.** A file is
+   * the second way into this queue and most files carry no ISBN at all:
+   * measured over 79 real EPUBs, 4 did. Keying on one would collapse every
+   * ISBN-less pick into a single entry.
+   */
+  key: string;
+  /** What the queue shows and what a removal is announced by. */
+  label: string;
+  /** Empty when the entry came from a file that named none. */
   isbn: string;
-  state: "looking-up" | "found" | "not-found" | "failed";
+  /**
+   * What kind of object this copy is, where the way it arrived answers that.
+   *
+   * **A picked EPUB is an ebook and the container says so**, which is not the
+   * guess `docs/decisions.md` refuses when it leaves `format` nullable: that
+   * refuses a value written across every imported row on no evidence, and
+   * `csv_import` already reads the literal string `epub` as this answer. A
+   * barcode carries no such evidence and stays blank.
+   */
+  format: BookFormat | "";
+  state: "looking-up" | "reading" | "found" | "not-found" | "failed";
   draft: BookDraft | null;
-  /** Why it could not be added, once the batch has run. */
+  /** Why it could not be read, or could not be added once the batch has run. */
   reason?: string;
+}
+
+/** The queue key for a scanned barcode. One book, one ISBN, one entry. */
+function scannedKey(isbn: string): string {
+  return `isbn:${isbn}`;
+}
+
+/**
+ * The queue key for a picked file.
+ *
+ * Name, size and modification time rather than the name alone: two different
+ * books can be `book.epub` in two folders, and picking the same file twice is
+ * the case that should be ignored.
+ */
+function pickedKey(file: File): string {
+  return `file:${file.name}:${file.size}:${file.lastModified}`;
 }
 
 export interface UseRapidIntakeResult {
@@ -514,7 +571,18 @@ export interface UseRapidIntakeResult {
   locations: LocationOut[];
   /** Feed a scanned barcode in. Repeats are ignored rather than queued twice. */
   capture: (isbn: string) => void;
-  remove: (isbn: string) => void;
+  /**
+   * Read picked files and queue what they say.
+   *
+   * The same queue as the scanner fills, deliberately: a folder is a third way
+   * of choosing *which* book and it answers the same question, so it gets the
+   * same review and the same one commit at the end rather than a second bulk
+   * path beside this one.
+   */
+  pickFiles: (files: readonly File[]) => void;
+  /** True while any picked file is still being read. */
+  isReading: boolean;
+  remove: (key: string) => void;
   clear: () => void;
 
   addAll: () => void;
@@ -552,42 +620,119 @@ export function useRapidIntake(): UseRapidIntakeResult {
   // showing, so `errorText` needs the catalogue to supply one.
   const { t } = useTranslation();
 
+  /** Rewrite the one entry with this key, leaving every other alone. */
+  function settle(key: string, patch: Partial<ScannedEntry>) {
+    setEntries((current) =>
+      current.map((entry) =>
+        entry.key === key ? { ...entry, ...patch } : entry,
+      ),
+    );
+  }
+
   function capture(isbn: string) {
+    const key = scannedKey(isbn);
     setEntries((current) => {
       // The camera fires continuously while a barcode is in frame, so the same
       // book arrives many times a second. Without this the queue fills with
       // one book.
-      if (current.some((entry) => entry.isbn === isbn)) return current;
+      if (current.some((entry) => entry.key === key)) return current;
       void lookUp(isbn);
-      return [...current, { isbn, state: "looking-up", draft: null }];
+      return [
+        ...current,
+        {
+          key,
+          label: isbn,
+          isbn,
+          format: "",
+          state: "looking-up",
+          draft: null,
+        },
+      ];
     });
   }
 
   async function lookUp(isbn: string) {
+    const key = scannedKey(isbn);
     try {
       const lookup = await queryClient.fetchQuery({
         queryKey: getLookupIsbnQueryKey({ isbn }),
         queryFn: () => lookupIsbn({ isbn }),
         staleTime: 60_000,
       });
-      setEntries((current) =>
-        current.map((entry) =>
-          entry.isbn === isbn
-            ? { ...entry, state: "found", draft: draftFromLookup(lookup) }
-            : entry,
-        ),
-      );
+      settle(key, { state: "found", draft: draftFromLookup(lookup) });
     } catch {
       // Neither source knew it. Kept in the queue as a blank draft rather than
       // dropped, so it can still be added by hand instead of silently vanishing
       // between the shelf and the catalogue.
-      setEntries((current) =>
-        current.map((entry) =>
-          entry.isbn === isbn
-            ? { ...entry, state: "not-found", draft: blankDraft(isbn) }
-            : entry,
-        ),
-      );
+      settle(key, { state: "not-found", draft: blankDraft(isbn) });
+    }
+  }
+
+  /**
+   * Read picked files, one entry each.
+   *
+   * **The reader is imported inside this call rather than at the top of the
+   * module**, so a session that never picks a file never downloads a zip walk
+   * and an XML reader. It is resolved once for the batch: the module graph is
+   * cached after the first await, and asking per file would serialise every
+   * read behind something already in memory.
+   *
+   * **A file that cannot be read stays in the queue as a named failure.** It is
+   * one entry's failure and never the batch's, which is what lets somebody
+   * point at a folder holding one broken file and still get the rest.
+   *
+   * The already-queued check happens inside the updater and starts the reads
+   * from there, which is the shape `capture` uses and for the same reason: the
+   * queue is the only record of what has been picked, so asking anything else
+   * would be a second one to keep in step.
+   */
+  function pickFiles(files: readonly File[]) {
+    setEntries((current) => {
+      const queued = new Set(current.map((entry) => entry.key));
+      const fresh = files.filter((file) => !queued.has(pickedKey(file)));
+      if (fresh.length === 0) return current;
+      void readFiles(fresh);
+      return [
+        ...current,
+        ...fresh.map((file) => ({
+          key: pickedKey(file),
+          label: file.name,
+          isbn: "",
+          format: BookFormat.ebook,
+          state: "reading" as const,
+          draft: null,
+        })),
+      ];
+    });
+  }
+
+  async function readFiles(files: readonly File[]) {
+    const { readEpub } = await import("../../lib/epub");
+    for (const file of files) {
+      const key = pickedKey(file);
+      try {
+        const reading = await readEpub(file);
+        if (!reading.ok) {
+          settle(key, {
+            state: "failed",
+            reason: t(FILE_FAILURES[reading.failure]),
+          });
+          continue;
+        }
+        const draft = draftFromFile(reading.metadata);
+        // A title is the one field the API requires, so a file naming none
+        // carried no usable metadata. Said here rather than left to a 422
+        // halfway through somebody's batch.
+        if (draft.title === "") {
+          settle(key, { state: "failed", reason: t("file.noTitle") });
+          continue;
+        }
+        settle(key, { state: "found", isbn: draft.isbn, draft });
+      } catch {
+        // A bug in the reader rather than anything the file did. Still one
+        // entry: a batch is not the place to find that out.
+        settle(key, { state: "failed", reason: t("file.unreadable") });
+      }
     }
   }
 
@@ -610,9 +755,14 @@ export function useRapidIntake(): UseRapidIntakeResult {
         // The same request builder as the one-book flow, so a field added
         // there cannot quietly go missing from a rapid run. Everything a rapid
         // run does not offer takes its blank value: no cover, no tags, not
-        // private, no format.
+        // private. `format` is the exception and is carried off the entry,
+        // because a picked file answers it and a barcode does not.
         await scanAdd.mutateAsync({
-          data: toScanRequest({ ...blankPending(shelf), draft }),
+          data: toScanRequest({
+            ...blankPending(shelf),
+            format: entry.format,
+            draft,
+          }),
         });
         added += 1;
       } catch (error) {
@@ -632,9 +782,19 @@ export function useRapidIntake(): UseRapidIntakeResult {
     // than everything: a rapid run leaves the scanner open, so a keyless
     // invalidate re-spent the search quota in the middle of a shelf.
     invalidate.catalogue();
-    // Only the ones that landed leave the queue. What is left is exactly what
-    // still needs a decision.
-    setEntries(failures);
+    // **Only the ones that landed leave the queue, and that means the ones that
+    // were never offered stay too.** This used to keep the failures alone,
+    // which silently dropped every entry with no draft: a barcode whose lookup
+    // was still in flight when the button was pressed vanished between the
+    // shelf and the catalogue, and a file that could not be read would vanish
+    // the same way. Both are exactly what somebody still has to decide about.
+    const offered = new Set(ready.map((entry) => entry.key));
+    const failed = new Map(failures.map((entry) => [entry.key, entry]));
+    setEntries((current) =>
+      current
+        .filter((entry) => !offered.has(entry.key) || failed.has(entry.key))
+        .map((entry) => failed.get(entry.key) ?? entry),
+    );
     setIsAdding(false);
     setResult({ added, failed: failures.length });
   }
@@ -651,8 +811,13 @@ export function useRapidIntake(): UseRapidIntakeResult {
     setLocation,
     locations,
     capture,
-    remove: (isbn) =>
-      setEntries((current) => current.filter((entry) => entry.isbn !== isbn)),
+    pickFiles,
+    // Derived rather than counted. A count is a second record of the same fact
+    // and drifts the first time a read ends on a path that forgets to decrement
+    // it; the queue already says which entries are still being read.
+    isReading: entries.some((entry) => entry.state === "reading"),
+    remove: (key) =>
+      setEntries((current) => current.filter((entry) => entry.key !== key)),
     clear: () => setEntries([]),
     addAll: () => void addAll(),
     isAdding,

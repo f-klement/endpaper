@@ -674,7 +674,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **107** models under `schemas/`, **39** of
+    Measured on the tree as it stands: **112** models under `schemas/`, **41** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -3730,7 +3730,7 @@ class TestOneReaderPerAmbiguousSubfield:
         assert set(found) == {("metadata.py", "_subject_vocabulary")}
 
     def test_two_files_of_one_stem_are_two_sites(self):
-        """`path.stem` was the identity and eight stems already collide.
+        """`path.stem` was the identity and nine stems already collide.
 
         `metadata` is not one of them today, so nothing failed; a reader added
         to `routers/metadata.py` would have been indistinguishable from the
@@ -3745,10 +3745,10 @@ class TestOneReaderPerAmbiguousSubfield:
     def test_the_stems_that_already_collide_are_still_only_these(self):
         """A count in prose does not recount itself, so this recounts it.
 
-        The docstring names eight, and it named seven until `sru.py` arrived
-        beside `routers/sru.py` and this failed. If a ninth appears the number
-        above is stale, and this says so at the rule rather than leaving the
-        next reader to trust it.
+        The docstring names nine, and it named seven until `sru.py` arrived
+        beside `routers/sru.py` and eight until `opds.py` did. If a tenth
+        appears the number above is stale, and this says so at the rule rather
+        than leaving the next reader to trust it.
         """
         stems: dict[str, list[str]] = {}
         for path in _python_sources():
@@ -3760,6 +3760,7 @@ class TestOneReaderPerAmbiguousSubfield:
             "backup",
             "covers",
             "imports",
+            "opds",
             "public",
             "settings",
             "sru",

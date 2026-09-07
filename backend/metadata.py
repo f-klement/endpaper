@@ -667,7 +667,16 @@ def _google_record(fields: dict[str, Any], isbn: str | None = None) -> Record:
 #: The one construct that makes a response's size a lie. XML spells it exactly
 #: this way and only in the prolog, and character data cannot contain a literal
 #: `<`, so a substring test is exact rather than a heuristic.
-_DOCTYPE: Final = "<!DOCTYPE"
+#:
+#: **Public, and it is the only name in this module that three others read.**
+#: `marc.py` refuses the same construct on an upload and `opds.py` on a feed,
+#: both from this constant rather than a second spelling, because two spellings
+#: let one be tightened while the other stays as it was. A name read across the
+#: tree is public by behaviour, and spelling it private made `opds.py` an
+#: offender under `tests/test_marc.py::TestTheSeamIntoMetadataIsPinned`, whose
+#: single admitted module is `marc.py` and whose reason is that module's own
+#: seam rather than this one constant.
+DOCTYPE: Final = "<!DOCTYPE"
 
 
 def _parsed(body: str) -> ElementTree.Element:
@@ -695,7 +704,7 @@ def _parsed(body: str) -> ElementTree.Element:
     the cap bounds an honest body at a measured 15.28x its own size, and the
     doctype refusal bounds the one construct that makes that ratio a lie.
     """
-    if _DOCTYPE in body:
+    if DOCTYPE in body:
         raise ElementTree.ParseError("Refused a catalogue response carrying a doctype.")
     return ElementTree.fromstring(body)
 

@@ -23,11 +23,14 @@ import {
 } from "../../../src/api/generated/model";
 import {
   blankPending,
+  draftFromFile,
   toCopyRequest,
   toScanRequest,
   type BookDraft,
   type PendingBook,
 } from "../../../src/pages/ScanPage/types";
+import { TEXT_CEILINGS } from "../../../src/lib/bookBounds";
+import type { OpfRecord } from "../../../src/lib/opf";
 
 /**
  * One value per draft field, all of them set.
@@ -415,5 +418,91 @@ describe("the copy request agrees with the API", () => {
     ).filter((name) => !sent.has(name));
 
     expect(missing).toEqual([]);
+  });
+});
+
+/** What a package document said, with everything present. */
+const RECORD: { [K in keyof OpfRecord]-?: OpfRecord[K] } = {
+  version: "3.0",
+  title: "Dune",
+  subtitle: "A Novel",
+  authors: ["Frank Herbert", "Brian Herbert"],
+  identifiers: [{ scheme: "ISBN", value: "9780441013593" }],
+  isbn: "9780441013593",
+  publisher: "Chilton",
+  year: 1965,
+  language: "en",
+  description: "Desert planet politics.",
+  seriesName: "Dune",
+  seriesIndex: 1,
+};
+
+function record(patch: Partial<OpfRecord> = {}): OpfRecord {
+  return { ...RECORD, ...patch };
+}
+
+describe("draftFromFile", () => {
+  it("carries what the file said into the confirm step", () => {
+    expect(draftFromFile(record())).toMatchObject({
+      isbn: "9780441013593",
+      title: "Dune",
+      subtitle: "A Novel",
+      publisher: "Chilton",
+      year: 1965,
+      language: "en",
+      series_name: "Dune",
+      series_index: 1,
+    });
+  });
+
+  it("joins the authors with the separator the server splits on", () => {
+    // `backend/authors.py` splits an author line on a comma and on nothing
+    // else, so this is the one join that round trips.
+    expect(draftFromFile(record()).author).toBe("Frank Herbert, Brian Herbert");
+  });
+
+  it("sends an empty ISBN rather than none, which the server reads as absent", () => {
+    // Measured over 79 real EPUBs: 4 carried one. A file with no ISBN is the
+    // ordinary case and has to be addable.
+    expect(draftFromFile(record({ isbn: null })).isbn).toBe("");
+  });
+
+  it("offers editable fields, because no catalogue was asked", () => {
+    // What is on screen is the file's own claim, and the member is the one who
+    // can correct it.
+    expect(draftFromFile(record()).notFound).toBe(true);
+  });
+
+  it("carries no cover, which is the one thing this path must not send", () => {
+    expect(draftFromFile(record())).not.toHaveProperty("cover_url");
+  });
+
+  it("cuts a title the column could not hold rather than losing the book", () => {
+    const long = "a".repeat(TEXT_CEILINGS.title + 100);
+    expect(draftFromFile(record({ title: long })).title).toHaveLength(
+      TEXT_CEILINGS.title,
+    );
+  });
+
+  it("drops a language code the column could not hold rather than cutting it", () => {
+    // A cut code names a different language. The book still lands.
+    const draft = draftFromFile(
+      record({ language: "x".repeat(TEXT_CEILINGS.language + 1) }),
+    );
+    expect(draft.language).toBeNull();
+    expect(draft.title).toBe("Dune");
+  });
+
+  it("drops a series index outside what the API accepts", () => {
+    expect(draftFromFile(record({ seriesIndex: 1e9 })).series_index).toBeNull();
+  });
+
+  it("produces a body the scan endpoint accepts", () => {
+    // The half a field by field assertion cannot reach: this is what actually
+    // goes on the wire.
+    const draft = draftFromFile(record());
+    const body = toScanRequest({ ...blankPending(""), draft });
+    expect(body).toMatchObject({ title: "Dune", is_private: false });
+    expect(body).not.toHaveProperty("notFound");
   });
 });

@@ -5,7 +5,9 @@ import type {
   BookMatch,
   CopyCreate,
 } from "../../api/generated/model";
+import { boundNumber, boundText } from "../../lib/bookBounds";
 import { normaliseLocation } from "../../lib/lastLocation";
+import type { OpfRecord } from "../../lib/opf";
 
 /**
  * What the confirm step is editing.
@@ -166,5 +168,62 @@ export function draftFromMatch(match: BookMatch): BookDraft {
     // server writes a row each.
     classifications: match.classifications ?? [],
     suggested_tag_ids: match.suggested_tag_ids ?? [],
+  };
+}
+
+/**
+ * How the authors of one book are joined onto the one line the API takes.
+ *
+ * **A comma, because `backend/authors.py` splits on a comma and on nothing
+ * else**, deliberately: "Simon and Garfunkel" is one act. So this is the one
+ * separator that round trips, and any other would file two authors as one.
+ *
+ * The exclusion, because it is real: a creator whose own name contains a comma
+ * arrives as two authors. Measured over 79 real EPUB files, 2 of 79 creator
+ * strings contained one and both were the same corporate name,
+ * `W3C® (MIT, ERCIM, Keio)`. The fix is a wire field carrying authors
+ * separately, which is a schema change and is not this ticket.
+ */
+const AUTHOR_SEPARATOR = ", ";
+
+/**
+ * The confirm step, prefilled from a file the member picked.
+ *
+ * A sibling of `draftFromLookup` and `draftFromMatch` rather than a branch of
+ * either, and it lives here for the reason those do: this module is where what
+ * the app holds becomes what the request carries. **Every value is bounded on
+ * the way through**, because the file is untrusted input and the alternative is
+ * a 422 on the member's own batch rather than a book with one field missing.
+ * `lib/bookBounds.ts` carries that rule and the reason for the cut or drop
+ * split.
+ *
+ * `notFound` is set, which is what puts the confirm step into editable fields:
+ * no catalogue was asked, so what is on screen is the file's own claim and the
+ * member is the one who can correct it.
+ *
+ * **No cover, and that is scope rather than a rule.** An EPUB carries a cover
+ * image inside the archive, and an image is not the book: `POST
+ * /api/books/{id}/cover` already takes one. Lifting it out is a second entry
+ * read with its own bounds and a second request per book, and whether an import
+ * should make them is a decision about the import flow rather than about this
+ * reader.
+ */
+export function draftFromFile(record: OpfRecord): BookDraft {
+  return {
+    isbn: boundText("isbn", record.isbn) ?? "",
+    title: boundText("title", record.title) ?? "",
+    subtitle: boundText("subtitle", record.subtitle),
+    author: boundText("author", record.authors.join(AUTHOR_SEPARATOR)),
+    publisher: boundText("publisher", record.publisher),
+    year: boundNumber("year", record.year),
+    description: boundText("description", record.description),
+    language: boundText("language", record.language),
+    series_name: boundText("series_name", record.seriesName),
+    series_index: boundNumber("series_index", record.seriesIndex),
+    // The file names neither, and an empty list is what the confirm step and
+    // the batch both already handle.
+    classifications: [],
+    suggested_tag_ids: [],
+    notFound: true,
   };
 }

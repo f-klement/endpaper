@@ -1144,8 +1144,9 @@ export const en = {
   "rapid.stop": "Finish scanning",
   "rapid.explain":
     "Keep scanning. Each book is looked up and queued, and you confirm the whole batch at the end.",
-  "rapid.queued": "{count} scanned",
+  "rapid.queued": "{count} in the queue",
   "rapid.lookingUp": "Looking up...",
+  "rapid.reading": "{name} is being read...",
   "rapid.notFound": "Not found: {isbn}",
   "rapid.duplicate": "Already scanned",
   "rapid.alreadyInLibrary": "Already in the library",
@@ -1154,8 +1155,23 @@ export const en = {
   "rapid.adding": "Adding...",
   "rapid.discard": "Discard",
   "rapid.added": "{count} added. {failed} still below, with the reason.",
-  "rapid.removeFromQueue": "Remove {isbn} from the queue",
+  "rapid.removeFromQueue": "Remove {label} from the queue",
   "rapid.nothingScanned": "Nothing scanned yet",
+
+  // ── Adding books from their files ───────────────────────────────────────
+  "file.title": "Add from a file",
+  "file.explain":
+    "Pick EPUB files and Endpaper reads the title, authors and series out of them. The files are read here in your browser and are never uploaded.",
+  "file.pickLabel": "EPUB files",
+  "file.readingFiles": "Reading the files you picked...",
+  "file.notAnEpub": "Not an EPUB file.",
+  "file.damaged": "This file is damaged and could not be opened.",
+  "file.protected": "This file is protected, so its metadata cannot be read.",
+  "file.tooLarge": "This file is too large to read here.",
+  "file.unsupported": "This file uses a format Endpaper cannot open.",
+  "file.noInflate": "This browser is too old to read EPUB files.",
+  "file.noTitle": "This file carries no title.",
+  "file.unreadable": "This file could not be read.",
 
   // ── Loan due dates ──────────────────────────────────────────────────────
   "loans.dueDate": "Due back",

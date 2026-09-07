@@ -16,6 +16,7 @@ import * as books from "../../src/api/generated/endpoints/books/books";
 import * as collections from "../../src/api/generated/endpoints/collections/collections";
 import * as covers from "../../src/api/generated/endpoints/covers/covers";
 import * as loans from "../../src/api/generated/endpoints/loans/loans";
+import * as opds from "../../src/api/generated/endpoints/opds/opds";
 import * as publicCatalogue from "../../src/api/generated/endpoints/public/public";
 import * as settings from "../../src/api/generated/endpoints/settings/settings";
 import * as stats from "../../src/api/generated/endpoints/stats/stats";
@@ -101,6 +102,13 @@ const KEYS: Record<string, readonly unknown[]> = {
   getCover: covers.getGetCoverQueryKey(7, "jpg"),
   getLoginBackground: covers.getGetLoginBackgroundQueryKey("jpg"),
   healthz: system.getHealthzQueryKey(),
+  // The household's own OPDS servers. **Deliberately not catalogue queries**:
+  // `isCatalogueQuery` is an allowlist over `/api/books`, and these are
+  // configuration rather than anybody's shelf, so a write to a book must not
+  // drop them. What a sync changes is the books it wrote, and those keys are
+  // already here.
+  listServers: opds.getListServersQueryKey(),
+  listSyncableServers: opds.getListSyncableServersQueryKey(),
 };
 
 /**
@@ -198,8 +206,14 @@ describe("the inventory is complete", () => {
     // confirmation is the arrival: nine routes, three of them reads. The other
     // six are writes and produce no key, and the four unauthenticated ones are
     // all `POST`, which is the same shape as the credential work above.
+    //
+    // 53 on 2026-09-07, counted with that same command rather than as 51 plus
+    // two. The household OPDS servers are the arrival: seven routes, two of
+    // them reads, and the other five are writes producing no key. The delta an
+    // implementer would have guessed from "seven routes" is wrong again, in the
+    // same direction as the credential work and for the same reason.
     expect(Object.keys(MODULES).length).toBeGreaterThan(5);
-    expect(Object.keys(KEYS).length).toBe(51);
+    expect(Object.keys(KEYS).length).toBe(53);
   });
 });
 

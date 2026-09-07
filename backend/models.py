@@ -2283,3 +2283,134 @@ class CatalogueCredential(Base):
     source: Mapped[str] = mapped_column(String(32), primary_key=True)
     #: `v1.<generation>.<nonce>.<ciphertext>`. See `backend/credentials.py`.
     envelope: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+#: The prefix every OPDS server's credential key carries.
+#:
+#: **Not decoration: it is what keeps two key spaces from colliding in one
+#: table.** `catalogue_credentials.source` holds a `CatalogueSource` value for a
+#: roster row and this value for a household's server, and no member of that
+#: enum is spelled with a hyphen. `tests/test_models.py` pins that, because the
+#: day one is, a new OPDS server could be handed a catalogue's stored login.
+#:
+#: **That pin is on the enum and it is not the whole guard.** The column is
+#: written by `backup.restore` as well as by this function, and an archive is a
+#: file somebody was handed, so `ck_opds_servers_credential_key` requires this
+#: prefix too. That constraint's own comment carries what leaving it out
+#: admitted.
+OPDS_CREDENTIAL_PREFIX = "opds-"
+
+
+def new_opds_credential_key() -> str:
+    """A credential key no deleted server can lend to a new one.
+
+    **Random rather than derived from the row id, and that is a bug this table
+    would otherwise ship with.** SQLite reuses `max(rowid) + 1` after a delete
+    unless the column is declared `AUTOINCREMENT`, so a key of `opds-<id>` would
+    give a newly added server the sealed login of the one that used to have that
+    id, and `credentials.for_request` would bind it to the **new** address and
+    send it there. Sixteen hex characters cannot be reused.
+
+    `OpdsServer.delete` has no hook, so the route forgets the credential as
+    well. The two guards are independent on purpose: one stops the reuse and the
+    other stops the orphan.
+    """
+    return f"{OPDS_CREDENTIAL_PREFIX}{secrets.token_hex(8)}"
+
+
+class OpdsServer(Base):
+    """One OPDS catalogue a household runs, as a row.
+
+    **Its own table rather than a row in `catalogue_targets`, and the reason is
+    that table's key space rather than its width.** `catalogue_targets.source`
+    is the closed `CatalogueSource` enum and is the primary key;
+    `sources.Plan.parse` validates a stored settings row against that enum, and
+    every door onto the ISBN lookup path is keyed on it. A household's own
+    server in that key space is a member's private holdings able to be selected
+    as a source answering another member's scan, which is the merge
+    `enums.SourceFamily` exists to refuse.
+
+    Two consequences follow and each would have been a rule added to something
+    that has one. `main.seed_catalogue_targets` reconciles every seeded row
+    against `targets.SEEDED` on each start and would need to learn to skip
+    these. And of that table's twenty two columns an OPDS server fills one:
+    there is no query grammar, no record schema, no index name, no search cap
+    and no reader choice, because `decoders.Reader.OPDS_ATOM` is the only
+    parser a row here could ever name.
+
+    **The credential side needed no such decision**, which is evidence the split
+    is the shape that was already intended: `CatalogueCredential.source` is
+    deliberately not keyed to the enum, so "a row added by a curated registry,
+    or a typed host, gets a credential with no migration".
+
+    **No `ForeignKey` from `catalogue_credentials` to `credential_key`**, for
+    that table's own stated reason: `backup.restore` deletes and reinserts whole
+    tables through Core, and a constraint would let one credential for a server
+    an archive no longer carries fail an entire restore.
+    """
+
+    __tablename__ = "opds_servers"
+
+    __table_args__ = (
+        CheckConstraint(
+            "length(name) BETWEEN 1 AND 100",
+            name="ck_opds_servers_name",
+        ),
+        # **The same rule as `ck_catalogue_credentials_source`, and it is here
+        # for the same reason.** This value becomes that column's value, and
+        # `credentials.unreadable_sources` reads that column straight back to a
+        # settings screen, where a generated client interpolates it into a URL
+        # path. There is no foreign key and `backup.restore` inserts through
+        # Core, so an archive decides both columns.
+        #
+        # `instr(... char(0))` is not decoration: SQLite's `length` and `GLOB`
+        # are C string operations and stop at the first NUL, so without it the
+        # constraint reads `opds-1\0../../books/5?` as `opds-1` and admits it.
+        # **`GLOB 'opds-*'` is the clause that keeps the two key spaces apart,
+        # and it is here because the boundary moved.** While this table was not
+        # in `backup._TABLES` the column had exactly one writer,
+        # `new_opds_credential_key`, and the prefix was a property of that
+        # function. Archiving the table made `backup.restore` a second writer:
+        # it re-inserts through Core with no validating arm for this table, so
+        # an archive decides this value.
+        #
+        # What that admitted, measured end to end by a critic: a row with
+        # `credential_key='bne'` and a `base_url` the archive names passes the
+        # charset rule, and `credentials.for_request` then binds the library's
+        # sealed BNE login to **that** address and `header_for` sends it. The
+        # attacker needs a copy of the archive and not the key, which is exactly
+        # the loss sealing was bought to prevent. `stored()` is keyed on the
+        # source alone; only `shipped()` re-checks a published origin.
+        #
+        # The guard above this, that no `CatalogueSource` is spelled with the
+        # prefix, is a property of the enum. This is the same rule on the column
+        # the boundary actually crosses.
+        CheckConstraint(
+            "length(credential_key) BETWEEN 1 AND 32 "
+            "AND instr(credential_key, char(0)) = 0 "
+            "AND credential_key NOT GLOB '*[^a-z0-9_-]*' "
+            "AND credential_key GLOB 'opds-*'",
+            name="ck_opds_servers_credential_key",
+        ),
+        # The scheme rule, in SQL, so a hand edited archive cannot put a
+        # `file://` or a `gopher://` address where a sync will read it.
+        # `opds.is_fetchable` is the rule in full and runs before every request;
+        # this is the last line for a write that never came through it.
+        CheckConstraint(
+            "base_url GLOB 'http://?*' OR base_url GLOB 'https://?*'",
+            name="ck_opds_servers_base_url",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    #: What the household calls this server. Shown on a screen, never sent
+    #: anywhere and never part of an address.
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    #: The acquisition feed a sync walks. The origin computed from it is what
+    #: every later address in that walk is held to: see `opds._next_page`.
+    base_url: Mapped[str] = mapped_column(String(255), nullable=False)
+    #: This server's key in `catalogue_credentials`. See
+    #: `new_opds_credential_key` for why it is random.
+    credential_key: Mapped[str] = mapped_column(
+        String(32), nullable=False, unique=True, default=new_opds_credential_key
+    )

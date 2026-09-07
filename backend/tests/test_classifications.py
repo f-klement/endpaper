@@ -10,6 +10,7 @@ before the kind column existed is ever corrected.
 import ast
 import pathlib
 import re
+import sys
 from typing import Any
 from xml.etree import ElementTree
 
@@ -463,8 +464,39 @@ def _reaching(calls: dict[str, set[str]], builds: set[str]) -> set[str]:
     return reaching
 
 
+def _table_holding_modules() -> list[Any]:
+    """Every module of this application that is loaded, found rather than named.
+
+    **Naming `metadata` was the rule until a decoder lived somewhere else.** It
+    read `vars(metadata)` alone, which was right while every decoder was a
+    catalogue's; `opds.py` is the import family's first, so a walk keyed on one
+    module reported `Reader.OPDS_ATOM` as answered by nothing. Naming two
+    modules would be the enumerating shape this file already refuses one level
+    down, so the module set is derived the same way the table set is.
+
+    **The exclusion, stated rather than an inclusion list**: this backend's own
+    `.py` files, minus anything under `tests/`, because a test may build a
+    reader keyed dict of its own and `test_a_reader_registered_in_a_new_table`
+    does exactly that. A vendored environment is excluded by the same path test.
+
+    A module is only found if something imported it. `conftest.py` imports
+    `main`, which reaches every router and every module a router reaches, so
+    that is the whole application; `test_the_walk_reaches_more_than_one_module`
+    is what fails if it ever stops being.
+    """
+    found = []
+    for module in list(sys.modules.values()):
+        path = getattr(module, "__file__", None)
+        if path is None:
+            continue
+        resolved = pathlib.Path(path).resolve()
+        if resolved.is_relative_to(BACKEND) and "tests" not in resolved.parts:
+            found.append(module)
+    return found
+
+
 def _dispatch_tables() -> list[dict[decoders.Reader, Any]]:
-    """Every reader keyed dispatch table in `metadata`, found rather than named.
+    """Every reader keyed dispatch table in this application, found rather than named.
 
     **A list of five attribute names is the shape this whole file refuses.** It
     was one, and a sixth table wiring an already registered reader to a heading
@@ -478,10 +510,14 @@ def _dispatch_tables() -> list[dict[decoders.Reader, Any]]:
     `dict[Reader, str]` of per reader labels is not a dispatch table, and
     admitting one would put a value with no `__name__` into the walk, where the
     only honest thing left to do with it is skip it silently.
+
+    Which modules are searched is `_table_holding_modules`, and it is derived
+    for this function's own reason one level up.
     """
     return [
         value
-        for value in vars(metadata).values()
+        for module in _table_holding_modules()
+        for value in vars(module).values()
         if isinstance(value, dict)
         and value
         and all(isinstance(key, decoders.Reader) for key in value)
@@ -675,6 +711,30 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         finding anywhere. `metadata._check_readable` raises on this for a live
         row; this is the same rule asked of the closed set."""
         assert set(_registered_entries()) == set(decoders.Reader)
+
+    def test_the_walk_reaches_more_than_one_module(self):
+        """The control the row above needs since the walk stopped naming
+        `metadata`.
+
+        `_table_holding_modules` finds only what something has imported, so a
+        conftest that stopped importing the application would make the test
+        above pass over a smaller closed set without saying so. Asserted as a
+        count of **modules holding a table** rather than of modules loaded,
+        because the second is true of a run that found no table at all.
+        """
+        holders = {
+            module.__name__
+            for module in _table_holding_modules()
+            if any(
+                isinstance(value, dict)
+                and value
+                and all(isinstance(key, decoders.Reader) for key in value)
+                and all(callable(decoder) for decoder in value.values())
+                for value in vars(module).values()
+            )
+        }
+
+        assert len(holders) > 1, holders
 
     def test_the_walk_separates_readers_rather_than_admitting_all_of_them(self):
         """The other half of anti vacuity. A walk that answered "every reader"

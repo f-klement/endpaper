@@ -7,6 +7,7 @@ import re
 
 import pytest
 
+import decoders
 import sources
 import targets
 import z3950
@@ -216,6 +217,27 @@ class TestARowCannotCarryQueryStructure:
     def test_there_is_no_z3950_door_yet(self):
         with pytest.raises(ValueError):
             _seeded(transport=targets.Transport.Z3950)
+
+    def test_a_catalogue_row_may_not_name_the_other_familys_reader(self):
+        """The one rule `enums.SourceFamily` exists for, at the one place a row
+        could break it.
+
+        `metadata.resolve` catches this only for a row that also declares a
+        capability, so a row naming an import family reader and answering
+        nothing would otherwise construct and sit in the roster, where every
+        door onto a member's ISBN lookup is keyed.
+        """
+        for reader in decoders.IMPORT_READERS:
+            with pytest.raises(ValueError, match="import family"):
+                _seeded(reader=reader)
+
+    def test_that_refusal_is_derived_from_the_set_rather_than_naming_a_reader(self):
+        """The control: the arm above passes vacuously against an empty set, and
+        an empty set is what a future edit would leave behind."""
+        assert decoders.IMPORT_READERS
+        assert not decoders.IMPORT_READERS & {
+            target.reader for target in targets.SEEDED.values()
+        }
 
     def test_a_bespoke_row_carries_no_query_grammar(self):
         """An index sitting unused on a row is a row somebody reads as the one

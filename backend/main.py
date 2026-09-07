@@ -51,6 +51,7 @@ from routers import (
     covers,
     imports,
     loans,
+    opds,
     public,
     settings,
     sru,
@@ -410,6 +411,7 @@ app.include_router(books.router)
 app.include_router(collections.router)
 app.include_router(imports.router)
 app.include_router(loans.router)
+app.include_router(opds.router)
 # Before the SPA mount, like every router, and that matters more here than
 # elsewhere: this one owns `/robots.txt`, which a build emitting one would
 # otherwise be answered from disk. It is also the one router whose routes

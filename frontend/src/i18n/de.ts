@@ -1046,8 +1046,9 @@ export const de: Messages = {
   "rapid.stop": "Scannen beenden",
   "rapid.explain":
     "Einfach weiterscannen. Jedes Buch wird nachgeschlagen und gesammelt, bestätigt wird am Ende alles zusammen.",
-  "rapid.queued": "{count} gescannt",
+  "rapid.queued": "{count} in der Liste",
   "rapid.lookingUp": "Wird nachgeschlagen...",
+  "rapid.reading": "{name} wird gelesen...",
   "rapid.notFound": "Nicht gefunden: {isbn}",
   "rapid.duplicate": "Schon gescannt",
   "rapid.alreadyInLibrary": "Schon in der Bibliothek",
@@ -1056,8 +1057,25 @@ export const de: Messages = {
   "rapid.adding": "Wird hinzugefügt...",
   "rapid.discard": "Verwerfen",
   "rapid.added": "{count} hinzugefügt. {failed} stehen unten, mit dem Grund.",
-  "rapid.removeFromQueue": "{isbn} aus der Liste entfernen",
+  "rapid.removeFromQueue": "{label} aus der Liste entfernen",
   "rapid.nothingScanned": "Noch nichts gescannt",
+
+  // ── Bücher aus ihren Dateien hinzufügen ─────────────────────────────────
+  "file.title": "Aus einer Datei hinzufügen",
+  "file.explain":
+    "Wähle EPUB-Dateien aus, dann liest Endpaper Titel, Autoren und Reihe daraus. Die Dateien werden hier im Browser gelesen und niemals hochgeladen.",
+  "file.pickLabel": "EPUB-Dateien",
+  "file.readingFiles": "Die ausgewählten Dateien werden gelesen...",
+  "file.notAnEpub": "Keine EPUB-Datei.",
+  "file.damaged": "Diese Datei ist beschädigt und ließ sich nicht öffnen.",
+  "file.protected":
+    "Diese Datei ist geschützt, die Metadaten lassen sich nicht lesen.",
+  "file.tooLarge": "Diese Datei ist zu groß, um sie hier zu lesen.",
+  "file.unsupported":
+    "Diese Datei liegt in einem Format vor, das Endpaper nicht öffnen kann.",
+  "file.noInflate": "Dieser Browser ist zu alt, um EPUB-Dateien zu lesen.",
+  "file.noTitle": "Diese Datei enthält keinen Titel.",
+  "file.unreadable": "Diese Datei ließ sich nicht lesen.",
 
   // ── Rückgabefristen ─────────────────────────────────────────────────────
   "loans.dueDate": "Zurück bis",

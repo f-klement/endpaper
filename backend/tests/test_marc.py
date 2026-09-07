@@ -656,21 +656,27 @@ class TestReadingRealCatalogueShapes:
 class TestTheSeamIntoMetadataIsPinned:
     """`marc.py` is the one module here that reads another's private names.
 
-    **Derived with `ast`, never listed.** A test naming the twenty names would
+    **Derived with `ast`, never listed.** A test naming the nineteen names would
     be the shape this repository records as wrong on every first attempt, a
     guard that enumerates something open: it goes stale the first time the seam
     gains a name, and it passes while doing so. Both tests below read the source
     and find out.
 
     **What a rename actually breaks, corrected.** The first draft of this said
-    "a rename breaks MARC at runtime, not at import", and that is wrong for four
-    of the twenty: `_MARC`, `_GND_PREFIX`, `_DOCTYPE` and `_LANGUAGES` are read
-    at module scope, so renaming one stops the application importing and every
+    "a rename breaks MARC at runtime, not at import", and that is wrong for
+    three of the nineteen: `_MARC`, `_GND_PREFIX` and `_LANGUAGES` are read at
+    module scope, so renaming one stops the application importing and every
     router test catches it. The other sixteen are read inside a function body,
     where nothing catches it until a request arrives, and those are what this
     guard is for.
 
-    **`mypy` reports all twenty statically and the CI pipeline does not run it.**
+    **The count moved because a name left the seam rather than joined it.** It
+    was twenty, and `_DOCTYPE` became `metadata.DOCTYPE` when `opds.py` became
+    the third module refusing that construct: a name three modules read is
+    public by behaviour, and leaving it private would have meant admitting a
+    second module to this guard's exemption.
+
+    **`mypy` reports all nineteen statically and the CI pipeline does not run it.**
     The build runs `ruff check`, the OpenAPI diff and `pytest`, and its only
     mention of the type checker is a comment. Running it there would pin these
     and `_Subfields`, which is annotation only and which no runtime guard can

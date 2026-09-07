@@ -1447,6 +1447,16 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         Counts("the whole roster")
     ],
     ("backend/fetch.py", "{n} third party catalogues"): [Counts("the whole roster")],
+    # The OPDS route's three, and all three count the **search** fan out rather
+    # than the roster. `holdings` prices its own sequential walk against what
+    # `metadata.search` does concurrently, and the other two say how much of
+    # that fan out refuses an electronic record, which is the population a self
+    # hosted ebook server holds.
+    ("backend/opds.py", "{n} different catalogues"): [Counts("SEARCH_SOURCES")],
+    ("backend/routers/opds.py", "{n} catalogues"): [Counts("SEARCH_SOURCES")],
+    ("backend/tests/routers/test_opds.py", "{n} catalogues"): [
+        Counts("SEARCH_SOURCES")
+    ],
     ("backend/fetch.py", "{n} sources"): [
         Counts("SEARCH_SOURCES", near="`metadata.search` asks"),
         Counts("the whole roster", near="compression is not requested"),
@@ -1701,6 +1711,12 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
             "two that answer Dublin Core and has no constant of its own",
             near="carrier vocabulary",
         ),
+        # The OPDS entry's statement of how much of the title search fan out
+        # refuses an electronic record. It is the fan out itself, so it takes a
+        # Counts rather than a NotTheRoster: the sentence's whole argument is
+        # that a born digital title depends on the two of that set which apply
+        # no such rule, and a source joining or leaving it moves both halves.
+        Counts("SEARCH_SOURCES", near="a title search fans out to"),
     ],
     # The owner's decision of 2026-09-07 on the Z39.50 transport, which surveyed
     # eight national libraries rather than counting this roster. **This entry is a
@@ -2838,8 +2854,13 @@ def test_the_register_states_the_partition_the_census_gives_it():
     """
     text = (REPO / "docs" / "decisions.md").read_text(encoding="utf-8")
     stated = re.search(
-        r"census raises (\d+) candidates in it\. \*\*(\d+)\*\* are live claims "
-        r"the guard now checks against `sources\.py`; \*\*(\d+)\*\* are not",
+        # Both numbers grammatically, because either can be one. A regex fixed
+        # to the plural makes the sentence unwritable at a count of 1: the
+        # register would have to say "**1** are live claims" to satisfy a guard
+        # that exists to keep it honest, which is the guard shaping the prose
+        # rather than checking it. Met exactly that way on 2026-09-07.
+        r"census raises (\d+) candidates in it\. \*\*(\d+)\*\* (?:are live claims|is a live claim) "
+        r"the guard now checks against `sources\.py`; \*\*(\d+)\*\* (?:are|is) not",
         re.sub(r"\s+", " ", text),
     )
     assert stated is not None, (

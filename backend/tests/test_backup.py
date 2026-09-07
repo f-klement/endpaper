@@ -28,9 +28,11 @@ from enums import CatalogueSource, ClassificationScheme
 from models import (
     AuthorAlias,
     Book,
+    CatalogueCredential,
     Classification,
     Loan,
     Note,
+    OpdsServer,
     Quote,
     Tag,
     UserBook,
@@ -53,6 +55,14 @@ def rewrite(data: bytes, manifest: dict, covers: dict[str, bytes] | None = None)
         for name, body in (covers or {}).items():
             archive.writestr(name, body)
     return buffer.getvalue()
+
+
+@pytest.fixture
+def encryption_key():
+    """A key, so a credential can be sealed. Removed again by the conftest."""
+    import credentials
+
+    credentials.store_key(credentials.generate_phrase())
 
 
 @pytest.fixture
@@ -270,6 +280,111 @@ class TestRoundTrip:
         assert res.json()["author_aliases"] == 1
         restored = db.query(AuthorAlias).one()
         assert restored.canonical_name == "F. Herbert"
+
+    def test_the_opds_servers_come_back(self, client, admin, library, db):
+        """The manifest guard caught the table being absent; this is what the
+        absence would have cost.
+
+        A restore brings `catalogue_credentials` back either way, so leaving
+        this table out produced an install whose sealed `opds-*` envelopes were
+        orphans nothing on a screen could remove and whose configured servers
+        were simply gone. Both critic seats found the missing table
+        independently, which is why the round trip is pinned rather than only
+        the manifest key.
+        """
+        client.post(
+            "/api/opds/servers",
+            json={"name": "Home library", "base_url": "http://library.invalid:8083/opds"},
+            headers=admin["headers"],
+        )
+        data = client.get("/api/backup", headers=admin["headers"]).content
+
+        for server in db.query(OpdsServer).all():
+            db.delete(server)
+        db.commit()
+        assert db.query(OpdsServer).count() == 0
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", data, "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200, res.text
+        restored = db.query(OpdsServer).one()
+        assert restored.name == "Home library"
+        assert restored.base_url == "http://library.invalid:8083/opds"
+
+    def test_a_household_server_login_is_not_restored(
+        self, client, admin, library, db, encryption_key
+    ):
+        """**The archive may move a server's address; it may not move its login
+        with it.**
+
+        `credentials.for_request` binds a stored credential to the address it is
+        asked about, and a sync asks about `opds_servers.base_url`, which
+        `restore` writes with no validating arm. So an archive keeping a
+        legitimate key and rewriting only the address beside it would send the
+        household's own login to a host the archive named, which is exactly what
+        `PUT /api/opds/servers/{id}` refuses. The roster catalogues are not
+        exposed to this: their address is a module constant.
+
+        The cost is that a same machine restore loses these logins. That is the
+        assertion below rather than a caveat.
+        """
+        server = client.post(
+            "/api/opds/servers",
+            json={"name": "Home library", "base_url": "http://library.invalid:8083/opds"},
+            headers=admin["headers"],
+        ).json()
+        client.put(
+            f"/api/opds/servers/{server['id']}/credential",
+            json={"username": "house", "password": "housepw"},
+            headers=admin["headers"],
+        )
+        data = client.get("/api/backup", headers=admin["headers"]).content
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", data, "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200, res.text
+        assert db.query(OpdsServer).count() == 1, "the server row still comes back"
+        assert (
+            db.query(CatalogueCredential)
+            .filter(CatalogueCredential.source.startswith("opds-"))
+            .count()
+            == 0
+        )
+
+    def test_a_roster_catalogues_login_still_is_restored(
+        self, client, admin, library, db, encryption_key
+    ):
+        """The control, and it is the half that says the filter is narrow.
+
+        A rule dropping every credential would pass the row above while
+        undoing the table's whole purpose. A roster catalogue's address is a
+        module constant, so nothing an archive writes decides where its login is
+        sent.
+        """
+        import credentials
+
+        credentials.put(db, "bne", "library-account", "librarypw")
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        credentials.forget(db, "bne")
+
+        client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", data, "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert credentials.stored_envelope(db, "bne")
 
     def test_the_notes_come_back(self, client, admin, library, db):
         data = client.get("/api/backup", headers=admin["headers"]).content

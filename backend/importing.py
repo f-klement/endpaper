@@ -47,7 +47,7 @@ be the oracle again by another route.
 
 import logging
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, time
 from typing import Any, Final
@@ -174,16 +174,28 @@ class _CatalogueIndex:
         )
 
     def find(self, db: Session, row: csv_import.ImportRow) -> Book | None:
-        """Match an exported row to a Book already in the catalogue.
+        """Match an exported row to a Book already in the catalogue."""
+        return self.find_by(db, row.isbn, row.title)
+
+    def find_by(self, db: Session, isbn: str | None, title: str) -> Book | None:
+        """Match an ISBN and a title to a Book already in the catalogue.
 
         ISBN first, since it is unambiguous. The title fallback is deliberate
         and imperfect for the reason above.
+
+        **The two arguments rather than a row, so that this rule has one
+        implementation and not one per importer.** `OpdsImport` matches on
+        exactly this rule by the owner's instruction of 2026-09-05, and a second
+        index keyed the same way would be a second place for it to drift. It is
+        deliberately **not** `MarcIndex`'s rule, which folds the author in: see
+        that class for why a catalogue transfer needs the stricter one and a
+        reading history does not.
         """
         book_id = None
-        if row.isbn:
-            book_id = self.by_isbn.get(row.isbn)
+        if isbn:
+            book_id = self.by_isbn.get(isbn)
         if book_id is None:
-            book_id = self.by_title.get(row.title.lower())
+            book_id = self.by_title.get(title.lower())
         return db.get(Book, book_id) if book_id is not None else None
 
     def isbn_is_taken(self, isbn: str | None) -> bool:
@@ -527,6 +539,10 @@ class _Tally:
     updated: int = 0
     new_tags: int = 0
     unmatched_private: int = 0
+    #: Records with nothing left to file them under. Only `OpdsImport` counts
+    #: these: the other two importers get the number from their parser, which
+    #: has already dropped a titleless row before this class is built.
+    skipped_untitled: int = 0
     #: Capped at `MAX_UNMATCHED_REPORTED` by the caller, not here: this is a
     #: tally, and where the ceiling comes from is the report's business.
     unmatched: list[str] = field(default_factory=list)
@@ -965,3 +981,211 @@ def _fill_marc_gaps(book: Book, fields: dict[str, Any]) -> None:
         value = fields[attribute]
         if value is not None and getattr(book, attribute) is None:
             setattr(book, attribute, value)
+
+
+# ── OPDS ──────────────────────────────────────────────────────────────────────
+#
+# A third reader on the same application, and the one whose records carry least.
+# `csv_import.py` reads a service's export of somebody's shelf, `marc.py` reads
+# a library's export of its catalogue, and `opds.py` reads a member's own
+# server. What that server serves, measured across seven of them, is a title and
+# an author and nothing else: no identifier of any kind.
+#
+# So this importer asserts one thing the other two cannot and reads two fields
+# the other two also read. **The assertion is ownership.** A Goodreads export
+# says what somebody read and a MARC file says what another institution holds;
+# a member's own library server says what that member has. That is the whole
+# value of the route, and it is why `_create` below arrives at OWNED where
+# `MarcImport._create` arrives at UNKNOWN.
+#
+# **The matching rule is `_CatalogueIndex`'s and not `MarcIndex`'s**, by the
+# owner's instruction of 2026-09-05: ISBN where one exists, then lowercased
+# title. Do not invent a third.
+
+
+#: The columns an OPDS record can fill on a Book it matched.
+#:
+#: **One name long, and the shortness is the measurement rather than an
+#: oversight.** `_MARC_GAP_FIELDS` has nine because a MARC record carries nine;
+#: an OPDS entry carries a title, which is never a gap because it is what
+#: matched, an author, and an ISBN, which `_fill_opds_gaps` does not write
+#: because `books.isbn` is unique across the whole table and filling it can
+#: raise on a row this member cannot see. Ownership is filled and is not here,
+#: because it is not a nullable column: see `_fill_opds_gaps`.
+_OPDS_GAP_FIELDS: Final = ("author",)
+
+
+class OpdsImport:
+    """One walk of one OPDS feed, applied to the Library as one Member.
+
+    Separate from `MarcImport` for the reason that separates that one from
+    `Import`, said about a different column: **the two do not agree about
+    ownership, and they must not.** A MARC file is another institution's
+    catalogue and its records arrive UNKNOWN, to be confirmed by a person. An
+    OPDS feed is the member's own server and its entries are the closest thing
+    this application has to evidence of possession.
+
+    The viewer is fixed at construction, as in both other importers: what is
+    read is what this Member may see, and a created Book is attributed to them.
+
+    **Nothing personal is written.** A feed carries no reading status, no rating
+    and no review, so there is no `user_books` row here and no `Reading.by` call.
+    """
+
+    __slots__ = ("_db", "_member_id")
+
+    def __init__(self, db: Session, member_id: int) -> None:
+        self._db = db
+        self._member_id = member_id
+
+    @classmethod
+    def for_member(cls, db: Session, member_id: int) -> OpdsImport:
+        return cls(db, member_id)
+
+    def apply(
+        self, records: Sequence[Record], *, create_missing: bool = True
+    ) -> ImportResultOut:
+        """Apply every record the walk found, and report what happened.
+
+        **`create_missing` defaults to true, as on the MARC path and against the
+        CSV one**, and the reason is what the source means. A reading history is
+        mostly books the household does not own, so creating them by default
+        would fill the shelf with books nobody has. A member's own library
+        server lists what they have, and a sync that adds none of it has synced
+        nothing.
+
+        **`_CatalogueIndex` is built here although two of its four lookups go
+        unread.** It loads this Member's whole reading record and their note ids
+        for `Import`'s benefit, which this class never touches. That is two
+        statements per sync rather than per record, and the alternative is a
+        third index class keyed the same way as the first, which is the second
+        matching rule the owner refused.
+
+        Commits once at the end. One entry that cannot be acted on is counted
+        and skipped: a library of thousands is not uniformly clean, and failing
+        the sync on entry 412 gives nobody anything to act on.
+        """
+        index = _CatalogueIndex.build(self._db, self._member_id)
+        tally = _Tally()
+
+        for record in records:
+            self._apply_one(record, index, tally, create_missing)
+
+        self._db.commit()
+
+        return ImportResultOut(
+            rows_read=len(records),
+            matched=tally.matched,
+            created=tally.created,
+            # Nothing personal is written, so nothing personal changed. Reported
+            # as zero rather than omitted, for `MarcImport.apply`'s reason: the
+            # field is on the shared result model.
+            statuses_updated=0,
+            # Entries with no title, plus entries whose ISBN belongs to a Book
+            # this Member cannot see. Counted together for `Import.apply`'s
+            # reason: separating them would be an oracle for "does a Book with
+            # this ISBN exist in this house", which the 404-not-403 rule
+            # withholds.
+            skipped=tally.unmatched_private + tally.skipped_untitled,
+            unmatched_titles=tally.unmatched,
+        )
+
+    def _apply_one(
+        self,
+        record: Record,
+        index: _CatalogueIndex,
+        tally: _Tally,
+        create_missing: bool,
+    ) -> None:
+        # Bounded once, before anything reads a value, for `bounded_fields`'
+        # reason: matching on the incoming value and storing the bounded one
+        # means the same feed synced twice can fail to find itself.
+        fields = bounded_fields(record)
+        title = fields["title"]
+        if not title:
+            # **What reaches here is a record whose title `catalogue.Record`
+            # dropped**, not one `within_bounds` truncated: `_drop_unstorable`
+            # in `Record.__post_init__` sets a scalar the column cannot hold to
+            # None rather than cutting it, because half a title is an assertion
+            # nobody made. `opds.entry_record` refuses an entry whose `<title>`
+            # is missing or blank, so that is not this arm either.
+            #
+            # Without it `find_by` raises `AttributeError` on `title.lower()`
+            # and one over long title costs the whole sync. The stated reason
+            # here was `within_bounds` truncating to `""`, which it cannot do:
+            # a critic read the mechanism rather than the comment.
+            tally.skipped_untitled += 1
+            return
+
+        book = index.find_by(self._db, fields["isbn"], title)
+
+        if book is None and create_missing and index.isbn_is_taken(fields["isbn"]):
+            # The ISBN belongs to a Book this Member cannot see. Creating it
+            # would raise on the unique index and abort the whole sync, and the
+            # title is never reported: see this module's docstring.
+            tally.unmatched_private += 1
+            return
+
+        if book is None and create_missing:
+            self._create(fields, index)
+            tally.created += 1
+        elif book is None:
+            if len(tally.unmatched) < MAX_UNMATCHED_REPORTED:
+                # A title from the member's own server, so reporting it back to
+                # that member discloses nothing they did not already have.
+                tally.unmatched.append(title)
+        else:
+            tally.matched += 1
+            _fill_opds_gaps(book, fields)
+
+    def _create(self, fields: dict[str, Any], index: _CatalogueIndex) -> Book:
+        """Add a Book the member's server lists and this Library does not hold.
+
+        **`ownership=OWNED`, where both other importers arrive at UNKNOWN**, and
+        the difference is whose catalogue is speaking. A Goodreads export is a
+        reading history and a MARC file is another institution's holdings;
+        neither is evidence that this household has the book. A member's own
+        library server is exactly that evidence, and an import that arrived
+        UNKNOWN would make the one thing this route can establish something a
+        person has to confirm by hand for every book they own.
+
+        **No cover is fetched**, for `MarcImport._create`'s reason: a fetch per
+        record over a whole library is thousands of round trips holding one
+        request open. `POST /api/books/covers/backfill` does it afterwards.
+        """
+        book = Book(
+            title=fields["title"],
+            author=fields["author"],
+            isbn=fields["isbn"],
+            added_by_user_id=self._member_id,
+            ownership=OwnershipStatus.OWNED,
+        )
+        self._db.add(book)
+        self._db.flush()
+        index.remember(book)
+        return book
+
+
+def _fill_opds_gaps(book: Book, fields: dict[str, Any]) -> None:
+    """Add what the member's server knows and this catalogue does not.
+
+    **Never overwrites, and ownership is the one that needed a rule.** The other
+    two importers fill a column that is None; `books.ownership` is never None,
+    so "the gap" has to be named, and it is `UNKNOWN`, which is the value
+    `enums.OwnershipStatus` documents as "nobody has answered the question". A
+    Book somebody set to NOT_OWNED is left alone: they answered, and a feed does
+    not overrule a person.
+
+    The ISBN is deliberately not filled even when it is a gap. `books.isbn` is
+    unique across the whole table for any row nobody has declared a copy, so
+    writing one onto a matched Book can raise on a row this Member cannot see,
+    and that raise aborts the transaction and costs the whole sync. The record
+    that carried it matched on its title, which is the weaker key, so this is
+    also the case where the ISBN is least likely to be about the same book.
+    """
+    for attribute in _OPDS_GAP_FIELDS:
+        value = fields[attribute]
+        if value is not None and getattr(book, attribute) is None:
+            setattr(book, attribute, value)
+    if book.ownership == OwnershipStatus.UNKNOWN:
+        book.ownership = OwnershipStatus.OWNED

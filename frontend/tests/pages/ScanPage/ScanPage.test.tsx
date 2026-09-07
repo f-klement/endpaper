@@ -21,6 +21,7 @@ import { decodeFromStream, emitBarcode } from "../../doubles/zxing";
 import ScanPage from "../../../src/pages/ScanPage";
 import { makeBook, makeTagSet, resetIds } from "../../factories";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
+import { epubFile } from "../../zipFixtures";
 
 const LOOKUP = {
   isbn: "9780441013593",
@@ -73,6 +74,50 @@ describe("ScanPage", () => {
   it("offers manual ISBN entry alongside the camera", () => {
     renderWithProviders(<ScanPage />);
     expect(screen.getByLabelText("ISBN")).toBeInTheDocument();
+  });
+
+  describe("a file is the fourth way of choosing which book", () => {
+    it("offers the picker beside the camera and the search box", () => {
+      renderWithProviders(<ScanPage />);
+      expect(screen.getByLabelText("EPUB files")).toBeInTheDocument();
+    });
+
+    it("shows no queue until something is in it", () => {
+      renderWithProviders(<ScanPage />);
+      expect(screen.queryByText("Nothing scanned yet")).not.toBeInTheDocument();
+    });
+
+    it("puts a picked EPUB into the same queue rapid scanning fills", async () => {
+      // A folder is a third way of answering *which* book, so it gets the same
+      // review and the same one commit at the end rather than a second bulk
+      // path beside it.
+      const user = userEvent.setup();
+      const file = await epubFile("dune.epub");
+      renderWithProviders(<ScanPage />);
+
+      await user.upload(screen.getByLabelText("EPUB files"), file);
+
+      await waitFor(() => expect(screen.getByText("Dune")).toBeInTheDocument());
+      expect(screen.getByText("1 in the queue")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Add all" }),
+      ).toBeInTheDocument();
+    });
+
+    it("names a file it could not read rather than dropping it", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ScanPage />);
+
+      await user.upload(
+        screen.getByLabelText("EPUB files"),
+        new File(["not an epub"], "broken.epub"),
+      );
+
+      await waitFor(() =>
+        expect(screen.getByText(/broken.epub/)).toBeInTheDocument(),
+      );
+      expect(screen.getByText(/Not an EPUB file/)).toBeInTheDocument();
+    });
   });
 
   describe("the camera is opened on request", () => {

@@ -26,9 +26,10 @@ import pytest
 from sqlalchemy import event
 
 import csv_import
+from catalogue import Record
 from enums import OwnershipStatus, ReadStatus, TagCategory
-from importing import Import, _CatalogueIndex
-from models import Book, Note, Tag, User, UserBook
+from importing import Import, OpdsImport, _CatalogueIndex
+from models import TITLE_MAX, Book, Note, Tag, User, UserBook
 from schemas.tag import MAX_TAG_NAME
 
 HEADER = (
@@ -452,3 +453,233 @@ class TestTheCatalogueIsReadOnce:
         # takes the whole import down.
         assert theirs in index.taken_isbns
         assert mine in index.taken_isbns
+
+
+# ── OPDS ──────────────────────────────────────────────────────────────────────
+
+
+def held(title: str, *, author: str | None = None, isbn: str | None = None):
+    """One record as `opds.entry_record` would produce it."""
+    return Record(source="opds", title=title, author=author, isbn=isbn)
+
+
+class TestAnOpdsSyncAssertsOwnership:
+    """The one thing this route establishes that the other two importers cannot.
+
+    A reading history says what somebody read and another institution's
+    catalogue says what that institution holds. A member's own library server
+    says what that member has, and if that did not reach `ownership` the route
+    would have imported nothing worth having.
+    """
+
+    def test_a_created_book_arrives_owned(self, db, member):
+        OpdsImport.for_member(db, member.id).apply([held("Small Gods")])
+
+        assert db.query(Book).one().ownership == OwnershipStatus.OWNED
+
+    def test_a_matched_book_nobody_answered_for_becomes_owned(self, db, member):
+        db.add(
+            Book(
+                title="Small Gods",
+                added_by_user_id=member.id,
+                ownership=OwnershipStatus.UNKNOWN,
+            )
+        )
+        db.commit()
+
+        OpdsImport.for_member(db, member.id).apply([held("Small Gods")])
+
+        assert db.query(Book).one().ownership == OwnershipStatus.OWNED
+
+    def test_a_book_somebody_said_is_not_owned_is_left_alone(self, db, member):
+        """`UNKNOWN` is the gap for this column. A person answered here, and a
+        feed does not overrule a person."""
+        db.add(
+            Book(
+                title="Small Gods",
+                added_by_user_id=member.id,
+                ownership=OwnershipStatus.NOT_OWNED,
+            )
+        )
+        db.commit()
+
+        OpdsImport.for_member(db, member.id).apply([held("Small Gods")])
+
+        assert db.query(Book).one().ownership == OwnershipStatus.NOT_OWNED
+
+
+class TestTheOpdsMatchingRuleIsTheOneImportUses:
+    """ISBN where one exists, then lowercased title. Not `MarcIndex`'s rule."""
+
+    def test_an_isbn_matches_before_a_title(self, db, member):
+        db.add(Book(title="A different spelling", isbn="9780552152976",
+                    added_by_user_id=member.id))
+        db.commit()
+
+        result = OpdsImport.for_member(db, member.id).apply(
+            [held("Small Gods", isbn="9780552152976")]
+        )
+
+        assert (result.matched, result.created) == (1, 0)
+
+    def test_a_title_matches_case_insensitively_with_no_author_in_the_key(
+        self, db, member
+    ):
+        """The difference from `MarcIndex`, which folds the author into the key.
+        A record crediting nobody still matches a Book credited to someone."""
+        db.add(Book(title="Small Gods", author="Terry Pratchett",
+                    added_by_user_id=member.id))
+        db.commit()
+
+        result = OpdsImport.for_member(db, member.id).apply([held("SMALL GODS")])
+
+        assert (result.matched, result.created) == (1, 0)
+
+    def test_a_book_this_library_does_not_hold_is_created(self, db, member):
+        result = OpdsImport.for_member(db, member.id).apply([held("Small Gods")])
+
+        assert (result.matched, result.created) == (0, 1)
+
+    def test_nothing_is_created_when_the_caller_asked_for_none(self, db, member):
+        result = OpdsImport.for_member(db, member.id).apply(
+            [held("Small Gods")], create_missing=False
+        )
+
+        assert (result.created, result.unmatched_titles) == (0, ["Small Gods"])
+
+    def test_a_feed_listing_one_book_twice_creates_it_once(self, db, member):
+        result = OpdsImport.for_member(db, member.id).apply(
+            [held("Small Gods"), held("Small Gods")]
+        )
+
+        assert (result.created, result.matched) == (1, 1)
+
+
+class TestFillingGapsAndNeverOverwriting:
+    def test_an_author_this_catalogue_lacks_is_filled_in(self, db, member):
+        db.add(Book(title="Small Gods", added_by_user_id=member.id))
+        db.commit()
+
+        OpdsImport.for_member(db, member.id).apply(
+            [held("Small Gods", author="Terry Pratchett")]
+        )
+
+        assert db.query(Book).one().author == "Terry Pratchett"
+
+    def test_an_author_somebody_already_wrote_is_not_replaced(self, db, member):
+        db.add(Book(title="Small Gods", author="T. Pratchett",
+                    added_by_user_id=member.id))
+        db.commit()
+
+        OpdsImport.for_member(db, member.id).apply(
+            [held("Small Gods", author="Terry Pratchett")]
+        )
+
+        assert db.query(Book).one().author == "T. Pratchett"
+
+    def test_an_isbn_is_never_written_onto_a_book_that_matched_on_its_title(
+        self, db, member
+    ):
+        """`books.isbn` is unique across the whole table, so filling it can raise
+        on a row this Member cannot see and abort the entire sync. The record
+        matched on the weaker key, which is also where it is least likely to be
+        about the same book."""
+        db.add(Book(title="Small Gods", added_by_user_id=member.id))
+        db.commit()
+
+        OpdsImport.for_member(db, member.id).apply(
+            [held("Small Gods", isbn="9780552152976")]
+        )
+
+        assert db.query(Book).one().isbn is None
+
+
+class TestTheOpdsPrivateBookOracle:
+    """A record whose ISBN belongs to a Book this Member cannot see.
+
+    Counted with the unusable records and never named, for the reason the
+    module docstring gives: the difference between 200 and 500 would be a clean
+    answer to "does a Book with this ISBN exist in this house".
+    """
+
+    def test_it_is_skipped_rather_than_raising_on_the_unique_index(self, db, member, other):
+        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True,
+                    added_by_user_id=other.id))
+        db.commit()
+
+        result = OpdsImport.for_member(db, member.id).apply(
+            [held("Small Gods", isbn="9780552152976")]
+        )
+
+        assert (result.created, result.skipped) == (0, 1)
+
+    def test_its_title_is_never_reported(self, db, member, other):
+        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True,
+                    added_by_user_id=other.id))
+        db.commit()
+
+        result = OpdsImport.for_member(db, member.id).apply(
+            [held("Small Gods", isbn="9780552152976")]
+        )
+
+        assert result.unmatched_titles == []
+
+    def test_the_rest_of_the_feed_still_arrives(self, db, member, other):
+        """One record that cannot be acted on is counted and skipped, never a
+        failed sync."""
+        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True,
+                    added_by_user_id=other.id))
+        db.commit()
+
+        result = OpdsImport.for_member(db, member.id).apply(
+            [held("Small Gods", isbn="9780552152976"), held("Good Omens")]
+        )
+
+        assert (result.created, result.skipped) == (1, 1)
+
+
+class TestAnOpdsSyncWritesNothingPersonal:
+    def test_no_reading_record_is_touched(self, db, member):
+        OpdsImport.for_member(db, member.id).apply([held("Small Gods")])
+
+        assert db.query(UserBook).count() == 0
+
+    def test_the_result_reports_no_statuses_changed(self, db, member):
+        result = OpdsImport.for_member(db, member.id).apply([held("Small Gods")])
+
+        assert result.statuses_updated == 0
+
+
+class TestOpdsValuesAreBoundedBeforeTheyAreMatched:
+    def test_a_title_at_the_column_width_matches_itself_on_a_second_sync(self, db, member):
+        """Matching on the incoming value and storing the bounded one is how the
+        same feed synced twice fails to find itself."""
+        record = held("T" * TITLE_MAX)
+
+        first = OpdsImport.for_member(db, member.id).apply([record])
+        second = OpdsImport.for_member(db, member.id).apply([record])
+
+        assert (first.created, second.matched) == (1, 1)
+
+    def test_a_title_the_column_cannot_hold_is_skipped_rather_than_filed_cut_short(
+        self, db, member
+    ):
+        """The bound is `catalogue.Record`'s and it drops rather than truncates:
+        half a title is an assertion nobody made. What reaches here is a record
+        naming nothing, and it is counted where a person can see it."""
+        result = OpdsImport.for_member(db, member.id).apply([held("T" * (TITLE_MAX + 1))])
+
+        assert (result.created, result.skipped) == (0, 1)
+
+    def test_an_empty_title_matches_nothing_rather_than_every_book(
+        self, db, member
+    ):
+        """A record naming nothing must not be matched by `""`. The over long
+        case is the test above; this one is the empty string it could also
+        arrive as."""
+        db.add(Book(title="Small Gods", added_by_user_id=member.id))
+        db.commit()
+
+        result = OpdsImport.for_member(db, member.id).apply([held("")])
+
+        assert (result.created, result.matched, result.skipped) == (0, 0, 1)

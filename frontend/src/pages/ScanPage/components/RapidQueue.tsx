@@ -5,17 +5,21 @@ interface RapidQueueProps {
   entries: ScannedEntry[];
   isAdding: boolean;
   result: { added: number; failed: number } | null;
-  onRemove: (isbn: string) => void;
+  onRemove: (key: string) => void;
   onAddAll: () => void;
   onDiscard: () => void;
 }
 
 /**
- * What the rapid scanner has caught so far.
+ * What the scanner has caught and the file picker has read so far.
  *
  * Deliberately shows the failures alongside the hits. A book whose ISBN
- * matched nothing is still a book on the shelf, and silently dropping it is
- * how a catalogue ends up quietly incomplete.
+ * matched nothing is still a book on the shelf, an EPUB that would not open is
+ * still a book on somebody's disk, and silently dropping either is how a
+ * catalogue ends up quietly incomplete.
+ *
+ * **Entries are identified by `key`, never by ISBN**, because a picked file
+ * usually has none: see `ScannedEntry.key`.
  */
 export default function RapidQueue({
   entries,
@@ -61,13 +65,18 @@ export default function RapidQueue({
       <ul className="space-y-1.5 max-h-64 overflow-y-auto">
         {entries.map((entry) => (
           <li
-            key={entry.isbn}
+            key={entry.key}
             className="flex items-center gap-2 text-sm border border-paper-100 rounded-lg px-2.5 py-1.5 dark:border-paper-800"
           >
             <span className="min-w-0 flex-1 truncate">
               {entry.state === "looking-up" && (
                 <span className="text-paper-600 dark:text-paper-400">
                   {t("rapid.lookingUp")}
+                </span>
+              )}
+              {entry.state === "reading" && (
+                <span className="text-paper-600 dark:text-paper-400">
+                  {t("rapid.reading", { name: entry.label })}
                 </span>
               )}
               {entry.state === "found" && (
@@ -85,7 +94,7 @@ export default function RapidQueue({
                   they stay in the queue so they can be retried or dropped. */}
               {entry.state === "failed" && (
                 <span className="text-danger-600 dark:text-danger-300">
-                  {entry.draft?.title || entry.isbn}
+                  {entry.draft?.title || entry.label}
                   {entry.reason && (
                     <span className="text-paper-600 dark:text-paper-400">
                       {" "}
@@ -97,8 +106,8 @@ export default function RapidQueue({
             </span>
             <button
               type="button"
-              onClick={() => onRemove(entry.isbn)}
-              aria-label={t("rapid.removeFromQueue", { isbn: entry.isbn })}
+              onClick={() => onRemove(entry.key)}
+              aria-label={t("rapid.removeFromQueue", { label: entry.label })}
               className="shrink-0 text-paper-600 hover:text-danger-500 dark:text-paper-400 dark:hover:text-danger-300"
             >
               ×

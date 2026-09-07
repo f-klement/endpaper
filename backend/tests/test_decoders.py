@@ -479,3 +479,34 @@ class TestTheCapabilityVocabularyIsSharedRatherThanCatalogueShaped:
         ]
 
         assert readers, capability
+
+
+class TestEveryReaderBelongsToExactlyOneFamily:
+    """`decoders.IMPORT_READERS` and `CATALOGUE_READERS` partition `Reader`.
+
+    **Neither list is the rule on its own**, which is what this class exists to
+    say. `targets.Target` refuses a reader in the first, so a member left out of
+    it is admitted to the catalogue registry in silence: that is the
+    `enums.SourceFamily` merge arriving with nothing red. A member left out of
+    the second fails loudly at `targets.SEEDED`, which is built at module scope,
+    but only if it is actually seeded.
+
+    So the guard is the partition rather than either side, and a `Reader` added
+    without being placed fails here.
+    """
+
+    def test_together_they_are_the_whole_enum(self):
+        assert set(decoders.Reader) == (
+            decoders.IMPORT_READERS | decoders.CATALOGUE_READERS
+        )
+
+    def test_no_reader_is_in_both(self):
+        assert not decoders.IMPORT_READERS & decoders.CATALOGUE_READERS
+
+    def test_neither_side_is_empty(self):
+        """The control. Two empty sets are disjoint, and an empty import side is
+        what a future edit would leave behind: the union test would then fail,
+        but only because the catalogue side had to grow to cover it, which is a
+        different failure than the one this class is about."""
+        assert decoders.IMPORT_READERS
+        assert decoders.CATALOGUE_READERS

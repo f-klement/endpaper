@@ -2,8 +2,9 @@
 
 A **decoder** turns one record of one serialisation into this application's
 model. `Reader` is the closed set of them and `Decoding` is the whole of what
-one is told. The implementations are in `metadata.py`; this module is the
-contract they are held to.
+one is told. The implementations are in `metadata.py` for the catalogue family
+and in `opds.py` for the import family; this module is the contract both are
+held to.
 
 ## The contract, and both families are held to it
 
@@ -38,10 +39,10 @@ on a file unchanged, and it is run rather than asserted:
 disk, builds a `Decoding` by hand with no `Target` anywhere, and gets the record
 the live path gets.
 
-## Why there are seven readers and five serialisations
+## Why there are eight readers and six serialisations
 
-The serialisations are MARC21, Dublin Core, MODS, Open Library's JSON and Google
-Books'. Two of them are read two ways.
+The serialisations are MARC21, Dublin Core, MODS, Open Library's JSON, Google
+Books' and OPDS's Atom. Two of them are read two ways.
 
 MARC21 is two profiles here rather than one. `metadata._dnb_record` harvests GND
 identified headings across five tags and refuses a title that names a volume
@@ -95,6 +96,16 @@ class Reader(StrEnum):
     OPEN_LIBRARY = "open_library"
     #: The Google Books volumes API.
     GOOGLE_BOOKS = "google_books"
+    #: One `<entry>` of an OPDS 1.x Atom catalogue, `opds.entry_record`. The
+    #: first member of this set belonging to `SourceFamily.IMPORT` rather than
+    #: to the catalogue registry, which costs this enum nothing: a reader is
+    #: keyed on the serialisation and a family is a property of the source.
+    #:
+    #: **Atom and not OPDS 2.0's JSON, and that is a measurement rather than a
+    #: preference.** Of nine self hosted candidates surveyed 2026-09-05, seven
+    #: serve OPDS and all seven serve the 1.x Atom line. See
+    #: `docs/decisions.md`, "OPDS is a discovery route".
+    OPDS_ATOM = "opds_atom"
 
 
 #: The readers that read MARC21, so the two knobs that only a MARC reader can
@@ -106,6 +117,46 @@ class Reader(StrEnum):
 #: the third knob and is **not** MARC only: `metadata._dublin_core_bare_lookup`
 #: reads it for the Czech National Library, whose reader is `DUBLIN_CORE_BARE`.
 MARC_READERS: Final = frozenset({Reader.MARC_GND, Reader.MARC_PLAIN})
+
+#: The readers that belong to `enums.SourceFamily.IMPORT`, so the catalogue
+#: registry can refuse one, and the readers that do not.
+#:
+#: **Both sides are named, and that is a correction rather than belt and
+#: braces.** The first version named only the import family, on the argument
+#: that a new catalogue reader should be admitted rather than refused until
+#: somebody listed it. A critic inverted it: forget to add the next **import**
+#: reader, the OPF decoder this module's docstring already names as the near
+#: term demand, and `targets.Target(reader=Reader.OPF)` constructs, which admits
+#: the `enums.SourceFamily` merge with nothing red. The inclusion direction
+#: fails instead at `targets.SEEDED`, which is built at module scope, so the
+#: application does not start, on the commit that adds the reader, in the file
+#: being edited.
+#:
+#: So neither list is the rule on its own. The rule is that they partition
+#: `Reader`, asserted by
+#: `tests/test_decoders.py::TestEveryReaderBelongsToExactlyOneFamily`, and a new
+#: member fails that test until somebody places it.
+#:
+#: **This is not a family on the reader**, which `Reader` says it is not: it is
+#: the catalogue registry stating which parsers are not its own, in the one
+#: place both registries can see. `targets.Target.__post_init__` is the refusal
+#: and `tests/test_targets.py` is its guard; without it a `catalogue_targets`
+#: row could name `OPDS_ATOM` and construct, and only a row that also declared a
+#: capability would be caught, by `metadata.resolve`.
+IMPORT_READERS: Final = frozenset({Reader.OPDS_ATOM})
+
+#: The other side of that partition. See `IMPORT_READERS`.
+CATALOGUE_READERS: Final = frozenset(
+    {
+        Reader.MARC_GND,
+        Reader.MARC_PLAIN,
+        Reader.DUBLIN_CORE,
+        Reader.DUBLIN_CORE_BARE,
+        Reader.MODS,
+        Reader.OPEN_LIBRARY,
+        Reader.GOOGLE_BOOKS,
+    }
+)
 
 
 @dataclass(frozen=True)

@@ -12,14 +12,21 @@ import pytest
 from sqlalchemy import CheckConstraint, String, delete, text
 from sqlalchemy.exc import IntegrityError
 
+import credentials
 import filing
 from database import Base
-from enums import AuthorityProvenance, AuthorityScheme, ClassificationScheme
+from enums import (
+    AuthorityProvenance,
+    AuthorityScheme,
+    CatalogueSource,
+    ClassificationScheme,
+)
 from models import (
     AUTHORITY_IDENTIFIER_MAX,
     CLASSIFICATION_NUMBER_MAX,
     CLASSIFICATION_SORT_KEY_MAX,
     ONE_BORROWER_SQL,
+    OPDS_CREDENTIAL_PREFIX,
     AuthorIdentifier,
     Book,
     Collection,
@@ -31,6 +38,7 @@ from models import (
     UserBook,
     is_switch_target,
     names_exactly_one_borrower,
+    new_opds_credential_key,
     switch_targets,
     visible_to,
 )
@@ -1238,3 +1246,112 @@ class TestTheShelfKeyFitsItsColumn:
         number, so reusing `CLASSIFICATION_NUMBER_MAX` here would be too
         narrow."""
         assert CLASSIFICATION_SORT_KEY_MAX > CLASSIFICATION_NUMBER_MAX
+
+
+class TestAnOpdsServerNeverBorrowsACatalogueLogin:
+    """`catalogue_credentials.source` holds two key spaces at once: a
+    `CatalogueSource` value for a roster row, and an `OpdsServer.credential_key`
+    for a household's own machine. If the two could collide, adding a server
+    could hand it a catalogue's stored login and send it there.
+    """
+
+    def test_no_catalogue_source_is_spelled_with_the_opds_prefix(self):
+        assert not [
+            source
+            for source in CatalogueSource
+            if source.value.startswith(OPDS_CREDENTIAL_PREFIX)
+        ]
+
+    def test_a_generated_key_carries_the_prefix_and_is_a_safe_source(self):
+        """Safe in `credentials.is_safe_source`'s sense, because this value
+        becomes `catalogue_credentials.source`, which travels into a URL path."""
+        key = new_opds_credential_key()
+
+        assert key.startswith(OPDS_CREDENTIAL_PREFIX)
+        assert credentials.is_safe_source(key)
+
+    def test_two_keys_generated_in_a_row_differ(self):
+        """Random rather than derived from the row id: SQLite reuses
+        `max(rowid) + 1` after a delete, so a derived key would hand a new
+        server the login of the one that used to have that id."""
+        assert new_opds_credential_key() != new_opds_credential_key()
+
+    def test_the_credential_key_column_refuses_what_is_not_a_source(self, db):
+        """`ck_opds_servers_credential_key`, which is
+        `ck_catalogue_credentials_source`'s rule over this column's name."""
+        with pytest.raises(IntegrityError):
+            db.execute(
+                text(
+                    "INSERT INTO opds_servers (name, base_url, credential_key) "
+                    "VALUES ('x', 'http://h/opds', 'opds-../../books/5?')"
+                )
+            )
+
+    @pytest.mark.parametrize("value", [source.value for source in CatalogueSource])
+    def test_the_column_refuses_a_roster_catalogues_key(self, db, value):
+        """**The guard above is on the enum and this one is on the column, and
+        only the second covers the writer that matters.**
+
+        `backup.restore` re-inserts this table through Core with no validating
+        arm, so an archive decides this value. A row naming `bne` beside an
+        address of its own makes `credentials.for_request` bind the library's
+        sealed BNE login to that address and `header_for` send it: the plaintext
+        reaching a host the archive chose, from an archive carrying no key.
+        Parametrised over the whole roster rather than one member, so a source
+        added later is covered without an arm being remembered.
+        """
+        with pytest.raises(IntegrityError):
+            db.execute(
+                text(
+                    "INSERT INTO opds_servers (name, base_url, credential_key) "
+                    "VALUES ('x', 'http://attacker.example/opds', :key)"
+                ),
+                {"key": value},
+            )
+
+    def test_the_column_admits_the_key_this_application_generates(self, db):
+        """The control: a refusal that refused everything would pass the row
+        above while making the feature impossible."""
+        db.execute(
+            text(
+                "INSERT INTO opds_servers (name, base_url, credential_key) "
+                "VALUES ('x', 'http://library.invalid/opds', :key)"
+            ),
+            {"key": new_opds_credential_key()},
+        )
+
+    def test_the_credential_key_column_refuses_a_path_hidden_behind_a_nul(self, db):
+        """SQLite's `length` and `GLOB` stop at the first NUL, so the clause
+        that catches this is `instr(credential_key, char(0)) = 0` and nothing
+        else in the constraint sees past it."""
+        with pytest.raises(IntegrityError):
+            db.execute(
+                text(
+                    "INSERT INTO opds_servers (name, base_url, credential_key) "
+                    "VALUES ('x', 'http://h/opds', 'opds-1' || char(0) || '../../books/5?')"
+                )
+            )
+
+    @pytest.mark.parametrize(
+        "address", ["file:///etc/passwd", "gopher://h/opds", "http://", ""]
+    )
+    def test_the_address_column_refuses_a_scheme_no_sync_would_fetch(self, db, address):
+        """The last line for a write that never came through the route, which is
+        what a restore is."""
+        with pytest.raises(IntegrityError):
+            db.execute(
+                text(
+                    "INSERT INTO opds_servers (name, base_url, credential_key) "
+                    "VALUES ('x', :url, 'opds-abc')"
+                ),
+                {"url": address},
+            )
+
+    def test_the_name_column_refuses_an_empty_name(self, db):
+        with pytest.raises(IntegrityError):
+            db.execute(
+                text(
+                    "INSERT INTO opds_servers (name, base_url, credential_key) "
+                    "VALUES ('', 'http://h/opds', 'opds-abc')"
+                )
+            )

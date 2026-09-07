@@ -50,6 +50,24 @@
   local account must return a code sent to its address before it may sign in, and an admin
   can confirm an account instead, which is the path for a deployment with no mail server.
   The account records who confirmed it. Accounts that already exist are unaffected.
+- **Add a book by pointing at its EPUB.** The scan page takes files beside the camera, the ISBN
+  box and the title search, reads the title, authors, series, publisher, year and language out
+  of them, and fills the same review queue rapid scanning fills, so a pick is reviewed and
+  committed the way a shelf of barcodes is. **The file is read in your own browser and the
+  application never takes custody of it**: only what the file said is sent. A file that will not
+  open stays in the queue with its name and the reason rather than failing the batch. Both EPUB
+  2 and EPUB 3 spellings are read, which is not a detail: measured over 79 real files, the ISBN
+  arrives as the identifier's own text in all four files that carry one, through neither
+  documented scheme.
+- **Read a household's own OPDS server.** Calibre-Web, Komga, Kavita, Ubooquity and anything
+  else serving an OPDS 1.x Atom catalogue. An admin adds the server's feed address and, where it
+  needs one, a login sealed with the same key every other stored credential uses; any member can
+  then sync it, and what the feed lists arrives in the catalogue as books they own. Titles and
+  authors only: measured across seven self hosted servers, none emits an identifier, so what a
+  book **is** still comes from the catalogue chain. Matching is by ISBN where the feed carries
+  one and by title otherwise, and a sync fills gaps and never overwrites what somebody wrote.
+  Only an entry saying the member holds the book is taken: a title a server offers to sell or
+  lend is passed over, because an entitlement is not a holding.
 
 ### Changed
 
@@ -132,6 +150,14 @@
 - The credential encryption key no longer prints when a `KeyState` is rendered. The bytes
   are the recovery phrase, so one rendering disclosed the key that opens every stored
   credential.
+- **A cut title no longer loses the whole book.** Any value too wide for its column was cut in
+  UTF-16 units where the column and the schema count code points, so a cut landing inside an
+  emoji produced half a character, the request was refused outright, and the book was lost
+  rather than one field. It also refused at 250 emoji what the server would have taken 500 of.
+- **A barcode whose lookup was still in flight when Add all was pressed no longer vanishes.**
+  It had no draft, so it was not in the batch, and the queue was then replaced by the failures
+  alone: the book was gone between the shelf and the catalogue with nothing on screen saying so.
+  Everything the batch was never offered now stays in the queue.
 
 ## v0.13.0
 

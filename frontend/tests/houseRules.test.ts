@@ -156,6 +156,68 @@ describe("no control draws its own focus ring", () => {
   });
 });
 
+/**
+ * The modules that read a picked ebook file, which is the whole reading path.
+ *
+ * Named rather than globbed: this is a rule about a specific seam, and a glob
+ * would either miss a reader added elsewhere or sweep in the page that
+ * legitimately does both. A new reader is added to this list by the ticket that
+ * writes it, which is the moment somebody is thinking about the rule.
+ */
+const FILE_READERS = ["lib/zip.ts", "lib/epub.ts", "lib/opf.ts"];
+
+/** Anything by which a module could put bytes on the wire. */
+const REACHES_THE_NETWORK =
+  /\b(fetch|XMLHttpRequest|WebSocket|sendBeacon|FormData|navigator\.send)\b|from "[^"]*\/api\//;
+
+describe("a member's book file cannot leave the browser", () => {
+  it("keeps every reader out of reach of the network", () => {
+    // The decision on the digital copies ticket is that no bytes reach the
+    // server, and it is worth more as a structural property than as a
+    // discipline: the reader modules hold the only `ArrayBuffer` of somebody's
+    // book, so if none of them can reach the network, no arrangement of the
+    // page above them can send one.
+    //
+    // A guard on the page instead would have to tell a book file from a cover
+    // image, and the page legitimately sends the second. This one does not need
+    // to, because it sits where only the first exists.
+    const offenders = entries()
+      .filter(([path]) => FILE_READERS.some((name) => path.endsWith(name)))
+      .filter(([, source]) => REACHES_THE_NETWORK.test(withoutProse(source)))
+      .map(([path]) => path);
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("is watching something", () => {
+    // The list above is the failure this test is for: a reader that is renamed
+    // or added, and silently stops being covered. So assert the paths resolve
+    // to real files rather than trusting that they do.
+    const seen = entries().map(([path]) => path);
+    for (const name of FILE_READERS) {
+      expect(seen.filter((path) => path.endsWith(name))).toHaveLength(1);
+    }
+  });
+
+  it("keeps the picked file out of the value a request is built from", () => {
+    // `draftFromFile` is the seam between the reading path and the request
+    // path, and the property is its parameter: it takes the parsed record, so a
+    // `File` has nowhere to travel. Taking a `File` here would compile, would
+    // pass every other test, and would put the bytes one spread away from a
+    // body.
+    const types = entries().find(([path]) =>
+      path.endsWith("pages/ScanPage/types.ts"),
+    );
+    expect(types).toBeDefined();
+
+    const signature = withoutProse(types![1]).match(
+      /export function draftFromFile\(([^)]*)\)/,
+    );
+    expect(signature).not.toBeNull();
+    expect(signature![1]).not.toMatch(/\bFile\b/);
+  });
+});
+
 /** The source with comments removed, so a rule cannot be satisfied by prose. */
 function withoutProse(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");

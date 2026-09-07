@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:dcterms="http://purl.org/dc/terms/">
+  <id>urn:uuid:8f2c1d40-0000-4000-8000-000000000001</id>
+  <title>All books</title>
+  <updated>2026-09-07T09:00:00Z</updated>
+  <link rel="self" href="/opds/books" type="application/atom+xml;profile=opds-catalog"/>
+  <entry>
+    <title>Small Gods</title>
+    <author><name>Terry Pratchett</name></author>
+    <updated>2026-09-07T09:00:00Z</updated>
+    <link rel="http://opds-spec.org/acquisition"
+          href="/opds/download/1"
+          type="application/epub+zip"/>
+  </entry>
+  <entry>
+    <title>Good Omens</title>
+    <author><name>Terry Pratchett</name></author>
+    <author><name>Neil Gaiman</name></author>
+    <updated>2026-09-07T09:00:00Z</updated>
+    <link rel="http://opds-spec.org/acquisition/open-access"
+          href="/opds/download/2"
+          type="application/epub+zip"/>
+  </entry>
+  <entry>
+    <title>Recently added</title>
+    <updated>2026-09-07T09:00:00Z</updated>
+    <link rel="subsection"
+          href="/opds/recent"
+          type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+  </entry>
+</feed>

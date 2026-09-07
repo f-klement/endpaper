@@ -16,6 +16,7 @@ import {
   useScanFlow,
 } from "../../../src/pages/ScanPage/hooks";
 import { makeBook, resetIds } from "../../factories";
+import { epubFile, packageDocument } from "../../zipFixtures";
 import { mockApi, renderHookWithProviders, type MockApi } from "../../utils";
 
 let api: MockApi;
@@ -543,10 +544,198 @@ describe("useRapidIntake", () => {
     act(() => result.current.capture("9780262033848"));
     await waitFor(() => expect(result.current.entries).toHaveLength(2));
 
-    act(() => result.current.remove("9780441013593"));
+    act(() => result.current.remove("isbn:9780441013593"));
 
     expect(result.current.entries.map((e) => e.isbn)).toEqual([
       "9780262033848",
+    ]);
+  });
+
+  it("keeps a barcode whose lookup was still in flight when the batch ran", async () => {
+    // It has no draft, so it is not in the batch. It used to be dropped from
+    // the queue anyway: press Add all one second early and that book is gone
+    // between the shelf and the catalogue, with nothing on screen saying so.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    api.on("/api/books/lookup", async (url) => {
+      if (url.includes("9780262033848")) await held;
+      return { body: LOOKUP };
+    });
+    api.on("/api/books/scan", { body: makeBook() });
+    const { result } = renderRapid();
+
+    act(() => result.current.capture("9780441013593"));
+    await waitFor(() => expect(result.current.entries[0]?.state).toBe("found"));
+    act(() => result.current.capture("9780262033848"));
+    act(() => result.current.addAll());
+
+    await waitFor(() => expect(result.current.result?.added).toBe(1));
+    expect(result.current.entries.map((entry) => entry.isbn)).toEqual([
+      "9780262033848",
+    ]);
+    release();
+  });
+});
+
+describe("useRapidIntake and a picked file", () => {
+  function renderRapid() {
+    return renderHookWithProviders(() => useRapidIntake());
+  }
+
+  /** The queue, once nothing in it is still being read. */
+  async function settled(result: { current: { isReading: boolean } }) {
+    await waitFor(() => expect(result.current.isReading).toBe(false));
+  }
+
+  it("reads an EPUB into the queue without sending anything", async () => {
+    const { result } = renderRapid();
+    const file = await epubFile("dune.epub");
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+
+    expect(result.current.entries[0]?.state).toBe("found");
+    expect(result.current.entries[0]?.draft?.title).toBe("Dune");
+    // The decision behind this path, asserted rather than commented: reading a
+    // file creates no request at all, so nothing here is a route by which the
+    // application comes to hold somebody's book.
+    expect(api.calls).toEqual(
+      api.calls.filter((call) => call.method === "GET"),
+    );
+  });
+
+  it("labels the entry with the file's name, since most files have no ISBN", async () => {
+    // Measured over 79 real EPUBs: 4 carried an ISBN. A queue labelled by ISBN
+    // would show seventy five blanks.
+    const { result } = renderRapid();
+
+    const file = await epubFile("dune.epub");
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+
+    expect(result.current.entries[0]?.label).toBe("dune.epub");
+    expect(result.current.entries[0]?.isbn).toBe("");
+  });
+
+  it("keeps a file it could not read, named, rather than failing the batch", async () => {
+    const { result } = renderRapid();
+    const broken = new File(["not an epub at all"], "broken.epub");
+
+    act(() => result.current.pickFiles([broken]));
+    await settled(result);
+
+    expect(result.current.entries[0]).toMatchObject({
+      state: "failed",
+      label: "broken.epub",
+      draft: null,
+    });
+    expect(result.current.entries[0]?.reason).toBe("Not an EPUB file.");
+  });
+
+  it("reads the rest of a batch after one file fails", async () => {
+    const { result } = renderRapid();
+
+    const good = await epubFile("dune.epub");
+
+    act(() =>
+      result.current.pickFiles([new File(["nope"], "broken.epub"), good]),
+    );
+    await settled(result);
+
+    expect(result.current.entries.map((entry) => entry.state)).toEqual([
+      "failed",
+      "found",
+    ]);
+  });
+
+  it("refuses a file that carries no title, because the API requires one", async () => {
+    const { result } = renderRapid();
+    const untitled = await epubFile("untitled.epub", {
+      opf: packageDocument(`<dc:creator>Frank Herbert</dc:creator>`),
+    });
+
+    act(() => result.current.pickFiles([untitled]));
+    await settled(result);
+
+    expect(result.current.entries[0]?.state).toBe("failed");
+    expect(result.current.entries[0]?.reason).toBe(
+      "This file carries no title.",
+    );
+  });
+
+  it("ignores the same file picked twice", async () => {
+    const { result } = renderRapid();
+    const file = await epubFile("dune.epub");
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+
+    expect(result.current.entries).toHaveLength(1);
+  });
+
+  it("adds what the file said when the batch is confirmed", async () => {
+    api.on("/api/books/scan", { body: makeBook() });
+    const { result } = renderRapid();
+    const file = await epubFile("dune.epub");
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+
+    act(() => result.current.addAll());
+
+    await waitFor(() => expect(result.current.result?.added).toBe(1));
+    expect(api.lastCall("/api/books/scan", "POST")?.body).toMatchObject({
+      title: "Dune",
+      author: "Frank Herbert",
+      language: "en",
+      // The container answers this. `format` is nullable precisely so nothing
+      // guesses it, and a file whose own type is EPUB is not a guess.
+      format: "ebook",
+    });
+  });
+
+  it("leaves the format blank for a barcode, which answers nothing about it", async () => {
+    api.on("/api/books/lookup", {
+      body: {
+        isbn: "9780441013593",
+        title: "Dune",
+        author: "Frank Herbert",
+        suggested_tag_ids: [],
+      },
+    });
+    api.on("/api/books/scan", { body: makeBook() });
+    const { result } = renderRapid();
+    act(() => result.current.capture("9780441013593"));
+    await waitFor(() => expect(result.current.entries[0]?.state).toBe("found"));
+
+    act(() => result.current.addAll());
+
+    await waitFor(() => expect(result.current.result?.added).toBe(1));
+    expect(api.lastCall("/api/books/scan", "POST")?.body).toMatchObject({
+      format: null,
+    });
+  });
+
+  it("keeps an unreadable file in the queue after the batch runs", async () => {
+    // It has no draft, so it was never offered to the batch, and it is exactly
+    // what still needs a decision.
+    api.on("/api/books/scan", { body: makeBook() });
+    const { result } = renderRapid();
+    const good = await epubFile("dune.epub");
+    act(() =>
+      result.current.pickFiles([new File(["nope"], "broken.epub"), good]),
+    );
+    await settled(result);
+
+    act(() => result.current.addAll());
+
+    await waitFor(() => expect(result.current.result?.added).toBe(1));
+    expect(result.current.entries.map((entry) => entry.label)).toEqual([
+      "broken.epub",
     ]);
   });
 });

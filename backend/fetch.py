@@ -10,14 +10,24 @@ read or the seconds spent. This module is the single definition of all four.
 not one outbound policy for the whole app".** `covers.py` answers a different
 question: `cover_url` arrives on `BookCreate` from any signed in member, so the
 host is chosen by an attacker and has to be tested against an allowlist
-(`covers.is_fetchable`) on every hop. Here the host is a module constant and the
-member supplies at most a query string, so there is no allowlist to apply and
-nothing an allowlist would refuse. Folding them together would mean adding eleven
-catalogue hosts to `COVER_HOSTS`, and `COVER_HOSTS` is what the CSP's `img-src`
-is generated from: the merge would widen the browser policy to pay for a fetch
-policy. What the two do share is the *shape* of the read loop, and both now have
-it: refuse a hop that leaves the host, count raw bytes, stop at a deadline. See
-`docs/security.md`.
+(`covers.is_fetchable`) on every hop. Folding them together would mean adding
+eleven catalogue hosts to `COVER_HOSTS`, and `COVER_HOSTS` is what the CSP's
+`img-src` is generated from: the merge would widen the browser policy to pay for
+a fetch policy. What the two do share is the *shape* of the read loop, and both
+now have it: refuse a hop that leaves the host, count raw bytes, stop at a
+deadline. See `docs/security.md`.
+
+**"There is no allowlist here because the host is a module constant" is true of
+`metadata.py` and `google_books.py` and is no longer true of this module's
+callers as a set.** `opds.py` is the third one, and its address is typed by an
+admin, which is #131's concession 1 arriving. It is admitted here rather than
+given a fourth read loop because a fourth copy of these four bounds is how one
+of them comes to be missing, and because it brings its own admission rule and
+its own origin pin and applies both **before** every call into this module: no
+byte of any response it reads may move the address of the next request. What
+this module contributes to that is the hop guard, which refuses a redirect off
+the host whoever the caller is. Read `opds.py`'s docstring for the whole policy,
+including the one control of #131's that deliberately does not apply there.
 """
 
 import asyncio
@@ -192,9 +202,14 @@ class DeadlineExceeded(FetchRefused):
 class RedirectedOffHost(FetchRefused):
     """A catalogue tried to send this server somewhere else.
 
-    **This is the SSRF, and it is the only one this module has.** The first
-    host is a module constant, so an attacker cannot pick it; a redirect is how
-    they would pick the second. `targets.SEEDED[CatalogueSource.LOC].base_url` is plaintext `http://lx2.loc.gov:210`
+    **This is the SSRF for the catalogue callers.** There the first host is a
+    module constant, so an attacker cannot pick it; a redirect is how they would
+    pick the second. For `opds.py` the first host is an admin's and a redirect
+    is one of two ways a response could pick the second, the other being a
+    paging link, which that module refuses against the same origin this does.
+
+    `targets.SEEDED[CatalogueSource.LOC].base_url` is plaintext
+    `http://lx2.loc.gov:210`
     by necessity, so anyone on the path, or anyone answering DNS for the pod,
     can forge a 302 and turn a member's search into a GET at any address the pod
     can reach, cluster ClusterIPs and 169.254.169.254 included, with up to the

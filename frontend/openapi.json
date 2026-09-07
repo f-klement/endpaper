@@ -3803,6 +3803,188 @@
         "title": "NoteOut",
         "type": "object"
       },
+      "OpdsCredentialIn": {
+        "description": "A login at one household server.\n\nBoth halves are required. `credentials.put` refuses a blank either way and\nrefuses a colon in the username, because RFC 7617 forbids one in a Basic\nuser-id and this application keeps one representation of the pair.",
+        "properties": {
+          "password": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "OpdsCredentialIn",
+        "type": "object"
+      },
+      "OpdsServerIn": {
+        "description": "A server an admin is adding, or the two fields of one they are editing.\n\n**The address is validated here as well as at the route**, and the two are\nnot the same check said twice: this bounds the length and the shape a column\ncan hold, and `opds.is_fetchable` decides whether this server will open a\nconnection to it. The second is the security rule and it runs again before\nevery single request, including for the paging links the feed itself writes,\nwhich never come through this model at all.",
+        "properties": {
+          "base_url": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Base Url",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "base_url"
+        ],
+        "title": "OpdsServerIn",
+        "type": "object"
+      },
+      "OpdsServerOut": {
+        "description": "One configured server, and never its login.\n\n`credential_username_preview` is masked by the route, in\n`settings_store.mask`, which is where every other preview in this\napplication is masked.",
+        "properties": {
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "credential_provenance": {
+            "$ref": "#/components/schemas/CredentialProvenance"
+          },
+          "credential_unreadable": {
+            "title": "Credential Unreadable",
+            "type": "boolean"
+          },
+          "credential_username_preview": {
+            "title": "Credential Username Preview",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "base_url",
+          "credential_provenance",
+          "credential_username_preview",
+          "credential_unreadable"
+        ],
+        "title": "OpdsServerOut",
+        "type": "object"
+      },
+      "OpdsServerSummaryOut": {
+        "description": "One server as a member may see it: enough to name it and to sync it.\n\n**Deliberately not `OpdsServerOut` with fields omitted.** The address is the\nconfiguration an admin owns and `credential_provenance` is about a secret;\na separate model means neither can be added back by somebody widening a\nresponse they did not realise a member reads.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "OpdsServerSummaryOut",
+        "type": "object"
+      },
+      "OpdsSyncOut": {
+        "description": "What one sync did, over the shared import result.\n\n**The extra fields are what only this route can answer**, and each exists\nbecause of a question a person actually asks when nothing arrives.\n\n`entries_not_held` answers \"why did my library not come in\": an entry counts\nonly when it says the member holds the book, so a large number here means\nthe address given is a shelf index, or a feed offering titles for sale or\nloan rather than listing what is on the shelf. See `opds.HOLDING_RELS`.\n\n`truncated` answers \"is that all of it\": true when a cap or the sync\ndeadline stopped the walk before the feed ran out. A sync that stopped early\nhas still written what it read, so this is the difference between a complete\npicture and a partial one.",
+        "properties": {
+          "created": {
+            "description": "Books added from the file",
+            "minimum": 0.0,
+            "title": "Created",
+            "type": "integer"
+          },
+          "entries_not_held": {
+            "description": "Entries passed over because they say nothing about the member holding the book: a link to another feed, or a title offered for sale or loan",
+            "minimum": 0.0,
+            "title": "Entries Not Held",
+            "type": "integer"
+          },
+          "excluded": {
+            "default": 0,
+            "description": "Rows the file itself marked as not wanted, such as a title deleted at the source",
+            "minimum": 0.0,
+            "title": "Excluded",
+            "type": "integer"
+          },
+          "matched": {
+            "description": "Rows matched to a book already here",
+            "minimum": 0.0,
+            "title": "Matched",
+            "type": "integer"
+          },
+          "pages_read": {
+            "description": "Pages of the feed that were walked",
+            "minimum": 0.0,
+            "title": "Pages Read",
+            "type": "integer"
+          },
+          "rows_read": {
+            "description": "Rows this import acted on",
+            "minimum": 0.0,
+            "title": "Rows Read",
+            "type": "integer"
+          },
+          "skipped": {
+            "description": "Rows this import could not act on: no title, or an ISBN held by a book the caller cannot see",
+            "minimum": 0.0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "statuses_updated": {
+            "description": "Statuses actually changed",
+            "minimum": 0.0,
+            "title": "Statuses Updated",
+            "type": "integer"
+          },
+          "truncated": {
+            "default": false,
+            "description": "A cap or the deadline stopped the walk before the feed ended",
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "unmatched_titles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unmatched Titles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows_read",
+          "matched",
+          "created",
+          "statuses_updated",
+          "skipped",
+          "pages_read",
+          "entries_not_held"
+        ],
+        "title": "OpdsSyncOut",
+        "type": "object"
+      },
       "OverdueNotifyReason": {
         "description": "Why the overdue digest sent nothing.\n\nA closed set rather than the prose in `detail`, because the client has to\n*render* the difference and a sentence is not something it can branch on.\nWithout it a broken webhook and a quiet week were the same string on the\nscreen, which is the exact confusion the \"send now\" button exists to clear\nup.\n\n`detail` stays beside it, and the two are not the same thing: this is what\nhappened, in a form code can test; that is a sentence for a log or an API\ncaller with no message catalogue of its own.",
         "enum": [
@@ -10710,6 +10892,384 @@
         "summary": "Return Loan",
         "tags": [
           "loans"
+        ]
+      }
+    },
+    "/api/opds/servers": {
+      "get": {
+        "description": "Every OPDS server this library is configured to read.",
+        "operationId": "list_servers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OpdsServerOut"
+                  },
+                  "title": "Response List Servers",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Servers",
+        "tags": [
+          "opds"
+        ]
+      },
+      "post": {
+        "description": "Add a server, with no login on it yet.\n\nThe credential is a second call rather than two more fields here, mirroring\nthe catalogue settings screen: a login is replaced far more often than an\naddress is, and folding them would make an edit that leaves the password\nfield blank ambiguous between \"unchanged\" and \"removed\".",
+        "operationId": "add_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpdsServerIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpdsServerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Add Server",
+        "tags": [
+          "opds"
+        ]
+      }
+    },
+    "/api/opds/servers/mine": {
+      "get": {
+        "description": "The servers this member may sync, by id and name.\n\n**Without this the split above is not deliverable and nothing said so.** The\nfull listing is admin only, so a member had no way to learn a `server_id`\nand could reach `POST /servers/{id}/sync` only by guessing an integer. A\ncritic found it because the router's own test took the id from the admin's\ncreate response, which is exactly where a missing route does not show.\n\n**Two fields and not the full row.** A member needs to name the server they\nare syncing; the address is the configuration an admin owns, and the\ncredential state is about a secret. Neither belongs on a screen that only\noffers a button.",
+        "operationId": "list_syncable_servers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OpdsServerSummaryOut"
+                  },
+                  "title": "Response List Syncable Servers",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Syncable Servers",
+        "tags": [
+          "opds"
+        ]
+      }
+    },
+    "/api/opds/servers/{server_id}": {
+      "delete": {
+        "description": "Forget a server, and the login sealed for it.\n\n**Both, and the credential is not merely tidied away.** The key is random\nrather than derived from the row id, so no later server can be handed this\none's login even if this delete were skipped, and this delete means the\nenvelope does not sit in every archive after the machine it was for is gone.\nSee `models.new_opds_credential_key` for why the two guards are separate.",
+        "operationId": "remove_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Server Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Remove Server",
+        "tags": [
+          "opds"
+        ]
+      },
+      "put": {
+        "description": "Rename a server, or point it somewhere else.\n\n**Moving it to a different origin drops the stored login**, and that is the\nsecurity rule rather than tidiness. `credentials.for_request` binds a\ncredential to the address it is **asked** about, so a login sealed for one\nmachine would be sent to whatever address this row is edited to name. The\nresponse reports the credential as gone, so nothing has to be inferred from\nsilence.\n\nA rename, or an edit that keeps the same scheme, host and port, keeps the\nlogin: it is the same machine, and making somebody retype a password to fix\na path would teach them to keep the row wrong.",
+        "operationId": "edit_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Server Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpdsServerIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpdsServerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Edit Server",
+        "tags": [
+          "opds"
+        ]
+      }
+    },
+    "/api/opds/servers/{server_id}/credential": {
+      "delete": {
+        "description": "Drop this server's stored login.\n\n**Succeeds whether or not one was stored, and needs no key**, for the\ncatalogue credential route's reason: a login nobody can read is exactly the\none somebody most wants to be rid of, and requiring the key to delete it\nwould make a rotated key unrecoverable without a database edit.",
+        "operationId": "forget_server_credential",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Server Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpdsServerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Forget Server Credential",
+        "tags": [
+          "opds"
+        ]
+      },
+      "put": {
+        "description": "Store this server's login, sealed.\n\nSealed against the row's own credential key, so a ciphertext moved between\nrows by a hand edited archive fails authentication rather than decrypting\ninto a request aimed at a different machine. `credentials.seal` carries the\nargument.\n\n409 when no encryption key is configured: there is nowhere to put a secret,\nand the message names the variables that would supply one.",
+        "operationId": "set_server_credential",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Server Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpdsCredentialIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpdsServerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Server Credential",
+        "tags": [
+          "opds"
+        ]
+      }
+    },
+    "/api/opds/servers/{server_id}/sync": {
+      "post": {
+        "description": "Read one server's feed and record what this member holds.\n\n**`async def`, and the applying is pushed off the event loop by hand, which\nis the opposite arrangement to the other two importers and is deliberate.**\nThose read a file that has already arrived and are `def` throughout, so\nFastAPI runs them in a threadpool. This one has two halves: the walk is\nnetwork bound and awaits, and the apply is blocking, because SQLAlchemy has\nno async here. Declaring the whole handler `def` would put an `asyncio.run`\ninside a worker thread; leaving the apply on the loop would stop the\napplication answering for its duration, measured elsewhere at 14.4 seconds\nfor `GET /api/books` during a 3,000 row import. So the walk awaits and the\napply goes to `anyio.to_thread`.\n\n**The session is touched from one thread at a time**, which is what makes\nthat safe: the walk is finished before the apply starts, and nothing else\nholds this request's session.\n\n**Rate limited on the import limiter**, with the other bulk writes. A sync\nis a walk of somebody's whole library and a write per entry, and the\naddress it walks is one an admin chose rather than one this build ships.\n\nBooks created here arrive `ownership=owned`, which is the whole point of the\nroute: a member's own library server is the evidence of possession that a\nreading history and another institution's catalogue both are not. **Only an\nentry that says the member holds the book is counted**, so a title a server\noffers for sale or loan is passed over rather than recorded as owned: an\nentitlement is not a holding.\n\n**A book added by a sync carries a title, an author and nothing else, and\nthat is a complete row rather than a half finished one.** What the feed\ncannot supply, measured across seven servers rather than read off the\nspecification, is an identifier, a series, a publisher, a year, a language\nand a page count. A description arrives later from the catalogue chain, and\n**the chain may have none for a born digital title**: of the eight\ncatalogues a title search asks, six refuse a record that says it is\nelectronic. Five decide it from codes, the four MARC ones on their carrier\ncodes and the Library of Congress on its MODS form, and the BnF decides it\nfrom the format prose alone. Only Open Library and Google Books apply no\nsuch rule. So a row with no description is this route working, not failing,\nand it is reported under `created` for that reason.",
+        "operationId": "sync_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Server Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Add books the feed lists and this catalogue lacks",
+            "in": "query",
+            "name": "create_missing",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "Add books the feed lists and this catalogue lacks",
+              "title": "Create Missing",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpdsSyncOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Sync Server",
+        "tags": [
+          "opds"
         ]
       }
     },

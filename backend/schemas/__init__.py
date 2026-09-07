@@ -82,6 +82,13 @@ from schemas.imports import (
 )
 from schemas.loan import LoanCreate, LoanOut, MyOverdueOut
 from schemas.note import NoteCreate, NoteOut
+from schemas.opds import (
+    OpdsCredentialIn,
+    OpdsServerIn,
+    OpdsServerOut,
+    OpdsServerSummaryOut,
+    OpdsSyncOut,
+)
 from schemas.progress import ProgressCreate, ProgressOut
 from schemas.public import (
     PublicBookOut,
@@ -218,6 +225,11 @@ __all__ = [
     "MonthStat",
     "NoteCreate",
     "NoteOut",
+    "OpdsCredentialIn",
+    "OpdsServerIn",
+    "OpdsServerOut",
+    "OpdsServerSummaryOut",
+    "OpdsSyncOut",
     "OverdueNotifyResult",
     "SenderHealth",
     "SenderOutcome",

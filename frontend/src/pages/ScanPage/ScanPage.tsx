@@ -6,6 +6,7 @@ import { LocationField } from "../components";
 import { useTranslation, type MessageKey } from "../../i18n";
 import { parseIsbn } from "../../lib/isbn";
 import BarcodeScanner from "./components/BarcodeScanner";
+import FilePickPanel from "./components/FilePickPanel";
 import SearchPanel from "./components/SearchPanel";
 import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import LookupResult from "./components/LookupResult";
@@ -39,6 +40,13 @@ export default function ScanPage() {
   // The scanner and the search box are both ways of choosing *which* book.
   // Once a draft exists that question is answered, so both step aside.
   const showEntry = draft === null && !scan.isLookingUp && !rapid.isActive;
+
+  // **The queue outlives rapid mode, because the file picker fills it too.**
+  // It used to be rendered inside the rapid block, so a picked file joined a
+  // queue nothing was showing. The result banner keeps it on screen for one
+  // more render after the last entry leaves, which is where "12 added" is said.
+  const showQueue =
+    rapid.isActive || rapid.entries.length > 0 || rapid.result !== null;
 
   function handleManualLookup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -109,6 +117,11 @@ export default function ScanPage() {
           <p className="text-xs text-paper-600 mt-3 leading-relaxed dark:text-paper-400">
             {t("rapid.explain")}
           </p>
+        </>
+      )}
+
+      {showQueue && (
+        <>
           {/* Above the queue rather than inside it, so the shelf can be named
               before the first barcode instead of remembered afterwards. */}
           <div className="mt-4">
@@ -221,6 +234,12 @@ export default function ScanPage() {
             isSearchingHarder={search.isSearchingHarder}
             hasSearchedHarder={search.hasSearchedHarder}
           />
+
+          {/* The fourth way in, and the only one that starts from something
+              the member already owns rather than from a catalogue. It fills the
+              same queue as rapid scanning: a file answers the same question a
+              barcode does. */}
+          <FilePickPanel onPick={rapid.pickFiles} isReading={rapid.isReading} />
         </>
       )}
 

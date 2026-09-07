@@ -465,12 +465,12 @@ class ParsedMarc:
 #: encoded and the answer is decided by the first four of them.
 _SNIFF: Final = 1024
 
-#: `metadata._DOCTYPE` as bytes, because an upload is parsed from bytes.
+#: `metadata.DOCTYPE` as bytes, because an upload is parsed from bytes.
 #:
 #: **From that constant rather than spelled again.** It is the same construct
 #: being refused for the same reason, and two spellings of it would let one be
 #: tightened while the other stayed as it was.
-_DOCTYPE_BYTES: Final = metadata._DOCTYPE.encode("ascii")
+_DOCTYPE_BYTES: Final = metadata.DOCTYPE.encode("ascii")
 
 
 def _parsed(content: bytes) -> ElementTree.Element:

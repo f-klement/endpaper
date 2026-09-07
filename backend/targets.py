@@ -15,7 +15,7 @@ National Library were each a day of adapter code.
 and whether it needs a credential.
 
 **Code**: the parser. A row names a `Reader` and nothing here knows what one
-does. What a decoder is, why there are seven of them for five serialisations,
+does. What a decoder is, why there are eight of them for six serialisations,
 and why a stylesheet could not stand in for one, are `decoders.py`'s subject.
 `Target.decoding` is the whole of what this module hands it, and the whole of
 what it may hand it: an address or a query grammar reaching a decoder is the
@@ -62,7 +62,7 @@ import z3950
 # `decoders.py`'s, and the redundant alias is what says so to mypy under
 # `no_implicit_reexport`. Spelling it `targets.Reader` at a call site is not a
 # mistake; building a decoder from anything but `Target.decoding` is.
-from decoders import MARC_READERS, Decoding
+from decoders import IMPORT_READERS, MARC_READERS, Decoding
 from decoders import Reader as Reader
 from enums import Capability, CatalogueSource, SourceFamily
 
@@ -508,6 +508,16 @@ class Target:
         if self.transport is Transport.Z3950:
             raise ValueError(
                 f"{self.source}: no Z39.50 door yet, the transport dispatch is #129"
+            )
+        if self.reader in IMPORT_READERS:
+            # **The registry refusing the other family's parser**, which is the
+            # one rule `enums.SourceFamily` exists for and the one place a row
+            # could break it. `metadata.resolve` catches only a row that also
+            # declares a capability, so a row naming this reader and answering
+            # nothing would otherwise construct and sit in the roster.
+            raise ValueError(
+                f"{self.source}: {self.reader} belongs to the import family, "
+                "which no catalogue row may name"
             )
         if self.transport is Transport.SRU:
             self._check_sru()

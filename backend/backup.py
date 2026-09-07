@@ -43,6 +43,7 @@ from config import COVERS_DIR
 from database import Base
 from enums import VerificationProvenance
 from models import (
+    OPDS_CREDENTIAL_PREFIX,
     AuthorAlias,
     AuthorIdentifier,
     Book,
@@ -54,6 +55,7 @@ from models import (
     CustomFieldValue,
     Loan,
     Note,
+    OpdsServer,
     PasswordResetRequest,
     Quote,
     ReadingProgress,
@@ -210,6 +212,28 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # `FORMAT_VERSION` 1: an archive written before this restores with none,
         # which is the state it was written in.
         ("catalogue_credentials", CatalogueCredential),
+        # The household's own OPDS servers, after the credential table their
+        # `credential_key` points into. No foreign key in either direction, so
+        # the position is free; here because the two are read together.
+        #
+        # **The address is the library's and the login is not in this row**, so
+        # this table restores usefully where `catalogue_credentials` restores
+        # unreadable: somebody who moves to a new machine gets their servers
+        # back and types the passwords again, which is the same bargain the
+        # comment above describes and a better one than losing the addresses
+        # too.
+        #
+        # **An orphaned envelope is the failure this ordering does not
+        # prevent**, and it does not need to: an archive holding a credential
+        # whose server row is gone leaves a row `credentials.unreadable_sources`
+        # reports and `DELETE /api/settings/catalogue-sources/{source}/credential`
+        # removes, which is exactly why that route deliberately does not check
+        # the roster.
+        #
+        # Absent from `_REQUIRED_TABLES`, like every table added after
+        # `FORMAT_VERSION` 1: an archive written before this restores with none,
+        # which is the state it was written in.
+        ("opds_servers", OpdsServer),
         # The password reset requests, whose only foreign key is `users`, first
         # in this tuple. Here rather than beside the other per member tables
         # because it is not about the catalogue at all: it is the record of who
@@ -723,6 +747,55 @@ def _settle_restored_accounts(db: Session) -> None:
     )
 
 
+def _without_household_logins(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every credential in the archive except a household server's own.
+
+    **The address a household login is sent to is decided by a row in the same
+    archive, and that is what makes this one different from a roster
+    catalogue's.** `credentials.for_request` binds a stored credential to the
+    `base_url` it is **asked** about, and `routers/opds.sync_server` asks about
+    `opds_servers.base_url`, which `restore` writes with no validating arm. So
+    an archive could keep a legitimate `opds-` key and change only the address
+    beside it, and the next sync would send the household's login for its own
+    server to a host the archive named. A roster catalogue's address is a module
+    constant (`targets.SEEDED`), so its credential has no such writer.
+
+    **`PUT /api/opds/servers/{id}` refuses exactly this**, dropping the login
+    before an address moves to a different origin. Without this, the archive
+    path did what that route exists to refuse, for an admin the route refuses
+    it to. Measured by a critic: with a real generated key, a sealed
+    `house:housepw` and the address rewritten, `for_request` bound the pair to
+    the attacker's origin and `header_for` emitted it.
+
+    **The cost is stated rather than hidden**: a restore onto the same machine
+    loses OPDS logins this deployment's key could still have opened, and they
+    are typed again. That is the bargain `_TABLES` already describes for a
+    restore onto a new machine, applied one case earlier, and it is the safe
+    direction: the alternative loses somebody else's password to a host they
+    did not choose.
+
+    **Why dropping the row is sufficient, which is not a property of this
+    function.** The delete loop above runs over every entry of `_TABLES`
+    unconditionally rather than over the tables the archive happens to list, so
+    a live envelope cannot survive an archive that simply omits
+    `catalogue_credentials`. Without that, an archive could leave the deployment's
+    own `opds-` envelope in place and pair it with an `opds_servers` row of its
+    choosing, which is this attack one step around this filter. The two do not
+    otherwise name each other, so it is said here.
+
+    **The residue this leaves.** `credentials.seal` takes the source alone as
+    associated data, so an envelope opens at whatever address the row beside it
+    names, and this filter is what stands in for a binding the envelope does not
+    carry. That is a property of the credential scheme rather than of this
+    module.
+    """
+    return [
+        row
+        for row in rows
+        if not str(row.get("source", "")).startswith(OPDS_CREDENTIAL_PREFIX)
+    ]
+
+
 def restore(db: Session, data: bytes) -> dict[str, int]:
     """Replace the database and the covers with the archive's contents.
 
@@ -744,6 +817,8 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
     restored: dict[str, int] = {}
     for name, _model, table in _TABLES:
         rows = tables.get(name) or []
+        if name == "catalogue_credentials":
+            rows = _without_household_logins(rows)
         if rows:
             parsers = _temporal_columns(table)
             db.execute(table.insert(), [_parse_row(row, parsers, table) for row in rows])
