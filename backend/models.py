@@ -627,6 +627,77 @@ class User(Base):
     appearance_mode: Mapped[str | None] = mapped_column(String(10), nullable=True)
     appearance_wallpaper: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
+    # ── Verification ──────────────────────────────────────────────────────
+    # That **an** address on this account was shown to belong to whoever holds
+    # it, and who said so. Read on the sign in path, which is why the settled
+    # answer is a column rather than a join: `settings_store` decides whether
+    # the policy applies, and this decides whether this row satisfies it.
+    #
+    # **Not a claim about the current value of `email`.** The four routes in
+    # `routers/users.py` write that column and touch none of these, so a member
+    # who confirmed at registration and afterwards typed a different address is
+    # still confirmed. That is deliberate: the policy asks somebody opening an
+    # account here to prove they hold a mailbox, and clearing the stamp on an
+    # edit would lock a member out over a typo, under a rule that says an
+    # unconfirmed account may do nothing.
+    #
+    # **NULL means unverified and every row the migration touched is NOT null.**
+    # An account created before the policy existed was made under a policy that
+    # asked nothing, and backfilling it as unverified would lock a household out
+    # of its own catalogue on an upgrade. The same reasoning stamps an account
+    # created while the switch is off: verification is decided when the account
+    # is made, so turning the switch on gates new accounts and never strands an
+    # existing member. What it therefore cannot do is retroactively require
+    # verification of accounts already here, which is stated rather than fixed:
+    # the admin override is how an admin acts on one of those.
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # A `VerificationProvenance`. Explicit rather than inferred from which other
+    # column is null, for the reason `AuthorityProvenance` gives: the question
+    # this exists to answer is whether a checked list has quietly become an
+    # asserted one, and it has to be answerable by reading one value.
+    email_verification_source: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )
+    # The admin who asserted it, and null for every other provenance. No check
+    # constraint pairing the two: adding one to `users` forces a batch rewrite
+    # of a table that now carries this self referential foreign key, and a
+    # rewrite is a larger risk than the rule is worth. `accounts` is the one
+    # writer and `tests/test_accounts.py` is the enforcement.
+    email_verified_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+
+    # The live verification code, hashed, and when it stops working. One at a
+    # time per account, so these are columns rather than a table: the same
+    # argument the appearance columns carry, a one to one with no history and no
+    # cardinality. A second request replaces the first, which is what makes
+    # "resend" mean resend rather than queue.
+    #
+    # bcrypt, like a password and unlike a mailed link's token: a code short
+    # enough to read down a telephone needs a slow hash, and it is found by the
+    # username beside it rather than by an indexed digest.
+    verification_code_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    verification_code_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+
+    # ── Session revocation, for this account alone ────────────────────────
+    #
+    # Every token issued before this instant is refused. `SettingKey.TOKEN_EPOCH`
+    # is the same idea for the whole library and is what a restore bumps; this is
+    # the one account's, because a password reset must not sign the household out.
+    #
+    # It is the half of an admin confirmed reset that a member cannot miss. A
+    # reset that left the member's live session working would be indistinguishable
+    # from a quiet takeover until their next sign in, which under a week long
+    # token is a week.
+    #
+    # Compared against the token's `iat`, and **both sides carry sub second
+    # precision**: rounded to whole seconds the rule has a hole either way, and
+    # `accounts.session_is_live` states which and why rather than the reasoning
+    # being restated here.
+    sessions_valid_from: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     books_added: Mapped[list[Book]] = relationship("Book", back_populates="added_by")
     user_books: Mapped[list[UserBook]] = relationship("UserBook", back_populates="user")
     loans_received: Mapped[list[Loan]] = relationship(
@@ -1726,6 +1797,120 @@ class Setting(Base):
     value: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PasswordResetRequest(Base):
+    """A member asking to be let back in, and what an admin did about it.
+
+    **A table rather than columns on `users`, unlike the verification code
+    beside it, and the difference is that this one has a queue and an
+    approver.** An admin reads the pending set as a list, a second person's name
+    is on the row, and the row outlives the reset because it is the record the
+    member is shown. A verification code has none of those: one per account, no
+    reader but its own owner, gone when it is used.
+
+    **Only `accounts.request_password_reset` inserts one, and that function is
+    reached from one unauthenticated route.** That is the whole of the asymmetry
+    the design rests on: an admin may approve a request, and there is no path by
+    which an admin makes one. `tests/test_accounts.py::TestOnlyAMemberStartsAReset`
+    is the enforcement, and the residual is stated rather than hidden in
+    `docs/decisions.md`: the route takes a username, so an admin can post one.
+    What stops that being silent is that the row is kept and the member's
+    sessions end.
+
+    Rows are kept after redemption. A dismissal deletes instead, because a
+    request an admin declined is not an assertion about anybody and the log line
+    is the record of it.
+    """
+
+    __tablename__ = "password_reset_requests"
+    __table_args__ = (
+        # Approval is three columns and they move together.
+        #
+        # **`code_hash` is deliberately not one of them**, and the first version
+        # of this constraint included it and was wrong: redeeming clears the hash
+        # and keeps the approval, so an approved row with no code is the ordinary
+        # spent state rather than an error. What the pairing has to say about the
+        # code is the other direction, and that is the constraint below.
+        CheckConstraint(
+            "(code_expires_at IS NULL AND approved_by_user_id IS NULL "
+            "AND approved_at IS NULL) "
+            "OR (code_expires_at IS NOT NULL AND approved_by_user_id IS NOT NULL "
+            "AND approved_at IS NOT NULL)",
+            name="ck_password_reset_requests_approval",
+        ),
+        # A code exists only on a row somebody approved. This is the half that
+        # matters: a code nobody granted would be a way in with no approver on
+        # it, which is the thing the whole flow is built to prevent.
+        CheckConstraint(
+            "code_hash IS NULL OR approved_at IS NOT NULL",
+            name="ck_password_reset_requests_code",
+        ),
+        # A request cannot be redeemed without having been approved.
+        CheckConstraint(
+            "completed_at IS NULL OR approved_at IS NOT NULL",
+            name="ck_password_reset_requests_completion",
+        ),
+        # One live request per account, enforced by the database rather than by
+        # the handler that checks first. A partial index, because the completed
+        # rows are the history and there may be many of them per account.
+        Index(
+            "uq_password_reset_requests_live",
+            "user_id",
+            unique=True,
+            sqlite_where=text("completed_at IS NULL"),
+            postgresql_where=text("completed_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False
+    )
+    requested_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    #: When an unapproved request stops occupying the admin's queue.
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    #: bcrypt of the code the admin reads out. Never served, at any point: the
+    #: plaintext exists once, in the approval response.
+    code_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    code_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    approved_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    #: Set when the member redeemed the code. Null while the request is live,
+    #: which is what the partial unique index above is keyed on.
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+def app_holds_the_password(user: User | None) -> TypeGuard[User]:
+    """Whether a password this app stores is what signs this account in.
+
+    The question both account recovery flows have to ask before they promise
+    anything. A directory backed row has no local credential, so a reset would
+    set a password nothing checks and a verification would be an assertion about
+    somebody else's authentication.
+
+    **Stated as an exclusion, not an inclusion.** `users.auth_source` carries no
+    `CheckConstraint`, which `auth_backends.directory_owns_email` says and relies
+    on, so a restored or hand edited row can hold any string. Asking "is it
+    local" would answer False for such a row and let it past a gate that fails
+    open; asking "is it neither directory" answers True and fails closed. That is
+    the opposite stance from `MemberEmailOut.from_directory`, which names the
+    directories so an unknown row stays editable, and the two differ because
+    being wrong costs a member a text field there and a bypassed account policy
+    here.
+
+    A missing hash is not part of the rule. An account being recovered is exactly
+    one whose hash is about to be replaced, and a local row that never had one
+    (a shadow row from before a deployment moved to local auth) is still this
+    app's to hold a password for.
+    """
+    return user is not None and user.auth_source not in (
+        AuthMode.LDAP.value,
+        AuthMode.PROXY.value,
     )
 
 

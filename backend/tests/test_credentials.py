@@ -363,6 +363,117 @@ class TestACredentialIsNeverRendered:
         credential = credentials.Credential("https://catalogue.example:443", "alice", "hunter2")
         assert "hunter2" not in str(credential)
 
+    def test_nor_does_the_key_state_carrying_the_key_itself(self, key):
+        """The stronger of the two, because these bytes open every credential.
+
+        `key_to_phrase` turns them straight back into the words, so a rendering
+        discloses the key rather than one login, and a `KeyState` is bound in a
+        frame on the member request path.
+        """
+        state = credentials.KeyState(key)
+        # **The rendering does not depend on the key, which is the claim, and
+        # naming an encoding is not.** Both critic seats measured an arm that
+        # named one, in opposite directions and each blind to the other's
+        # mutation: against a field renamed with its flag dropped, so the key
+        # prints in full, an arm naming the field passes; against a repr
+        # rendering the key as hex, an arm naming the bytes passes.
+        #
+        # **Three arms over a closed set rather than an enumeration of an open
+        # one.** `repr`, `str` and `format` are every rendering protocol Python
+        # has, and each falls back to the one before, so on a class overriding
+        # none of them the third alone would answer. **That is a property of
+        # this class today and not of the protocols**, which is why all three
+        # are here: an override of one is invisible to the other two, so a
+        # `__str__` that leaks under a `__format__` that does not is caught by
+        # the second arm alone. An f-string is how a log line is written.
+        assert repr(state) == repr(credentials.KeyState(None))
+        assert str(state) == str(credentials.KeyState(None))
+        assert f"{state}" == f"{credentials.KeyState(None)}"
+        # The direct statement of what must not appear, beside the arm that
+        # does the guarding rather than in place of it.
+        assert repr(key) not in repr(state)
+        assert credentials.key_to_phrase(key) not in repr(state)
+        # The other field still prints, or the refusal a screen reports would
+        # have gone with it.
+        assert "stores disagree" in repr(credentials.KeyState(None, "stores disagree"))
+
+
+class TestAnOperatorCanWithholdTheFeatureEntirely:
+    """The recipe `docs/security.md` publishes, tested rather than described.
+
+    **It is operator guidance in a published document, which is why it is
+    tested at all.** A reader acting on that paragraph is deciding whether third
+    party accounts are safe on somebody else's host, and the whole recipe rests
+    on one `continue` in `store_key` and on `can_generate`'s expression in the
+    settings router. Untested, a refactor of either republishes a false recipe
+    with a green suite.
+
+    **This class owns the `store_key` half only.** The screen's half is
+    `tests/routers/test_settings.py::TestTheScreenStopsOfferingAKeyThereIsNowhereToPut`,
+    which asserts `can_generate` on the response body. It belongs there and not
+    here because recomputing the router's expression is the expression testing
+    itself: `can_generate=True` written into the router would leave such a test
+    green while the published sentence became false.
+
+    **The off arm turns on the directory rather than the file's mode, and that
+    is not a detail.** Unwritability is what `can_generate` reads, and an absent
+    directory is the mechanism that achieves it at any uid: `_file_is_writable`
+    asks `parent.is_dir()` before it reaches `os.access`. A read only mode does
+    not, and this suite is where that shows, because it runs as root and
+    `os.access` answers True there for a 0400 file.
+    """
+
+    def test_a_key_file_in_a_directory_that_does_not_exist_turns_it_off(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY", raising=False)
+        monkeypatch.setenv(
+            "CREDENTIAL_ENCRYPTION_KEY_FILE", str(tmp_path / "absent" / "key")
+        )
+
+        assert credentials.key_material() is None
+        with pytest.raises(credentials.KeyConfigurationError) as refusal:
+            credentials.store_key(credentials.generate_phrase())
+        assert "nowhere on this machine" in str(refusal.value)
+
+    def test_but_a_directory_that_exists_leaves_it_on(self, tmp_path, monkeypatch):
+        """The arm that makes the one above evidence rather than a tautology.
+
+        It is also why the recipe names a directory that does not exist rather
+        than an absent file: the file is absent in both, and only this one has a
+        directory to make it in.
+        """
+        monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY", raising=False)
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(tmp_path / "key"))
+
+        assert credentials.store_key(credentials.generate_phrase()) == "file"
+        assert credentials.key_material() is not None
+
+    def test_and_a_read_only_file_holding_a_key_is_not_the_same_thing(
+        self, tmp_path, monkeypatch
+    ):
+        """The trap the same paragraph warns about, which is a mounted secret.
+
+        A Docker secret and a Kubernetes Secret both arrive as a read only file,
+        which is what `_from_file` was written for. The key is then in force for
+        every request, so an operator who reads the recipe as "make it
+        unwritable" has switched nothing off.
+
+        **What is asserted is that the key is in force, and the mode is not set
+        at all**, because that is the half that is honest here: this suite runs
+        as root, where `os.access` answers True for a file nobody else could
+        write, so a `can_generate` assertion under a 0400 file would measure the
+        uid, and one under a stubbed probe would measure the stub. The two tests
+        above carry the writability arm, on the condition that is root proof.
+        """
+        phrase = credentials.generate_phrase()
+        mounted = tmp_path / "key"
+        mounted.write_text(phrase + "\n", encoding="utf-8")
+        monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY", raising=False)
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(mounted))
+
+        assert credentials.key_material() == credentials.phrase_to_key(phrase)
+
 
 class TestTheStoreSealsWhatItIsGiven:
     def test_a_credential_round_trips(self, db):

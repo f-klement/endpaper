@@ -115,9 +115,18 @@ from schemas.user import (
     EmailUpdate,
     LoginRequest,
     MemberEmailOut,
+    MemberVerificationOut,
+    MySecurityOut,
+    RegistrationOut,
+    ResetCodeOut,
+    ResetRedeem,
+    ResetRequest,
+    ResetRequestOut,
     Token,
     UserCreate,
     UserOut,
+    VerificationRedeem,
+    VerificationRequest,
 )
 
 # Resolve the BookOut <-> LoanOut forward references now that both are imported.
@@ -139,6 +148,11 @@ __all__ = [
     "AuthorityDisagreementOut",
     "AuthorMergeBatchRequest",
     "AuthorMergeGroup",
+    "RegistrationOut",
+    "ResetCodeOut",
+    "ResetRedeem",
+    "ResetRequest",
+    "ResetRequestOut",
     "RefusedAssertionOut",
     "AuthorMergeOut",
     "AuthorMergeRequest",
@@ -186,6 +200,8 @@ __all__ = [
     "MarcPreviewOut",
     "MarcPreviewRow",
     "MemberEmailOut",
+    "MemberVerificationOut",
+    "MySecurityOut",
     "MergeRequest",
     "SeriesOut",
     "SourceCredentialIn",
@@ -228,6 +244,8 @@ __all__ = [
     "Token",
     "UserCreate",
     "UserOut",
+    "VerificationRedeem",
+    "VerificationRequest",
     # The tag key rule, as a type and as the function inside it. Exported
     # because `schemas/stats.py` annotates with the first, and because a test
     # exercises the second directly.

@@ -16,6 +16,7 @@ import type { Locale } from "./locale.ts";
  * browser never received the real value to send back.
  */
 export interface SettingsUpdate {
+  accounts_open_to_outsiders?: boolean | null;
   catalogue_sources?: CatalogueSourcePreference[] | null;
   default_locale?: Locale | null;
   goodreads_lookup_enabled?: boolean | null;

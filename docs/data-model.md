@@ -51,6 +51,59 @@ column recording which of those applies, because the answer is a configuration l
 `auth_backends.directory_owns_email` is the one place it is decided, and three call sites in
 two modules ask it.
 
+`email_verified_at`, `email_verification_source` and `email_verified_by_user_id` say that
+**an** address on this account was shown to belong to whoever holds it, and who said so.
+They are not a claim about the current value of `email`: the four routes that write that
+column touch none of these, so a member who confirmed at registration and later typed a
+different address stays confirmed. That is deliberate, because clearing the stamp on an
+edit would lock a member out over a typo under a rule that says an unconfirmed account may
+do nothing. NULL means unconfirmed, and the sign in boundary refuses such an account **only** where
+`accounts_open_to_outsiders` is on: verification applies to deployments where accounts
+belong to people outside the household, and to nothing else. **Every path that creates an
+account stamps a value**, so the switch gates the accounts made after it and never strands
+a member already here; the migration stamped every row that existed as `not_required`, and
+a restore does the same **only** for an archive written before the column existed, which it
+decides by whether the manifest carries the key at all rather than by reading it: a recent
+archive carries an explicit null for exactly the accounts the policy refuses. The provenance is explicit rather than
+inferred from which other column is null, for the reason `AuthorityProvenance` gives: an
+admin confirming an account is an assertion about a person, and reading one value has to
+answer who made it. `email_verified_by_user_id` is set on the `admin` provenance and on no
+other; there is no check constraint pairing them, because adding one to `users` forces a
+batch rewrite of a table that now carries that self referential foreign key, so
+`accounts.record_verification` is the one writer and a test is the enforcement.
+
+`verification_code_hash` and `verification_code_expires_at` hold the live confirmation
+code, hashed. One at a time per account, so they are columns for the reason the appearance
+columns are: a one to one with no history. A second request replaces the first, which is
+what makes "send it again" mean send it again.
+
+`sessions_valid_from` refuses every token issued before it, for **this account alone**.
+`SettingKey.TOKEN_EPOCH` is the same idea for the whole library and is what a restore
+bumps; this is what lets a password reset end one member's sessions without signing the
+household out. Both sides of the comparison carry sub second precision, and a token's `iat`
+is written as a non integer for that reason: rounded to whole seconds the rule has a hole in
+either direction, and `accounts.session_is_live` says which.
+
+**`password_reset_requests`.** A member asking to be let back in, and what an admin did
+about it. One live row per account, enforced by a **partial** unique index over the rows
+whose `completed_at` is null: completed rows are the history a member reads back, and there
+may be several per account.
+
+**Only one function constructs a row, and it is reached from one unauthenticated route.**
+That is the whole of what separates a recovery flow from a back door: an admin approves a
+request a member made and has no way to start one. The restore path writes these rows
+generically from an archive and is the named exception; it widens nothing, because the same
+transaction replaces every password hash in the library. The residual is recorded rather than hidden in
+[decisions.md](decisions.md), since the route takes a username anybody may type; what stops
+that being quiet is that the row is kept with the approver's name on it and that redeeming
+moves `sessions_valid_from`.
+
+`code_hash` is a bcrypt digest of the one time code, and the plaintext exists once, in the
+response to the approval. Redeeming clears it and sets `completed_at`. Two check
+constraints hold what is true: the three approval columns move together, and a code exists
+only on a row somebody approved. `code_hash` is deliberately outside the first of those,
+because an approved row with no code is the ordinary spent state.
+
 `appearance_palette`, `appearance_mode` and `appearance_wallpaper` are the member's own
 look, nullable, with NULL meaning "has not chosen" rather than a value. Columns rather than
 a `user_preferences` table: it is a one-to-one with no history, and a side table would add a

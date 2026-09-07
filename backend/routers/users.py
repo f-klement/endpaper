@@ -2,17 +2,23 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
+import accounts
 from auth import hash_password, require_admin
 from auth_backends import directory_owns_email
 from dependencies import CurrentUser, DbSession, RowId
-from enums import AuthMode
-from models import User, switch_targets
+from enums import AuthMode, VerificationProvenance
+from models import User, app_holds_the_password, switch_targets
 from schemas import (
     AppearanceOut,
     AppearanceUpdate,
     EmailUpdate,
     MemberEmailOut,
+    MemberVerificationOut,
+    MySecurityOut,
+    ResetCodeOut,
+    ResetRequestOut,
     UserCreate,
     UserOut,
 )
@@ -40,11 +46,12 @@ def list_users(db: DbSession, current_user: CurrentUser) -> list[User]:
 # their directory password. These two routes are that way in, and they are
 # admin only.
 #
-# `PUT /{user_id}/email` is the router's only path parameter and is declared
-# **last**, at the bottom of this file. FastAPI matches in declaration order, so
-# a `/{user_id}` route above these would make `/test-accounts` a request for the
-# member with that id, and `/me/email` a request for the member with id "me"
-# (a 422, since `RowId` is an int).
+# **Every route with a `/{user_id}` first segment is declared last**, at the
+# bottom of this file. FastAPI matches in declaration order, so one of them above
+# these would make `/test-accounts` a request for the member with that id, and
+# `/me/email` a request for the member with id "me" (a 422, since `RowId` is an
+# int). `/password-resets/{user_id}/approve` is not one of them: its first
+# segment is a literal, so it collides with nothing.
 
 
 @router.get("/test-accounts", response_model=list[UserOut])
@@ -95,6 +102,12 @@ def create_test_account(
         is_test_account=True,
         email=payload.email,
     )
+    # Nobody was asked, which is what `NOT_REQUIRED` says. Deliberately not
+    # `ADMIN`: that value names the admin who asserted an address belongs to a
+    # person, and this account is the admin's own, made to look at the library
+    # from the other side. Recording a name here would put a confirmation in
+    # front of a reader that nobody made.
+    accounts.record_verification(user, VerificationProvenance.NOT_REQUIRED)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -261,9 +274,211 @@ def list_emails(
     ]
 
 
-# ── The only route in this file with a path parameter ─────────────────────────
+# ── Account recovery, and confirming an address ───────────────────────────────
+#
+# The admin's half of both flows. What an admin may do here is bounded by what
+# the routes are: **approve** a request a member made, and **assert** that an
+# account's address is that person's. Neither creates a request, and no route
+# reachable with a session does: `backup.restore` writes the rows generically
+# from an archive and is the named exception, for the reason `accounts` gives.
+
+
+def _username(db: Session, user_id: int | None) -> str | None:
+    """One name for a row this screen is about to show, or None."""
+    if user_id is None:
+        return None
+    user = db.get(User, user_id)
+    return user.username if user is not None else None
+
+
+@router.get("/password-resets", response_model=list[ResetRequestOut])
+def list_password_resets(
+    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
+) -> list[ResetRequestOut]:
+    """The requests waiting on an admin, oldest first. Admin only.
+
+    Carries no code and never has: an approval's code exists once, in the
+    response to the approval, and is stored as a bcrypt hash. `approved_at` is
+    here so the queue can say a request has already been granted, which is the
+    one thing a screen that cannot show the code again has to be able to say.
+    """
+    rows = accounts.pending_requests(db)
+    return [
+        ResetRequestOut(
+            user_id=row.user_id,
+            username=_username(db, row.user_id) or "",
+            requested_at=row.requested_at,
+            expires_at=row.expires_at,
+            approved_at=row.approved_at,
+            approved_by=_username(db, row.approved_by_user_id),
+            code_expires_at=row.code_expires_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post("/password-resets/{user_id}/approve", response_model=ResetCodeOut)
+def approve_password_reset(
+    user_id: RowId,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> ResetCodeOut:
+    """Grant a request, and show the code once.
+
+    **An admin may approve another admin's request.** Owner's decision on issue
+    #105: what makes it acceptable is the asymmetry already in the mechanism
+    rather than a further rule, since the request is still member initiated. The
+    case it refuses is an admin quietly acquiring a peer's account; the case it
+    allows is an admin who locked themselves out being helped by the person
+    beside them, which is the ordinary one in a two person archive.
+
+    **A deployment with exactly one admin therefore has no path in this app**,
+    and that case belongs to the operator: `README.md` names the command line
+    recovery, which is the capability whoever runs the container already has.
+
+    404 when there is no live request, which is true of this route: there is
+    nothing here to approve, and an admin may already list every member.
+    """
+    request = accounts.live_request(db, user_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="No such reset request")
+    code = accounts.approve_reset(db, request, current_user)
+    # `code_expires_at` is set by the approval and is never None afterwards; the
+    # narrowing is for the type checker rather than a case that can occur.
+    assert request.code_expires_at is not None
+    return ResetCodeOut(code=code, expires_at=request.code_expires_at)
+
+
+@router.delete("/password-resets/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def decline_password_reset(
+    user_id: RowId,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> None:
+    """Decline a request, so it stops occupying the queue."""
+    request = accounts.live_request(db, user_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="No such reset request")
+    accounts.dismiss_reset(db, request, current_user)
+
+
+@router.get("/verification", response_model=list[MemberVerificationOut])
+def list_verification(
+    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
+) -> list[MemberVerificationOut]:
+    """Every member's confirmation state. Admin only.
+
+    The whole list rather than the unconfirmed ones, for the reason
+    `list_emails` serves the whole list: the screen is a list of a household's
+    accounts and the admin is looking for the row that is wrong. It also lets the
+    screen say which accounts this app never held a credential for, rather than
+    silently omitting them and leaving somebody to wonder.
+    """
+    return [_verification(db, user) for user in db.query(User).order_by(User.username)]
+
+
+def _verification(db: Session, user: User) -> MemberVerificationOut:
+    """One row as the schema, address withheld.
+
+    `has_address` rather than the address itself: this is not one of the four
+    routes `MemberEmailOut` is served on, and what this screen needs to know is
+    whether a code could have been sent at all, not where.
+    """
+    return MemberVerificationOut(
+        id=user.id,
+        username=user.username,
+        verified_at=user.email_verified_at,
+        verification_source=(
+            VerificationProvenance(user.email_verification_source)
+            if user.email_verification_source is not None
+            else None
+        ),
+        verified_by=_username(db, user.email_verified_by_user_id),
+        has_address=bool(user.email),
+        applies=app_holds_the_password(user),
+    )
+
+
+@router.get("/me/security", response_model=MySecurityOut)
+def get_my_security(db: DbSession, current_user: CurrentUser) -> MySecurityOut:
+    """What has been done to the caller's own account, and by whom.
+
+    **The member's half of an admin confirmed reset.** A reset that left no mark
+    would be indistinguishable from a quiet takeover, which is the property the
+    whole flow exists to keep, so the completed request is kept and read back
+    here with the approver's name on it.
+
+    No path parameter and no member id, so there is no object to authorize: the
+    only account reachable here is the caller's. That is the same shape as
+    `/me/email` and `/me/appearance` and it is why none of the three is a field
+    on `UserOut`.
+    """
+    reset = accounts.last_completed_reset(db, current_user.id)
+    return MySecurityOut(
+        password_reset_at=reset.completed_at if reset is not None else None,
+        password_reset_approved_by=(
+            _username(db, reset.approved_by_user_id) if reset is not None else None
+        ),
+        verified_at=current_user.email_verified_at,
+        verification_source=(
+            VerificationProvenance(current_user.email_verification_source)
+            if current_user.email_verification_source is not None
+            else None
+        ),
+        verified_by=_username(db, current_user.email_verified_by_user_id),
+    )
+
+
+# ── The two routes in this file with a path parameter ─────────────────────────
 #
 # Declared last on purpose. See the note above `/test-accounts`.
+
+
+@router.post("/{user_id}/verify", response_model=MemberVerificationOut)
+def verify_member(
+    user_id: RowId,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> MemberVerificationOut:
+    """Assert that this account's address is that person's. Admin only.
+
+    **The override that makes "an unverified account may do nothing" survivable.**
+    A confirmation step completable only by receiving mail cannot be completed at
+    all by a household with no mail server, which is the ordinary configuration
+    here, so this is the primary path for some installations and the exception
+    for others. Owner's decision, 2026-09-06.
+
+    **It is an assertion about a person, so it is recorded as one.** The account
+    carries that an admin confirmed it and which admin, not merely that it is
+    confirmed: `AuthorityProvenance` is this codebase's precedent and
+    `VerificationProvenance` is the same shape.
+
+    409 where this app never held the credential. Nothing about the caller's
+    rights is wrong, which is why it is not a 403: a directory authenticated that
+    account, so confirming its address here would be an assertion this app cannot
+    make. The same reasoning, and the same status, as
+    `_refuse_if_the_directory_owns_it`.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="No such member")
+    if not app_holds_the_password(user):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This account is authenticated elsewhere, so there is nothing "
+                "here to confirm."
+            ),
+        )
+    # **An account that is already settled is left alone**, and the row is
+    # returned unchanged. Re-stamping would overwrite a member's own
+    # confirmation with an admin's name, so the member's account screen would
+    # afterwards say an admin confirmed an address they proved themselves. The
+    # screen hides the control for such a row, and a client is not a control.
+    if user.email_verified_at is None:
+        accounts.override_verification(db, user, current_user)
+        db.refresh(user)
+    return _verification(db, user)
 
 
 @router.put("/{user_id}/email", response_model=MemberEmailOut)

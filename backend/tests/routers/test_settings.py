@@ -816,8 +816,8 @@ def _write_tables() -> dict[str, dict[str, object]]:
     **Derived from the module rather than named**, and that was a correction.
     The guard below read `_SENDER_TEXT | _SENDER_BOOL` by name, so a **third**
     table was invisible to it: the library mode switches arrived in
-    `_LIBRARY_MODE_BOOL`, are written on every `PUT`, and the guard reported all
-    three fields as accepted and dropped. A rule that enumerates the tables it
+    `_STORED_BOOL` (then named `_LIBRARY_MODE_BOOL`), are written on every `PUT`,
+    and the guard reported all three fields as accepted and dropped. A rule that enumerates the tables it
     knows about fails on the table added after it, which is the one case it
     exists for.
 
@@ -875,7 +875,7 @@ class TestEverySenderFieldIsActuallyWritten:
         assert set(_write_tables()) == {
             "_SENDER_TEXT",
             "_SENDER_BOOL",
-            "_LIBRARY_MODE_BOOL",
+            "_STORED_BOOL",
         }, (
             "The write tables in routers/settings.py are pinned here, so a "
             "fourth fails this until somebody says it is one. That is the "
@@ -1573,6 +1573,57 @@ class TestTheLookupCacheIsDroppedByEveryWriteThatChangesWhatIsAsked:
 
 
 # ── The encryption key and the catalogue credentials ──────────────────────────
+
+
+class TestTheScreenStopsOfferingAKeyThereIsNowhereToPut:
+    """`can_generate` on the real response, which is what an operator is told.
+
+    **The half of `docs/security.md`'s withholding recipe that lives on this
+    route.** `tests/test_credentials.py::TestAnOperatorCanWithholdTheFeatureEntirely`
+    pins the other half, that `store_key` refuses, and it first pinned this one
+    by recomputing the router's expression in the test, which is the expression
+    testing itself: `can_generate=True` hardcoded here would have left it green
+    while "the screen never offers to create a key" became false. The security
+    seat found it. So the assertion is on the response body and the route runs.
+
+    **The directory rather than the file's mode, and that is not a detail.**
+    `credentials._file_is_writable` asks `parent.is_dir()` before it reaches
+    `os.access`, so an absent directory refuses whatever uid the process has.
+    This suite runs as root, where `os.access` answers True for a file nobody
+    else could write, so a mode based arm here would measure the uid.
+    """
+
+    @staticmethod
+    def _asked(client, admin) -> dict:
+        answered = client.get(
+            "/api/settings/credential-key", headers=admin["headers"]
+        )
+        assert answered.status_code == 200
+        return answered.json()
+
+    def test_a_key_file_in_a_directory_that_does_not_exist_offers_nothing(
+        self, client, admin, tmp_path, monkeypatch
+    ):
+        monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY", raising=False)
+        monkeypatch.setenv(
+            "CREDENTIAL_ENCRYPTION_KEY_FILE", str(tmp_path / "absent" / "key")
+        )
+
+        body = self._asked(client, admin)
+
+        assert body["can_generate"] is False
+        assert body["configured"] is False
+
+    def test_but_a_directory_that_exists_offers_the_button(
+        self, client, admin, tmp_path, monkeypatch
+    ):
+        """The arm that makes the one above evidence rather than a tautology."""
+        monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY", raising=False)
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(tmp_path / "key"))
+
+        body = self._asked(client, admin)
+
+        assert body["can_generate"] is True
 
 
 class TestTheKeyRoutesReportAboutTheKeyAndNeverTheKey:

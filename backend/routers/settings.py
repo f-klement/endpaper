@@ -57,23 +57,34 @@ _SENDER_TEXT: Final[dict[str, SettingKey]] = {
     "telegram_chat_id": SettingKey.TELEGRAM_CHAT_ID,
 }
 
-#: The three library mode switches, whose write is uniform: a boolean, stored,
-#: with no environment override to refuse and no sender health to forget.
+#: Every switch whose write is uniform: a boolean, stored, with no environment
+#: override to refuse and no sender health to forget.
 #:
 #: A table for the same reason `_SENDER_BOOL` is one, and separate from it
 #: because these are not senders: `notifications.sender_for` answers None for
-#: all three, so routing them through `_SENDER_BOOL` would work and would file
-#: them under a heading they do not belong to.
+#: every one of them, so routing them through `_SENDER_BOOL` would work and
+#: would file them under a heading they do not belong to.
+#:
+#: **Named for the property rather than for the feature**, because it was
+#: `_LIBRARY_MODE_BOOL` and the fourth entry is an account policy with nothing
+#: to do with library mode: a name describing three of four members is how the
+#: next one gets a second loop of its own beside this one.
 #:
 #: **Nothing here refuses a combination.** `public_catalogue_enabled` may be
 #: stored true while `library_mode` is false; the catalogue is still not
 #: published, because `settings_store.public_catalogue_is_published` reads both
 #: and the routes ask it rather than reading a row. Enforcing the nesting at
 #: the write instead would make the order of two toggles in one form matter.
-_LIBRARY_MODE_BOOL: Final[dict[str, SettingKey]] = {
+_STORED_BOOL: Final[dict[str, SettingKey]] = {
     "library_mode": SettingKey.LIBRARY_MODE,
     "public_catalogue_enabled": SettingKey.PUBLIC_CATALOGUE_ENABLED,
     "public_catalogue_indexing_enabled": SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED,
+    # Whether accounts here belong to people outside the household, which is the
+    # one switch that turns on confirming a new account's address. Stored rather
+    # than pinned from the environment, like the three above and for the same
+    # reason: an account policy turned on by mistake has to be correctable
+    # without a redeploy.
+    "accounts_open_to_outsiders": SettingKey.ACCOUNTS_OPEN_TO_OUTSIDERS,
 }
 
 _SENDER_BOOL: Final[dict[str, SettingKey]] = {
@@ -274,6 +285,7 @@ def _read_settings(db: DbSession) -> SettingsOut:
             db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED
         ),
         public_catalogue_published=settings_store.public_catalogue_is_published(db),
+        accounts_open_to_outsiders=settings_store.accounts_are_open_to_outsiders(db),
         # **The stored list, not the one in force.** An admin has to see what
         # they set: a screen that hid Google Books because no key is configured
         # would be one they cannot use, since they would switch it on and watch
@@ -448,7 +460,7 @@ def update_settings(
             ),
         )
 
-    for field, key in _LIBRARY_MODE_BOOL.items():
+    for field, key in _STORED_BOOL.items():
         value = getattr(payload, field)
         if value is None:
             continue

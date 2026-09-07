@@ -141,6 +141,20 @@ UNAUTHENTICATED: dict[str, str] = {
     "POST /auth/login": "the route that creates a session",
     "POST /auth/logout": "discards a token, and a caller with none has nothing to prove",
     "POST /auth/register": "the route that creates an account",
+    # The four recovery routes. Each is reachable without a session because a
+    # member who could sign in would not need it, and each answers the same
+    # whatever it found, so none is a roster. See `backend/accounts.py`.
+    "POST /auth/reset/request": (
+        "a member with no session asking an admin to approve a reset"
+    ),
+    "POST /auth/reset/redeem": (
+        "spending an approved code on a new password, which issues no session"
+    ),
+    "POST /auth/verify/request": "sending a confirmation code to an address again",
+    "POST /auth/verify": (
+        "returning the confirmation code, which settles the account and issues "
+        "no session"
+    ),
     "GET /covers/login_bg.{extension}": "the sign in background's bytes",
     "GET /robots.txt": "what a crawler is told, which must answer either way",
     "GET /sru": "the SRU base URL, gated by the same publish switch",

@@ -25,9 +25,14 @@ import type {
   AuthConfigOut,
   HTTPValidationError,
   LoginRequest,
+  RegistrationOut,
+  ResetRedeem,
+  ResetRequest,
   Token,
   UserCreate,
   UserOut,
+  VerificationRedeem,
+  VerificationRequest,
 } from "../../model";
 
 import { customFetch } from "../../../mutator.ts";
@@ -508,7 +513,7 @@ export const getRegisterUrl = () => {
 export const register = async (
   userCreate: UserCreate,
   options?: Parameters<typeof customFetch>[1],
-): Promise<Token> => {
+): Promise<RegistrationOut> => {
   const getHeaders = (
     h?: NonNullable<RequestInit["headers"]>,
   ): Record<string, string | readonly string[]> => {
@@ -517,7 +522,7 @@ export const register = async (
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-  return customFetch<Token>(getRegisterUrl(), {
+  return customFetch<RegistrationOut>(getRegisterUrl(), {
     ...options,
     method: "POST",
     headers: {
@@ -594,6 +599,237 @@ export const useRegister = <TError = HTTPValidationError, TContext = unknown>(
   TContext
 > => {
   return useMutation(getRegisterMutationOptions(options), queryClient);
+};
+export const getRedeemPasswordResetUrl = () => {
+  return `/auth/reset/redeem`;
+};
+
+/**
+ * Spend an approved code on a new password.
+ *
+ * 204 and no token. The code is not a session and never becomes one: the
+ * member signs in with what they just set, which is also the check that it
+ * works.
+ *
+ * One message for every failure, exactly as `/auth/login` answers one for a
+ * missing account and a wrong password, and for the sharper version of the
+ * same reason: this caller holds no session at all.
+ * @summary Redeem Password Reset
+ */
+export const redeemPasswordReset = async (
+  resetRedeem: ResetRedeem,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<void>(getRedeemPasswordResetUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(resetRedeem),
+  });
+};
+
+export const getRedeemPasswordResetMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof redeemPasswordReset>>,
+    TError,
+    RedeemPasswordResetMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof redeemPasswordReset>>,
+  TError,
+  RedeemPasswordResetMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["redeemPasswordReset"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof redeemPasswordReset>>,
+    RedeemPasswordResetMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return redeemPasswordReset(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RedeemPasswordResetMutationResult = NonNullable<
+  Awaited<ReturnType<typeof redeemPasswordReset>>
+>;
+export type RedeemPasswordResetMutationBody = ResetRedeem;
+export type RedeemPasswordResetMutationError = HTTPValidationError;
+export type RedeemPasswordResetMutationVariables = { data: ResetRedeem };
+
+/**
+ * @summary Redeem Password Reset
+ */
+export const useRedeemPasswordReset = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof redeemPasswordReset>>,
+      TError,
+      RedeemPasswordResetMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof redeemPasswordReset>>,
+  TError,
+  RedeemPasswordResetMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getRedeemPasswordResetMutationOptions(options),
+    queryClient,
+  );
+};
+export const getRequestPasswordResetUrl = () => {
+  return `/auth/reset/request`;
+};
+
+/**
+ * Ask an admin to approve a password reset for this account.
+ *
+ * **Unauthenticated, because there is no other moment.** A member who could
+ * sign in would not need this. Everything else about the route follows: it
+ * answers 202 whether or not the account exists, making a request grants
+ * nothing, and at most one request per account is ever live.
+ *
+ * **This is the only place in the application that creates a reset request**,
+ * which is what separates a recovery flow from a back door: an admin may
+ * approve one and cannot start one. The residual is recorded rather than
+ * hidden, since the route takes a username anybody may type. See
+ * `accounts.request_password_reset` and `docs/decisions.md`.
+ *
+ * Refused outright where the deployment does not hold the password, with a
+ * message naming the system that does. That refusal discloses nothing:
+ * `GET /auth/config` already publishes the auth mode to the login page.
+ * @summary Request Password Reset
+ */
+export const requestPasswordReset = async (
+  resetRequest: ResetRequest,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<unknown> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<unknown>(getRequestPasswordResetUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(resetRequest),
+  });
+};
+
+export const getRequestPasswordResetMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestPasswordReset>>,
+    TError,
+    RequestPasswordResetMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof requestPasswordReset>>,
+  TError,
+  RequestPasswordResetMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["requestPasswordReset"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof requestPasswordReset>>,
+    RequestPasswordResetMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return requestPasswordReset(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RequestPasswordResetMutationResult = NonNullable<
+  Awaited<ReturnType<typeof requestPasswordReset>>
+>;
+export type RequestPasswordResetMutationBody = ResetRequest;
+export type RequestPasswordResetMutationError = HTTPValidationError;
+export type RequestPasswordResetMutationVariables = { data: ResetRequest };
+
+/**
+ * @summary Request Password Reset
+ */
+export const useRequestPasswordReset = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof requestPasswordReset>>,
+      TError,
+      RequestPasswordResetMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof requestPasswordReset>>,
+  TError,
+  RequestPasswordResetMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getRequestPasswordResetMutationOptions(options),
+    queryClient,
+  );
 };
 export const getSwitchAccountUrl = () => {
   return `/auth/switch`;
@@ -716,4 +952,227 @@ export const useSwitchAccount = <
   TContext
 > => {
   return useMutation(getSwitchAccountMutationOptions(options), queryClient);
+};
+export const getConfirmAddressUrl = () => {
+  return `/auth/verify`;
+};
+
+/**
+ * Settle an account by returning the code sent to its address.
+ *
+ * 204 and no token, for the reason the reset redemption returns none: a code
+ * proves an address rather than authenticating a person, so the member signs in
+ * afterwards with the password they already chose.
+ * @summary Confirm Address
+ */
+export const confirmAddress = async (
+  verificationRedeem: VerificationRedeem,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<void>(getConfirmAddressUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(verificationRedeem),
+  });
+};
+
+export const getConfirmAddressMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmAddress>>,
+    TError,
+    ConfirmAddressMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof confirmAddress>>,
+  TError,
+  ConfirmAddressMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["confirmAddress"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof confirmAddress>>,
+    ConfirmAddressMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return confirmAddress(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConfirmAddressMutationResult = NonNullable<
+  Awaited<ReturnType<typeof confirmAddress>>
+>;
+export type ConfirmAddressMutationBody = VerificationRedeem;
+export type ConfirmAddressMutationError = HTTPValidationError;
+export type ConfirmAddressMutationVariables = { data: VerificationRedeem };
+
+/**
+ * @summary Confirm Address
+ */
+export const useConfirmAddress = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof confirmAddress>>,
+      TError,
+      ConfirmAddressMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof confirmAddress>>,
+  TError,
+  ConfirmAddressMutationVariables,
+  TContext
+> => {
+  return useMutation(getConfirmAddressMutationOptions(options), queryClient);
+};
+export const getRequestVerificationUrl = () => {
+  return `/auth/verify/request`;
+};
+
+/**
+ * Send this account's confirmation code again.
+ *
+ * 202 whatever happened, including for an account that is already confirmed,
+ * that does not exist, or that has no address. A route saying which would tell
+ * a stranger which names are taken and which of them have a mailbox.
+ *
+ * **And it costs the same either way**, which the body alone does not buy.
+ * Minting a code is a bcrypt and finding no account is one indexed SELECT, so
+ * without the discarded comparison the two branches differ by a hash and the
+ * roster is readable off a clock. `accounts.spend_a_comparison` carries the
+ * measurement, once; `tests/test_accounts.py::TestNeitherBranchOfAResendIsFree`
+ * compares the two counts rather than checking each is non zero, which is the
+ * weaker property the first version of that guard settled for.
+ * @summary Request Verification
+ */
+export const requestVerification = async (
+  verificationRequest: VerificationRequest,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<unknown> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<unknown>(getRequestVerificationUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(verificationRequest),
+  });
+};
+
+export const getRequestVerificationMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestVerification>>,
+    TError,
+    RequestVerificationMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof requestVerification>>,
+  TError,
+  RequestVerificationMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["requestVerification"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof requestVerification>>,
+    RequestVerificationMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return requestVerification(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RequestVerificationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof requestVerification>>
+>;
+export type RequestVerificationMutationBody = VerificationRequest;
+export type RequestVerificationMutationError = HTTPValidationError;
+export type RequestVerificationMutationVariables = {
+  data: VerificationRequest;
+};
+
+/**
+ * @summary Request Verification
+ */
+export const useRequestVerification = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof requestVerification>>,
+      TError,
+      RequestVerificationMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof requestVerification>>,
+  TError,
+  RequestVerificationMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getRequestVerificationMutationOptions(options),
+    queryClient,
+  );
 };

@@ -27,12 +27,12 @@ the backup nor the original describes. It is admin-only and asks.
 import json
 import logging
 import zipfile
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Date, DateTime, Table, delete
+from sqlalchemy import Date, DateTime, Table, delete, update
 from sqlalchemy.orm import Session
 
 import covers
@@ -41,6 +41,7 @@ import filing
 import settings_store
 from config import COVERS_DIR
 from database import Base
+from enums import VerificationProvenance
 from models import (
     AuthorAlias,
     AuthorIdentifier,
@@ -53,6 +54,7 @@ from models import (
     CustomFieldValue,
     Loan,
     Note,
+    PasswordResetRequest,
     Quote,
     ReadingProgress,
     Setting,
@@ -208,6 +210,28 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # `FORMAT_VERSION` 1: an archive written before this restores with none,
         # which is the state it was written in.
         ("catalogue_credentials", CatalogueCredential),
+        # The password reset requests, whose only foreign key is `users`, first
+        # in this tuple. Here rather than beside the other per member tables
+        # because it is not about the catalogue at all: it is the record of who
+        # approved a member's way back into their account, which is the half of
+        # that flow the member reads.
+        #
+        # **Carried rather than dropped**, and the pending rows come with it. An
+        # archive already holds every password hash in the library, so a hash of
+        # a code that stops working within the hour discloses nothing new, and a
+        # restore that silently emptied this table would take away the record a
+        # member is entitled to read back.
+        #
+        # **This module is the exception to "only a member starts a reset", and
+        # it is named at every site that states the rule.** `restore` writes
+        # these rows through `table.insert()` from the archive, so an archive
+        # can carry an approved request. That widens nothing: a restore replaces
+        # every password hash in the library in the same transaction, so
+        # whoever can hand one to this route already holds every account.
+        #
+        # Absent from `_REQUIRED_TABLES`, like every table added after
+        # `FORMAT_VERSION` 1.
+        ("password_reset_requests", PasswordResetRequest),
         ("settings", Setting),
     )
 )
@@ -655,6 +679,50 @@ def _refuse_a_colliding_pair(tables: dict[str, Any]) -> None:
         first_by_fold[folded] = name
 
 
+def _archive_knows_about_confirmation(rows: list[dict[str, Any]]) -> bool:
+    """Whether this archive's `users` rows were written after `a7c41d9e6b28`.
+
+    **The key's presence, not its value**, and that distinction is the whole of
+    the rule below. `_row_to_dict` emits every column, so a modern archive
+    carries `email_verified_at: null` for exactly the accounts the policy
+    refuses: the ones that registered while `accounts_open_to_outsiders` was on
+    and never confirmed. Reading the value would restore those as confirmed,
+    which is the opposite of what the archive says.
+
+    An empty `users` payload counts as knowing, because there is nothing to
+    stamp either way and guessing on no evidence is how the wrong branch gets
+    taken silently.
+    """
+    return not rows or "email_verified_at" in rows[0]
+
+
+def _settle_restored_accounts(db: Session) -> None:
+    """Stamp the accounts an archive older than `a7c41d9e6b28` carried no
+    confirmation for.
+
+    **The migration's rule, applied to the same population by the one other path
+    that writes `users` rows wholesale.** Such an archive has no
+    `email_verified_at` in its manifest at all, so its accounts come back
+    unconfirmed, and turning the account policy on afterwards would refuse every
+    one of them, the library's only admin included, with nobody left to override
+    it.
+
+    `not_required` is the honest value and the same one the migration wrote:
+    those accounts were made under a policy that asked nothing.
+
+    Called only where the archive predates the column. A recent archive keeps
+    what it says, including an account that was deliberately left unconfirmed.
+    """
+    db.execute(
+        update(User)
+        .where(User.email_verified_at.is_(None))
+        .values(
+            email_verified_at=datetime.now(UTC).replace(tzinfo=None),
+            email_verification_source=VerificationProvenance.NOT_REQUIRED.value,
+        )
+    )
+
+
 def restore(db: Session, data: bytes) -> dict[str, int]:
     """Replace the database and the covers with the archive's contents.
 
@@ -690,6 +758,9 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
     # value for this key and would otherwise restore an older epoch, which is
     # exactly the state a pre-restore token verifies against.
     settings_store.bump_token_epoch(db)
+
+    if not _archive_knows_about_confirmation(tables.get("users") or []):
+        _settle_restored_accounts(db)
 
     db.commit()
 

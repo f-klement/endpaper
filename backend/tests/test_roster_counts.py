@@ -477,20 +477,22 @@ NOT_PROSE = ("/generated/", "/dist/")
 #: and because the gate already requires this line of every document it strips.
 #: One convention, enforced at both ends.
 #:
-#: **Recounted 2026-09-06 over the widened walk**, across the 629 files
-#: `len(candidates())` reports: 29 carry the declaration in their header, every
+#: **Recounted 2026-09-06 over the widened walk**, across the 630 files
+#: `len(candidates())` reports: 30 carry the declaration in their header, every
 #: one of them is stripped from the mirror, and between them they hold **zero**
 #: census candidates. So the rule drops exactly what the mirror drops and costs
 #: no coverage today. It read six of 547 when the walk was a list of globs, and
 #: the ratio moving that far on a change to the **walk** rather than to the tree
-#: is the reminder that a corpus figure measures the instrument too.
+#: is the reminder that a corpus figure measures the instrument too. Every
+#: figure below is taken by calling `candidates()` and reading what it returns,
+#: which is the walk the rule itself uses.
 #:
 #: **The anchoring is a rule about shape and this corpus does not justify it**,
 #: which is worth saying because the first version of this comment claimed it
-#: did. The phrase occurs 34 times across 31 files, this file's own `_DECLARES`
+#: did. The phrase occurs 35 times across 32 files, this file's own `_DECLARES`
 #: among them. Five of those sit outside the header window this reads and are
-#: not the question; of the 29 inside it,
-#: the anchored pattern matches all 29 and so does a bare substring, so nothing
+#: not the question; of the 30 inside it,
+#: the anchored pattern matches all 30 and so does a bare substring, so nothing
 #: in this tree separates a mention from a declaration. The anchor is kept
 #: because it is the publish gate's own pattern, not because the corpus argues
 #: for it.
@@ -506,21 +508,28 @@ NOT_PROSE = ("/generated/", "/dist/")
 #: the gate's own guard reads. They used to differ, this reading 2000 characters
 #: and the gate 30 lines, and the difference was written down as harmless on the
 #: strength of the two agreeing about every candidate. They do still agree,
-#: measured over all 629, **and that agreement was luck rather than structure**:
-#: **573** of the 629 have thirty lines or more counting newlines, the way
-#: `wc -l` does, and their opening thirty run under 2000 characters by as much
-#: as **1475**. Every declaration in this tree sits by line 24, counted 1 based
+#: measured over all 630, **and that agreement was luck rather than structure**:
+#: **577** of the 630 have thirty lines or more counting newlines, the way
+#: `wc -l` does, all but **three** of those run their opening thirty under 2000
+#: characters, and where they do they run under it by as much as **1470**. Every
+#: declaration in this tree sits by line 24, counted 1 based
 #: the way `grep -n` reports one. So the old window read past the end of line 30
 #: in most of the tree, and one declaration written into that span in a
 #: **published** document would be dropped here and published there, quietly.
 #:
 #: **Both figures need their counting rule beside them or they are three
-#: numbers each.** The population is 626 over every candidate, which folds in
-#: files with no line 31 and compares nothing; 575 if a line is what
-#: `split("\n")` returns, which counts a trailing empty; 571 if it must exceed
-#: thirty. And the bound is 1475 measured to the end of line 30's text and 1474
-#: measured to the end of its newline, which is what `head -n 30` actually
-#: writes. The bound does not move with the population, only with that.
+#: numbers each.** The population is 630 over every candidate, which folds in
+#: files with no line 31 and compares nothing; 577 if a line is what
+#: `split("\n")` returns, which counts a trailing empty; 575 if it must exceed
+#: thirty newlines. **The trailing empty is the whole of that difference, and
+#: the splitter is not part of it**: `str.splitlines` breaks on strictly more
+#: characters than a newline does, so under one threshold it can never return
+#: the smaller population, and it returns the same 577 here. Reading 575 as its
+#: figure is a lenient splitter answering with less than a strict one, which is
+#: this file's own first tell. And the bound is 1470 measured to the
+#: end of line 30's text and 1469 measured to the end of its newline, which is
+#: what `head -n 30` actually writes. The bound does not move with the
+#: population, only with that.
 #:
 #: **The number is copied, so it is pinned rather than trusted.** A published
 #: file cannot read the gate's script, for the reason two paragraphs up, so the
@@ -528,12 +537,16 @@ NOT_PROSE = ("/generated/", "/dist/")
 #: spells it once more, which is what makes moving it something somebody has to
 #: write twice.
 #:
-#: **Neither drift is caught by the tree, which is why the pin is not
+#: **Neither drift shows up in this tree, which is why the pin is not
 #: decoration.** Wider drops a published file from the census and is the silent
 #: direction this replaced. Narrower keeps a file the mirror strips, and that
 #: reaches the publish gate only where the kept file holds a claim: measured, a
 #: window of three would admit **six** declaring files and not one of them holds
-#: a census candidate, so nothing at either end would fail.
+#: a census candidate, so nothing at either end fails on the corpus. What does
+#: fail is a guard outside the published tree, which drives the gate with a
+#: declaration on this number's last in-window line and on the line after it.
+#: Either number moving alone turns one of those two red. It cannot be named
+#: from here, for the reason two paragraphs up.
 _INTERNAL = re.compile(
     r"^[^A-Za-z0-9]{0,6}[ \t]*\*\*This file is internal\.\*\*", re.M
 )
@@ -562,7 +575,7 @@ def declares_itself_internal(path) -> bool:
     attempt at that sentence omitted the one member a reader thinks of first.
     A file carrying any of the nine would have its thirtieth line arrive early
     here and not at the gate, so the window would be narrower for that file
-    only. Measured over the 629 candidates, **none** holds one, which is a
+    only. Measured over the 630 candidates, **none** holds one, which is a
     corpus cooperating rather than a rule holding, and it is cheaper to make
     the rule hold.
     """
@@ -2547,11 +2560,12 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
         """The two ends have to answer the same question about the same file.
 
         This read 2000 characters where the gate reads lines, and the two agreed
-        about every candidate, which was luck: 573 of the 629 have thirty lines
-        or more by `wc -l`, and their opening thirty run under 2000 characters
-        by as much as 1475, with every declaration in the tree sitting by line
-        24. Both figures carry their counting rule at `_INTERNAL`, because each
-        is three different numbers without one. A declaration written into that
+        about every candidate, which was luck: 577 of the 630 have thirty lines
+        or more by `wc -l`, all but three of those run their opening thirty
+        under 2000 characters, and where they do it is by as much as 1470, with
+        every declaration in the tree sitting by line 24. Both figures carry
+        their counting rule at `_INTERNAL`, because each is three different
+        numbers without one. A declaration written into that
         span in a published document was dropped here and published there, so
         the census stopped reading a file the mirror carries and nothing said
         so.
@@ -2584,7 +2598,7 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
         the gate's for that file: it publishes, and the census has already
         stopped reading it.
 
-        **Zero of the 629 candidates hold one of those characters, which is why
+        **Zero of the 630 candidates hold one of those characters, which is why
         this needs a fixture rather than the tree.** Measured before it was
         written: reverting the split to `splitlines` was caught by nothing at
         all, so the rule was a sentence in a docstring and not a guard.
@@ -2623,10 +2637,19 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
         alone.** Narrowing the constant to three changes nothing the unit test
         above asserts, and it is silent in the tree as well: six declaring files
         sit past line three and none of them holds a census candidate, so
-        admitting all six fails nothing anywhere. Widening it is caught up there
-        only by an anti vacuity arm noticing that its own fixture stopped telling
-        lines from characters, which is a report about the fixture rather than
-        about the window.
+        admitting all six fails nothing on the corpus. Widening it is caught up
+        there only by an anti vacuity arm noticing that its own fixture stopped
+        telling lines from characters, which is a report about the fixture rather
+        than about the window.
+
+        **What this literal no longer carries alone is the other half of the
+        pair.** A guard outside the published tree drives the publish gate with
+        a declaration on this number's last in-window line and on the line after
+        it, so the gate's bound is derived rather than copied and a move on
+        either side goes red. **This stays anyway, and the reason is the mirror
+        rather than the reader.** The public tree carries this file and not that
+        guard, so over there this literal is the only statement of the number
+        anything makes.
         """
         assert _HEADER_LINES == 30, (
             "the declaration window no longer matches the publish gate's bound on "

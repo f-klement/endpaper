@@ -115,7 +115,7 @@ for _pinned in config._ENV_OVERRIDES.values():
 # there is disarmed here the moment it is added, and the per-source pins are
 # generated from the same function the application uses.
 import credentials  # noqa: E402
-from enums import CatalogueSource  # noqa: E402
+from enums import CatalogueSource, VerificationProvenance  # noqa: E402
 
 for _key_variable in credentials.ENV_VARIABLES:
     os.environ.pop(_key_variable, None)
@@ -135,6 +135,7 @@ os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.fail.Keyring"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+import accounts  # noqa: E402
 import covers  # noqa: E402
 import main  # noqa: E402
 import metadata  # noqa: E402
@@ -147,6 +148,9 @@ from ratelimit import (  # noqa: E402
     login_limiter,
     metadata_limiter,
     public_catalogue_limiter,
+    recovery_code_limiter,
+    recovery_request_account_limiter,
+    recovery_request_address_limiter,
     register_limiter,
 )
 
@@ -279,6 +283,9 @@ def reset_rate_limits() -> None:
     authority_limiter.reset()
     cover_backfill_limiter.reset()
     public_catalogue_limiter.reset()
+    recovery_request_address_limiter.reset()
+    recovery_request_account_limiter.reset()
+    recovery_code_limiter.reset()
 
 
 @pytest.fixture(autouse=True)
@@ -478,6 +485,15 @@ def _make_account(password_hash: str, username: str, *, is_admin: bool) -> dict:
     session = SessionLocal()
     try:
         user = User(username=username, password_hash=password_hash, is_admin=is_admin)
+        # Confirmed, because **every path that creates an account stamps one**:
+        # registration under a policy that is off, an admin making a test
+        # account, a directory sign in, and the migration for every row that
+        # already existed. A fixture that skipped it would be the one account
+        # shape the application never produces, and would make an unrelated test
+        # fail the moment it turned the account policy on.
+        # `tests/test_accounts.py` builds an unconfirmed account explicitly where
+        # it needs one.
+        accounts.record_verification(user, VerificationProvenance.NOT_REQUIRED)
         session.add(user)
         session.commit()
         session.refresh(user)

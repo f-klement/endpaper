@@ -455,6 +455,52 @@ export const en = {
   "login.uploading": "Uploading...",
   "login.signingYouIn": "Signing you in",
 
+  // ── Getting back in, and confirming an address ──────────────────────────
+  //
+  // Two flows on the sign in card, and every string here is written for
+  // somebody locked out and irritated. What each says about what it did is the
+  // same sentence whether or not the account exists, which is the server's rule
+  // rather than a wording choice: a screen that said "no such account" would
+  // hand a stranger the household's roster.
+  "login.forgotPassword": "Forgotten your password?",
+  "login.haveCode": "I have a confirmation code",
+  "login.backToSignIn": "Back to sign in",
+  "recovery.title": "Get back in",
+  "recovery.intro":
+    "An admin has to approve this. They will give you a one time code to type in below.",
+  "recovery.ask": "Ask an admin",
+  // Deliberately says nothing about whether the account exists. The server
+  // answers the same either way, and a screen that said more would be the
+  // disclosure the route refuses.
+  "recovery.asked":
+    "If that account exists, an admin has been asked. They will read you a code.",
+  "recovery.codeLabel": "One time code",
+  "recovery.codePlaceholder": "ABCD-EFGH-JKLM",
+  "recovery.newPassword": "New password",
+  "recovery.newPasswordPlaceholder": "At least 8 characters",
+  "recovery.setPassword": "Set my password",
+  "recovery.done": "Your password is set. Sign in with it.",
+  "recovery.failed":
+    "That code is not usable. Ask an admin to approve a reset.",
+  "verify.title": "Confirm your address",
+  "verify.intro":
+    "Type the code sent to your address. An admin can confirm the account instead, if no mail arrives.",
+  "verify.submit": "Confirm",
+  "verify.resend": "Send it again",
+  "verify.resent":
+    "If that account is waiting to be confirmed, a code has been sent.",
+  "verify.done": "Your account is confirmed. Sign in.",
+  "verify.failed": "That code is not usable. Ask for a new one.",
+  "login.registered":
+    "Your account is made. Confirm your address with the code we sent, or ask an admin to confirm it.",
+  "login.emailRequiredHint":
+    "This library confirms new accounts, so an address is needed. A code is sent to it.",
+  // Said where the only admin is being created rather than discovered during an
+  // incident. A reset is approved by another admin, so the first account has
+  // nobody to approve it and the way back is a command line.
+  "login.soleAdminWarning":
+    "Keep this password safe. A reset is approved by another admin, so the first account in a library has nobody to approve its own.",
+
   // ── Settings ────────────────────────────────────────────────────────────
   "settings.title": "Settings",
   "settings.saved": "Settings saved.",
@@ -552,6 +598,28 @@ export const en = {
   "account.members.title": "Member addresses",
   "account.members.hint":
     "So you can find the empty one, or the typo, when somebody's reminders go nowhere.",
+
+  // ── What has been done to your own account ──────────────────────────────
+  //
+  // The member's half of an admin confirmed reset. A reset that left no mark
+  // would be indistinguishable from a quiet takeover, so the account says who
+  // approved one and when, permanently.
+  "account.security.title": "Your account's history",
+  "account.security.hint":
+    "A password reset has to be approved by an admin, and the account keeps a record of who approved it.",
+  "account.security.noReset":
+    "No password reset has been approved for this account.",
+  "account.security.reset":
+    "Your password was reset on {date}, approved by {name}.",
+  "account.security.resetUnknown": "Your password was reset on {date}.",
+  "account.security.confirmedBy":
+    "An address on this account was confirmed by {name}.",
+  "account.security.confirmedByEmail":
+    "An address on this account was confirmed by a code sent to it.",
+  "account.security.notAsked":
+    "This account was never asked to confirm an address.",
+  "account.security.directory":
+    "A directory signs this account in, so there is no address for this library to confirm.",
 
   "theme.hint": "Saved to your account, so it follows you between devices.",
   "theme.light": "Light",
@@ -698,6 +766,39 @@ export const en = {
   "settings.testAccountsSwitchTo": "Switch to {name}",
   "settings.testAccountsSwitchFailed": "Could not switch to that account.",
   "settings.testAccountsPasswordFor": "Password for {name}",
+
+  // ── Account recovery and confirmation, the admin's half ─────────────────
+  "settings.openToOutsiders":
+    "Accounts are open to people outside the household",
+  "settings.openToOutsidersHint":
+    "On, a new account must confirm its address before it can sign in. It changes nothing for the accounts already here.",
+  "settings.resetRequests": "Password reset requests",
+  "settings.resetRequestsHint":
+    "A member asked to be let back in. Approving one produces a code you read out to them, shown once. Nothing here can start a reset: only the member can.",
+  "settings.resetRequestsEmpty": "Nobody is waiting.",
+  "settings.resetRequestsFailed": "Could not act on that request.",
+  "settings.resetRequestsAsked": "Asked {date}",
+  "settings.resetRequestsApprovedBy": "Approved by {name}",
+  "settings.resetRequestsApprove": "Approve",
+  "settings.resetRequestsApproveFor": "Approve a reset for {name}",
+  "settings.resetRequestsDecline": "Decline",
+  "settings.resetRequestsDeclineFor": "Decline the reset for {name}",
+  "settings.resetRequestsCodeExpires": "The code stops working at {time}.",
+  "settings.resetRequestsCodeFor":
+    "Read this code to {name}. It is shown once and stops working at {time}.",
+  "settings.verification": "Account confirmation",
+  "settings.verificationHint":
+    "Confirming an account says that the address on it belongs to that person. It is recorded with your name on it.",
+  "settings.verificationConfirm": "Confirm",
+  "settings.verificationConfirmFor": "Confirm the account {name}",
+  "settings.verificationFailed": "Could not confirm that account.",
+  "settings.verificationWaiting": "Waiting to be confirmed",
+  "settings.verificationNoAddress": "No address, so no code can be sent.",
+  "settings.verificationElsewhere":
+    "Signed in by a directory, nothing to confirm here.",
+  "settings.verificationBySomebody": "Confirmed by {name}",
+  "settings.verificationByEmail": "Confirmed by a code sent to an address",
+  "settings.verificationNotAsked": "Confirmed, because nobody was asked",
 
   // ── Overdue reminders ───────────────────────────────────────────────────
   //

@@ -10347,3 +10347,244 @@ every such tree in this repository today except one, whose deeper source holds n
 fail on. A fixture arm for a subdirectory carrying no document of its own is what catches it
 now. The second was the quantifier above, found by driving the one document case rather than
 reading it. Both are one shape: a fixture named for the rule was not testing the rule.
+
+## The suite runner ships the repository it belongs to, not the caller's directory
+
+The wrapper that runs a suite on a worker node used to tar `.`, the caller's working
+directory, while resolving every other file it needs from its own repository. A wrapper
+invoked by path from anywhere else therefore ran one checkout's runner over another
+checkout's tree and reported on a tree nobody had named. Measured 2026-09-06 by a mutation
+harness holding a second copy of this repository with one file mutated: the same command
+with the same argument gave `136 passed, SUITE EXIT: 0` from one directory and `5 failed,
+SUITE EXIT: 1` from the other, and nothing in the output tells the two apart.
+
+The ship is anchored to the runner's own root. It refuses, before it asks the cluster for
+anything, when that root holds no directory for the suite it was asked to run: shipping a
+tree with no suite in it fails inside the container on a `cd`, which reads as a broken
+repository rather than as a runner pointed at the wrong root.
+
+Agent worktrees are excluded alongside the git directory. No suite reads them: collection
+is confined to `backend/tests` by `testpaths`, and each tool runs inside its own suite
+directory, so a directory at the repository root was only ever ship time and disk.
+
+## The census's declaration window is bracketed where the number may be read
+
+Whether a document declares itself internal is decided by reading its opening lines, and
+that window has to be the publish gate's own, because the two rules answer the same
+question and a census wider than the gate drops a published document from scope in silence.
+The census lives in a published file and the gate's script does not survive the strip, so
+the census may not read it: the number is spelled at both sites.
+
+A stated bound of that kind stops guarding without ever failing, because a narrower window
+is a weaker inequality. The pair is therefore asserted outside the published tree, by
+driving the gate with a declaration on the census constant's last in-window line and on the
+line after it. Accepting at the bound and reporting one past it derives the gate's number
+rather than copying it, and either side moving alone turns one arm red.
+
+## An unverified account may do nothing, and the admin override is what makes that safe
+
+Owner's decision, 2026-09-06. Account verification refuses the login outright rather than
+granting a reduced account. The alternative considered was read only, and it was refused on
+surface rather than on principle: a third account state has to be threaded through every
+write path, and a path that forgets it is a silent hole, where a check at the login boundary
+is one place that either runs or does not.
+
+This is only tolerable because the admin override exists. A verification step completable
+only by receiving mail cannot be completed at all by a household with no mail server, which
+is a real configuration here rather than a hypothetical, so the override is the primary path
+for some installations and the exception for others.
+
+**The audience is named by its own setting, not inferred.** Verification applies only where
+accounts are open to people outside the household, and nothing in the codebase drew that
+line. Reusing a switch that means something else was refused for each candidate in turn: the
+auth mode is about where credentials are checked, library mode is about cataloguing, the
+public catalogue switch is about readers rather than accounts, and gating on whether
+registration is open would silently disable verification for existing unverified accounts
+the moment an admin closed signups.
+
+## A catalogue credential is per source row, and the envelope already says so
+
+Owner's decision, 2026-09-06, ratifying what was built. The sealed envelope is bound to its
+source by the purpose string it authenticates, so a stored login cannot be moved between
+rows or between kinds. Per institution was refused because it needs an entity that does not
+exist and would break that binding, which is the property making a sealed login unmovable.
+
+A hosted deployment serving more than one tenant may offer this, with the consequence stated
+rather than implied: the key lives in the operator's environment, so the operator can
+decrypt every credential stored on the instance. That is a property of holding the key, not
+a defect to be fixed by a switch, and a deployment whose tenants cannot accept it should not
+offer the feature.
+
+## The importer gets a reader per service, rather than a pre-pass in front of one path
+
+Owner's decision, 2026-09-06. Three export shapes cannot be expressed as candidate header
+names: a compound cell packing publisher, year and format into one value, a row exclusion
+marking what the member deleted at the source, and a library export that is nested JSON
+rather than a CSV at all. A row level exclusion in particular cannot be a header name under
+any spelling, and it is the half that changes what a member sees, since the import path
+never sets the private flag and a title deleted at the source returns visible to the whole
+instance.
+
+The generic name mapping stays for every service that fits it. A service that does not gets
+its own reader behind a seam built for the purpose. The pre-pass was refused despite being
+smaller: it keeps one path and pays for it with a detection step that has to be right about
+which service wrote a file, and it does not reach the JSON case at all, so the seam would be
+built later anyway with a pre-pass left in front of it.
+
+## The key is resolved once for a loop, and the arm that costs is stated with the one that saves
+
+`credentials.for_request` took no `KeyState`, so `routers/books.py::_catalogue_logins`
+re-resolved the key per source: `for_request` to `stored` to `require_key` to
+`key_material` to `_supplied`, which reads every entry in `KEY_SOURCES` and runs a BIP-39
+decode per phrase held. Measured against two sealed logins on the DNB and K10plus rows,
+by mutation, with the pre-fix loop restored in process: **2 `_supplied` invocations and 6
+key source reads before, 1 and 3 after**, and the count is flat in the number of sources
+rather than linear in it. Whole request, including
+`settings_store._sources_with_a_credential`, which resolves once for its own loop: 2 and
+3 for one and two credentialled sources before, 2 and 2 after.
+
+**`stored` takes the state as well, and `_material` is what makes that safe.** `key_state`
+turns a configuration refusal into a sentence so a settings screen can report it; a caller
+opening an envelope has to meet the refusal instead. Two stores holding different keys
+raised `KeyConfigurationError` through `require_key` before, and would otherwise have
+become "no credential is stored", which tells an admin to type a login in again when the
+thing to fix is the second store.
+
+**The state binds even when it says there is no key, and that arm was wrong first.** Both
+critic seats found it independently, which is the strongest signal this process produces:
+`_material` fell through to `require_key` when the state carried neither a key nor a
+problem, which is exactly the deployment whose key is gone. Measured: **3 `_supplied`
+invocations for two sealed logins where the fix gives 1**, so the one state every other
+reader of a `KeyState` answers from the value it was handed was the one state that read
+every store again, per source. `require_key`'s message is a constant now because two
+callers raise it and only one of them may resolve.
+
+**The doors are collected before the key is touched.** An eager `key_state()` would have
+taken today's roster from zero resolutions to one, and today's roster is every install:
+`sources.NEEDS_A_KEY` is Google Books alone, whose row is bespoke, so no door carries a
+login. What the change does cost is a roster whose credential doors are **all** pinned in
+the environment, which opens no envelope and now pays one resolution where it paid none.
+That is one per request, bounded by nothing the roster can grow, where the defect it
+replaces was bounded by the roster.
+`tests/routers/test_books.py::TestTheKeyIsResolvedOncePerRequest` pins the saving, the
+zero, the lost key and the cost, with two instruments: `_supplied` invocations, and
+`KeySource.read` calls, which observes the effect rather than the function.
+
+## The lever on a hosted deployment is one variable, and unwritable is not the condition
+
+`docs/security.md` refused the hosted multi tenant case flatly, where the owner's decision of
+2026-09-06 replaces the refusal with the consequence. The property is stated here and the
+argument and attribution stay in the register, joined by a pointer.
+
+Three claims were written and withdrawn before one held, each caught by a seat rather than
+by a reading. The key does not only live in the environment: it is on the operator's machine
+whichever of the three stores holds it, and creating one is `require_admin`, so a tenant's
+own admin can mint one onto the operator's disk. There **is** a lever, against a claim that
+there was none: `key_file()` reads `CREDENTIAL_ENCRYPTION_KEY_FILE` before it falls back into
+the data directory, so the key store moves without the database. And the lever's condition is
+not "a path the application cannot write": a 0400 file holding a phrase satisfies that, and it
+is what a Docker secret and a Kubernetes Secret both arrive as, so the key is in force for
+every request while the screen correctly reports that none can be created. The condition is a
+path that does not exist and cannot be created, and the read only file is recorded as the trap.
+
+## A `KeyState` carries the recovery phrase, so it is not rendered either
+
+`KeyState.material` is the 32 bytes `key_to_phrase` turns straight back into the words, so
+one rendering discloses the key that opens every stored credential rather than one login.
+It was the only secret bearing dataclass in the module without `repr=False`, and this is
+the change that binds one in a frame on the member request path, where a
+`logger.exception` lives. `problem` still prints, or the refusal a settings screen reports
+would have gone with it.
+
+## The asymmetry, not a rule, is what makes an admin confirmed reset a recovery flow
+
+One function inserts a reset request and one unauthenticated route reaches it, so an admin
+approves and cannot initiate. **The residual is stated rather than closed**: the route takes
+a username anybody may type, so an admin can post a member's name and approve it. Nothing in
+a mechanism prevents that, because the request deliberately requires nothing only the member
+has, and a request that required something would be a request the locked out member cannot
+make.
+
+What is prevented is doing it quietly. Redeeming moves `users.sessions_valid_from`, so every
+session on the account ends and the member's password stops working the same evening rather
+than at their next sign in, which under a week long token is a week. The request row is kept
+with the approver's name and `GET /api/users/me/security` is where the member reads it.
+
+## A code, never a mailed link, and the reason is the `Host` header
+
+The only source for a base URL on a request is a header the client sets, so a mailed link
+built from one mails an attacker's host into a member's mailbox. The alternatives were a
+base URL setting nobody would fill in on a household install, or a link that goes to the
+wrong place. A code the member types needs neither, and it makes the two flows one
+mechanism: the reset has no mailbox to send to at all, so the admin reads the code out.
+
+bcrypt rather than a digest, because a code short enough to say aloud needs a slow hash, and
+it is found by the username beside it rather than by an indexed token.
+
+## Confirmation is stamped when an account is made, not evaluated against the current policy
+
+Turning the switch on gates accounts created after it and never strands a member already in
+the library; turning it off never admits somebody who registered while it was on and never
+confirmed. The migration stamped every row that existed as `not_required`, and `backup`
+does the same for an archive older than the migration, because the alternative is an upgrade
+plus one switch locking a household out of its own catalogue.
+
+The cost, stated rather than discovered: an admin cannot retroactively require confirmation
+of accounts already here. The override is how they act on one of those.
+
+The first account is never gated, since there would be no admin to override it and no
+mailbox configured yet.
+
+## `users` carries the settled fact and a table carries the workflow
+
+The confirmation state and the live code are columns, for the reason the appearance columns
+are: one to one, no history, no cardinality. A reset request is a table because it has a
+queue an admin reads, a second person's name on it, and a life beyond the reset. The
+completed rows are that record, so uniqueness is a partial index over the live ones.
+
+## No check constraint pairs the confirmation provenance with the admin who asserted it
+
+`AuthorityProvenance` has one and this does not. Adding it forces a batch rewrite of `users`,
+which from this revision carries a self referential foreign key and is referenced by nine
+tables. `accounts.record_verification` is the one writer, raises on a mismatched pair, and
+`tests/test_accounts.py::TestOnlyAnAdminAssertionNamesAnAdmin` is the enforcement.
+
+## One recovery budget across both flows, charged on two keys
+
+Verification and reset are the same act from a limiter's point of view: a caller with no
+session asking for a code to be produced. Splitting the counter would let a caller spend
+five of each, which is what a shared counter exists to prevent. Both an address key and an
+account key are charged, because an address limit alone lets a botnet queue requests against
+one member and an account limit alone lets one address work through the roster slowly. The
+account key is caller chosen, so it is a denial of service on recovery; what bounds the
+damage is that at most one live request exists per account however many times it is asked
+for.
+
+## An archive says what it knows by carrying the key, not by carrying a value
+
+`backup.restore` stamps an account only where the archive predates the column, and it
+decides that by whether the `users` payload carries `email_verified_at` at all. Reading the
+value instead confirms every account the policy refuses, because a current archive carries
+an explicit null for exactly those. Both critic seats found that independently, which is the
+strongest signal this process produces; both directions are now pinned by a test.
+
+## A token's `iat` carries sub second precision, and both roundings were wrong
+
+Whole seconds leave a hole in either direction, and both halves were measured here. Floored,
+a token minted in the same second as a reset survives it, which is the session the reset
+exists to end. Unfloored, a member signing in immediately after their own reset presents an
+`iat` that floored to before the cutoff and is refused the session the password they just
+set is for. RFC 7519 allows a non integer NumericDate, so `auth._encode` writes one.
+
+The security seat read the installed PyJWT rather than remembering it: `_validate_claims`
+computes `now` as an unfloored float and `_validate_iat` floors the claim, so a sub second
+`iat` raises no `ImmatureSignatureError`, and that holds even if a later PyJWT floors `now`
+again.
+
+**The timing figure in `backend/accounts.py` is a ratio, and the absolutes are one
+machine's**: 333.3 ms median over seven bcrypt hashes against 0.0033 ms median over 200
+indexed SELECTs, measured on a worker node rather than on the machine this repository is
+developed on. Which machine is the part that decides whether such a number is a floor or an
+estimate, so it is recorded where this project records that, and not here: a duration
+measured on one node says nothing about another, and most of the names involved are internal
+and may not be published.

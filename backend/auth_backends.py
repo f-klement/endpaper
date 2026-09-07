@@ -24,6 +24,7 @@ from ldap3.utils.conv import escape_filter_chars
 from sqlalchemy.orm import Session
 
 import mailer
+from accounts import record_verification
 from auth import verify_password
 from config import (
     auth_mode,
@@ -41,7 +42,7 @@ from config import (
     proxy_groups_header,
     proxy_user_header,
 )
-from enums import AuthMode
+from enums import AuthMode, VerificationProvenance
 from models import User
 
 logger = logging.getLogger("endpaper.auth")
@@ -273,6 +274,12 @@ def upsert_directory_user(
             auth_source=source.value,
             email=asserted,
         )
+        # A directory authenticated this identity, so this app never held the
+        # credential and has nothing of its own to verify. Stamped rather than
+        # left null, because null is what the account policy refuses a sign in
+        # for, and `app_holds_the_password` and this line have to agree about a
+        # row that is neither of the two directories.
+        record_verification(user, VerificationProvenance.DIRECTORY)
         db.add(user)
         # WARNING, not INFO. Creating an account is the most consequential
         # thing this app does without anybody clicking anything, and under

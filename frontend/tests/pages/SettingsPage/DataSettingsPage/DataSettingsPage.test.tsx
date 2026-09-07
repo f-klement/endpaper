@@ -51,6 +51,18 @@ beforeEach(() => {
   // Every test that reaches the admin block asks for these, and an
   // unstubbed request throws.
   api.on("/api/users/test-accounts", { body: [] });
+  api.on("/api/users/password-resets", { body: [] });
+  api.on("/api/users/verification", { body: [] });
+  // The reset queue is drawn only where this deployment resets a password at
+  // all, and the answer is the server's rather than a derivation from `mode`.
+  api.on("/auth/config", {
+    body: {
+      auth_mode: AuthMode.local,
+      registration_enabled: true,
+      password_reset_enabled: true,
+      verification_required: false,
+    },
+  });
 });
 
 describe("DataSettingsPage", () => {
@@ -185,6 +197,36 @@ describe("DataSettingsPage", () => {
         "Incorrect password for that account",
       );
       expect(onSignIn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getting back in", () => {
+    it("draws the queue where this deployment resets a password", async () => {
+      render();
+
+      expect(
+        await screen.findByText("Password reset requests"),
+      ).toBeInTheDocument();
+    });
+
+    it("draws nothing where the password is held elsewhere", async () => {
+      // Under ldap and proxy every request into that queue is refused at the
+      // route, so the section could only ever be empty beside a hint describing
+      // a mechanism that cannot run.
+      api.on("/auth/config", {
+        body: {
+          auth_mode: AuthMode.ldap,
+          registration_enabled: false,
+          password_reset_enabled: false,
+          verification_required: false,
+        },
+      });
+      render();
+
+      expect(await screen.findByText("Test accounts")).toBeInTheDocument();
+      expect(
+        screen.queryByText("Password reset requests"),
+      ).not.toBeInTheDocument();
     });
   });
 });

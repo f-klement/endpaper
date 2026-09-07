@@ -5,7 +5,8 @@ import { SettingsSection } from "../../components";
 import SettingsSubPage from "../components/SettingsSubPage";
 import AddressField from "./components/AddressField";
 import MemberAddresses from "./components/MemberAddresses";
-import { useMemberEmails, useMyEmail } from "./hooks";
+import SecurityRecord from "./components/SecurityRecord";
+import { useMemberEmails, useMyEmail, useMySecurity } from "./hooks";
 
 interface AccountSettingsPageProps {
   /**
@@ -38,6 +39,7 @@ export default function AccountSettingsPage({
   const { t } = useTranslation();
   const mine = useMyEmail();
   const members = useMemberEmails(currentUser.is_admin);
+  const security = useMySecurity();
 
   return (
     <SettingsSubPage icon="user" title={t("settings.account.title")}>
@@ -86,6 +88,14 @@ export default function AccountSettingsPage({
             {t("settings.saved")}
           </p>
         )}
+      </SettingsSection>
+
+      <SettingsSection title={t("account.security.title")} icon="user">
+        <SecurityRecord
+          security={security.security}
+          isLoading={security.isLoading}
+          error={security.error}
+        />
       </SettingsSection>
 
       <MemberAddresses state={members} />

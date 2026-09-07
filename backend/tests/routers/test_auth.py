@@ -11,17 +11,19 @@ class TestRegister:
     def test_first_account_becomes_admin(self, client):
         res = client.post("/auth/register", json={"username": "first", "password": "pw12345678"})
         assert res.status_code == 201
-        assert res.json()["user"]["is_admin"] is True
+        # `RegistrationOut`, so the session is nested: where a deployment
+        # confirms new accounts there is none to hand back.
+        assert res.json()["token"]["user"]["is_admin"] is True
 
     def test_second_account_is_not_admin(self, client, admin):
         res = client.post("/auth/register", json={"username": "second", "password": "pw12345678"})
         assert res.status_code == 201
-        assert res.json()["user"]["is_admin"] is False
+        assert res.json()["token"]["user"]["is_admin"] is False
 
     def test_registration_returns_a_usable_token(self, client):
         token = client.post(
             "/auth/register", json={"username": "first", "password": "pw12345678"}
-        ).json()["access_token"]
+        ).json()["token"]["access_token"]
         res = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert res.status_code == 200
 
@@ -33,7 +35,7 @@ class TestRegister:
     def test_password_is_never_returned(self, client):
         body = client.post(
             "/auth/register", json={"username": "first", "password": "pw12345678"}
-        ).json()
+        ).json()["token"]
         assert "password" not in body["user"]
         assert "password_hash" not in body["user"]
 
@@ -135,7 +137,7 @@ class TestAnAddressCanBeGivenWhileTheAccountIsBeingMade:
                 "password": "pw12345678",
                 "email": "first@example.org",
             },
-        ).json()
+        ).json()["token"]
         assert "email" not in body["user"]
 
 

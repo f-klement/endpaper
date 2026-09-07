@@ -786,10 +786,11 @@ is how a secret reaches a log aggregator.
 
 ## Rate limiting
 
-**Seven counters, for four different reasons.** Counted 2026-08-28 against
-`SlidingWindowLimiter(` in `backend/ratelimit.py`; this table used to say five
-and list four of them, omitting the authority and cover backfill limits
-entirely. The number is now derived rather than written:
+**Ten counters, for five different reasons.** The count is not read off this
+page: `SlidingWindowLimiter(` in `backend/ratelimit.py` is counted on every run,
+which is why no date is attached to it. The method was added on 2026-08-28,
+after this table said five and listed four of them, omitting the authority and
+cover backfill limits entirely. The number is derived rather than written:
 `tests/test_ratelimit.py::TestTheRateLimitTableInTheDocsIsTheModule`
 reads the sentence and the table out of this file and counts the module, so a
 counter added without a row here is a failing test rather than a stale
@@ -804,7 +805,10 @@ paragraph.
 | metadata lookup, search, refresh, enrich | 60 / min | username | Each call fans out to as many as eight public catalogues that this library neither runs nor pays for |
 | `GET /api/books/authors/authority`, `POST /api/books/authors/identifiers`, `GET /api/books/authors/wikipedia` | 10 / min | username | **Three paths, one counter**, because all three reach an authority service on a member's behalf; sharing it means a member reloading the authors page cannot also spend the confirmation budget. Sized for the search rather than the confirmation: the supplier's published figures are 6,000 simple lookups a minute and **30 complex searches**, and this counter cannot tell the two apart, so three members searching flat out at ten each are exactly at that thirty. **Which of the two is "more expensive" depends on the unit, and this row has stated it in the wrong one twice.** Since 2026-08-28 a confirmation is one lobid request, four to Wikidata and up to three to VIAF: **8 requests, about 1.08 MB, three hosts**; where VIAF produces no cluster, six more Wikidata calls replace the VIAF ones rather than joining them, so the ceiling is **14 requests** and the bytes fall, the six measuring 1,942 together. A lookup reaches two hosts and no VIAF, and is the **larger of the two in requests**: its name search branch is 1 + 2 per candidate capped by `MAX_CANDIDATES`, so **11 requests and about 43 KB**, and its resolve branch is a full `resolve` per stored identifier under the same cap, so **25 requests and about 93 KB**. At ten a minute that is up to 250 outbound requests for lookups against 140 for confirmations. **In bytes the comparison inverts**: a confirmation is about 25x a name search and 12x a resolve, because the VIAF fallback record alone can be 781,687 bytes. **The third path is the one to read before re-sizing this, for two reasons this row did not previously have to state.** It is the first consumer of this counter that fires on a **page render** rather than on a deliberate act, so it is spent by navigation rather than by intent; and it spends the whole of that budget at **Wikidata**, which this row is not sized against, while the 30-complex-search figure above is lobid's. It is at most 10 requests per call (five filtered, five unfiltered), so a member with 201 or more confirmed authors reaches 100 Wikidata requests a minute at this ceiling, against a measured tolerance of roughly 50 `wbgetclaims` in two minutes from one address. The resulting 429 is not seen by the reader: it degrades to a link to the Wikidata item, and it lands on the confirmation path as well, silently, because both routes reach Wikidata from one address. The shared counter is what **bounds** the combined spend rather than what causes the collision, so splitting it raises the total and makes the collision more likely, not less. A client is expected to cache: Endpaper's own asks once an hour per locale and not at all for a library that has confirmed nobody. Totals measured live 2026-08-28; the per-call figures are in `backend/authority.py` and are not repeated here so they cannot drift against it. VIAF publishes no figure to size against, and serves no `robots.txt` |
 | `POST /api/books/covers/backfill` | 6 / min | username | One run fetches up to a hundred images from the same services the metadata limit protects, and it is the call a member would press twice while the first is still running |
-| `GET /api/public/books`, `GET /api/public/books/{id}`, `GET /sru` | 120 / min | address | The fourth reason, and the only counter here whose caller holds no session: this is the published catalogue, so it is the first surface a stranger can reach. **Keyed on the weakest key in the module**, because there is no username to key on and `X-Forwarded-For` is not trusted, so behind a proxy this is closer to a global cap than a per client one. 120 a minute is far above a person turning pages. **It does not stop a bulk copy of the listing and is not meant to**: `MAX_PAGE_SIZE` is 200, so a 3,000 record catalogue is 15 requests, and a published catalogue is a public document. What it bounds is the record by record read, one request per book, which is where the per query cost is and which is the path an indiscriminate crawler takes. **One counter for three paths, not three counters**, because there is one published catalogue and a harvester and a browser reading the same records should not have two budgets between them |
+| `GET /api/public/books`, `GET /api/public/books/{id}`, `GET /sru` | 120 / min | address | The fourth reason: this is the published catalogue, so it is the first surface a stranger can reach. **It is no longer the only counter here whose caller holds no session**, and that sentence stood in this row until account recovery arrived beneath it; it is the only one that serves catalogue rows to such a caller. **Keyed on the weakest key in the module**, because there is no username to key on and `X-Forwarded-For` is not trusted, so behind a proxy this is closer to a global cap than a per client one. 120 a minute is far above a person turning pages. **It does not stop a bulk copy of the listing and is not meant to**: `MAX_PAGE_SIZE` is 200, so a 3,000 record catalogue is 15 requests, and a published catalogue is a public document. What it bounds is the record by record read, one request per book, which is where the per query cost is and which is the path an indiscriminate crawler takes. **One counter for three paths, not three counters**, because there is one published catalogue and a harvester and a browser reading the same records should not have two budgets between them |
+| `/auth/reset/request`, `/auth/verify/request` | 5 / hour | address | The fifth reason, and both of these rows are it: getting back into an account, from a caller who by definition holds no session. One budget across both routes, because they are the same act (ask for a one time code to be produced) and splitting it would let a caller spend five of each. **Charged on the address so a botnet cannot queue a hundred requests against one member** |
+| `/auth/reset/request`, `/auth/verify/request` | 5 / hour | account | The other half of the same charge, and both halves are needed: an address limit alone leaves one address free to work through the roster slowly, one member at a time. **The key is caller chosen, so this is a denial of service on recovery**, stated rather than argued away. What bounds the damage is that the thing being rationed is already bounded: at most one live request exists per account however many times it is asked for. **The wider residual, stated because it is a property of this window rather than of the key**: the limiter refuses a key it has never seen once its table is full rather than evicting a live one, so 4,096 distinct account keys held live deny recovery to every account not already tracked, for an hour. Filling them takes 4,096 requests across about 820 addresses at five each. Refusing rather than evicting is still right, because every eviction policy lets an attacker choose which key leaves |
+| `/auth/reset/redeem`, `/auth/verify` | 10 / hour | username + address | Guessing a one time code. The code is 60 bits, so the keyspace is not what is doing the work here and this is: an approved reset code lives one hour. Keyed like a sign in rather than on the account alone, because an account-only key would let anybody lock a member out of the recovery they had just been granted |
 
 The last three of the first six are the ones that are not about this deployment: spending somebody else's
 quota is a way to get this deployment's address rate-limited upstream, which loses
@@ -1172,8 +1176,37 @@ settings screen, not only here. On a machine nobody
 administers this is also the restore story: a backup carries the sealed rows and never the
 key, so restoring onto a new machine needs the phrase. That is why there is one.
 
-**A hosted multi-tenant deployment may not offer this**, and that is structural rather than
-a policy. One deployment holds one Library, and there is no multi tenancy anywhere in this
+**A hosted deployment serving more than one tenant may offer this, and the operator can
+then decrypt every credential on the instance.** The key is on the operator's machine
+whichever of the three stores above holds it, and the operator does not decide whether one
+exists: creating a key is `require_admin`, so a tenant's own admin can mint one onto the
+operator's disk. **There is no switch that gives tenants the feature while the operator
+does not hold the key**, and that is a property of holding the key rather than something a
+setting could fix: `docs/decisions.md`, "A catalogue credential is per source row, and the
+envelope already says so".
+
+**What an operator can do is withhold it entirely, and that is one variable.** With
+`CREDENTIAL_ENCRYPTION_KEY` unset and `CREDENTIAL_ENCRYPTION_KEY_FILE` naming a path in a
+**directory that does not exist**, no store holds a key and none can be made to: a
+process cannot set a variable for its own next start, the published image carries no
+keychain, and the file the variable names is the only store left and it is out of reach.
+The screen never offers to create a key, and creating one, storing a phrase and storing a
+credential all refuse. It withholds the feature rather than making it safe, which is the
+honest description of what the lever does.
+
+**A key file can be unwritable and still hold a key, and only the second fact decides
+whether credentials work.** A Docker secret and a Kubernetes Secret both arrive as a read
+only file, which is what `credentials._from_file` was written for, and a key mounted that
+way is in force for every request while the settings screen correctly reports that no key
+can be created here. A read only **mode** on the file is the same trap
+one step further in: `access` answers writable for a 0400 file when the process is root,
+which most containers are. A read only **mount** does hold, because the kernel refuses a
+write to a read only filesystem whatever the uid, but that is a property of how the
+deployment is assembled rather than one variable, which is why the recipe above names the
+directory instead.
+
+The structural fact underneath is the reason that consequence has to be stated rather than
+designed away. One deployment holds one Library, and there is no multi tenancy anywhere in this
 application: one database, one roster, one `is_admin` flag and one key in one process. So a
 credential an admin supplies is exercised by every other member's lookups, and nothing in
 the schema could scope it to one group of readers. The environment-only design this replaced
@@ -1191,6 +1224,14 @@ carrying an `Authorization` header off host is account theft, so
 credential carries and answers nothing anywhere else. The header is never set on the
 client, which is the arrangement neither guard could see. Both halves of the credential are
 `repr=False` with `__str__` overridden, so a `logger.exception` cannot print one.
+
+**The key itself is held to the same rule, and it is the stronger case.** The resolved key
+is passed down a request as a value, and those 32 bytes are the recovery phrase: they
+convert straight back into the words, so one rendering discloses what opens every stored
+credential rather than one login. It is `repr=False` for that reason, and a dataclass with
+no `__str__` of its own falls back to its repr, so the one flag covers both renderings and
+no second override is wanted. Which store a key came from is still reported, because naming
+a value's source is not naming the value.
 
 **A login is resolved by the route that is about to ask, never by the module that makes the
 request**, because that module reaches no database. The route hands down a mapping of source
@@ -1345,6 +1386,75 @@ Two properties of that effect are load-bearing:
 effect watching it. `mutator.ts::endSession` reaches the same place on the 401 path by
 doing a full navigation instead, which is why it is the exemption.
 
+## Getting back in, and confirming an address
+
+**A household with no mail server has no mailbox to send a link to**, and that is the
+ordinary configuration here rather than a corner: `OVERDUE_MAIL_ENABLED` is off by default.
+So both recovery flows end in a **one time code** the member types, and neither builds a
+link. That is a security decision and not a convenience: the only source for a base URL on
+a request is the `Host` header, which the client sets, so an app that builds a mailed link
+from it mails an attacker's host into a member's mailbox.
+
+### An admin confirmed reset
+
+A member who cannot sign in posts their username to `POST /auth/reset/request`. That route
+is unauthenticated, because there is no other moment: somebody who could sign in would not
+need it. Every other rule follows from that.
+
+- **It answers 202 whether or not the account exists.** A route that said otherwise is a
+  roster for whoever wants the household's.
+- **At most one live request per account**, and it expires. A queue of pending requests is
+  a denial of service against the admin's attention, which is the resource this design
+  spends.
+- **Making a request grants nothing.** It asks a person to act.
+- **It is refused outright under `ldap` and `proxy`**, with a message naming the system
+  that does hold the password. A reset there would either do nothing or set a credential
+  nothing checks.
+
+An admin approves from the settings screen and is shown a code **once**; what is stored is
+a bcrypt hash, so no route could serve it again. The admin passes it to the member out of
+band, which is the channel a household with no mail server already uses for everything
+else. The member spends it on a new password. **No token is issued**: the code is not a
+session and never becomes one.
+
+**An admin may approve another admin's request.** What makes that acceptable is the
+asymmetry rather than a further rule: the request is still member initiated, so one admin
+cannot start a reset against another. **The honest residual is that an admin can post a
+member's username themselves and then approve it.** Nothing in a mechanism can prevent
+that, because the request deliberately requires nothing only the member has. What is
+prevented is doing it quietly:
+
+- redeeming moves `users.sessions_valid_from`, so **every** session on that account ends,
+  the member's own included, and their password no longer works;
+- the request row is kept with the approver's name and the date, and the member reads it
+  back from `GET /api/users/me/security`.
+
+**A deployment with exactly one admin has no in app path**, because the flow is member
+initiated by design and nobody can approve that admin's own request. That case belongs to
+the operator: `README.md` names the command line reset, which is a capability whoever runs
+the container already has rather than a new one.
+
+### Confirming an address
+
+Where `accounts_open_to_outsiders` is on, a new local account must confirm the address it
+registered with before it may sign in. **An unconfirmed account may do nothing**: the
+refusal is at the boundary that issues a session and at the one that accepts a token, which
+are the same function, rather than being a third account state threaded through every write
+path where one path forgetting it is a silent hole.
+
+That is only tolerable because **an admin can confirm an account instead**, which is the
+primary path for an install with no mail server. It is an assertion about a person, so it
+is recorded as one: the account carries that an admin confirmed it and which admin.
+
+The switch is its own setting and is derived from nothing. The auth mode is about where
+credentials are checked, library mode is about cataloguing, the public catalogue switch is
+about readers rather than accounts, and gating on whether registration is open would admit
+every account that registered while it was open and never confirmed, the moment an admin
+closed signups.
+
+**The first account in a library is never gated**, since there would be no admin to
+override it and no mailbox configured yet.
+
 ## Known limits
 
 Worth knowing before exposing this beyond a private network:
@@ -1353,8 +1463,9 @@ Worth knowing before exposing this beyond a private network:
   `localStorage` and is attached explicitly, so it is not sent automatically with a
   cross-site request. Moving *it* to a cookie would change that and require CSRF tokens.
   There is one cookie, and it is not that token. See below.
-- **No account lockout or password reset.** A forgotten password needs a hand-edited
-  database row.
+- **No account lockout.** The login limiter bounds guessing; nothing disables an account
+  after a run of failures, deliberately, because a limiter keyed on a caller supplied
+  username is a lockout somebody else can trigger.
 - **No endpoint deletes or renames an account**, test accounts included. Removing a member
   means deciding what happens to the books they added, the loans they are part of and the
   notes and quotes they wrote, which is a larger decision than this feature. The cost is

@@ -349,6 +349,20 @@ class SettingsOut(BaseModel):
     #: the browser cannot get the rule wrong. See `FeatureFlagsOut`.
     public_catalogue_published: bool = False
 
+    #: Whether accounts here belong to people outside the household.
+    #:
+    #: **Its own row and derived from nothing**, which is the whole of the
+    #: decision on issue #104: the auth mode is about where credentials are
+    #: checked, library mode is about cataloguing, and the switch above it is
+    #: about readers rather than accounts. It sits in this response beside them
+    #: because they are all deployment posture, and it means none of what they
+    #: mean.
+    #:
+    #: On, a new local account must confirm its address before it may sign in.
+    #: `/auth/config` publishes the same fact to the login page, which needs it
+    #: before anybody holds a token.
+    accounts_open_to_outsiders: bool = False
+
 
 class SourceCredentialIn(BaseModel):
     """A username and a password for one catalogue, on their way to being sealed.
@@ -529,6 +543,12 @@ class SettingsUpdate(BaseModel):
     library_mode: bool | None = None
     public_catalogue_enabled: bool | None = None
     public_catalogue_indexing_enabled: bool | None = None
+
+    #: Whether accounts here belong to people outside the household. Turning it
+    #: on gates accounts created afterwards and never strands a member already
+    #: in the library: verification is stamped when an account is made. See
+    #: `models.User.email_verified_at`.
+    accounts_open_to_outsiders: bool | None = None
 
     @field_validator("overdue_webhook_url")
     @classmethod

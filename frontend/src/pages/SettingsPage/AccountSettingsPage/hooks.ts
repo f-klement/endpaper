@@ -16,6 +16,7 @@ import {
   getGetMyEmailQueryKey,
   getListEmailsQueryKey,
   useGetMyEmail,
+  useGetMySecurity,
   useListEmails,
   useSetMemberEmail,
   useSetMyEmail,
@@ -143,5 +144,27 @@ export function useMemberEmails(isAdmin: boolean): UseMemberEmailsResult {
     saveError: mutation.error,
     isDirectoryOwned: isDirectoryOwned(mutation.error),
     hasSaved: mutation.isSuccess,
+  };
+}
+
+/**
+ * What has been done to the caller's own account.
+ *
+ * **The member's half of an admin confirmed reset.** A reset that left no mark
+ * would be indistinguishable from a quiet takeover, so the account keeps the
+ * completed request with the approver's name on it and this is where a member
+ * reads it back.
+ *
+ * Its own query rather than a field on the session's account: `UserOut` is
+ * served inside every book payload and by the member list, and who approved
+ * whose reset is nobody else's business. The same reasoning keeps the address
+ * off it.
+ */
+export function useMySecurity() {
+  const query = useGetMySecurity();
+  return {
+    security: query.data,
+    isLoading: query.isLoading,
+    error: query.error,
   };
 }

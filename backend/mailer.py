@@ -163,8 +163,18 @@ def _addresses(raw: str) -> tuple[str, ...]:
     return tuple(parts)
 
 
-def checked_config(db: Session) -> MailConfig:
+def checked_config(
+    db: Session, *, recipients: tuple[str, ...] | None = None
+) -> MailConfig:
     """The mail configuration in force, or a refusal naming what is wrong.
+
+    **`recipients` overrides the household address, and only two callers may
+    pass it.** `overdue_mail_to` is where a reminder about the library goes; a
+    verification code goes to the one person being verified, and there is no
+    other address it could be sent to. Passing the recipient in keeps that a
+    decision the caller makes and states, rather than this function growing a
+    second source of addresses: everything else about the transport, including
+    the refusals, is unchanged and shared.
 
     Read through `settings_store.in_force`, so a deployment that supplies
     `MAIL_SERVER` in the environment is the one that is checked and the one that
@@ -209,7 +219,13 @@ def checked_config(db: Session) -> MailConfig:
     if not looks_like_address(sender):
         raise MailRefused("The sender address is not an address.")
 
-    recipients = _addresses(settings_store.in_force(db, SettingKey.OVERDUE_MAIL_TO))
+    if recipients is None:
+        recipients = _addresses(settings_store.in_force(db, SettingKey.OVERDUE_MAIL_TO))
+    else:
+        # Through the same door, so a caller supplied address cannot reach the
+        # envelope on terms the configured one could not: the count and the
+        # header injection rule are `_addresses`, once, for both sources.
+        recipients = _addresses(",".join(recipients))
 
     return MailConfig(
         host=host,

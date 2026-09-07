@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A password reset that does not need a mail server.** A member who cannot sign in asks
+  from the login screen; an admin approves it under Settings, Data and accounts and is shown
+  a one time code once, which they pass to the member out of band. The member spends it on a
+  new password. An admin can only approve a request a member made, never start one, and
+  redeeming ends every session on the account and leaves a permanent record on it of who
+  approved the reset, which the member reads on their account screen. Refused under `ldap`
+  and `proxy` with a message naming the system that holds the password.
+- **A command line reset for a library with exactly one admin**, who has nobody to approve
+  their own request: `docker compose exec endpaper python -m recover <username>`. See
+  `README.md`.
+- **Confirming a new account's address**, off by default and turned on by *Accounts are open
+  to people outside the household* under Settings, Data and accounts. With it on, a new
+  local account must return a code sent to its address before it may sign in, and an admin
+  can confirm an account instead, which is the path for a deployment with no mail server.
+  The account records who confirmed it. Accounts that already exist are unaffected.
+
+### Changed
+
+- `POST /auth/register` answers `RegistrationOut` rather than `Token`. The token is nested
+  and is absent where the account has an address to confirm first, because an account that
+  may do nothing does not get a session.
+- A catalogue login loop on the book lookup and search paths resolved the credential
+  encryption key once per source. It resolves it once for the request now, so a deployment
+  holding several sealed logins pays one keychain read per lookup rather than one per
+  source, and a deployment whose key is gone pays one rather than one per source to learn
+  that nothing is readable. A roster with no credential door still resolves no key at all.
+- `docs/security.md` now says a hosted deployment serving more than one tenant may offer
+  stored catalogue credentials, and what that costs: the operator holds the key and can
+  decrypt every one of them. It also says the only way to withhold the feature, and warns
+  that a read only key file is not it. The recipe has tests, where published operator
+  guidance of this kind had none.
+
+### Fixed
+
+- The credential encryption key no longer prints when a `KeyState` is rendered. The bytes
+  are the recovery phrase, so one rendering disclosed the key that opens every stored
+  credential.
+
 ## v0.13.0
 
 _2026-09-06_

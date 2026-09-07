@@ -89,6 +89,11 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # out, because `sources.parse` already answers "absent means the defaults"
     # and writing them twice is two places for the default order to drift.
     SettingKey.CATALOGUE_SOURCES: "{}",
+    # Off, so a household that reads no setting asks nobody to prove anything.
+    # On, it means accounts here are held by people outside the household, and
+    # a new local account cannot sign in until its address is verified or an
+    # admin says otherwise.
+    SettingKey.ACCOUNTS_OPEN_TO_OUTSIDERS: "false",
 }
 
 # Settings whose value must never be sent back to a browser in full.
@@ -430,6 +435,26 @@ def public_catalogue_may_be_indexed(db: Session) -> bool:
     return public_catalogue_is_published(db) and get_bool(
         db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED
     )
+
+
+def accounts_are_open_to_outsiders(db: Session) -> bool:
+    """Whether accounts here belong to people outside the household.
+
+    The one switch that decides whether a new local account has to prove its
+    address, and it means nothing else. Every candidate for reusing an existing
+    signal was refused in turn on issue #104: the auth mode is about where
+    credentials are checked, library mode is about cataloguing, the public
+    catalogue switch is about readers rather than accounts, and gating on
+    whether registration is open would admit every account that registered while
+    it was open and never verified, the moment an admin closed signups.
+
+    Read at the two doors that produce or accept a session, at account creation,
+    and on the two settings responses that publish it, and nowhere else. It is
+    deliberately not a second condition on any book query: an account it refuses
+    holds no session at all, which is the property that makes the boundary check
+    enough. See `docs/decisions.md`.
+    """
+    return get_bool(db, SettingKey.ACCOUNTS_OPEN_TO_OUTSIDERS)
 
 
 def token_epoch(db: Session) -> str:

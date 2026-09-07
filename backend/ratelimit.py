@@ -44,6 +44,46 @@ class RateLimit:
 LOGIN_LIMIT = RateLimit(max_attempts=10, window_seconds=60)
 REGISTER_LIMIT = RateLimit(max_attempts=5, window_seconds=3600)
 
+# Asking for a one time code, whichever flow is asking.
+#
+# **One budget across account verification and password reset, deliberately.**
+# They are the same act: somebody with no session asks for a code to be produced.
+# Splitting the counter would let a caller spend five of each, which is the thing
+# a shared counter exists to prevent, and it is the argument `AUTHORITY_LIMIT`
+# already makes for not splitting itself by route.
+#
+# Charged twice, on two different keys, and the owner named both cases on issue
+# #105: a per address limit alone lets a botnet queue a hundred requests against
+# one member, and a per account limit alone lets one address work through the
+# roster slowly.
+#
+# **The account key is caller chosen, so this is a denial of service on
+# recovery**, and that is stated rather than argued away. It is the shape
+# `login_key` already has, `MAX_TRACKED_KEYS` refuses rather than evicts so the
+# table cannot be used to unpin somebody, and what bounds the damage is that the
+# thing being rationed is already bounded: at most one live request exists per
+# account however many times it is asked for, so a flood buys an attacker
+# nothing except the hour a member has to wait.
+#
+# **The wider residual, stated because it is a property of this window rather
+# than of the key.** `MAX_TRACKED_KEYS` refuses an unseen key at capacity rather
+# than evicting a live one, and this window is 3,600 seconds, so 4,096 distinct
+# account keys held live deny recovery to every account not already tracked, for
+# an hour. Filling them takes 4,096 requests spread over about 820 addresses at
+# five each. Refusing rather than evicting is still the right call, for the
+# reason `SlidingWindowLimiter.check` gives: every eviction policy lets an
+# attacker choose which key leaves.
+RECOVERY_REQUEST_LIMIT = RateLimit(max_attempts=5, window_seconds=3600)
+
+# Guessing a one time code. Sixty bits against ten tries an hour, so the
+# keyspace is not what is doing the work here and this is: an approved reset code
+# lives one hour, which is ten guesses at 2**60.
+#
+# Keyed like a login, `username|address`, rather than on the account alone. A
+# code is the last step of getting back into an account, so an account-only key
+# would let anybody lock a member out of the recovery they had just been granted.
+RECOVERY_CODE_LIMIT = RateLimit(max_attempts=10, window_seconds=3600)
+
 # An import parses a whole file and writes thousands of rows inside one
 # transaction, which holds the single SQLite writer for its duration. Nobody
 # migrates a library twice in a minute; somebody firing them back to back would
@@ -331,6 +371,9 @@ metadata_limiter = SlidingWindowLimiter(METADATA_LIMIT)
 authority_limiter = SlidingWindowLimiter(AUTHORITY_LIMIT)
 cover_backfill_limiter = SlidingWindowLimiter(COVER_BACKFILL_LIMIT)
 public_catalogue_limiter = SlidingWindowLimiter(PUBLIC_CATALOGUE_LIMIT)
+recovery_request_address_limiter = SlidingWindowLimiter(RECOVERY_REQUEST_LIMIT)
+recovery_request_account_limiter = SlidingWindowLimiter(RECOVERY_REQUEST_LIMIT)
+recovery_code_limiter = SlidingWindowLimiter(RECOVERY_CODE_LIMIT)
 
 
 def client_address(request: Request) -> str:
@@ -343,6 +386,16 @@ def client_address(request: Request) -> str:
     registration is a rare action and often disabled outright.
     """
     return request.client.host if request.client else "unknown"
+
+
+def account_key(username: str) -> str:
+    """The attacked account alone, with no address beside it.
+
+    The other half of the recovery request limit, and it is deliberately the key
+    `login_key` refuses to be: one address working slowly through the roster
+    stays under a per address ceiling and is caught here.
+    """
+    return username.lower()
 
 
 def login_key(username: str, request: Request) -> str:

@@ -27,6 +27,10 @@ import type {
   EmailUpdate,
   HTTPValidationError,
   MemberEmailOut,
+  MemberVerificationOut,
+  MySecurityOut,
+  ResetCodeOut,
+  ResetRequestOut,
   UserCreate,
   UserOut,
 } from "../../model";
@@ -839,6 +843,509 @@ export const useSetMyEmail = <TError = HTTPValidationError, TContext = unknown>(
 > => {
   return useMutation(getSetMyEmailMutationOptions(options), queryClient);
 };
+export const getGetMySecurityUrl = () => {
+  return `/api/users/me/security`;
+};
+
+/**
+ * What has been done to the caller's own account, and by whom.
+ *
+ * **The member's half of an admin confirmed reset.** A reset that left no mark
+ * would be indistinguishable from a quiet takeover, which is the property the
+ * whole flow exists to keep, so the completed request is kept and read back
+ * here with the approver's name on it.
+ *
+ * No path parameter and no member id, so there is no object to authorize: the
+ * only account reachable here is the caller's. That is the same shape as
+ * `/me/email` and `/me/appearance` and it is why none of the three is a field
+ * on `UserOut`.
+ * @summary Get My Security
+ */
+export const getMySecurity = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<MySecurityOut> => {
+  return customFetch<MySecurityOut>(getGetMySecurityUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetMySecurityQueryKey = () => {
+  return [`/api/users/me/security`] as const;
+};
+
+export const getGetMySecurityQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMySecurity>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof getMySecurity>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetMySecurityQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getMySecurity>>> = ({
+    signal,
+  }) => getMySecurity({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMySecurity>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetMySecurityQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMySecurity>>
+>;
+export type GetMySecurityQueryError = unknown;
+
+export function useGetMySecurity<
+  TData = Awaited<ReturnType<typeof getMySecurity>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getMySecurity>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMySecurity>>,
+          TError,
+          Awaited<ReturnType<typeof getMySecurity>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetMySecurity<
+  TData = Awaited<ReturnType<typeof getMySecurity>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getMySecurity>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMySecurity>>,
+          TError,
+          Awaited<ReturnType<typeof getMySecurity>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetMySecurity<
+  TData = Awaited<ReturnType<typeof getMySecurity>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getMySecurity>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Get My Security
+ */
+
+export function useGetMySecurity<
+  TData = Awaited<ReturnType<typeof getMySecurity>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getMySecurity>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetMySecurityQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getListPasswordResetsUrl = () => {
+  return `/api/users/password-resets`;
+};
+
+/**
+ * The requests waiting on an admin, oldest first. Admin only.
+ *
+ * Carries no code and never has: an approval's code exists once, in the
+ * response to the approval, and is stored as a bcrypt hash. `approved_at` is
+ * here so the queue can say a request has already been granted, which is the
+ * one thing a screen that cannot show the code again has to be able to say.
+ * @summary List Password Resets
+ */
+export const listPasswordResets = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ResetRequestOut[]> => {
+  return customFetch<ResetRequestOut[]>(getListPasswordResetsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListPasswordResetsQueryKey = () => {
+  return [`/api/users/password-resets`] as const;
+};
+
+export const getListPasswordResetsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listPasswordResets>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<
+      Awaited<ReturnType<typeof listPasswordResets>>,
+      TError,
+      TData
+    >
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListPasswordResetsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listPasswordResets>>
+  > = ({ signal }) => listPasswordResets({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listPasswordResets>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListPasswordResetsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listPasswordResets>>
+>;
+export type ListPasswordResetsQueryError = unknown;
+
+export function useListPasswordResets<
+  TData = Awaited<ReturnType<typeof listPasswordResets>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPasswordResets>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPasswordResets>>,
+          TError,
+          Awaited<ReturnType<typeof listPasswordResets>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListPasswordResets<
+  TData = Awaited<ReturnType<typeof listPasswordResets>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPasswordResets>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPasswordResets>>,
+          TError,
+          Awaited<ReturnType<typeof listPasswordResets>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListPasswordResets<
+  TData = Awaited<ReturnType<typeof listPasswordResets>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPasswordResets>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Password Resets
+ */
+
+export function useListPasswordResets<
+  TData = Awaited<ReturnType<typeof listPasswordResets>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPasswordResets>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListPasswordResetsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getDeclinePasswordResetUrl = (userId: number) => {
+  return `/api/users/password-resets/${userId}`;
+};
+
+/**
+ * Decline a request, so it stops occupying the queue.
+ * @summary Decline Password Reset
+ */
+export const declinePasswordReset = async (
+  userId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getDeclinePasswordResetUrl(userId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeclinePasswordResetMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof declinePasswordReset>>,
+    TError,
+    DeclinePasswordResetMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof declinePasswordReset>>,
+  TError,
+  DeclinePasswordResetMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["declinePasswordReset"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof declinePasswordReset>>,
+    DeclinePasswordResetMutationVariables
+  > = (props) => {
+    const { userId } = props ?? {};
+
+    return declinePasswordReset(userId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeclinePasswordResetMutationResult = NonNullable<
+  Awaited<ReturnType<typeof declinePasswordReset>>
+>;
+
+export type DeclinePasswordResetMutationError = HTTPValidationError;
+export type DeclinePasswordResetMutationVariables = { userId: number };
+
+/**
+ * @summary Decline Password Reset
+ */
+export const useDeclinePasswordReset = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof declinePasswordReset>>,
+      TError,
+      DeclinePasswordResetMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof declinePasswordReset>>,
+  TError,
+  DeclinePasswordResetMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getDeclinePasswordResetMutationOptions(options),
+    queryClient,
+  );
+};
+export const getApprovePasswordResetUrl = (userId: number) => {
+  return `/api/users/password-resets/${userId}/approve`;
+};
+
+/**
+ * Grant a request, and show the code once.
+ *
+ * **An admin may approve another admin's request.** Owner's decision on issue
+ * #105: what makes it acceptable is the asymmetry already in the mechanism
+ * rather than a further rule, since the request is still member initiated. The
+ * case it refuses is an admin quietly acquiring a peer's account; the case it
+ * allows is an admin who locked themselves out being helped by the person
+ * beside them, which is the ordinary one in a two person archive.
+ *
+ * **A deployment with exactly one admin therefore has no path in this app**,
+ * and that case belongs to the operator: `README.md` names the command line
+ * recovery, which is the capability whoever runs the container already has.
+ *
+ * 404 when there is no live request, which is true of this route: there is
+ * nothing here to approve, and an admin may already list every member.
+ * @summary Approve Password Reset
+ */
+export const approvePasswordReset = async (
+  userId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ResetCodeOut> => {
+  return customFetch<ResetCodeOut>(getApprovePasswordResetUrl(userId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getApprovePasswordResetMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof approvePasswordReset>>,
+    TError,
+    ApprovePasswordResetMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof approvePasswordReset>>,
+  TError,
+  ApprovePasswordResetMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["approvePasswordReset"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof approvePasswordReset>>,
+    ApprovePasswordResetMutationVariables
+  > = (props) => {
+    const { userId } = props ?? {};
+
+    return approvePasswordReset(userId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ApprovePasswordResetMutationResult = NonNullable<
+  Awaited<ReturnType<typeof approvePasswordReset>>
+>;
+
+export type ApprovePasswordResetMutationError = HTTPValidationError;
+export type ApprovePasswordResetMutationVariables = { userId: number };
+
+/**
+ * @summary Approve Password Reset
+ */
+export const useApprovePasswordReset = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof approvePasswordReset>>,
+      TError,
+      ApprovePasswordResetMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof approvePasswordReset>>,
+  TError,
+  ApprovePasswordResetMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getApprovePasswordResetMutationOptions(options),
+    queryClient,
+  );
+};
 export const getListTestAccountsUrl = () => {
   return `/api/users/test-accounts`;
 };
@@ -1112,6 +1619,164 @@ export const useCreateTestAccount = <
 > => {
   return useMutation(getCreateTestAccountMutationOptions(options), queryClient);
 };
+export const getListVerificationUrl = () => {
+  return `/api/users/verification`;
+};
+
+/**
+ * Every member's confirmation state. Admin only.
+ *
+ * The whole list rather than the unconfirmed ones, for the reason
+ * `list_emails` serves the whole list: the screen is a list of a household's
+ * accounts and the admin is looking for the row that is wrong. It also lets the
+ * screen say which accounts this app never held a credential for, rather than
+ * silently omitting them and leaving somebody to wonder.
+ * @summary List Verification
+ */
+export const listVerification = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<MemberVerificationOut[]> => {
+  return customFetch<MemberVerificationOut[]>(getListVerificationUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListVerificationQueryKey = () => {
+  return [`/api/users/verification`] as const;
+};
+
+export const getListVerificationQueryOptions = <
+  TData = Awaited<ReturnType<typeof listVerification>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof listVerification>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListVerificationQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listVerification>>
+  > = ({ signal }) => listVerification({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listVerification>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListVerificationQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listVerification>>
+>;
+export type ListVerificationQueryError = unknown;
+
+export function useListVerification<
+  TData = Awaited<ReturnType<typeof listVerification>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listVerification>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listVerification>>,
+          TError,
+          Awaited<ReturnType<typeof listVerification>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListVerification<
+  TData = Awaited<ReturnType<typeof listVerification>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listVerification>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listVerification>>,
+          TError,
+          Awaited<ReturnType<typeof listVerification>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListVerification<
+  TData = Awaited<ReturnType<typeof listVerification>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listVerification>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Verification
+ */
+
+export function useListVerification<
+  TData = Awaited<ReturnType<typeof listVerification>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listVerification>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListVerificationQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getSetMemberEmailUrl = (userId: number) => {
   return `/api/users/${userId}/email`;
 };
@@ -1216,4 +1881,109 @@ export const useSetMemberEmail = <
   TContext
 > => {
   return useMutation(getSetMemberEmailMutationOptions(options), queryClient);
+};
+export const getVerifyMemberUrl = (userId: number) => {
+  return `/api/users/${userId}/verify`;
+};
+
+/**
+ * Assert that this account's address is that person's. Admin only.
+ *
+ * **The override that makes "an unverified account may do nothing" survivable.**
+ * A confirmation step completable only by receiving mail cannot be completed at
+ * all by a household with no mail server, which is the ordinary configuration
+ * here, so this is the primary path for some installations and the exception
+ * for others. Owner's decision, 2026-09-06.
+ *
+ * **It is an assertion about a person, so it is recorded as one.** The account
+ * carries that an admin confirmed it and which admin, not merely that it is
+ * confirmed: `AuthorityProvenance` is this codebase's precedent and
+ * `VerificationProvenance` is the same shape.
+ *
+ * 409 where this app never held the credential. Nothing about the caller's
+ * rights is wrong, which is why it is not a 403: a directory authenticated that
+ * account, so confirming its address here would be an assertion this app cannot
+ * make. The same reasoning, and the same status, as
+ * `_refuse_if_the_directory_owns_it`.
+ * @summary Verify Member
+ */
+export const verifyMember = async (
+  userId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<MemberVerificationOut> => {
+  return customFetch<MemberVerificationOut>(getVerifyMemberUrl(userId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getVerifyMemberMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof verifyMember>>,
+    TError,
+    VerifyMemberMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof verifyMember>>,
+  TError,
+  VerifyMemberMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["verifyMember"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof verifyMember>>,
+    VerifyMemberMutationVariables
+  > = (props) => {
+    const { userId } = props ?? {};
+
+    return verifyMember(userId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type VerifyMemberMutationResult = NonNullable<
+  Awaited<ReturnType<typeof verifyMember>>
+>;
+
+export type VerifyMemberMutationError = HTTPValidationError;
+export type VerifyMemberMutationVariables = { userId: number };
+
+/**
+ * @summary Verify Member
+ */
+export const useVerifyMember = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof verifyMember>>,
+      TError,
+      VerifyMemberMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof verifyMember>>,
+  TError,
+  VerifyMemberMutationVariables,
+  TContext
+> => {
+  return useMutation(getVerifyMemberMutationOptions(options), queryClient);
 };

@@ -12,6 +12,7 @@ import type { Locale } from "./locale.ts";
  * The admin view. The API key is masked, never returned in full.
  */
 export interface SettingsOut {
+  accounts_open_to_outsiders?: boolean;
   catalogue_sources?: CatalogueSourceOut[];
   default_locale: Locale;
   goodreads_lookup_enabled: boolean;

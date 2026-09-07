@@ -101,11 +101,26 @@ def create_access_token(db: Session, user_id: int, username: str) -> str:
 
 
 def _encode(db: Session, user_id: int, username: str, *, scope: str | None) -> str:
-    expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    issued = datetime.now(UTC)
+    expire = issued + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload: dict[str, object] = {
         "sub": str(user_id),
         "username": username,
         "exp": expire,
+        # When this token was minted. `epoch` beside it ends every session in the
+        # library at once and is what a restore bumps; this is what lets
+        # `users.sessions_valid_from` end the sessions on **one** account, which
+        # is what a password reset needs and what a restore does not. A token
+        # issued before that column existed carries no `iat` and is refused only
+        # once the column is set.
+        #
+        # **A float, not the datetime PyJWT would round to whole seconds.**
+        # RFC 7519 allows a non integer NumericDate, and the resolution is load
+        # bearing: at one second, a member signing in immediately after their own
+        # reset gets an `iat` that floors to **before** the cutoff, so the
+        # password they had just set would be refused a session. Measured on this
+        # tree before the change.
+        "iat": issued.timestamp(),
         "epoch": settings_store.token_epoch(db),
     }
     if scope is not None:
@@ -155,7 +170,26 @@ def _user_from_token(token: str, db: Session, *, scope: str | None = None) -> Us
     # longer exists. See settings_store.bump_token_epoch.
     if payload.get("epoch") != settings_store.token_epoch(db):
         return None
-    return db.get(User, int(user_id))
+    user = db.get(User, int(user_id))
+    if user is None:
+        return None
+    # Imported here rather than at module scope, for the reason
+    # `user_from_proxy_headers` is: `accounts` imports this module for the
+    # password hashing, so a top level import would be circular.
+    #
+    # **Here rather than in the two `get_current_user` functions**, because every
+    # token this app accepts is decoded through this one helper and a check
+    # placed in the callers is a check the next caller does not have. That is the
+    # difference this file already records between the epoch reaching the cover
+    # route and not the API one.
+    from accounts import session_is_live
+
+    issued_at = payload.get("iat")
+    if not session_is_live(
+        db, user, issued_at if isinstance(issued_at, int | float) else None
+    ):
+        return None
+    return user
 
 
 def _switch_session(

@@ -149,7 +149,13 @@ describe("LoginPage", () => {
 
     it("registers through the register endpoint, not login", async () => {
       api.on("/auth/register", {
-        body: { access_token: "t", token_type: "bearer", user: makeUser() },
+        // `RegistrationOut`, not a token: where the deployment confirms new
+        // accounts there is no session to hand back, so the token is nested and
+        // may be absent.
+        body: {
+          verification_required: false,
+          token: { access_token: "t", token_type: "bearer", user: makeUser() },
+        },
       });
       renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
 
@@ -188,7 +194,13 @@ describe("LoginPage", () => {
 
     it("sends an address given at registration", async () => {
       api.on("/auth/register", {
-        body: { access_token: "t", token_type: "bearer", user: makeUser() },
+        // `RegistrationOut`, not a token: where the deployment confirms new
+        // accounts there is no session to hand back, so the token is nested and
+        // may be absent.
+        body: {
+          verification_required: false,
+          token: { access_token: "t", token_type: "bearer", user: makeUser() },
+        },
       });
       renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
 
@@ -213,7 +225,13 @@ describe("LoginPage", () => {
 
     it("sends no address field when the box is left empty", async () => {
       api.on("/auth/register", {
-        body: { access_token: "t", token_type: "bearer", user: makeUser() },
+        // `RegistrationOut`, not a token: where the deployment confirms new
+        // accounts there is no session to hand back, so the token is nested and
+        // may be absent.
+        body: {
+          verification_required: false,
+          token: { access_token: "t", token_type: "bearer", user: makeUser() },
+        },
       });
       renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
 

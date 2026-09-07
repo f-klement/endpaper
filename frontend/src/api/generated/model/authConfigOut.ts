@@ -12,5 +12,7 @@ import type { AuthMode } from "./authMode.ts";
  */
 export interface AuthConfigOut {
   auth_mode: AuthMode;
+  password_reset_enabled: boolean;
   registration_enabled: boolean;
+  verification_required: boolean;
 }

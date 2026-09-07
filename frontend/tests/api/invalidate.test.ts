@@ -92,6 +92,9 @@ const KEYS: Record<string, readonly unknown[]> = {
   getMyEmail: users.getGetMyEmailQueryKey(),
   listEmails: users.getListEmailsQueryKey(),
   listTestAccounts: users.getListTestAccountsQueryKey(),
+  getMySecurity: users.getGetMySecurityQueryKey(),
+  listPasswordResets: users.getListPasswordResetsQueryKey(),
+  listVerification: users.getListVerificationQueryKey(),
   authConfig: auth.getAuthConfigQueryKey(),
   me: auth.getMeQueryKey(),
   downloadBackup: backup.getDownloadBackupQueryKey(),
@@ -190,8 +193,13 @@ describe("the inventory is complete", () => {
     // implementer would have guessed from "five routes" is wrong in the other
     // direction this time. That is the same lesson as the paragraph above and
     // is why the command is written out rather than the arithmetic.
+    //
+    // 51 on 2026-09-07, counted with that same command. Account recovery and
+    // confirmation is the arrival: nine routes, three of them reads. The other
+    // six are writes and produce no key, and the four unauthenticated ones are
+    // all `POST`, which is the same shape as the credential work above.
     expect(Object.keys(MODULES).length).toBeGreaterThan(5);
-    expect(Object.keys(KEYS).length).toBe(48);
+    expect(Object.keys(KEYS).length).toBe(51);
   });
 });
 

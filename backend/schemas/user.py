@@ -4,7 +4,7 @@ from typing import Annotated
 from pydantic import AfterValidator, BaseModel, Field
 
 import mailer
-from enums import AuthMode, ThemeMode
+from enums import AuthMode, ThemeMode, VerificationProvenance
 
 # bcrypt only hashes the first 72 bytes; anything beyond it is not merely
 # useless but actively misleading, since two passwords sharing a 72-byte prefix
@@ -221,8 +221,152 @@ class Token(BaseModel):
     user: UserOut
 
 
+class RegistrationOut(BaseModel):
+    """What registering produced: a session, or an account with something to prove.
+
+    **The token is optional and that is the whole shape of the account policy.**
+    Where accounts are open to people outside the household, a new account may do
+    nothing until its address is confirmed, so handing back a session would hand
+    back the thing the policy exists to withhold. Where the policy is off,
+    nothing changes and the token is there, exactly as this route has always
+    answered.
+
+    Two fields rather than a nullable token alone, because "there is no token"
+    and "you have something to do next" are different sentences and only the
+    second is one a screen can render.
+    """
+
+    verification_required: bool
+    token: Token | None = None
+
+
+#: What a one time code may look like on the way in.
+#:
+#: Generous rather than exact: `accounts.normalise_code` strips spacing and case
+#: before anything compares, so the schema's job is to bound the length rather
+#: than to re-state the alphabet. A pattern here would be a second spelling of
+#: `accounts.CODE_ALPHABET` and the two would drift.
+MAX_CODE_LENGTH = 64
+
+
+class ResetRequest(BaseModel):
+    """A member, signed out, asking to be let back in.
+
+    No password and no address: this asks a person to act and grants nothing, so
+    there is nothing to check. The username is what the admin's queue is read
+    against.
+    """
+
+    username: str = Field(min_length=1, max_length=50)
+
+
+class ResetRedeem(BaseModel):
+    """A code an admin read out, and the password it is being spent on.
+
+    `MIN_PASSWORD_LENGTH` applies here and deliberately not at sign in: this is a
+    **new** password, so the registration policy is the right one, and there is
+    no account created before the policy for it to lock out.
+    """
+
+    username: str = Field(min_length=1, max_length=50)
+    code: str = Field(min_length=1, max_length=MAX_CODE_LENGTH)
+    new_password: str = Field(
+        min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_BYTES
+    )
+
+
+class VerificationRequest(BaseModel):
+    """Send the confirmation code for this account again."""
+
+    username: str = Field(min_length=1, max_length=50)
+
+
+class VerificationRedeem(BaseModel):
+    """The confirmation code that arrived by mail."""
+
+    username: str = Field(min_length=1, max_length=50)
+    code: str = Field(min_length=1, max_length=MAX_CODE_LENGTH)
+
+
+class ResetCodeOut(BaseModel):
+    """The one time code an approval produced, shown once and never again.
+
+    **The only model in the application carrying a `code`**, which is not an
+    incidental fact: it is stored as a bcrypt hash, so there is no second route
+    that could serve it even by accident, and
+    `tests/test_house_rules.py::TestAOneTimeCodeIsServedOnlyWhereItIsNamed`
+    fails if another model grows the field.
+    """
+
+    code: str
+    expires_at: datetime
+
+
+class ResetRequestOut(BaseModel):
+    """One pending request, as the admin's queue shows it.
+
+    Carries no code and no hash. `approved_at`, `approved_by` and
+    `code_expires_at` are what the queue needs in order to say a request has
+    already been granted and until when, since the code itself was shown once
+    and cannot be shown again: after a reload the plaintext is gone from the
+    browser and these three are all an admin has left of it.
+    """
+
+    user_id: int
+    username: str
+    requested_at: datetime
+    expires_at: datetime
+    approved_at: datetime | None = None
+    approved_by: str | None = None
+    code_expires_at: datetime | None = None
+
+
+class MemberVerificationOut(BaseModel):
+    """One member's verification state, for the admin panel that overrides it.
+
+    **Deliberately no address**, though the screen behind it is about addresses:
+    `MemberEmailOut` is where an address is served and this is not one of those
+    four routes. `has_address` is what the screen actually needs, because the
+    question it answers is whether a code could have been sent at all.
+    """
+
+    id: int
+    username: str
+    verified_at: datetime | None = None
+    verification_source: VerificationProvenance | None = None
+    verified_by: str | None = None
+    has_address: bool
+    #: False for a directory account, which this app never held a credential for.
+    applies: bool
+
+
+class MySecurityOut(BaseModel):
+    """What happened to the caller's own account, and who did it.
+
+    The member's half of the admin confirmed reset. A reset that left no mark on
+    the account would be indistinguishable from a quiet takeover, which is the
+    property the flow exists to keep, so this is served on its own route rather
+    than being a field on `UserOut`: that schema is inside every book payload and
+    the member list, and who reset whose password is nobody else's business.
+    """
+
+    password_reset_at: datetime | None = None
+    password_reset_approved_by: str | None = None
+    verified_at: datetime | None = None
+    verification_source: VerificationProvenance | None = None
+    verified_by: str | None = None
+
+
 class AuthConfigOut(BaseModel):
     """Read by the login page before anyone holds a token."""
 
     auth_mode: AuthMode
     registration_enabled: bool
+    #: Whether this deployment will reset a local password at all. False under
+    #: ldap and proxy, where the credential is somebody else's, and the login
+    #: page draws no recovery link rather than one that answers 403.
+    password_reset_enabled: bool
+    #: Whether a new account has to confirm its address before it may sign in.
+    #: The login page needs it to ask for an address at registration and to draw
+    #: the confirmation form.
+    verification_required: bool

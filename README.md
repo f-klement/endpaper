@@ -175,6 +175,23 @@ install. No account needed.
 - Camera access on phones requires HTTPS. Deploy behind Caddy or nginx with TLS.
 - Data lives in `./data/library.db` (bind-mounted). Back up by copying it.
 - `ALLOW_REGISTRATION=false` closes signups without affecting existing accounts.
+- **Keep the first admin's password.** A password reset is approved by another admin, so a
+  library with exactly one admin has no way to reset that account from inside the app. The
+  way back is a shell in the container:
+
+  ```bash
+  docker compose exec endpaper python -m recover <username>
+  ```
+
+  It asks for the new password twice on standard input, never on the command line, and it
+  ends every session on that account. Whoever can run it can already read the database, so
+  this names a capability that exists rather than adding one.
+- **Confirming new accounts** is off by default. Turn on *Accounts are open to people
+  outside the household* under Settings, Data and accounts, and a new account must confirm
+  the address it registered with before it can sign in. A code is mailed to that address if
+  a mail server is configured, and an admin can confirm an account from the same screen
+  instead, which is the path for a deployment with no mailbox. Accounts that already exist
+  are unaffected: confirmation is decided when an account is made.
 
 ## Architecture
 

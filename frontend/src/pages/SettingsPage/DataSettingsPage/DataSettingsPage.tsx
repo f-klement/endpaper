@@ -4,9 +4,19 @@ import { SettingsSection } from "../../components";
 import AdminSettings from "../components/AdminSettings";
 import SettingsSubPage from "../components/SettingsSubPage";
 import { useSettings } from "../hooks";
+import ToggleField from "../components/ToggleField";
 import BackupSection from "./components/BackupSection";
+import MemberVerification from "./components/MemberVerification";
+import ResetRequests from "./components/ResetRequests";
 import TestAccounts from "./components/TestAccounts";
-import { useBackup, useSwitchToTestAccount, useTestAccounts } from "./hooks";
+import {
+  useBackup,
+  useMemberVerification,
+  useResetOffered,
+  useResetRequests,
+  useSwitchToTestAccount,
+  useTestAccounts,
+} from "./hooks";
 
 interface DataSettingsPageProps {
   /** Which sentence the test accounts card uses to say how to get back. */
@@ -43,6 +53,17 @@ export default function DataSettingsPage({
   // that flag would be a 403 on every visit by every member.
   const testAccounts = useTestAccounts(state.settings !== undefined);
   const switching = useSwitchToTestAccount(onSignIn);
+  // The same `enabled` and the same reason: both endpoints are admin only, so
+  // asking without the flag is a 403 on every visit by every member.
+  // **Both conditions, and the second is the server's answer rather than a
+  // derivation from `mode`.** Under ldap or proxy this app holds no password, so
+  // every request is refused at the route and the queue could only ever be
+  // empty beside a hint describing a mechanism that cannot run. `/auth/config`
+  // already publishes the fact for the login page, so reading it here is one
+  // source rather than two.
+  const offersReset = useResetOffered();
+  const resets = useResetRequests(state.settings !== undefined && offersReset);
+  const verification = useMemberVerification(state.settings !== undefined);
 
   return (
     <SettingsSubPage icon="inbox" title={t("settings.data.title")}>
@@ -58,6 +79,44 @@ export default function DataSettingsPage({
               restored={backup.restored}
               onRestore={backup.restore}
             />
+
+            {/* Before the two lists it governs, because it is what decides
+                whether either has anything in it: a household that has not
+                turned this on confirms nothing and sees an empty list. */}
+            <SettingsSection title={t("settings.verification")} icon="user">
+              <ToggleField
+                label={t("settings.openToOutsiders")}
+                hint={t("settings.openToOutsidersHint")}
+                checked={state.settings?.accounts_open_to_outsiders ?? false}
+                disabled={state.isSaving}
+                onChange={(checked) =>
+                  state.save({ accounts_open_to_outsiders: checked })
+                }
+              />
+              <MemberVerification
+                members={verification.members}
+                isLoading={verification.isLoading}
+                error={verification.error}
+                onConfirm={verification.confirm}
+                isConfirming={verification.isConfirming}
+                confirmError={verification.confirmError}
+              />
+            </SettingsSection>
+
+            {offersReset && (
+              <SettingsSection title={t("settings.resetRequests")} icon="user">
+                <ResetRequests
+                  requests={resets.requests}
+                  isLoading={resets.isLoading}
+                  error={resets.error}
+                  codes={resets.codes}
+                  onApprove={resets.approve}
+                  onDecline={resets.decline}
+                  isWorking={resets.isWorking}
+                  actionError={resets.actionError}
+                />
+              </SettingsSection>
+            )}
 
             <SettingsSection title={t("settings.testAccounts")} icon="user">
               <TestAccounts

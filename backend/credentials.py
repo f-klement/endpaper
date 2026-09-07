@@ -583,20 +583,29 @@ def forget_key() -> int:
     return cleared
 
 
-def require_key() -> bytes:
-    """The configured key, or a refusal naming what to do about it.
+#: What a deployment with no key is told, wherever that is met.
+#:
+#: **A constant because two callers raise it and only one of them may resolve.**
+#: `require_key` reads the stores to find out; `_material` is handed a
+#: `KeyState` that already says there is none, and calling `require_key` there
+#: would read every store again, per source, which is the whole cost a
+#: `KeyState` exists to pay once.
+#:
+#: Names the action rather than the three stores, because only one of the three
+#: is something a person types: an admin with no key needs to be told to make
+#: one, not to be handed a list of places it could have come from.
+_NO_KEY: Final = (
+    "This deployment has no encryption key, so a catalogue credential "
+    "cannot be stored. Create one on the Catalogue settings screen, or "
+    "set CREDENTIAL_ENCRYPTION_KEY where the app is configured."
+)
 
-    Names the action rather than the three stores, because only one of the three
-    is something a person types: an admin with no key needs to be told to make
-    one, not to be handed a list of places it could have come from.
-    """
+
+def require_key() -> bytes:
+    """The configured key, or a refusal naming what to do about it."""
     material = key_material()
     if material is None:
-        raise NoKeyConfigured(
-            "This deployment has no encryption key, so a catalogue credential "
-            "cannot be stored. Create one on the Catalogue settings screen, or "
-            "set CREDENTIAL_ENCRYPTION_KEY where the app is configured."
-        )
+        raise NoKeyConfigured(_NO_KEY)
     return material
 
 
@@ -1004,12 +1013,15 @@ def forget(db: Session, source: str) -> bool:
     return True
 
 
-def stored(db: Session, source: str) -> tuple[str, str]:
-    """The stored username and password, opened. Raises rather than returning blanks."""
+def stored(db: Session, source: str, state: KeyState | None = None) -> tuple[str, str]:
+    """The stored username and password, opened. Raises rather than returning blanks.
+
+    Pass `state` when asking about more than one source; see `KeyState`.
+    """
     envelope = stored_envelope(db, source)
     if not envelope:
         raise UnreadableCredential("No credential is stored for this source.")
-    opened = unseal(require_key(), source, envelope)
+    opened = unseal(_material(state), source, envelope)
     username, _, password = opened.partition(":")
     return username, password
 
@@ -1027,9 +1039,16 @@ class KeyState:
     `problem` carries a configuration refusal as a sentence rather than raising,
     because two stores holding different keys is a **state to report on a
     screen**, not a 500 on the settings page.
+
+    **`material` is `repr=False`, for the reason `Credential`'s two halves are.**
+    A frozen dataclass prints every field, and these bytes are the recovery
+    phrase: `key_to_phrase` turns them straight back into the words, so one
+    rendering discloses the key that opens every stored credential rather than
+    one login. It is bound in a frame on the member request path now, which is
+    where a `logger.exception` lives.
     """
 
-    material: bytes | None
+    material: bytes | None = field(repr=False)
     problem: str = ""
 
 
@@ -1039,6 +1058,37 @@ def key_state() -> KeyState:
         return KeyState(key_material())
     except KeyConfigurationError as refusal:
         return KeyState(None, str(refusal))
+
+
+def _material(state: KeyState | None) -> bytes:
+    """The key to open an envelope with, from a resolved state or from scratch.
+
+    **A state carrying no key raises what resolving it would have raised**, and
+    that is the whole of this function. `key_state` turns a configuration
+    refusal into a sentence so a settings screen can report it; a caller that
+    opens an envelope has to meet the refusal instead. Answering "no key" for a
+    deployment whose two stores hold different keys would tell an admin to type
+    a credential in again, when the thing to fix is the second store, and it
+    would do it on a path where nothing else says so.
+
+    **A state saying there is no key binds, and nothing here reads a store
+    again.** Both critic seats found the arm that did: `require_key` at the end
+    of this function costs one full resolution per source on the deployment
+    whose key is gone, which is 1 + N against the N it replaced, in the one
+    state every other reader of a `KeyState` already answers from the value it
+    was handed. Given `material is None`, `key_state` has exactly two ways of
+    getting there: `problem` set, where `key_material` refused, and `problem`
+    empty, where no source held a key at all.
+    `tests/routers/test_books.py::test_a_lost_key_is_resolved_once_as_well` is
+    the arm that stops it coming back.
+    """
+    if state is None:
+        return require_key()
+    if state.material is not None:
+        return state.material
+    if state.problem:
+        raise KeyConfigurationError(state.problem)
+    raise NoKeyConfigured(_NO_KEY)
 
 
 @dataclass(frozen=True)
@@ -1151,7 +1201,9 @@ def is_held(db: Session, source: str, state: KeyState | None = None) -> bool:
     return held.has_credential and not held.unreadable
 
 
-def for_request(db: Session, source: str, base_url: str) -> Credential | None:
+def for_request(
+    db: Session, source: str, base_url: str, state: KeyState | None = None
+) -> Credential | None:
     """The credential a request to this target would actually carry, bound to its origin.
 
     **Every outbound caller goes through here rather than reading the row**, the
@@ -1159,6 +1211,10 @@ def for_request(db: Session, source: str, base_url: str) -> Credential | None:
     "what will the next request send", and `stored_envelope` answers "what is on
     the row". The environment's wins, exactly as it does for every other pinned
     value.
+
+    Pass `state` when asking about more than one source; see `KeyState`. Without
+    it this resolves the key again per call, which on the member request path is
+    one keychain round trip and one BIP-39 decode per source asked.
 
     None on anything that cannot be read, deliberately. A request that cannot be
     authenticated is one the target refuses, which every caller already handles
@@ -1177,7 +1233,7 @@ def for_request(db: Session, source: str, base_url: str) -> Credential | None:
     if pinned is not None:
         return Credential(origin, pinned[0], pinned[1])
     try:
-        username, password = stored(db, source)
+        username, password = stored(db, source, state)
     except CredentialError:
         return None
     return Credential(origin, username, password)

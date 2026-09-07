@@ -87,14 +87,24 @@
           "auth_mode": {
             "$ref": "#/components/schemas/AuthMode"
           },
+          "password_reset_enabled": {
+            "title": "Password Reset Enabled",
+            "type": "boolean"
+          },
           "registration_enabled": {
             "title": "Registration Enabled",
+            "type": "boolean"
+          },
+          "verification_required": {
+            "title": "Verification Required",
             "type": "boolean"
           }
         },
         "required": [
           "auth_mode",
-          "registration_enabled"
+          "registration_enabled",
+          "password_reset_enabled",
+          "verification_required"
         ],
         "title": "AuthConfigOut",
         "type": "object"
@@ -3490,6 +3500,68 @@
         "title": "MemberEmailOut",
         "type": "object"
       },
+      "MemberVerificationOut": {
+        "description": "One member's verification state, for the admin panel that overrides it.\n\n**Deliberately no address**, though the screen behind it is about addresses:\n`MemberEmailOut` is where an address is served and this is not one of those\nfour routes. `has_address` is what the screen actually needs, because the\nquestion it answers is whether a code could have been sent at all.",
+        "properties": {
+          "applies": {
+            "title": "Applies",
+            "type": "boolean"
+          },
+          "has_address": {
+            "title": "Has Address",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          },
+          "verification_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VerificationProvenance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          },
+          "verified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified By"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "has_address",
+          "applies"
+        ],
+        "title": "MemberVerificationOut",
+        "type": "object"
+      },
       "MergeRequest": {
         "description": "Fold several books into one.\n\n`keep_id` survives and must appear in `book_ids`, spelled out rather than\ninferred so a mistyped request fails instead of silently keeping whichever\nrow sorted first.",
         "properties": {
@@ -3556,6 +3628,69 @@
           "enabled"
         ],
         "title": "MyOverdueOut",
+        "type": "object"
+      },
+      "MySecurityOut": {
+        "description": "What happened to the caller's own account, and who did it.\n\nThe member's half of the admin confirmed reset. A reset that left no mark on\nthe account would be indistinguishable from a quiet takeover, which is the\nproperty the flow exists to keep, so this is served on its own route rather\nthan being a field on `UserOut`: that schema is inside every book payload and\nthe member list, and who reset whose password is nobody else's business.",
+        "properties": {
+          "password_reset_approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password Reset Approved By"
+          },
+          "password_reset_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password Reset At"
+          },
+          "verification_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VerificationProvenance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          },
+          "verified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified By"
+          }
+        },
+        "title": "MySecurityOut",
         "type": "object"
       },
       "NoteCreate": {
@@ -4567,6 +4702,162 @@
         "title": "RefusedAssertionOut",
         "type": "object"
       },
+      "RegistrationOut": {
+        "description": "What registering produced: a session, or an account with something to prove.\n\n**The token is optional and that is the whole shape of the account policy.**\nWhere accounts are open to people outside the household, a new account may do\nnothing until its address is confirmed, so handing back a session would hand\nback the thing the policy exists to withhold. Where the policy is off,\nnothing changes and the token is there, exactly as this route has always\nanswered.\n\nTwo fields rather than a nullable token alone, because \"there is no token\"\nand \"you have something to do next\" are different sentences and only the\nsecond is one a screen can render.",
+        "properties": {
+          "token": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Token"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verification_required": {
+            "title": "Verification Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "verification_required"
+        ],
+        "title": "RegistrationOut",
+        "type": "object"
+      },
+      "ResetCodeOut": {
+        "description": "The one time code an approval produced, shown once and never again.\n\n**The only model in the application carrying a `code`**, which is not an\nincidental fact: it is stored as a bcrypt hash, so there is no second route\nthat could serve it even by accident, and\n`tests/test_house_rules.py::TestAOneTimeCodeIsServedOnlyWhereItIsNamed`\nfails if another model grows the field.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "expires_at"
+        ],
+        "title": "ResetCodeOut",
+        "type": "object"
+      },
+      "ResetRedeem": {
+        "description": "A code an admin read out, and the password it is being spent on.\n\n`MIN_PASSWORD_LENGTH` applies here and deliberately not at sign in: this is a\n**new** password, so the registration policy is the right one, and there is\nno account created before the policy for it to lock out.",
+        "properties": {
+          "code": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "new_password": {
+            "maxLength": 72,
+            "minLength": 8,
+            "title": "New Password",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "code",
+          "new_password"
+        ],
+        "title": "ResetRedeem",
+        "type": "object"
+      },
+      "ResetRequest": {
+        "description": "A member, signed out, asking to be let back in.\n\nNo password and no address: this asks a person to act and grants nothing, so\nthere is nothing to check. The username is what the admin's queue is read\nagainst.",
+        "properties": {
+          "username": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username"
+        ],
+        "title": "ResetRequest",
+        "type": "object"
+      },
+      "ResetRequestOut": {
+        "description": "One pending request, as the admin's queue shows it.\n\nCarries no code and no hash. `approved_at`, `approved_by` and\n`code_expires_at` are what the queue needs in order to say a request has\nalready been granted and until when, since the code itself was shown once\nand cannot be shown again: after a reload the plaintext is gone from the\nbrowser and these three are all an admin has left of it.",
+        "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          },
+          "code_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code Expires At"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "username",
+          "requested_at",
+          "expires_at"
+        ],
+        "title": "ResetRequestOut",
+        "type": "object"
+      },
       "RestoreResult": {
         "description": "What a restore actually put back.\n\nCounted per table rather than reported as \"done\", so a backup that was\nmissing its covers or its loans says so instead of looking successful.\n\nThe list is the tables whose absence a library would notice: their books,\ntheir accounts, what they wrote, who has what, and what they have read. It\nis not every table, and the two it leaves out are the two nobody counts:\n`tags` and `book_tags` come back with the books, and `settings` is one row\nper toggle. A table added to `backup._TABLES` belongs here if losing it\nsilently would look like a successful restore.",
         "properties": {
@@ -4804,6 +5095,11 @@
       "SettingsOut": {
         "description": "The admin view. The API key is masked, never returned in full.",
         "properties": {
+          "accounts_open_to_outsiders": {
+            "default": false,
+            "title": "Accounts Open To Outsiders",
+            "type": "boolean"
+          },
           "catalogue_sources": {
             "items": {
               "$ref": "#/components/schemas/CatalogueSourceOut"
@@ -4988,6 +5284,17 @@
       "SettingsUpdate": {
         "description": "A partial update. Every field is optional; absent means \"leave alone\".\n\nThat matters for the API key: a form that always submitted every field\nwould blank the key whenever an admin toggled something else, since the\nbrowser never received the real value to send back.",
         "properties": {
+          "accounts_open_to_outsiders": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accounts Open To Outsiders"
+          },
           "catalogue_sources": {
             "anyOf": [
               {
@@ -5747,6 +6054,56 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VerificationProvenance": {
+        "description": "Who said this account's address is that person's.\n\nThe same shape as `AuthorityProvenance` and for the same reason: an admin\nmarking an account verified is an assertion about a person, and a column\nholding only the assertion cannot afterwards say who made it. Owner's\ndecision on issue #104.\n\nA closed set, so the settings screen and the member list can label each\nwithout a string arriving on screen with no translation.\n\n`email_verified_by_user_id` is set on `ADMIN` and on nothing else. That\npairing is not a check constraint, because adding one to `users` forces a\nbatch rewrite of a table that now carries a self referential foreign key;\n`accounts.record_verification` is the one writer and\n`tests/test_accounts.py::TestOnlyAnAdminAssertionNamesAnAdmin` is what keeps\nit true.",
+        "enum": [
+          "not_required",
+          "email",
+          "admin",
+          "directory"
+        ],
+        "title": "VerificationProvenance",
+        "type": "string"
+      },
+      "VerificationRedeem": {
+        "description": "The confirmation code that arrived by mail.",
+        "properties": {
+          "code": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "code"
+        ],
+        "title": "VerificationRedeem",
+        "type": "object"
+      },
+      "VerificationRequest": {
+        "description": "Send the confirmation code for this account again.",
+        "properties": {
+          "username": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username"
+        ],
+        "title": "VerificationRequest",
         "type": "object"
       }
     },
@@ -11111,6 +11468,157 @@
         ]
       }
     },
+    "/api/users/me/security": {
+      "get": {
+        "description": "What has been done to the caller's own account, and by whom.\n\n**The member's half of an admin confirmed reset.** A reset that left no mark\nwould be indistinguishable from a quiet takeover, which is the property the\nwhole flow exists to keep, so the completed request is kept and read back\nhere with the approver's name on it.\n\nNo path parameter and no member id, so there is no object to authorize: the\nonly account reachable here is the caller's. That is the same shape as\n`/me/email` and `/me/appearance` and it is why none of the three is a field\non `UserOut`.",
+        "operationId": "get_my_security",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MySecurityOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get My Security",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/users/password-resets": {
+      "get": {
+        "description": "The requests waiting on an admin, oldest first. Admin only.\n\nCarries no code and never has: an approval's code exists once, in the\nresponse to the approval, and is stored as a bcrypt hash. `approved_at` is\nhere so the queue can say a request has already been granted, which is the\none thing a screen that cannot show the code again has to be able to say.",
+        "operationId": "list_password_resets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ResetRequestOut"
+                  },
+                  "title": "Response List Password Resets",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Password Resets",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/users/password-resets/{user_id}": {
+      "delete": {
+        "description": "Decline a request, so it stops occupying the queue.",
+        "operationId": "decline_password_reset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "User Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Decline Password Reset",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/users/password-resets/{user_id}/approve": {
+      "post": {
+        "description": "Grant a request, and show the code once.\n\n**An admin may approve another admin's request.** Owner's decision on issue\n#105: what makes it acceptable is the asymmetry already in the mechanism\nrather than a further rule, since the request is still member initiated. The\ncase it refuses is an admin quietly acquiring a peer's account; the case it\nallows is an admin who locked themselves out being helped by the person\nbeside them, which is the ordinary one in a two person archive.\n\n**A deployment with exactly one admin therefore has no path in this app**,\nand that case belongs to the operator: `README.md` names the command line\nrecovery, which is the capability whoever runs the container already has.\n\n404 when there is no live request, which is true of this route: there is\nnothing here to approve, and an admin may already list every member.",
+        "operationId": "approve_password_reset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "User Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetCodeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Approve Password Reset",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/api/users/test-accounts": {
       "get": {
         "description": "The accounts an admin may switch into, and no others.\n\n`switch_targets()`, not the flag alone, so that sentence is true of every\nrow returned. The two differ only for a row nothing here writes (a flagged\naccount whose `auth_source` was edited to a directory, or whose hash was\ncleared), and on that row the flag alone would put a Switch button in front\nof an admin that `/auth/switch` then answers 404 to, with nothing the UI\ncould usefully say.\n\nFiltering is presentation either way: `/auth/switch` refuses a bad target\nwhatever the client sends. Admin only because who exists for testing is\nnobody else's business, and because every account on this list is one\nsomebody holds the password to.",
@@ -11187,6 +11695,37 @@
         ]
       }
     },
+    "/api/users/verification": {
+      "get": {
+        "description": "Every member's confirmation state. Admin only.\n\nThe whole list rather than the unconfirmed ones, for the reason\n`list_emails` serves the whole list: the screen is a list of a household's\naccounts and the admin is looking for the row that is wrong. It also lets the\nscreen say which accounts this app never held a credential for, rather than\nsilently omitting them and leaving somebody to wonder.",
+        "operationId": "list_verification",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberVerificationOut"
+                  },
+                  "title": "Response List Verification",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Verification",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/api/users/{user_id}/email": {
       "put": {
         "description": "Set or clear any member's address. Admin only.",
@@ -11242,6 +11781,56 @@
           }
         ],
         "summary": "Set Member Email",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/users/{user_id}/verify": {
+      "post": {
+        "description": "Assert that this account's address is that person's. Admin only.\n\n**The override that makes \"an unverified account may do nothing\" survivable.**\nA confirmation step completable only by receiving mail cannot be completed at\nall by a household with no mail server, which is the ordinary configuration\nhere, so this is the primary path for some installations and the exception\nfor others. Owner's decision, 2026-09-06.\n\n**It is an assertion about a person, so it is recorded as one.** The account\ncarries that an admin confirmed it and which admin, not merely that it is\nconfirmed: `AuthorityProvenance` is this codebase's precedent and\n`VerificationProvenance` is the same shape.\n\n409 where this app never held the credential. Nothing about the caller's\nrights is wrong, which is why it is not a 403: a directory authenticated that\naccount, so confirming its address here would be an assertion this app cannot\nmake. The same reasoning, and the same status, as\n`_refuse_if_the_directory_owns_it`.",
+        "operationId": "verify_member",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "User Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberVerificationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Verify Member",
         "tags": [
           "users"
         ]
@@ -11369,7 +11958,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Token"
+                  "$ref": "#/components/schemas/RegistrationOut"
                 }
               }
             },
@@ -11387,6 +11976,81 @@
           }
         },
         "summary": "Register",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/reset/redeem": {
+      "post": {
+        "description": "Spend an approved code on a new password.\n\n204 and no token. The code is not a session and never becomes one: the\nmember signs in with what they just set, which is also the check that it\nworks.\n\nOne message for every failure, exactly as `/auth/login` answers one for a\nmissing account and a wrong password, and for the sharper version of the\nsame reason: this caller holds no session at all.",
+        "operationId": "redeem_password_reset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetRedeem"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Redeem Password Reset",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/reset/request": {
+      "post": {
+        "description": "Ask an admin to approve a password reset for this account.\n\n**Unauthenticated, because there is no other moment.** A member who could\nsign in would not need this. Everything else about the route follows: it\nanswers 202 whether or not the account exists, making a request grants\nnothing, and at most one request per account is ever live.\n\n**This is the only place in the application that creates a reset request**,\nwhich is what separates a recovery flow from a back door: an admin may\napprove one and cannot start one. The residual is recorded rather than\nhidden, since the route takes a username anybody may type. See\n`accounts.request_password_reset` and `docs/decisions.md`.\n\nRefused outright where the deployment does not hold the password, with a\nmessage naming the system that does. That refusal discloses nothing:\n`GET /auth/config` already publishes the auth mode to the login page.",
+        "operationId": "request_password_reset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Password Reset",
         "tags": [
           "auth"
         ]
@@ -11434,6 +12098,81 @@
           }
         ],
         "summary": "Switch Account",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/verify": {
+      "post": {
+        "description": "Settle an account by returning the code sent to its address.\n\n204 and no token, for the reason the reset redemption returns none: a code\nproves an address rather than authenticating a person, so the member signs in\nafterwards with the password they already chose.",
+        "operationId": "confirm_address",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationRedeem"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Address",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/verify/request": {
+      "post": {
+        "description": "Send this account's confirmation code again.\n\n202 whatever happened, including for an account that is already confirmed,\nthat does not exist, or that has no address. A route saying which would tell\na stranger which names are taken and which of them have a mailbox.\n\n**And it costs the same either way**, which the body alone does not buy.\nMinting a code is a bcrypt and finding no account is one indexed SELECT, so\nwithout the discarded comparison the two branches differ by a hash and the\nroster is readable off a clock. `accounts.spend_a_comparison` carries the\nmeasurement, once; `tests/test_accounts.py::TestNeitherBranchOfAResendIsFree`\ncompares the two counts rather than checking each is non zero, which is the\nweaker property the first version of that guard settled for.",
+        "operationId": "request_verification",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Verification",
         "tags": [
           "auth"
         ]

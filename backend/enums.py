@@ -649,6 +649,25 @@ class SettingKey(StrEnum):
     # `targets.SEEDED` has no entry for. See `settings_store.catalogue_sources`.
     CATALOGUE_SOURCES = "catalogue_sources"
 
+    # Whether accounts here are held by people outside the household.
+    #
+    # **Its own row, deliberately, and derived from nothing.** It draws a line
+    # the codebase did not draw: the auth mode says where credentials are
+    # checked, library mode says how the catalogue is presented, and the public
+    # catalogue switch is about readers rather than accounts. A verification
+    # requirement hung on any of those would be found by somebody turning that
+    # thing on for its own reason, which is the worst way to discover an account
+    # policy. Owner's decision, 2026-09-06, recorded in `docs/decisions.md`.
+    #
+    # Gating on whether registration is open was refused separately and it is
+    # the near miss: closing signups would silently admit every account that
+    # registered while it was open and never verified.
+    #
+    # A setting rather than an environment variable, like the two switches
+    # above and for the same reason: an account policy turned on by mistake has
+    # to be correctable without a redeploy.
+    ACCOUNTS_OPEN_TO_OUTSIDERS = "accounts_open_to_outsiders"
+
 
 class OverdueSender(StrEnum):
     """Which channel a reminder went out on.
@@ -864,3 +883,35 @@ class Capability(StrEnum):
     #: Needs a credential the household supplies, so an install without one has
     #: a source in the list that can never answer.
     NEEDS_A_CREDENTIAL = "needs_a_credential"
+
+
+class VerificationProvenance(StrEnum):
+    """Who said this account's address is that person's.
+
+    The same shape as `AuthorityProvenance` and for the same reason: an admin
+    marking an account verified is an assertion about a person, and a column
+    holding only the assertion cannot afterwards say who made it. Owner's
+    decision on issue #104.
+
+    A closed set, so the settings screen and the member list can label each
+    without a string arriving on screen with no translation.
+
+    `email_verified_by_user_id` is set on `ADMIN` and on nothing else. That
+    pairing is not a check constraint, because adding one to `users` forces a
+    batch rewrite of a table that now carries a self referential foreign key;
+    `accounts.record_verification` is the one writer and
+    `tests/test_accounts.py::TestOnlyAnAdminAssertionNamesAnAdmin` is what keeps
+    it true.
+    """
+
+    #: Nobody was asked. The account existed before the policy, or was created
+    #: while it was off. Every row the migration backfilled reads this.
+    NOT_REQUIRED = "not_required"
+    #: The member returned a code sent to the address on the account.
+    EMAIL = "email"
+    #: An admin asserted it from the settings screen. The only value that names
+    #: a person.
+    ADMIN = "admin"
+    #: A directory authenticated the account, so this app was never the one
+    #: holding the credential and has nothing of its own to verify.
+    DIRECTORY = "directory"

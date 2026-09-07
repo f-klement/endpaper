@@ -627,7 +627,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **98** models under `schemas/`, **35** of
+    Measured on the tree as it stands: **107** models under `schemas/`, **39** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -2398,6 +2398,16 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
     ADDRESS_READERS = {
         "auth_backends.py": "the directory writes it, and compares before writing",
         "routers/users.py": "the routes that serve it",
+        # **The one widening of issue #80's rule, and it is deliberate.** That
+        # issue kept the mailer off `users.email` because a reminder goes to the
+        # household mailbox, and that is unchanged: `notifications` still takes
+        # its recipients from `overdue_mail_to`. A confirmation code goes to the
+        # one person being confirmed, and there is no other address it could go
+        # to, so this module reads one and hands it to `mailer.checked_config`
+        # as an explicit recipient. It serves none back: `accounts` has no
+        # schema, and the code it produces travels to the mailbox rather than to
+        # the caller.
+        "accounts.py": "the confirmation code is sent to the member's own address",
     }
 
     #: Modules where **one receiver** may be read, rather than the whole module.
@@ -4338,3 +4348,79 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         fixture = tmp_path / "indented.md"
         fixture.write_text("prose\n\n    ```\n\n```\nx\n```\n")
         assert len(_fence_lines(fixture.read_text(encoding="utf-8"))) == 2
+
+
+class TestAOneTimeCodeIsServedOnlyWhereItIsNamed:
+    """A recovery code reaches the one response that exists to carry it.
+
+    The same mechanism as `TestAnAddressIsServedOnlyWhereItIsNamed` and for a
+    sharper reason: a code is a credential for the hour it lives, and it exists
+    in plaintext exactly once, in the response to an approval. It is stored as a
+    bcrypt hash, so no route **could** serve it a second time from the database;
+    what this rule stops is a second response carrying it forward from the one
+    that may, which no amount of hashing prevents.
+
+    **Both schema modes**, because a request body naming a code is fine and a
+    response naming one is not, and the two are told apart by which model it is
+    rather than by which mode: `ResetRedeem` and `VerificationRedeem` take a code
+    in and serve none back.
+
+    The blind spots are the address rule's, unchanged, and stated there: a code
+    served under a different property name, and a route with
+    `response_model=None` returning a hand built dict. This adds one of its own:
+    it says nothing about the **queue** response, which is checked by
+    `tests/test_accounts.py::TestTheCodeIsNeverServedTwice` looking at the
+    rendered body rather than at the schema.
+    """
+
+    #: The models allowed to carry a code, and what each is for.
+    CODE_MODELS = {
+        "ResetCodeOut": "the approval response, which is where a code exists once",
+        "ResetRedeem": "the body that spends one",
+        "VerificationRedeem": "the body that returns the mailed one",
+    }
+
+    CODE_FIELD = "code"
+
+    def test_no_other_schema_carries_a_code(self) -> None:
+        address_rule = TestAnAddressIsServedOnlyWhereItIsNamed()
+        models = address_rule._our_models()
+        assert models, "no models were found; this rule now inspects nothing"
+
+        carriers: set[str] = set()
+        unreadable: list[str] = []
+        for name, model in models.items():
+            try:
+                schemas = [
+                    model.model_json_schema(mode=mode)
+                    for mode in ("validation", "serialization")
+                ]
+            except Exception as error:  # noqa: BLE001  (reported, never skipped)
+                unreadable.append(f"{name}: {type(error).__name__}: {error}")
+                continue
+            if any(self._serves_a_code(schema) for schema in schemas):
+                carriers.add(name)
+
+        assert not unreadable, (
+            "These models could not be asked what they put on the wire:\n  "
+            + "\n  ".join(sorted(unreadable))
+        )
+        offenders = sorted(carriers - set(self.CODE_MODELS))
+        assert not offenders, (
+            "These put a one time code on the wire and are not one of the "
+            f"schemas that may: {offenders}. A code is a credential and exists "
+            "in plaintext once, in the approval response. Serve it from "
+            + "; ".join(f"{name} ({why})" for name, why in self.CODE_MODELS.items())
+            + " instead."
+        )
+
+    def _serves_a_code(self, schema: object) -> bool:
+        """The address rule's walk, over the same flattened `$defs` document."""
+        if isinstance(schema, dict):
+            properties = schema.get("properties")
+            if isinstance(properties, dict) and self.CODE_FIELD in properties:
+                return True
+            return any(self._serves_a_code(value) for value in schema.values())
+        if isinstance(schema, list):
+            return any(self._serves_a_code(item) for item in schema)
+        return False

@@ -416,28 +416,41 @@ def _catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credenti
     because a row skipped here is a request that goes out unauthenticated with
     nothing saying so.
 
-    **It costs nothing on today's roster and it is not free**, and the second
-    half is the one to plan against. The loop runs per source declaring
-    `Capability.NEEDS_A_CREDENTIAL` whose door carries a login, and that is empty
-    today only because the sources declaring it are bespoke. Each turn resolves
-    the encryption key again: `credentials.for_request` takes no
-    `credentials.KeyState`, so a sealed source costs a keychain round trip and a
-    BIP-39 decode per key source held, on the path that adds a book.
-    `settings_store._sources_with_a_credential` resolves the key once for its own
-    loop and states why; this cannot until `for_request` takes a `KeyState`, which
-    is raised rather than taken here.
+    **The key is resolved once for the whole loop, never per source**, which is
+    the rule `settings_store._sources_with_a_credential` states over the same
+    shape of loop. Resolving it reads every entry in `credentials.KEY_SOURCES`
+    and runs a BIP-39 decode per phrase held, so it is a keychain round trip per
+    source per lookup, on the path that adds a book, which is a member request
+    rather than an admin visit. The size it was costing is on the issue.
+
+    **The doors are collected before the key is touched, so a roster with none
+    resolves nothing**, which is today's roster and is the property the eager
+    call would have taken away. What it does cost, said rather than left to be
+    found: a roster whose credential doors are **all** pinned by the environment
+    pays one resolution where it paid none, because a pinned credential never
+    opens an envelope. That is one per request and bounded by nothing the roster
+    can grow, where the defect this replaced was bounded by the roster.
+    `tests/routers/test_books.py::TestTheKeyIsResolvedOncePerRequest` pins both
+    ends.
 
     Written for the set rather than for its members because the next source to
     declare that capability is the reason this plumbing exists.
     """
+    doors = [
+        targets.SEEDED[source]
+        for source in sorted(sources.NEEDS_A_KEY)
+        if metadata.carries_a_credential(targets.SEEDED[source])
+    ]
+    if not doors:
+        return {}
+    state = credentials.key_state()
     resolved: dict[CatalogueSource, credentials.Credential] = {}
-    for source in sources.NEEDS_A_KEY:
-        target = targets.SEEDED[source]
-        if not metadata.carries_a_credential(target):
-            continue
-        login = credentials.for_request(db, source.value, target.base_url)
+    for target in doors:
+        login = credentials.for_request(
+            db, target.source.value, target.base_url, state
+        )
         if login is not None:
-            resolved[source] = login
+            resolved[target.source] = login
     return resolved
 
 

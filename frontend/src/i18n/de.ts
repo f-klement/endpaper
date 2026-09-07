@@ -440,6 +440,41 @@ export const de: Messages = {
   "login.uploading": "Wird hochgeladen...",
   "login.signingYouIn": "Anmeldung läuft",
 
+  // ── Getting back in, and confirming an address ──────────────────────────
+  "login.forgotPassword": "Passwort vergessen?",
+  "login.haveCode": "Ich habe einen Bestätigungscode",
+  "login.backToSignIn": "Zurück zur Anmeldung",
+  "recovery.title": "Wieder hineinkommen",
+  "recovery.intro":
+    "Das muss eine Administratorin freigeben, die dann einen Einmalcode nennt. Dieser ist unten einzutragen.",
+  "recovery.ask": "Administratorin fragen",
+  "recovery.asked":
+    "Falls es dieses Konto gibt, wurde eine Administratorin gefragt. Der Code kommt dann von dort.",
+  "recovery.codeLabel": "Einmalcode",
+  "recovery.codePlaceholder": "ABCD-EFGH-JKLM",
+  "recovery.newPassword": "Neues Passwort",
+  "recovery.newPasswordPlaceholder": "Mindestens 8 Zeichen",
+  "recovery.setPassword": "Passwort setzen",
+  "recovery.done": "Das neue Passwort ist gesetzt. Damit anmelden.",
+  "recovery.failed":
+    "Dieser Code ist nicht verwendbar. Bitte eine Administratorin um eine Freigabe bitten.",
+  "verify.title": "Adresse bestätigen",
+  "verify.intro":
+    "Bitte den Code eintragen, der an die eigene Adresse ging. Kommt keine Nachricht an, kann eine Administratorin das Konto stattdessen bestätigen.",
+  "verify.submit": "Bestätigen",
+  "verify.resend": "Erneut senden",
+  "verify.resent":
+    "Falls dieses Konto auf eine Bestätigung wartet, wurde ein Code gesendet.",
+  "verify.done": "Das Konto ist bestätigt. Jetzt anmelden.",
+  "verify.failed":
+    "Dieser Code ist nicht verwendbar. Bitte einen neuen anfordern.",
+  "login.registered":
+    "Das Konto ist angelegt. Die Adresse mit dem gesendeten Code bestätigen, oder eine Administratorin um die Bestätigung bitten.",
+  "login.emailRequiredHint":
+    "Diese Bibliothek bestätigt neue Konten, daher wird eine Adresse gebraucht. Ein Code geht dorthin.",
+  "login.soleAdminWarning":
+    "Dieses Passwort gut aufbewahren. Eine Zurücksetzung gibt eine andere Administratorin frei, also hat das erste Konto einer Bibliothek niemanden, der seine eigene freigibt.",
+
   // ── Einstellungen ───────────────────────────────────────────────────────
   "settings.title": "Einstellungen",
   "settings.saved": "Einstellungen gespeichert.",
@@ -516,6 +551,25 @@ export const de: Messages = {
   "account.members.title": "Adressen der Mitglieder",
   "account.members.hint":
     "Damit sich die fehlende oder falsch getippte Adresse finden lässt, wenn Erinnerungen nirgends ankommen.",
+
+  // ── What has been done to your own account ──────────────────────────────
+  "account.security.title": "Verlauf des eigenen Kontos",
+  "account.security.hint":
+    "Eine Zurücksetzung des Passworts muss eine Administratorin freigeben, und das Konto hält fest, wer das war.",
+  "account.security.noReset":
+    "Für dieses Konto wurde keine Zurücksetzung freigegeben.",
+  "account.security.reset":
+    "Das Passwort wurde am {date} zurückgesetzt, freigegeben von {name}.",
+  "account.security.resetUnknown":
+    "Das Passwort wurde am {date} zurückgesetzt.",
+  "account.security.confirmedBy":
+    "Eine Adresse dieses Kontos wurde von {name} bestätigt.",
+  "account.security.confirmedByEmail":
+    "Eine Adresse dieses Kontos wurde mit einem Code bestätigt, der an sie gesendet wurde.",
+  "account.security.notAsked":
+    "Dieses Konto wurde nie um eine Bestätigung der Adresse gebeten.",
+  "account.security.directory":
+    "Dieses Konto wird von einem Verzeichnis angemeldet, es gibt hier keine Adresse zu bestätigen.",
 
   "theme.hint": "Wird im Konto gespeichert und gilt auf allen Geräten.",
   "theme.light": "Hell",
@@ -646,6 +700,40 @@ export const de: Messages = {
   "settings.testAccountsSwitchFailed":
     "Zu diesem Konto konnte nicht gewechselt werden.",
   "settings.testAccountsPasswordFor": "Passwort für {name}",
+
+  // ── Account recovery and confirmation, the admin's half ─────────────────
+  "settings.openToOutsiders":
+    "Konten stehen Menschen außerhalb des Haushalts offen",
+  "settings.openToOutsidersHint":
+    "Eingeschaltet muss ein neues Konto seine Adresse bestätigen, bevor es sich anmelden kann. Für die bereits vorhandenen Konten ändert sich nichts.",
+  "settings.resetRequests": "Anfragen zum Zurücksetzen",
+  "settings.resetRequestsHint":
+    "Ein Mitglied bittet darum, wieder hineinzukommen. Eine Freigabe erzeugt einen Code zum Vorlesen, der nur einmal sichtbar ist. Hier lässt sich keine Zurücksetzung anstoßen, das kann nur das Mitglied selbst.",
+  "settings.resetRequestsEmpty": "Niemand wartet.",
+  "settings.resetRequestsFailed": "Die Anfrage ließ sich nicht bearbeiten.",
+  "settings.resetRequestsAsked": "Gefragt am {date}",
+  "settings.resetRequestsApprovedBy": "Freigegeben von {name}",
+  "settings.resetRequestsApprove": "Freigeben",
+  "settings.resetRequestsApproveFor": "Zurücksetzung für {name} freigeben",
+  "settings.resetRequestsDecline": "Ablehnen",
+  "settings.resetRequestsDeclineFor": "Zurücksetzung für {name} ablehnen",
+  "settings.resetRequestsCodeExpires": "Der Code gilt bis {time}.",
+  "settings.resetRequestsCodeFor":
+    "{name} diesen Code vorlesen. Er ist einmal sichtbar und gilt bis {time}.",
+  "settings.verification": "Kontobestätigung",
+  "settings.verificationHint":
+    "Ein Konto zu bestätigen heißt, dass die hinterlegte Adresse dieser Person gehört. Das wird mit dem eigenen Namen festgehalten.",
+  "settings.verificationConfirm": "Bestätigen",
+  "settings.verificationConfirmFor": "Konto {name} bestätigen",
+  "settings.verificationFailed": "Das Konto ließ sich nicht bestätigen.",
+  "settings.verificationWaiting": "Wartet auf Bestätigung",
+  "settings.verificationNoAddress":
+    "Keine Adresse, es kann kein Code gesendet werden.",
+  "settings.verificationElsewhere":
+    "Wird von einem Verzeichnis angemeldet, hier gibt es nichts zu bestätigen.",
+  "settings.verificationBySomebody": "Bestätigt von {name}",
+  "settings.verificationByEmail": "Bestätigt durch einen Code an eine Adresse",
+  "settings.verificationNotAsked": "Bestätigt, weil niemand gefragt wurde",
 
   // ── Erinnerungen an überfällige Bücher ──────────────────────────────────
   "settings.overdue": "Erinnerungen an überfällige Bücher",

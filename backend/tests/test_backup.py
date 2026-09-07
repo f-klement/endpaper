@@ -1580,3 +1580,64 @@ class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
             headers=admin["headers"],
         )
         assert response.status_code != 200
+
+
+class TestARestoreDoesNotConfirmAnAccountTheArchiveLeftUnconfirmed:
+    """The narrow rule, and the wide one it was first written as.
+
+    An archive older than `a7c41d9e6b28` carries no `email_verified_at` at all,
+    so its accounts come back unconfirmed and turning the account policy on
+    afterwards would refuse every one of them, the library's only admin
+    included. Those are stamped.
+
+    **A current archive carries the key with an explicit null** for exactly the
+    accounts the policy refuses: the ones that registered while it was on and
+    never confirmed. The first version of this decided from the value, so
+    restoring today's backup admitted all of them. Both critics found it
+    independently, which is why the two cases are pinned here rather than the
+    one that was wrong.
+    """
+
+    def _archive(self, client, admin) -> bytes:
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        assert data
+        return data
+
+    def test_an_explicit_null_stays_unconfirmed(self, client, admin, db):
+        from models import User
+
+        db.add(User(username="waiting", password_hash="x"))
+        db.commit()
+        data = self._archive(client, admin)
+        manifest = read_manifest(data)
+        rows = manifest["tables"]["users"]
+        assert any("email_verified_at" in row for row in rows), (
+            "the archive stopped carrying the column, so this test now checks "
+            "nothing"
+        )
+
+        backup.restore(db, data)
+
+        restored = db.query(User).filter(User.username == "waiting").one()
+        assert restored.email_verified_at is None
+
+    def test_an_archive_written_before_the_column_is_stamped(
+        self, client, admin, db
+    ):
+        from enums import VerificationProvenance
+        from models import User
+
+        data = self._archive(client, admin)
+        manifest = read_manifest(data)
+        for row in manifest["tables"]["users"]:
+            row.pop("email_verified_at", None)
+            row.pop("email_verification_source", None)
+
+        backup.restore(db, rewrite(data, manifest))
+
+        restored = db.query(User).filter(User.username == "admin").one()
+        assert restored.email_verified_at is not None
+        assert (
+            restored.email_verification_source
+            == VerificationProvenance.NOT_REQUIRED.value
+        )
