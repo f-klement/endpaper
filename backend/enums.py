@@ -802,13 +802,16 @@ class CatalogueSource(StrEnum):
 
     **Not every source answers every question**, and the split is real rather
     than incidental. BNF and LOC are title search only, because neither was
-    worth an ISBN request. NKP and BNE are the other way round, **lookup only**,
-    and for two different reasons. The NKP's is the server's: it renders one
-    populated record per response whatever page size is asked for, so a search
-    for ten candidates would be ten requests. The BNE's is ours: its search
-    works and nobody has measured what it would find, so it holds the
-    conservative default. See `sources.LOOKUP_SOURCES` and
+    worth an ISBN request. NKP, BNE and BNA are the other way round, **lookup
+    only**, and for two different reasons. The NKP's and the BNA's is the
+    server's: each renders one populated record per response whatever page size
+    is asked for, so a search for ten candidates would be ten requests. The
+    BNE's is ours: its search works and nobody has measured what it would find,
+    so it holds the conservative default. See `sources.LOOKUP_SOURCES` and
     `SEARCH_SOURCES`, which is why those are two sets and not one.
+
+    **One member needs a credential and is free**, which is new: the BNA. What
+    that costs the roster's rules is on `sources.NEEDS_A_KEY`.
     """
 
     OPEN_LIBRARY = "open_library"
@@ -823,6 +826,10 @@ class CatalogueSource(StrEnum):
     #: The Biblioteca Nacional de España. Alma SRU on the OPAC hostname, MARC21,
     #: and the ÖNB's profile exactly. #91.
     BNE = "bne"
+    #: The Biblioteca Nacional Argentina. The NKP's profile exactly, over the
+    #: same bare Dublin Core, and the first source here that is free and
+    #: credentialled at once: see `sources.NEEDS_A_KEY`. #116.
+    BNA = "bna"
 
 
 class SourceFamily(StrEnum):

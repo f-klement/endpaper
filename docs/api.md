@@ -637,7 +637,7 @@ Books created by an import get `ownership=unknown`, never `owned`. See
 
 ### Metadata lookup
 
-`GET /api/books/lookup` asks eight catalogues in two phases and merges what comes back.
+`GET /api/books/lookup` asks nine catalogues in two phases and merges what comes back.
 
 **Phase one, asked together:** the **Deutsche Nationalbibliothek** and **K10plus**, the
 union catalogue of the German library networks. Both are free, need no key, and are the
@@ -649,12 +649,20 @@ the same book.
 
 **Phase two, asked in turn, only if neither knew the book:** **Open Library**, then the
 **Czech National Library**, then the **Spanish National Library**, then the **National
-Library of Greece**, then the **Austrian National Library**, then **Google Books**. Phase
-two stops at the first hit, so it is ordered by how often a source answers a book phase one
-missed: of 278 such ISBNs in 500, Open Library answers 82, the NKP 42, the BNE 40, the NLG
-34 and the ÖNB 1. Open Library is the broadest source and much the slowest, which is why it
-is here rather than in phase one; Google is the only one with a key, a quota and a bill
-attached, and an ordinary lookup therefore spends no quota at all.
+Library of Greece**, then the **Austrian National Library**, then the **Biblioteca Nacional
+Argentina**, then **Google Books**. Phase two stops at the first hit, so it is ordered by
+how often a source answers a book phase one missed: of 278 such ISBNs in 500, Open Library
+answers 82, the NKP 42, the BNE 40, the NLG 34 and the ÖNB 1. Open Library is the broadest
+source and much the slowest, which is why it is here rather than in phase one.
+
+**Two of the nine need a credential and only one of them costs money**, which is why the
+last two are where they are. Google Books has a key, a quota and a bill attached, so it is
+last and an ordinary lookup spends no quota at all. The Biblioteca Nacional Argentina needs
+a login and charges nothing: the library publishes a username and password on its own page
+for librarians, Endpaper ships neither, and an install that has not entered one is not
+asking it, so it sits after every source measured on that sample and before the one with
+the bill. It answers ten of the fifty Argentine ISBNs in that sample, four of which no
+other free source in the chain holds.
 
 **A national catalogue is never in phase one**, however well it does on the whole sample.
 Phase one is paid on every lookup by every install, and what a national catalogue answers
@@ -695,7 +703,7 @@ asymmetry in this table and is the server's rather than a preference: it returns
 filled in record per reply whatever page size is asked for, so ten search results would be
 ten requests. A lookup wants one record and gets one.
 
-**No order of these seven finds more books than another.** Every enabled source is asked
+**No order of the nine finds more books than another.** Every enabled source is asked
 until one answers, so the order decides latency and which records are merged, never
 coverage. Reordering is not the fix for a book the chain misses.
 
@@ -704,9 +712,11 @@ it is a different axis from the order: a national catalogue below phase one is a
 the registration groups it collects and no others. The bound on that is zero books, so the
 sentence above holds in practice as well as in principle.
 
-**What the chain covers without a Google Books key, which is what a stock install runs.**
-Seven of the eight are free; Google Books needs a key you supply. Measured over 500
-domestic ISBNs across ten countries, the seven free sources answer **395 and miss 105**,
+**What the chain covers with no credential at all, which is what a stock install runs.**
+Seven of the nine need none. Google Books takes an API key you supply and the Argentine
+catalogue a login the library publishes. Measured over 500
+domestic ISBNs across ten countries, the seven sources a stock install asks answer **395 and
+miss 105**,
 and outside German language publishing they miss **101 of 400**. The same books under an
 earlier release answered 300: the three national catalogues added since, the NLG, the NKP
 and the BNE, account for part of that and a fix to how a qualified `020` is read accounts
@@ -742,7 +752,7 @@ authorised heading string itself, subdivisions included
 identifier for it in this record, so the string is the access point.
 
 **`lcsh` reaches only the search response**, not this one. The Library of Congress is not
-one of the eight sources a lookup asks, so a scan never sees an LCSH heading; a picked search
+one of the nine sources a lookup asks, so a scan never sees an LCSH heading; a picked search
 result carries it into `POST /{id}/enrich/apply`, which is how it reaches a book.
 
 **The suggestion has two routes and they fail on opposite records.** One compares the

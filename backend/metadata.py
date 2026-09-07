@@ -2242,8 +2242,19 @@ def _nkp_claims_isbn(record: ElementTree.Element, isbn: str) -> bool:
 _NKP_ONLINE: Final = re.compile(r"online\s+zdroj|elektronick\w*\s+zdroj", re.IGNORECASE)
 
 
-def _nkp_record(record: ElementTree.Element, isbn: str) -> Record | None:
-    """One Czech Dublin Core record as book fields, or None if it is not a book.
+def _nkp_record(
+    record: ElementTree.Element, isbn: str, *, source: str
+) -> Record | None:
+    """One bare Dublin Core record as book fields, or None if it is not a book.
+
+    **`source` is keyword only and passed in rather than spelled here**, because
+    two catalogues write this dialect: the Czech National Library and the Biblioteca Nacional
+    Argentina. It was a literal `"nkp"` until the second one arrived, at which
+    point a live Argentine lookup returned a `Lookup` labelled `bna` carrying a
+    `Record` labelled `nkp`, and `Record.source` is what
+    `_MATCH_PRECEDENCE`, `_SECONDARY_SOURCES`, `_merge_matches` and the
+    attribution on a member's screen all read. Named after the first of the two
+    for the reason `_dnb_record` is, which reads four MARC catalogues.
 
     **Contributors rather than creators, because this catalogue writes no
     creator at all.** Measured 2026-08-31 over the **9 records that carried
@@ -2285,6 +2296,16 @@ def _nkp_record(record: ElementTree.Element, isbn: str) -> Record | None:
     # all, so `_dc_title_statement` has nothing to split off and leaves it.
     title, subtitle = _dc_title_statement(titles[0])
     title = _strip_marc_punctuation(title)
+    # **Both halves, and the subtitle half was missing.** `_dc_title_statement`
+    # drops a statement of responsibility only where the slash has a space after
+    # it, and both catalogues in this dialect write `main : sub /` with nothing
+    # following, so the slash survives into the subtitle. The title beside it
+    # was already stripped and the subtitle was not, so `El mundo gamer` came
+    # back with `del juego al reclutamiento /` under it, measured over 10 live
+    # Argentine records on 2026-09-07, 3 of which carry a subtitle and all 3 of
+    # those ended in a slash. Stripped here rather than inside
+    # `_dc_title_statement`, which the BnF and the DNB also call.
+    subtitle = _strip_marc_punctuation(subtitle) if subtitle else None
     if _is_placeholder_title(title):
         return None
 
@@ -2302,7 +2323,7 @@ def _nkp_record(record: ElementTree.Element, isbn: str) -> Record | None:
     publisher = next(iter(_nkp_text(record, "publisher")), None)
 
     return Record(
-        source="nkp",
+        source=source,
         isbn=isbn,
         title=title,
         subtitle=subtitle,
@@ -2420,6 +2441,99 @@ def _nkp_record(record: ElementTree.Element, isbn: str) -> Record | None:
 # 5.911s against a 4.0s whole fan out, so the cheap version of the question is
 # not free either. `sources.SEARCH_SOURCES` carries the full argument.
 
+# ── The Biblioteca Nacional Argentina ─────────────────────────────────────────
+
+# Argentina's legal deposit catalogue, and the Czech National Library's row with
+# a different address: SRU 1.1, PQF in `x-pquery`, use attribute 7, no
+# `recordSchema`, bare Dublin Core through `_nkp_record`. It needed no adapter,
+# which is the second time that property has paid for the way `targets.py` is
+# arranged.
+#
+# **The credential is the gate and the transport is ordinary.** #91 inferred
+# that from the refusal being identical over both protocols; it is now a round
+# trip rather than an inference. Measured 2026-09-07 against
+# `targets.SEEDED[CatalogueSource.BNA].base_url`, YAZ 4.2.66:
+#
+#   * unauthenticated, `operation=searchRetrieve` with `x-pquery`: HTTP **200**
+#     carrying SRU diagnostic `info:srw/diagnostic/1/3`, `Authentication error`,
+#     with details naming an Aleph service code and **the user name the request
+#     carried**, truncated by the target's own parser. A refusal arrives as a
+#     diagnostic under a 200, which is why `_sru_refusal` is what separates this
+#     from an empty answer, and the details are the one part of a diagnostic
+#     nothing here logs or quotes: they are half a login at this target, so they
+#     are described rather than reproduced, here as well as in a log line.
+#   * the same request under HTTP Basic: `numberOfRecords` and a record.
+#   * `recordSchema=marcxml`: diagnostic 1/66, measured 2026-09-06 and recorded
+#     on the ticket rather than here. So the ticket's parameter table, which
+#     says MARC21, describes the **Z39.50** route and not this one.
+#
+# **This tree ships no credential and that is a decision rather than an
+# oversight.** The library publishes a username and password on its own page for
+# librarians, `bn.gov.ar/bibliotecarios/protocoloZ3950`, so an install can
+# obtain one without an account anywhere; what it may not do is ship one. A
+# default in the source would be published by the mirror and baked into the
+# image, so every install would authenticate as the same account at somebody
+# else's server, an install with its own arrangement with the library could not
+# replace it, and `credentials.py` seals a credential at rest precisely because
+# a login at a third party is not this deployment's to hand out. So this row
+# declares `Capability.NEEDS_A_CREDENTIAL` and an admin enters the published
+# pair once, on the settings screen or through
+# `credentials.env_variable_name("bna")`. `sources.NEEDS_A_KEY` carries what
+# that costs the roster.
+#
+# **A rotated credential has to read as a credential**, which is the ticket's
+# own requirement and was not true of this application before this row. Any SRU
+# diagnostic now makes the source unavailable rather than empty handed, so a
+# credential that stops working reads as "this catalogue could not be asked".
+# `_sru_refusal` carries the rule and why it is structural rather than a list of
+# diagnostic numbers.
+#
+# **Plaintext, and here that is a sharper statement than at the other three.**
+# Port 9991 speaks no TLS, so the request and every record cross the network in
+# clear, and this is the one catalogue request in the application that carries
+# an `Authorization` header. `credentials.Credential.header_for` binds that
+# header to this origin, and `fetch._same_host_hop` refuses a redirect off it;
+# the two are deliberately separate guards, because a redirect leaking a page is
+# an information leak and one carrying this header is account theft. What no
+# guard here can fix is that the credential is Basic over plaintext to begin
+# with, which is what the library published and is the whole of what it
+# protects: a catalogue nobody's library card opens.
+#
+# **One populated record per response, whatever page size is asked for**, which
+# is the Czech National Library's property at a second Aleph target. Measured
+# 2026-09-07: an ISBN with two hits, at `maximumRecords=5`, answers two
+# `<zs:record>` elements and **one** `recordData`. So `lookup_records` is 1 and
+# `answers_search` is False, the second being forced anyway because
+# `targets.Target._check_sru` allows a search only on a CQL target.
+#
+# What it answers, over the fifty Argentine rows of the 500 ISBN sample
+# committed at `tests/fixtures/catalogue_survey_2026_08_31.json`, one serial
+# pass on 2026-09-07 with nothing else in flight:
+#
+#   * **10 of the 50**, and **4 of the 26 that the seven sources a stock install
+#     asks miss**. Seven and not eight: this source is free and is not one of
+#     them, because an install that has entered no login is not asking it.
+#     The frame goes from 24 answered to 28.
+#   * Lookup latency min 0.496s, median 0.516s, p90 0.529s, max 0.530s, over all
+#     fifty, which is the tightest spread of any source here and is one Aleph
+#     answering from one machine.
+#   * 10 of 10 records parsed as books through the reader unchanged, and 10 of
+#     10 named the ISBN asked for, so `requires_isbn_claim` refused nothing.
+#
+# **4 is the number to plan against and the ticket says 56.0%.** That figure is
+# a coverage claim over a different sample and it is not what this pass found:
+# against the committed one, what this source uniquely answers is four books in
+# five hundred. It is admitted on the tail's terms, where the OENB sits on one,
+# and it would not clear `sources.SLOT_MUST_EARN` for a tier slot.
+#
+# **The Spanish for an online resource is not refused**, and that is recorded
+# rather than guarded. `_NKP_ONLINE` is Czech and `_NOT_A_BOOK` is German and
+# English, so `1 recurso electrónico` would reach a shelf here. None of the ten
+# records measured is one, so there is nothing measured to write a pattern
+# against, and a refusal guessed from no example is the mistake `_NKP_ONLINE`'s
+# own comment records. Whichever ticket gives this source a second pass writes
+# it, from records rather than from a dictionary.
+
 # ── The chain ─────────────────────────────────────────────────────────────────
 #
 # Ranked by measurement, not reputation. Ten ISBNs across five languages, each
@@ -2468,10 +2582,10 @@ def _nkp_record(record: ElementTree.Element, isbn: str) -> Record | None:
 # did not, which is the question the fallback order turns on.
 #
 # **What this chain covers without a Google Books key, which is what a default
-# install runs.** Google Books needs one (`sources.NEEDS_A_KEY`) and most
-# installations have none, so the chain most deployments actually run is the
-# seven free sources. Measured over 500 domestic ISBNs across ten frames: the
-# free seven answer 395 and miss 105, and outside German language publishing
+# install runs.** Two sources need a credential (`sources.NEEDS_A_KEY`) and most
+# installations have neither, so the chain most deployments actually run is the
+# seven sources a stock install asks. Measured over 500 domestic ISBNs across ten
+# frames: the seven answer 395 and miss 105, and outside German language publishing
 # they miss 101 of 400. The same 500 books under the roster of three releases
 # ago, and the previous `020` rule, answered 300. So a sentence anywhere in this module saying
 # the chain covers a country is a statement about a **keyed** install. #91
@@ -3507,13 +3621,19 @@ def _marc_nodes(
 ) -> list[ElementTree.Element]:
     """Every MARC record in a response that this decoding wants read.
 
-    **An SRU diagnostic needs no branch of its own**, and it is worth saying
-    because these endpoints answer every error with HTTP 200. An invalid query
-    and an unsupported one both come back as a well formed
+    **An SRU diagnostic needs no branch of its own here**, and it is worth
+    saying because these endpoints answer every error with HTTP 200. An invalid
+    query and an unsupported one both come back as a well formed
     `searchRetrieveResponse` carrying a `diag:diagnostic` and no records, so the
-    body parses, this returns nothing, and the source reports no results, which
-    is what it should do. `test_metadata.py` pins that with a recorded
-    diagnostic rather than leaving it to be rediscovered.
+    body parses and this returns nothing. `test_metadata.py` pins that with a
+    recorded diagnostic rather than leaving it to be rediscovered.
+
+    **On the search path that is the whole answer and on the lookup path it is
+    not**, which is the asymmetry to read before moving this rule.
+    `_sru_lookup` turns a diagnostic into `Outcome.UNAVAILABLE` before a reader
+    is reached, because a lookup can say "nobody could be asked" and a search
+    cannot: this returns `list[Record]`, and an empty list is the only thing it
+    has to say with. `_sru_refusal` carries the argument.
 
     The component part filter is the ÖNB's and the NLG's. What it catches and
     what it does not is on `targets.Target.refuses_component_parts`, and the two
@@ -3603,16 +3723,21 @@ def _dublin_core_bare_lookup(
 ) -> Lookup:
     """The best un-namespaced Dublin Core record for the ISBN that was asked about.
 
-    The Czech National Library's shape, and it is the whole of this reader's
-    roster. `_nkp_claims_isbn` is this format's `_marc_claims_isbn`: it has no
-    020 to read and tests the record's own identifier elements instead.
+    The Czech National Library's shape, and the Biblioteca Nacional Argentina's,
+    which is this reader's whole roster. `_nkp_claims_isbn` is this format's
+    `_marc_claims_isbn`: it has no 020 to read and tests the record's own
+    identifier elements instead.
+
+    **`decoding.source` labels the record as well as the lookup.** It labelled
+    only the lookup until the second catalogue in this dialect arrived; see
+    `_nkp_record`.
     """
     name = decoding.source
     parsed = [
         record
         for node in _nkp_records(root)
         if not decoding.requires_isbn_claim or _nkp_claims_isbn(node, isbn)
-        for record in [_nkp_record(node, isbn)]
+        for record in [_nkp_record(node, isbn, source=name)]
         if record is not None
     ]
     if not parsed:
@@ -3710,6 +3835,92 @@ _SEARCH_READERS: Final[
 }
 
 
+#: What an SRU diagnostic's own identifier looks like, and the whole of what is
+#: ever written down from one.
+#:
+#: **The URI and never the details, because the details echo what was sent.**
+#: Measured 2026-09-07: the Biblioteca Nacional Argentina answers an
+#: unauthenticated request with an Aleph error whose text quotes back the user
+#: name on the request, truncated by the target's own parser. A log line
+#: carrying a target's prose therefore carries half a login at that target, and
+#: no reading of a third party's free text makes that safe. A URI is a code out
+#: of a registry, and one that does not look like one is dropped rather than
+#: repeated.
+_DIAGNOSTIC_URI: Final = re.compile(r"[\w.:/+-]{1,120}")
+
+
+def _local_name(tag: str) -> str:
+    """An element's name without its namespace.
+
+    Namespace agnostic on purpose: SRU 1.1 and 1.2 and the servers in this
+    roster disagree about which namespace a diagnostics block carries, and a
+    match on one spelling would read a refusal from the others as an empty
+    catalogue.
+    """
+    return tag.rsplit("}", 1)[-1]
+
+
+def _sru_refusal(root: ElementTree.Element) -> str | None:
+    """A refused request as its diagnostic URI, or None where nothing refused.
+
+    **A diagnostic is not an empty answer, and every SRU endpoint here reports
+    both under HTTP 200.** Zero results are `numberOfRecords 0`; a diagnostic
+    means the request was not honoured at all, whether because a credential is
+    wrong, a schema is unsupported or a database name does not exist. Reading
+    the second as the first tells a member their book is not held by a catalogue
+    that was never asked, which is `Outcome`'s founding distinction and the
+    conflation #91 found for the Greek `$q` case.
+
+    **Structural rather than a list of codes.** It asks whether the response
+    carries a diagnostics block, not which diagnostic: the authentication
+    numbers are one family in an open registry, and a guard naming 1/3 today
+    would read 1/2 and 1/235 as books this library does not hold.
+
+    **A diagnostic beside records is not a refusal, and this function cannot
+    tell**, which is why `_sru_lookup` asks it only after the reader has found
+    nothing. The National Library of Greece answers the true `numberOfRecords`
+    **and** `Unknown schema for retrieval` when no `recordSchema` is named, and
+    `docs/decisions.md` records a probe that read every such response as
+    unreadable and reported a confident zero for the country it was recommending.
+    Records that parse win over anything the envelope says about itself.
+
+    **The case this rule would get wrong is a target that diagnoses an honest
+    empty answer, and it is measured rather than argued about.** Asked on
+    2026-09-07 for an ISBN none of them holds, every one of the seven SRU lookup
+    targets answered `numberOfRecords 0` and **no diagnostic element of any
+    kind**: 457, 463, 205, 420, 462, 420 and 205 bytes. The Argentine
+    catalogue's forty other empty answers that day carried none either. A target
+    that starts attaching one is the thing to watch for, and the symptom would be
+    that source reporting `UNAVAILABLE` on every miss.
+
+    **What a refusal costs is the whole lookup and not only the source**, which
+    is `_worst`: it reports `UNAVAILABLE` over `NOT_FOUND` when nothing was found
+    anywhere, so one target declining to be asked is the answer a member sees for
+    all of them. That is the intended reading, "nobody could be asked" rather
+    than "nobody holds it", and it is the reason this arm is narrow.
+
+    **A diagnostic inside `records` is deliberately not read.** SRU allows one
+    there and it describes a single record rather than the request, so this
+    looks only at a direct child of the response element. That is also what
+    stops a record's own text becoming a refusal for the whole lookup.
+
+    **None and the empty string are two different answers**, which is why this
+    is not a `bool` and not a `str`. None is "nothing refused". Empty is "a
+    refusal whose URI is missing or is not a URI", which is still a refusal and
+    is a thing this application may not repeat into a log.
+    """
+    for child in root:
+        if _local_name(child.tag) != "diagnostics":
+            continue
+        for element in child.iter():
+            if _local_name(element.tag) != "uri":
+                continue
+            uri = (element.text or "").strip()
+            return uri if _DIAGNOSTIC_URI.fullmatch(uri) else ""
+        return ""
+    return None
+
+
 async def _sru_lookup(
     target: targets.Target, isbn: str, credential: fetch.Credential | None
 ) -> Lookup:
@@ -3745,7 +3956,18 @@ async def _sru_lookup(
     ):
         logger.warning("%s lookup failed for %s", name, isbn, exc_info=True)
         return Lookup(Outcome.UNAVAILABLE, source=name)
-    return _LOOKUP_READERS[target.reader](root, isbn, target.decoding)
+    answer = _LOOKUP_READERS[target.reader](root, isbn, target.decoding)
+    if answer.outcome is not Outcome.NOT_FOUND:
+        return answer
+    refusal = _sru_refusal(root)
+    if refusal is None:
+        return answer
+    # Nothing was read and the target said why, so this is a refusal rather than
+    # a miss. See `_sru_refusal` for why the reader runs first, why the URI is
+    # the only part of a diagnostic that is ever written down, and what `_worst`
+    # then does with this one source's answer.
+    logger.warning("%s refused a lookup: %r", name, refusal)
+    return Lookup(Outcome.UNAVAILABLE, source=name)
 
 
 async def _sru_search(
@@ -4002,17 +4224,19 @@ _LANGUAGE_WEIGHT: Final = 3
 #: promoting, so a point comes off. One point is less than a single term match,
 #: so this only ever breaks a tie.
 #:
-#: **The NKP and BNE entries are inert and are here so they stay correct if that
-#: changes.** This set is read only from `_relevance`, which scores **search**
-#: rows, and neither answers a title search: `sources.SEARCH_SOURCES` leaves both
-#: out, the NKP because its server renders one populated record per response
-#: whatever page size is asked, the BNE because its search gain was never
-#: measured. So neither can reach this comparison today. Listing them costs
-#: nothing and omitting them would put a wrong default in place the day either
-#: does, which is the same reasoning `_MATCH_PRECEDENCE` records for the same
-#: pair. A reader meeting this line should not conclude that either appears in
-#: search results.
-_SECONDARY_SOURCES: Final = frozenset({"bnf", "loc", "oenb", "nlg", "nkp", "bne"})
+#: **The NKP, BNE and BNA entries are inert and are here so they stay correct if
+#: that changes.** This set is read only from `_relevance`, which scores
+#: **search** rows, and none of the three answers a title search:
+#: `sources.SEARCH_SOURCES` leaves all three out, the NKP and the BNA because
+#: their server renders one populated record per response whatever page size is
+#: asked, the BNE because its search gain was never measured. So none can reach
+#: this comparison today. Listing them costs nothing and omitting them would put
+#: a wrong default in place the day one does, which is the same reasoning
+#: `_MATCH_PRECEDENCE` records for the same three. A reader meeting this line
+#: should not conclude that any of them appears in search results.
+_SECONDARY_SOURCES: Final = frozenset(
+    {"bnf", "loc", "oenb", "nlg", "nkp", "bne", "bna"}
+)
 _SECONDARY_PENALTY: Final = 1
 
 #: Fields that make a row pickable rather than a stub. Scored **separately**
@@ -4497,27 +4721,28 @@ _MATCH_PRECEDENCE: Final = (
     "dnb",
     "bnf",
     "loc",
-    # Last four, and named rather than left to the default so that a reader can
+    # Last five, and named rather than left to the default so that a reader can
     # see it was decided. They are the newest and the least compared of the
-    # ten, and the field any of them would win is a field the DNB or K10plus has
-    # already filled for any book all four hold. Where one is the only
+    # eleven, and the field any of them would win is a field the DNB or K10plus
+    # has already filled for any book all five hold. Where one is the only
     # catalogue with a row, precedence never runs.
     #
-    # **The order among the four national catalogues is arbitrary**, which is
+    # **The order among the five national catalogues is arbitrary**, which is
     # worth saying rather than implying a comparison nobody made. They collect
     # different countries, so a book two of them hold is a book the primary
     # three hold as well, and the tie this would break has not been observed.
     #
-    # The NKP and the BNE are here rather than absent because a source missing
-    # from this tuple sorts last by default and silently, which is the thing
-    # `test_precedence_names_every_source_and_nothing_else` exists to catch. It
-    # caught the NKP. Neither answers a title search, so neither can reach this
-    # comparison today; see `_SECONDARY_SOURCES`, which carries the same pair
-    # for the same reason.
+    # The NKP, the BNE and the BNA are here rather than absent because a source
+    # missing from this tuple sorts last by default and silently, which is the
+    # thing `test_precedence_names_every_source_and_nothing_else` exists to
+    # catch. It caught the NKP. None of the three answers a title search, so
+    # none can reach this comparison today; see `_SECONDARY_SOURCES`, which
+    # carries the same three for the same reason.
     "oenb",
     "nlg",
     "nkp",
     "bne",
+    "bna",
 )
 
 

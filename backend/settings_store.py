@@ -85,7 +85,7 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # An empty JSON object: no sender has run yet. Not a preference, so it has
     # no field in `SettingsUpdate` and never reaches `_read_settings`.
     SettingKey.SENDER_HEALTH: "{}",
-    # The provider list. An empty object rather than the ten sources spelled
+    # The provider list. An empty object rather than the eleven sources spelled
     # out, because `sources.parse` already answers "absent means the defaults"
     # and writing them twice is two places for the default order to drift.
     SettingKey.CATALOGUE_SOURCES: "{}",
@@ -278,12 +278,13 @@ _SECRET_IS_A_SETTINGS_ROW: Final[frozenset[CatalogueSource]] = frozenset(
 def _sources_with_a_credential(db: Session) -> set[CatalogueSource]:
     """Which credential-needing sources hold a readable sealed login.
 
-    **Empty today, and that is a fact about the roster rather than about this
-    function.** `sources.NEEDS_A_KEY` is Google Books alone on this date, whose
-    secret is a settings row, so the loop runs zero times. It is written for the
-    set rather than for the member because the next source to declare that
-    capability is the reason #180 was opened, and a rule spelled per source is
-    one somebody has to remember to extend.
+    **One source today, and that is a fact about the roster rather than about
+    this function.** It was empty while `sources.NEEDS_A_KEY` was Google Books
+    alone, whose secret is a settings row; the Biblioteca Nacional Argentina is
+    the second member and the first whose secret is sealed, so the loop runs
+    once and the key is resolved on every call that reaches here. It was written
+    for the set rather than for the member, which is why that cost the roster
+    nothing to arrive at.
     `tests/test_settings_store.py` exercises it against a roster with a second
     such source in it.
 
@@ -362,7 +363,7 @@ def catalogue_sources(db: Session) -> sources.Plan:
     **One row read and one `json.loads` per request that reaches a catalogue**,
     and that is accepted rather than cached. It is the same cost
     `google_books_api_key` already pays beside it on the same call sites, a
-    populated row holds ten sources, and the alternative is a process local
+    populated row holds eleven sources, and the alternative is a process local
     cache that has to be invalidated on write: a second source of truth for a
     value whose whole point is that turning a source off takes effect
     immediately. If this ever shows up in a measurement, the honest fix is to

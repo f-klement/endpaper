@@ -234,6 +234,7 @@ from shelf import (
 # is read from here, from `tests/test_schema.py` and from `tests/test_backup.py`.
 # One list, so a shape added for one reader is a shape every reader gets.
 from tests.test_filing import CORPUS
+from tests.test_house_rules import _source_modules
 
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -1233,15 +1234,6 @@ def _predicate_calls(source: str) -> set[str]:
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name | ast.Attribute)
     } & named
-
-
-def _source_modules() -> dict[str, str]:
-    """Every backend module these rules apply to, keyed by relative path."""
-    return {
-        str(path.relative_to(BACKEND)): path.read_text()
-        for path in BACKEND.rglob("*.py")
-        if path.relative_to(BACKEND).parts[0] not in {"tests", "migrations", ".venv"}
-    }
 
 
 @pytest.fixture
@@ -4452,3 +4444,272 @@ class TestRowsThatMayLeaveTheInstance:
         )
         assert len(rows) == 0
         assert not rows
+
+
+# ── Who may build a payload out of rows that may leave ────────────────────────
+
+
+def _annotations(arguments: ast.arguments) -> list[ast.expr]:
+    """Every parameter annotation on one signature, of whatever kind.
+
+    **Walked off the `arguments` node rather than added up from named lists.**
+    The first version read `posonlyargs + args + kwonlyargs`, which is three of
+    the five slots: `def write(stream, *pages: Outbound)` and `**rows: Outbound`
+    were not signatures as far as the rule was concerned, and every spelling in
+    the diagonal below lived in the covered half. A list of slot names is the
+    enumeration shape this file keeps recording, and `ast.walk` over the node
+    has no list to fall behind.
+    """
+    return [
+        node.annotation
+        for node in ast.walk(arguments)
+        if isinstance(node, ast.arg) and node.annotation is not None
+    ]
+
+
+def _names_the_type(annotation: ast.expr, local_names: set[str]) -> bool:
+    """Whether one annotation mentions `shelf.Outbound`, however it is written.
+
+    The whole subtree, so `Outbound | None` and `Sequence[Outbound]` count.
+
+    **A quoted name is re-parsed wherever it sits, not only when the whole
+    annotation is one.** Reading the top level alone is an enumeration over
+    where a quote may go: `rows: "Outbound"` was a door and
+    `rows: Sequence["Outbound"]` was not, and quoting one name inside a
+    subscript is the cheaper evasion of the two. This backend runs under PEP 649
+    and quotes almost nothing, so a quote here is somebody reaching for the
+    spelling the rule does not read. A string that does not parse is not an
+    annotation and is left alone.
+
+    What that costs is a `Literal["Outbound"]` reported as a door, which costs a
+    person one look, and this file has already chosen that direction: see
+    `_outbound_constructions` on `x.Outbound(...)`.
+    """
+    pending = [annotation]
+    while pending:
+        for inner in ast.walk(pending.pop()):
+            if isinstance(inner, ast.Name) and inner.id in local_names:
+                return True
+            if isinstance(inner, ast.Attribute) and inner.attr == "Outbound":
+                return True
+            if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
+                try:
+                    pending.append(ast.parse(inner.value, mode="eval").body)
+                except SyntaxError:
+                    continue
+    return False
+
+
+def _outbound_signatures(source: str) -> list[str]:
+    """Every function in one module that takes an `Outbound`, by name.
+
+    The annotation is resolved through `_entity_aliases` like every other rule
+    in this file, so `from shelf import Outbound as Rows` is read rather than
+    walked past.
+    """
+    tree = ast.parse(source)
+    local_names = _entity_aliases(tree, _OUTBOUND, module="shelf")
+    return [
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and any(
+            _names_the_type(annotation, local_names)
+            for annotation in _annotations(node.args)
+        )
+    ]
+
+
+def _outbound_requests(source: str) -> list[str]:
+    """Every call in one module that asks a Shelf for rows that may leave."""
+    return [
+        node.func.attr
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"outbound_page", "outbound_first"}
+    ]
+
+
+class TestTheSerialisersThatMayBuildAnOutboundPayload:
+    """The third question `docs/data-model.md` asks, which had no rule behind it.
+
+    Two of the three had one. *Which rows may a stranger see* is
+    `Shelf.seen_by_the_public`. *How do those rows stay marked as such* is
+    `Outbound`, minted by the shelf alone and pinned by the two classes above.
+    *Which serialiser may build the payload* was answered "whichever takes an
+    `Outbound`", which describes the tree rather than constraining it: a second
+    serialiser is a signature, and nothing was reading signatures.
+
+    **The point of one door is that the test is "does anything else build an
+    outbound payload", not "did each caller remember".** That is the shape that
+    has kept the Shelf rule intact, and it needs the set of doors to be a set
+    somebody argued rather than a set somebody counted once.
+
+    **Producers as well as consumers**, because they fail differently. A new
+    consumer is a payload nobody argued about. A new producer is a route
+    reaching for rows a stranger may see, which is where the publish gate and
+    the record limits live, and `routers/public.py` is where those are.
+
+    **What this cannot see:**
+
+    * **A payload built for a stranger that never names the type.** That is not
+      caught here and is not meant to be: `tests/test_nothing_private_leaves.py`
+      drives every route answered with no member and asserts a marked private
+      Book comes back from none of them. This rule and that sweep meet at the
+      routes and diverge off them, which is why both exist.
+    * **Reaching past the type.** `outbound.books` is a public attribute and
+      hands back a plain tuple. It discloses nothing, because those rows came
+      off a shelf with no ownership arm, and the direction that would matter,
+      putting unsafe rows *into* the type, is what `Outbound.__post_init__`
+      refuses.
+    * **A serialiser in a test**, since `_source_modules()` excludes `tests/`.
+    * **A second door of a kind already argued, in a module already argued.**
+      The keys are module and kind, so a second `outbound_page` call inside
+      `routers/public.py` adds none. What a new key says is that a module has
+      started building outbound payloads, or has started building them a second
+      way, which is the change worth an argument.
+    """
+
+    #: Every function that takes rows which may leave, and every call that asks
+    #: for a set of them, with the reason each may.
+    #:
+    #: **Asserted by equality in both directions.** A door that appears without
+    #: a line here is a payload addressed to somebody this instance cannot name
+    #: and that nobody argued about; a door that disappears is a claim in
+    #: `docs/data-model.md` that has stopped being true.
+    OUTBOUND_DOORS: dict[str, str] = {
+        "serialisation.py: books_to_public_out takes an Outbound": (
+            "the JSON catalogue. Takes no Session and no User, so it "
+            "structurally cannot ask who is reading"
+        ),
+        "sru.py: _records_element takes an Outbound": (
+            "the SRU records element. Takes the type rather than looping "
+            "outside it, so the loop that writes a record cannot be handed a "
+            "bare list"
+        ),
+        "routers/public.py: asks a shelf for one": (
+            "the two published catalogue routes, which is also where the "
+            "publish switch is read"
+        ),
+        "sru.py: asks a shelf for one": (
+            "the SRU searchRetrieve response, gated by the same switch"
+        ),
+    }
+
+    @staticmethod
+    def _doors() -> set[str]:
+        # **No exemption for `shelf.py`**, which had one until it was asked what
+        # it bought. Nothing there takes an `Outbound`, only returns one, and
+        # the resolver reads parameters, so the exemption changed no verdict;
+        # what it did buy was the one module where a serialiser could be put and
+        # this rule would not see it.
+        found: set[str] = set()
+        for name, source in _source_modules().items():
+            found |= {
+                f"{name}: {function} takes an Outbound"
+                for function in _outbound_signatures(source)
+            }
+            if _outbound_requests(source):
+                found.add(f"{name}: asks a shelf for one")
+        return found
+
+    def test_the_doors_are_the_argued_ones(self):
+        found = self._doors()
+        assert found == set(self.OUTBOUND_DOORS), (
+            f"Added: {sorted(found - set(self.OUTBOUND_DOORS))}. Gone: "
+            f"{sorted(set(self.OUTBOUND_DOORS) - found)}. A private Book never "
+            "leaves this instance, and that holds because the payloads "
+            "addressed to a stranger are few enough to name. Add the line with "
+            "the reason, or serialise through one that is already there."
+        )
+
+    def test_there_are_doors_to_classify(self):
+        """Anti vacuity: the equality above is satisfied by a resolver that
+        finds nothing, which is what renaming the type would produce."""
+        assert len(self._doors()) >= 3
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "from shelf import Outbound\ndef f(rows: Outbound) -> int:\n    return 0\n",
+            "from shelf import Outbound as Rows\ndef f(rows: Rows) -> int:\n    return 0\n",
+            "import shelf\ndef f(rows: shelf.Outbound) -> int:\n    return 0\n",
+            "from shelf import Outbound\ndef f(rows: Outbound | None) -> int:\n    return 0\n",
+            "from shelf import Outbound\nasync def f(*, rows: Outbound) -> int:\n    return 0\n",
+            "from shelf import Outbound\ndef f(stream, *pages: Outbound) -> int:\n    return 0\n",
+            "from shelf import Outbound\ndef f(**rows: Outbound) -> int:\n    return 0\n",
+            "from shelf import Outbound\ndef f(rows: 'Outbound', /) -> int:\n    return 0\n",
+            "from shelf import Outbound\ndef f(rows: Sequence['Outbound']) -> int:\n    return 0\n",
+            "from shelf import Outbound\ndef f(rows: list['Outbound'] | None) -> int:\n    return 0\n",
+        ],
+        ids=[
+            "imported",
+            "aliased",
+            "attribute",
+            "optional",
+            "keyword only async",
+            "star args",
+            "star kwargs",
+            "quoted and positional only",
+            "quoted inside a subscript",
+            "quoted inside a subscript and optional",
+        ],
+    )
+    def test_a_new_serialiser_is_found_however_it_spells_the_type(self, spelling):
+        """The diagonal, one mutation each, for the reason
+        `test_the_rule_catches_each_spelling` gives: a sample carrying two
+        spellings passes with either arm deleted and never says which caught
+        it."""
+        assert _outbound_signatures(spelling) == ["f"]
+
+    def test_a_function_that_only_returns_one_is_not_a_door(self):
+        """What keeps `shelf.py`'s own two out, now that nothing excludes that
+        module by name: they annotate a return and this rule reads parameters.
+        Reporting a return as well would make the rule unusable, since minting
+        one is the shelf's job and is guarded by the class above."""
+        assert (
+            _outbound_signatures(
+                "from shelf import Outbound\ndef f() -> Outbound:\n    return g()\n"
+            )
+            == []
+        )
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "rows, total = shelf.outbound_page(0, 10)\n",
+            "rows = Shelf.seen_by_the_public(db).outbound_first()\n",
+        ],
+        ids=["page", "first"],
+    )
+    def test_both_ways_to_ask_for_rows_are_found(self, spelling):
+        assert _outbound_requests(spelling) != []
+
+    def test_asking_for_something_else_is_not_a_request(self):
+        assert _outbound_requests("rows = shelf.page(0, 10)\n") == []
+
+
+class TestTheModulesTheseRulesWalk:
+    """The corpus every rule in this file is asked about.
+
+    Every guard here is an absence over `_source_modules()`, so a walk that
+    quietly returns the wrong set changes every verdict in the file with nothing
+    to say so. Two ways that happens, and the second is the one that was live:
+    it narrows and a rule stops seeing an offender, or it widens into a tool's
+    own directory and a rule reports third party code nobody here can fix.
+
+    **The walk is `test_house_rules._source_modules` and this file no longer
+    keeps its own.** The copy here excluded a tool's directory by naming `.venv`
+    and nothing else, so a `.uv-cache/` under `backend/` in CI, which is where
+    the pipeline puts it, was source as far as every rule in this file was
+    concerned. `_is_vendored` is the structural rule and it has its own tests
+    beside it.
+    """
+
+    def test_it_returns_the_modules_these_rules_are_about(self):
+        """Anti vacuity, and it names one module per shape the rules read: the
+        seam itself, a router and a module reached only through a join."""
+        assert {"shelf.py", "routers/books.py", "notifications.py"} <= set(
+            _source_modules()
+        )

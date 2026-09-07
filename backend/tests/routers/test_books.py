@@ -1508,18 +1508,22 @@ class TestTheKeyIsResolvedOncePerRequest:
     def key_phrase(self) -> str:
         return credentials.generate_phrase()
 
-    def test_the_shipping_roster_resolves_no_key_at_all(self, db, monkeypatch):
+    def test_the_shipping_roster_resolves_the_key_once_and_finds_nothing(
+        self, db, monkeypatch
+    ):
         """Nothing is patched, so this is the roster as it ships.
 
-        The saving above would be worthless if it were bought by making an
-        install that stores no credential pay for one, and this is the arm that
-        says it was not.
+        **It resolved nothing until the roster grew a credential door**, and the
+        arm that matters is unchanged by that: an install storing no credential
+        pays one resolution rather than one per source, and gets an empty
+        answer rather than a login it does not have. A tally above one here is
+        the defect this class exists for, arriving from the other side.
         """
         tally = self._counted(monkeypatch)
 
         assert books_router._catalogue_logins(db) == {}
 
-        assert tally[0] == 0
+        assert tally[0] == 1
 
     def test_two_sealed_logins_cost_what_one_costs(
         self, db, key_phrase, monkeypatch

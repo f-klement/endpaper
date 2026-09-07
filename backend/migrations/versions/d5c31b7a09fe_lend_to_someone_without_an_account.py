@@ -65,7 +65,14 @@ def upgrade() -> None:
             _BORROWER_CHECK,
             # The trim clause matters: '' and '   ' both satisfy IS NOT NULL,
             # so without it the constraint admits a loan whose borrower is a
-            # run of spaces. Kept identical to models.py.
+            # run of spaces.
+            #
+            # A copy, not an import of `models.ONE_BORROWER_SQL`: a revision
+            # records what was applied on a day, and one that imported a
+            # constant would change meaning whenever the constant did.
+            # `tests/test_models.py::TestTheBorrowerRuleHasOneSpelling` compares
+            # the constant against what a migrated database carries, so the two
+            # parting is a failing build rather than a comment nobody rereads.
             "(loaned_to_user_id IS NULL) <> (loaned_to_name IS NULL) "
             "AND (loaned_to_name IS NULL OR length(trim(loaned_to_name)) > 0)",
         )

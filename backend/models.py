@@ -1156,6 +1156,88 @@ class ReadingProgress(Base):
     book: Mapped[Book] = relationship("Book", back_populates="progress")
 
 
+#: A loan names exactly one borrower, in SQL.
+#:
+#: **One rule, because it had four statements that agreed by inspection.**
+#: The CHECK constraint below, the migration that created it, `LoanCreate`'s
+#: validator and the prose in `docs/data-model.md` all state it, and four
+#: statements of one rule are four chances to drift. The constraint and the
+#: validator now read this and `names_exactly_one_borrower` beside it, so the
+#: two that execute cannot disagree.
+#:
+#: **The migration keeps its own copy on purpose.** A revision is a record of
+#: what was applied on a day, and one that imported a constant would change
+#: meaning whenever the constant did, so a database migrated last year and one
+#: migrated tonight would no longer be the same database.
+#: `tests/test_models.py::TestTheBorrowerRuleHasOneSpelling` compares this
+#: against the constraint a migrated database actually carries, which is the
+#: comparison that notices them parting without forbidding a later revision
+#: from stating a different rule.
+#:
+#: **The `trim` clause is not decoration.** `''` and `'   '` both satisfy
+#: `IS NOT NULL`, so without it a loan can name a run of spaces: a book that is
+#: out, with nobody to ask for it back.
+#:
+#: **SQLite's `trim()` strips the space character and nothing else**, measured:
+#: a tab, a newline, a carriage return and U+00A0 all survive it and are stored.
+#: So a name of one tab reaches this column through a restore or an import,
+#: which are exactly the writers this constraint exists for. Not widened here,
+#: because the SQL form of "whitespace" is a list of characters and Python's is
+#: a Unicode property, so an ASCII list would close four holes and claim to
+#: close a category. `LoanCreate` strips on Python's rule before storing, so no
+#: route reaches it, and `tests/test_models.py` pins the gap by name rather than
+#: leaving it to be rediscovered.
+ONE_BORROWER_SQL = (
+    "(loaned_to_user_id IS NULL) <> (loaned_to_name IS NULL) "
+    "AND (loaned_to_name IS NULL OR length(trim(loaned_to_name)) > 0)"
+)
+
+
+def names_exactly_one_borrower(user_id: int | None, name: str | None) -> bool:
+    """Whether this pair identifies somebody a book can be asked back from.
+
+    The Python reading of `ONE_BORROWER_SQL` above, clause for clause, and the
+    two are asserted against each other row by row rather than read side by
+    side, because two careful readings are one instrument twice.
+
+    A member **or** a free-text name, never both and never neither, and a name
+    of nothing but spaces is not a name.
+
+    **It answers what the constraint will accept, not what a person would call
+    a name**, and the two questions part on two SQLite behaviours that no
+    reading of the SQL out loud would suggest.
+
+    **`strip(" ")` rather than `strip()`**, because SQLite's `trim()` strips the
+    space character alone. A predicate using Python's whitespace rule refuses a
+    tab that the database stores, and no test corpus made of spaces can show it.
+
+    **`partition("\x00")` because `length()` counts characters up to the first
+    NUL**, so a name whose first non space character is a NUL is empty to
+    SQLite and the row is refused, however many characters follow. `'\x00a'` is
+    refused and `'a\x00b'` is accepted.
+
+    Both were found by sweeping an alphabet against a real constraint rather
+    than by reading it, and neither by a list of cases somebody chose.
+    `tests/test_models.py::TestTheBorrowerRuleHasOneSpelling` is that sweep and
+    carries its own size, which is a number that moves whenever its alphabet
+    does. Deciding what is fit to store is `LoanCreate`'s job and it strips on
+    Python's rule, so nothing a route stores relies on this being the stricter
+    of the two.
+
+    **`is None` and not falsiness, for the same reason.** SQL asks `IS NULL`, so
+    `''` beside a member id is a name as far as the constraint is concerned and
+    the row is refused for naming two borrowers. A predicate reading `''` as
+    "no name" would answer True there and hand a caller a 500 from the database
+    in place of the 422 this rule exists to give.
+
+    `tests/test_models.py::TestTheBorrowerRuleHasOneSpelling` drives every pair
+    through both, including the whitespace a corpus of spaces cannot show.
+    """
+    return (user_id is None) != (name is None) and (
+        name is None or bool(name.strip(" ").partition("\x00")[0])
+    )
+
+
 class Loan(Base):
     __tablename__ = "loans"
 
@@ -1170,17 +1252,12 @@ class Loan(Base):
     # because a book returned and lent again is two rows with the same
     # `book_id`, and only the open ones are exclusive.
     #
-    # The second constraint is the borrower rule: a loan names **either** a
-    # member **or** a free-text name, never both and never neither. In the
-    # database rather than only in `LoanCreate`, for the same reason as the
-    # index above: the schema guards one writer, and a restore, an import or
-    # the next endpoint added does not go through it.
-    #
-    # The trim clause is not decoration. `''` and `'   '` both satisfy
-    # `IS NOT NULL`, so without it the constraint admits a loan whose borrower
-    # is a run of spaces: a book that is out, with nobody to ask for it back.
-    # `LoanCreate` strips whitespace, and `LoanCreate` is the writer this
-    # constraint exists because you cannot rely on.
+    # The second constraint is the borrower rule, whose one spelling is
+    # `ONE_BORROWER_SQL` above. In the database rather than only in
+    # `LoanCreate`, for the same reason as the index above: the schema guards
+    # one writer, and a restore, an import or the next endpoint added does not
+    # go through it. `LoanCreate` is the writer this constraint exists because
+    # you cannot rely on.
     __table_args__ = (
         Index(
             "uq_loans_one_open_per_book",
@@ -1188,11 +1265,7 @@ class Loan(Base):
             unique=True,
             sqlite_where=text("returned_at IS NULL"),
         ),
-        CheckConstraint(
-            "(loaned_to_user_id IS NULL) <> (loaned_to_name IS NULL) "
-            "AND (loaned_to_name IS NULL OR length(trim(loaned_to_name)) > 0)",
-            name="ck_loans_one_borrower",
-        ),
+        CheckConstraint(ONE_BORROWER_SQL, name="ck_loans_one_borrower"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)

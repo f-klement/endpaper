@@ -100,13 +100,20 @@ class TestTheSeededRosterSaysWhatTheRulesSay:
             assert origin.startswith(("http://", "https://"))
 
     def test_the_origins_are_one_per_host_and_carry_the_scheme(self):
-        """Scheme and port, not a bare host: three targets are plaintext by
-        necessity and a hostname allowlist would let the other six join them."""
+        """Scheme and port, not a bare host: four targets are plaintext by
+        necessity and a hostname allowlist would let the other seven join them.
+
+        **Counted rather than listed**, and the count is the thing: one of the
+        four authenticates, so a plaintext origin is no longer only a question
+        of what an eavesdropper reads.
+        `tests/test_metadata.py::TestThePlaintextSourcesAreCounted` names them
+        and checks the two documents that state the number.
+        """
         assert {
             targets.origin(target.base_url) for target in targets.SEEDED.values()
         } == targets.SEEDED_ORIGINS
         plaintext = {o for o in targets.SEEDED_ORIGINS if o.startswith("http://")}
-        assert len(plaintext) == 3
+        assert len(plaintext) == 4
 
 
 class TestARowCannotCarryQueryStructure:
@@ -267,8 +274,9 @@ class TestTheQueryIsBuiltHereAndNowhereElse:
         """Byte for byte, and the first five are the constants #127 deleted.
 
         **The count in that sentence is the history and not the dict below**,
-        which has grown since and will again. The BNE is the sixth and was never
-        an adapter: it is the first lookup target that arrived as a row alone.
+        which has grown since and will again. The BNE was the sixth and the BNA
+        is the seventh, and neither was ever an adapter: they are the lookup
+        targets that arrived as a row alone.
         """
         isbn = "9783825354077"
         assert {
@@ -283,6 +291,7 @@ class TestTheQueryIsBuiltHereAndNowhereElse:
             "nlg": f"dc.isbn={isbn}",
             "nkp": f'@attr 1=7 "{isbn}"',
             "bne": f"alma.isbn={isbn}",
+            "bna": f'@attr 1=7 "{isbn}"',
         }
 
     def test_the_seeded_search_queries_are_what_the_adapters_built(self):

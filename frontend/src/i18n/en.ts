@@ -685,7 +685,7 @@ export const en = {
   // and the person who has to act on it is standing here.
   "settings.catalogueLogins": "Catalogue logins",
   "settings.catalogueLoginsHint":
-    "Some national libraries answer only to an account. A login is stored encrypted and is sent to that catalogue and nowhere else.",
+    "Some national libraries answer only to an account. A login is stored encrypted and is sent to that catalogue and nowhere else. Not all of them offer an encrypted connection, so use a login that opens nothing but the catalogue.",
   "settings.credentialUsername": "Username",
   "settings.credentialPassword": "Password",
   "settings.credentialSet": "A login is stored ({preview}).",
@@ -1484,10 +1484,11 @@ export const en = {
   "providers.name.nlg": "National Library of Greece",
   "providers.name.nkp": "Czech National Library",
   "providers.name.bne": "Spanish National Library",
+  "providers.name.bna": "Argentine National Library",
   "providers.name.bnf": "National Library of France",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":
-    "Needs an API key. Add one below, or it cannot answer.",
+    "Needs an API key or a catalogue login. Add one below, or it cannot answer.",
   "providers.status.switchedOffBelow":
     "A key is stored, but this catalogue is switched off in its own card below.",
   "providers.status.searchOnly":

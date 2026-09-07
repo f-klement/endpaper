@@ -10588,3 +10588,224 @@ developed on. Which machine is the part that decides whether such a number is a 
 estimate, so it is recorded where this project records that, and not here: a duration
 measured on one node says nothing about another, and most of the names involved are internal
 and may not be published.
+
+## The export door has a guest list, not only a doorman
+
+`shelf.Outbound` says which rows may leave; nothing said which functions may turn them into
+a payload. `docs/data-model.md` answered that question with "whichever takes an `Outbound`",
+which describes the tree rather than constraining it: a second serialiser is a signature,
+and no rule was reading signatures.
+
+Both the consumers and the producers are pinned, by equality and with a reason each, because
+they fail differently. A new consumer is a payload nobody argued about. A new producer is a
+route reaching for rows a stranger may see, which is where the publish switch and the record
+limits are.
+
+**What it deliberately does not cover**: a payload for a stranger that never names the type.
+That is the route sweep's job, and the two meet at the routes and diverge off them. Stated
+rather than closed, because closing it would mean a rule that tries to recognise a correct
+payload, which is the cleverness the shelf rule already refused five times.
+
+## One instance issues a loan, and today that is two checkable claims
+
+Authority follows the physical object: the book is in one house, and the person who hands it
+over is the one who records it. That gives one writer per loan, so there is no consensus, no
+reconciliation and no window in which two instances both issue.
+
+The reason it is a rule rather than a preference is `uq_loans_one_open_per_book`, a cross row
+invariant. Two issuers is not a conflict a merge rule repairs: it is a book out with two
+people at once, which is exactly the defect a merge left behind once already.
+
+There is one instance today, so the rule reduces to two things a test can check: the places
+that write the table are places somebody argued for, and the issuer is always the member this
+instance resolved from a session. The second is the arm that survives a second store
+existing. The transport that would carry a loan between instances does not exist, so nothing
+checks a wire, and the guard says so rather than implying otherwise.
+
+## The borrower rule is one predicate, and the constraint is stricter than it by one shape
+
+The rule had four statements: the CHECK constraint, the migration that created it, the request
+model's validator, and the prose. Two of them execute, and they now read one constant and one
+predicate. The migration keeps its own copy on purpose: a revision records what was applied on
+a day, and one importing a constant would change meaning whenever the constant did. Its
+comment used to say "kept identical to models.py", which is a claim with nothing behind it;
+a test compares them now.
+
+**The first draft of the predicate was a second rule wearing the first one's name.** It read
+a blank string as "no name", which is what a caller means by it, so it answered yes to a
+member id beside `''` where SQL reads that as a second borrower and refuses the row: a 500
+from the database where the request model promises a 422. It reads `IS NULL` now, clause for
+clause with the constraint, and normalising a blank into a null is the request model's job,
+done before it asks. The row by row comparison is what found this; three prose blocks had
+said the two were one rule.
+
+## A corpus somebody chose cannot exhibit a disagreement nobody thought of
+
+Two defects in the borrower rule in a row were characters nobody had written down. SQLite's
+`trim()` strips U+0020 alone, so a name of one tab is stored where a predicate spelled
+`strip()` refuses it. And `length()` counts characters up to the first NUL, so `'\x00Ada'`
+is empty to the constraint and the row is refused, which reached a route: `POST /api/loans`
+with a leading NUL passed the request model, reached the commit, and answered **500**, the
+outcome that layer exists to turn into a 422 naming the field.
+
+**Both were found by sweeping, and neither could have been found by the list of pairs that
+was asserting their absence.** So the check is now an alphabet crossed with itself to length
+three against a table built from the constant, and the named pairs stay beside it because a
+named case fails with its own name where a sweep fails with a value. The alphabet is the
+enumeration that is left, one row per behaviour known to make the two spellings part, each
+with its reason, and that is said in the tree rather than claimed closed.
+
+## `trim()` strips a space, and a corpus of spaces cannot say so
+
+SQLite's `trim()` strips U+0020 and nothing else; Python's `str.strip()` is a Unicode
+property. So a borrower named with one tab satisfies `ck_loans_one_borrower` and is stored,
+which is the book that is out with nobody to ask for it back that the trim clause exists to
+refuse, reachable by a restore and an importer, which are the writers it exists for.
+
+**The claim that the two readings matched was certified by a test that could not see the
+disagreement**, because every pair in its corpus was made of spaces. The corpus now carries
+a tab, a newline and U+00A0. The predicate answers what the constraint will accept, so it
+strips the space character too; deciding what is fit to store is the request model's job and
+it keeps Python's rule, which makes that layer the stricter of the two on purpose.
+
+**The constraint is not widened, and the reason is the shape of the fix.** SQL's whitespace
+is a list of characters and Python's is a category, so widening `trim()` to the four ASCII
+ones would close four holes and read as closing the category. It is filed with the
+measurement, and a test pins the gap so it is not rediscovered.
+
+## A historical revision is compared by what it built, not by its source
+
+The borrower rule's fourth statement is a copy inside the revision that created the
+constraint, kept there because a revision records what was applied on a day and one importing
+a constant would change meaning whenever the constant did.
+
+**Comparing the revision's source against the constant forbids exactly the drift the copy
+exists to allow.** The first change to the rule goes red, and the only ways out are editing a
+historical revision, which destroys the record, or deleting the test. So what is compared is
+the constraint a migrated database carries. That is the thing which has to agree with the
+constant, it tolerates a later revision stating a different rule, and it reads a drop and
+recreate without an edit.
+
+## The test suite's schema is the migrated one, not the declared one
+
+`main.init_db` runs `upgrade_to_head()` at import and the test session imports `main`, so
+every table is Alembic's by the time `Base.metadata.create_all` runs and is skipped as
+already there.
+
+This was found by mutating the constraint's constant and watching the suite stay green while
+a fresh database built from the metadata accepted the row it should refuse. It makes a
+behavioural constraint test stronger than it looks, since it asks what a database somebody
+actually migrated enforces. It also means a test written to compare the two would be
+comparing the declaration with itself, which is why the fact is pinned rather than left to be
+rediscovered.
+
+## A corpus is stated as an exclusion, never as a total
+
+The house rules' compile arm stated its corpus as a number, measured once and spelled three
+times, two of them worded to agree with the first by construction. It stated 173 and had
+never failed, because the arm walks whatever the walk returns: a count that has drifted low
+is a weaker claim about a wider walk. Measured 203 when the defect was filed and 208 at
+this tip, by three instruments each time.
+
+The total is gone rather than corrected, since a corrected literal is the same defect with a
+fresher date. What replaced it is the exclusion, checked as a complement over a second
+traversal, plus a partition that walks the migrations independently of the walk under test.
+Sieving them out of that walk is what made the claim circular: narrow the walk and both
+sides empty at once.
+
+## Four test modules keep their own copy of the walk over the backend's source
+
+`_source_modules` is defined four times in the test tree, in `test_shelf.py`,
+`test_custom_fields.py`, `test_fetch.py` and `test_reading.py`, each spelling the exclusion as
+`parts[0] not in {"tests", "migrations", ".venv"}`. That is the enumeration `_is_vendored`
+exists to replace: the pipeline puts `UV_CACHE_DIR` inside the build directory, so `.uv-cache/`
+appears under `backend/` with third party packages in it and every rule reading one of these
+walks is asked about code nobody here can fix.
+
+`test_shelf.py`'s copy is gone and it imports the one beside `_is_vendored`. The other three
+belong to rules this work does not own and are raised rather than taken.
+
+## An SRU diagnostic is a refusal to answer, not an answer of nothing
+
+**Decided 2026-09-07 while adding a catalogue that authenticates.** Every SRU endpoint in
+this roster reports its errors as HTTP 200 carrying a `diag:diagnostic`, and the lookup path
+read that as a response with no records: the body parsed, the reader found nothing, and the
+source reported `NOT_FOUND`. That is the conflation `metadata.Outcome` exists to refuse, and
+it had one visible cost before this and one after. Before: a wrong index or an unsupported
+schema said "no such book" instead of "this was not asked properly". After: the first source
+whose request carries a login would have answered every lookup with "not held" the day its
+credential was rotated, which is exactly what the ticket for it asked not to happen.
+
+**The rule is the diagnostics block and never the number inside it.** The codes that mean
+"the request was not honoured" are a family in an open registry, so a guard naming 1/3 today
+reads 1/2 and 1/235 as books this library does not hold. `metadata._sru_refusal` therefore
+asks whether a diagnostics block is a direct child of the response, and a diagnostic inside
+`records`, which SRU allows and which describes one record, is deliberately not read.
+
+**Records that parse win over anything the envelope says about itself**, and this register is
+the reason that arm exists. The entry on the Greek and Czech coverage discount records that
+the National Library of Greece answers the true `numberOfRecords` **and** `Unknown schema for
+retrieval` when no `recordSchema` is named, and that a probe reading any diagnostic as
+unreadable reported a confident zero for the country it was recommending. So the refusal is
+asked only after the reader has found nothing, and a lookup that read a record is unaffected.
+
+**What a refusal costs is the whole lookup rather than only the source**, and that is the
+point rather than a side effect. `metadata._worst` reports `UNAVAILABLE` over `NOT_FOUND`
+when nothing was found anywhere, so one target declining to be asked becomes the answer a
+member sees: "nobody could be asked" rather than "nobody holds it". The case that would make
+that wrong is a target attaching a diagnostic to an honest empty answer, and it is measured
+rather than argued about: asked on 2026-09-07 for an ISBN none of them holds, all seven SRU
+lookup targets answered `numberOfRecords 0` with no diagnostic element of any kind.
+
+**The search path is left alone and cannot do this.** `_sru_search` answers `list[Record]`,
+so an empty list is the only thing it has to say with; a lookup can say "nobody could be
+asked" and a search cannot.
+
+## A third party's diagnostic text is not logged, only its URI
+
+**Measured 2026-09-07.** The Argentine national library answers an unauthenticated request
+with an Aleph error whose text quotes back the user name on the request, truncated by its own
+parser. A log line carrying a target's prose therefore carries half a login at that target.
+`metadata._DIAGNOSTIC_URI` is the whole of what is repeated: a code out of a registry, and
+one that does not look like one is dropped rather than logged.
+
+## Free and credentialled is a real combination, and two guards rested on its not being one
+
+`sources.NEEDS_A_KEY` and `sources.METERED` were one set while the only credential in the
+roster was also the only bill. The Argentine national library is free and needs a login, so:
+
+* `test_house_rules.py::test_a_source_needing_a_key_is_one_that_costs_money` fails, as its own
+  docstring says it should. `Plan.lookup_together` and `describe` were re-read: the tier bars
+  a **metered** source and a free credentialled one may join it, which is right because it
+  costs nothing per request, and `describe` already reports needing a key and holding one as
+  two fields over two stores.
+* `test_roster_counts.py`'s cardinality named "the free lookup sources" was
+  `LOOKUP_SOURCES - METERED` and meant "what a stock install asks". The two expressions had
+  never disagreed. Three coverage sentences bind to that name, each measured over an install
+  with no credential at all, and each would have gone from a true seven to a false eight with
+  nothing failing. The name is now "the lookup sources a stock install asks" and the
+  expression is `LOOKUP_SOURCES - NEEDS_A_KEY`.
+
+**A credential this library publishes about itself is a third kind of secret**, beside the
+deployment's own and a member's, and nothing in the tree carries that distinction yet. It is
+why no default ships: a shipped login would make every install authenticate as one account at
+somebody else's server, with no way for an install with its own arrangement to replace it.
+
+## A login on a plaintext connection, accepted with the residual stated in three places
+
+**The Argentine national library answers only over plain HTTP and only to an authenticated
+request**, so this is the first outbound request in the application that puts an HTTP Basic
+header on an unencrypted connection. Port 9991 offers no TLS and the library publishes no
+hostname, only an address.
+
+**What makes it acceptable is what the credential opens, not what protects it.** The library
+publishes the pair itself on its page for librarians, so an install using that pair discloses
+nothing its issuer has not. `Credential.header_for` computes the header per hop from the
+origin the credential was set for, so a redirect cannot carry it elsewhere even if
+`fetch._same_host_hop` were bypassed, and the two guards are deliberately separate.
+
+**The residual is an install that has its own arrangement with a library**, which the design
+anticipates: shipping a default is refused precisely so such an install can replace one. That
+install puts a private login on an unencrypted connection. It is said beside the field on the
+settings screen, in `docs/security.md` and in the row's own block, and it is not fixable here:
+the catalogue offers nothing else.

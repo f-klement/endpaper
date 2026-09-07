@@ -85,9 +85,9 @@ def titles(response: httpx.Response) -> list[str]:
 
 # ── Metadata catalogues ───────────────────────────────────────────────────────
 #
-# Ten sources answer a lookup or a search, and respx fails a test that makes
+# Eleven sources answer a lookup or a search, and respx fails a test that makes
 # an unmocked request rather than letting it reach the real service. So a test
-# touching either path has to silence all ten, and stating them one by one in
+# touching either path has to silence all eleven, and stating them one by one in
 # every test was both noise and a trap: adding a source broke thirty tests in
 # an unrelated file. It did so again when the Spanish National Library joined,
 # because `silence_catalogues` still held a **list** of the sources rather than
@@ -142,62 +142,49 @@ def silence_covers(mock: Any) -> Any:
     return mock
 
 
-def silence_oenb(mock: Any) -> Any:
-    """Answer the ÖNB with "nothing found".
+def silence_other_lookup_catalogues(mock: Any, *answered: str) -> Any:
+    """Answer every SRU lookup target but the ones this test answers itself.
 
-    A helper of its own rather than a line in every test, because it was added
-    to a module whose tests each register their sources by hand: the ÖNB joined
-    a lookup chain and a search fan-out that 21 existing tests already pinned,
-    and every one of them failed on an unmocked request rather than on anything
-    about the ÖNB.
+    **The roster is derived and the exceptions are the test's own**, which is
+    the division this exists to get. What it replaces was one silencer per
+    source, each written the day that source joined the chain, called in a group
+    at every site that named the sources a test did **not** answer: an
+    enumeration of the roster, spelled 32 times. Each of the last three sources
+    added broke a batch of those sites on an unmocked request, 21, 36 and 15, so
+    this is the shape that stops the fourth SRU one.
 
-    **Not autouse, deliberately.** A fixture registering this for every test
-    would also register it for the tests that exist to watch the ÖNB answer,
-    and respx resolves routes in registration order with the first match
-    winning, so those would have silently tested nothing.
+    **Passed the base URLs a test registers itself, and it checks them.** A
+    constant that has drifted from the row would otherwise silence the source
+    the test exists to watch, which is the failure the four helpers made
+    impossible only by never being derived at all. The check is why this takes
+    URLs rather than sources: the call site already has the constant it is about
+    to register a response on, and comparing that constant is what proves the
+    two agree.
+
+    **After the test's own routes is safe both ways and before them is safe only
+    if the names are right**, which is worth stating in that order because every
+    call site today is the second. Registered first, a source the test answers
+    and forgot to name gets an empty response ahead of the real one and the test
+    passes having asserted nothing, which is the old helpers' failure mode
+    carried forward one level. What stands between that and a green suite is the
+    check above, and it is one sided: it says a name is a real lookup row, never
+    that the test registers a response for it.
+
+    **What it does not cover, stated rather than left to the name.** Search only
+    targets, because this is the lookup chain and `silence_sru_catalogues` is
+    what covers a fan out; and **a bespoke lookup source**, which Open Library
+    and Google Books are, because an empty SRU envelope is not an answer either
+    of them could give. Each of those has a silencer of its own shape.
     """
-    mock.get(url__regex=f"{re.escape(OENB)}.*").mock(return_value=sru_response())
-    return mock
-
-
-def silence_nlg(mock: Any) -> Any:
-    """Answer the National Library of Greece with "nothing found".
-
-    `silence_oenb`'s helper, one source later and for the same reason: the NLG
-    joined a lookup chain and a search fan out that existing tests already
-    pinned, and each of those would fail on an unmocked request rather than on
-    anything about the NLG.
-
-    **Not autouse**, for `silence_oenb`'s reason.
-    """
-    mock.get(url__regex=f"{re.escape(NLG)}.*").mock(return_value=sru_response())
-    return mock
-
-
-def silence_nkp(mock: Any) -> Any:
-    """Answer the Czech National Library with "nothing found".
-
-    `silence_nlg`'s helper one source later, and its body differs: this target
-    speaks Dublin Core rather than MARC, so `SRU_EMPTY` is what an empty answer
-    from it looks like and `sru_response` already sends exactly that.
-
-    **Not autouse**, for `silence_oenb`'s reason.
-    """
-    mock.get(url__regex=f"{re.escape(NKP)}.*").mock(return_value=sru_response())
-    return mock
-
-
-def silence_bne(mock: Any) -> Any:
-    """Answer the Spanish National Library with "nothing found".
-
-    `silence_oenb`'s helper, three sources later and for the same reason. The
-    body is `SRU_EMPTY` rather than an Alma shaped envelope because an empty
-    answer carries no records and so no schema, which is the one case where the
-    two envelopes are the same bytes.
-
-    **Not autouse**, for `silence_oenb`'s reason.
-    """
-    mock.get(url__regex=f"{re.escape(BNE)}.*").mock(return_value=sru_response())
+    lookups = {
+        target.base_url
+        for target in targets.SEEDED.values()
+        if target.transport is targets.Transport.SRU and target.answers_lookup
+    }
+    unknown = set(answered) - lookups
+    assert not unknown, f"not the base URL of an SRU lookup target: {sorted(unknown)}"
+    for base in sorted(lookups - set(answered)):
+        mock.get(url__regex=f"{re.escape(base)}.*").mock(return_value=sru_response())
     return mock
 
 
@@ -205,10 +192,11 @@ def silence_sru_catalogues(mock: Any) -> Any:
     """Answer every reachable catalogue with "nothing found", derived from the rows.
 
     **The one to reach for instead of listing the national catalogues.** Naming
-    them one by one is how `silence_oenb`, `silence_nlg` and `silence_nkp` came
-    to be written out at five sites in `tests/routers/test_books.py` and thirty
-    one in `tests/test_metadata.py`, and every one of those sites is a place a
-    new source escapes as an unmocked request.
+    them one by one is how a helper per source came to be written out at five
+    sites in `tests/routers/test_books.py` and thirty two in
+    `tests/test_metadata.py`, and every one of those sites was a place a new
+    source escaped as an unmocked request. `silence_other_lookup_catalogues` is
+    what the second of those two became.
 
     **It is not the same as `silence_catalogues`**, which answers Open Library
     with a 404 and Google Books with an empty result list rather than with an
@@ -247,7 +235,8 @@ def silence_sru_catalogues(mock: Any) -> Any:
 def silence_open_library(mock: Any) -> Any:
     """Answer the whole Open Library host with "nothing found".
 
-    A helper of its own for `silence_oenb`'s reason, one reorder later. #115 put
+    A helper of its own for the reason `silence_other_lookup_catalogues` gives,
+    one reorder later. #115 put
     Open Library ahead of the OENB in `sources.DEFAULT_ORDER`, so every test that
     watches the OENB answer an **ISBN lookup** now passes through Open Library
     first, and seven of them failed on an unmocked request rather than on
@@ -266,9 +255,9 @@ def silence_open_library(mock: Any) -> Any:
     neither shadows the other whichever is registered first. That is a narrower
     claim than it looks and it is the only one made here.
 
-    **Not autouse**, for `silence_oenb`'s reason: a fixture registering this for
-    every test would also register it for the tests that exist to watch Open
-    Library answer, and respx resolves in registration order.
+    **Not autouse**: a fixture registering this for every test would also
+    register it for the tests that exist to watch Open Library answer, and respx
+    resolves in registration order, so those would silently test nothing.
     """
     mock.get(url__regex=f"{re.escape(OPEN_LIBRARY)}.*").mock(
         return_value=httpx.Response(404)

@@ -227,7 +227,7 @@ describe("ProviderSection", () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByText(
-        "Needs an API key. Add one below, or it cannot answer.",
+        "Needs an API key or a catalogue login. Add one below, or it cannot answer.",
       ),
     ).not.toBeInTheDocument();
   });
@@ -265,7 +265,9 @@ describe("ProviderSection", () => {
   it("says when a source cannot answer for want of a key", () => {
     draw();
     expect(
-      screen.getByText("Needs an API key. Add one below, or it cannot answer."),
+      screen.getByText(
+        "Needs an API key or a catalogue login. Add one below, or it cannot answer.",
+      ),
     ).toBeInTheDocument();
   });
 

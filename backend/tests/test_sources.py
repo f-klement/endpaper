@@ -266,12 +266,14 @@ class TestTheOrderFollowsTheMeasurement:
     """
 
     @staticmethod
-    def _free_lookup() -> set[CatalogueSource]:
+    def _asked_by_a_stock_install() -> set[CatalogueSource]:
         """The sources a default install actually asks about an ISBN.
 
-        Metered ones are excluded because `Plan.lookup_together` bars them from
-        the tier whatever position they hold, and a default install has no key
-        for the only one there is.
+        **What is subtracted is needing a credential, not costing money**, and
+        the two were one set until a source arrived that is free and
+        credentialled. The reason is what a default install has rather than what
+        a source charges: it has entered nothing, so a source that needs
+        anything entered answers nothing, whatever it would have cost.
         """
         return set(sources.LOOKUP_SOURCES - sources.NEEDS_A_KEY)
 
@@ -294,7 +296,7 @@ class TestTheOrderFollowsTheMeasurement:
 
     @classmethod
     def _within(cls) -> list[CatalogueSource]:
-        """The free lookup sources a tier may hold.
+        """The sources a stock install asks that a tier may hold.
 
         Two conditions, not one: fast enough to be asked on every lookup, and
         **general** enough to be worth asking on every lookup. See
@@ -304,7 +306,7 @@ class TestTheOrderFollowsTheMeasurement:
         """
         return [
             source
-            for source in cls._free_lookup()
+            for source in cls._asked_by_a_stock_install()
             if sources.MEASURED[source].p90_seconds
             <= sources.FIRST_TIER_BUDGET_SECONDS
             and cls._concentration(source) < sources.TIER_MAX_CONCENTRATION
@@ -322,16 +324,22 @@ class TestTheOrderFollowsTheMeasurement:
         )
         within = [
             source
-            for source in cls._free_lookup()
+            for source in cls._asked_by_a_stock_install()
             if sources.MEASURED[source].p90_seconds <= budget
             and cls._concentration(source) < bound
         ]
         within.sort(key=lambda source: (-cls._rate(source), source.value))
         return set(within[: sources.ALWAYS_ASKED])
 
-    def test_the_measurement_covers_every_free_lookup_source(self):
-        """A source added to the roster cannot quietly go unmeasured."""
-        assert set(sources.MEASURED) == self._free_lookup()
+    def test_the_measurement_covers_every_source_a_stock_install_asks(self):
+        """A source added to the roster cannot quietly go unmeasured.
+
+        **Named for the set rather than for "free"**, which they stopped being
+        the same thing the moment a source was free and credentialled: a source
+        an install has entered nothing for is not asked, whatever it costs, and
+        that is the set `MEASURED` has to cover.
+        """
+        assert set(sources.MEASURED) == self._asked_by_a_stock_install()
 
     def test_every_row_has_a_sample_behind_it(self):
         """A row of zeroes would satisfy every rule below without measuring one."""
@@ -473,7 +481,7 @@ class TestTheOrderFollowsTheMeasurement:
         # first version of this test failed on the unmutated tree.
         excluded = [
             source
-            for source in self._free_lookup()
+            for source in self._asked_by_a_stock_install()
             if source not in kept
             and sources.MEASURED[source].p90_seconds
             <= sources.FIRST_TIER_BUDGET_SECONDS
@@ -653,6 +661,35 @@ class TestTheOrderFollowsTheMeasurement:
         assert len(measured) >= 2
         marginals = [sources.TAIL_MARGINAL[source] for source in measured]
         assert marginals == sorted(marginals, reverse=True)
+
+    def test_a_source_the_sample_never_measured_sorts_between_the_two_rules(self):
+        """`DEFAULT_ORDER`'s rule for a source `MEASURED` cannot rank, enforced.
+
+        **Both tail guards step over such a source by construction**, which is
+        what left this rule stated and nothing else: the ordering guard filters
+        to `TAIL_MARGINAL` and the completeness guard to `MEASURED`, and a
+        source in neither passes both wherever it is put. Moving it behind the
+        metered source went red nowhere, and what that costs is quota spent
+        before a free source has been asked.
+
+        After every measured source, because there is no measurement to rank it
+        against theirs; before the metered one, because it costs nothing per
+        request and that one does.
+        """
+        order = list(sources.DEFAULT_ORDER)
+        unranked = [
+            source
+            for source in sources.LOOKUP_SOURCES
+            if source not in sources.MEASURED and source not in sources.METERED
+        ]
+        # Or every assertion below is a statement about an empty set.
+        assert unranked, "no unmeasured unmetered lookup source, so this asserts nothing"
+        assert sources.METERED, "no metered source, so the upper bound is vacuous"
+
+        last_measured = max(order.index(source) for source in sources.MEASURED)
+        first_metered = min(order.index(source) for source in sources.METERED)
+        for source in unranked:
+            assert last_measured < order.index(source) < first_metered, source
 
     def test_the_marginal_table_covers_the_whole_measured_tail(self):
         """A source in the tail and not in that table is one the ordering rule

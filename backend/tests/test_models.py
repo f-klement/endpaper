@@ -4,10 +4,12 @@ These exercise the ORM directly rather than through the API, because the
 behaviour under test belongs to the schema.
 """
 
+import itertools
+import sqlite3
 from typing import Any
 
 import pytest
-from sqlalchemy import String, delete
+from sqlalchemy import CheckConstraint, String, delete, text
 from sqlalchemy.exc import IntegrityError
 
 import filing
@@ -17,6 +19,7 @@ from models import (
     AUTHORITY_IDENTIFIER_MAX,
     CLASSIFICATION_NUMBER_MAX,
     CLASSIFICATION_SORT_KEY_MAX,
+    ONE_BORROWER_SQL,
     AuthorIdentifier,
     Book,
     Collection,
@@ -27,6 +30,7 @@ from models import (
     User,
     UserBook,
     is_switch_target,
+    names_exactly_one_borrower,
     switch_targets,
     visible_to,
 )
@@ -642,6 +646,328 @@ class TestTheBorrowerRule:
         db.add(Loan(book_id=book.id, loaned_to_name=" Ada ", loaned_by_user_id=user.id))
         db.commit()
         assert db.query(Loan).count() == 1
+
+
+class TestTheBorrowerRuleHasOneSpelling:
+    """The rule above, stated twice on purpose, and asked rather than read.
+
+    `models.ONE_BORROWER_SQL` is the SQL and `models.names_exactly_one_borrower`
+    is the Python. Everything else that used to state the rule now calls one of
+    them: the CHECK constraint is built from the constant, `LoanCreate` applies
+    the predicate, and the two documents point at both. What is left is the risk
+    that the two spellings mean different things, which no amount of reading
+    them side by side settles, because two careful readings are one instrument
+    twice.
+
+    So the database is **asked**: every pair below is written through the ORM,
+    which applies no borrower rule of its own, and what the constraint did with
+    it is compared against what the predicate says.
+
+    **And the database that answers is the migrated one, not the declared one.**
+    `main.init_db` runs `upgrade_to_head()` at import and the test session
+    imports `main`, so `loans` is Alembic's table by the time
+    `Base.metadata.create_all` runs and is skipped as already there. That is
+    what makes this the strongest of the three arms rather than a restatement of
+    the constraint: it asks what a database somebody actually migrated enforces.
+    Measured, by mutating the constant and finding this class still green while
+    a fresh in memory database built from the metadata accepted the row.
+    `test_the_pairs_are_written_to_a_migrated_database` is what keeps that true.
+
+    **A corpus somebody chose cannot exhibit a disagreement nobody thought of**,
+    which is why the pairs below are not the whole of this class. They were all
+    made of spaces once, and the two spellings parted on every whitespace
+    character that is not one, and then on a name beginning with a NUL, with
+    this class green through both. `test_the_two_spellings_agree_over_a_swept_alphabet`
+    is the answer to that: an alphabet crossed with itself rather than a list of
+    cases a person found interesting. The pairs stay because a named case fails
+    with its own name in the report, where a sweep fails with a value.
+    """
+
+    #: Every shape a borrower pair can take, as `(is a member, the name)`.
+    #:
+    #: The whitespace rows are the ones worth having: `''` and `'   '` both
+    #: satisfy `IS NOT NULL` and identify nobody, which is a book that is out
+    #: with nobody to ask for it back.
+    #:
+    #: **The last four are whitespace that is not a space**, and they are here
+    #: because a corpus made of spaces certified an agreement it could not see.
+    #: SQLite's `trim()` strips the space character alone, so a tab is a name to
+    #: the constraint; a predicate spelled `strip()` refuses one, and the two
+    #: parted on every pair no case here contained. The three NUL rows are the
+    #: same lesson one level down: `length()` counts to the first NUL, so
+    #: `'\x00Ada'` is empty to SQLite and refused, and `'Ada\x00Ada'` is not.
+    #: U+00A0 is in the list
+    #: because `str.strip()` is a Unicode property where `trim()` is a
+    #: character, so the difference is a category rather than three characters.
+    PAIRS = [
+        (False, None),
+        (True, None),
+        (False, "Ada"),
+        (True, "Ada"),
+        (False, ""),
+        (False, "   "),
+        (True, ""),
+        (True, "   "),
+        (False, " Ada "),
+        (False, "\t"),
+        (False, "\n"),
+        (False, "\xa0"),
+        (True, "\t"),
+        (False, "\x00"),
+        (False, "\x00Ada"),
+        (False, "Ada\x00Ada"),
+    ]
+
+    @staticmethod
+    def _database_accepts(db, book, user, member: bool, name: str | None) -> bool:
+        """Whether the constraint lets this pair be stored.
+
+        Through the ORM, which has no borrower rule of its own, so what answers
+        is SQLite reading the constraint the migrations put on the table. See
+        the class docstring for why that is not the same thing as the constant.
+
+        **An accepted row is deleted again before returning**, and that is not
+        tidiness: `uq_loans_one_open_per_book` refuses a second open loan of the
+        same book, so a caller asking about several pairs in turn would read the
+        second refusal onwards as the borrower rule. Measured, on the first run
+        of the two tests below: two pairs the constraint accepts were reported
+        as pairs it refuses.
+        """
+        loan = Loan(
+            book_id=book.id,
+            loaned_to_user_id=user.id if member else None,
+            loaned_to_name=name,
+            loaned_by_user_id=user.id,
+        )
+        db.add(loan)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            return False
+        db.delete(loan)
+        db.commit()
+        return True
+
+    @pytest.mark.parametrize(("member", "name"), PAIRS)
+    def test_the_two_spellings_agree_on_every_pair(self, db, book, user, member, name):
+        """One case per pair, so a disagreement names the pair that found it.
+
+        A single case walking the table would pass with every arm but one
+        deleted and would never say which pair it was watching.
+        """
+        stored = self._database_accepts(db, book, user, member, name)
+        predicate = names_exactly_one_borrower(user.id if member else None, name)
+        assert stored == predicate
+
+    def test_neither_spelling_is_stricter_than_the_other(self, db, book, user):
+        """The same claim as a set, in both directions, and it is not a
+        duplicate of the cases above.
+
+        Those are nine independent assertions and this is one sentence about
+        all of them: which pairs one accepts and the other refuses. A pair
+        appearing on either side is the rule having grown a second meaning,
+        which is the state this class was written in and had to be corrected
+        out of, and the direction it appears on says which side moved.
+        """
+        stricter = [
+            (member, name)
+            for member, name in self.PAIRS
+            if names_exactly_one_borrower(user.id if member else None, name)
+            and not self._database_accepts(db, book, user, member, name)
+        ]
+        laxer = [
+            (member, name)
+            for member, name in self.PAIRS
+            if self._database_accepts(db, book, user, member, name)
+            and not names_exactly_one_borrower(user.id if member else None, name)
+        ]
+        assert (stricter, laxer) == ([], [])
+
+    def test_neither_spelling_accepts_everything(self, db, book, user):
+        """Anti vacuity. Both assertions above hold over a predicate that
+        answers True to everything and a constraint that refuses everything,
+        which is what a broken driver looks like."""
+        accepted = [pair for pair in self.PAIRS if self._database_accepts(db, book, user, *pair)]
+        allowed = [
+            (member, name)
+            for member, name in self.PAIRS
+            if names_exactly_one_borrower(user.id if member else None, name)
+        ]
+        assert 0 < len(accepted) < len(self.PAIRS)
+        assert 0 < len(allowed) < len(self.PAIRS)
+
+    #: What the sweep below crosses with itself.
+    #:
+    #: One entry per behaviour known to make the two spellings part, with the
+    #: reason: a space, because `trim()` strips it; the six other ASCII
+    #: whitespace characters and two Unicode ones, because `str.strip()` strips
+    #: those and `trim()` does not; a NUL, because `length()` stops there; and
+    #: two ordinary names, because a corpus of nothing but edge cases cannot
+    #: show a rule that refuses everything.
+    #:
+    #: **This is the enumeration that is left, and it is stated rather than
+    #: claimed closed.** Crossing it to length three finds a defect built from
+    #: characters that are in it, which is how both known ones were found and is
+    #: strictly more than a list of pairs can do. A fourth SQLite behaviour over
+    #: a character nobody has added here would be invisible, and the answer when
+    #: one turns up is a row here rather than a case in `PAIRS`.
+    ALPHABET = (
+        "",
+        " ",
+        "\t",
+        "\n",
+        "\r",
+        "\x0b",
+        "\x0c",
+        "\x00",
+        "\xa0",
+        "\u3000",
+        "a",
+        "Ada",
+    )
+
+    def test_the_two_spellings_agree_over_a_swept_alphabet(self):
+        """Every name the alphabet builds up to three pieces long, both arms.
+
+        **A sweep rather than a longer list of pairs**, because the two defects
+        this class has been corrected out of were both characters nobody thought
+        to write down: a tab, then a leading NUL. A third will be the same
+        shape, and a list of cases is exactly the instrument that cannot find
+        it.
+
+        Against a table built from `ONE_BORROWER_SQL` through `sqlite3`
+        directly, rather than through the ORM: this arm is about the constant
+        and wants no foreign key, no open loan index and no fixture between the
+        constraint and the answer. The pairs above are what exercise the real
+        migrated table.
+        """
+        connection = sqlite3.connect(":memory:")
+        connection.execute(
+            "CREATE TABLE probe (loaned_to_user_id INTEGER, loaned_to_name TEXT, "
+            f"CHECK ({ONE_BORROWER_SQL}))"
+        )
+
+        def accepted(user_id: int | None, name: str | None) -> bool:
+            # `sqlite3.IntegrityError` and not SQLAlchemy's: this probe is a raw
+            # connection, so the ORM's exception can never be raised here and
+            # catching it would say the opposite of what the docstring above is
+            # at pains to say.
+            try:
+                connection.execute("INSERT INTO probe VALUES (?, ?)", (user_id, name))
+            except sqlite3.IntegrityError:
+                return False
+            connection.execute("DELETE FROM probe")
+            return True
+
+        names: set[str | None] = {
+            "".join(pieces)
+            for length in range(4)
+            for pieces in itertools.product(self.ALPHABET, repeat=length)
+        }
+        names.add(None)
+        disagreements = [
+            (user_id, name)
+            for name in sorted(names, key=lambda value: (value is not None, value or ""))
+            for user_id in (None, 5)
+            if accepted(user_id, name) != names_exactly_one_borrower(user_id, name)
+        ]
+        assert not disagreements, (
+            f"{len(disagreements)} of {len(names) * 2} pairs: the predicate and "
+            f"the constraint answer differently. First few: {disagreements[:5]}"
+        )
+        # Anti vacuity, both halves. A constraint that refused everything and a
+        # predicate that agreed would satisfy the line above, and so would a
+        # sweep that built no name carrying the characters it exists for.
+        assert any(accepted(None, name) for name in names if name is not None)
+        assert any(not accepted(None, name) for name in names if name is not None)
+        assert {"\x00", "\t", " ", "\xa0"} <= names
+
+    def test_a_borrower_of_one_tab_is_stored_and_nothing_here_refuses_it(
+        self, db, book, user
+    ):
+        """The gap both spellings now agree on, pinned rather than left open.
+
+        `trim()` strips the space character alone, so a name of one tab is a
+        name to the constraint and the row is stored: a book that is out with
+        nobody to ask for it back, which is what the trim clause was written to
+        refuse. It is reachable only by a writer that does not go through
+        `LoanCreate`, which strips on Python's rule, and those are the restore
+        and the importer, which are exactly the writers the constraint exists
+        for.
+
+        **Not closed here**, and the reason is the shape of the fix rather than
+        its size: SQL's whitespace is a list of characters and Python's is a
+        Unicode property, so widening `trim()` to the four ASCII ones would
+        close four holes and read as closing a category. It is filed with the
+        measurement instead. This test is what stops it being rediscovered, and
+        it fails if somebody widens the constraint, which is the point at which
+        the record should be rewritten rather than kept.
+        """
+        assert self._database_accepts(db, book, user, False, "\t")
+        assert names_exactly_one_borrower(None, "\t")
+
+    def test_the_pairs_are_written_to_a_migrated_database(self, db):
+        """Which of the two schemas the cases above are answered by.
+
+        `create_all` takes `checkfirst`, so whichever of the two ran first owns
+        the table and the other is silently a no op. A stamped
+        `alembic_version` says the migrations ran, and therefore that the
+        constraint under test is the one a real deployment carries. Were this to
+        become `create_all`'s table, every case above would still pass and would
+        quietly be comparing the declaration with itself.
+        """
+        stamped = db.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        assert stamped, (
+            "The schema these cases are written against was not built by the "
+            "migrations, so the constraint they exercise is the one declared "
+            "in models.py rather than the one a deployment has."
+        )
+
+    def test_the_constraint_is_built_from_the_constant(self):
+        """Not a copy of it. Reading it off the table is what would notice the
+        text being inlined again, which is the state this constant replaced."""
+        table = Base.metadata.tables["loans"]
+        checks = [
+            constraint
+            for constraint in table.constraints
+            if isinstance(constraint, CheckConstraint)
+            and constraint.name == "ck_loans_one_borrower"
+        ]
+        assert [str(check.sqltext) for check in checks] == [ONE_BORROWER_SQL]
+
+    def test_the_migrated_database_carries_the_constant(self, db):
+        """The fourth statement, which cannot call the constant.
+
+        A revision records what was applied on a day, so one that imported a
+        constant would change meaning whenever the constant did, and a database
+        migrated last year would stop being the same database as one migrated
+        tonight. It keeps its own copy for that reason, and the comment beside
+        that copy used to assert it was identical to `models.py` with nothing
+        behind the claim.
+
+        **What is compared is the constraint the database carries, not the
+        revision's source.** Comparing sources forbids the drift the copy exists
+        to allow: the first change to the rule would go red, and the ways out
+        would be editing a historical revision or deleting this test. The
+        effective schema is what has to agree with the constant, and a later
+        revision that drops and recreates the constraint is read here without an
+        edit.
+
+        Whitespace collapsed, because the DDL SQLite stores keeps the line
+        breaks the constraint was written with.
+        """
+        wanted = " ".join(ONE_BORROWER_SQL.split())
+        stored = db.execute(
+            text("SELECT sql FROM sqlite_master WHERE name = 'loans'")
+        ).scalar()
+        collapsed = " ".join((stored or "").split())
+        assert "ck_loans_one_borrower" in collapsed, collapsed
+        assert wanted in collapsed, (
+            "The constraint this database enforces is not `ONE_BORROWER_SQL`. "
+            "The constant and whatever the migrations built have parted, so "
+            f"the predicate is checked against a rule nobody stated:\n{collapsed}"
+        )
 
 
 class TestCoversAreStoredOverHttps:

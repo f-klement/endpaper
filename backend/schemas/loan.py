@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, model_validator
 
+from models import names_exactly_one_borrower
 from schemas.common import RowIdField
 from schemas.user import UserOut
 
@@ -44,27 +45,42 @@ class LoanCreate(BaseModel):
     def _exactly_one_borrower(self) -> LoanCreate:
         """Both or neither is a 422, never a loan nobody can be asked about.
 
-        The database says the same thing (`ck_loans_one_borrower`). This layer
-        exists so the caller gets a 422 naming the field rather than a 500 from
-        a constraint violation.
+        **The rule itself is `models.names_exactly_one_borrower`, called rather
+        than restated.** The database says the same thing through
+        `models.ONE_BORROWER_SQL`, which is where that constraint's own text
+        comes from. This layer exists so the caller gets a 422 naming the field
+        rather than a 500 from a constraint violation, which is a different job
+        from deciding what the rule is.
 
-        Whitespace is stripped first: a name of three spaces satisfies
-        `IS NOT NULL` and identifies nobody.
+        **The strip happens before the question, not after**, because the
+        predicate reads `''` the way SQL does: a value, and therefore a second
+        borrower beside a member id. Normalising first is what turns a member
+        plus an empty name into a member plus no name, which is what the column
+        holds and what this route has always accepted. Asking first and
+        normalising after would refuse it.
+
+        **`strip()` here and `strip(" ")` in the predicate, deliberately.** This
+        line decides what is fit to store and a name of one tab identifies
+        nobody; the predicate answers what the constraint will accept, and
+        SQLite's `trim()` strips spaces alone. So this layer is the stricter of
+        the two on purpose, and a tab reaches the column only through a writer
+        that does not come this way.
         """
-        name = (self.loaned_to_name or "").strip()
-        if (self.loaned_to_user_id is not None) == bool(name):
+        self.loaned_to_name = (self.loaned_to_name or "").strip() or None
+        if not names_exactly_one_borrower(self.loaned_to_user_id, self.loaned_to_name):
             raise ValueError(
                 "Name exactly one borrower: either loaned_to_user_id or loaned_to_name."
             )
-        self.loaned_to_name = name or None
         return self
 
 
 class LoanOut(BaseModel):
     id: int
     book_id: int
-    # Exactly one of these two is set. `loaned_to` is the member's full record
-    # and is None for an external borrower, whose name is all there is.
+    # Exactly one of these two is set, by `models.names_exactly_one_borrower`,
+    # which is the one place that rule is spelled. `loaned_to` is the member's
+    # full record and is None for an external borrower, whose name is all there
+    # is.
     loaned_to_user_id: int | None
     loaned_to_name: str | None = None
     loaned_by_user_id: int

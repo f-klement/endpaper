@@ -5944,7 +5944,7 @@ export const getEnrichBookUrl = (bookId: number, params?: EnrichBookParams) => {
  * Matched by ISBN when there is one, which runs the full merged chain, and by
  * title and author otherwise, which runs the ranked search. **Which
  * catalogues either of those asks is the library's own provider list**, set
- * in Settings: the roster holds eight lookup sources that answer an ISBN and
+ * in Settings: the roster holds nine lookup sources that answer an ISBN and
  * eight search sources that answer a title, the leading pair is asked together
  * and the rest one at a time, and a source switched off is not asked on either
  * path. Google Books answers only when its own section is on and a key is in

@@ -424,14 +424,23 @@ def _catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credenti
     rather than an admin visit. The size it was costing is on the issue.
 
     **The doors are collected before the key is touched, so a roster with none
-    resolves nothing**, which is today's roster and is the property the eager
-    call would have taken away. What it does cost, said rather than left to be
-    found: a roster whose credential doors are **all** pinned by the environment
-    pays one resolution where it paid none, because a pinned credential never
-    opens an envelope. That is one per request and bounded by nothing the roster
-    can grow, where the defect this replaced was bounded by the roster.
+    resolves nothing.** That was today's roster until the Biblioteca Nacional
+    Argentina joined it, and the property is worth keeping stated because what
+    it bounds has not changed: the cost is **one** resolution per request now
+    that there is a door, and it stays one however many doors the roster grows,
+    where the defect this replaced was one per source. An install that has
+    stored no credential pays that one and gets an empty answer, and so does one
+    whose credentials are all pinned by the environment, because a pinned
+    credential never opens an envelope.
     `tests/routers/test_books.py::TestTheKeyIsResolvedOncePerRequest` pins both
     ends.
+
+    **It is not the only resolution on a lookup.** `settings_store.ready_sources`
+    resolves the key as well, to answer whether a credentialled source can be
+    asked at all, so a request that reaches a catalogue pays two. Both are an
+    environment read, a file read and a BIP-39 decode with no key derivation
+    function behind it; it is written down here rather than measured away
+    because the thing to watch is the shape, one per request, not the constant.
 
     Written for the set rather than for its members because the next source to
     declare that capability is the reason this plumbing exists.
@@ -3665,7 +3674,7 @@ async def enrich_book(
     Matched by ISBN when there is one, which runs the full merged chain, and by
     title and author otherwise, which runs the ranked search. **Which
     catalogues either of those asks is the library's own provider list**, set
-    in Settings: the roster holds eight lookup sources that answer an ISBN and
+    in Settings: the roster holds nine lookup sources that answer an ISBN and
     eight search sources that answer a title, the leading pair is asked together
     and the rest one at a time, and a source switched off is not asked on either
     path. Google Books answers only when its own section is on and a key is in

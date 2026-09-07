@@ -995,9 +995,10 @@ therefore never repair another member's private books. It is rate limited instea
 
 ## Catalogue requests
 
-Ten third party catalogues are asked for records: Open Library, the DNB, K10plus, the
+Eleven third party catalogues are asked for records: Open Library, the DNB, K10plus, the
 BnF, the Library of Congress, the Austrian National Library, the Spanish National Library,
-the National Library of Greece, the Czech National Library and Google Books. `backend/fetch.py` is the only place an HTTP
+the National Library of Greece, the Czech National Library, the Biblioteca Nacional
+Argentina and Google Books. `backend/fetch.py` is the only place an HTTP
 client for them is built, and `backend/tests/test_fetch.py` enforces that with an AST pass
 over the tree, because the defect that produced the module was ten hand built clients that
 agreed on the timeout and agreed on nothing else.
@@ -1017,7 +1018,7 @@ stored configuration or a request body, that changes.
 member input, so `covers.is_fetchable` has to decide whether this server may connect at all,
 per redirect hop. A catalogue URL is a module constant plus a query string, so an attacker
 cannot choose the host and there is nothing an allowlist would refuse. Merging the two would
-mean adding ten catalogue hosts to `COVER_HOSTS`, which is what the CSP's `img-src` is
+mean adding eleven catalogue hosts to `COVER_HOSTS`, which is what the CSP's `img-src` is
 generated from: the browser policy would be widened to pay for a fetch policy.
 
 **Redirects are walked here, and only to the same host.** Measured live with redirects off,
@@ -1029,9 +1030,9 @@ send this server to a host of its choosing. `fetch.get` therefore sets
 implicit 443 and 80 filled in, at most `MAX_REDIRECTS` of them. Anything else raises
 `RedirectedOffHost`.
 
-That matters most at the three catalogues with no TLS endpoint, the Library of Congress,
-the National Library of Greece and the Czech national library, where an on path attacker
-could answer for the catalogue:
+That matters most at the four catalogues with no TLS endpoint, the Library of Congress,
+the National Library of Greece, the Czech national library and the Biblioteca Nacional
+Argentina, where an on path attacker could answer for the catalogue:
 `docs/decisions.md`, "The Library of Congress is fetched over plaintext HTTP, knowingly"
 and "The National Library of Greece is plaintext too, and the identity check is what that
 costs". Substituting a record is still open to such an attacker; turning one request into a
@@ -1045,6 +1046,19 @@ identifier to check against, so a substituted body can offer any row it likes an
 picks one from a list. That second path is exactly the Library of Congress's exposure,
 which is title search only: the Greek source's search surface is **not** narrower than it,
 and its lookup surface is the half that is checked.
+
+**One of those four carries a login, and that is a different exposure rather than more of
+the same.** The Argentine national library answers only over plaintext and only to an
+authenticated request, so a lookup there puts an HTTP Basic header on an unencrypted
+connection. What that credential opens is a public catalogue and nothing else: the library
+publishes the pair itself and this build ships no default, so an install using the
+published pair puts nothing on the wire its issuer has not already disclosed. **An install
+that has its own arrangement with a library is putting a private login on an unencrypted
+connection**, which is stated here and beside the field because that install is anticipated
+rather than hypothetical: shipping no default is what leaves room for it. The header is
+computed per hop from the origin the credential was set for, so a redirect cannot carry it
+elsewhere even if the hop check were bypassed, and a diagnostic from that target is logged
+as its URI alone because the target's own error text quotes the user name back.
 
 **A `Location` naming an unusable host is refused the same way**, and it is worth knowing
 why it needed separate handling. httpx builds the redirect request inside `send()` **even

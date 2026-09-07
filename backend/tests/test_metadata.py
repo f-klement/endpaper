@@ -29,6 +29,7 @@ catalogue.
 import ast
 import asyncio
 import inspect
+import logging
 import math
 import random
 import re
@@ -77,13 +78,10 @@ from metadata import (
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.book import BookLookup
 from tests.helpers import (
-    silence_bne,
     silence_catalogues,
     silence_covers,
-    silence_nkp,
-    silence_nlg,
-    silence_oenb,
     silence_open_library,
+    silence_other_lookup_catalogues,
     silence_sru_catalogues,
     sru_response,
 )
@@ -468,6 +466,57 @@ NKP_RECORD = (
 
 NKP_EMPTY = _nkp_envelope()
 
+#: The Biblioteca Nacional Argentina. Plaintext HTTP on 9991, a bare IP address
+#: because the library publishes no hostname, and the `/BNA01` database path is
+#: part of the address: see `targets.SEEDED[CatalogueSource.BNA]`.
+BNA = "http://200.123.191.9:9991/BNA01"
+
+#: A real BNA record, trimmed to what this app reads.
+#:
+#: Captured live 2026-09-07 on `@attr 1=7 "9789878539140"`. The envelope is
+#: `_nkp_envelope`'s because the two targets answer the identical shape, which
+#: is why this source needed no reader of its own. Two things in it are the
+#: point:
+#:
+#: * the title carries a subtitle **and** a trailing ISBD slash with nothing
+#:   after it, `main : sub /`, which is the form `_dc_title_statement` does not
+#:   split. 3 of the 10 live records measured that day carry a subtitle and all
+#:   3 end this way.
+#: * the people are `contributor` and there is no `creator`, the NKP's habit at
+#:   a second Aleph.
+BNA_RECORD = (
+    "<dc-record>"
+    "<type>text</type>"
+    "<language>spa</language>"
+    "<identifier>978-987-85-3914-0</identifier>"
+    "<contributor>Rubio Piñeiro, Gonzalo Javier</contributor>"
+    "<title>El mundo gamer : del juego al reclutamiento /</title>"
+    "<publisher>Dunken,</publisher>"
+    "<date>2024.</date>"
+    "<format>271 p. :</format>"
+    "<subject>Videojuegos Historia</subject>"
+    "<contributor>Rascov, Hugo Marcelo</contributor>"
+    "</dc-record>"
+)
+
+#: What this target answers when the credential is missing, wrong or rotated.
+#:
+#: Captured live 2026-09-07 by asking unauthenticated. **HTTP 200 with a
+#: diagnostic**, which is why `metadata._sru_refusal` exists: read as an empty
+#: answer it says a library does not hold a book nobody asked about. The
+#: `diag:details` element the live body carries is left out here, deliberately:
+#: it quotes back the user name on the request, and a fixture is a published
+#: file.
+BNA_UNAUTHENTICATED = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/">'
+    "<zs:version>1.1</zs:version>"
+    '<zs:diagnostics xmlns:diag="http://www.loc.gov/zing/srw/diagnostic/">'
+    "<diag:diagnostic><diag:uri>info:srw/diagnostic/1/3</diag:uri>"
+    "<diag:message>Authentication error</diag:message>"
+    "</diag:diagnostic></zs:diagnostics></zs:searchRetrieveResponse>"
+)
+
 #: One live ÖNB record, ISBN 9783552058217, `Das angehaltene Leben`, Zsolnay.
 #:
 #: **Copied from the live response rather than written to suit the test**, so
@@ -697,6 +746,47 @@ def _clear_cache():
     metadata.clear_cache()
 
 
+class TestTheSilencerNamesTheSourcesATestAnswers:
+    """The exception list is checked against the rows, so a stale one is loud.
+
+    **The failure it stops is silent.** A test names the base URLs it answers
+    itself; a name that has drifted from the row is a source the helper then
+    silences before the test registers its own route, and respx resolves in
+    registration order, so the test passes on an empty answer from the catalogue
+    it exists to watch. That is the shape the four per source silencers made
+    impossible only by never being derived at all.
+    """
+
+    def test_a_url_that_is_not_a_lookup_row_is_refused(self):
+        with (
+            respx.mock(assert_all_called=False) as mock,
+            pytest.raises(AssertionError),
+        ):
+            silence_other_lookup_catalogues(mock, "https://catalogue.bnf.fr")
+
+    def test_every_lookup_row_but_the_named_ones_is_answered(self):
+        """The other half: it silences what it was not told to leave alone.
+
+        Answered rather than counted: a request per row is what says a route
+        resolves, and reading the loop cannot see that respx resolves in
+        registration order.
+        """
+        rows = [
+            target.base_url
+            for target in targets.SEEDED.values()
+            if target.transport is targets.Transport.SRU and target.answers_lookup
+        ]
+        with respx.mock(assert_all_called=False) as mock:
+            silence_other_lookup_catalogues(mock, DNB)
+            with httpx.Client() as client:
+                for base in rows:
+                    if base == DNB:
+                        with pytest.raises(respx.models.AllMockedAssertionError):
+                            client.get(base)
+                        continue
+                    assert client.get(base).status_code == 200
+
+
 class TestSourceOrder:
     @pytest.mark.asyncio
     async def test_a_german_isbn_asks_the_dnb_first(self):
@@ -744,10 +834,7 @@ class TestSourceOrder:
     async def test_open_library_answers_when_the_fast_pair_misses(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -786,10 +873,7 @@ class TestSourceOrder:
     async def test_google_is_tried_after_open_library_misses(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -821,10 +905,7 @@ class TestSourceOrder:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=OPEN_LIBRARY).mock(
@@ -850,10 +931,7 @@ class TestSourceOrder:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -875,10 +953,7 @@ class TestOutcome:
     async def test_a_throttled_source_is_reported_as_rate_limited(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -903,10 +978,7 @@ class TestOutcome:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -926,10 +998,7 @@ class TestOutcome:
     async def test_every_source_answering_nothing_is_not_found(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -949,10 +1018,7 @@ class TestOutcome:
     async def test_a_network_failure_is_unavailable_not_missing(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -1262,10 +1328,7 @@ class TestDnbRecord:
         )
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -1328,10 +1391,7 @@ class TestDnbRecord:
     async def test_an_empty_result_set_is_a_miss_not_an_outage(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -1421,10 +1481,7 @@ class TestCatalogueXml:
         )
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -1653,10 +1710,7 @@ class TestTheResponseSizeCap:
     async def test_an_enormous_catalogue_answer_is_unavailable_not_a_500(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -2298,10 +2352,7 @@ class TestK10plusIdentity:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(
                     _marc(
@@ -2449,10 +2500,7 @@ class TestK10plusIdentity:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(
                     _marc(_marc_record(isbn=ENGLISH_ISBN, isbn_qualifier="χαρτόδετο"))
@@ -3115,9 +3163,7 @@ class TestAHostileSourceCostsItsOwnRows:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB, OENB)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith="https://openlibrary.org/search.json").mock(
@@ -3146,9 +3192,7 @@ class TestAHostileSourceCostsItsOwnRows:
     async def test_an_unparsable_page_count_does_not_500_a_lookup(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -3210,10 +3254,7 @@ class TestAHostileSourceCostsItsOwnRows:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
-            silence_nlg(mock)
+            silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith="https://openlibrary.org/search.json").mock(
@@ -3626,6 +3667,7 @@ class TestWhatEachReaderCanSupply:
                 "<format>200 s.</format><subject>Roman</subject></dc-record>"
             ),
             "9788072033034",
+            source="nkp",
         )
 
         assert bnf is not None
@@ -4277,8 +4319,7 @@ class TestTheCandidates:
         mock.get(url__startswith="http://lx2.loc.gov").mock(
             return_value=httpx.Response(500)
         )
-        silence_oenb(mock)
-        silence_nlg(mock)
+        silence_other_lookup_catalogues(mock, K10PLUS, DNB)
 
     @pytest.mark.asyncio
     async def test_the_cluster_leads(self):
@@ -4464,9 +4505,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_open_library(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -4526,9 +4565,7 @@ class TestTheAustrianNationalLibrary:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -4551,9 +4588,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_open_library(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -4586,9 +4621,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_open_library(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -4615,9 +4648,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_open_library(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -4632,9 +4663,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_open_library(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -4658,9 +4687,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_open_library(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             route = mock.get(url__startswith=OENB).mock(
@@ -4677,9 +4704,7 @@ class TestTheAustrianNationalLibrary:
     async def test_a_throttled_oenb_is_not_reported_as_a_missing_book(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=httpx.Response(429))
@@ -4699,15 +4724,21 @@ class TestTheAustrianNationalLibrary:
         """Every error this endpoint reports arrives as HTTP 200.
 
         An invalid query answers with a well formed envelope carrying a
-        `diag:diagnostic` and no records. The right handling is none: the body
-        parses, no record is found, the source reports nothing, and a search
-        still answers from the other six.
+        `diag:diagnostic` and no records, and the body parses, so nothing raises
+        and every other source still answers.
+
+        **What the source reports for itself changed**, and the old answer was
+        the conflation `Outcome` exists to refuse: a diagnostic is the target
+        declining to answer, not the target answering that it holds no such
+        book, and reporting the second sends a member to type in a book that was
+        never looked for. `metadata._sru_refusal` carries the rule and why it is
+        the diagnostics block rather than the code inside it. The other sources
+        are asserted here as well, because the change must cost this source its
+        rows and nothing else.
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -4721,7 +4752,9 @@ class TestTheAustrianNationalLibrary:
             )
             result = await lookup("9783700316206")
 
-        assert ("oenb", Outcome.NOT_FOUND) in result.attempts
+        assert (CatalogueSource.OENB, Outcome.UNAVAILABLE) in result.attempts
+        assert (CatalogueSource.DNB, Outcome.NOT_FOUND) in result.attempts
+        assert (CatalogueSource.K10PLUS, Outcome.NOT_FOUND) in result.attempts
 
     @pytest.mark.asyncio
     async def test_an_enormous_oenb_answer_costs_the_oenb_and_nothing_else(self):
@@ -4734,9 +4767,7 @@ class TestTheAustrianNationalLibrary:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -4760,9 +4791,14 @@ class TestTheAustrianNationalLibrarySearch:
 
     @staticmethod
     def _quiet(mock):
-        """Every source but the ÖNB answering nothing."""
+        """Every source but the ÖNB answering nothing.
+
+        The ÖNB is named here and answered by the caller, which is what the
+        exception list is for: a silencer registered before the caller's route
+        wins over it, because respx resolves in registration order.
+        """
         silence_covers(mock)
-        silence_nlg(mock)
+        silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
         mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
         mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
         mock.get(url__startswith=OPEN_LIBRARY).mock(
@@ -4892,9 +4928,7 @@ class TestTheAustrianNationalLibrarySearch:
         """User story 5, from the search side."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, OENB, K10PLUS, DNB)
             mock.get(url__startswith=OENB).mock(return_value=httpx.Response(500))
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_RECORD)
@@ -4966,9 +5000,7 @@ class TestTheAustrianNationalLibrarySearch:
 
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            silence_nlg(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, OENB, K10PLUS, DNB)
             mock.get(url__startswith=OENB).mock(side_effect=_crawl)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_RECORD)
@@ -5031,9 +5063,7 @@ class TestTheNationalLibraryOfGreece:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_open_library(mock)
-            silence_oenb(mock)
-            silence_nkp(mock)
-            silence_bne(mock)
+            silence_other_lookup_catalogues(mock, DNB, K10PLUS, NLG)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_RECORD))
@@ -5446,6 +5476,209 @@ class TestTheCzechNationalLibrary:
         assert CatalogueSource.NKP in sources.LOOKUP_SOURCES
         assert CatalogueSource.NKP not in sources.SEARCH_SOURCES
         assert not targets.SEEDED[CatalogueSource.NKP].answers_search
+
+
+class TestTheBibliotecaNacionalArgentina:
+    """The sixth SRU source, the second in the bare Dublin Core dialect, and the
+    first whose request carries a login.
+
+    What is this target's rather than the format's, each measured beside the
+    constant it decided: the credential is the gate and the transport is
+    ordinary SRU, the response renders one populated record whatever page size
+    is asked for, and a refusal arrives as a diagnostic under HTTP 200.
+    """
+
+    ISBN = "9789878539140"
+
+    def _answer(self, mock, body: str):
+        mock.get(url__startswith=BNA).mock(return_value=_xml(body))
+
+    async def _lookup(self, body: str):
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            self._answer(mock, body)
+            return await metadata._lookup_one(
+                targets.SEEDED[CatalogueSource.BNA], self.ISBN, "", credential=None
+            )
+
+    @pytest.mark.asyncio
+    async def test_an_argentine_book_resolves(self):
+        result = await self._lookup(_nkp_envelope(BNA_RECORD))
+
+        assert result.outcome is Outcome.FOUND
+        assert result.record is not None
+        assert result.record.title == "El mundo gamer"
+        assert result.record.author == "Gonzalo Javier Rubio Piñeiro"
+        assert result.record.publisher == "Dunken"
+        assert result.record.year == 2024
+        assert result.record.page_count == 271
+
+    @pytest.mark.asyncio
+    async def test_the_record_names_this_catalogue_and_not_the_czech_one(self):
+        """The reader is shared and the label was not passed through it.
+
+        Measured live on 2026-09-07 before it was fixed: the `Lookup` said
+        `bna` and the `Record` inside it said `nkp`, which is what
+        `_MATCH_PRECEDENCE`, `_SECONDARY_SOURCES`, `_merge_matches` and the
+        attribution on a member's screen all read. Both halves are asserted
+        because only one of them was wrong.
+        """
+        result = await self._lookup(_nkp_envelope(BNA_RECORD))
+
+        assert result.source == "bna"
+        assert result.record is not None
+        assert result.record.source == "bna"
+
+    @pytest.mark.asyncio
+    async def test_a_subtitle_keeps_none_of_the_isbd_punctuation(self):
+        """`main : sub /` with nothing after the slash.
+
+        `_dc_title_statement` splits a statement of responsibility on `" / "`
+        with the space, so a trailing slash survives into the subtitle where the
+        title beside it was already stripped. 3 of the 10 live records measured
+        on 2026-09-07 carry a subtitle and all 3 end this way.
+        """
+        result = await self._lookup(_nkp_envelope(BNA_RECORD))
+
+        assert result.record is not None
+        assert result.record.subtitle == "del juego al reclutamiento"
+
+    @pytest.mark.asyncio
+    async def test_a_credential_that_no_longer_works_is_not_a_missing_book(self):
+        """The ticket's own requirement, and the distinction `Outcome` exists for.
+
+        This target answers a wrong, missing or rotated credential with HTTP 200
+        carrying diagnostic 1/3, so the body parses and the reader finds no
+        records. Read as an empty answer it tells a member their book is not in
+        a catalogue that refused to be asked, and sends them to type it in.
+        """
+        result = await self._lookup(BNA_UNAUTHENTICATED)
+
+        assert result.outcome is Outcome.UNAVAILABLE
+
+    @pytest.mark.asyncio
+    async def test_a_diagnostics_body_with_no_records_is_still_a_refusal(self):
+        """The rule is the diagnostics block and never the code inside it.
+
+        A diagnostic this application has never seen has to read as a refusal:
+        the numbers are an open registry and the ones that mean "the request was
+        not honoured" are not a list anybody here can close. So a body carrying
+        an unknown URI, and one carrying none at all, both refuse.
+        """
+        unknown = BNA_UNAUTHENTICATED.replace("1/3", "1/999")
+        no_uri = BNA_UNAUTHENTICATED.replace(
+            "<diag:uri>info:srw/diagnostic/1/3</diag:uri>", ""
+        )
+
+        for body in (unknown, no_uri):
+            result = await self._lookup(body)
+            assert result.outcome is Outcome.UNAVAILABLE, body
+
+    @pytest.mark.asyncio
+    async def test_nothing_a_diagnostic_says_reaches_the_log(self, caplog):
+        """A diagnostic's details quote back the user name on the request.
+
+        Measured 2026-09-07: this target's `diag:details` names the account this
+        application authenticated as, truncated by its own parser. The URI is a
+        code out of a registry and is logged; every other part of a third
+        party's error text is dropped, because there is no reading of somebody
+        else's free text that makes it safe to repeat into a container log.
+        """
+        secret = "User name somebody does not exist"
+        body = BNA_UNAUTHENTICATED.replace(
+            "</diag:diagnostic>", f"<diag:details>{secret}</diag:details></diag:diagnostic>"
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = await self._lookup(body)
+
+        assert result.outcome is Outcome.UNAVAILABLE
+        assert "somebody" not in caplog.text
+        assert "info:srw/diagnostic/1/3" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_a_diagnostic_about_one_record_is_not_a_refusal_either(self):
+        """SRU allows a diagnostic inside `records`, and it is about that record.
+
+        The rule reads a diagnostics block that is a direct child of the
+        response and nothing else, so a record the target could not render is a
+        record this application does not have rather than a catalogue that
+        refused to be asked. Without the arm, one unrenderable record in a page
+        would take the whole lookup out.
+        """
+        envelope = _nkp_envelope().replace(
+            "<zs:records></zs:records>",
+            "<zs:records><zs:record>"
+            '<zs:diagnostics xmlns:diag="http://www.loc.gov/zing/srw/diagnostic/">'
+            "<diag:diagnostic><diag:uri>info:srw/diagnostic/1/64</diag:uri>"
+            "</diag:diagnostic></zs:diagnostics></zs:record></zs:records>",
+        )
+        assert "1/64" in envelope, "the fixture no longer carries the diagnostic"
+
+        result = await self._lookup(envelope)
+
+        assert result.outcome is Outcome.NOT_FOUND
+
+    @pytest.mark.asyncio
+    async def test_a_diagnostic_beside_a_record_is_not_a_refusal(self):
+        """Records that parse win over anything the envelope says about itself.
+
+        **A measured shape rather than an invented one.** The National Library
+        of Greece answers the true `numberOfRecords` **and** `Unknown schema for
+        retrieval` when no `recordSchema` is named, and `docs/decisions.md`
+        records a probe that read every such response as unreadable and reported
+        a confident zero for the country it was recommending. The rule that
+        refuses a credential failure has to leave that case alone, so it asks
+        only after the reader has found nothing.
+        """
+        envelope = _nkp_envelope(BNA_RECORD).replace(
+            "</zs:searchRetrieveResponse>",
+            '<zs:diagnostics xmlns:diag="http://www.loc.gov/zing/srw/diagnostic/">'
+            "<diag:diagnostic><diag:uri>info:srw/diagnostic/1/66</diag:uri>"
+            "</diag:diagnostic></zs:diagnostics></zs:searchRetrieveResponse>",
+        )
+
+        result = await self._lookup(envelope)
+
+        assert result.outcome is Outcome.FOUND
+        assert result.record is not None
+        assert result.record.title == "El mundo gamer"
+
+    @pytest.mark.asyncio
+    async def test_the_lookup_asks_the_index_the_probe_established(self):
+        """One record, PQF in `x-pquery`, use attribute 7, and no record schema.
+
+        Every one of the four is a measurement rather than a default:
+        `recordSchema=marcxml` answers diagnostic 1/66 here, and asking for five
+        records returns one populated record and four stubs.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            route = mock.get(url__startswith=BNA).mock(
+                return_value=_xml(_nkp_envelope(BNA_RECORD))
+            )
+            await metadata._lookup_one(
+                targets.SEEDED[CatalogueSource.BNA], self.ISBN, "", credential=None
+            )
+
+        params = route.calls.last.request.url.params
+        assert params["x-pquery"] == f'@attr 1=7 "{self.ISBN}"'
+        assert params["maximumRecords"] == "1"
+        assert "recordSchema" not in params
+        assert "query" not in params
+
+    def test_it_answers_no_title_search_and_needs_a_credential(self):
+        """Both are properties of the row, asserted rather than described.
+
+        The first is the Czech National Library's reason at a second Aleph. The
+        second is what nothing else in the roster is: free and credentialled at
+        once, so `sources.NEEDS_A_KEY` and `sources.METERED` are no longer the
+        same set.
+        """
+        assert CatalogueSource.BNA in sources.LOOKUP_SOURCES
+        assert CatalogueSource.BNA not in sources.SEARCH_SOURCES
+        assert CatalogueSource.BNA in sources.NEEDS_A_KEY
+        assert CatalogueSource.BNA not in sources.METERED
 
 
 class TestTheComponentPartRefusal:
@@ -6021,6 +6254,20 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
             # and the ÖNB's record body, because the two share a profile. The
             # 020 carries the ISBN-10 for the reason the class docstring gives.
             "bne": (BNE, _xml(oenb)),
+            # The NKP's envelope and dialect at a second target, with the
+            # identifier in the ISBN-10 form for the reason above.
+            "bna": (
+                BNA,
+                _xml(
+                    _nkp_envelope(
+                        "<dc-record><type>text</type>"
+                        "<identifier>0743273567</identifier>"
+                        "<title>The Great Gatsby</title>"
+                        "<date>1925</date>"
+                        "<format>218 p.</format></dc-record>"
+                    )
+                ),
+            ),
             "open_library": (
                 OPEN_LIBRARY,
                 httpx.Response(200, json={"title": "The Great Gatsby"}),
@@ -6092,24 +6339,26 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
 #:
 #: **One property of its own, and breadth beyond it.** The rotations carry
 #: position and precedence; what this buys and they cannot is adjacency. The
-#: rotations are one circular arrangement cut nine ways, so all nine put the same
-#: pairs **next to each other in the lookup chain**: one adjacency per source, so
-#: 7 of the 42 ordered pairs, and the sample takes that to 42 of 42.
+#: rotations are one circular arrangement cut eleven ways, so all eleven put the
+#: same pairs **next to each other in the lookup chain**: one adjacency per
+#: source, so 9 of the 72 ordered pairs, and the sample takes that to 72 of 72.
 #:
 #: **"Next to each other" means in the chain and never in the roster**, and the
 #: two are different numbers: `bnf` and `loc` sit side by side at the end of
 #: `DEFAULT_ORDER` and are never asked, so counting roster adjacencies with both
-#: endpoints a lookup source gives 6 rather than 7. The chain is what `lookup`
+#: endpoints a lookup source gives 8 rather than 9. The chain is what `lookup`
 #: walks, and it is what both tests below collect.
 #:
 #: Neither figure is left stated.
-#: `test_the_rotations_are_one_circular_arrangement` recomputes the 7 from the
-#: roster and `test_every_source_is_tried_next_to_every_other` the 42, so lowering
+#: `test_the_rotations_are_one_circular_arrangement` recomputes the 9 from the
+#: roster and `test_every_source_is_tried_next_to_every_other` the 72, so lowering
 #: this constant fails rather than quietly staling the figures below.
 #:
-#: **It is not a coverage figure and must not be read as one.** The 209 orders
-#: reach 198 of the 3,600 distinct plans the roster's 362,880 permutations
-#: produce, which is 5.5%.
+#: **It is not a coverage figure and must not be read as one**, and the unit is
+#: the trap in it. The 211 orders reach 209 of the **362,880 distinct lookup
+#: chains** the nine lookup sources can be put in, which is 0.06%. Measured
+#: 2026-09-07; the figure that stood here quoted a denominator whose unit no
+#: reader could reconstruct, and it was stale in both numbers besides.
 _SAMPLED_ORDERS = 200
 
 #: Fixed, so a failure reproduces. A sample redrawn per run would make this class
@@ -6131,11 +6380,13 @@ def _rotations[T](roster: tuple[T, ...]) -> tuple[tuple[T, ...], ...]:
     place, and what the filter drops is the two sources that answer no ISBN.
 
     **Its own function so the claim can be tested on it alone.** The claims held
-    for the whole set with this deleted, because at the nine sources of the day
-    200 sampled orders happened to cover every cell and every pair, so a test
-    over the whole set left this family at "a docstring says so". The roster has
-    grown since and that coverage has not been re-measured, which is a reason to
-    keep this function rather than a reason to trust the sampling.
+    for the whole set with this deleted, because 200 sampled orders happen to
+    cover every cell and every pair on their own, so a test over the whole set
+    left this family at "a docstring says so". Re-measured at eleven sources on
+    2026-09-07 and it still holds, which is a reason to keep this function
+    rather than a reason to trust the sampling: the sample reaches every cell at
+    60 orders and every pair at 40, so the margin it leaves is the roster's to
+    spend and nothing recomputes it.
     `test_every_source_reaches_every_position_in_the_lookup_chain` and
     `test_every_pair_of_sources_is_tried_in_both_directions` read this, and
     `test_the_orders_asked_hold_every_rotation` is what ties it back to the set
@@ -6153,12 +6404,15 @@ def _orders_worth_asking[T](roster: tuple[T, ...]) -> tuple[tuple[T, ...], ...]:
 
     **The reversed roster and its rotations were here and were measured out.**
     They cover no cell and no pair the rotations do not, and their only
-    contribution, the 7 mirrored **chain** adjacencies, is inside what the sample
+    contribution, the 9 mirrored **chain** adjacencies, is inside what the sample
     already reaches. The unit is named because this is the one adjacency figure
     in this module no test can recompute: the family it counts is gone. In the
-    roster the same figure reads 6, which is the collision `_SAMPLED_ORDERS`
-    describes. A family kept for a property another family already carries is a
-    reason a reviewer agrees with and a hole nobody looks at.
+    roster the same figure reads 8, which is the collision `_SAMPLED_ORDERS`
+    describes. Both re-derived on 2026-09-07 at the eleven sources the roster
+    now holds, and both had gone stale unnoticed, which is the reading to take
+    from a figure whose family no longer exists. A family kept for a property
+    another family already carries is a reason a reviewer agrees with and a hole
+    nobody looks at.
 
     `dict.fromkeys` rather than a set, so the rotations run before the sampled
     orders and a failure names a reproducible order first.
@@ -6194,9 +6448,18 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     **This enumerated the roster's permutations and no longer does.** Enumeration
     is factorial in the roster and the roster grows: a ninth source multiplied the
     work ninefold overnight and a tenth would have multiplied it again, with the
-    enumeration on the suite's critical path. `ORDERS_UNDER_TEST` is 209 orders
-    where `itertools.permutations` was 362,880, and it grows by one per source
-    rather than by a factor of it.
+    enumeration on the suite's critical path. `ORDERS_UNDER_TEST` is **211**
+    orders where `itertools.permutations` over eleven sources is **39,916,800**,
+    and it grows by one per source rather than by a factor of it.
+
+    **Both figures are recomputed by
+    `test_the_docstring_states_the_two_numbers_it_names`, not copied**, and the
+    pair they replace is why that is worth a test rather than a sentence: it
+    read 209 against 362,880, which were the roster's numbers two sources ago,
+    and 362,880 has since become the count of distinct **lookup chains** in this
+    same class. One number, two subjects, in one file. The claim that they were
+    recomputed shipped before the recomputation did, which is the same defect
+    one turn later.
 
     **What that gave up, stated rather than implied.** Kept: every source is
     asked from every index of the lookup chain, every ordered pair of sources is
@@ -6330,7 +6593,7 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
 
     @staticmethod
     def _every_ordered_pair() -> set[tuple[CatalogueSource, CatalogueSource]]:
-        """The 42 ordered pairs of lookup sources, which two tests compare against.
+        """The 72 ordered pairs of lookup sources, which two tests compare against.
 
         One expression rather than two, because the two tests differ in what
         they collect and not in what a complete answer looks like.
@@ -6377,18 +6640,19 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     def test_every_source_is_tried_next_to_every_other(self):
         """The sample's one purchase, recomputed rather than stated.
 
-        The rotations are one circular arrangement cut nine ways, so all nine put
-        the same 7 of the 42 ordered pairs next to each other in the chain, which
-        `test_the_rotations_are_one_circular_arrangement` is what says; the other
-        35 come from the sample. Nothing else here notices `_SAMPLED_ORDERS` being
-        lowered, and three figures in this module move with it.
+        The rotations are one circular arrangement cut eleven ways, so all eleven
+        put the same 9 of the 72 ordered pairs next to each other in the chain,
+        which `test_the_rotations_are_one_circular_arrangement` is what says; the
+        other 63 come from the sample. Nothing else here notices
+        `_SAMPLED_ORDERS` being lowered, and three figures in this module move
+        with it.
 
         **A red here means the sample is too small for a roster that grew, not
         that the chain is broken**, and that is the one thing to know before
         chasing it: this is the only property the construction reaches
-        statistically rather than by construction. Measured at seed 0 and nine
-        sources, 20 orders reach 40 of the 42, 30 reach 41, and 40 reach all of
-        them.
+        statistically rather than by construction. Measured at seed 0 and eleven
+        sources on 2026-09-07, 20 orders reach 65 of the 72, 30 reach 70, and 40
+        reach all of them.
         """
         beside: set[tuple[CatalogueSource, CatalogueSource]] = set()
         for order in ORDERS_UNDER_TEST:
@@ -6405,6 +6669,31 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         because the sample is deliberately free to grow.
         """
         assert set(_rotations(sources.DEFAULT_ORDER)) <= set(ORDERS_UNDER_TEST)
+
+    def test_the_docstring_states_the_two_numbers_it_names(self):
+        """The order count and the enumeration it replaced, both recomputed.
+
+        **The sentence above claimed they were and they were stated**, which is
+        the shape this repository keeps paying for: the bound below is
+        `size <= count <= size + _SAMPLED_ORDERS`, which at the roster's own
+        size makes the upper bound **equal** to the count, so raising the sample
+        moves the real number and leaves the prose green; and nothing anywhere
+        computed the factorial at all.
+
+        The word between them is left to the census, which binds it to the
+        roster. This holds the two numerals.
+        """
+        flat = " ".join((TestNoOrderOfTheRosterFindsMoreBooks.__doc__ or "").split())
+        stated = re.search(
+            r"is \*\*([\d,]+)\*\* orders where `itertools.permutations` over "
+            r"\w+ sources is \*\*([\d,]+)\*\*",
+            flat,
+        )
+        assert stated is not None, "the docstring no longer states the pair"
+        orders, enumerated = (int(g.replace(",", "")) for g in stated.groups())
+
+        assert orders == len(ORDERS_UNDER_TEST)
+        assert enumerated == math.factorial(len(sources.DEFAULT_ORDER))
 
     def test_the_order_set_grows_with_the_roster_and_not_with_its_factorial(self):
         """The cost bound, and it is the reason enumeration was dropped.
@@ -6755,8 +7044,13 @@ class TestThePlaintextSourcesAreCounted:
     anything, because a count in prose does not recount itself.
 
     So the set is recomputed from the module's own endpoint values and the docs
-    are checked against it. A fourth plaintext source fails this test rather than
+    are checked against it. A fifth plaintext source fails this test rather than
     quietly making three documents wrong.
+
+    **Three sentences are checked and there were two**, which is the hole a
+    critic found in the round that added the fourth source: `DOCUMENTS` named
+    `backend/targets.py` and nothing here read the count in it, so that module
+    stated three while the two documents beside it said four.
 
     **Two critics broke the first version of this class independently and it is
     worth recording how**, because every hole was in the guard rather than in its
@@ -6868,16 +7162,23 @@ class TestThePlaintextSourcesAreCounted:
                 index = flat.find(phrase, index + 1)
         return True
 
-    def test_the_set_is_the_three_this_repository_has_accepted(self):
+    def test_the_set_is_the_four_this_repository_has_accepted(self):
         """The guard's own subject, pinned.
 
         Without this the test passes on an empty set, which is what it would
         compute if every endpoint moved to HTTPS or was renamed.
+
+        **The fourth is the one that carries a login**, which is a different
+        exposure from the other three rather than more of the same: a plaintext
+        request that authenticates puts an `Authorization` header on the wire.
+        `targets.SEEDED[CatalogueSource.BNA]` carries what that costs and why the
+        library offers nothing else.
         """
         assert set(self.plaintext()) == {
             "loc.base_url",
             "nlg.base_url",
             "nkp.base_url",
+            "bna.base_url",
         }
 
     def test_the_legend_states_the_current_count(self):
@@ -6891,6 +7192,26 @@ class TestThePlaintextSourcesAreCounted:
         expected = self.WORDS[len(self.plaintext())]
 
         assert f"the {expected} catalogues with no TLS endpoint" in security
+
+    def test_the_targets_module_states_the_current_count(self):
+        """The module the addresses live in, and it went stale unnoticed.
+
+        `DOCUMENTS` has listed it all along, and the only thing read there was
+        the retired sentence, so the count beside `SEEDED_ORIGINS` was wrong in
+        the commit that added the fourth plaintext target while this class
+        passed. A guard that reads two of the three places it names is two
+        thirds of a guard.
+        """
+        module = (BACKEND / "targets.py").read_text(encoding="utf-8")
+        expected = self.WORDS[len(self.plaintext())].capitalize()
+        # **Whitespace collapsed and the comment marker with it**, which is the
+        # lesson `mentions_only` records one method along: this file wraps prose
+        # at about eighty characters behind a `#:`, so the sentence is split
+        # across two lines and a raw substring never sees it. The first version
+        # of this test read the raw text and failed on prose that was correct.
+        flat = " ".join(module.replace("#:", " ").split())
+
+        assert f"**{expected}** targets are plain HTTP" in flat
 
     def test_no_document_asserts_a_single_plaintext_catalogue(self):
         """The retired sentence may be quoted, and may not be said.

@@ -355,6 +355,25 @@ class TestLoanCreate:
         with pytest.raises(ValidationError):
             LoanCreate(book_id=1, loaned_to_name="x" * 121)
 
+    def test_a_name_the_database_would_read_as_empty_is_rejected_here(self):
+        """A leading NUL, which is a name to look at and no name to SQLite.
+
+        `length()` counts characters up to the first NUL, so
+        `ck_loans_one_borrower` refuses this row however many characters follow.
+        Without this the request model said yes, `create_loan` reached
+        `db.commit()`, nothing on that path catches `IntegrityError` and the
+        generic handler answered **500**: the outcome this layer exists to turn
+        into a 422 naming the field.
+        """
+        with pytest.raises(ValidationError):
+            LoanCreate(book_id=1, loaned_to_name="\x00Ada")
+
+    def test_a_name_with_a_nul_after_its_first_character_is_kept(self):
+        """The other side of it, because a rule that refused every NUL would be
+        a different rule from the constraint. `length('Ada\x00Ada')` is 3, so
+        the row is stored and this must accept it."""
+        assert LoanCreate(book_id=1, loaned_to_name="Ada\x00Ada").loaned_to_name
+
 
 class TestProgressCreate:
     """Exactly one unit per entry. The CHECK constraint says the same thing;

@@ -15,13 +15,13 @@ the sentence somebody thought to guard.
 ## Why a scan alone cannot do this
 
 **"The roster count" is not one number.** There are **six** named sets a claim
-may bind to, and only **three** distinct sizes among them, because three of the
-six are the roster's own size and two more are equal to each other. Nothing in a
-sentence's shape says which is meant. So "eight sources" in this tree is a
-correct count of the lookup sources, a correct count of the search sources, or a
-stale count of some other subject entirely. Measured over the census below,
-**18** of its occurrences count something that is not the roster, so a scan with
-no classification fails 18 times on its first run and is switched off.
+may bind to, and only **four** distinct sizes among them, because three of the
+six are the roster's own size. Nothing in a sentence's shape says which is
+meant. So "eleven sources" in this tree is a correct count of the roster, a
+correct count of what a lookup or a search may ask, or a stale count of some
+other subject entirely. Measured over the census below,
+**18** of its occurrences count something that is not the roster, so a scan
+with no classification fails 18 times on its first run and is switched off.
 
 Both figures in that paragraph are recomputed by `TestThisFileCountsItself`
 rather than reread, because this file's own prose is inside its subject.
@@ -298,20 +298,32 @@ def roster_sets() -> dict[str, int]:
 #: sources there are.
 #:
 #: **`Counts` compares a number, not a set, and a reader will read it as the
-#: set.** Three of these six names are 9 today, so six names discriminate four
+#: set.** Three of these six names are 11 today, so six names discriminate four
 #: ways and a claim can bind to the wrong one and pass. Live instance:
-#: `test_books_google.py` says enrichment reaches all nine sources and binds to
-#: `the whole roster`, while `helpers.py` states the identical fact about the
+#: `test_books_google.py` says enrichment reaches all eleven sources and binds
+#: to `the whole roster`, while `helpers.py` states the identical fact about the
 #: identical helper and binds to `lookup or search`. Both pass. The day those
 #: two stop being equal, one fails naming a set it was never about. No test can
 #: catch that, because the two claims are indistinguishable by number, which is
 #: all a number carries.
+#:
+#: **"A stock install asks it" is not "it costs nothing", and it took a source
+#: that is both free and credentialled to separate them.** That name read
+#: `LOOKUP_SOURCES - METERED` while the only credential in the roster was also
+#: the only bill, so the two expressions had never disagreed. They do now: the
+#: Biblioteca Nacional Argentina costs nothing per request and answers nothing
+#: until a login is entered, so the metered reading counts it in and every
+#: sentence bound to this name means the set that excludes it. The three
+#: sentences are coverage measurements over a default install, and each would
+#: have gone from a true seven to a false eight with nothing failing.
 CARDINALITIES = {
     "the whole roster": lambda: len(CatalogueSource),
     "DEFAULT_ORDER": lambda: len(sources.DEFAULT_ORDER),
     "SEARCH_SOURCES": lambda: len(sources.SEARCH_SOURCES),
     "LOOKUP_SOURCES": lambda: len(sources.LOOKUP_SOURCES),
-    "the free lookup sources": lambda: len(sources.LOOKUP_SOURCES - sources.METERED),
+    "the lookup sources a stock install asks": (
+        lambda: len(sources.LOOKUP_SOURCES - sources.NEEDS_A_KEY)
+    ),
     "lookup or search": lambda: len(sources.LOOKUP_SOURCES | sources.SEARCH_SOURCES),
 }
 
@@ -329,11 +341,16 @@ NOT_A_ROSTER_COUNT = {
     "SERVES_GROUPS": "which sources have a registration group remit",
     "TAIL_MARGINAL": "what each tail source answers, keyed on the source",
     # The one entry whose reason a reader will check against the census bound
-    # and find inside it: `MEASURED` has six members, and six is a live
-    # cardinality. It is here anyway because it is a mapping of measurements
-    # keyed on the source rather than a count of sources, and its size equalling
-    # one is a coincidence of today's roster.
-    "MEASURED": "what each free source was measured to do, keyed on the source",
+    # and find inside it: `MEASURED` has **seven** members and seven is a live
+    # cardinality, which is what the whole of this entry turns on and what it
+    # got wrong in both numbers until 2026-09-07. It is here anyway because it
+    # is a mapping of measurements keyed on the source rather than a count of
+    # sources, and its size equalling a cardinality is a coincidence of today's
+    # roster.
+    "MEASURED": (
+        "what each source a stock install asks was measured to do, keyed on "
+        "the source"
+    ),
 }
 
 #: The words a count is spelled with here, and the digits it may be written as.
@@ -1379,16 +1396,14 @@ _MARC_IMPORT = (
 #: Each was read when it was added here and found to be a dated statement, a
 #: count of something that is not the roster, or both.
 OUT_OF_BOUND: frozenset[str] = frozenset({
+    "backend/sources.py '{n} frames a source' entry[0]",
     "backend/tests/routers/test_books_search.py '{n} sources' entry[0]",
+    "backend/tests/test_marc.py '{n} source' entry[0]",
     "backend/tests/test_authority.py '{n} viaf source' entry[0]",
     "backend/tests/test_fetch.py '{n} sources' entry[0]",
     "backend/tests/test_fetch.py '{n} sources' entry[3]",
     "backend/tests/test_fetch.py '{n} sources' entry[4]",
-    "backend/tests/test_metadata.py '{n} sources' entry[1]",
-    "backend/tests/test_metadata.py '{n} sources' entry[2]",
     "backend/tests/test_roster_counts.py '{n} sources' entry[1]",
-    "backend/tests/test_roster_counts.py '{n} sources' entry[4]",
-    "backend/tests/test_roster_counts.py '{n} sources' entry[6]",
     "docs/decisions.md '{n} source' entry[0]",
     "docs/security.md '{n} sources' entry[0]",
     # Split only to fit the line: this is one path and two entries on it.
@@ -1431,9 +1446,6 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     # harder search's concurrency against what a whole fan out costs, so its eight
     # is a search roster count read off that comment's own arithmetic.
     ("backend/metadata.py", "{n} source"): [Counts("SEARCH_SOURCES")],
-    ("backend/metadata.py", "{n} free sources"): [
-        Counts("the free lookup sources", near="most deployments actually run")
-    ],
     ("backend/ratelimit.py", "{n} public catalogues"): [Counts("SEARCH_SOURCES")],
     # Both halves of one sentence in the enrichment route's docstring, which
     # FastAPI publishes as the endpoint's OpenAPI description. It said
@@ -1455,7 +1467,12 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         Counts("DEFAULT_ORDER", near="absent means the defaults"),
         Counts("DEFAULT_ORDER", near="invalidated on write"),
     ],
-    ("backend/sources.py", "{n} free sources"): [Counts("the free lookup sources")],
+    ("backend/sources.py", "{n} sources"): [
+        Counts(
+            "the lookup sources a stock install asks",
+            near="answer 395 of the 500 ISBNs",
+        )
+    ],
     ("backend/metadata.py", "{n} sources"): [
         NotTheRoster(
             "the sources that reach `_is_physical_book`, which is the roster "
@@ -1463,6 +1480,19 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
             near="_is_physical_book",
         ),
         Counts("SEARCH_SOURCES", near="asked at once"),
+        # The chain a default install actually runs, in the block that says so
+        # and in the Argentine block's denominator. **Both said "free sources"
+        # and bound to a name that had stopped meaning that**: a source can be
+        # free and still need a login, and the set those sentences are about is
+        # the one an install with no credential at all asks.
+        Counts(
+            "the lookup sources a stock install asks",
+            near="most deployments actually run",
+        ),
+        Counts(
+            "the lookup sources a stock install asks",
+            near="The frame goes from 24 answered to 28",
+        ),
     ],
     ("backend/tests/helpers.py", "{n} sources"): [Counts("lookup or search")],
     ("backend/tests/routers/test_books_google.py", "{n} sources"): [
@@ -1511,6 +1541,14 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         # somebody to re-derive them instead of leaving prose nobody rechecks.
         Counts("the whole roster", near="tested on it alone"),
         Counts("the whole roster", near="too small for a roster that grew"),
+        # The third figure in that class, in the docstring of the family that
+        # was measured out: it counts the roster the two above were re-derived
+        # at, which is why it is a `Counts` and not a dated aside.
+        Counts("the whole roster", near="family it counts is gone"),
+        Counts("the whole roster", near="grows by one per source"),
+    ],
+    ("backend/tests/test_metadata.py", "{n} lookup sources"): [
+        Counts("LOOKUP_SOURCES")
     ],
     ("backend/tests/test_ratelimit.py", "{n} public catalogues"): [
         Counts("LOOKUP_SOURCES")
@@ -1582,8 +1620,13 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         Counts("SEARCH_SOURCES", near="asked concurrently"),
         Counts("LOOKUP_SOURCES", near="two phases"),
     ],
-    ("docs/api.md", "{n} free sources"): [Counts("the free lookup sources")],
-    ("docs/api.md", "{n} sources"): [Counts("LOOKUP_SOURCES")],
+    ("docs/api.md", "{n} sources"): [
+        Counts("LOOKUP_SOURCES", near="lcsh` reaches only the search response"),
+        Counts(
+            "the lookup sources a stock install asks",
+            near="What the chain covers with no credential at all",
+        ),
+    ],
     ("docs/data-model.md", "{n} catalogues"): [
         NotTheRoster("the sources that build a Heading, which `_merge` concatenates")
     ],
@@ -2232,7 +2275,7 @@ class TestThisFileCountsItself:
     def test_the_docstring_states_both_counts_of_the_cardinality_table(self):
         """**Names and distinct sizes are two numbers and the file needs both.**
 
-        Six names over four sizes, because three of the six are 9. The prose
+        Six names over four sizes, because three of the six are 11. The prose
         said "six live cardinalities" and was checked against `len(CARDINALITIES)`,
         which is the name count, while `live_cardinalities()` two hundred lines
         below uses the same word for the size count. The test passed and the

@@ -110,8 +110,9 @@ class CatalogueSourceOut(BaseModel):
     #: lookup. This is what "what does enabling cost" resolves to on the ISBN
     #: path: everything below the leading run is asked only after a miss.
     asked_first: bool
-    #: Whether it needs a credential the household supplies. Google Books alone
-    #: today.
+    #: Whether it needs a credential the household supplies. Two sources today,
+    #: and they take different things: Google Books an API key, the Biblioteca
+    #: Nacional Argentina a username and password.
     needs_a_key: bool
     #: Whether that credential is in force, from the environment or the table.
     #:
@@ -122,8 +123,8 @@ class CatalogueSourceOut(BaseModel):
     #: to stop somebody hunting for.
     has_key: bool
     #: Whether it **could** answer if asked, which is false only for a source
-    #: needing a key that this deployment has not got: Google Books with none
-    #: stored and none in the environment. **The most likely single cause of
+    #: needing a credential this deployment has not got: Google Books with no
+    #: key stored and none in the environment, or a catalogue with no login. **The most likely single cause of
     #: "why is this not working"**, so it is a field rather than something a
     #: reader is left to infer from two other screens.
     #:

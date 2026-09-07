@@ -9,6 +9,7 @@ again".
 import ast
 import copy
 import dataclasses
+import importlib
 import inspect
 import os
 import re
@@ -25,8 +26,10 @@ from pydantic import BaseModel
 from sqlalchemy import CheckConstraint
 
 import metadata
+import models as orm  # noqa: F401  (registers the tables on Base.metadata)
 import sources
 import targets
+from database import Base
 from enums import CatalogueSource
 from tests.helpers import silence_catalogues
 
@@ -114,6 +117,50 @@ def _every_python_file() -> list[Path]:
     `backend/` and the word is left to it.
     """
     return [path for path in BACKEND.rglob("*.py") if not _is_vendored(path)]
+
+
+def _source_modules() -> dict[str, str]:
+    """`_python_sources()` read, keyed by path relative to `backend/`.
+
+    **Here rather than in `tests/test_shelf.py`, which is where it used to
+    live**, because the exclusion it rests on is `_is_vendored` and that is
+    defined above. The shelf rules import this one; the reverse would be a cycle
+    under `--import-mode=importlib`, since that module is imported for
+    `_is_vendored` before it defines anything of its own.
+
+    **Three other test modules still keep a copy of this walk**, each spelling
+    the exclusion as `parts[0] not in {"tests", "migrations", ".venv"}`, which is
+    the enumeration `_is_vendored` exists to replace. Raised rather than taken:
+    they belong to rules this file does not own.
+    """
+    return {
+        str(path.relative_to(BACKEND)): path.read_text() for path in _python_sources()
+    }
+
+
+def _every_file_a_tool_does_not_own() -> list[Path]:
+    """Every file under `backend/` that no tool owns, of whatever suffix.
+
+    **A second instrument for the walk above, and the only reason it exists.**
+    `_every_python_file` states its corpus as an exclusion (not vendored, not
+    bytecode) and a rule stating an exclusion needs the complement to be
+    checkable: this is what lets
+    `test_the_walk_reaches_every_group_and_leaves_no_remainder` say that
+    everything left out is a tool's or is not a `.py` file, rather than
+    restating the filter it is testing.
+
+    `os.walk` and a pruned `dirnames`, where the walk above is an `rglob` and a
+    per path predicate. Same exclusion, different traversal, so a filter added
+    to that function shows up here as a difference. Pruning is also what keeps
+    this affordable: a `.venv` holds tens of thousands of files and neither walk
+    should descend one.
+    """
+    found: list[Path] = []
+    for root, dirnames, filenames in os.walk(BACKEND):
+        here = Path(root)
+        dirnames[:] = [name for name in dirnames if not _is_vendored(here / name)]
+        found += [here / name for name in filenames]
+    return found
 
 
 def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
@@ -1966,7 +2013,7 @@ class TestNoFixtureLooksLikeACredential:
             if relative in self.ALLOWED:
                 continue
             # **Decoded explicitly, not through the locale.** `_offences` reads
-            # bytes for this reason and this arm now walks the same 173 files:
+            # bytes for this reason and this arm walks the same corpus:
             # `read_text()` uses `locale.getencoding()` and raises
             # `UnicodeDecodeError` on a latin-1 cookied file that compiles
             # perfectly well, which is the scan failing rather than the file.
@@ -2691,14 +2738,14 @@ class TestEveryTargetResolvesToADoorAndAReader:
         """Not a restatement of the derivation: it names the roster's answer.
 
         A derivation compared against itself is vacuous, so this writes out what
-        the ten rows actually say. A row whose capability changes has to change
+        the eleven rows actually say. A row whose capability changes has to change
         this line too, which is the argument the old test made for writing
         `SEARCH_SOURCES` out rather than deriving it, kept in the one place where
         it still costs nothing.
         """
         assert {source.value for source in sources.LOOKUP_SOURCES} == {
             "dnb", "k10plus", "oenb", "nlg", "nkp", "bne", "open_library",
-            "google_books",
+            "google_books", "bna",
         }
         assert {source.value for source in sources.SEARCH_SOURCES} == {
             "dnb", "k10plus", "oenb", "nlg", "open_library", "google_books",
@@ -2719,15 +2766,23 @@ class TestEveryTargetResolvesToADoorAndAReader:
     def test_the_default_order_names_the_whole_roster_exactly_once(self):
         assert sorted(sources.DEFAULT_ORDER) == sorted(CatalogueSource)
 
-    def test_a_source_needing_a_key_is_one_that_costs_money(self):
-        """The two properties are separate and today they name one source.
+    def test_a_metered_source_is_one_that_needs_a_credential(self):
+        """The containment that holds, and the equality that stopped.
 
-        Kept as an assertion rather than one constant, because they are
-        genuinely different questions: a free source could need registration,
-        and a metered one could be billed without a key. If they ever diverge
-        this fails and both `Plan.lookup_together` and `describe` need re-reading.
+        They were one set until a source arrived that is free and credentialled:
+        the Biblioteca Nacional Argentina publishes its own login and charges
+        nothing. The containment is the half `Plan.lookup_together` rests on,
+        since that tier bars a metered source and not a credentialled one, and
+        both it and `describe` were re-read when the two came apart.
+
+        **The second line names a row, and that is the weaker half.** There is
+        no capability saying "the credential is published", so the exception is
+        registered here rather than derived; giving it one is open work, and
+        until then a second such catalogue changes this line.
         """
-        assert sources.NEEDS_A_KEY == sources.METERED
+        assert sources.METERED <= sources.NEEDS_A_KEY
+        free_but_credentialled = sources.NEEDS_A_KEY - sources.METERED
+        assert free_but_credentialled == {CatalogueSource.BNA}
 
 
 class TestBeliefIsStatedOnceRatherThanTwice:
@@ -2824,7 +2879,7 @@ class TestNoModuleHardCodesASourceOrder:
     * `sources.DEFAULT_ORDER`, the seeded order itself.
     * `metadata._MATCH_PRECEDENCE`, which source is believed about a shared
       field. Deliberately not reachable from the settings list.
-    * `targets.SEEDED`, the ten catalogue rows. **A mapping consulted by key**,
+    * `targets.SEEDED`, the eleven catalogue rows. **A mapping consulted by key**,
       the narrower claim `SERVES_GROUPS` makes: `metadata` reaches it with
       `SEEDED[name]`, and the four derivations in `sources.py` build
       `frozenset`s, which have no order to read. The order a household gets is
@@ -2858,7 +2913,8 @@ class TestNoModuleHardCodesASourceOrder:
       spellings by `test_every_declared_group_is_a_group_the_decoder_recognises`,
       and its values by `test_no_source_with_a_remit_uniquely_answers_outside_it`
       against the committed sample.
-    * `sources.MEASURED`, what each free lookup source was measured to do.
+    * `sources.MEASURED`, what each lookup source needing no credential was
+      measured to do.
       **Justified by what is checkable rather than by what is obvious.** Nothing
       outside `backend/tests/` reads it, `TIER_UNION` or `SLOT_MUST_EARN` at all,
       every reference to them under `backend/` being a comment, so none can be
@@ -3262,8 +3318,13 @@ _ALPHANUMERIC_PREDICATES: Final = frozenset(
 #: word in a set. That is how `isalnum` was lost from the rule for as long as it
 #: was: the name went in somewhere plausible and nobody was asked why.
 #:
-#: The call site counts are measured 2026-09-06 over the 74 modules
-#: `_python_sources` returns.
+#: The call site counts below are measured 2026-09-06 over the modules
+#: `_python_sources` returns, by walking the `ast` for a call of that name.
+#: **The corpus is named and not counted**: how many modules it held on the day
+#: is not the measurement, and a size written beside a count is the figure that
+#: goes stale first. Read with the `ast` rather than with `grep`, which counts
+#: lines where the claim is calls: `isprintable` reads 5 that way and is 3, the
+#: other two being prose about it.
 _PREDICATES_LEFT_ALONE: Final = {
     "isascii": "the narrowing call this rule demands, so it is the remedy",
     "isalpha": (
@@ -3870,12 +3931,18 @@ class TestEveryPythonFileCompilesWithoutAWarning:
     source explicitly has no such hole, and it is also the only form that can
     report a file nothing imports.
 
-    **Measured 2026-09-02 on this branch**: **173** non vendored `.py` files
-    under `backend/`, of which **0** emit a warning and **0** fail to compile.
-    Those 173 partition as 67 from `_python_sources()`, 74 from
-    `_test_sources()` and 32 under `migrations/`, with no remainder. An earlier
-    sweep on 2026-08-31 read 171 files with exactly one warning; two files have
-    been added since and the one that warned has been made raw.
+    **The corpus is stated as an exclusion and never as a total.** It is every
+    file under `backend/` whose suffix is `.py` and whose path no tool owns:
+    tests and migrations included, bytecode and a tool's own directory out.
+    `test_the_walk_reaches_every_group_and_leaves_no_remainder` recomputes that
+    from the walks rather than checking it against a number.
+
+    **A total here is a number that stops being re-derived and starts being
+    copied.** The one that stood in this docstring was measured once, was stale
+    by thirty when somebody counted again, and never failed: the arm walks
+    whatever the walk returns, so a count that has drifted low is a weaker claim
+    about a wider walk. It had been spelled three times by then, twice worded to
+    agree with the first by construction.
 
     This docstring is raw for the reason it exists.
     """
@@ -3950,16 +4017,49 @@ class TestEveryPythonFileCompilesWithoutAWarning:
         `_test_sources` only descends `backend/tests`, so a file at
         `backend/routers/tests/x.py` would be in neither. There is none today,
         and the equality below is what would say so.
+
+        **The migrations are walked independently of the walk under test**, not
+        sieved out of it. Sieving is what the first draft of this line did, and
+        it made the claim circular: `_every_python_file` narrowed to drop
+        `migrations/` would have emptied both sides at once and passed.
         """
         walked = set(_every_python_file())
         assert set(_python_sources()) <= walked
         assert set(_test_sources()) <= walked
-        migrations = {path for path in walked if "migrations" in path.parts}
+        migrations = {
+            path
+            for path in (BACKEND / "migrations").rglob("*.py")
+            if not _is_vendored(path)
+        }
         assert migrations, "the migrations are why this walk is wider than the two above"
         assert walked == set(_python_sources()) | set(_test_sources()) | migrations
-        # A floor, because every assertion above holds over an empty tree.
-        # Measured 2026-09-02: 173 files, as 67 + 74 + 32.
-        assert len(walked) > 100, f"only {len(walked)} files walked"
+
+        # **The exclusion, derived, where a total used to stand.** Everything
+        # under `backend/` that this walk leaves out is a tool's own (pruned by
+        # `_is_vendored` in both instruments) or is not a `.py` file, which for
+        # this corpus means bytecode, a lock file or a template. Stated as the
+        # complement rather than as a count, because a count is what goes stale
+        # without ever failing: the walk is whatever it returns, so a low number
+        # beside it is a weaker claim about a wider walk and stays green.
+        left_out = set(_every_file_a_tool_does_not_own()) - walked
+        missed = sorted(path for path in left_out if path.suffix == ".py")
+        assert not missed, (
+            "These are Python files under backend/ that no tool owns and that "
+            f"the walk did not return: {missed}. The corpus is every one of "
+            "them, and a walk that returns fewer says so nowhere else."
+        )
+        # Anti vacuity for the line above, which passes over an empty
+        # complement. There is always something under `backend/` that is not a
+        # `.py` file, so a `left_out` that has gone empty is the second walk
+        # failing rather than the tree being tidy.
+        assert left_out, "the second walk returned nothing the first did not"
+
+        # Vacuity, because every assertion above holds over an empty tree. Each
+        # group non empty, plus the file making the assertion, rather than a
+        # floor: a literal count here is the defect this class's docstring
+        # records, and one that has drifted low never fails.
+        assert set(_python_sources()) and set(_test_sources())
+        assert Path(__file__).resolve() in {path.resolve() for path in walked}
 
     @pytest.mark.parametrize(
         ("shape", "source", "line", "category"),
@@ -4424,3 +4524,376 @@ class TestAOneTimeCodeIsServedOnlyWhereItIsNamed:
         if isinstance(schema, list):
             return any(self._serves_a_code(item) for item in schema)
         return False
+
+
+# ── Who may write a loan ──────────────────────────────────────────────────────
+
+
+def _loans_only_columns() -> frozenset[str]:
+    """The `loans` columns whose name belongs to no other table.
+
+    **Derived from the metadata, and the exclusion is the whole of it.** The
+    rule below reads attribute assignments, and an attribute name is all it has:
+    `loan.returned_at = now` and `out.returned_at = now` are the same three
+    tokens. So a column name shared with another table cannot be attributed to
+    `loans` by name alone and is left out, which today drops `id` and `book_id`.
+
+    Stating it the other way round, as a list of the seven that are unique,
+    is what goes stale the day a second table grows a `due_at`: the rule would
+    then report every write to that table as a loan.
+    """
+    loans = Base.metadata.tables["loans"]
+    elsewhere = {
+        column.name
+        for table in Base.metadata.tables.values()
+        if table.name != "loans"
+        for column in table.columns
+    }
+    return frozenset({column.name for column in loans.columns} - elsewhere)
+
+
+def _loan_names(tree: ast.Module) -> set[str]:
+    """Every local name in one module that means `models.Loan`.
+
+    `from models import Loan as L` and `Mk = Loan` both bind a name no rule
+    looking for the literal `Loan` would ever ask about, and the second is the
+    spelling `tests/test_shelf._entity_aliases` was written for after exactly
+    that walked past it.
+
+    **A second, smaller resolver rather than that one**, because this file is
+    imported by that one for `_is_vendored` and importing back is a cycle under
+    `--import-mode=importlib`. Smaller in one way that is stated rather than
+    hidden: it does not follow `aliased(Loan)`, which is a query construct and
+    builds no row. The `AnnAssign` form is followed, because the annotated
+    binding is the more idiomatic half of this backend and a resolver reading
+    only `Assign` would follow the less used spelling.
+    """
+    names = {"Loan"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "models":
+            names |= {alias.asname or alias.name for alias in node.names if alias.name == "Loan"}
+    # A second pass, because a rebinding may sit above or below the import.
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign | ast.AnnAssign):
+            continue
+        value = node.value
+        if value is None:
+            continue
+        means_loan = (isinstance(value, ast.Name) and value.id in names) or (
+            isinstance(value, ast.Attribute) and value.attr == "Loan"
+        )
+        names |= {
+            target.id
+            for target in _assignment_targets(node)
+            if isinstance(target, ast.Name) and means_loan
+        }
+    return names
+
+
+def _assignment_targets(node: ast.AST) -> list[ast.expr]:
+    """What one statement assigns to, over all three assignment forms.
+
+    One helper for both arms below. They read different forms once, so
+    `loan.loaned_by_user_id: int = payload.issuer` was a write to one and
+    invisible to the other, which is a disagreement about what a statement is
+    rather than about what the rule says.
+    """
+    if isinstance(node, ast.Assign):
+        return list(node.targets)
+    if isinstance(node, ast.AugAssign | ast.AnnAssign):
+        return [node.target]
+    return []
+
+
+def _names_the_model(call: ast.expr, local_names: set[str]) -> bool:
+    """Whether this callee is one of the module's names for `Loan`."""
+    return (isinstance(call, ast.Name) and call.id in local_names) or (
+        isinstance(call, ast.Attribute) and call.attr == "Loan"
+    )
+
+
+def _loan_writes(source: str) -> list[tuple[str, str]]:
+    """Every statement in one module that writes a loan, as `(kind, statement)`.
+
+    Three shapes, and each is deliberately blunt about its receiver, for the
+    reason `test_shelf._outbound_constructions` gives about `x.Outbound(...)`: a
+    false report costs a person one look and a missed one costs the rule. So
+    `self.loaned_to_name = ...` on a Pydantic model is reported like any other,
+    and the table below carries the reason it is there.
+
+    **The class is resolved rather than spelled**, by `_loan_names` above, so an
+    import alias and a rebinding are read. The third shape reads the **columns**
+    instead of the class, which are derived from the schema: a call carrying a
+    keyword argument named after a column only `loans` has is building a loan
+    row whatever it calls the class. That is what catches a Core insert, and it
+    is what would catch a construction through a value this resolver cannot
+    trace.
+    """
+    tree = ast.parse(source)
+    columns = _loans_only_columns()
+    local_names = _loan_names(tree)
+    found: list[tuple[str, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if _names_the_model(node.func, local_names):
+                found.append(("constructs a Loan", ast.unparse(node)))
+            if any(keyword.arg in columns for keyword in node.keywords):
+                found.append(("builds a row shaped like a loan", ast.unparse(node)))
+        for target in _assignment_targets(node):
+            if isinstance(target, ast.Attribute) and target.attr in columns:
+                found.append((f"writes loans.{target.attr}", ast.unparse(node)))
+    return found
+
+
+def _issuers(source: str) -> list[str]:
+    """What every write of `loans.loaned_by_user_id` binds it to, as source.
+
+    A construction that leaves it out reports `<omitted>`: the column is
+    `nullable=False`, so an omission is a 500 rather than a loan, and a rule
+    that read only what was written would have nothing to report about it.
+    """
+    tree = ast.parse(source)
+    local_names = _loan_names(tree)
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _names_the_model(node.func, local_names):
+            # The model, and not every call carrying the column, which is what
+            # `_loan_writes` reads. A response model names the issuer to
+            # **render** it (`LoanOut(loaned_by_user_id=loan.loaned_by_user_id)`),
+            # and reading that as a write would put a read into a set this arm
+            # pins to one expression.
+            bound = [
+                keyword.value
+                for keyword in node.keywords
+                if keyword.arg == "loaned_by_user_id"
+            ]
+            found += [ast.unparse(value) for value in bound] or ["<omitted>"]
+        if isinstance(node, ast.Assign | ast.AugAssign | ast.AnnAssign):
+            value = node.value
+            found += [
+                ast.unparse(value)
+                for target in _assignment_targets(node)
+                if value is not None
+                and isinstance(target, ast.Attribute)
+                and target.attr == "loaned_by_user_id"
+            ]
+    return found
+
+
+class TestOneInstanceIssuesALoan:
+    """Authority follows the physical object: the instance holding a copy is the
+    only one that may issue a loan of it.
+
+    **Why a rule rather than a comment.** `uq_loans_one_open_per_book` is a
+    cross row invariant, so two writers of the same loan is not a conflict that
+    a merge rule fixes: it is a book out with two people at once. With one
+    authority per object there is no consensus to reach, no reconciliation and
+    no window in which two instances both issue. A loan written by a non owning
+    instance is what a peer, an importer or a mobile client adds without
+    noticing, which is why this is a test and not a sentence.
+
+    **What is testable today, said plainly, because the rest is not.** There is
+    one instance, so "the owning instance issued it" reduces to two claims a
+    rule can check: that the issuer of every loan is a member this instance
+    resolved from a session, never a value that arrived in a payload; and that
+    the set of places writing the table is a set somebody argued. The transport
+    that would carry a loan between instances does not exist, so nothing here
+    checks a wire.
+
+    **What this cannot see:**
+
+    * **A write that names no column and calls no class.** `setattr(loan,
+      field, value)`, a Core `table.insert()` over rows read from somewhere, and
+      `db.execute(text("UPDATE loans SET ..."))` all evade both arms, from any
+      module. `backup.restore` is the live one and is the tree's named third way
+      past a viewer, but the shape is an idiom rather than that file's quirk:
+      `main.py` already writes a model through a `setattr` loop. A rule that saw
+      these would watch the session at run time rather than read source.
+    * **The migrations**, which `_source_modules()` does not return. One
+      revision already closes every open loan but the earliest per book with an
+      `UPDATE`, clearing the way for `uq_loans_one_open_per_book` rather than
+      ending anybody's loan, and a revision is a record of what was applied
+      rather than a place authority is decided.
+    * **A second statement of a kind already argued, in a module already
+      argued.** The table below is keyed on module and kind, so a new column
+      written in a module, or any write in a new module, is a new key; a second
+      `loan.returned_at = now` beside the first is not. The issuer arm is what
+      covers the case that matters, since a write taking its authority from
+      input changes what is bound rather than where.
+    """
+
+    #: Every place in the tree that writes a loan, and the authority it carries.
+    #:
+    #: **Asserted by equality, never as a subset**, so a writer that appears is
+    #: a decision rather than an edit. A subset check forgives exactly the
+    #: change this table exists to catch.
+    WRITES_A_LOAN: Final = {
+        "routers/loans.py: constructs a Loan": (
+            "the lending desk: a member of this instance lends a book this "
+            "instance holds, and is the issuer by being the caller"
+        ),
+        "routers/loans.py: builds a row shaped like a loan": (
+            "the same statement, seen by the arm that reads columns rather "
+            "than the class name. Both keys, deliberately: a construction that "
+            "loses the name is still a loan"
+        ),
+        "serialisation.py: builds a row shaped like a loan": (
+            "not a write at all: `LoanOut`, which renders a loan and shares "
+            "its column names. Left reported rather than exempted, because an "
+            "exemption for a module is what a real write would then arrive "
+            "under"
+        ),
+        "routers/loans.py: writes loans.returned_at": (
+            "the same desk closing the loan it issued"
+        ),
+        "routers/books.py: writes loans.returned_at": (
+            "merging two records and trashing one both close an open loan, "
+            "because the book they were about stops existing as that row"
+        ),
+        "notifications.py: writes loans.notified_at": (
+            "when a reminder last went out, which is delivery state rather "
+            "than the loan: it says nothing about who has the book or when it "
+            "is due, and it is stamped only after a send that succeeded"
+        ),
+        "schemas/loan.py: writes loans.loaned_to_name": (
+            "not the table at all: the request model normalising a blank name "
+            "to null before it can be stored. Reported because this rule reads "
+            "an attribute name and cannot see a receiver's type, and left here "
+            "rather than exempted because it is the one write that decides "
+            "what a borrower's name is"
+        ),
+    }
+
+    def test_the_places_that_write_a_loan_are_the_argued_ones(self):
+        found = {
+            f"{name}: {kind}"
+            for name, source in _source_modules().items()
+            for kind, _ in _loan_writes(source)
+        }
+        assert found == set(self.WRITES_A_LOAN), (
+            f"Added: {sorted(found - set(self.WRITES_A_LOAN))}. Gone: "
+            f"{sorted(set(self.WRITES_A_LOAN) - found)}. A loan is issued by "
+            "the instance holding the book, so every place that writes one "
+            "carries an argument about whose authority it is acting on. Add "
+            "the line, or route the write through the desk in "
+            "`routers/loans.py`."
+        )
+
+    def test_the_issuer_of_a_loan_is_always_this_instances_caller(self):
+        """The arm that survives a second store existing.
+
+        `loaned_by_user_id` is the claim "this instance lent this book". A
+        writer that takes it from its input is asserting somebody else's
+        authority, which is exactly what a sync handler, an importer or a
+        client outbox does by default. Nothing about the shape of such a
+        feature makes it look wrong at review; this is what makes it red.
+        """
+        found = {
+            source_of
+            for _, source in _source_modules().items()
+            for source_of in _issuers(source)
+        }
+        assert found == {"current_user.id"}, (
+            f"These decide who lent a book: {sorted(found)}. Only the member "
+            "this instance resolved from the session may be the issuer: a "
+            "value from a payload is another instance's authority, and "
+            "`uq_loans_one_open_per_book` is a cross row invariant that no "
+            "merge rule repairs."
+        )
+
+    def test_there_are_writes_to_classify(self):
+        """Anti vacuity. Both equalities above are satisfied by a resolver that
+        finds nothing, which is what a rename of the model would produce."""
+        found = [
+            (name, kind)
+            for name, source in _source_modules().items()
+            for kind, _ in _loan_writes(source)
+        ]
+        assert len(found) >= 5
+        assert {name for name, _ in found} >= {"routers/loans.py"}
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "from models import Loan\nLoan(loaned_by_user_id=1)\n",
+            "from models import Loan as L\nL(loaned_by_user_id=1)\n",
+            "import models\nmodels.Loan(loaned_by_user_id=1)\n",
+            "from models import Loan\nMk = Loan\nMk(loaned_by_user_id=1)\n",
+            "from models import Loan\nMk: type = Loan\nMk(loaned_by_user_id=1)\n",
+            "rows.insert().values(loaned_to_name='Ada')\n",
+            "loan.returned_at = now\n",
+            "loan.notified_at: datetime = now\n",
+        ],
+        ids=[
+            "imported",
+            "aliased",
+            "attribute",
+            "rebound",
+            "rebound annotated",
+            "a core insert naming no class",
+            "an assignment",
+            "an annotated assignment",
+        ],
+    )
+    def test_a_loan_written_under_any_of_these_names_is_still_a_write(self, spelling):
+        """The diagonal, one mutation each.
+
+        A sample carrying two spellings passes with either arm deleted and never
+        says which arm caught it. The last three are the reason the rule reads
+        columns as well as the class: none of them names `Loan` anywhere.
+        """
+        assert _loan_writes(spelling) != []
+
+    def test_something_that_is_not_a_loan_is_not_reported(self):
+        """The other side of the diagonal. A rule that reported every call
+        would be one somebody deletes, and the census is asserted by equality,
+        so a false report is a failing build rather than a note."""
+        assert _loan_writes("book.title = 'Dune'\nBook(title='Dune')\n") == []
+
+    def test_the_columns_this_rule_reads_are_the_ones_only_loans_has(self):
+        """The derivation, pinned where the rule cannot see it move.
+
+        A column name arriving on a second table drops out of this set, and the
+        rule then stops reading writes to it with nothing to say so. Asserted
+        against the two halves rather than against a list of seven names.
+        """
+        columns = _loans_only_columns()
+        loans = {column.name for column in Base.metadata.tables["loans"].columns}
+        assert columns <= loans
+        assert "loaned_by_user_id" in columns
+        assert not columns & {"id", "book_id"}, (
+            "A key is shared with every other table, so a rule reading "
+            "attribute names cannot attribute one to `loans`."
+        )
+
+    def test_no_request_model_lets_a_caller_name_the_issuer(self):
+        """The other door into the same defect, and it needs no new code to open.
+
+        A schema field is how a sync payload or an import would carry an
+        issuer, and it would reach the table through an ordinary
+        `model_validate`. Derived by importing every module in `schemas/` and
+        walking Pydantic's own subclass registry, so a model that is not
+        exported from the package is read too.
+        """
+        for path in sorted((BACKEND / "schemas").glob("*.py")):
+            if path.stem != "__init__":
+                importlib.import_module(f"schemas.{path.stem}")
+
+        seen: set[type[BaseModel]] = set()
+        stack: list[type[BaseModel]] = [BaseModel]
+        while stack:
+            for subclass in stack.pop().__subclasses__():
+                if subclass not in seen:
+                    seen.add(subclass)
+                    stack.append(subclass)
+        declaring = {
+            subclass.__name__
+            for subclass in seen
+            if subclass.__module__.startswith("schemas")
+            and "loaned_by_user_id" in subclass.model_fields
+        }
+        assert declaring == {"LoanOut"}, (
+            f"{sorted(declaring)} declare who issued a loan. `LoanOut` is a "
+            "response and may say so; a model a caller can send is a way to "
+            "claim another instance's authority for a row this one writes."
+        )

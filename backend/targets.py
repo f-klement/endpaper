@@ -321,8 +321,20 @@ class Target:
     query_parameter: str = ""
     query_language: QueryLanguage | None = None
     #: The `recordSchema` asked for, or empty where the target takes none. The
-    #: NKP takes none: its response carries its own Dublin Core whatever is
-    #: asked for.
+    #: NKP and the BNA take none: each response carries its own Dublin Core
+    #: whatever is asked for.
+    #:
+    #: **Empty on a target that answers a lookup puts that target in
+    #: `metadata._sru_refusal`'s path**, and that is worth knowing here because
+    #: it is the field that decides it. The National Library of Greece answers
+    #: the true hit count **and** `Unknown schema for retrieval` when no
+    #: `recordSchema` is named, so this row's `marcxml` is what keeps an
+    #: informational diagnostic out of a rule that reads a diagnostic as a
+    #: refusal. Clearing it here, or adding a lookup target that names none,
+    #: reinstates that: the symptom is the source reporting `UNAVAILABLE` on
+    #: every miss, and no test can see it because it is a property of the live
+    #: server. Measured 2026-09-07, all seven SRU lookup targets answer an
+    #: honest empty result with no diagnostic at all.
     record_schema: str = ""
     #: The CQL index that means "the ISBN" at this target.
     #:
@@ -619,14 +631,19 @@ class Target:
 #: is on `enums.SourceFamily`.
 FAMILY: Final = SourceFamily.CATALOGUE
 
-#: The ten catalogues this application ships knowing about.
+#: The eleven catalogues this application ships knowing about.
 #:
 #: **This is what the runtime asks, and the table is what it seeds.** The
-#: migrations write these ten rows into `catalogue_targets` and
-#: `main.seed_catalogue_targets` reconciles them on every start; **nothing reads
-#: that table back**, deliberately, because #127's decision D2 sends a member
-#: supplied host to #131 and an address read off a row is that decision. #130
-#: makes a row editable and is the first reader.
+#: migrations write ten of these rows into `catalogue_targets` and
+#: `main.seed_catalogue_targets` reconciles them on every start, and **nothing
+#: reads that table back**, deliberately, because #127's decision D2 sends a
+#: member supplied host to #131 and an address read off a row is that decision.
+#: #130 makes a row editable and is the first reader.
+#:
+#: **The eleventh row has no revision yet**, so a deployment's boot seeds one
+#: that a migrated database does not have.
+#: `tests/test_schema.py::TestTheSeededCatalogueTargetsMatchTheCode` is what
+#: says so, and it stays red until one is written.
 #:
 #: So a fresh install behaves exactly as the release before this one did, which
 #: is the only property this had to have, and it holds by construction rather
@@ -809,9 +826,43 @@ SEEDED: Final[dict[CatalogueSource, Target]] = {
         search_cap=50,
         refuses_component_parts=True,
     ),
+    CatalogueSource.BNA: Target(
+        source=CatalogueSource.BNA,
+        rank=7,
+        transport=Transport.SRU,
+        # **Plaintext by necessity and an IP address by necessity**, which are
+        # two separate compromises: port 9991 speaks no TLS, and the library
+        # publishes a bare address with no hostname behind it. `metadata`'s
+        # block carries what a plaintext catalogue connection exposes; what is
+        # different here is that the request carries an `Authorization` header,
+        # so `credentials.Credential.header_for` binding the login to this
+        # origin is load bearing rather than defence in depth.
+        base_url="http://200.123.191.9:9991/BNA01",
+        reader=Reader.DUBLIN_CORE_BARE,
+        answers_lookup=True,
+        # One populated record per response whatever page size is asked for, the
+        # Czech National Library's property measured at this target too: an ISBN
+        # with two hits answers two `<zs:record>` elements and **one**
+        # `recordData`, at `maximumRecords=5`. Measured 2026-09-07.
+        answers_search=False,
+        # **Free and credentialled, which nothing here was before.** The library
+        # publishes the login itself, so this costs nothing per request and
+        # still answers nothing until an install enters one. See
+        # `sources.NEEDS_A_KEY`.
+        metered=False,
+        needs_key=True,
+        sru_version="1.1",
+        query_parameter="x-pquery",
+        query_language=QueryLanguage.PQF,
+        # No `recordSchema`: `recordSchema=marcxml` answers SRU diagnostic 1/66
+        # and the target renders its own Dublin Core regardless.
+        record_schema="",
+        isbn_attribute=z3950.USE_ISBN,
+        lookup_records=1,
+    ),
     CatalogueSource.GOOGLE_BOOKS: Target(
         source=CatalogueSource.GOOGLE_BOOKS,
-        rank=7,
+        rank=8,
         transport=Transport.BESPOKE,
         base_url="https://www.googleapis.com/books/v1/volumes",
         reader=Reader.GOOGLE_BOOKS,
@@ -822,7 +873,7 @@ SEEDED: Final[dict[CatalogueSource, Target]] = {
     ),
     CatalogueSource.BNF: Target(
         source=CatalogueSource.BNF,
-        rank=8,
+        rank=9,
         transport=Transport.SRU,
         base_url="https://catalogue.bnf.fr/api/SRU",
         reader=Reader.DUBLIN_CORE,
@@ -841,7 +892,7 @@ SEEDED: Final[dict[CatalogueSource, Target]] = {
     ),
     CatalogueSource.LOC: Target(
         source=CatalogueSource.LOC,
-        rank=9,
+        rank=10,
         transport=Transport.SRU,
         base_url="http://lx2.loc.gov:210/lcdb",
         reader=Reader.MODS,
@@ -889,9 +940,14 @@ def origin(base_url: str) -> str:
 #: Every origin this application will open a catalogue connection to.
 #:
 #: **Scheme, host and port, and not just the host**, so a row cannot downgrade a
-#: TLS target to plaintext or move it to another port on the same name. Three
-#: targets are plain HTTP by necessity (ports 210, 9991 and 210 speak no TLS) and
-#: an allowlist of bare hostnames would let the other seven join them.
+#: TLS target to plaintext or move it to another port on the same name. **Four**
+#: targets are plain HTTP by necessity (ports 210, 210, 9991 and 9991 speak no
+#: TLS) and an allowlist of bare hostnames would let the other seven join them.
+#: One of the four authenticates, so a plaintext origin here is not only a
+#: question of what an eavesdropper reads.
+#: `tests/test_metadata.py::TestThePlaintextSourcesAreCounted` recomputes that
+#: count from the rows and checks this sentence against it, because it had gone
+#: stale in the commit that added the fourth.
 #:
 #: **Declared here and applied nowhere, deliberately, and this is the paragraph
 #: to read before applying it.** `fetch.py` and `z3950.py` both argue they need

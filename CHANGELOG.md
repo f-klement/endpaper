@@ -4,6 +4,15 @@
 
 ### Added
 
+- **The Biblioteca Nacional Argentina joins the catalogue chain**, asked about an ISBN and
+  never about a title. It is the first source that is free and needs a login: the library
+  publishes a username and password on its own page for librarians, and Endpaper ships
+  neither, so the source answers once an admin enters that pair under Settings, or the
+  deployment pins `CATALOGUE_CREDENTIAL_BNA`. Until then it sits in the provider list saying
+  it needs one, the way Google Books does for its key. Measured against the 500 ISBN sample
+  this
+  repository already holds: of the fifty Argentine ISBNs, it answers ten, four of which no
+  other free source in the chain holds.
 - **A password reset that does not need a mail server.** A member who cannot sign in asks
   from the login screen; an admin approves it under Settings, Data and accounts and is shown
   a one time code once, which they pass to the member out of band. The member spends it on a
@@ -22,6 +31,39 @@
 
 ### Changed
 
+- **A catalogue refusing to answer no longer reads as a book nobody holds.** These endpoints
+  report every error as HTTP 200 carrying a diagnostic, and a lookup read that as an empty
+  answer, so a credential that stopped working, an unsupported record schema or a database
+  name that does not exist all told a member their book was not in the catalogue. A lookup
+  that reads no record from a response carrying a diagnostic now reports the source as
+  unavailable, and where nothing else answered either that is what the whole lookup reports:
+  "try again" rather than "type it in by hand". A diagnostic **beside** records changes
+  nothing, because some catalogues send both.
+- **A record from the Argentine catalogue is attributed to it** rather than to the Czech
+  national library, whose reader it shares.
+- **A subtitle no longer keeps the slash the catalogue prints after it.** Both catalogues in
+  the bare Dublin Core dialect write `title : subtitle /`, and only the title was cleaned.
+- A provider that cannot answer for want of a credential says "Needs an API key or a
+  catalogue login" rather than naming the key alone, because those are now two different
+  things kept in two different places.
+- **What is private stays on the instance it was added to, and that is now a property of
+  the payload rather than of every client.** A private book is never sent, not merely never
+  shown: a rule the client carries is one copy per client, including clients written
+  against this API by people this project cannot correct. The set of serialisers that may
+  build a payload for a reader with no account is pinned by name with a reason each, so a
+  second one is a decision rather than a signature nobody reads. Nothing a member sees
+  changes.
+- **Lending to a borrower whose name the database reads as empty answers 422 rather than
+  500.** A name beginning with a NUL character is a name to look at and no name to SQLite,
+  which counts characters up to the first one, so the row was refused by the database after
+  the request had been accepted. It is refused at the door now, naming the field. Measured:
+  166 of 1,642 route outcomes change, every one from 500 to 422, and nothing that used to be
+  stored is refused.
+- **A loan is issued by the instance holding the book.** `loaned_by_user_id` is only ever
+  the member this instance resolved from a session, and no request model may carry it. That
+  was true and is now enforced, because a sync handler, an importer or a client outbox
+  binds that field from its input by default and nothing about the shape of such a feature
+  looks wrong at review.
 - `POST /auth/register` answers `RegistrationOut` rather than `Token`. The token is nested
   and is absent where the account has an address to confirm first, because an account that
   may do nothing does not get a session.

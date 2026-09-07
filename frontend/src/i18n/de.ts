@@ -631,7 +631,7 @@ export const de: Messages = {
 
   "settings.catalogueLogins": "Katalogzugänge",
   "settings.catalogueLoginsHint":
-    "Manche Nationalbibliotheken antworten nur mit Zugangsdaten. Ein Zugang wird verschlüsselt gespeichert und ausschließlich an diesen Katalog gesendet.",
+    "Manche Nationalbibliotheken antworten nur mit Zugangsdaten. Ein Zugang wird verschlüsselt gespeichert und ausschließlich an diesen Katalog gesendet. Nicht alle bieten eine verschlüsselte Verbindung an, deshalb bitte nur Zugangsdaten hinterlegen, die ausschließlich den Katalog öffnen.",
   "settings.credentialUsername": "Benutzername",
   "settings.credentialPassword": "Passwort",
   "settings.credentialSet": "Ein Zugang ist gespeichert ({preview}).",
@@ -1385,10 +1385,11 @@ export const de: Messages = {
   "providers.name.nlg": "Griechische Nationalbibliothek",
   "providers.name.nkp": "Tschechische Nationalbibliothek",
   "providers.name.bne": "Spanische Nationalbibliothek",
+  "providers.name.bna": "Argentinische Nationalbibliothek",
   "providers.name.bnf": "Französische Nationalbibliothek",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":
-    "Braucht einen API-Schlüssel. Unten einen hinterlegen, sonst kann dieser Katalog nichts beantworten.",
+    "Braucht einen API-Schlüssel oder Zugangsdaten für den Katalog. Unten hinterlegen, sonst kann dieser Katalog nichts beantworten.",
   "providers.status.switchedOffBelow":
     "Ein Schlüssel ist hinterlegt, dieser Katalog ist aber in seiner eigenen Karte weiter unten ausgeschaltet.",
   "providers.status.searchOnly":

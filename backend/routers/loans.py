@@ -242,9 +242,10 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    # Only a member has to exist. An external borrower is a name, checked by
-    # `LoanCreate` (exactly one of the two is set) and by the CHECK constraint
-    # behind it.
+    # Only a member has to exist. An external borrower is a name, and which of
+    # the two a payload may carry is `models.names_exactly_one_borrower`,
+    # applied by `LoanCreate` before this runs and by `ck_loans_one_borrower`
+    # after it.
     if payload.loaned_to_user_id is not None and db.get(User, payload.loaned_to_user_id) is None:
         raise HTTPException(status_code=404, detail="User not found")
 

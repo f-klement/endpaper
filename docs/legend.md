@@ -7,7 +7,7 @@ It defines nothing endpaper invented: for that, read [data-model.md](data-model.
 
 ## The catalogues
 
-Eight of the ten metadata sources are national or union library catalogues. The other two,
+Nine of the eleven metadata sources are national or union library catalogues. The other two,
 Open Library and Google Books, are ordinary web APIs and need no glossary.
 
 | Term | What it is |
@@ -15,11 +15,12 @@ Open Library and Google Books, are ordinary web APIs and need no glossary.
 | **DNB** | Deutsche Nationalbibliothek. Germany's legal deposit library, so it holds essentially everything published there. It is the reason a 978-3 ISBN can be catalogued at all: for the two that prompted this work, Open Library answered 404 and the DNB returned a full record for each. |
 | **K10plus** | The union catalogue of the GBV and SWB library networks, one shared database behind a large share of German academic libraries. Strong on European publishing and on printings older than the ISBN. |
 | **BnF** | Bibliothèque nationale de France, the French national library. |
-| **LoC** | Library of Congress, the de facto national library of the United States. One of the three sources fetched over plaintext HTTP, which `decisions.md` records as accepted rather than fixed. |
+| **LoC** | Library of Congress, the de facto national library of the United States. One of the four sources fetched over plaintext HTTP, which `decisions.md` records as accepted rather than fixed. |
 | **ÖNB** | Österreichische Nationalbibliothek, Austria's national library. In the chain for Austrian imprints the German catalogues hold as cross references or not at all. Austria has no registration group of its own, so its remit is `978-3`, shared with Germany and Switzerland. |
 | **NLG** | The National Library of Greece, Greece's legal deposit library. One of the plaintext sources: its catalogue answers on port 210 and offers no TLS. Asked only about Greek publishing, `978-960` and `978-618`. |
 | **BNE** | Biblioteca Nacional de España, Spain's legal deposit library. Reached over Alma's SRU on its OPAC hostname, which is why an earlier survey recorded it as closed: its Z39.50 port authenticates and its catalogue does not. Asked about an ISBN and never about a title. It declares no registration group remit, because it alone answers for books outside `978-84`: Spanish language publishing from Latin America reaches this catalogue and no other in the chain. |
 | **NKP** | Národní knihovna České republiky, the Czech national library. Asked about an ISBN and never about a title: its server renders one populated record per response whatever page size is asked for, so a search for ten candidates would be ten requests. Plaintext on port 9991. |
+| **BNA** | Biblioteca Nacional Argentina, Argentina's national library. The Czech catalogue's profile at a different address, down to answering one populated record per response, so it is asked about an ISBN and never about a title. The one source whose request carries a login: the library publishes a username and password on its own page for librarians, this build ships neither, and an install that enters one gets the source. Plaintext on port 9991, which is what makes that login the sharpest case of the row above. |
 
 ## Inside an ISBN
 
@@ -32,8 +33,8 @@ Open Library and Google Books, are ordinary web APIs and need no glossary.
 
 | Term | What it is |
 |---|---|
-| **SRU** | Search/Retrieve via URL. The standard HTTP query protocol for library catalogues: send a query and a `recordSchema`, receive XML. All eight catalogues above speak it, though the NKP takes its query in PQF rather than CQL. |
-| **PQF** | Prefix Query Format, YAZ's textual form of a Z39.50 query: `@attr 1=7 "9788025712948"` is "the ISBN index equals this". The NKP takes this and refuses CQL, so its terms are quoted by `z3950.pqf_term`, which is PQF's own escaping rule and deliberately not the CQL sanitiser. |
+| **SRU** | Search/Retrieve via URL. The standard HTTP query protocol for library catalogues: send a query and a `recordSchema`, receive XML. All nine catalogues above speak it, though the NKP and the BNA take their queries in PQF rather than CQL. |
+| **PQF** | Prefix Query Format, YAZ's textual form of a Z39.50 query: `@attr 1=7 "9788025712948"` is "the ISBN index equals this". The NKP and the BNA take this and refuse CQL, so their terms are quoted by `z3950.pqf_term`, which is PQF's own escaping rule and deliberately not the CQL sanitiser. |
 | **CQL** | The query language SRU carries. Its index names are catalogue specific, which is why the code holds `num=` (the DNB's identifier index, which matches an identifier anywhere in a record), `WOE=` (the DNB's all words index) and `pica.all=` (K10plus's catch all, named for PICA, the cataloguing system behind those networks). |
 | **MARC**, **MARC21** | MAchine Readable Cataloging, the dominant library record format since the 1960s. A record is numbered **fields**, each holding lettered **subfields**: `245 $a` is the title and `$b` the subtitle. MARC21 is the Anglo-American branch, the harmonisation of the American and Canadian formats, and it is what every catalogue this build reads sends. It is not the only branch: see UNIMARC below. |
 | **UNIMARC** | The other MARC family, created by IFLA so national formats could be exchanged through one intermediary, and native to the Romance and Mediterranean national libraries. Same shape as MARC21, different numbers: the title is `200` rather than `245`, the author `700` rather than `100`, the publisher `210` rather than `260`, Dewey `676` rather than `082`. Two differences are not renumbering. It records a contributor's **role in the tag**, 701 for alternate and 702 for secondary responsibility, where MARC21 puts it in `$4` of a single `700`. And its relator codes are numeric, `070` for author, where MARC21's are letters. **Nothing this build queries answers it**, so no reader here reads one. The Z39.50 seam names the format, but no target may carry that transport yet and none does; the one catalogue ever measured for UNIMARC answered MARC21 instead. |

@@ -376,6 +376,20 @@ point at `users` (borrower and lender), which is why the relationships declare e
 `is_overdue` is **computed per request, never stored**, since a stored flag would be wrong
 from the moment the deadline passed until something happened to write to the row.
 
+**Who may issue a loan.** The instance holding the copy, and no other. The book is in one
+house, and the person who hands it over is the one who records it, which gives one writer
+per loan: no consensus, no reconciliation, and no window in which two instances both
+issue. That matters because `uq_loans_one_open_per_book` is a cross row invariant rather
+than a value, so two issuers is not a conflict a merge rule repairs, it is a book out with
+two people at once. `loaned_by_user_id` is that claim, and no route lets a caller supply it:
+it is the member this instance resolved from a session.
+`backend/tests/test_house_rules.py::TestOneInstanceIssuesALoan` pins both halves, the places
+that write the table and what the issuer is bound to, and names what it cannot see.
+
+**A restore is the exception and is not a route.** `backup.restore` inserts `loans` from an
+archive through Core, so the issuer of a restored loan is whatever the archive holds, which
+is the same deliberate unfiltered reach that makes a backup a backup.
+
 `notified_at` is the one piece of state the overdue digest keeps: when a reminder last
 went out for this loan, or null if none ever has. Stamped only after a delivery that
 succeeded, so a failed one retries on the next run. Without it the digest either sends
@@ -385,11 +399,30 @@ once and forgets a book that is still out, or repeats the same list every hour.
 `loaned_to_name` holds a free-text name (120 characters) for somebody with no account: a
 neighbour, a colleague, a book club. The whole point of recording a loan is remembering
 who has the book, and the people most likely to keep one are exactly those who will never
-have a login here. **Exactly one of the two is set**, enforced by the CHECK constraint
-`ck_loans_one_borrower` rather than by the schema alone, for the same reason the open-loan
-rule is an index: a restore and an import both write rows without going through
-`LoanCreate`. The constraint also refuses an all-whitespace name, which satisfies
-`IS NOT NULL` and identifies nobody. `LoanCreate` rejects both or neither with a 422.
+have a login here. **Exactly one of the two is set**, and that rule has one spelling in each
+language: `models.ONE_BORROWER_SQL`, which is the text the CHECK constraint
+`ck_loans_one_borrower` is built from, and `models.names_exactly_one_borrower`, which is
+what `LoanCreate` applies. In the database rather than in the schema alone, for the same
+reason the open-loan rule is an index: a restore and an import both write rows without going
+through `LoanCreate`.
+
+The two are clause for clause, and the SQL's two surprises are in the predicate rather than
+argued away. **SQLite's `trim()` strips the space character and nothing else**, so a borrower
+named with a single tab satisfies the constraint and is stored; and **`length()` counts up to
+the first NUL**, so a name whose first non space character is a NUL is empty to SQLite and
+the row is refused however many characters follow. The predicate says the same on both,
+because its job is to answer what the database will accept. Both were found by sweeping an
+alphabet against a real constraint rather than by reading it. Deciding what is fit to store is
+`LoanCreate`'s, which strips on Python's whitespace rule before asking, so no route reaches
+that row; a restore and an importer do, and those are the writers this constraint exists for.
+It is recorded as a known gap rather than closed, because SQL's whitespace is a list of
+characters and Python's is a Unicode property, so widening `trim()` to the ASCII four would
+close four holes and read as closing a category.
+
+The two are asserted against each other row by row rather than read side by side. That is
+what caught the predicate reading an empty string as no name where SQL reads it as a second
+borrower, and, once the cases included whitespace that is not a space, the `trim()`
+difference above.
 
 Lending **from** an external, a book the library has borrowed rather than lent, is
 deliberately not a loan. See [decisions.md](decisions.md).
@@ -898,7 +931,7 @@ The rule has one home per question, the same way the query side does:
 |---|---|
 | Which rows may a stranger see? | `Shelf.seen_by_the_public`, which has no ownership arm |
 | How do those rows stay marked as such? | `shelf.Outbound`, minted by the shelf alone |
-| Which serialiser may build the payload? | whichever takes an `Outbound` |
+| Which serialiser may build the payload? | one that takes an `Outbound`, and they are named |
 
 `Shelf.outbound_page` and `Shelf.outbound_first` are the two ways to a value of that type,
 and both refuse a shelf built for a member. So `books_to_public_out` cannot be handed one
@@ -921,7 +954,7 @@ the member who added them. Two serialisers with two types is the evidence the bo
 on the right axis: `Outbound` does not mean "serialised", it means "addressed to somebody
 this instance cannot name".
 
-Four things enforce it, each seeing what the others cannot:
+Five things enforce it, each seeing what the others cannot:
 
 - **mypy**, at every call site, because the type is on the signature.
 - `Outbound.__post_init__`, at run time, whatever spelling the class is reached by. It is
@@ -930,9 +963,16 @@ Four things enforce it, each seeing what the others cannot:
   construction **that names the type** outside `shelf.py`. It is not made redundant by the
   check above: it fails in CI on a construction that is merely written, where the run time
   check fails only when the line is reached.
+- `backend/tests/test_shelf.py::TestTheSerialisersThatMayBuildAnOutboundPayload`, which
+  pins the set of functions that take an `Outbound` and the set of calls that ask a shelf
+  for one, by equality and with a reason each. Without it "whichever takes an `Outbound`"
+  describes the tree rather than constraining it, and a second serialiser is a signature
+  nobody reads.
 - `backend/tests/test_nothing_private_leaves.py`, which drives **every route this
   application answers with no member resolved**, derived from the live route table, and
-  asserts a marked private book comes back from none of them.
+  asserts a marked private book comes back from none of them. It meets the rule above at
+  the routes and diverges off them: a payload built for a stranger by something that is
+  not a route is caught by neither.
 
 **What none of them covers**: anything leaving by something that is not a route. The digest
 mailer sends titles to members, a backup carries every row deliberately and is admin only
@@ -1032,8 +1072,9 @@ rather than for any query: it is a child of a table whose rows get deleted, and 
 book from the trash checks it once per deleted row.
 
 **Exactly one borrower** (migration `d5c31b7a09fe`). The CHECK constraint
-`ck_loans_one_borrower`: `(loaned_to_user_id IS NULL) <> (loaned_to_name IS NULL)`, plus a
-`trim()` clause so an empty or whitespace name cannot pass. That migration drops the
+`ck_loans_one_borrower`, whose text is `models.ONE_BORROWER_SQL`. The revision keeps a
+copy of its own, deliberately: a revision records what was applied on a day, and one that
+imported the constant would change meaning whenever the constant did. That migration drops the
 partial index and recreates it around the table rewrite, because batch mode rebuilds a
 SQLite table by reflecting it and a partial index returning as a plain unique one would
 forbid ever lending a book twice.

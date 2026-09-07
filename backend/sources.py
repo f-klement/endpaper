@@ -86,7 +86,14 @@ class Measured:
     largest_frame: int
 
 
-#: What each free lookup source does, measured 2026-08-30, except the BNE's row.
+#: What each source a stock install asks does, measured 2026-08-30, except the
+#: BNE's row.
+#:
+#: **A source a stock install does not ask is not in this table**, and that is
+#: not the same rule as costing money: a source that is free and needs a login
+#: is asked by nobody who has entered nothing, so there is nothing to measure
+#: about it here. `tests/test_sources.py` binds this set to
+#: `LOOKUP_SOURCES - NEEDS_A_KEY` so a source cannot quietly go unmeasured.
 #:
 #: **The sample**: ten frames of 50 domestic ISBNs, 500 in all, so a source with
 #: a national remit is measured on the books it is for rather than on a global
@@ -264,6 +271,15 @@ DEFAULT_ORDER: Final[tuple[CatalogueSource, ...]] = (
     CatalogueSource.BNE,
     CatalogueSource.NLG,
     CatalogueSource.OENB,
+    # **After every measured source and before the metered one**, which is the
+    # rule for a source `MEASURED` does not cover: it cannot be ranked against
+    # the tail's marginal counts, and putting it behind Google Books would spend
+    # quota before a free source had been asked. `TAIL_MARGINAL` therefore does
+    # not name it and `test_the_tail_is_ordered_by_how_often_it_answers_what_the_tier_missed`
+    # steps over it. What it does answer is measured in `metadata`'s block for
+    # it, against the same committed sample: it is a credentialled source and so
+    # outside the pass those figures come from.
+    CatalogueSource.BNA,
     CatalogueSource.GOOGLE_BOOKS,
     CatalogueSource.BNF,
     CatalogueSource.LOC,
@@ -349,12 +365,20 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset(
 #: Sources that need a credential the household supplies, so an install without
 #: one has a provider in the list that can never answer. The settings screen
 #: says so rather than leaving it as the silent cause of "why is this not
-#: working". `config.google_books_api_key_from_env` and the stored key are the
-#: two places one can come from; `settings_store.google_books_api_key` is the
-#: single answer to whether there is one.
+#: working". `settings_store.ready_sources` is the single answer to whether
+#: there is one, over both stores: a settings row for Google Books' key, and a
+#: sealed `catalogue_credentials` row for anything else.
+#:
+#: **Free and credentialled is a real combination now, and this set no longer
+#: equals `METERED`.** The Biblioteca Nacional Argentina publishes its own login
+#: on its page for librarians, so its credential costs nothing and still has to
+#: be entered before the source answers anything. The two properties were one
+#: set until it joined, and `Plan.lookup_together` bars a **metered** source from
+#: the gathered tier rather than a credentialled one, which is the reading that
+#: had to be checked rather than assumed when they came apart.
 #:
 #: **This is much of the chain's coverage, and most installs do not have it.**
-#: The seven free sources answer 395 of the 500 ISBNs behind `MEASURED` and miss
+#: The seven sources a stock install asks answer 395 of the 500 ISBNs behind `MEASURED` and miss
 #: 105, and outside German language publishing they miss 101 of 400. #91
 #: measured the same books with a key: Italy 36% missed keyless against 0% with
 #: one, Greece 86% against 54%. So "the chain covers this country" is a claim
@@ -379,9 +403,9 @@ NEEDS_A_KEY: Final[frozenset[CatalogueSource]] = frozenset(
 #:
 #: A cost bound rather than a taste: an ordinary lookup makes this many outbound
 #: requests whatever the household puts in the list, so reordering cannot turn
-#: every lookup into an eight way fan out. **Eight, not ten**, and the number is
-#: `LOOKUP_SOURCES` rather than the roster: two of the ten answer a title search
-#: only and are never asked about an ISBN at all. What a household changes is
+#: every lookup into a nine way fan out. **Nine, not eleven**, and the number is
+#: `LOOKUP_SOURCES` rather than the roster: two of the eleven answer a title
+#: search only and are never asked about an ISBN at all. What a household changes is
 #: **which** sources fill the slots, which is the whole point of the control.
 #:
 #: **Three was measured and refused, #115, and re-measured and refused again on
@@ -830,10 +854,12 @@ def describe(
     so first.
     """
     # **The leading pair as it will actually be asked**, so a source kept out of
-    # the plan for want of a key does not hold a slot on the screen that it does
-    # not hold in a request. Computed here rather than taken from the stored
-    # plan, which agreed only by accident: today the one unready source is also
-    # the one barred from this tier for being metered.
+    # the plan for want of a credential does not hold a slot on the screen that
+    # it does not hold in a request. Computed here rather than taken from the
+    # stored plan, which agreed only by accident while the one unready source
+    # was also the one barred from this tier for being metered. It stopped
+    # agreeing when a free credentialled source joined: that one **may** hold a
+    # leading slot, and does not while no login is stored.
     leading = frozenset(in_force(plan, ready).lookup_together)
     return tuple(
         Described(
