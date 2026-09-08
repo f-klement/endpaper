@@ -1,9 +1,9 @@
 # Backend test coverage
 
-**6320 tests**, in 95 files, recounted with `--collect-only` on 2026-09-08.
+**6328 tests**, in 96 files, recounted with `--collect-only` on 2026-09-08.
 
 **The headline equals the passed count today, and that is a fact about the tree rather than
-a simplification.** The gate reports `6320 passed`, with no skip and no `xfail`: the strict
+a simplification.** The gate reports `6328 passed`, with no skip and no `xfail`: the strict
 `xfail` that recorded a defect in the CSV importer is gone, because the work that closed the
 defect closed it.
 
@@ -15,7 +15,7 @@ the skip once made the check undoable, and a rule rewritten as `collected == pas
 the tree happens to have neither is one that fails for the wrong reason the day somebody adds
 either.
 
-**The rows below sum to 6271, forty nine short, and the shortfall is deliberate.** Those
+**The rows below sum to 6279, forty nine short, and the shortfall is deliberate.** Those
 tests live in six files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -94,6 +94,7 @@ why the helper uses regexes.
 | `test_authorship.py` | 107 | **The database half of author identity.** That one read costs two statements and that a read after a write is not stale |
 | `test_shelf.py` | 224 | The seam every many-book query goes through, and the only enforcement of the privacy rule since the AST guard was deleted. |
 | `test_nothing_private_leaves.py` | 34 | **The export boundary, and what still crosses it.** That only the shelf builds an outbound payload, a route sweep derived from the live route table, and the shapes the guards admit they cannot see |
+| `test_no_custody.py` | 7 | **Nowhere to send a book file to.** Which routes accept an upload, as an equality in both directions with what each file is for, and that no mapped column carries bytes: the structural half of the promise that a book file is read in the browser and never uploaded |
 | `test_authors.py` | 63 | Splitting a credit line, the key that folds without asking against the one that only suggests, the index, the four suggestion rules |
 | `test_auth_backends_bindguard.py` | 20 | **The empty-password guards**, at all three layers |
 | `test_ratelimit.py` | 37 | The sliding window, and the login/registration limits |
@@ -138,7 +139,7 @@ why the helper uses regexes.
 | `routers/test_books_reading.py` | 31 | Ratings, and the rules for stamping reading dates |
 | `routers/test_books_series.py` | 30 | Series gaps, shelf locations, partial detail edits, and that the gap range is truncated at `MAX_SERIES_INDEX`, pinned from both edges so neither a smaller ceiling nor a missing one passes |
 | `routers/test_books_authors.py` | 110 | The author index and its privacy, the `?author=` filter, merging and reversing one, the library wide mapping against the filtered shelf, the flat map, and undoing a merge. |
-| `routers/test_books.py` | 123 | Listing, search, sorting, tagging, covers, notes, export, ownership, and that a login this deployment holds leaves with the request that needs it |
+| `routers/test_books.py` | 124 | Listing, search, sorting, tagging, covers, notes, export, ownership, and that a login this deployment holds leaves with the request that needs it |
 | `routers/test_books_google.py` | 44 | Enrichment, the chosen-edition apply and that its body cannot overflow the database |
 | `routers/test_books_search.py` | 55 | **Free-text search.** That it works with no API key, that the six catalogues a reader would doubt answer do, how they merge |
 | `routers/test_books_trash.py` | 43 | **Undoing a delete.** That a trashed book leaves every view, comes back whole, and frees its ISBN again |

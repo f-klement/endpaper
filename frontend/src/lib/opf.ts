@@ -39,6 +39,7 @@
  * the file.
  */
 
+import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
 
 const OPF_NAMESPACE = "http://www.idpf.org/2007/opf";
@@ -296,6 +297,20 @@ function readIsbn(identifiers: readonly OpfIdentifier[]): string | null {
  * format guarantees. EPUB 3 allows one `dc:date`, the publication date, and
  * puts the last modification in a `dcterms:modified` meta where this cannot
  * reach it.
+ *
+ * **Plausible rather than storable**, and the window is
+ * `bookBounds.plausibleYear`'s rather than this reader's. Choosing among the
+ * dates does not make the chosen one a date: every branch above can land on the
+ * value that bought the window, the last two by having nothing else to land on.
+ *
+ * **Applied to the chosen date and not to each candidate**, which is the
+ * opposite of `fb2.yearIn` and is a difference between the two fallback chains
+ * rather than a disagreement about the window. FB2 falls back from one typed
+ * field to another typed field, so skipping an implausible first candidate
+ * reaches a fact of the same kind. The last arm here is `dates[0]`, any date in
+ * the document, so skipping an implausible preferred date would reach the
+ * conversion date that this preference order exists to avoid. An implausible
+ * publication date loses the year rather than trading it for a worse one.
  */
 function readYear(metadata: Element): number | null {
   const dates = dcChildren(metadata, "date");
@@ -311,7 +326,7 @@ function readYear(metadata: Element): number | null {
     dates[0];
 
   const match = /^(\d{4})/.exec(text(chosen) ?? "");
-  return match ? Number(match[1]) : null;
+  return match === null ? null : plausibleYear(Number(match[1]));
 }
 
 /** A `<meta name="..." content="...">`, which is how EPUB 2 says everything. */

@@ -173,76 +173,135 @@ export function classicPdf(
   );
 }
 
+/** Where a packed object ended up: which object stream, and at which index. */
+interface Packing {
+  readonly stream: number;
+  readonly index: number;
+}
+
 /**
  * A PDF whose cross reference is a stream, optionally under a PNG predictor.
  *
- * The stream object numbers itself one past the highest given object, which is
- * what a real writer does, and it is written last so its own offset is known.
+ * The object streams and then the cross reference stream number themselves past
+ * the highest given object, which is what a real writer does, and the cross
+ * reference is written last so its own offset is known.
  */
 export async function streamPdf(
   objects: readonly PdfObject[],
   trailer: string,
   options: {
     readonly predictor?: boolean;
-    readonly compressed?: readonly number[];
+    /**
+     * Which objects live in object streams, **one object stream per group**.
+     *
+     * A group rather than a flat list, because the number of streams is a fact
+     * a test needs to choose: what one of them costs is bounded per stream, so
+     * how many of them there are is the other half of what a file can spend.
+     */
+    readonly packed?: readonly (readonly number[])[];
+    /**
+     * Pad every object stream so it inflates to exactly this many bytes.
+     *
+     * Zeroes, appended after the objects, which is where nothing reads: an
+     * object stream is addressed by the offsets in its own header, so a tail it
+     * never points at changes what the stream costs to open and nothing else.
+     * They deflate to roughly a thousandth of their size, so this is how a
+     * fixture asks for a large inflate out of a small file.
+     */
+    readonly inflateTo?: number;
+    /**
+     * The pairs header to write, as `[object number, offset]` rows, instead of
+     * the one derived from where the bodies land.
+     *
+     * **A file writes that header, so a test has to be able to write a wrong
+     * one.** Nothing in the format requires two rows to name different offsets,
+     * and a header naming one offset `/N` times is how an object stream costs
+     * `/N` parses for the one inflation it is charged. One group only, since it
+     * describes one stream.
+     */
+    readonly packedHeader?: readonly (readonly [number, number])[];
     readonly header?: string;
     /**
      * What to write as the object stream's `/Length`, instead of its size.
      *
      * For the one shape a length has to be able to take: a reference to an
-     * object that lives inside the very stream whose length it is.
+     * object that lives inside the very stream whose length it is. One group
+     * only, since it names one stream.
      */
     readonly objStmLength?: string;
   } = {},
 ): Promise<Uint8Array<ArrayBuffer>> {
   const header = options.header ?? "%PDF-1.5\n";
-  const inStream = new Set(options.compressed ?? []);
-  const loose = objects.filter((item) => !inStream.has(item.num));
-  const packed = objects.filter((item) => inStream.has(item.num));
-
-  const all: PdfObject[] = [...loose];
+  const groups = options.packed ?? [];
+  if (options.objStmLength !== undefined && groups.length !== 1) {
+    throw new Error("objStmLength names one object stream, so pass one group");
+  }
+  if (options.packedHeader !== undefined && groups.length !== 1) {
+    throw new Error("packedHeader describes one object stream, so pass one");
+  }
+  const inStream = new Set(groups.flat());
+  const all: PdfObject[] = objects.filter((item) => !inStream.has(item.num));
   const highest = Math.max(0, ...objects.map((item) => item.num));
-  const objStmNum = highest + 1;
-  const xrefNum = highest + 2;
 
-  let inside = new Map<number, number>();
-  if (packed.length > 0) {
-    let pairs = "";
+  const inside = new Map<number, Packing>();
+  let next = highest + 1;
+  for (const group of groups) {
+    const packed = objects.filter((item) => group.includes(item.num));
+    if (packed.length === 0) continue;
+    const objStmNum = next;
+    next += 1;
     let bodies: Uint8Array<ArrayBuffer> = new Uint8Array();
+    const derived: [number, number][] = [];
     for (const item of packed) {
-      pairs += `${item.num} ${bodies.length} `;
+      derived.push([item.num, bodies.length]);
       bodies = concat(bodies, item.body, " ");
     }
+    const pairRows = options.packedHeader ?? derived;
+    const pairs = pairRows.map(([num, at]) => `${num} ${at} `).join("");
     const first = latin(pairs).length;
-    const payload = concat(pairs, bodies);
+    let payload = concat(pairs, bodies);
+    if (options.inflateTo !== undefined) {
+      if (payload.length > options.inflateTo) {
+        throw new Error("inflateTo is under what the objects themselves take");
+      }
+      payload = concat(
+        payload,
+        new Uint8Array(options.inflateTo - payload.length),
+      );
+    }
     const packedBytes = await deflate(payload);
     all.push(
       options.objStmLength === undefined
         ? streamObject(
             objStmNum,
-            `<< /Type /ObjStm /N ${packed.length} /First ${first} /Filter /FlateDecode >>`,
+            `<< /Type /ObjStm /N ${pairRows.length} /First ${first} /Filter /FlateDecode >>`,
             packedBytes,
           )
         : object(
             objStmNum,
             concat(
-              `<< /Type /ObjStm /N ${packed.length} /First ${first}` +
+              `<< /Type /ObjStm /N ${pairRows.length} /First ${first}` +
                 ` /Filter /FlateDecode /Length ${options.objStmLength} >>\nstream\n`,
               packedBytes,
               "\nendstream",
             ),
           ),
     );
-    inside = new Map(packed.map((item, index) => [item.num, index]));
+    packed.forEach((item, index) =>
+      inside.set(item.num, { stream: objStmNum, index }),
+    );
   }
+  const xrefNum = next;
 
   const { bytes, offsets } = assemble(all, header);
   const xrefAt = bytes.length;
 
   const rows: number[][] = [[0, 0, 65535]];
   for (let num = 1; num <= xrefNum; num += 1) {
+    const packing = inside.get(num);
     if (num === xrefNum) rows.push([1, xrefAt, 0]);
-    else if (inside.has(num)) rows.push([2, objStmNum, inside.get(num)!]);
+    else if (packing !== undefined)
+      rows.push([2, packing.stream, packing.index]);
     else if (offsets.has(num)) rows.push([1, offsets.get(num)!, 0]);
     else rows.push([0, 0, 0]);
   }

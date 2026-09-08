@@ -1057,6 +1057,16 @@ class TestExport:
             "Purchase Currency", "Purchased On", "Purchased From",
         ]
 
+    def test_a_format_outside_its_enum_never_reaches_the_export(self, client, admin):
+        """The `Format` and `Condition` cells skip `_csv_safe`, so the write refuses
+        anything but an enum value: that refusal is what keeps a formula out of them."""
+        res = client.post(
+            "/api/books",
+            json={"title": "Test Book", "author": "Test Author", "format": "=1+1"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
+
     def test_csv_contains_the_books(self, client, admin, make_book):
         make_book(admin["headers"], title="Exported", author="An Author")
         rows = self._rows(client.get("/api/books/export", headers=admin["headers"]))

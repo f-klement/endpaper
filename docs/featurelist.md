@@ -71,7 +71,9 @@ MOBI, AZW and AZW3, FictionBook as both `.fb2` and `.fb2.zip`, CBZ, and PDF.
 Title, authors, series and the position in it, publisher, year, language and
 description, as far as each format carries them. **The files are read in your
 own browser and are never uploaded**: only what a file said is sent, and the app
-never takes custody of a book. A file that will not open stays in the queue with
+never takes custody of a book. What holds that up is the server rather than the
+page: no route accepts a book file, so there is nowhere to send one. A file that
+will not open stays in the queue with
 its name and the reason rather than failing the batch, and a format Endpaper
 does not read is counted and reported rather than passed over in silence.
 

@@ -830,9 +830,16 @@ def export_books(
             ]
         )
         for book in books:
-            # Every member-supplied cell goes through `_csv_safe`. The numeric
-            # and enum columns do not need it and are passed through it anyway,
-            # so adding a column cannot accidentally skip the guard.
+            # Every member-supplied cell goes through `_csv_safe`. Four do not,
+            # and the reason is the column rather than the call: `year` is an
+            # int, `added_at` and `purchased_at` are dates, the status is ours,
+            # and `format` and `condition` are refused at the write unless they
+            # are one of their enum's values, so none of them can carry a
+            # leading `=`, `+`, `-` or `@` into a spreadsheet. A new column is
+            # covered by this list only if it is constrained the same way; a
+            # member-supplied string is not, and goes through `_csv_safe`.
+            # `test_books.py::TestExport` pins the enum half, which is the only
+            # one that depends on a validator rather than on a type.
             writer.writerow(
                 [
                     _csv_safe(book.title),

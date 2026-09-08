@@ -11558,8 +11558,12 @@ since no schema stands behind it. Three arms stand in for that, all in
 `tests/lib/bookBounds.test.ts`: `boundNumber("year", 101)` keeps 101 while
 `plausibleYear(101)` refuses it, which a reader collapsing one window into the other fails;
 `bookBounds.ts` is the only module under `src/` carrying either end of the window, and each
-end appears once inside it; and the modules calling `plausibleYear` are exactly the three
-readers.
+end appears once inside it; and the modules calling `plausibleYear` are exactly the readers
+that apply it.
+
+**The third arm counted three readers when it was written and counts six now**, and the arm
+reads the callers out of the source rather than restating a number, which is why the window
+reaching `opf.ts`, `cbz.ts` and `fb2.ts` did not have to be a change here.
 
 **The source scan took five attempts and every evasion was a different class**, which is the
 part worth keeping: a matcher covering one end of a two ended window, the same literal
@@ -11600,6 +11604,10 @@ which deliberately reads none because the year on a recording is not the book's:
 | `opf.ts` | `dc:date` | nothing |
 | `cbz.ts` | ComicInfo `Year` | nothing: it refuses every year at or below zero, where ComicRack's `-1` for unknown lands, which is reading the format rather than bounding it |
 | `fb2.ts` | `publish-info/year`, then `title-info/date` | nothing |
+
+**This table is the state that motivated the change and not the state today.** The last three
+rows now read `plausibleYear`: see "The plausibility window belongs to reading a year, not to
+bounding one" below, which also carries what stayed open at the `calibre.ts` door.
 
 Measured 2026-09-08 by running the real parsers: `readOpf` answers 101 for
 `<dc:date>0101-01-01T00:00:00+00:00</dc:date>` in both the EPUB 2 and the EPUB 3 spelling,
@@ -11642,8 +11650,10 @@ The Calibre import ticket recorded the reference library as carrying **damage in
 the OPF corrects**. The count is right, the same 57 books, and the direction is inverted.
 
 57 of the 244 files carry `dc:date` of `0101-01-01`, Calibre's `UNDEFINED_DATE`. `opf.ts`
-reads the leading four digits and does not refuse it, correctly, because it reports what an OPF
-file says and that constant is Calibre's convention rather than the format's. So all 57 arrived
+read the leading four digits and did not refuse it when this was measured, because it reports
+what an OPF file says and that constant is Calibre's convention rather than the format's. It
+refuses the year 101 now, by the window rather than by the name, and the counts below were
+taken before that and count arrivals rather than what the door does today. So all 57 arrived
 at `crossCheck` as the year 101: **28 filled an empty year and 29 were counted as a
 disagreement against a real year the index already held**. The file supplied a year the index
 lacked in 0 of the 57.
@@ -11828,3 +11838,209 @@ sentence.** The rules that fall out, each bought by a failure here:
   timings and node names; it extends to test counts. `0 test` was true of a run with an
   evaluation fault injected and was written as a fact about the source, where the file collects
   45 and passes.
+
+## The plausibility window belongs to reading a year, not to bounding one
+
+Six readers take a publication year out of a file, and each of their modules
+says in its own docstring that it reports what the file claims. That reads as an
+argument against a window at the reader: a value the file carries is a value the
+file carries. It is not one. A number outside the window is not a publication
+year the file asserted, it is a number sitting in a date field, and reporting it
+as a year is the reader getting the field wrong. `cbz.readYear` reached the same
+conclusion independently for ComicRack's `-1` sentinel before the window existed.
+
+`bookBounds.plausibleYear` is the one home of that sentence. Each reader points
+at it and none restates it.
+
+**The exclusion is `calibre.ts::readYear`**, which takes a year out of a
+`metadata.db` row and refuses the literal 101 by name rather than by window, so
+`[1, 1449]` and `[2101, 2200]` stay open at that door and a `pubdate` of
+`1200-01-01` arrives as the year 1200. It is the door with the only incidence
+measured against a real library. It is stated in `bookBounds.ts` and in the
+caller scan's own comment rather than left as a silent hole inside a sentence
+that reads as a universal; closing it is a separate change and is in the
+tracker.
+
+**What the window costs on the Calibre route.** `opf.readOpf` is also the
+Calibre import's reader, so the window now applies to a `metadata.opf` beside a
+book as well as to a file picked on the scan page. The ticket's own case is
+unchanged there, because `calibre.ts::withoutPlaceholders` already refused the
+year 101 by name on that route. **The door is not unchanged**: that arm can no
+longer fire in production, since `opf.readYear` cannot return 101 any more. It
+stays because the placeholder set drives both doors and the database door still
+needs it, and `calibre.test.ts` still drives it directly with a hand built
+`OpfRecord`. What also moves is a file claiming a year like 1200, which
+`crossCheck` used to count as a filled field or a disagreement and now does not
+see at all. The 57 of 243 and the 28 and 29 recorded for that door were measured
+before the window and count arrivals at `opf.readYear`, not at the arm.
+
+## The window sits in `fb2.yearIn`, not at the end of `fb2.readYear`
+
+FictionBook says the year twice, and `readYear` prefers `publish-info/year` over
+`title-info/date`. Putting the window at the end of `readYear` would let an
+implausible `publish-info/year` win the preference and then be discarded, so a
+file carrying `0101` in the first field and a real year in the second answers
+null. Inside `yearIn` each candidate is judged on its own, so an implausible
+first candidate is absent rather than final and the fallback runs, which is what
+`readYear` already does for a missing one. `tests/lib/fb2.test.ts::falls through
+to the written date when the published year is not one` is the arm that
+distinguishes the two sites, and it is the only one that does.
+
+## `opf.readYear` windows the chosen date, which is the opposite choice
+
+The two readers differ because their fallback chains differ, not because they
+disagree about the window. FB2 falls back from one typed field to another typed
+field, so skipping an implausible first candidate reaches a fact of the same
+kind. The last arm of `opf.readYear`'s preference order is `dates[0]`, any date
+in the document, so skipping an implausible preferred date would reach the
+conversion date the whole preference order exists to avoid: taking the first
+date is how a reader files every Project Gutenberg book under the year somebody
+ran the converter. An implausible publication date therefore loses the year
+rather than trading it for a worse one, and
+`tests/lib/opf.test.ts::loses the year rather than falling to a later date it
+did not prefer` pins it.
+
+## Why no complement guard was built for the caller list
+
+The caller scan in `tests/lib/bookBounds.test.ts` is an inclusion list, and a
+seventh reader added with no window names nothing and passes it, which is
+exactly how the three readers this work fixed sat unwindowed with nothing red.
+The complement was measured rather than assumed unbuildable. Under `src/lib/`,
+`grep -rlE '(^|[^A-Za-z_])year\??\s*:'` finds 9 modules carrying a year
+property, so a complement drawn there needs a three name exclusion. Drawn over
+the whole of `src/` it needs more than a dozen, and how many depends on the
+spelling the pattern allows: 17 and 23 by two readings of the same question,
+measured by two people who each believed they had asked it. **That disagreement
+is the argument against drawing the line there and it is worth more than either
+number.** A predicate over `OpfRecord` is tighter at 9 modules and misses
+`fileName.ts`, which windows a year and builds no record. Neither is a
+complement. What was added instead is the second assertion that a named caller
+also calls, and the exclusion stated in the scan's own comment.
+
+## A boundary arm asserts the point just outside the end, not a number far outside
+
+The first version of the three readers' arms asserted 101 and 2199. Both are far
+outside the window, so both catch a reader that drops the window altogether and
+neither catches a reader that keeps a second, wider window beside it and falls
+through to this one for the rest. Any contiguous widening of an end has to
+contain the point immediately outside that end, so 1449 and 2101 catch the whole
+contiguous family where 2199 catches none of it.
+
+Measured against the whole frontend suite, 3019 tests, with the band
+`year > 1000 && year < 2150` put into `cbz.readYear` and then into `fb2.yearIn`:
+0 red with the arms at 101 and 2199, and 1 red each with them at 1449 and 2101,
+the reader's own arm both times.
+
+**The residue is an accepted set that touches neither end**, which is wider than
+a point and is the property rather than an example: the boundary values catch a
+widening OF an end, and a second window sitting wholly inside this one touches
+neither. Both `year === 1200` and `year >= 1200 && year <= 1300`, each falling
+through to `plausibleYear` for the rest, pass all 3019. Nothing cheap catches
+either, because no arm can name a value it was not told about.
+
+**The first statement of that residue said "a point rather than a band", and
+the correction is the lesson.** The code was right both times and the sentence
+justifying it named a narrower class than the guard leaves open, which is the
+shape where a reviewer agrees with the comment and the hole survives. It was
+caught by the seat that had proposed the mutation the boundary values were
+added for, reading its own argument carried one step further than it had taken
+it.
+
+The band was designed by the seat that wrote none of those arms and the boundary
+values by the other seat, which is the arrangement that found it: the author of
+a guard picks the mutation the guard already covers.
+
+## A PDF's inflated bytes and its object stream parses are charged to the same total as its reads
+
+`Source.spent` counted bytes read off the blob and nothing counted inflated output, so the
+per stream ceiling was the only bound on inflation and a file chooses how many streams it
+has. Measured 2026-09-08 on `builder`, before the change: a crafted 1,562,153 byte file
+drove **1,593,843,488 bytes** through the decompressor for **6,135,579 bytes** of the
+33,554,432 byte budget, 96 inflate calls with 95 of them at the per stream ceiling, and
+answered `ok` in 801 ms with 81% of the budget unspent. Charged, the same file stops at
+**33,431,328 bytes inflated**.
+
+**That 1.59 GB is a floor and not a ceiling**, which is why the number is written with the
+file that produced it. The file walks the six reference chains `readPdf` follows, sixteen
+links each, and touches the `/Prev` chain not at all: that chain is 64 further sections,
+each with four resolve chains of its own. The ticket's 8 GiB was arithmetic on
+`MAX_FETCH_BYTES / OBJECT_WINDOW_BYTES` and its instrument was the wrong one in both
+directions: a read is charged the bytes that exist, so a crafted file need not be large
+enough to pay for 512 windows, and the multiplier is the number of streams it can name
+rather than the number of windows it can buy.
+
+**A second way of spending was uncharged and the security seat found it while reviewing the
+first.** An object stream's members are parsed eagerly, `/N` of them, and nothing requires
+two of them to name different offsets, so one stream can be parsed 8192 times for the one
+inflation it is charged. Measured on the machine this repository is developed on: 8192
+members at one offset holding a 64 kB string, 18,942 bytes of file, **7,742 ms and 741 MB**,
+answering `ok`. A member's parse is now charged what it consumed, and a member that failed
+is charged the rest of the stream, because `Lexer.object` winds its cursor back before
+throwing `not a value` and a scan over megabytes then looks free from the call site. The
+charge sits outside the `catch`, which swallows a `PdfError` and would have swallowed the
+bound with it. Both paths have their own arm, because the first draft covered the throwing
+one only and the attack that was measured walks the other: both seats caught that
+independently, and the mutation crediting a returning parse to the inflate charge passed
+every test until the second arm existed.
+
+**One total rather than one per kind.** Separate totals do not multiply the way per read
+bounds do, but they let a file spend the whole of each, and what gets charged next has one
+place to go. `Source.charge` throws rather than answering a caller that has to remember to
+test it, and `pdf.test.ts` asserts the running total is written in exactly one place.
+
+**Charged per chunk rather than per stream, and that part is stated rather than tested.**
+Both review seats independently proposed charging once, in two different places, and both
+mutations pass every test in `pdf.test.ts`. Against either, the per chunk form abandons a
+stream at the byte the budget runs out rather than holding it whole. Against a charge on
+`inflate`'s return value it also pays for a stream that emits bytes and then breaks, which
+that form never sees and a charge after the loop still does.
+
+**Where the corrected statement lives.** At the site, in the docstring of
+`MAX_BUDGET_BYTES`, renamed from `MAX_FETCH_BYTES` because a constant that also bounds
+inflation under a name saying fetch is what the next author reads. The reader seam
+specification that credited `pdf.ts` with this property was deleted with its wave, so
+there was no bounds table to correct.
+
+**What is still not measured**: what a real file spends in total. The corpus is not in
+this repository. The carried maxima are 1.23 MB fetched and a 2,866,290 byte largest
+single inflate, from files that may not be the same one, and 32 MB is 8.2 times their sum.
+That ratio rests on two measurements and the assumption that no real file opens two large
+streams, and it leaves out the parse charge, which charges a second time for bytes an
+object stream already paid to inflate.
+
+## The no-custody claim rests on the absent route, not on the network scan
+
+`frontend/tests/houseRules.test.ts` refuses a network call in any reader module,
+by matching six names and one import shape. The set of ways a module can reach
+the network is open, so that matcher is a second line and not the property.
+
+**What the published claim rests on is that there is nowhere to send a book file
+to.** Seven routes accept an uploaded file: a backup archive, a cover image, the
+login background, and four catalogue exports. None takes a book.
+`backend/tests/test_no_custody.py` asserts that as an equality in both
+directions, so a route joining or leaving the set is a decision rather than an
+edit.
+
+**The alternation was deliberately not widened.** An arm per spelling is the
+shape this repository keeps paying for, and here it would have made an overclaim
+worse by looking thorough: measured over the 430 modules under `frontend/src/`,
+four of the six existing arms match no file at all, and one of them,
+`navigator.send`, is not a web API. A real closure is a different instrument, one
+that denies those modules the network, rather than a longer regex.
+
+## Why the published sentence says "no route accepts a book file" and the guard does not enforce that
+
+The design seat measured the gap: a route taking a book as a base64 string on a
+JSON body passes every test in `test_no_custody.py`. The sentence stays, because
+it is a true statement about the app: no such field exists, and none of the seven
+file routes takes a book. What was missing was the **guard's** stated bound, not
+the fact, so the exclusion is now a bullet in that file's docstring rather than a
+narrower promise to the reader.
+
+## The column half is asserted, and it is the weaker half
+
+`docs/featurelist.md` said "no table has a column to keep one in". A base64 book
+fits `notes.content` today, which is `Text`, so the claim went past what any rule
+enforces and past what `README.md` says in the same commit. The published prose
+now carries the route half only, in both files, and the column rule keeps its own
+narrower statement in the test: no column carries **bytes**.

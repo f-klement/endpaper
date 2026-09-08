@@ -117,9 +117,13 @@
  * identifier that only XMP carries here, and it refuses an encrypted document
  * outright.
  *
- * **This module ships as 5,520 bytes gzipped**, its own chunk out of
- * `bun run build`, 14,720 raw, loaded only when a member picks a `.pdf`. That
- * is 32.6 times smaller than the cheaper of the two libraries and 91 times
+ * **This module ships as 5.53 kB gzipped**, its own chunk out of
+ * `bun run build`, 14.81 kB raw, loaded only when a member picks a `.pdf`. Two
+ * decimals because that is what the build prints, and read off the build
+ * rather than carried: comments are minified away, so the figure moves when the
+ * code does and not when this paragraph does. Checked by rebuilding after this
+ * sentence changed, which returned the same chunk under the same content hash.
+ * That is 32.5 times smaller than the cheaper of the two libraries and 91 times
  * smaller than the one that matches it on yield. It costs no dependency at all
  * because the two things a PDF needs beyond parsing are `DecompressionStream`,
  * which the platform supplies and `lib/zip.ts` already relies on, and
@@ -133,11 +137,13 @@
  * believed**, and the bounds are the constants below. **Most carry a
  * measurement and two do not**: `MAX_DEPTH` and `MAX_RESOLVE_STEPS` are chosen
  * rather than derived, and say so at their own site. A PDF is an object graph a
- * member supplied, so the shapes
- * that matter are not truncation: a reference cycle, a nest deep enough to
- * exhaust the stack, a `/Length` that runs past the end of the file, and a
- * stream that inflates to more than the machine holds. Each has its own bound
- * and its own test.
+ * member supplied, so the shapes that matter are not truncation: a reference
+ * cycle, a nest deep enough to exhaust the stack, a `/Length` that runs past
+ * the end of the file, a stream
+ * that inflates to more than the machine holds, and enough streams that do it
+ * together. Each has its own bound and its own test, and the last of them is
+ * why the bound on the total covers what a stream inflates to as well as what
+ * a read takes.
  */
 
 import { plausibleYear } from "./bookBounds";
@@ -256,21 +262,49 @@ const OBJECT_WINDOW_BYTES = 64 * 1024;
  * It is what refuses a compression bomb: 300 kB of deflated zeroes inflates to
  * roughly 300 MB, and this stops at 16 MB with the stream cancelled rather than
  * drained.
+ *
+ * **These are one stream's ceilings, and neither bounds a file.** A file
+ * chooses how many streams it has; the running total below is what stops them
+ * adding up.
  */
 const MAX_STREAM_BYTES = 8 * 1024 * 1024;
 const MAX_INFLATED_BYTES = 16 * 1024 * 1024;
 
 /**
- * The total this reader will take out of the file, and how many reads.
+ * The total this reader will spend on one file: read, inflated and parsed.
  *
  * Measured by this reader over the 123: 129 kB to 1.23 MB fetched, median
- * 219 kB, against files of 146 kB to 65.1 MB. **The bound is on the total
- * rather than on any one read**, because the ways a crafted file can make this
- * expensive are a long `/Prev` chain, a deep reference chain and a large table,
- * and bounding each of those separately still multiplies. 32 MB is 27.4 times
- * the largest measured.
+ * 219 kB, against files of 146 kB to 65.1 MB, and a largest single inflate of
+ * 2,866,290 bytes. **The bound is on the total rather than on any one read or
+ * any one stream**, because the ways a crafted file can make this expensive are
+ * a long `/Prev` chain, a deep reference chain and a large table, and bounding
+ * each of those separately still multiplies.
+ *
+ * **Inflated output is charged here too, and it is the larger half.** A read is
+ * charged the bytes that exist, so a small file's reads are small however many
+ * of them it forces, while every stream it declares may inflate to
+ * `MAX_INFLATED_BYTES` out of a few kilobytes. Measured 2026-09-08 on `builder`
+ * with the inflated bytes uncharged: a crafted 1,562,153 byte file drove
+ * **1,593,843,488 bytes through the decompressor for 6,135,579 bytes of this
+ * budget**, 96 inflate calls with 95 of them at the per stream ceiling, and
+ * answered `ok` in 801 ms with 81% of the budget unspent. It is a floor rather
+ * than a ceiling: the file that measured it walks the six reference chains
+ * `readPdf` follows, and nothing in it touches the `/Prev` chain, which is 64
+ * more sections each with four chains of its own. Charged, the same file stops
+ * at **33,431,328 bytes inflated**, and `pdf.test.ts` holds the pair of files
+ * either side of the threshold.
+ *
+ * 32 MB is 27.4 times the largest fetch measured, and 8.2 times that fetch and
+ * the largest single inflate added together, which takes both maxima off the
+ * corpus at once and off files that may not be the same one. **What a real file
+ * spends in total was never measured**, here or before this line existed, so
+ * that 8.2 rests on two measurements and one assumption: that no file opens two
+ * large streams. **The parse of an object stream's members is not in that sum
+ * either**, and it charges a second time for bytes that stream already paid to
+ * inflate, so the real headroom is smaller than 8.2 by an amount nobody has
+ * measured.
  */
-const MAX_FETCH_BYTES = 32 * 1024 * 1024;
+const MAX_BUDGET_BYTES = 32 * 1024 * 1024;
 
 /**
  * How deep a nested container may go, and how long a reference chain may be.
@@ -747,7 +781,7 @@ function usableAuthor(value: string | null): string | null {
 // --- reading the file -------------------------------------------------------
 
 /**
- * The file, as bounded reads.
+ * The file, as bounded reads, and the running total everything is charged to.
  *
  * **One place holds the running total**, so the ceiling is on what this reader
  * costs rather than on any single read: a crafted file's ways of being
@@ -763,16 +797,43 @@ class Source {
     return this.blob.size;
   }
 
+  /**
+   * Charge bytes to the running total, and refuse the file once it is gone.
+   *
+   * **A throw and not an answer the caller checks.** Three things spend and all
+   * three come here: `read` below, `inflate` beside it, and what an object
+   * stream's members take to parse. A bound a caller has to remember to test is
+   * one a later caller does not.
+   */
+  charge(bytes: number): void {
+    this.spent += bytes;
+    if (this.spent > MAX_BUDGET_BYTES) {
+      throw new PdfError("damaged", "this file wants more than it is allowed");
+    }
+  }
+
   async read(from: number, length: number): Promise<Uint8Array> {
     if (from < 0 || length < 0 || from >= this.blob.size)
       return new Uint8Array();
     const to = Math.min(from + length, this.blob.size);
-    this.spent += to - from;
-    if (this.spent > MAX_FETCH_BYTES) {
-      throw new PdfError("damaged", "reading this file wants too many bytes");
-    }
+    // **What is there, not what was asked for.** A window past the end of a
+    // small file costs what it returns, which is why a crafted file's reads are
+    // cheap and its streams are not.
+    this.charge(to - from);
     return new Uint8Array(await this.blob.slice(from, to).arrayBuffer());
   }
+}
+
+/**
+ * What `inflate` needs of a `Source`, which is one method.
+ *
+ * **The role and not the class.** Inflating does not care where the bytes came
+ * from, and typing the parameter `Source` would make the next producer of
+ * expensive bytes take a `Blob` it has no use for, or open a second funnel,
+ * which is the shape this bound exists to close.
+ */
+interface Budget {
+  charge(bytes: number): void;
 }
 
 /**
@@ -786,9 +847,11 @@ class Source {
  * it**, and that is stated rather than left as an implied measurement. It is
  * kept because a producer omitting the header is a shape other readers carry
  * recovery for, and it costs one further attempt on a stream that has already
- * failed. `pdf.test.ts` exercises both attempts failing.
+ * failed. `pdf.test.ts` exercises both attempts failing. A stream that emits
+ * bytes under one header and breaks is charged for those and again for the
+ * retry, which is what it cost.
  */
-async function inflate(raw: Uint8Array): Promise<Uint8Array> {
+async function inflate(raw: Uint8Array, budget: Budget): Promise<Uint8Array> {
   if (typeof DecompressionStream === "undefined") {
     throw new PdfError("no-inflate", "this browser cannot inflate");
   }
@@ -827,6 +890,25 @@ async function inflate(raw: Uint8Array): Promise<Uint8Array> {
         // reading the rest to find out how big it was would defeat it.
         release(reader);
         throw new PdfError("damaged", "a stream inflates past the limit");
+      }
+      try {
+        // **Charged as it arrives, against the same total the reads spend.**
+        // Charging nothing is what let a 1,562,153 byte file inflate
+        // 1,593,843,488, which the constant's docstring carries and this line
+        // was measured against.
+        //
+        // **That this does more than charging once per stream is stated
+        // rather than tested.** Both review seats proposed charging once,
+        // independently and in two different places, and both mutations pass
+        // every test in `pdf.test.ts`. Against either, this abandons a stream
+        // at the byte the budget runs out rather than holding it whole. Against
+        // a charge on `inflate`'s return value it also pays for a stream that
+        // emits bytes and then breaks, which that form never sees and a charge
+        // after the loop still does.
+        budget.charge(value.length);
+      } catch (error) {
+        release(reader);
+        throw error;
       }
       chunks.push(value);
     }
@@ -1242,7 +1324,7 @@ class Document {
     // would hand back bytes that look like data and are not.
     if (names.length > 1 || names[0] !== "FlateDecode") return null;
 
-    const inflated = await inflate(raw);
+    const inflated = await inflate(raw, this.source);
     let parms = await this.resolve(dictionary.entries.get("DecodeParms"));
     if (typeof parms === "object" && parms !== null && parms.kind === "array") {
       parms = parms.items[0] ?? null;
@@ -1359,14 +1441,34 @@ class Document {
       pairs.skip();
       const offset = numeric(pairs);
       if (number === null || offset === null) break;
-      if (first + offset >= data.length) break;
+      const from = first + offset;
+      if (from >= data.length) break;
+      const member = new Lexer(data, from);
+      let consumed: number;
       try {
-        contents.set(number, new Lexer(data, first + offset).object());
+        contents.set(number, member.object());
+        consumed = member.at - from;
       } catch {
-        // One unreadable member does not cost the rest of the stream. The
-        // failure this refuses is a whole file reporting `damaged` because an
-        // object nobody asked for is malformed.
+        // One unreadable member does not fail the file. The failure this
+        // refuses is a whole file reporting `damaged` because an object nobody
+        // asked for is malformed.
+        //
+        // **Charged the rest of the stream rather than what it read**, which
+        // is the conservative direction and is here because the cursor lies on
+        // this path: `object` winds itself back before throwing `not a value`,
+        // so a scan over megabytes of regular characters looks from here like
+        // it cost nothing. Nothing requires two members to name different
+        // offsets, so without a charge one stream is parsed `/N` times.
+        // Measured on the machine this repository is developed on, driving
+        // `readPdf` from a standalone script: 8192 members at one offset
+        // holding a 64 kB string took 7,742 ms and 741 MB for an 18,942 byte
+        // file and answered `ok`, and the cost is linear in both the count and
+        // the string.
+        consumed = data.length - from;
       }
+      // **Outside the `catch`, which swallows a `PdfError`.** A charge inside
+      // it is a bound that can never fire.
+      this.source.charge(consumed);
     }
     return contents;
   }

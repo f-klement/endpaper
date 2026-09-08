@@ -335,6 +335,55 @@ describe("the year", () => {
   it("is null for a date with no year in it", () => {
     expect(readOpf(epub3(`<dc:date>undated</dc:date>`))?.year).toBeNull();
   });
+
+  it("is null for the undefined date Calibre writes into dc:date", () => {
+    // The window is `bookBounds.plausibleYear`'s, and this is the arm that
+    // notices this reader letting go of it: the caller scan in
+    // `tests/lib/bookBounds.test.ts` still passes on a module that keeps the
+    // name in its prose and drops the call. 101 is inside `NUMBER_RANGES.year`,
+    // so nothing downstream reports it, and the value is not rare:
+    // `calibre.ts::withoutPlaceholders` carries the count against a real
+    // library.
+    const undefinedDate = "0101-01-01T00:00:00+00:00";
+
+    expect(
+      readOpf(
+        epub2(`<dc:date opf:event="publication">${undefinedDate}</dc:date>`),
+      )?.year,
+    ).toBeNull();
+    expect(
+      readOpf(epub3(`<dc:date>${undefinedDate}</dc:date>`))?.year,
+    ).toBeNull();
+  });
+
+  it("is null for a year no book could have been published in", () => {
+    // **The point immediately outside each end, and that choice is the arm.**
+    // A number far outside catches a reader that drops the window and nothing
+    // else; a reader keeping a second, wider window of its own answers from
+    // that one for a contiguous band, and any contiguous widening of an end has
+    // to contain the point just outside it. So these two catch that whole
+    // family where `9999` catches none of it. `boundNumber` would also have
+    // stopped anything above 2200, which is the other reason not to reach for a
+    // bigger number here.
+    expect(readOpf(epub3(`<dc:date>1449-01-01</dc:date>`))?.year).toBeNull();
+    expect(readOpf(epub3(`<dc:date>2101-01-01</dc:date>`))?.year).toBeNull();
+  });
+
+  it("loses the year rather than falling to a later date it did not prefer", () => {
+    // The window is applied to the chosen date and not to each candidate, which
+    // is the opposite of `fb2.yearIn` and is pinned here so the difference is a
+    // decision rather than a drift. Judging each candidate would answer 1965
+    // for this file and would reach the conversion date for the ordinary one,
+    // which is the failure the preference order above exists to prevent:
+    // `dates[0]` is any date in the document.
+    const record = readOpf(
+      epub2(`
+        <dc:date opf:event="publication">0101-01-01T00:00:00+00:00</dc:date>
+        <dc:date opf:event="original-publication">1965-01-01</dc:date>`),
+    );
+
+    expect(record?.year).toBeNull();
+  });
 });
 
 describe("the rest of the record", () => {

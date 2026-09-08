@@ -15,6 +15,12 @@
 
 ### Added
 
+- **The no-custody promise is a test rather than a reading.** `backend/tests/test_no_custody.py`
+  asserts, as an equality in both directions, which routes accept an uploaded file: a backup
+  archive, a cover, the login background and four catalogue imports, and no book. It also
+  asserts that no mapped column carries bytes. A route joining or leaving that set is now a
+  decision rather than an edit.
+
 - **The importer has a reader per service where a service needs one.** Two export shapes cannot
   be a candidate header name: a cell packing a publisher, a year and a format into one value,
   and a library export that is nested JSON. `backend/import_readers.py` is the contract, a
@@ -140,6 +146,13 @@
 
 ### Changed
 
+- **The guard behind "a member's book file cannot leave the browser" now says what it covers
+  and what it does not.** It matches six names and one import shape, under a docstring that
+  claimed anything by which a module could put bytes on the wire. The alternation is unchanged,
+  deliberately: an arm per spelling would make the overclaim worse by looking thorough. The
+  README and the feature list now say what actually holds the promise up, which is that no
+  route accepts a book file.
+
 - **A zipped FictionBook is read the way a bare one is.** The reader takes the header off the
   front of the entry and stops there, rather than inflating the whole book to reach the two
   kilobytes at the start of it. Both doors read the same 256 KiB and answer the same way about
@@ -211,6 +224,21 @@
   equality in a test.
 
 ### Fixed
+
+- **A PDF's inflated output and its object stream parses are charged to the same budget as the
+  bytes read off the file**, so a crafted file cannot spend the three separately. Measured with
+  inflation uncharged: a 1,562,153 byte file drove 1,593,843,488 bytes through the decompressor
+  for 6,135,579 bytes of the 33,554,432 byte budget and was read as `ok`; it now stops at
+  33,431,328 bytes inflated and is reported damaged. An object stream's members were parsed
+  uncharged and nothing requires two of them to name different offsets: 8192 members at one
+  offset holding a 64 kB string took 7,742 ms and 741 MB for an 18,942 byte file and answered
+  `ok`. No file in the reference corpus is known to spend more than a few MB of the budget.
+
+- The three file readers that took a publication year with no plausibility window now apply
+  one. An EPUB's `dc:date`, a CBZ's `ComicInfo.xml` `<Year>` and a FictionBook's
+  `publish-info/year` or `title-info/date` all go through `lib/bookBounds.plausibleYear`, so
+  Calibre's undefined date of `0101-01-01` no longer drafts a scanned book as published in the
+  year 101. Six readers now share the one window; three of them had none.
 
 - **A Calibre library no longer imports Calibre's own blanks as facts.** `metadata.opf` is
   written by Calibre from the same rows as the index, so the values it writes where nobody typed

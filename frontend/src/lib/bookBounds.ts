@@ -67,10 +67,13 @@ export type BoundedNumber = keyof typeof NUMBER_RANGES;
  * everything below and reports nothing.
  *
  * **Here because of a value real files carry, not as a validator.** Calibre
- * writes `0101-01-01T00:00:00+00:00` where a book has no date, and 2 of the 69
- * real MOBI files measured 2026-09-07 carry exactly that in EXTH 106. It reads
- * as the year 101, which is inside `NUMBER_RANGES.year`, so nothing downstream
- * stops it and a member sees a book published in the second century.
+ * writes `0101-01-01T00:00:00+00:00` where a book has no date, and it writes it
+ * into every field it uses for one: EXTH 106 in a MOBI, `dc:date` in an OPF,
+ * `pubdate` in `metadata.db`. It reads as the year 101, which is inside
+ * `NUMBER_RANGES.year`, so nothing downstream stops it and a member sees a book
+ * published in the second century. 2 of the 69 real MOBI files measured
+ * 2026-09-07 carry it; `calibre.ts::withoutPlaceholders` carries the count for
+ * the OPF spelling, against a real library.
  *
  * **Chosen rather than measured, and wide on both ends on purpose**: a signal
  * that has to be wrong rarely, not a bound anything enforces. No schema stands
@@ -78,9 +81,9 @@ export type BoundedNumber = keyof typeof NUMBER_RANGES;
  * number in this module from `openapi.json`, cannot recompute this pair and
  * does not try.
  *
- * Not exported, because `plausibleYear` is the whole interface: the three
- * readers that each declared these two numbers each wrote the comparison out
- * again beside them, and handing out the pair leaves that second copy in place.
+ * Not exported, because `plausibleYear` is the whole interface: the readers
+ * that each declared these two numbers each wrote the comparison out again
+ * beside them, and handing out the pair leaves that second copy in place.
  */
 const PLAUSIBLE_YEARS = [1450, 2100] as const;
 
@@ -199,11 +202,25 @@ export function boundNumber(
 /**
  * The year a file claims, when a book could have been published in it.
  *
- * **The one home of the window, and the three readers that each held a copy
- * call it**: a year sniffed out of a filename, one out of EXTH 106, and one out
- * of a PDF's XMP date. The window arrived once per reader, and the third copy
+ * **The one home of the window, and the readers that take a year out of a file
+ * call it.** Three of them each held their own copy of the pair, and the third
  * was written by somebody who had read the second and pointed a comment at it;
- * what stops a fourth is that there is nothing left to copy.
+ * what stops the next copy is that there is nothing left to copy.
+ * `tests/lib/bookBounds.test.ts` names the callers, so the list is not written
+ * out here as well.
+ *
+ * **The exclusion, and it is the door with the only incidence measured against
+ * a real library.** `calibre.ts::readYear` takes a year out of a `metadata.db`
+ * row and refuses the literal 101 by name rather than by window, so the rest of
+ * the band is open there and a `pubdate` of `1200-01-01` arrives as 1200.
+ *
+ * **A window is part of reading a year, not part of bounding one for the API.**
+ * Every one of those readers says in its own docstring that it reports what its
+ * file claims, so each of them raises this question and the answer is here
+ * once: a number outside the window is not a publication year the file
+ * asserted, it is a number sitting in a date field, and reporting it as a year
+ * is the reader getting the field wrong. `cbz.readYear` reached the same
+ * conclusion on its own for ComicRack's `-1`.
  *
  * **This is not `boundNumber("year", ...)` and does not replace it.** A value on
  * its way to a request still goes through that one, which is what the column

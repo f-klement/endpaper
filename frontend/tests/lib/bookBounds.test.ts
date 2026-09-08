@@ -414,7 +414,7 @@ describe("plausibleYear", () => {
     ).toBe(1);
   });
 
-  it("is called by the three readers and by nothing else", () => {
+  it("is named and called by the readers that apply it, and by nothing else", () => {
     // The scan above watches the numbers coming back into another module. This
     // one watches the function going out, which is what the old arrangement
     // refused and this one has to be told to refuse: three module private
@@ -425,30 +425,99 @@ describe("plausibleYear", () => {
     // `boundNumber("year", ...)`, so the cheap mistake is a page swapping it in
     // on a year a member typed, which drops a genuine 1400 and reports nothing.
     //
-    // **The list is the assertion and not a filter.** A fourth caller is a
-    // decision about which values get a plausibility window, and it fails here
-    // until somebody makes it.
+    // **Named and called are two facts and each has its own assertion.** The
+    // name scan is what catches a module reaching for a window it should not
+    // have, and it says nothing about whether a module on the list still uses
+    // what it imports: a reader that deletes the call and leaves the identifier
+    // in a docstring passes it. **The call scan narrows that and only narrows
+    // it**, because it reads `plausibleYear(` and a docstring writing
+    // `plausibleYear(101)` is that string, which is the spelling this file
+    // itself uses five times. What actually refuses a reader that drops the
+    // call is the arm in that reader's own test file, which is the rung below
+    // both of these.
     //
-    // **What this closes and what it does not.** Any module outside these three
+    // **The list is the assertion and not a filter**, and it runs both ways: a
+    // new caller is a decision about which values get a plausibility window and
+    // fails here until somebody makes it, and a reader dropping out fails here
+    // too, because `toEqual` on a sorted list is an equality rather than a
+    // containment.
+    //
+    // **The exclusion, stated because the list is an inclusion.** A reader
+    // added with no window names nothing and passes here, which is exactly how
+    // `opf.ts`, `cbz.ts` and `fb2.ts` sat unwindowed with nothing red. The
+    // complement was measured rather than assumed unbuildable. Under
+    // `src/lib/`, `grep -rlE '(^|[^A-Za-z_])year\??\s*:'` finds 9 modules
+    // carrying a year property, so a complement drawn there needs a three name
+    // exclusion. Drawn over the whole of `src/` it needs more than a dozen, and
+    // **how many depends on the spelling the pattern allows**: 17 and 23 by two
+    // readings of the same question, measured by two people who each thought
+    // they had asked it. That disagreement is the argument against drawing the
+    // line there, and it is worth more than either number. A predicate over
+    // `OpfRecord` is tighter at 9 modules and misses `fileName.ts`, which
+    // windows a year and builds no record. Neither is a complement, so neither
+    // is here.
+    //
+    // The one live exclusion is `calibre.ts::readYear`, which takes a year out
+    // of a `metadata.db` row and refuses the literal 101 by name rather than by
+    // window. `audiobook.ts` reads no year at all.
+    //
+    // **What this closes and what it does not.** Any module outside the list
     // that names `plausibleYear` fails here, whether it imports it from
-    // `bookBounds.ts` or from one of the three, and a plain re-export is
+    // `bookBounds.ts` or from one of the readers, and a plain re-export is
     // covered with them: a consumer of one still has to name the identifier.
     // What it does not see is an alias, `export { plausibleYear as believable }`
     // or `const believable = plausibleYear` re-exported under that name, since
     // from there nothing downstream carries the word. No arm is added: a scan
     // for either spelling reports the family closed while the other walks past
     // it, and the family closes with the module graph or not at all.
-    const callers = Object.entries(sourceModules())
+    //
+    // **Nor does it see a second window a reader keeps beside this one**, which
+    // is the class this module was written to end. A caller answering from its
+    // own `year > 1000 && year < 2150` and falling through to `plausibleYear`
+    // for the rest is green on both scans here and green on the number scan
+    // above, since neither 1000 nor 2150 is an end of the window. **What sees
+    // it is each reader's own boundary arm**, and that is why those assert the
+    // point immediately outside each end rather than a number far outside it:
+    // any contiguous widening of an end has to contain that point.
+    //
+    // Measured 2026-09-08 against the whole frontend suite, 3019 tests, by
+    // putting that band into `cbz.readYear` and then into `fb2.yearIn`: 1 red
+    // each, the reader's own arm both times. **The first version of those arms
+    // asserted 101 and 2199 and the same mutation passed all 3019**, which is
+    // this file's own rule about a guard's author picking the case the guard
+    // covers. The band was chosen by the seat that wrote none of these arms and
+    // the boundary values by the other one.
+    //
+    // **What is left is an accepted set that touches neither end**, which is
+    // wider than a point and is the property rather than an example: the
+    // boundary values catch a widening OF an end, and a second window sitting
+    // wholly inside this one touches neither. Both `year === 1200` and
+    // `year >= 1200 && year <= 1300`, each falling through to `plausibleYear`
+    // for the rest, passed all 3019 in the same runs. Nothing cheap catches
+    // either, because no arm can name a value it was not told about. What
+    // refuses them is a reviewer reading the diff, where a second comparison
+    // beside a call to this one is plain.
+    const named = Object.entries(sourceModules())
       .filter(([path]) => path !== BOOK_BOUNDS)
-      .filter(([, text]) => /\bplausibleYear\b/.test(text))
-      .map(([path]) => path)
-      .sort();
+      .filter(([, text]) => /\bplausibleYear\b/.test(text));
 
-    expect(callers).toEqual([
+    const READERS = [
+      "../../src/lib/cbz.ts",
+      "../../src/lib/fb2.ts",
       "../../src/lib/fileName.ts",
       "../../src/lib/mobi.ts",
+      "../../src/lib/opf.ts",
       "../../src/lib/pdf.ts",
-    ]);
+    ];
+
+    expect(named.map(([path]) => path).sort()).toEqual(READERS);
+    expect(
+      named
+        .filter(([, text]) => /\bplausibleYear\(/.test(text))
+        .map(([path]) => path)
+        .sort(),
+      "a reader that names the window has to call it",
+    ).toEqual(READERS);
   });
 });
 

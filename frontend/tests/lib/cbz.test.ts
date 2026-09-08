@@ -375,6 +375,34 @@ describe("the document itself", () => {
     expect(record?.year).toBeNull();
   });
 
+  it("does not read a year no comic could have been published in", () => {
+    // The window is `bookBounds.plausibleYear`'s, and this is the arm that
+    // notices this reader letting go of it: the caller scan in
+    // `tests/lib/bookBounds.test.ts` still passes on a module that keeps the
+    // name in its prose and drops the call.
+    //
+    // `101` is the value that bought the window and it is inside
+    // `NUMBER_RANGES.year`, so nothing downstream reports it. The comparison it
+    // replaced was `> 0`, which closed one end and let it through.
+    expect(
+      readComicInfo(comicInfo(`<Series>Saga</Series><Year>101</Year>`))?.year,
+    ).toBeNull();
+
+    // **The point immediately outside each end, and that choice is the arm.**
+    // A number far outside, `2199` say, catches a reader that drops the window
+    // and nothing else; a reader keeping a second, wider window of its own
+    // answers from that one for a contiguous band, and any contiguous widening
+    // of an end has to contain the point just outside it. So these two catch
+    // that whole family. Found by the seat that did not write this arm, against
+    // a mutation the first version of it passed.
+    expect(
+      readComicInfo(comicInfo(`<Series>Saga</Series><Year>1449</Year>`))?.year,
+    ).toBeNull();
+    expect(
+      readComicInfo(comicInfo(`<Series>Saga</Series><Year>2101</Year>`))?.year,
+    ).toBeNull();
+  });
+
   it("separates the writers and keeps the file's order", () => {
     const record = readComicInfo(
       comicInfo(`<Writer>Alan Moore, Dave Gibbons, Alan Moore</Writer>`),

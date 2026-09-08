@@ -48,6 +48,7 @@
  * when a member picks a file whose name ends in one of the two extensions.
  */
 
+import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
 import { declaresEntities, type OpfIdentifier, type OpfRecord } from "./opf";
 import { openZip, ZipError, type ZipFailure } from "./zip";
@@ -408,24 +409,35 @@ function readYear(
  *
  * **Standalone, because `<date>` text is whatever a person typed and one thing
  * people type there is the ISBN.** An unanchored `\d{4}` takes the first four
- * digits of any longer run: on `ISBN 5-17-002238-0, 2001` it reads `0022` and
- * files the book under the year 22, which is a plausible looking number that
- * survives every bound after this one. A non digit on each side skips a digit
- * run longer than four, so `20140825` yields nothing where an unanchored
- * pattern yields 2014: a refusal rather than a wrong year.
+ * digits of any longer run: on `ISBN 5-17-002238-0, 2001` it reads `0022`, and
+ * the year 22 is refused by the window below rather than by the pattern. **What
+ * the window cannot refuse is the reason the anchor is here**: a non digit on
+ * each side skips a digit run longer than four, so `20140825` yields nothing
+ * where an unanchored pattern yields 2014, and 2014 is a year nothing after
+ * this could tell from a real one.
  *
  * **It does not skip an identifier whose own groups are four digits, and that
  * is the exclusion rather than a corner case.** Measured over the 8 distinct
  * hyphen grouped ISBN literals under `frontend/`, 1 carries a group this takes,
- * and it is the ISBN in this reader's own fixtures: `978-5-9922-1663-9` reads
- * as the year 9922. **What bounds the exposure is where this is called from and
- * not the pattern**: `publish-info/year` and `title-info/date` and nothing else,
- * so an identifier reaches it by sitting inside a date element, which is a
- * malformed file rather than an ordinary one.
+ * and it is the ISBN in this reader's own fixtures: the pattern takes 9922 out
+ * of `978-5-9922-1663-9`, which the window then refuses. **The window does not
+ * close the class either**, which is worth saying because it looks as though it
+ * would: an identifier carrying a group inside the window, which
+ * `978-1-2001-…` does, still yields a year nothing here can tell from a real
+ * one. **What bounds the exposure is where this is called from and not the
+ * pattern**: `publish-info/year` and `title-info/date` and nothing else, so an
+ * identifier reaches it by sitting inside a date element, which is a malformed
+ * file rather than an ordinary one.
+ *
+ * **Applied here rather than at `readYear`**, so an implausible
+ * `publish-info/year` falls through to `title-info/date` exactly as an absent
+ * one does: each candidate is judged on its own, and the preference between
+ * the two fields stays `readYear`'s.
  *
  * **The group and not the match**, because the match carries the delimiter that
- * anchored it: `25/08/2014` matches `/2014`, and `Number("/2014")` is `NaN`,
- * which is not `null` and so leaves here as a year.
+ * anchored it: `25/08/2014` matches `/2014` and `Number("/2014")` is `NaN`. The
+ * window refuses a `NaN`, so taking the match would cost a refusal rather than
+ * a wrong year, and a refusal on a date this reader can read is still wrong.
  *
  * Written with a leading `(?:^|\D)` rather than a lookbehind: a lookbehind is a
  * syntax error at parse time on engines older than the one the archived door
@@ -434,7 +446,7 @@ function readYear(
  */
 function yearIn(raw: string | null): number | null {
   const match = /(?:^|\D)(\d{4})(?!\d)/.exec(raw ?? "");
-  return match ? Number(match[1]) : null;
+  return match === null ? null : plausibleYear(Number(match[1]));
 }
 
 /**

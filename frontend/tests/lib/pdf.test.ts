@@ -424,9 +424,7 @@ describe("a cross reference this reader has to follow", () => {
     // information dictionary there, and a byte scanning reader found 41 titles
     // against this one's 71.
     expect(
-      outcome(
-        await read(await streamPdf(objects, trailer, { compressed: [1] })),
-      ),
+      outcome(await read(await streamPdf(objects, trailer, { packed: [[1]] }))),
     ).toBe("read: Learning Spark");
   });
 
@@ -439,7 +437,7 @@ describe("a cross reference this reader has to follow", () => {
     const inner = await streamPdf(
       [object(1, "<< /Title (Kafka: The Definitive Guide) >>")],
       "",
-      { compressed: [1] },
+      { packed: [[1]] },
     );
     const innerXref = startxrefOf(inner);
     const outer = classicPdf(
@@ -573,7 +571,7 @@ describe("an object graph that does not terminate", () => {
         object(2, "<< /Type /Catalog >>"),
       ],
       "/Info 1 0 R /Root 2 0 R",
-      { compressed: [1], objStmLength: "1 0 R" },
+      { packed: [[1]], objStmLength: "1 0 R" },
     );
 
     const slice = vi.spyOn(Blob.prototype, "slice");
@@ -787,6 +785,155 @@ describe("a number the file supplied that does not agree with the file", () => {
   });
 });
 
+/**
+ * What each object stream in the two files below inflates to.
+ *
+ * `MAX_INFLATED_BYTES`, restated because the module keeps its bounds private
+ * the way every other reader does. One of these streams is inside the budget
+ * and three of them are 16.8 MB past it, which is the pair below: a reader that
+ * charges nothing for what a stream inflates to reads them both, since neither
+ * file is large and neither stream is over its own ceiling.
+ *
+ * **What the pair does not distinguish is one total from two.** A reader
+ * charging inflation to a second budget of its own refuses the second file too,
+ * and `outcome` sees only `damaged` either way. Telling those apart needs a file
+ * whose inflation is under the budget on its own and over it once the reads are
+ * added, and the reads here are 87,024 bytes against a 33,554,432 byte budget,
+ * so the margin such a file would balance on is 0.26%. Stated rather than
+ * built: it would be a test that a later edit to the fixture breaks without
+ * touching the reader.
+ */
+const INFLATED_PER_STREAM = 16 * 1024 * 1024;
+
+/**
+ * A file whose `/Info` is a chain of `links` references, one per object stream.
+ *
+ * Each link costs a whole stream's worth of inflation and 16 kB of file, which
+ * is the shape the budget is about: a crafted file is small, so its reads are
+ * cheap however many it forces, and what it spends is what it inflates.
+ */
+async function chainOfInflatedStreams(links: number) {
+  const objects = [];
+  for (let index = 1; index <= links; index += 1) {
+    objects.push(
+      object(
+        index,
+        index === links ? "<< /Title (Deep) >>" : `${index + 1} 0 R`,
+      ),
+    );
+  }
+  objects.push(object(links + 1, "<< /Type /Catalog >>"));
+  return await streamPdf(objects, `/Info 1 0 R /Root ${links + 1} 0 R`, {
+    packed: objects.slice(0, links).map((item) => [item.num]),
+    inflateTo: INFLATED_PER_STREAM,
+  });
+}
+
+/** `src/lib/pdf.ts` as text, read the way `sqlite.test.ts` reads its own. */
+function source(): string {
+  const files = import.meta.glob("../../src/lib/pdf.ts", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  });
+  return Object.values(files)[0] as string;
+}
+
+describe("what one file may spend altogether", () => {
+  it("reads a file whose one stream inflates to the per stream ceiling", async () => {
+    const bytes = await chainOfInflatedStreams(1);
+
+    // 16,777,256 bytes inflated and 37,727 read, measured on `builder`
+    // 2026-09-08, against a budget of 33,554,432.
+    expect(outcome(await read(bytes))).toBe("read: Deep");
+  });
+
+  it("refuses three streams that inflate past the budget together", async () => {
+    const bytes = await chainOfInflatedStreams(3);
+
+    // A 49,598 byte file. Uncharged it inflated 50,331,720 bytes and answered
+    // `read: Deep` in 33 ms; charged it stops at 33,488,968 with 87,024 read,
+    // both measured on `builder` 2026-09-08.
+    expect(outcome(await read(bytes))).toBe("damaged");
+  });
+
+  it("charges what an object stream's members take to parse", async () => {
+    // **Four members, four offsets, each a byte that cannot begin a value**, in
+    // a stream that inflates to 12,582,912. A member that fails is charged the
+    // rest of the stream, so the second exhausts the budget: 12,582,912 for the
+    // inflation, then 12,582,896 and 12,582,894 for the two members, against
+    // 33,554,432. Members three and four are never reached. Uncharged, this
+    // file answers `ok` with a null title, because every member failing is what
+    // an empty object stream looks like.
+    //
+    // **The failing path only**, which is the arm below for the other one.
+    // Moving the charge inside the `try` is what this one catches: that `catch`
+    // swallows a `PdfError`, so a charge under it can never fire.
+    const bytes = await streamPdf(
+      [
+        object(1, ")"),
+        object(2, ")"),
+        object(3, ")"),
+        object(4, ")"),
+        object(5, "<< /Type /Catalog >>"),
+      ],
+      "/Info 1 0 R /Root 5 0 R",
+      { packed: [[1, 2, 3, 4]], inflateTo: 12 * 1024 * 1024 },
+    );
+
+    expect(outcome(await read(bytes))).toBe("damaged");
+  });
+
+  it("charges a member that parses, not only one that fails", async () => {
+    // **Nine rows in the pairs header, all naming the one member's offset**,
+    // which the format does not forbid and which is the shape the charge was
+    // written for: one stream is parsed `/N` times for the one inflation it is
+    // charged. The member is a 4 MiB literal string, so every parse returns
+    // rather than throwing, and a parse that returns is what this arm charges
+    // for. The other arm's members all throw, so neither covers the other.
+    //
+    // Measured on `builder`: a 4,475 byte file, 4,194,383 bytes inflated and
+    // 8,762 read, `damaged` in 413 ms. Nine parses put it 8.4 MB past the
+    // 33,554,432 budget, so this does not balance on the fixture's own
+    // overhead. Uncharged the same file answers `read: null`, and one row
+    // rather than nine answers it in 86 ms.
+    const string = `(${"z".repeat(4 * 1024 * 1024)})`;
+    const bytes = await streamPdf(
+      [object(1, string), object(2, "<< /Type /Catalog >>")],
+      "/Info 1 0 R /Root 2 0 R",
+      {
+        packed: [[1]],
+        packedHeader: [
+          [1, 0],
+          [1, 0],
+          [1, 0],
+          [1, 0],
+          [1, 0],
+          [1, 0],
+          [1, 0],
+          [1, 0],
+          [1, 0],
+        ],
+      },
+    );
+
+    expect(outcome(await read(bytes))).toBe("damaged");
+  });
+
+  it("adds to the running total in exactly one place", () => {
+    // **The funnel, which is otherwise only asserted in a docstring.** What it
+    // refuses is a spender that adds to `spent` without going through
+    // `Source.charge`, which is where the ceiling is compared.
+    //
+    // **It counts writes to `spent` and nothing else**, so a second total under
+    // another name passes it, and so does a path that spends without charging
+    // at all. Nothing structural sees either, because the ways of spending are
+    // not a closed set; the three that exist are covered by the arms above and
+    // by the bomb test further up.
+    expect(source().match(/this\.spent\s*[-+*/]?=/g)).toHaveLength(1);
+  });
+});
+
 describe("no file makes the reader throw", () => {
   it("answers a reading for every truncation of a well formed file", async () => {
     const whole = await streamPdf(
@@ -800,7 +947,7 @@ describe("no file makes the reader throw", () => {
         ),
       ],
       "/Info 1 0 R /Root 2 0 R",
-      { compressed: [1] },
+      { packed: [[1]] },
     );
 
     // Every cut, not a sample: a truncation is the cheapest malformed file to

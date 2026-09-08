@@ -79,7 +79,9 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
   tagged MP3 for audiobooks, where a folder of chapter files is read as one book rather
   than thirty. A file that says nothing useful about itself is offered a catalogue lookup
   under its own name instead. **The files are read in your browser and never uploaded**:
-  only what a file said is sent, and Endpaper never takes custody of a book
+  only what a file said is sent, and Endpaper never takes custody of a book. What holds
+  that up is the server rather than the page: no route accepts a book file, so there is
+  nowhere to send one
 - **Read your own OPDS server**: Calibre-Web, Komga, Kavita, Ubooquity or anything else
   serving an OPDS 1.x catalogue. An admin adds the feed once and any member can sync it;
   what the feed lists arrives as books they own, matched on ISBN where the feed carries one

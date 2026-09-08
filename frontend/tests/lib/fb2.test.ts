@@ -318,8 +318,9 @@ describe("the year, which the format says twice", () => {
   it("reads a typed date whose year is not the first thing in it", () => {
     // `25/08/2014` is corpus data, and it is where the difference between the
     // match and the group shows: the match carries the delimiter that anchored
-    // it, so reading the whole of it gives `Number("/2014")`, which is `NaN`,
-    // and `NaN` is not `null` so it leaves the reader as a year.
+    // it, so reading the whole of it gives `Number("/2014")`, which is `NaN`.
+    // The window refuses a `NaN`, so this would answer null rather than a wrong
+    // year, and null is still the wrong answer for a date the reader can read.
     const record = read(
       fb2(
         titleInfo(
@@ -353,6 +354,74 @@ describe("the year, which the format says twice", () => {
     );
 
     expect(record?.year).toBeNull();
+  });
+
+  it("reads no year no book could have been published in", () => {
+    // The window is `bookBounds.plausibleYear`'s, and this is the arm that
+    // notices this reader letting go of it: the caller scan in
+    // `tests/lib/bookBounds.test.ts` still passes on a module that keeps the
+    // name in its prose and drops the call.
+    //
+    // `0101` is the undefined date its producer writes where a book has none,
+    // and it is inside `NUMBER_RANGES.year`, so nothing downstream reports it.
+    // Asserted in both typed fields, because either can be the one read.
+    expect(
+      read(
+        fb2(
+          `${titleInfo("<book-title>Ничего</book-title>")}<publish-info><year>0101</year></publish-info>`,
+        ),
+      )?.year,
+    ).toBeNull();
+    expect(
+      read(
+        fb2(
+          titleInfo(
+            '<book-title>Ничего</book-title><date value="0101-01-01">0101</date>',
+          ),
+        ),
+      )?.year,
+    ).toBeNull();
+    // **The point immediately outside each end, and that choice is the arm.**
+    // A floor is half a window and every other year asserted in this file is
+    // below the ceiling, so a ceiling removed for this reader alone leaves the
+    // caller scan green and every arm above green. A number far outside, `2199`
+    // say, catches a reader that drops the window and nothing else; a reader
+    // keeping a second, wider window of its own answers from that one for a
+    // contiguous band, and any contiguous widening of an end has to contain the
+    // point just outside it. So these two catch that whole family. Found by the
+    // seat that did not write this arm, against a mutation the first version of
+    // it passed.
+    expect(
+      read(
+        fb2(
+          `${titleInfo("<book-title>Ничего</book-title>")}<publish-info><year>1449</year></publish-info>`,
+        ),
+      )?.year,
+    ).toBeNull();
+    expect(
+      read(
+        fb2(
+          `${titleInfo("<book-title>Ничего</book-title>")}<publish-info><year>2101</year></publish-info>`,
+        ),
+      )?.year,
+    ).toBeNull();
+  });
+
+  it("falls through to the written date when the published year is not one", () => {
+    // The window sits in `yearIn` rather than at the end of `readYear`, so an
+    // implausible `publish-info/year` is absent rather than final and the
+    // preference between the two fields is unchanged: this file would answer
+    // 101 with the window at the other site, and null with the whole read
+    // abandoned on the first candidate.
+    const record = read(
+      fb2(
+        `${titleInfo(
+          '<book-title>Война и мир</book-title><date value="1869-01-01">1869</date>',
+        )}<publish-info><year>0101</year></publish-info>`,
+      ),
+    );
+
+    expect(record?.year).toBe(1869);
   });
 });
 

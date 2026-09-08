@@ -544,8 +544,11 @@ describe("checking a book against the file beside it", () => {
   });
 
   describe("the placeholders, arriving by the file's door instead", () => {
-    // `readCalibreLibrary` refuses all three by name and `opf.ts` refuses none,
-    // so a Calibre library's own `metadata.opf` hands them straight back.
+    // `readCalibreLibrary` refuses all three by name. `opf.ts` refuses the year
+    // one by its plausibility window and hands the other two straight back, so
+    // a Calibre library's own `metadata.opf` still reaches this door with them.
+    // These arms drive `crossCheck` directly, which is what keeps the year arm
+    // covered now that `opf.readYear` cannot produce 101 in production.
     // Measured over the household's 897 book library on 2026-09-08: 57 books
     // took the year 101 and 31 took `Unknown` as their author.
 
