@@ -10,8 +10,9 @@
 A self-hosted catalogue for the books you share.
 
 Built for a household's shelves and for the library or archive that has outgrown a
-spreadsheet. Scan a barcode, get a real bibliographic record, and know who has what across
-the people and places that share it.
+spreadsheet. Scan a barcode and get a real bibliographic record, or point it at a folder
+of ebooks and let it draft the rows out of them, and know who has what across the people
+and places that share it.
 
 Like Endpaper or find it useful? Offer me a coffee. It helps pay for the public
 server that lets two copies of Endpaper reach each other. All features are free
@@ -73,6 +74,16 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
   a feed does not carry. The file beside each book is an optional second pass that fills in
   what the index left blank. The file itself never leaves your browser, only the records it
   turned out to hold, and nothing is written to the library
+- **Add a book from its own file**: point the add page at book files or a whole folder and
+  Endpaper drafts the rows out of them. EPUB, MOBI, AZW, FictionBook, CBZ, PDF, and M4B or
+  tagged MP3 for audiobooks, where a folder of chapter files is read as one book rather
+  than thirty. A file that says nothing useful about itself is offered a catalogue lookup
+  under its own name instead. **The files are read in your browser and never uploaded**:
+  only what a file said is sent, and Endpaper never takes custody of a book
+- **Read your own OPDS server**: Calibre-Web, Komga, Kavita, Ubooquity or anything else
+  serving an OPDS 1.x catalogue. An admin adds the feed once and any member can sync it;
+  what the feed lists arrives as books they own, matched on ISBN where the feed carries one
+  and on title otherwise, filling gaps and overwriting nothing
 - **Per-book privacy**: a book can be yours alone inside a shared library catalogue.
   Nobody else sees it, in listings, in search, in stats or by guessing a URL
 - **Reading status**: per-person "unread / want to read / reading / read / did not finish",
@@ -95,7 +106,7 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
   same list. Private books are never included: every one of those goes to a place with no
   single account behind it
 - **Three ways to look at it**: a grid of covers whose cards fold out for the details, a
-  dense list of one line per book, or a table of twenty one metadata columns. Your choice
+  dense list of one line per book, or a table of twenty three metadata columns. Your choice
   is remembered in your browser
 - **Backup and restore**: download the whole library, covers included, and put it back
 - **Search and filters**: by title, author, ISBN, tag, series, shelf location or format

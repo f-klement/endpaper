@@ -164,6 +164,34 @@ function reader(file: Blob) {
 
 type Read = ReturnType<typeof reader>;
 
+type AudioReader = (read: Read, size: number) => Promise<AudioTags | null>;
+
+/**
+ * Which walk reads a file of this extension.
+ *
+ * **A total `Record` and not a branch, so a third audio extension is a compile
+ * error rather than an MP3 read.** This was `extension === ".m4b" ? readMp4 :
+ * readMp3`, an else branch, and an else branch answers for keys nobody has
+ * written an arm for: an `.ogg` added to `AUDIO_EXTENSIONS` went to `readMp3`,
+ * found no ID3 header and reported `no-tags`, which says the file carried no
+ * tags when what happened is that nothing here can read it.
+ *
+ * **Set equality is not an arm.** `tests/lib/fileName.test.ts` holds this
+ * module's extensions level with the ones `FORMAT_FOR_EXTENSION` files as an
+ * audiobook, and that is what keeps a file from being routed here and read by
+ * nothing. It says nothing about whether the dispatch below has a case for
+ * each, which is the second question and the one this map answers.
+ *
+ * **Neither arm is handed the blob, only its length.** That is what keeps the
+ * `reader(file)` closure the one route to this file's bytes and its budget the
+ * one thing every read is counted against: an arm holding the blob could slice
+ * outside both.
+ */
+const AUDIO_READERS: Record<AudioExtension, AudioReader> = {
+  ".m4b": readMp4,
+  ".mp3": readMp3,
+};
+
 /** Read one file's tags, dispatched on the extension the walk already knows. */
 export async function readAudioTags(
   file: Blob,
@@ -171,10 +199,7 @@ export async function readAudioTags(
 ): Promise<AudioReading> {
   try {
     const read = reader(file);
-    const tags =
-      extension === ".m4b"
-        ? await readMp4(read, file.size)
-        : await readMp3(read, file);
+    const tags = await AUDIO_READERS[extension](read, file.size);
     if (tags === null) return { ok: false, failure: "no-tags" };
     return { ok: true, tags };
   } catch (error) {
@@ -419,8 +444,8 @@ const ID3_ALBUM = ["TALB", "TAL"];
 const ID3_ARTIST = ["TPE1", "TP1"];
 const ID3_TITLE = ["TIT2", "TT2"];
 
-async function readMp3(read: Read, file: Blob): Promise<AudioTags | null> {
-  return (await readId3v2(read)) ?? (await readId3v1(read, file));
+async function readMp3(read: Read, size: number): Promise<AudioTags | null> {
+  return (await readId3v2(read)) ?? (await readId3v1(read, size));
 }
 
 async function readId3v2(read: Read): Promise<AudioTags | null> {
@@ -546,9 +571,9 @@ function readFrames(
  * the LibriVox chapters carry no ID3v2 at all, and the one whose tail was
  * fetched carried a complete ID3v1.
  */
-async function readId3v1(read: Read, file: Blob): Promise<AudioTags | null> {
-  if (file.size < ID3V1_BYTES) return null;
-  const view = await read(file.size - ID3V1_BYTES, ID3V1_BYTES);
+async function readId3v1(read: Read, size: number): Promise<AudioTags | null> {
+  if (size < ID3V1_BYTES) return null;
+  const view = await read(size - ID3V1_BYTES, ID3V1_BYTES);
   if (view === null) return null;
   if (fourCharacters(view, 0).slice(0, 3) !== "TAG") return null;
 

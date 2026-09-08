@@ -11537,3 +11537,294 @@ is the shape the entry above on naming a corpus and its instrument in one clause
 it arrived in the same wave that entry was written. Neither can carry a guard: the corpus is
 not in this repository. What is cheap is stating the exclusion, so both now say what they are
 **not** counting.
+
+## A plausible year and a storable year are two questions, and the plausible one is a function
+
+`bookBounds.NUMBER_RANGES.year` is `[1, 2200]`, which is what `BookCreate` will hold.
+`bookBounds.plausibleYear` is `[1450, 2100]`, which is what a publication year could
+credibly be. Calibre writes `0101-01-01T00:00:00+00:00` where a book has no date, 2 of 69
+real MOBI files carry it in EXTH 106, and 101 is inside the column's range, so nothing
+downstream reports it.
+
+The window arrived three times, once per reader, and the third copy was written by somebody
+who had read the second and pointed a comment at it instead of importing it. **Exported as
+a function rather than as the pair**, because each of the three sites also carried its own
+`>= low && <= high`. Both windows now share one private `within(value, range)`, so the
+policy they enforce, nothing for nothing, nothing for a number that is not one, and never a
+clamp, is stated once rather than twice.
+
+It cannot be recomputed from `openapi.json` the way every other number in that module is,
+since no schema stands behind it. Three arms stand in for that, all in
+`tests/lib/bookBounds.test.ts`: `boundNumber("year", 101)` keeps 101 while
+`plausibleYear(101)` refuses it, which a reader collapsing one window into the other fails;
+`bookBounds.ts` is the only module under `src/` carrying either end of the window, and each
+end appears once inside it; and the modules calling `plausibleYear` are exactly the three
+readers.
+
+**The source scan took five attempts and every evasion was a different class**, which is the
+part worth keeping: a matcher covering one end of a two ended window, the same literal
+spelled `1_450`, an alternation that could be halved back to one end, a commented copy of a
+superseded pair standing in for the live declaration, and a glob narrowed to the one module
+the scan exempts. What answers them is not five arms. The separator family is normalised
+away before any match; the ends are read out of the declaration, anchored and required to
+be the only one, so the guard moves with the window and no comment can impersonate it; each
+end is asserted once in its own module as well as in one module, so a second window under
+another name beside it is not "one place"; and the glob asserts its own reach by naming what
+it holds besides the modules, the two stylesheets under `src/`.
+
+**What it still accepts, stated because a guard's exclusion is the useful half**: a caller
+reached through a re-export under a different name, since the caller scan matches the
+identifier per file and `fileName.ts` already re-exports two constants that way; a computed
+literal such as `1449 + 1`; anything outside `src/`; and a window moved onto a number many
+modules carry, which turns the scan red on unrelated files, loudly and in the safe
+direction.
+
+**That last arm is what the old arrangement gave for free and the new one has to be told.**
+Three module private constants could not be reached from outside their own file.
+`plausibleYear` is exported from the module the scan page and the Calibre import already
+import for `boundNumber("year", ...)`, and it reads as the more specific of the two, so the
+cheap mistake is a page applying it to a year a member typed, which drops a genuine 1400 in
+silence.
+
+### Seven modules read a publication year, and they apply three different rules
+
+Every module under `src/lib/` that reads one, which is every reader less `audiobook.ts`,
+which deliberately reads none because the year on a recording is not the book's:
+
+| module | what it reads | what it applies |
+|---|---|---|
+| `fileName.ts` | a four digit run in the name | `plausibleYear` |
+| `mobi.ts` | EXTH 106 | `plausibleYear` |
+| `pdf.ts` | the XMP date | `plausibleYear` |
+| `calibre.ts` | `metadata.db`'s `pubdate` | refuses one literal by name, `CALIBRE_UNDEFINED_YEAR = 101` |
+| `opf.ts` | `dc:date` | nothing |
+| `cbz.ts` | ComicInfo `Year` | nothing: it refuses every year at or below zero, where ComicRack's `-1` for unknown lands, which is reading the format rather than bounding it |
+| `fb2.ts` | `publish-info/year`, then `title-info/date` | nothing |
+
+Measured 2026-09-08 by running the real parsers: `readOpf` answers 101 for
+`<dc:date>0101-01-01T00:00:00+00:00</dc:date>` in both the EPUB 2 and the EPUB 3 spelling,
+`readComicInfo` answers 101 for `<Year>101</Year>`, and `readFb2Description` answers 101 for
+`<year>0101</year>`. `boundNumber("year", 101)` returns 101, so the value reaches
+`BookCreate`. The producer is verified from calibre's own source rather than inferred:
+`UNDEFINED_DATE = datetime(101, 1, 1, tzinfo=utc_tz)` in `utils/iso8601.py`, written into
+`dc:date` by `metadata_to_opf` with no `is_date_undefined` guard.
+
+The band that can reach a row is `[1, 1449]` and `[2101, 2200]`: outside it the column's own
+range drops the value.
+
+### One defect, two seats, two instruments, and it was already fixed
+
+`calibre.ts` refuses 101 on the database side by name and `crossCheck` reinstated it from
+the file side, through `gap(book.year, opf.year)`, counting it as a filled field. The year
+window trio found it by reading the merge and the Calibre trio found it independently in the
+same wave, and the Calibre trio fixed it: `withoutPlaceholders` now sieves the file's record
+before any comparison, including `year: opf.year === CALIBRE_UNDEFINED_YEAR ? null :
+opf.year`. Recorded because the convergence is the evidence, not because anything is open.
+
+## A Calibre library's `metadata.opf` is a stale copy of the index, not a second source
+
+Measured 2026-09-08 over the household's reference library: 897 books in `metadata.db`, 244
+`metadata.opf` files on disk, 243 of which match a `books.path`. The one that does not sits
+in a directory the index no longer names. **654 index rows have
+no file beside them at all**, so the cross check runs on 27% of this library and says nothing
+about the other 73%.
+
+**Every one of the 244 files predates the index.** 233 carry an mtime of 2026-06-07 and 11 of
+2024-11-15, against the index's own 2026-08-19 11:29. Calibre writes these files from the same
+rows, so the two are not independent sources: the file is what the index said in June. That
+settles the shape of every disagreement below, and it is why "which source wins" has no single
+answer. Where the index has since been repaired, the file is stale. Where the index has since
+been damaged, the file is the last clean copy.
+
+## The 57 books are the undefined date, and the correction runs the other way
+
+The Calibre import ticket recorded the reference library as carrying **damage in 57 books that
+the OPF corrects**. The count is right, the same 57 books, and the direction is inverted.
+
+57 of the 244 files carry `dc:date` of `0101-01-01`, Calibre's `UNDEFINED_DATE`. `opf.ts`
+reads the leading four digits and does not refuse it, correctly, because it reports what an OPF
+file says and that constant is Calibre's convention rather than the format's. So all 57 arrived
+at `crossCheck` as the year 101: **28 filled an empty year and 29 were counted as a
+disagreement against a real year the index already held**. The file supplied a year the index
+lacked in 0 of the 57.
+
+The same door carried the second placeholder. 31 books took `Unknown` back as their author,
+having had it refused on the index's side by `readCalibreLibrary`; the index carries an
+`Unknown` author row on 40 books, and 31 of those have a file. The third, `series_index`,
+needed nothing: `opf.ts` reads `calibre:series_index` only under a `calibre:series`, and 0 of
+the 244 files carry either.
+
+**There is no fourth placeholder to refuse.** 0 files carry `dc:language` of `und`, and 0 carry
+a `dc:title` of exactly `Unknown`. The three named in `calibre.ts` are the whole set; what was
+wrong was that they were refused at one of the two doors.
+
+`crossCheck` now sieves the file's record through `withoutPlaceholders` before it compares or
+counts. Over the 243 books that changes the member's figures from 120 fills and 99
+disagreements to **61 and 70**, and the books carrying at least one disagreement from 85 to 69.
+
+**What the set is, and not where each door happens to spell it.** `CALIBRE_PLACEHOLDER` holds
+one predicate a placeholder and both doors are driven from it. The constants were already single
+homed and that was not enough: what drifts is the **application**, one field at a time, and it
+had already drifted, in whether the file door's author refusal depended on a name's position.
+A fourth placeholder is one entry in that set and a failing test at whichever door forgets it.
+
+## Neither source wins the 70 that are left, and each is right about a different field
+
+The reason the count is still reported to the member rather than resolved is now a measurement
+rather than a deferral. Over the same 243 books:
+
+| field | disagreements | who is right | what the disagreement is |
+|---|---|---|---|
+| `language` | 42 | the index, 42 of 42 | 39 `eng` against `en`, 3 `deu` against `en` |
+| `publisher` | 22 | the file, 22 of 22 | an HTML entity the index escaped |
+| `title` | 6 | the file, 6 of 6 | an HTML entity the index escaped |
+| `description` | 0 | | |
+| `series` | 0 | | 0 of 244 files carry a `calibre:series` |
+| ISBN | 0 | | |
+
+**The file is right about `title` and `publisher` in 28 of 28**, and the criterion is checkable
+rather than a judgement: in all 28 the index's value carries an HTML entity, in 0 of 28 does
+the file's, and **repeatedly unescaping the index's value yields the file's exactly, 28 of
+28**. Once, twice and three times over: `O&#39;Reilly Media`, `O&amp;#39;Reilly Media` and
+`Taylor &amp;amp; Francis`. The June enrichment introduced it and the file predates it.
+
+**The index is right about `language` in 42 of 42**, and the file is right in none. 39 are one
+language spelled in two ISO code sets rather than a disagreement about a fact, and 3 are a book
+the index calls `deu` and the file calls `en`. The tell is that the 103 files spelling `en` are
+**exactly** the 103 language events, and the 140 matched files spelling `eng`, `deu`, `spa` or
+`ara` produce none: `en` is what one producer wrote on every file it touched, not something these books
+assert.
+
+Neither is a gap filling rule this reader can apply. Unescaping the index is a repair of the
+index rather than an import rule, and it belongs where the enrichment writes rather than where
+a member's file is read. Preferring one language code set is a decision about what the column
+holds, it would have to make `en` win the 3 books where `en` is wrong, and a code set mapping
+is a table rather than a rule. **So the count still goes to the member, and now says what it is
+made of.** What that leaves the member paying is 42 rows of noise in one number, which is
+recorded as an accepted cost below rather than left unqualified.
+
+---
+
+## How it was measured, and what is excluded
+
+`metadata.db` was copied twice through `kubectl exec` into the `calibre-web` pod, which mounts
+the share read write; both copies hashed identically, `PRAGMA integrity_check` answered `ok`,
+and `journal_mode` is `delete`, so there is no WAL sidecar holding rows the copy would miss.
+The 244 files came off the same mount as a tar. Nothing was opened for writing and the desktop
+was not started.
+
+**Two instruments.** A re-derivation in Python, `sqlite3` plus `ElementTree` plus
+`html.parser`, and the shipping `readCalibreLibrary`, `readOpf` and `crossCheck` themselves run
+under bun against the copied library. They agree on every field and every count except
+`description`, where Python reported 2 disagreements and the shipping code 0. Both are a file
+whose escaped HTML leaves `<p>` and `<li>` unclosed: a real `DOMParser` closes them and
+`html.parser` does not, so the two sides normalise to the same text under the code that ships
+and to different text under the re-derivation. The shipping code is the authority and the
+figure is 0.
+
+**The exclusion, stated.** These numbers describe the 243 books of one household library that
+have a `metadata.opf` beside them. They say nothing about the 654 that do not, and nothing
+about a library from another Calibre version or another producer. The entity escaping in
+particular is this library's own enrichment history rather than a property of Calibre.
+
+**A note the OPF reader already carries, confirmed against a second corpus.** Instrument B had
+to use jsdom, because happy-dom's `DOMParser` falls back to HTML parsing on a single quoted XML
+declaration and every one of these 244 files is spelled that way. `tests/lib/opf.test.ts`
+records that against the 79 file EPUB corpus; this is 244 real Calibre files saying the same
+thing.
+
+## The 42 language disagreements are an accepted cost, with the reason
+
+The member is shown one number, and 42 of the 70 in it are `eng` against `en`: one language
+spelled in two ISO code sets, which is not a disagreement about a fact. That is the same defect
+this trio just removed, one rung down, and it is recorded as accepted rather than left
+unqualified.
+
+**Why it is accepted and the placeholders were not.** A placeholder has a checkable criterion,
+a documented Calibre constant, and refusing one loses nothing: the value it replaces is a blank.
+A code set has neither half. Deciding `eng` and `en` are the same fact means a mapping table
+between 639-2/B and 639-1, and suppressing the pair without one would have to suppress the 3
+books where the file says `en` and the index says `deu`, which is the file being wrong about the
+language and exactly what the count exists to surface. **So the cost is 42 rows of noise in one
+number, against 3 real disagreements that a cheap suppression would hide.**
+
+**What would remove it** is a decision about what the `language` column holds, taken where the
+column is written rather than where a member's file is read: the backend's storage decision and
+the schema that carries it. Not `bookBounds.ts`, whose `language: 10` is a length bound and says
+nothing about code sets.
+
+## The count that corroborates the split, and the base rate that looked wrong
+
+The 57 partition into 28 fills and 29 disagreements, and one of those numbers is the other's
+complement, so a wrong 29 gives a wrong 28. Re-derived 2026-09-08 by a second route that runs no
+reader code: `grep -l "<dc:date>0101"` in the pod for the file side, and `pubdate LIKE '0101-%'`
+against the index for the row side, joined on `books.path`. It answers 57 files, 28 of them
+beside a row whose own `pubdate` is `0101-01-01` and 29 beside a row with a real year. The
+partition is not inverted, and the index copy hashed identically to the one read earlier.
+
+**The base rate that looks impossible is an artefact of which books have files.** 28 of the 29
+rows carrying `pubdate 0101` have a `metadata.opf`, against 243 of 897 overall, which reads as
+97% against 27%. The files are not scattered: they cover `books.id` 1 to 244, where 243 of the
+244 rows in that range have one, and nothing above 244 has any. 28 of the 29 zero date rows sit
+inside that range and the 29th is id 246, just outside it. **Inside the range the base rate is
+100%, not 27%**, so there is no anomaly to explain.
+
+## A prefix read is a third question, not a smaller ceiling
+
+`ZipArchive.read(entry, limit)` inflated until the limit and then refused, so a reader wanting
+the head of an entry had to ask for the whole thing. `fb2.ts` slices 256 KiB off the front of a
+bare `.fb2`; the zipped path could not, so a `.fb2.zip` inflated up to 32 MiB to reach a header
+of about two kilobytes.
+
+**`readPrefix(entry, { prefix, limit })` adds the question rather than lowering the ceiling.**
+`limit` is unchanged and still refuses on three counts: the declared uncompressed size, the
+compressed bytes, and a stored entry's own length. `prefix` is where output stops. `partial`
+says the entry went on. Conflating the two is how a refusal turns into a silent truncation,
+which is what `too-large` and a prefix that stopped early have to stay distinguishable for.
+
+Measured on a 64 MiB entry declaring 2 KiB: a prefix read returns 262,144 bytes in 1 ms with no
+heap growth, against 56 ms and 15.8 MiB when the cap is removed. The bomb's outcome flips from
+`too-large` to a drafted book, which is stated at the site rather than left to be discovered.
+
+**What the change removed and had to be given back.** `inflateRaw` used to carry `total > limit`
+inside its loop and throw. It does not, so `stop` became the only bound on the accumulator, and
+`Math.max(0, NaN)` is `NaN`, which made every comparison against it false: the stored door
+returned the whole entry and the deflate door accumulated the entire inflated output before
+returning nothing. A non-finite bound is refused before the clamp now. **That is the question a
+replacement owes: not whether it is better, but what the old one refused that it accepts.**
+
+**Not taken, with the reason.** The prefix read still slices the entry's compressed bytes whole.
+The smallest slice certain to yield `prefix` bytes out is not derivable from deflate's worst
+case, that bound being for expansion, and a read cut short there surfaces as `truncated`, which
+turns a good file into a damaged one. What the change removes is inflating and buffering past
+`prefix`, which is the cost the ticket was about.
+
+## Five guards, one shape: the description was written from what it was meant to cover
+
+Across one wave, every false claim found in this repository's own guards and prose was the same
+error, and none was found by reading. A count of the instances, so the shape is arguable rather
+than asserted: a source scan matching one end of a two ended window; the same literal spelled
+with a numeric separator; an alternation that could be halved back to one end; a commented copy
+of a superseded pair standing in for the live declaration; a glob narrowed to the one module the
+scan exempts; a registry guard asking whether a key was present rather than whether a reader
+answered; an identity check covering two of eight keys; a matcher named "anything by which a
+module could put bytes on the wire" holding six spellings; a caption crediting constants to an
+anchor that could not see the constant its own key arithmetic rested on.
+
+**Every one was found by re-deriving a number with a different instrument. None by reading the
+sentence.** The rules that fall out, each bought by a failure here:
+
+- When a claim names an instrument, run a second one that **could not share its blind spot**,
+  and put both counts in the sentence. A fraction whose numerator and denominator come from one
+  anchor is one measurement wearing the costume of two.
+- The cheap way to fail that is a second instrument that could share it, which is most of them.
+  Where the claim is about a **mechanism** rather than a count, the second instrument is the
+  case that must fail: prove a dynamic import is load bearing by making the static version
+  collect nothing, not by reading it.
+- A sound number can answer the wrong question. Check the claim the numbers are making, not
+  only the instrument that produced them. A coverage fraction whose numerator is a subset by
+  construction is the shape of that claim rather than a fault in it.
+- **A number carries the conditions it was taken under.** This register already says so for
+  timings and node names; it extends to test counts. `0 test` was true of a run with an
+  evaluation fault injected and was written as a fact about the source, where the file collects
+  45 and passes.

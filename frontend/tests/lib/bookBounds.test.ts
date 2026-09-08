@@ -12,6 +12,13 @@
  * direction: a stale ceiling that is too small only drops fields, so nothing
  * fails and the app quietly stops sending a publisher. Recomputing is what a
  * careful reader cannot do once.
+ *
+ * **One number is the exception and it is stated rather than recomputed**: the
+ * plausibility window `bookBounds.plausibleYear` applies has no schema behind
+ * it, so `1450` and `2100` are written out below. What stands in for the
+ * recomputation is three arms: the pair against `boundNumber`'s wider range,
+ * a scan asserting the numbers have one home under `src/`, and a scan asserting
+ * which modules call the function.
  */
 
 import { describe, expect, it } from "vitest";
@@ -22,6 +29,7 @@ import {
   CUT_TO_FIT,
   KEPT_WHOLE,
   NUMBER_RANGES,
+  plausibleYear,
   QUERY_CEILING,
   QUERY_FLOOR,
   TEXT_CEILINGS,
@@ -188,6 +196,259 @@ describe("boundNumber", () => {
     expect(boundNumber("year", undefined)).toBeNull();
     expect(boundNumber("year", Number.NaN)).toBeNull();
     expect(boundNumber("year", Number.POSITIVE_INFINITY)).toBeNull();
+  });
+});
+
+const BOOK_BOUNDS = "../../src/lib/bookBounds.ts";
+
+/** What lives under `src/` and is not a module. The scans state it as their reach. */
+const STYLESHEETS = ["../../src/index.css", "../../src/theme/palettes.css"];
+
+const isModule = (path: string) => /\.tsx?$/.test(path);
+
+/**
+ * Every module under `src/`, as text, over a glob that proves its own reach.
+ *
+ * **Non-emptiness is not reach, and the difference is the whole guard.** A glob
+ * narrowed to `bookBounds.ts` alone satisfies every check that reads
+ * `sources[BOOK_BOUNDS]`, and narrowing it is the shape a later simplification
+ * takes, so the scans below would sweep the one module they exempt and pass.
+ * What is asserted instead is what the glob holds **besides** the modules,
+ * stated as the exclusion: the two stylesheets under `src/`. No pattern that
+ * misses a directory can still answer that.
+ *
+ * The cost, since it is real: a third stylesheet, or any other kind of file
+ * added under `src/`, fails here until somebody names it. That is the safe
+ * direction, and a person deciding whether a new kind of file belongs in a
+ * source scan is the point rather than the price.
+ */
+function sourceModules(): Record<string, string> {
+  // **Two globs, and the one that measures the reach reads no content.** Names
+  // are all it needs, and an eager `?raw` sweep of everything would decode the
+  // first binary asset added under `src/` as UTF-8 and inline it into this
+  // bundle before failing on it, which is the one event that assertion exists
+  // to catch.
+  const everything = import.meta.glob("../../src/**/*");
+  const modules = import.meta.glob("../../src/**/*.{ts,tsx}", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+
+  const named = Object.keys(everything);
+
+  // **Both assertions, because either glob alone can be narrowed.** The first
+  // says what the tree holds beyond the modules, stated as the exclusion, so a
+  // pattern that misses a directory cannot still answer it. The second binds
+  // the sweep the scans actually read to it, so narrowing that one is red here
+  // rather than in whichever neighbouring arm happens to name enough files.
+  expect(
+    named.filter((path) => !isModule(path)).sort(),
+    "a new kind of file under src/: name it in STYLESHEETS if the scans should skip it",
+  ).toEqual(STYLESHEETS);
+  expect(
+    Object.keys(modules).sort(),
+    "the scans have to read every module the tree holds",
+  ).toEqual(named.filter(isModule).sort());
+
+  return modules;
+}
+
+/** `1_450` is the same literal as `1450` to the compiler, and to a scan. */
+function withoutSeparators(text: string): string {
+  return text.replace(/(?<=\d)_(?=\d)/g, "");
+}
+
+/**
+ * The window's two ends, read out of the declaration that owns them.
+ *
+ * **Derived rather than restated, which is the difference between a guard that
+ * moves with the window and two literals that fall out of step with it.** A
+ * pair written here again is an enumeration of two: halving it takes an end out
+ * of the scan with nothing red, and moving the window in the source leaves the
+ * scan hunting a number that is no longer either end.
+ *
+ * **Anchored, and exactly one.** Unanchored this bound to the first occurrence
+ * of the text anywhere in the file, and a docstring quoting a declaration is
+ * house style in this tree, so one commented line carrying a superseded pair
+ * made the scan below guard numbers that were no longer the window, green. The
+ * anchor stops a comment's ` * ` prefix from matching, and the count refuses a
+ * decoy standing **alongside** the declaration, since a line at column zero
+ * inside a block comment or a template literal is still a line.
+ *
+ * **What it does not remove**: a sole match at column zero is trusted, so a
+ * decoy is still read as the declaration if the real one is indented out of
+ * reach, inside a function body.
+ *
+ * **The decoy's numbers need not be a superseded window, and that is the half
+ * with no backstop.** A decoy that moves the window as well goes red at the
+ * arms above, which state `1450` and `2100` as literals. One substituted while
+ * the window stands still leaves those arms green by construction, and then a
+ * real second carrier of the live floor passes unreported: the scan is
+ * disarmed rather than weakened. Both measured.
+ *
+ * Nothing is bought for it here. Closing it takes either a count of the
+ * identifier or a match that ignores indentation, and both fail on prose that
+ * quotes a declaration, which is this tree's house style and is how the decoy
+ * class arrived in the first place. The precondition, a module constant moved
+ * into a function body, is what a diff shows plainly.
+ *
+ * A renamed, deleted, inlined or reformatted declaration fails here rather than
+ * passing quietly, which is the price of reading the source instead of
+ * importing `PLAUSIBLE_YEARS`, which is deliberately not exported.
+ */
+function declaredWindow(sources: Record<string, string>): {
+  low: string;
+  high: string;
+} {
+  const declarations = [
+    ...withoutSeparators(sources[BOOK_BOUNDS] ?? "").matchAll(
+      /^const PLAUSIBLE_YEARS = \[(\d+), (\d+)\]/gm,
+    ),
+  ];
+  expect(declarations).toHaveLength(1);
+  const [, low, high] = declarations[0]!;
+  return { low: low!, high: high! };
+}
+
+describe("plausibleYear", () => {
+  it("keeps both ends of the window", () => {
+    // Stated as the numbers rather than read off the module: the pair is not
+    // exported, and a test importing what it checks would move with it.
+    expect(plausibleYear(1450)).toBe(1450);
+    expect(plausibleYear(2100)).toBe(2100);
+  });
+
+  it("refuses the year either side of it", () => {
+    expect(plausibleYear(1449)).toBeNull();
+    expect(plausibleYear(2101)).toBeNull();
+  });
+
+  it("refuses the year Calibre writes for a book with no date", () => {
+    // `0101-01-01T00:00:00+00:00` is Calibre's undefined date and 2 of 69 real
+    // MOBI files carry it in EXTH 106. This is the case the window was written
+    // for, so it is asserted by its value rather than as another number below
+    // the floor.
+    expect(plausibleYear(101)).toBeNull();
+  });
+
+  it("refuses what the column would have held, which is the whole point", () => {
+    // The two windows answer different questions, and this pins the difference
+    // rather than the numbers: a reader "simplifying" one into the other passes
+    // every assertion above and fails this one, because the wider window
+    // reports nothing.
+    expect(boundNumber("year", 101)).toBe(101);
+    expect(plausibleYear(101)).toBeNull();
+  });
+
+  it("is null for nothing, and for a number that is not one", () => {
+    expect(plausibleYear(null)).toBeNull();
+    expect(plausibleYear(undefined)).toBeNull();
+    expect(plausibleYear(Number.NaN)).toBeNull();
+    expect(plausibleYear(Number.POSITIVE_INFINITY)).toBeNull();
+  });
+
+  it("is the only place in the source carrying either end of the window", () => {
+    // Three readers declared `[1450, 2100]` for one job, each unaware of the
+    // others, and the third was written by somebody who had read the second.
+    // A guard rather than a rule in a document, because the copy is what a
+    // reviewer of a new reader would have to notice.
+    //
+    // **Four evasions found the first three drafts, and none is answered with
+    // an arm.** A floor only matcher let `const NOT_IN_THE_FUTURE = 2100`
+    // through. `[1_450, 2_100]` is the same literal to the compiler and was not
+    // the same string to the scan, so the separator family is normalised away
+    // before any match, which covers `14_50` and `1_4_5_0` with it. An
+    // alternation over the two ends could be halved back to one with nothing
+    // red, so the ends are read out of the declaration and each is asserted on
+    // its own. And a commented copy of a superseded pair could stand in for the
+    // live one, which `declaredWindow` answers.
+    //
+    // **Once in the file that owns it, not once per file.** The carrier set
+    // says the numbers live in one module; the count says they are one
+    // declaration inside it, so a second window under another name in this same
+    // module is not the one place this test's name claims. The cost is that
+    // prose here may not quote either end.
+    //
+    // **The exclusion.** It reads the modules under `src/`, so `tests/`,
+    // `vite.config.ts`, `scripts/`, `types/`, the stylesheets and the backend
+    // are outside it. It catches a copied literal and not a computed one:
+    // `1449 + 1` and `0x5aa` are outside any scan of this kind, and a window
+    // with different numbers is a different rule. Deriving the ends also makes
+    // it depend on them being rare: a window moved onto a number many modules
+    // carry turns this red on unrelated files, which is loud and wrong rather
+    // than quiet and wrong. `2000` has 3 such carriers today, measured over the
+    // modules under `src/` by `grep -rlw` and again by a walk applying the
+    // normaliser above.
+    const sources = sourceModules();
+    const { low, high } = declaredWindow(sources);
+
+    const carriersOf = (end: string) =>
+      Object.entries(sources)
+        .filter(([, text]) =>
+          new RegExp(`\\b${end}\\b`).test(withoutSeparators(text)),
+        )
+        .map(([path]) => path)
+        .sort();
+
+    const timesInItsOwnModule = (end: string) =>
+      (
+        withoutSeparators(sources[BOOK_BOUNDS] ?? "").match(
+          new RegExp(`\\b${end}\\b`, "g"),
+        ) ?? []
+      ).length;
+
+    expect(carriersOf(low), `the window's floor, ${low}`).toEqual([
+      BOOK_BOUNDS,
+    ]);
+    expect(carriersOf(high), `the window's ceiling, ${high}`).toEqual([
+      BOOK_BOUNDS,
+    ]);
+    expect(
+      timesInItsOwnModule(low),
+      `the floor, ${low}, in its own module`,
+    ).toBe(1);
+    expect(
+      timesInItsOwnModule(high),
+      `the ceiling, ${high}, in its own module`,
+    ).toBe(1);
+  });
+
+  it("is called by the three readers and by nothing else", () => {
+    // The scan above watches the numbers coming back into another module. This
+    // one watches the function going out, which is what the old arrangement
+    // refused and this one has to be told to refuse: three module private
+    // constants could not be reached from outside their own file at all.
+    //
+    // `plausibleYear` reads as the more specific of the two, and it lives in
+    // the module the scan page and the Calibre import already import for
+    // `boundNumber("year", ...)`, so the cheap mistake is a page swapping it in
+    // on a year a member typed, which drops a genuine 1400 and reports nothing.
+    //
+    // **The list is the assertion and not a filter.** A fourth caller is a
+    // decision about which values get a plausibility window, and it fails here
+    // until somebody makes it.
+    //
+    // **What this closes and what it does not.** Any module outside these three
+    // that names `plausibleYear` fails here, whether it imports it from
+    // `bookBounds.ts` or from one of the three, and a plain re-export is
+    // covered with them: a consumer of one still has to name the identifier.
+    // What it does not see is an alias, `export { plausibleYear as believable }`
+    // or `const believable = plausibleYear` re-exported under that name, since
+    // from there nothing downstream carries the word. No arm is added: a scan
+    // for either spelling reports the family closed while the other walks past
+    // it, and the family closes with the module graph or not at all.
+    const callers = Object.entries(sourceModules())
+      .filter(([path]) => path !== BOOK_BOUNDS)
+      .filter(([, text]) => /\bplausibleYear\b/.test(text))
+      .map(([path]) => path)
+      .sort();
+
+    expect(callers).toEqual([
+      "../../src/lib/fileName.ts",
+      "../../src/lib/mobi.ts",
+      "../../src/lib/pdf.ts",
+    ]);
   });
 });
 

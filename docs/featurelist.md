@@ -17,13 +17,14 @@ what people read first and gets corrected first.
 cover, page count, language, categories, series name and index, format,
 condition, and where it is shelved.
 
-**Adding a book** by ISBN, by barcode scan in the browser, by free text search,
-or by hand. ISBN lookup chains several sources so a European or pre-ISBN book
-still resolves rather than failing at one provider, and English, German, French,
-Spanish, Portuguese, Greek and Czech titles all resolve. The two newest are the
-clearest case for chaining them: of 50 Greek ISBNs the other free sources answer
-8 between them and the Greek national catalogue answers 37, and of 50 Czech ISBNs
-they answer 10 and the Czech national catalogue answers 49.
+**Adding a book** by ISBN, by barcode scan in the browser, by free text
+search, by pointing at the book's own file, or by hand. ISBN lookup chains
+several sources so a European or pre-ISBN book still resolves rather than
+failing at one provider, and English, German, French, Spanish, Portuguese,
+Greek and Czech titles all resolve. The two newest are the clearest case for
+chaining them: of 50 Greek ISBNs the other free sources answer 8 between
+them and the Greek national catalogue answers 37, and of 50 Czech ISBNs they
+answer 10 and the Czech national catalogue answers 49.
 
 **Rapid mode** scans a whole shelf without stopping between books. The batch is
 reviewed before anything is written, so a misread barcode is caught before it
@@ -61,6 +62,72 @@ deliberately not exposed.
 checked before it is offered, so a broken link never becomes a book's cover, and
 a stored cover survives the source going away. Fetching is restricted to an
 allowlist of hosts.
+
+## Bringing a library in
+
+**From the files themselves.** Point the add page at book files, or at a whole
+folder, and Endpaper drafts rows out of what the files say. EPUB 2 and EPUB 3,
+MOBI, AZW and AZW3, FictionBook as both `.fb2` and `.fb2.zip`, CBZ, and PDF.
+Title, authors, series and the position in it, publisher, year, language and
+description, as far as each format carries them. **The files are read in your
+own browser and are never uploaded**: only what a file said is sent, and the app
+never takes custody of a book. A file that will not open stays in the queue with
+its name and the reason rather than failing the batch, and a format Endpaper
+does not read is counted and reported rather than passed over in silence.
+
+**CBR is the one refusal, and it is a licence rather than a gap.** A CBR is a
+RAR archive, and the standard decoder's licence forbids using it to recreate RAR
+compression, which is not something a published image can carry. A CBR named in
+an export, or attached to a book in an imported Calibre library, still files as
+a comic.
+
+**A folder of chapter files is one audiobook**, not thirty books. M4B and tagged
+MP3 are grouped before anything is queued: files naming an album belong to that
+album on the folder they share, files naming none belong to their own folder,
+and an M4B naming none is a book on its own. The queue says how many files each
+candidate was made of, lists them, and offers to file them separately.
+
+**A file whose own metadata says nothing is offered a catalogue lookup**, under
+its own name and the folders above it. Offered rather than automatic, and paced,
+so a folder of three hundred does not spend a morning's search budget in a
+minute.
+
+**From another app's export**: Goodreads, LibraryThing, StoryGraph, Libib and
+Openreads. **This file is uploaded and read on the server**, unlike the book
+files above, and so is a MARCXML file. The columns are worked out from the
+header row and shown before anything is saved, the preview names which reader
+ran and how many rows the file marks as deleted, and a title your old app says
+you deleted is not brought back.
+Where a service needs one, there is a reader per service: LibraryThing packs a
+publisher, a year and a format into one cell, and Openreads packs a book's
+starts and finishes into another.
+
+**From a Calibre library's own index.** Choose a copy of `metadata.db` and every
+book in it is read in your own browser, with the ISBN, the series and the
+position in it, the publisher, the language, the description and whether the
+book has a file. The `metadata.opf` beside each book is an optional second pick
+that fills in what the index left empty; where the two disagree the index is
+kept, and the count is shown before anything is written rather than left for
+you to find. Nothing is written until the counts have been shown, and nothing is
+ever written back to the library. **Copy the file first and import the copy**: a
+Calibre library has exactly one writer, and the card says so where you are
+standing.
+
+**From a household's own OPDS server**: Calibre-Web, Komga, Kavita, Ubooquity
+and anything else serving an OPDS 1.x Atom catalogue. An admin adds the feed
+address and, where it needs one, a login sealed with the same key every other
+stored credential uses; any member can then sync it, and what the feed lists
+arrives as books they own. **Titles and authors**, measured across seven
+self hosted servers: not one emits an identifier, so what a book is still comes
+from the catalogue chain. Matching is by ISBN where the feed carries one and by
+title otherwise, a sync fills gaps and never overwrites what somebody wrote, and
+only an entry saying the member holds the book is taken, because a title a
+server offers to lend is not a holding.
+
+A feed is fetched by the server rather than by your browser, and the reason is
+that a feed is a catalogue rather than a file: there is nothing to avoid
+storing, and a browser cannot fetch a self hosted server that sends no
+permissive CORS headers. **No route accepts a book file.**
 
 **Import and export** as CSV, and a full backup and restore.
 
@@ -282,7 +349,10 @@ screen here.
 **No social features**, no federation, no recommendations, no reading goals.
 
 **No library circulation.** No queue positions, no pickup notifications, no
-fines, no MARC, no Z39.50 as a client. Koha exists and is better at all of it.
+fines. Koha exists and is better at all of it. MARC21 itself is read and
+written, which is the exchange format rather than the circulation system: see
+*MARC21 import and export* under The interface. No catalogue is asked over
+Z39.50 yet: see *The Z39.50 client library* in `docs/architecture.md`.
 
 **No Z39.50 server.** SRU is served and this is not: Z39.50 is a binary
 protocol over raw TCP, normally served through YAZ, and is not a shape this

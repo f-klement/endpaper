@@ -60,6 +60,7 @@
  * this reader does not open records.
  */
 
+import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
 import type { OpfIdentifier, OpfRecord } from "./opf";
 
@@ -229,23 +230,6 @@ const ISBN = 104;
 const PUBLISHED = 106;
 const UPDATED_TITLE = 503;
 const LANGUAGE = 524;
-
-/**
- * The window a year out of EXTH 106 has to fall in.
- *
- * **Not a validator, and it is here because of a value real files carry.**
- * Calibre writes `0101-01-01T00:00:00+00:00` when a book has no date, and 2 of
- * the 69 files carry exactly that. It parses to the year 101, which is inside
- * `bookBounds.NUMBER_RANGES.year`, so nothing downstream would stop it and a
- * member would see a book published in the second century.
- *
- * `lib/fileName.ts` declares the same two numbers for a year sniffed out of a
- * filename. They are two instances of one threshold, and it belongs in
- * `lib/bookBounds.ts` beside `NUMBER_RANGES.year`, which is the number it is
- * not: that one is what the column will hold, this one is what a year could
- * plausibly be. Tracked.
- */
-const YEAR_RANGE = [1450, 2100] as const;
 
 /**
  * A `DataView` read that answers `null` past the end rather than throwing.
@@ -482,16 +466,14 @@ function readTitle(
  * The year, when the declared date carries a plausible one.
  *
  * The value is an ISO date in most files and a bare `YYYY-MM-DD` in some, so
- * the leading four digits are read and the rest ignored. See `YEAR_RANGE` for
- * the value that made a window necessary.
+ * the leading four digits are read and the rest ignored. **Plausible rather
+ * than storable**: `bookBounds.plausibleYear` holds the window, and the value
+ * out of these 69 files that made one necessary.
  */
 function readYear(exth: ExthRecords, decode: TextDecoder): number | null {
   const raw = text(exth, PUBLISHED, decode);
   const match = raw === null ? null : /^(\d{4})/.exec(raw);
-  if (match === null) return null;
-  const year = Number(match[1]);
-  const [low, high] = YEAR_RANGE;
-  return year >= low && year <= high ? year : null;
+  return match === null ? null : plausibleYear(Number(match[1]));
 }
 
 /**

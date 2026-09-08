@@ -140,6 +140,7 @@
  * and its own test.
  */
 
+import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
 import type { OpfIdentifier, OpfRecord } from "./opf";
 
@@ -296,9 +297,6 @@ const MAX_RESOLVE_STEPS = 16;
  * bound a file chooses.
  */
 const MAX_OBJSTM_OBJECTS = 8192;
-
-/** The window a year in a date has to fall in. `lib/mobi.ts` states the rule. */
-const YEAR_RANGE = [1450, 2100] as const;
 
 // --- the object model -------------------------------------------------------
 
@@ -1553,13 +1551,13 @@ function readXmp(packet: string): XmpRecord | null {
  *
  * One candidate and not a list: the XMP date is the only thing here that is a
  * publication date. `XmpRecord` says why `/CreationDate` is not a second one.
+ *
+ * **Plausible rather than storable**, and the window is
+ * `bookBounds.plausibleYear`'s rather than this reader's.
  */
 function readYear(candidate: string | null): number | null {
   const match = candidate === null ? null : /(\d{4})/.exec(candidate);
-  if (match === null) return null;
-  const year = Number(match[1]);
-  const [low, high] = YEAR_RANGE;
-  return year >= low && year <= high ? year : null;
+  return match === null ? null : plausibleYear(Number(match[1]));
 }
 
 /**

@@ -151,19 +151,9 @@ export function supportedExtension(name: string): SupportedExtension | null {
 // Both live in `bookBounds.ts`, which owns what a request will take. Re-exported
 // rather than re-declared so this module's callers need not know that, and so the
 // number cannot come back here as a fourth copy.
-import { QUERY_CEILING, QUERY_FLOOR } from "./bookBounds";
+import { plausibleYear, QUERY_CEILING, QUERY_FLOOR } from "./bookBounds";
 
 export { QUERY_CEILING, QUERY_FLOOR };
-
-/**
- * The window a four digit number has to fall in to be read as a year.
- *
- * Chosen rather than measured, and wide on both ends on purpose: this is a
- * signal that has to be wrong rarely, not a validator. The column's own range is
- * `bookBounds.NUMBER_RANGES.year`, which is wider still, and a year taken from a
- * name is passed through it before it can reach a request.
- */
-const YEAR_RANGE = [1450, 2100] as const;
 
 /** A folder shorter than this corroborates nothing. `A/` is not an author. */
 const MIN_FOLDER_LENGTH = 3;
@@ -214,7 +204,7 @@ export interface NameClues {
   title: string;
   /** A folder that also appears in the name, or null. Never a guessed one. */
   author: string | null;
-  /** A four digit year inside `YEAR_RANGE`, or null. */
+  /** A four digit year `bookBounds.plausibleYear` believes, or null. */
   year: number | null;
   /**
    * What to ask the catalogue, bounded, or null when nothing usable is left.
@@ -280,17 +270,29 @@ function isbnIn(stem: string): string | null {
   return null;
 }
 
-/** A standalone four digit number in `YEAR_RANGE`, brackets preferred. */
+/** A standalone four digit number that could be a year, brackets preferred. */
 function yearIn(stem: string): number | null {
   const bracketed = (stem.match(BRACKETED) ?? []).join(" ");
-  return plausibleYear(bracketed) ?? plausibleYear(stem);
+  return scanForYear(bracketed) ?? scanForYear(stem);
 }
 
-function plausibleYear(text: string): number | null {
-  const [low, high] = YEAR_RANGE;
+/**
+ * The first four digit run in the text that is a plausible year.
+ *
+ * **The window is `bookBounds.plausibleYear`'s**, which is where a year a file
+ * claims is believed or not.
+ *
+ * **A run outside it is skipped and the scan goes on**, rather than ending the
+ * scan: `Dune 1234 1965.epub` names a book published in 1965, and stopping at
+ * the first four digit run answers null for it. Spelled without brackets on
+ * purpose, since `yearIn` tries the bracketed groups first and a bracketed
+ * example would pass with or without the skip. `tests/lib/fileName.test.ts`
+ * carries that name as its own arm.
+ */
+function scanForYear(text: string): number | null {
   for (const found of text.match(/(?<!\d)\d{4}(?!\d)/g) ?? []) {
-    const year = Number(found);
-    if (year >= low && year <= high) return year;
+    const year = plausibleYear(Number(found));
+    if (year !== null) return year;
   }
   return null;
 }

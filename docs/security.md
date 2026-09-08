@@ -1547,6 +1547,20 @@ Worth knowing before exposing this beyond a private network:
   `localStorage` and is attached explicitly, so it is not sent automatically with a
   cross-site request. Moving *it* to a cookie would change that and require CSRF tokens.
   There is one cookie, and it is not that token. See below.
+- **A household OPDS server's address is fetched by this server, with no host allowlist.**
+  Loopback and private space are admitted deliberately: a household's own library server
+  is on the household's own network, so refusing private space would refuse the feature.
+  The after-resolution refusal that the typed host design specifies is not applied here,
+  so a name that resolves into private space is not treated differently from a literal
+  one. **Link local is admitted too, and whether it should be is open**, since it is the
+  one range that is never a household's own server and is where the cloud metadata
+  endpoint sits. `backend/opds.py` carries the reasoning, what does bound it, and which
+  control of the typed host design does not apply here. **An admin chooses the address and
+  any member can make the request**, so an admin gains a capability no other setting on
+  their list gives them. No bytes of the response are echoed, though its status code is,
+  and so are titles parsed out of it. **http is admitted and https is not required**,
+  because these servers rarely carry a certificate, so a login stored for an `http` feed
+  travels as `Authorization: Basic` in the clear on the household's own network.
 - **No account lockout.** The login limiter bounds guessing; nothing disables an account
   after a run of failures, deliberately, because a limiter keyed on a caller supplied
   username is a lockout somebody else can trigger.

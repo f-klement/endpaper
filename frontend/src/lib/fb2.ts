@@ -56,6 +56,9 @@ import { openZip, ZipError, type ZipFailure } from "./zip";
  * How much of a bare `.fb2` is read off the disk.
  *
  * **The whole point of the number: a `.fb2` is a book, and this reads a header.**
+ * Both doors read exactly this much: a bare file by slicing it and an archived
+ * one by `readPrefix` on the zip seam, so the two see the same bytes and answer
+ * the same way about them.
  * `<description>` is the first child of the root and the body follows it, so
  * everything this module wants sits at the front of the file. Measured over the
  * corpus: `</description>` ends at most 9,104 bytes in, median 2,472.5, against
@@ -70,13 +73,14 @@ import { openZip, ZipError, type ZipFailure } from "./zip";
 const MAX_HEADER_BYTES = 256 * 1024;
 
 /**
- * How much a `.fb2.zip` entry may inflate to.
+ * How large a `.fb2.zip` entry may be at all.
  *
- * **128 times the header bound, and that is a cost rather than a choice.**
- * `lib/zip.ts` inflates a whole entry or refuses it: there is no
- * read-the-first-N-bytes on that seam, so an archived FictionBook is inflated in
- * full to read the 2 KB at the front of it. Bounding this at the header size
- * instead would refuse every real book as `too-large`.
+ * **The ceiling and not the read**, which are two questions and used to be one.
+ * `lib/zip.ts` now takes both, so the read is `MAX_HEADER_BYTES` off the front
+ * of the entry and this is only what the entry may declare or hold before it is
+ * refused outright. Keeping it is the point: without a ceiling a prefix read
+ * accepts anything, and an entry no reader could open would come back as a
+ * header that happened to be short rather than as `too-large`.
  *
  * 32 MiB is 5.97 times the largest file in the corpus, 5,616,072 bytes. The
  * headroom is for the `<binary>` blocks: FB2 carries its cover, and sometimes
@@ -399,10 +403,38 @@ function readYear(
   return yearIn(date.getAttribute("value")) ?? yearIn(text(date));
 }
 
-/** The first four digit run, which is where a year hides in a typed date. */
+/**
+ * The first standalone four digit run, which is where a year hides in a date.
+ *
+ * **Standalone, because `<date>` text is whatever a person typed and one thing
+ * people type there is the ISBN.** An unanchored `\d{4}` takes the first four
+ * digits of any longer run: on `ISBN 5-17-002238-0, 2001` it reads `0022` and
+ * files the book under the year 22, which is a plausible looking number that
+ * survives every bound after this one. A non digit on each side skips a digit
+ * run longer than four, so `20140825` yields nothing where an unanchored
+ * pattern yields 2014: a refusal rather than a wrong year.
+ *
+ * **It does not skip an identifier whose own groups are four digits, and that
+ * is the exclusion rather than a corner case.** Measured over the 8 distinct
+ * hyphen grouped ISBN literals under `frontend/`, 1 carries a group this takes,
+ * and it is the ISBN in this reader's own fixtures: `978-5-9922-1663-9` reads
+ * as the year 9922. **What bounds the exposure is where this is called from and
+ * not the pattern**: `publish-info/year` and `title-info/date` and nothing else,
+ * so an identifier reaches it by sitting inside a date element, which is a
+ * malformed file rather than an ordinary one.
+ *
+ * **The group and not the match**, because the match carries the delimiter that
+ * anchored it: `25/08/2014` matches `/2014`, and `Number("/2014")` is `NaN`,
+ * which is not `null` and so leaves here as a year.
+ *
+ * Written with a leading `(?:^|\D)` rather than a lookbehind: a lookbehind is a
+ * syntax error at parse time on engines older than the one the archived door
+ * needs, and this door reads a bare file that does not need that engine, so the
+ * whole module would fail to load rather than one path failing to work.
+ */
 function yearIn(raw: string | null): number | null {
-  const match = /\d{4}/.exec(raw ?? "");
-  return match ? Number(match[0]) : null;
+  const match = /(?:^|\D)(\d{4})(?!\d)/.exec(raw ?? "");
+  return match ? Number(match[1]) : null;
 }
 
 /**
@@ -498,7 +530,8 @@ function firstIsbn(identifiers: readonly OpfIdentifier[]): string | null {
  *
  * **A prefix of the file and never the file.** `MAX_HEADER_BYTES` off the front
  * is what a `Blob.slice` costs, so picking a folder of 5 MB novels reads a few
- * kilobytes of each rather than all of them.
+ * kilobytes of each rather than all of them. The archived door reads the same
+ * number of bytes by the same argument.
  *
  * Never returns a failure for anything but the file's own content. A read that
  * rejects is the disk rather than the book, and `ScanPage` already reports that
@@ -507,6 +540,7 @@ function firstIsbn(identifiers: readonly OpfIdentifier[]): string | null {
 export async function readFb2(file: Blob): Promise<Fb2Reading> {
   return fromBytes(
     new Uint8Array(await file.slice(0, MAX_HEADER_BYTES).arrayBuffer()),
+    file.size > MAX_HEADER_BYTES,
   );
 }
 
@@ -516,23 +550,28 @@ export async function readFb2(file: Blob): Promise<Fb2Reading> {
  * **Both doors decide here**, so a document too long to read is told apart from
  * one that is not a FictionBook in one place rather than two.
  *
+ * **`more` is asked of the door rather than worked out from `raw.length`.** A
+ * prefix that filled its bound is not the same fact as a file continuing past
+ * it: a document of exactly `MAX_HEADER_BYTES` fills the bound with nothing cut
+ * off, and calling that one too large tells a member their whole malformed file
+ * was too long to read. Each door knows the difference for free, the bare one
+ * from the file's size and the archived one from `ZipPrefix.partial`.
+ *
  * **Three conditions, and naming one of them as the discriminator is how the
- * other two stop being checked.** The read filled its bound, the prefix opens a
- * `<description`, and the prefix does not close it. Drop the first and a short
- * broken file is called too large; drop the third and so is an RSS feed, which
- * has a `<description>` of its own and closes it. Each condition has its own arm
- * in the tests, because a comment that justifies a guard by one of its several
- * conditions is a comment a reviewer agrees with while the hole survives.
+ * other two stop being checked.** There are bytes past the ones read, the prefix
+ * opens a `<description`, and the prefix does not close it. Drop the first and a
+ * short broken file is called too large; drop the third and so is an RSS feed,
+ * which has a `<description>` of its own and closes it. Each condition has its
+ * own arm in the tests, because a comment that justifies a guard by one of its
+ * several conditions is a comment a reviewer agrees with while the hole
+ * survives.
  */
-function fromBytes(raw: Uint8Array): Fb2Reading {
-  const head = raw.subarray(0, MAX_HEADER_BYTES);
-  const xml = decode(head);
+function fromBytes(raw: Uint8Array, more: boolean): Fb2Reading {
+  const xml = decode(raw);
   const metadata = readFb2Description(xml);
   if (metadata !== null) return { ok: true, metadata };
   const truncated =
-    head.length === MAX_HEADER_BYTES &&
-    xml.includes("<description") &&
-    !DESCRIPTION_END.test(xml);
+    more && xml.includes("<description") && !DESCRIPTION_END.test(xml);
   return { ok: false, failure: truncated ? "too-large" : "not-an-fb2" };
 }
 
@@ -552,7 +591,14 @@ export async function readFb2Archive(file: Blob): Promise<Fb2Reading> {
     );
     if (entry === undefined) return { ok: false, failure: "not-an-fb2" };
 
-    return fromBytes(await archive.read(entry, MAX_ARCHIVED_BYTES));
+    // The head of the entry and not the entry. `MAX_ARCHIVED_BYTES` is still
+    // checked, so an entry too large to be a FictionBook is still refused;
+    // what stops is the inflating of everything past the header.
+    const head = await archive.readPrefix(entry, {
+      prefix: MAX_HEADER_BYTES,
+      limit: MAX_ARCHIVED_BYTES,
+    });
+    return fromBytes(head.bytes, head.partial);
   } catch (error) {
     if (error instanceof ZipError) {
       return { ok: false, failure: FROM_ZIP[error.failure] };

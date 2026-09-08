@@ -11,10 +11,11 @@ Like Endpaper or find it useful? Offer me a coffee. It helps pay for the public
 server that lets two copies of Endpaper reach each other. All features are free
 either way.
 
-Catalogue, lend and track a collection of **physical** books, shared by the people who use
-it. Scan a barcode, the book appears with its cover and metadata. Built for a household's
-shelves and for the library or archive that has outgrown a spreadsheet. Self-hosted, no
-account anywhere else, no telemetry.
+Catalogue, lend and track a collection of books, on the shelf and in files, shared by
+the people who use it. Scan a barcode and the book appears with its cover and metadata,
+or point it at a folder of ebooks and it drafts the rows out of the files themselves.
+Built for a household's shelves and for the library or archive that has outgrown a
+spreadsheet. Self-hosted, no account anywhere else, no telemetry.
 
 One container. It serves the API and the compiled web client together, so there is no
 second web server and no CORS to configure. Storage is a single SQLite file plus a

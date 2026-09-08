@@ -46,6 +46,17 @@
  * - `title` and an author's `name` are both the literal `Unknown`.
  * - `series_index` defaults to `1.0` on every book, including every book in no
  *   series at all, so it is read only where a series link exists.
+ *
+ * **The exclusion, because a list of three is a list somebody will extend.**
+ * `CALIBRE_PLACEHOLDER` is the set and both doors are driven from it, so
+ * extending it is one edit and a test that goes red until both doors apply the
+ * new member. What is **not** refused: every other value a
+ * library carries, however empty it looks. Swept 2026-09-08 over the 897 rows
+ * and 244 `metadata.opf` files of the reference library, no fourth value
+ * repeats where a blank would be: 0 files carry `dc:language` of `und`,
+ * Calibre's undefined language, and 0 carry a `dc:title` of exactly `Unknown`.
+ * That is one library and one Calibre version, so it bounds nothing; it is why
+ * the set has three members today rather than why it may only ever have three.
  */
 
 import { parseIsbn } from "./isbn";
@@ -177,6 +188,47 @@ const CALIBRE_UNDEFINED_YEAR = 101;
 
 /** What Calibre writes where a person did not say. Not a title and not a name. */
 const CALIBRE_UNKNOWN = "Unknown";
+
+/**
+ * What a Calibre placeholder is, decided once for both doors that meet one.
+ *
+ * **A library is read through two doors and they must refuse the same set.**
+ * `readCalibreLibrary` meets a placeholder in a row of `metadata.db`;
+ * `crossCheck` meets it again in the `metadata.opf` beside the book, which
+ * Calibre wrote from those same rows. Before this the two were separate
+ * literals that happened to agree, so a fourth placeholder was two edits with
+ * nothing red after the first, and the pair had already drifted: the file
+ * door's author refusal depended on a name's position in the list and the
+ * index door's did not.
+ *
+ * The constants were already single homed and that was not enough, because
+ * what goes wrong is the **application**, one field at a time, and a shared
+ * constant says nothing about who applied it.
+ *
+ * **What holds the set and its test together, on which rung.** The test's case
+ * list types each of its keys as one of this object's, so removing a member
+ * from here fails the typecheck there, and it asserts its keys against
+ * `Object.keys` of this object, so adding one with no case goes red. Each case
+ * then drives both doors. Exporting this was the whole of that mechanism and
+ * it is why the export exists: a first draft listed the three values in the
+ * test beside this object rather than from it, which moved "two edits with
+ * nothing red after the first" out of this file and into that one. Measured on
+ * that draft: a fourth member added here and wired at neither door passed 52
+ * of 52.
+ *
+ * **`series_index` is the third placeholder and is not here**, because it is
+ * refused structurally rather than by value: both doors read a position only
+ * where a series is named, so `1.0` on a standalone book is never reached. A
+ * predicate on the number would have to refuse a real first volume.
+ */
+export const CALIBRE_PLACEHOLDER = {
+  /** `title` is the literal `Unknown` where nobody typed one. */
+  title: (value: string): boolean => value === CALIBRE_UNKNOWN,
+  /** An author's `name` is the same literal, at any position in the list. */
+  author: (value: string): boolean => value === CALIBRE_UNKNOWN,
+  /** `pubdate` is `0101-01-01`, which reads back as the year 101. */
+  year: (value: number): boolean => value === CALIBRE_UNDEFINED_YEAR,
+} as const;
 
 /**
  * The tables this reader will use, and whether it can proceed without one.
@@ -395,7 +447,9 @@ export function readCalibreLibrary(db: SqliteDatabase): CalibreReading {
         ),
         (row) => {
           const name = text(row["name"]);
-          return name === CALIBRE_UNKNOWN ? null : name;
+          return name !== null && CALIBRE_PLACEHOLDER.author(name)
+            ? null
+            : name;
         },
       )
     : new Map<number, string[]>();
@@ -470,7 +524,7 @@ export function readCalibreLibrary(db: SqliteDatabase): CalibreReading {
     books.push({
       id,
       path: text(row["path"]) ?? "",
-      title: title === CALIBRE_UNKNOWN ? null : title,
+      title: title !== null && CALIBRE_PLACEHOLDER.title(title) ? null : title,
       authors: authors.get(id) ?? [],
       identifiers: ownIdentifiers,
       isbn: readIsbn(ownIdentifiers),
@@ -505,7 +559,43 @@ function readYear(value: unknown): number | null {
   const match = /^(\d{4})/.exec(text(value) ?? "");
   if (match === null) return null;
   const year = Number(match[1]);
-  return year === CALIBRE_UNDEFINED_YEAR ? null : year;
+  return CALIBRE_PLACEHOLDER.year(year) ? null : year;
+}
+
+/**
+ * The file's values with Calibre's own placeholders taken back out.
+ *
+ * `readCalibreLibrary` refuses all three by name on the database's side and
+ * `opf.ts` refuses none of them, correctly: that module reports what an OPF
+ * file says, and `Unknown` and `0101-01-01` are Calibre's conventions rather
+ * than the format's. A Calibre library's `metadata.opf` is written by Calibre
+ * from those same rows, so without this the placeholders arrive back through
+ * the gap filling door and land as facts, having been refused at the other one.
+ *
+ * Measured over the household's 897 book library on 2026-09-08, the 243 books
+ * carrying a `metadata.opf`: **57 books take the year 101 from the file**, 28
+ * into an empty year and 29 as a counted disagreement against a real year the
+ * database already held, and **31 books take `Unknown` back as their author**.
+ * The file is right in none of those 88. Refusing here rather than arbitrating
+ * is what the numbers support: 57 of the 244 files carry `0101-01-01` and not
+ * one of them carries a year the database lacks.
+ *
+ * The exclusion, stated: `series_index` is the third placeholder and needs
+ * nothing here, because `opf.ts` reads `calibre:series_index` only where a
+ * `calibre:series` names a series, which is the same guard `readCalibreLibrary`
+ * puts on the column. 0 of the 244 files measured carry either.
+ */
+function withoutPlaceholders(opf: OpfRecord): OpfRecord {
+  return {
+    ...opf,
+    title:
+      opf.title !== null && CALIBRE_PLACEHOLDER.title(opf.title)
+        ? null
+        : opf.title,
+    authors: opf.authors.filter((name) => !CALIBRE_PLACEHOLDER.author(name)),
+    year:
+      opf.year !== null && CALIBRE_PLACEHOLDER.year(opf.year) ? null : opf.year,
+  };
 }
 
 /** What one book's `metadata.opf` changed about it. */
@@ -531,17 +621,48 @@ export interface CalibreCrossCheck {
  * where both do. A number that fails its own check digit names no book, so
  * "the database has a value" is not a reason to keep it.
  *
- * **Disagreements are counted and not resolved.** The reference library is
- * recorded as carrying damage in 57 books that the OPF corrects, and what that
- * damage is has not been characterised here: the library was not reachable from
- * where this was written. Inventing a rule for it would be inventing which of
- * two values is the wrong one, so the count is reported to the member before
- * the write instead, and `docs/decisions.md` carries the open question.
+ * **Disagreements are counted and not resolved**, and that is now a measured
+ * answer rather than a deferral. Over the household's 897 book library on
+ * 2026-09-08, the 243 books carrying a `metadata.opf`, the file is right in 28
+ * disagreements and the database is right in 42, so neither source wins as a
+ * rule.
+ *
+ * **What that library is, because the numbers below are its history and not a
+ * property of OPF files.** All 244 files predate the index: 233 were written
+ * 2026-06-07 and 11 on 2024-11-15, against the index's own 2026-08-19. Calibre
+ * writes these files from those same rows, so the file is not a second source,
+ * it is what the index said two months earlier, and a later metadata
+ * enrichment is what introduced the escaping the file is right about. Another
+ * household, or a run of the same enrichment after a backup, inverts that. The
+ * two denominators differ by the one file whose directory the index no longer
+ * names: 244 files on disk, 243 of them beside a book. What each side is right
+ * about:
+ *
+ * - **The file is right about `title` and `publisher`, 28 of 28.** Every one is
+ *   an HTML entity the database escaped and the file did not, once, twice or
+ *   three times over: `O&#39;Reilly Media` against `O'Reilly Media`, and
+ *   `Taylor &amp;amp; Francis` against `Taylor & Francis`. Repeatedly
+ *   unescaping the database's value yields the file's exactly, in all 28.
+ * - **The database is right about `language`, 42 of 42.** 39 are `eng` against
+ *   `en`, one language spelled in two ISO code sets rather than a disagreement
+ *   about a fact, and 3 are a book the database calls `deu` and the file calls
+ *   `en`. The file is right in none.
+ * - **`description`, `series` and the ISBN disagreed in no book**, and 0 of the
+ *   244 files carry a `calibre:series` at all.
+ *
+ * Neither of those two is a rule this reader can apply: unescaping the database
+ * is a repair of the database rather than a gap filling rule, and preferring
+ * one language code set is a decision about what the column holds. Both are
+ * recorded in `docs/decisions.md`. So the count still goes to the member.
  */
 export function crossCheck(
   book: CalibreBook,
-  opf: OpfRecord,
+  file: OpfRecord,
 ): CalibreCrossCheck {
+  // Before anything is compared or counted: a placeholder is neither a fill
+  // nor a disagreement, and counting one as either is what puts 57 books of
+  // noise in front of the member.
+  const opf = withoutPlaceholders(file);
   let filled = 0;
   let disagreed = 0;
 

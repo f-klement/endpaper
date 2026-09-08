@@ -379,7 +379,10 @@ def custom_operation_id(route: APIRoute) -> str:
 app = FastAPI(
     title="Endpaper",
     version="1.0.0",
-    description="Catalogue, lend and track a collection of physical books, shared by the people who use it.",
+    description=(
+        "Catalogue, lend and track a collection of books, on the shelf and in "
+        "files, shared by the people who use it."
+    ),
     generate_unique_id_function=custom_operation_id,
     lifespan=lifespan,
 )

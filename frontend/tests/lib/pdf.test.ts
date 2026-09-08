@@ -299,6 +299,20 @@ describe("the XMP packet", () => {
     expect(reading.metadata.isbn).toBe("9781000650792");
   });
 
+  it("refuses a year no book could have been published in", async () => {
+    // The window is `bookBounds.plausibleYear`'s, shared with every other
+    // reader that takes a year out of a file, and this is the arm that notices
+    // this one letting go of it: a mutation dropping the call went unreported
+    // before it existed. The value is Calibre's undefined date, which is what
+    // bought the window; 101 is inside `NUMBER_RANGES.year`, so nothing
+    // downstream reports it.
+    const reading = await withXmp(xmpPacket({ date: "0101-01-01T00:00:00Z" }));
+
+    expect(reading.ok).toBe(true);
+    if (!reading.ok) return;
+    expect(reading.metadata.year).toBeNull();
+  });
+
   it("labels an identifier that is not an ISBN with no scheme", async () => {
     // 2 of the 3 identifiers in the corpus are DOIs. Calling one an ISBN
     // because it arrived in the identifier field is worse than leaving it

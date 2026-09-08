@@ -140,6 +140,25 @@
 
 ### Changed
 
+- **A zipped FictionBook is read the way a bare one is.** The reader takes the header off the
+  front of the entry and stops there, rather than inflating the whole book to reach the two
+  kilobytes at the start of it. Both doors read the same 256 KiB and answer the same way about
+  what they found, and a read that stopped early because that was all it needed is told apart
+  from a file that would not open.
+- **The window that says a year read out of a file is plausible has one home.** `[1450, 2100]`
+  was declared three times, in `lib/fileName.ts`, `lib/mobi.ts` and `lib/pdf.ts`, each with its
+  own copy of the comparison. It is `lib/bookBounds.plausibleYear` now. No behaviour changes.
+
+- **The API describes itself as a catalogue of books rather than of physical books**, which
+  it stopped being when the file readers shipped. The description is the one the OpenAPI
+  document publishes and the generated client carries, so it is what anybody writing against
+  this API reads first. `docs/featurelist.md` gains the whole family it never mentioned:
+  drafting from files, importing another app's export, importing a Calibre library, and
+  reading a household's own OPDS server. It also stopped saying MARC is deliberately not
+  built while documenting MARC21 import and export elsewhere in the same file, and stopped
+  calling a Z39.50 client deliberately not built when the image carries the library and
+  `docs/architecture.md` calls the client provisional rather than refused.
+
 - **A catalogue refusing to answer no longer reads as a book nobody holds.** These endpoints
   report every error as HTTP 200 carrying a diagnostic, and a lookup read that as an empty
   answer, so a credential that stopped working, an unsupported record schema or a database
@@ -192,6 +211,21 @@
   equality in a test.
 
 ### Fixed
+
+- **A Calibre library no longer imports Calibre's own blanks as facts.** `metadata.opf` is
+  written by Calibre from the same rows as the index, so the values it writes where nobody typed
+  one, the year 101 and the author `Unknown`, were arriving back through the gap filling step
+  after the index reader had refused them. Measured over an 897 book library, the 243 books with
+  a file beside them: 57 books took the year 101 and 31 took `Unknown` as an author. They are
+  refused at both doors now, and the disagreement count shown before the write falls from 99 to
+  70 and the fill count from 120 to 61, because what it was counting was mostly not a
+  disagreement.
+- **A FictionBook whose `<date>` carries its ISBN beside the year is filed under the year**, and
+  not under four digits taken out of the identifier. `ISBN 5-17-002238-0, 2001` read as the year
+  22, which is small enough to pass every bound after it and so arrived looking like data. A run
+  of more than four digits, `20140825`, now yields no year rather than 2014.
+- **A bare `.fb2` of exactly 256 KiB that is not a FictionBook is reported as not one**, rather
+  than as too long to read. Nothing had been cut off.
 
 - **A title your old app says you deleted is not imported back.** An export can carry a column
   marking what the member deleted at the source, and nothing read it, so such a book came back,

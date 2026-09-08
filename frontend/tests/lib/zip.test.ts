@@ -12,6 +12,12 @@
  * produce is one named refusal rather than a hung tab. Every arm names the
  * `ZipFailure` it expects, so a refusal moving from one reason to another is a
  * failure rather than a still-green test.
+ *
+ * The last block is the prefix read, and what it is written against is the one
+ * mistake that read makes available: answering "this is all I needed" with the
+ * refusal that means "this file will not open". Every ceiling the whole read
+ * enforces has its own arm there, read as a prefix, because a bound relaxed by
+ * a new door is a bound gone rather than moved.
  */
 
 import { describe, expect, it } from "vitest";
@@ -312,6 +318,16 @@ describe("an entry that cannot be read", () => {
     );
   });
 
+  it("refuses one asked for with a limit that is not a number", async () => {
+    // The whole read's half of the same guard. The three ceilings all compare
+    // against `limit`, so a `NaN` there passes every one of them.
+    const archive = await open(HELLO);
+
+    expect(
+      await failureOf(() => archive.read(archive.find("one.txt")!, Number.NaN)),
+    ).toBe("too-large");
+  });
+
   it("refuses one that says up front it is over the limit", async () => {
     const archive = await open(HELLO);
     expect(
@@ -406,5 +422,299 @@ describe("an entry that cannot be read", () => {
     expect(await failureOf(() => archive.read(archive.entries[0]!, 1024))).toBe(
       "too-large",
     );
+  });
+});
+
+describe("reading the head of an entry", () => {
+  const NOISE = incompressible(4096);
+
+  /** A bomb: 64 KiB of zeros deflated, declaring that it holds ten bytes. */
+  const BOMB: ArchiveSpec = {
+    entries: [
+      {
+        name: "bomb",
+        data: new Uint8Array(64 * 1024),
+        method: DEFLATED,
+        centralUncompressedSize: 10,
+      },
+    ],
+  };
+
+  it("returns the whole entry when it is shorter than the prefix", async () => {
+    const archive = await open(HELLO);
+
+    const head = await archive.readPrefix(archive.find("two.txt")!, {
+      prefix: 1024,
+      limit: 1024,
+    });
+
+    expect(new TextDecoder().decode(head.bytes)).toBe("goodbye");
+    expect(head.partial).toBe(false);
+  });
+
+  it("stops at the prefix and says the entry goes on", async () => {
+    const archive = await open({
+      entries: [{ name: "noise", data: NOISE, method: DEFLATED }],
+    });
+
+    const head = await archive.readPrefix(archive.entries[0]!, {
+      prefix: 16,
+      limit: 8192,
+    });
+
+    expect([...head.bytes]).toEqual([...NOISE.subarray(0, 16)]);
+    expect(head.partial).toBe(true);
+  });
+
+  it("stops at the prefix in a stored entry too", async () => {
+    // The copy path has its own bound and its own answer at the prefix, and it
+    // is one line away from the ceiling: a stop written as the ceiling refuses
+    // this entry rather than returning the two bytes asked of it.
+    const archive = await open(HELLO);
+
+    const head = await archive.readPrefix(archive.find("one.txt")!, {
+      prefix: 2,
+      limit: 1024,
+    });
+
+    expect(new TextDecoder().decode(head.bytes)).toBe("he");
+    expect(head.partial).toBe(true);
+  });
+
+  it("copies a truncated stored read rather than viewing the entry", async () => {
+    // A `subarray` hands back every byte past the prefix through `.buffer` and
+    // holds the whole entry alive behind a view of 16 bytes. `prefix` says what
+    // a caller gets, and a window over more than that is not it.
+    const archive = await open({
+      entries: [{ name: "wide", data: incompressible(4096), method: STORED }],
+    });
+
+    const head = await archive.readPrefix(archive.entries[0]!, {
+      prefix: 16,
+      limit: 8192,
+    });
+
+    expect(head.bytes.length).toBe(16);
+    expect(head.bytes.buffer.byteLength).toBe(16);
+  });
+
+  it("reads a stored entry of exactly the prefix whole", async () => {
+    // **The equality edge, and it is the off by one this whole seam is about.**
+    // An entry of exactly the prefix has nothing past it, so it is whole rather
+    // than partial. A stop written `>=` calls it partial here, and on the other
+    // door turns an entry of exactly the ceiling into a refusal.
+    const archive = await open(HELLO);
+
+    const head = await archive.readPrefix(archive.find("one.txt")!, {
+      prefix: 5,
+      limit: 1024,
+    });
+
+    expect(new TextDecoder().decode(head.bytes)).toBe("hello");
+    expect(head.partial).toBe(false);
+  });
+
+  it("reads a deflated entry of exactly the prefix whole", async () => {
+    // The deflated twin of the arm above: the two paths compare against the
+    // stop separately, so one of them being right says nothing about the other.
+    const archive = await open(HELLO);
+
+    const head = await archive.readPrefix(archive.find("two.txt")!, {
+      prefix: 7,
+      limit: 1024,
+    });
+
+    expect(new TextDecoder().decode(head.bytes)).toBe("goodbye");
+    expect(head.partial).toBe(false);
+  });
+
+  it.each(["one.txt", "two.txt"])(
+    "reads nothing from %s for a prefix below zero",
+    async (name) => {
+      // Nonsense in, a `ZipPrefix` out. Unclamped, the deflated path answers a
+      // bare `RangeError` from `new Uint8Array(-1)`, which is not a `ZipError`
+      // and escapes every caller catching this module's refusals, and the
+      // stored path answers four of five bytes, which is worse because it
+      // looks like data. Both methods, because the clamp is one line and the
+      // two paths that depend on it are not.
+      const archive = await open(HELLO);
+
+      const head = await archive.readPrefix(archive.find(name)!, {
+        prefix: -1,
+        limit: 1024,
+      });
+
+      expect(head.bytes.length).toBe(0);
+      expect(head.partial).toBe(true);
+    },
+  );
+
+  it.each(["one.txt", "two.txt"])(
+    "refuses %s asked for with a prefix that is not a number",
+    async (name) => {
+      // **`NaN` removes the cap rather than loosening it**, because every
+      // comparison against it is false: the stored path hands back the whole
+      // entry and the inflater buffers the whole output, both reporting
+      // `partial: false`, which is the silent truncation `ZipPrefix` exists to
+      // make impossible. Both methods, because the two paths compare against
+      // the stop separately.
+      const archive = await open(HELLO);
+
+      expect(
+        await failureOf(() =>
+          archive.readPrefix(archive.find(name)!, {
+            prefix: Number.NaN,
+            limit: 1024,
+          }),
+        ),
+      ).toBe("too-large");
+    },
+  );
+
+  it.each(["one.txt", "two.txt"])(
+    "refuses %s asked for with a ceiling that is not a number",
+    async (name) => {
+      // **The other half of that guard, and it has to be asked for separately.**
+      // The whole read passes one number as both, so a fixture going through
+      // that door cannot tell the two halves apart: dropping the `limit` arm of
+      // the condition left every other test here green.
+      const archive = await open(HELLO);
+
+      expect(
+        await failureOf(() =>
+          archive.readPrefix(archive.find(name)!, {
+            prefix: 16,
+            limit: Number.NaN,
+          }),
+        ),
+      ).toBe("too-large");
+    },
+  );
+
+  it("stops the inflater rather than reading to the end of the entry", async () => {
+    // **The claim a prefix read makes, in its only observable form.** This
+    // entry's deflate stream is cut short, so reaching the end of it is
+    // `truncated`: `refuses a deflate stream that stops halfway` above is this
+    // same archive read whole. A prefix inside the bytes that did arrive comes
+    // back, which it could not do if the rest were inflated first.
+    const archive = await open({
+      entries: [
+        {
+          name: "noise",
+          data: NOISE,
+          method: DEFLATED,
+          centralCompressedSize: 40,
+        },
+      ],
+    });
+
+    const head = await archive.readPrefix(archive.entries[0]!, {
+      prefix: 16,
+      limit: 8192,
+    });
+
+    expect([...head.bytes]).toEqual([...NOISE.subarray(0, 16)]);
+    expect(head.partial).toBe(true);
+    // The premise, so this is not green against an entry that reads cleanly.
+    expect(await failureOf(() => archive.read(archive.entries[0]!, 8192))).toBe(
+      "truncated",
+    );
+  });
+
+  it("tells a prefix that stopped apart from an entry that will not open", async () => {
+    // **The whole reason the two doors are different doors.** One entry and two
+    // questions: read whole against a ceiling of 1,024 it is `too-large` and
+    // refused, and read as a prefix it comes back with `partial` set. This is
+    // also the exclusion `readPrefix` states, that a deflated entry over the
+    // ceiling is not refused there, because noticing costs inflating the rest.
+    const archive = await open(BOMB);
+
+    expect(await failureOf(() => archive.read(archive.entries[0]!, 1024))).toBe(
+      "too-large",
+    );
+
+    const head = await archive.readPrefix(archive.entries[0]!, {
+      prefix: 1024,
+      limit: 1024,
+    });
+    expect(head.bytes.length).toBe(1024);
+    expect(head.partial).toBe(true);
+  });
+
+  it("never returns more than the ceiling however much is asked for", async () => {
+    // A prefix above the ceiling is clamped to it. Without the clamp this hands
+    // 64 KiB back to a caller that named 1,024 as the most it would take, which
+    // is the output bound gone rather than moved.
+    const archive = await open(BOMB);
+
+    const head = await archive.readPrefix(archive.entries[0]!, {
+      prefix: 100_000,
+      limit: 1024,
+    });
+
+    expect(head.bytes.length).toBe(1024);
+    expect(head.partial).toBe(true);
+  });
+
+  it("still refuses an entry that declares more than the ceiling", async () => {
+    const archive = await open(HELLO);
+
+    expect(
+      await failureOf(() =>
+        archive.readPrefix(archive.find("one.txt")!, { prefix: 2, limit: 4 }),
+      ),
+    ).toBe("too-large");
+  });
+
+  it("still refuses a stored entry over the ceiling", async () => {
+    // The declared size is understated, so this is the copy path's own bound
+    // rather than the claim being checked twice. A prefix read keeps it: the
+    // bytes are already in hand, so noticing costs nothing.
+    const archive = await open({
+      entries: [
+        {
+          name: "one.txt",
+          data: "hello",
+          method: STORED,
+          centralUncompressedSize: 1,
+        },
+      ],
+    });
+
+    expect(
+      await failureOf(() =>
+        archive.readPrefix(archive.entries[0]!, { prefix: 2, limit: 2 }),
+      ),
+    ).toBe("too-large");
+  });
+
+  it("still never reads more compressed bytes than the ceiling could need", async () => {
+    // The bound on what is read IN, which a new door must not have relaxed.
+    // Both bounds answer `too-large`, so the reason is not evidence and the
+    // assertion is on the largest slice actually asked of the file.
+    const watched = watchedBlob(
+      await buildZip({
+        entries: [
+          {
+            name: "wide",
+            data: incompressible(64 * 1024),
+            method: DEFLATED,
+            centralUncompressedSize: 1,
+          },
+        ],
+      }),
+    );
+    const archive = await openZip(watched.blob);
+    // The premise, checked rather than assumed.
+    expect(archive.entries[0]!.compressedSize).toBeGreaterThan(60_000);
+    watched.forget();
+
+    expect(
+      await failureOf(() =>
+        archive.readPrefix(archive.entries[0]!, { prefix: 16, limit: 16 }),
+      ),
+    ).toBe("too-large");
+    // The local header and nothing else. 64 KiB would be the whole entry.
+    expect(watched.largestSlice()).toBeLessThan(1024);
   });
 });

@@ -58,6 +58,33 @@ export const NUMBER_RANGES = {
 export type BoundedNumber = keyof typeof NUMBER_RANGES;
 
 /**
+ * The window a year read out of a file has to fall in to be believed.
+ *
+ * **Plausibility, and `NUMBER_RANGES.year` is storability.** That one is what
+ * `BookCreate` will hold; this one is what a publication year could credibly
+ * be, and the two answer different questions about the same number. Collapsing
+ * this into that is the simplification to refuse: it is wider, so it accepts
+ * everything below and reports nothing.
+ *
+ * **Here because of a value real files carry, not as a validator.** Calibre
+ * writes `0101-01-01T00:00:00+00:00` where a book has no date, and 2 of the 69
+ * real MOBI files measured 2026-09-07 carry exactly that in EXTH 106. It reads
+ * as the year 101, which is inside `NUMBER_RANGES.year`, so nothing downstream
+ * stops it and a member sees a book published in the second century.
+ *
+ * **Chosen rather than measured, and wide on both ends on purpose**: a signal
+ * that has to be wrong rarely, not a bound anything enforces. No schema stands
+ * behind it, so `tests/lib/bookBounds.test.ts`, which recomputes every other
+ * number in this module from `openapi.json`, cannot recompute this pair and
+ * does not try.
+ *
+ * Not exported, because `plausibleYear` is the whole interface: the three
+ * readers that each declared these two numbers each wrote the comparison out
+ * again beside them, and handing out the pair leaves that second copy in place.
+ */
+const PLAUSIBLE_YEARS = [1450, 2100] as const;
+
+/**
  * Which fields may arrive cut, and which lose the whole value instead.
  *
  * Stated as the exclusion as well as the inclusion, and both are asserted: a
@@ -142,18 +169,48 @@ export function boundText(
 }
 
 /**
- * The number the column can hold, or `null`.
+ * The number, when it falls inside a closed range, and `null` for anything else.
  *
- * Never clamped. A page count of 300,000 is not 100,000 seen through a narrower
- * window, it is a fact the file got wrong, and storing the ceiling would turn a
- * wrong number into a plausible one.
+ * **One body for both windows, because it is one policy**: nothing for nothing,
+ * nothing for a number that is not one, and **never a clamp**. A page count of
+ * 300,000 is not 100,000 seen through a narrower window, it is a fact the file
+ * got wrong, and storing the ceiling would turn a wrong number into a plausible
+ * one. Written out at each caller the policy moves under one of them and not
+ * the other, which is what a range does when nobody owns the comparison.
  */
+function within(
+  value: number | null | undefined,
+  range: readonly [number, number],
+): number | null {
+  if (value === null || value === undefined) return null;
+  if (!Number.isFinite(value)) return null;
+  const [low, high] = range;
+  return value >= low && value <= high ? value : null;
+}
+
+/** The number the column can hold, or `null`. `within` states the policy. */
 export function boundNumber(
   field: BoundedNumber,
   value: number | null | undefined,
 ): number | null {
-  if (value === null || value === undefined) return null;
-  if (!Number.isFinite(value)) return null;
-  const [low, high] = NUMBER_RANGES[field];
-  return value >= low && value <= high ? value : null;
+  return within(value, NUMBER_RANGES[field]);
+}
+
+/**
+ * The year a file claims, when a book could have been published in it.
+ *
+ * **The one home of the window, and the three readers that each held a copy
+ * call it**: a year sniffed out of a filename, one out of EXTH 106, and one out
+ * of a PDF's XMP date. The window arrived once per reader, and the third copy
+ * was written by somebody who had read the second and pointed a comment at it;
+ * what stops a fourth is that there is nothing left to copy.
+ *
+ * **This is not `boundNumber("year", ...)` and does not replace it.** A value on
+ * its way to a request still goes through that one, which is what the column
+ * will hold; this says only that the number is worth sending. Swapping it in on
+ * a year a member typed drops a genuine 1400 and says nothing, which is why
+ * `tests/lib/bookBounds.test.ts` asserts who imports this by name.
+ */
+export function plausibleYear(value: number | null | undefined): number | null {
+  return within(value, PLAUSIBLE_YEARS);
 }

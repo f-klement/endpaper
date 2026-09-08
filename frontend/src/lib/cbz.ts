@@ -229,13 +229,19 @@ function toNumber(raw: string | null): number | null {
 }
 
 /**
- * The year, refusing the schema's own spelling of "unknown".
+ * The year, refusing every value at or below zero.
  *
- * ComicRack writes `-1` into its numeric fields where nothing is known, so a
- * reader taking the number at face value files a comic in the year minus one.
+ * **The refusal is the comparison and not the one value it was written for.**
+ * ComicRack writes `-1` into its numeric fields where nothing is known, and a
+ * reader taking that at face value files a comic in the year minus one. `> 0`
+ * refuses more than that one number, and the wider refusal is free rather than
+ * accidental, because no publication year is at or below zero and there is
+ * nothing down there to lose. Measured: `-1` and `0` answer null, `101`
+ * answers 101 and `2199` answers 2199.
+ *
  * That is not this module bounding a value, which `lib/bookBounds.ts` does
- * downstream: it is reading the format correctly, because `-1` is not what the
- * file says the year is.
+ * downstream: it is reading the format correctly, because a number at or below
+ * zero is not what the file says the year is.
  */
 function readYear(root: Element): number | null {
   const year = toNumber(field(root, "Year"));
@@ -345,10 +351,9 @@ export function readComicInfo(xml: string): OpfRecord | null {
 /**
  * Read one comic archive's metadata.
  *
- * Never throws for anything the file did, for the reason `readEpub` states: a
- * picked file that is not a comic is one entry's outcome, which is what lets a
- * member point at a folder and get a queue rather than an error page. The one
- * thing it does not catch is a bug in this module.
+ * Never throws for anything the file did, which is the contract
+ * `fileReaders.FileReader` states. The one thing this does not catch is a bug
+ * in this module.
  */
 export async function readCbz(file: Blob): Promise<CbzReading> {
   try {

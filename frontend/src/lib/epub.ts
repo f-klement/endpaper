@@ -129,10 +129,10 @@ function packagePath(xml: string): string | null {
 /**
  * Read one EPUB's metadata.
  *
- * Never throws for anything the file did: a picked file that is not an EPUB is
- * one entry's failure, which is what lets a member point at a folder and get a
- * queue rather than an error page. The one thing it does not catch is a bug in
- * this module, which should not be turned into "not an EPUB".
+ * Never throws for anything the file did, which is the contract
+ * `fileReaders.FileReader` states for every reader, along with the reason it is
+ * worth stating. The one thing this does not catch is a bug in this module,
+ * which should not be turned into "not an EPUB".
  */
 export async function readEpub(file: Blob): Promise<EpubReading> {
   try {

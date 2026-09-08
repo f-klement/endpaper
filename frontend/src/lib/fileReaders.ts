@@ -29,11 +29,16 @@ import { supportedExtension, type SupportedExtension } from "./fileName";
  * That is the contract `backend/decoders.py` states for the catalogue readers,
  * arrived at independently on this side and worth naming as the same idea.
  *
- * **An extension with no reader is not an error.** `.m4b` and `.mp3` are the
- * standing case: audio is grouped and read by `lib/audiobook.ts` on a separate
- * path, because which files are one book is decided before any of them is
- * drafted from. `null` here means exactly that, and the caller falls through to
- * the filename path.
+ * **An extension may be readerless only where the picker routes the file
+ * away**, and audio is the one such route: `ScanPage.pickFiles` splits a pick
+ * on `fileName.FORMAT_FOR_EXTENSION` calling a file an audiobook and hands that
+ * half to `lib/audiobook.ts`, because which files are one book is decided
+ * before any of them is drafted from.
+ *
+ * **So `.m4b` and `.mp3` never reach `readerFor` at all**, and the `null` it
+ * answers for them is consulted by nothing. Every other supported extension has
+ * a reader, and `tests/lib/fileReaders.test.ts` asks `readerFor` itself rather
+ * than reading this map, so an extension the door drops fails there too.
  */
 export type FileFailure =
   CbzFailure | EpubFailure | Fb2Failure | MobiFailure | PdfFailure;
@@ -42,6 +47,30 @@ export type FileReading =
   | { readonly ok: true; readonly metadata: OpfRecord }
   | { readonly ok: false; readonly failure: FileFailure };
 
+/**
+ * What every reader is, and the three rules none of them stated for itself.
+ *
+ * **A reader never throws for anything the file did.** A picked file that is
+ * not what it claimed is one entry's failure, which is what lets a member point
+ * at a folder and get a queue rather than an error page. Only a bug in a reader
+ * throws. That distinction is load bearing and nothing enforces it:
+ * `ScanPage/hooks.ts` catches everything a reader throws and reports the file
+ * as unreadable, so a reader that throws for a bad file is downgraded in
+ * silence rather than found.
+ *
+ * **A file that carried no metadata is `ok` with a record of nulls, never a
+ * failure.** `FileFailure` has no name for it on purpose: the scan page sees no
+ * title and falls to `lib/fileName.ts`, which for a PDF is the ordinary outcome
+ * rather than the exception. A reason here would put a sentence in front of a
+ * member for the common case.
+ *
+ * **A field the file did not give is `null` and never `""`.** `OpfRecord` says
+ * every field is absent rather than empty, and a caller reading `record.title`
+ * to decide whether the file named one would take `""` for a title.
+ *
+ * Stated here rather than at each reader, so that the author of a sixth meets
+ * them at the type instead of by reading five modules.
+ */
 export type FileReader = (file: Blob) => Promise<FileReading>;
 
 /**

@@ -225,6 +225,14 @@ describe("a year in the name", () => {
     expect(clues("Dune 9999.epub").year).toBeNull();
   });
 
+  it("keeps scanning past a four digit run that is not a year", () => {
+    // The skip, which is what makes the scan a scan. Unbracketed on purpose:
+    // `yearIn` runs the bracketed groups first, so `Dune 1234 (1965).epub`
+    // answers 1965 whether the scan skips or stops, and only this spelling can
+    // tell the two apart.
+    expect(clues("Dune 1234 1965.epub").year).toBe(1965);
+  });
+
   it("refuses a number that is only four digits long by accident", () => {
     // Part of a longer run, so it is not a year in the first place.
     expect(clues("Dune 19741975.epub").year).toBeNull();

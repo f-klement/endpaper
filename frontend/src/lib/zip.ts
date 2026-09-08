@@ -12,6 +12,13 @@
  * two together are under 300 KB against archives up to 31,662,348 bytes, so
  * inflating the rest would be the whole cost of the feature for nothing.
  *
+ * **Two ways to read one entry, because they are two questions.** `read` wants
+ * the whole entry and refuses one bigger than the caller allowed. `readPrefix`
+ * wants the head of it and stops there, which is what a metadata reader wants
+ * when the entry it is after is the book itself rather than a small member of a
+ * large archive. Conflating them is how a refusal becomes a silent truncation,
+ * so a prefix read says whether it stopped early.
+ *
  * **The platform supplies the inflater.** `DecompressionStream("deflate-raw")`
  * is native in Chrome 103, Firefox 113 and Safari 16.4 and later. A library
  * would buy support for browsers older than that and cost a bundle on every
@@ -44,6 +51,48 @@ export type ZipFailure =
   | "too-large"
   /** This browser has no `DecompressionStream("deflate-raw")`. */
   | "no-inflate";
+
+/**
+ * How much of an entry to read, when the head of it is all the caller wants.
+ *
+ * Two numbers because they answer two questions. `limit` is the ceiling: an
+ * entry declaring or holding more than this is refused, which is the archive
+ * being told no. `prefix` is how much of an entry under that ceiling is wanted,
+ * which is the caller saying enough. Named fields rather than two positional
+ * numbers: swapping those type checks, and would read the ceiling.
+ *
+ * **Both are required to be finite.** A read with no bound is refused rather
+ * than performed: see the guard at the top of `readEntry`. Stated here rather
+ * than on either field, because it is a fact about the pair and a note on one
+ * of them is invisible to a caller filling in the other.
+ */
+export interface ZipBounds {
+  /** Stop after this many bytes of output and return what arrived. */
+  readonly prefix: number;
+  /**
+   * Refuse an entry declaring or holding more than this. A deflated entry read
+   * as a prefix is not measured past `prefix`, so this is what the entry says
+   * and what its compressed bytes come to, which is the phrasing `fb2.ts` uses
+   * of the same number. Also clamps a `prefix` above it.
+   */
+  readonly limit: number;
+}
+
+/**
+ * What a prefix read returned.
+ *
+ * **`partial` is not the `truncated` failure, and conflating the two is the
+ * mistake this type exists to make impossible.** `truncated` says the archive
+ * is broken and there is nothing to read; `partial` says the entry is longer
+ * than the caller asked for, which for a reader after a header is the ordinary
+ * case. "This is all I needed" and "this file will not open" are answered by
+ * different members, not by a byte count a caller has to interpret.
+ */
+export interface ZipPrefix {
+  readonly bytes: Uint8Array<ArrayBuffer>;
+  /** True when the entry holds bytes past the ones returned. */
+  readonly partial: boolean;
+}
 
 export class ZipError extends Error {
   readonly failure: ZipFailure;
@@ -137,6 +186,31 @@ export interface ZipArchive {
    * page in megabytes.
    */
   read: (entry: ZipEntry, limit: number) => Promise<Uint8Array>;
+  /**
+   * The first `bounds.prefix` bytes of the entry, stopping rather than failing.
+   *
+   * **A third question, and it replaces neither of the other two.**
+   * `bounds.limit` is still checked against what the directory declares and
+   * against how many compressed bytes the entry holds, so an entry too large to
+   * be the thing the caller is looking for is still `too-large`. What changes is
+   * what happens at `bounds.prefix`: the inflater is cancelled and the bytes so
+   * far come back with `partial` set, rather than the read being refused.
+   *
+   * **It bounds the inflate and the output, not the compressed read.** The
+   * entry's compressed bytes are still sliced whole, because the smallest slice
+   * certain to yield `prefix` bytes out is not knowable from deflate's worst
+   * case: that bound is the worst case for expansion, and an encoder emitting
+   * many small blocks yields fewer bytes than it. A read cut short there arrives
+   * as `truncated`, so bounding the input would report a good file as a damaged
+   * one. What this removes is inflating and buffering everything past `prefix`.
+   *
+   * **A stored entry over `limit` is still refused here and a deflated one is
+   * not**, because the first costs nothing to notice and the second costs
+   * inflating the rest, which is the read this exists to avoid. Both are caught
+   * before that by the declared size, so the two differ only for an archive
+   * whose directory lies, where refusing is the safer of the two answers.
+   */
+  readPrefix: (entry: ZipEntry, bounds: ZipBounds) => Promise<ZipPrefix>;
 }
 
 async function bytesAt(
@@ -278,7 +352,22 @@ export async function openZip(blob: Blob): Promise<ZipArchive> {
   return {
     entries,
     find: (name) => entries.find((entry) => entry.name === name),
-    read: (entry, limit) => readEntry(blob, entry, limit),
+    read: async (entry, limit) => {
+      // The whole entry, so the ceiling and the stop are the same number and
+      // stopping early is the refusal. This is the one place the two questions
+      // meet, and the refusal lives here rather than as a flag threaded through
+      // `readEntry`, so that neither read has to ask which kind it is.
+      const whole = await readEntry(blob, entry, limit, limit);
+      if (whole.partial) {
+        throw new ZipError(
+          "too-large",
+          `${entry.name} holds more than ${limit}`,
+        );
+      }
+      return whole.bytes;
+    },
+    readPrefix: (entry, bounds) =>
+      readEntry(blob, entry, bounds.limit, bounds.prefix),
   };
 }
 
@@ -298,13 +387,47 @@ function maxCompressedFor(limit: number): number {
   return limit + (Math.ceil(limit / 65535) + 1) * 5;
 }
 
+/**
+ * One entry's bytes: refused above `limit`, stopped at `prefix`.
+ *
+ * `limit` is the ceiling every check here is made against and the stop is where
+ * the output ends, which is why a partial result is returned rather than
+ * refused: only the caller knows whether stopping early was the point.
+ */
 async function readEntry(
   blob: Blob,
   entry: ZipEntry,
   limit: number,
-): Promise<Uint8Array<ArrayBuffer>> {
-  // The claim, checked first because it is free. The bytes are checked again
-  // as they arrive, which is the check that matters: a bomb understates this.
+  prefix: number,
+): Promise<ZipPrefix> {
+  // **A bound that is not a number is no bound at all, and this is the only
+  // place that can say so.** Every comparison below is against `limit` or
+  // against the stop derived from it, and a comparison with `NaN` is false, so
+  // `NaN` does not loosen the cap, it removes it: the stored path returns the
+  // whole entry saying `partial: false`, and the inflater accumulates the
+  // entire output and then answers `new Uint8Array(NaN)`, which is no bytes,
+  // also saying `partial: false`. Measured on a 64 MiB entry declaring 2 KiB:
+  // 262,144 bytes and 0.0 MiB of heap at a finite prefix against 0 bytes and
+  // 15.8 MiB at `NaN`. `too-large` because an unbounded read is the one this
+  // module exists to refuse, and no other member of the union fits.
+  if (!Number.isFinite(limit) || !Number.isFinite(prefix)) {
+    throw new ZipError(
+      "too-large",
+      `${entry.name} was asked for with no bound`,
+    );
+  }
+  // **The invariant the rest of this function assumes, held where it is
+  // stated.** Above the ceiling it would hand back more than the caller's own
+  // limit; below zero the stored path returns a plausible wrong answer and the
+  // deflated one throws a bare `RangeError` out of `new Uint8Array`, which is
+  // not a `ZipError` and so escapes what this module promises about refusals.
+  // Here rather than at the call site, because a second door would have to
+  // remember it.
+  const stop = Math.max(0, Math.min(prefix, limit));
+  // The claim, checked first because it is free. The bytes are bounded again as
+  // they arrive, by `stop`, and that is the bound that matters because a bomb
+  // understates this one. A prefix read makes it stricter rather than weaker:
+  // `stop` is at most `limit`, so less comes out and never more.
   if (entry.uncompressedSize > limit) {
     throw new ZipError(
       "too-large",
@@ -351,10 +474,19 @@ async function readEntry(
 
   const raw = await bytesAt(blob, dataStart, dataEnd);
   if (entry.method === METHOD_STORED) {
+    // The ceiling and not the stop: an entry the archive was not allowed to
+    // hold is a refusal whatever the caller asked to read of it.
     if (raw.length > limit) {
       throw new ZipError("too-large", `${entry.name} is larger than ${limit}`);
     }
-    return raw;
+    // **A copy and not a `subarray`, when there is anything to cut off.** A
+    // view keeps the whole entry alive behind it and hands back every byte past
+    // the prefix through `.buffer`, which is the opposite of what `prefix`
+    // promises. The condition is what keeps it free: neither `read` nor a
+    // prefix that fits ever copies.
+    return raw.length > stop
+      ? { bytes: raw.slice(0, stop), partial: true }
+      : { bytes: raw, partial: false };
   }
   if (entry.method !== METHOD_DEFLATE) {
     throw new ZipError(
@@ -362,22 +494,25 @@ async function readEntry(
       `${entry.name} uses method ${entry.method}`,
     );
   }
-  return inflateRaw(raw, limit, entry.name);
+  return inflateRaw(raw, stop, entry.name);
 }
 
 /**
- * Inflate, refusing at `limit` bytes of output.
+ * Inflate, stopping at `stop` bytes of output.
  *
- * The cap is enforced on what comes out rather than on what the archive said
+ * The stop is enforced on what comes out rather than on what the archive said
  * was in there, which is the whole point: a zip bomb declares a modest entry
- * and produces gigabytes. The stream is cancelled at the limit, so the work
- * stops rather than running to completion and being discarded.
+ * and produces gigabytes. The stream is cancelled there, so the work stops
+ * rather than running to completion and being discarded.
+ *
+ * **Whether stopping is a refusal is not decided here.** It is reported as
+ * `partial`, and `read` is the caller that turns it into `too-large`.
  */
 async function inflateRaw(
   raw: Uint8Array<ArrayBuffer>,
-  limit: number,
+  stop: number,
   name: string,
-): Promise<Uint8Array<ArrayBuffer>> {
+): Promise<ZipPrefix> {
   if (typeof DecompressionStream === "undefined") {
     throw new ZipError("no-inflate", "this browser cannot inflate");
   }
@@ -406,6 +541,7 @@ async function inflateRaw(
   const reader = source.pipeThrough(inflater).getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  let partial = false;
   for (;;) {
     // **The read is guarded, because the inflater rejects with a `TypeError`.**
     // Bytes that are not deflate, or that stop halfway, reach here as
@@ -421,23 +557,33 @@ async function inflateRaw(
       // Only the read is inside the try, and the read is the only thing here
       // that can reject with something other than a `ZipError`. A branch
       // rethrowing one was written and deleted: it could not fire, and a guard
-      // that cannot fire tells the next reader the throw below is covered.
+      // that cannot fire tells the next reader something here throws one.
       throw new ZipError("truncated", `${name} is not a deflate stream`);
     }
     if (done || value === undefined) break;
     total += value.length;
-    if (total > limit) {
-      await reader.cancel();
-      throw new ZipError("too-large", `${name} inflates past ${limit}`);
-    }
     chunks.push(value);
+    if (total > stop) {
+      partial = true;
+      // Let go of the inflater without waiting for it, for the reason
+      // `lib/pdf.ts`'s `release` states: awaiting the cancel puts this
+      // function's own bound at the mercy of the thing it is bounding, and a
+      // cancel on a stream that already errored rejects. The bytes asked for
+      // are already in `chunks`.
+      void reader.cancel().catch(() => {});
+      break;
+    }
   }
 
-  const out = new Uint8Array(total);
+  // Trimmed rather than sized to `total`, because the chunk that crossed the
+  // stop is kept whole and is the one that overruns it.
+  const out = new Uint8Array(Math.min(total, stop));
   let at = 0;
   for (const chunk of chunks) {
-    out.set(chunk, at);
-    at += chunk.length;
+    if (at === out.length) break;
+    const take = chunk.subarray(0, out.length - at);
+    out.set(take, at);
+    at += take.length;
   }
-  return out;
+  return { bytes: out, partial };
 }

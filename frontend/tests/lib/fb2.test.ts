@@ -315,6 +315,38 @@ describe("the year, which the format says twice", () => {
     expect(record?.year).toBe(1948);
   });
 
+  it("reads a typed date whose year is not the first thing in it", () => {
+    // `25/08/2014` is corpus data, and it is where the difference between the
+    // match and the group shows: the match carries the delimiter that anchored
+    // it, so reading the whole of it gives `Number("/2014")`, which is `NaN`,
+    // and `NaN` is not `null` so it leaves the reader as a year.
+    const record = read(
+      fb2(
+        titleInfo(
+          "<book-title>Отверженные</book-title><date>25/08/2014</date>",
+        ),
+      ),
+    );
+
+    expect(record?.year).toBe(2014);
+  });
+
+  it("does not read a year out of the digits in an identifier", () => {
+    // `<date>` text is whatever a person typed, and one thing people type there
+    // is the ISBN. A four digit run with no anchor takes `0022` out of
+    // `5-17-002238-0` and files the book under the year 22, which is a
+    // plausible looking number that survives every bound after this one.
+    const record = read(
+      fb2(
+        titleInfo(
+          "<book-title>Мастер и Маргарита</book-title><date>ISBN 5-17-002238-0, 2001</date>",
+        ),
+      ),
+    );
+
+    expect(record?.year).toBe(2001);
+  });
+
   it("reads no year from a date carrying none", () => {
     const record = read(
       fb2(titleInfo("<book-title>Другие люди</book-title><date></date>")),
@@ -539,6 +571,20 @@ describe("reading a .fb2 off the disk", () => {
     expect(outcome(await readFb2(new Blob([bytes(xml)])))).toBe("read: Онегин");
   });
 
+  it("still says not a FictionBook about a broken one ending at the bound", async () => {
+    // **The fourth shape of that discriminator, and the one a length test gets
+    // wrong.** This file fills the read exactly and nothing is cut off, so it
+    // is malformed rather than too long. Whether there is more is a fact about
+    // the file and is asked of it, not inferred from how much came back.
+    const opening =
+      '<?xml version="1.0"?><FictionBook><description><title-info>';
+    const exact = opening + "x".repeat(256 * 1024 - opening.length);
+    // The premise: one byte either way and this arm is one of the two above.
+    expect(exact.length).toBe(256 * 1024);
+
+    expect(outcome(await readFb2(new Blob([bytes(exact)])))).toBe("not-an-fb2");
+  });
+
   it("refuses a file that is not one", async () => {
     expect(outcome(await readFb2(new Blob([bytes("just some text")])))).toBe(
       "not-an-fb2",
@@ -610,6 +656,45 @@ describe("reading a .fb2.zip", () => {
     });
 
     expect(outcome(await readFb2Archive(new Blob([zip])))).toBe("too-large");
+  });
+
+  it("reads a book whose body runs past the header bound", async () => {
+    // **What the prefix read buys, as behaviour rather than as a cost.** The
+    // read stops inside the body, so the entry comes back `partial` and the
+    // header is whole. A door conflating "I stopped early" with "this would not
+    // open" reports an ordinary book as too large.
+    const long = ORDINARY.replace(
+      "nothing to see here. ".repeat(200),
+      "nothing to see here. ".repeat(20_000),
+    );
+    // The premise: the body really does run past what is read.
+    expect(long.length).toBeGreaterThan(256 * 1024);
+
+    expect(outcome(await archive([{ name: "book.fb2", data: long }]))).toBe(
+      "read: Назад в юность",
+    );
+  });
+
+  it("says too large for an archived description longer than it reads", async () => {
+    // The bare door's own arm for this is `says too large for a description
+    // longer than it reads`. Both doors read `MAX_HEADER_BYTES` and both answer
+    // the same way, which is what having one `fromBytes` is for.
+    const padding = `<annotation><p>${"я".repeat(300_000)}</p></annotation>`;
+    const xml = fb2(titleInfo(`<book-title>Онегин</book-title>${padding}`));
+
+    expect(outcome(await archive([{ name: "book.fb2", data: xml }]))).toBe(
+      "too-large",
+    );
+  });
+
+  it("still says not a FictionBook about a large entry that is not one", async () => {
+    // Stopping early is not on its own evidence of anything: this entry is
+    // `partial` too, and it has no `<description` at all.
+    const reading = await archive([
+      { name: "notes.fb2", data: "x".repeat(300_000) },
+    ]);
+
+    expect(outcome(reading)).toBe("not-an-fb2");
   });
 
   it("says damaged for an archive whose offsets do not agree", async () => {

@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CALIBRE_PLACEHOLDER,
   columnsIn,
   crossCheck,
   indexOpfFiles,
@@ -377,40 +378,50 @@ describe("finding the file beside a book", () => {
   });
 });
 
+/**
+ * One book as the index gives it, and the file Calibre wrote beside that book.
+ *
+ * At module scope because two describes drive them: the cross check's own
+ * cases, and the placeholder set below, which has to reach both of a library's
+ * doors from one list.
+ */
+const A_BOOK: CalibreBook = {
+  id: 1,
+  path: "x",
+  title: "Dune",
+  authors: ["Frank Herbert"],
+  identifiers: [],
+  isbn: null,
+  publisher: null,
+  year: null,
+  language: null,
+  description: null,
+  seriesName: null,
+  seriesIndex: null,
+  formats: ["EPUB"],
+};
+
+const A_FILE: OpfRecord = {
+  version: "2.0",
+  title: "Dune",
+  subtitle: null,
+  authors: ["Frank Herbert"],
+  identifiers: [],
+  isbn: null,
+  publisher: null,
+  year: null,
+  language: null,
+  description: null,
+  seriesName: null,
+  seriesIndex: null,
+};
+
 describe("checking a book against the file beside it", () => {
-  const book: CalibreBook = {
-    id: 1,
-    path: "x",
-    title: "Dune",
-    authors: ["Frank Herbert"],
-    identifiers: [],
-    isbn: null,
-    publisher: null,
-    year: null,
-    language: null,
-    description: null,
-    seriesName: null,
-    seriesIndex: null,
-    formats: ["EPUB"],
-  };
-
-  const opf: OpfRecord = {
-    version: "2.0",
-    title: "Dune",
-    subtitle: null,
-    authors: ["Frank Herbert"],
-    identifiers: [],
-    isbn: null,
-    publisher: null,
-    year: null,
-    language: null,
-    description: null,
-    seriesName: null,
-    seriesIndex: null,
-  };
-
   it("fills a field the database left empty", () => {
-    const checked = crossCheck(book, { ...opf, publisher: "Chilton Books" });
+    const checked = crossCheck(A_BOOK, {
+      ...A_FILE,
+      publisher: "Chilton Books",
+    });
 
     expect(checked.book.publisher).toBe("Chilton Books");
     expect(checked.filled).toBe(1);
@@ -419,8 +430,8 @@ describe("checking a book against the file beside it", () => {
 
   it("keeps the database's value where the two disagree, and counts it", () => {
     const checked = crossCheck(
-      { ...book, publisher: "Chilton Books" },
-      { ...opf, publisher: "Ace" },
+      { ...A_BOOK, publisher: "Chilton Books" },
+      { ...A_FILE, publisher: "Ace" },
     );
 
     expect(checked.book.publisher).toBe("Chilton Books");
@@ -429,7 +440,7 @@ describe("checking a book against the file beside it", () => {
   });
 
   it("takes the file's ISBN when the database has none", () => {
-    const checked = crossCheck(book, { ...opf, isbn: "9780441013593" });
+    const checked = crossCheck(A_BOOK, { ...A_FILE, isbn: "9780441013593" });
 
     expect(checked.book.isbn).toBe("9780441013593");
     expect(checked.filled).toBe(1);
@@ -437,8 +448,8 @@ describe("checking a book against the file beside it", () => {
 
   it("keeps the database's ISBN when both carry a real one", () => {
     const checked = crossCheck(
-      { ...book, isbn: "9780441013593" },
-      { ...opf, isbn: "9780140328721" },
+      { ...A_BOOK, isbn: "9780441013593" },
+      { ...A_FILE, isbn: "9780140328721" },
     );
 
     expect(checked.book.isbn).toBe("9780441013593");
@@ -448,20 +459,25 @@ describe("checking a book against the file beside it", () => {
   it("never pairs one source's index with the other's series", () => {
     // A position counts in a series. Taking the number from a file that names a
     // different series invents a volume neither source claims.
+    //
+    // **The database's own index is null here, and that is the whole test.**
+    // With a number on both sides `??` answers before the guard runs, so the
+    // fixture that gave the database a `seriesIndex` of 1 passed whether the
+    // series were compared or not: dropping the comparison entirely was green.
     const checked = crossCheck(
-      { ...book, seriesName: "Dune Chronicles", seriesIndex: 1 },
-      { ...opf, seriesName: "Something Else", seriesIndex: 7 },
+      { ...A_BOOK, seriesName: "Dune Chronicles", seriesIndex: null },
+      { ...A_FILE, seriesName: "Something Else", seriesIndex: 7 },
     );
 
     expect(checked.book.seriesName).toBe("Dune Chronicles");
-    expect(checked.book.seriesIndex).toBe(1);
+    expect(checked.book.seriesIndex).toBeNull();
     expect(checked.disagreed).toBe(1);
   });
 
   it("takes the index from the file when the two name one series", () => {
     const checked = crossCheck(
-      { ...book, seriesName: "Dune Chronicles", seriesIndex: null },
-      { ...opf, seriesName: "Dune Chronicles", seriesIndex: 2 },
+      { ...A_BOOK, seriesName: "Dune Chronicles", seriesIndex: null },
+      { ...A_FILE, seriesName: "Dune Chronicles", seriesIndex: 2 },
     );
 
     expect(checked.book.seriesIndex).toBe(2);
@@ -469,8 +485,8 @@ describe("checking a book against the file beside it", () => {
   });
 
   it("takes both when the database names no series at all", () => {
-    const checked = crossCheck(book, {
-      ...opf,
+    const checked = crossCheck(A_BOOK, {
+      ...A_FILE,
       seriesName: "Dune Chronicles",
       seriesIndex: 2,
     });
@@ -484,8 +500,8 @@ describe("checking a book against the file beside it", () => {
   });
 
   it("counts one when the file names a series and no position in it", () => {
-    const checked = crossCheck(book, {
-      ...opf,
+    const checked = crossCheck(A_BOOK, {
+      ...A_FILE,
       seriesName: "Dune Chronicles",
       seriesIndex: null,
     });
@@ -496,11 +512,14 @@ describe("checking a book against the file beside it", () => {
   it("fills the authors and does not compare them", () => {
     // Two spellings of one person are the common case, and counting them would
     // bury the disagreement count under a difference nobody would act on.
-    const filled = crossCheck({ ...book, authors: [] }, opf);
+    const filled = crossCheck({ ...A_BOOK, authors: [] }, A_FILE);
     expect(filled.book.authors).toEqual(["Frank Herbert"]);
     expect(filled.filled).toBe(1);
 
-    const spelled = crossCheck(book, { ...opf, authors: ["Herbert, Frank"] });
+    const spelled = crossCheck(A_BOOK, {
+      ...A_FILE,
+      authors: ["Herbert, Frank"],
+    });
     expect(spelled.book.authors).toEqual(["Frank Herbert"]);
     expect(spelled.disagreed).toBe(0);
   });
@@ -509,8 +528,8 @@ describe("checking a book against the file beside it", () => {
     // A Calibre `metadata.opf` writes `dc:description` as escaped HTML, so the
     // gap fill reaches the same markup the database path drops. Filling it raw
     // put `<script>` source into a stored book description by the other door.
-    const checked = crossCheck(book, {
-      ...opf,
+    const checked = crossCheck(A_BOOK, {
+      ...A_FILE,
       description: "<p>One.</p><script>alert(1)</script>",
     });
 
@@ -518,9 +537,248 @@ describe("checking a book against the file beside it", () => {
   });
 
   it("rescues a book whose title Calibre never had", () => {
-    const checked = crossCheck({ ...book, title: null }, opf);
+    const checked = crossCheck({ ...A_BOOK, title: null }, A_FILE);
 
     expect(checked.book.title).toBe("Dune");
     expect(checked.filled).toBe(1);
+  });
+
+  describe("the placeholders, arriving by the file's door instead", () => {
+    // `readCalibreLibrary` refuses all three by name and `opf.ts` refuses none,
+    // so a Calibre library's own `metadata.opf` hands them straight back.
+    // Measured over the household's 897 book library on 2026-09-08: 57 books
+    // took the year 101 and 31 took `Unknown` as their author.
+
+    it("refuses the file's undefined year rather than filling a gap with it", () => {
+      const checked = crossCheck(A_BOOK, { ...A_FILE, year: 101 });
+
+      expect(checked.book.year).toBeNull();
+      expect(checked.filled).toBe(0);
+    });
+
+    it("does not count the file's undefined year as a disagreement", () => {
+      const checked = crossCheck(
+        { ...A_BOOK, year: 1965 },
+        { ...A_FILE, year: 101 },
+      );
+
+      expect(checked.book.year).toBe(1965);
+      expect(checked.disagreed).toBe(0);
+    });
+
+    it("keeps an ordinary year the file supplies", () => {
+      // The arm had no case at all in which the file's year survived, so a
+      // mutant narrowing the refusal to `>= 101` discarded every real year the
+      // file carries and passed. This is the side of the boundary the case
+      // below does not reach.
+      const checked = crossCheck(A_BOOK, { ...A_FILE, year: 1965 });
+
+      expect(checked.book.year).toBe(1965);
+      expect(checked.filled).toBe(1);
+    });
+
+    it("keeps a real year the file supplies one below the placeholder", () => {
+      // The exact value, never a floor: widening `=== 101` to `<= 101` passed
+      // 43 of 43, because both string arms of this sieve had a boundary case
+      // and the numeric arm had none. A member's genuine pre-102 year is what
+      // that mutant discarded.
+      const checked = crossCheck(A_BOOK, { ...A_FILE, year: 100 });
+
+      expect(checked.book.year).toBe(100);
+      expect(checked.filled).toBe(1);
+    });
+
+    it("refuses the file's Unknown author rather than filling a gap with it", () => {
+      const checked = crossCheck(
+        { ...A_BOOK, authors: [] },
+        { ...A_FILE, authors: ["Unknown"] },
+      );
+
+      expect(checked.book.authors).toEqual([]);
+      expect(checked.filled).toBe(0);
+    });
+
+    it("keeps a real author the file names beside the placeholder", () => {
+      // The refusal is per name. Dropping the whole list would lose a person a
+      // library filed second behind a blank.
+      const checked = crossCheck(
+        { ...A_BOOK, authors: [] },
+        { ...A_FILE, authors: ["Unknown", "Frank Herbert"] },
+      );
+
+      expect(checked.book.authors).toEqual(["Frank Herbert"]);
+      expect(checked.filled).toBe(1);
+    });
+
+    it("refuses the placeholder wherever the file lists it", () => {
+      // Position independent, like the index door, which reaches every name
+      // through one predicate. This arm is where the two doors had already
+      // drifted: every other fixture puts `Unknown` first or nowhere, so a
+      // refusal that skipped every name after the first was green.
+      const checked = crossCheck(
+        { ...A_BOOK, authors: [] },
+        { ...A_FILE, authors: ["Frank Herbert", "Unknown"] },
+      );
+
+      expect(checked.book.authors).toEqual(["Frank Herbert"]);
+      expect(checked.filled).toBe(1);
+    });
+
+    it("keeps a real author whose name merely contains the placeholder", () => {
+      // The whole name, never a substring. Written because the mutation that
+      // loosened this to `includes` was the one evasion of six that the round
+      // before this did not catch: the case it had was `Unknown` beside a
+      // second name, which a substring match survives.
+      const checked = crossCheck(
+        { ...A_BOOK, authors: [] },
+        { ...A_FILE, authors: ["The Unknown Soldier"] },
+      );
+
+      expect(checked.book.authors).toEqual(["The Unknown Soldier"]);
+      expect(checked.filled).toBe(1);
+    });
+
+    it("refuses the file's Unknown title rather than filling a gap with it", () => {
+      const checked = crossCheck(
+        { ...A_BOOK, title: null },
+        { ...A_FILE, title: "Unknown" },
+      );
+
+      expect(checked.book.title).toBeNull();
+      expect(checked.filled).toBe(0);
+    });
+
+    it("keeps a real title that merely begins with the placeholder", () => {
+      // The whole value, never a substring: `Unknown` is what Calibre writes
+      // instead of a title, and a book called `Unknown Pleasures` is a title.
+      const checked = crossCheck(
+        { ...A_BOOK, title: null },
+        { ...A_FILE, title: "Unknown Pleasures" },
+      );
+
+      expect(checked.book.title).toBe("Unknown Pleasures");
+      expect(checked.filled).toBe(1);
+    });
+  });
+});
+
+describe("the placeholder set, refused at both of a library's doors", () => {
+  /**
+   * The set, named once, and the only place these tests say what one is.
+   *
+   * A library is read through two doors: `readCalibreLibrary` meets a
+   * placeholder in a row of `metadata.db`, and `crossCheck` meets it again in
+   * the `metadata.opf` Calibre wrote from that row. Each entry below carries
+   * the set's own key and says how a row carries the value and how a file
+   * carries it, so **a fourth predicate is one entry here and a failing test
+   * at whichever door forgets it**, rather than two edits with nothing red
+   * after the first.
+   *
+   * **The keys are checked against the set twice, and that is what makes this
+   * a derivation rather than a list beside one.** `PlaceholderCase.key` is
+   * typed as one of the set's, so removing a member fails the typecheck here,
+   * and the assertion after the loop fails when a member is added with none.
+   * Written first as a hand maintained parallel literal, which moved the very
+   * defect the set was introduced to remove up into this file: a fourth
+   * predicate wired at one door left all 52 tests green, because nothing red
+   * follows from a list that is merely short.
+   *
+   * That is not hypothetical either: the two doors had already drifted on the
+   * author arm, where the file door's refusal could be made to skip every name
+   * after the first and stay green.
+   *
+   * `series_index` is deliberately absent. Both doors refuse it structurally,
+   * by reading a position only where a series is named, so there is no value
+   * to hand a predicate and nothing here could drive it.
+   */
+  /** One placeholder, and the two doors it has to be refused at. */
+  interface PlaceholderCase {
+    /**
+     * The set's own key.
+     *
+     * Typed as one of them rather than as a string, so removing a member from
+     * `CALIBRE_PLACEHOLDER` fails the typecheck here rather than quietly
+     * shrinking what the assertion below compares.
+     */
+    readonly key: keyof typeof CALIBRE_PLACEHOLDER;
+    /** How the two test names below read. */
+    readonly what: string;
+    /** Rows that put the placeholder in an index. */
+    readonly rows: readonly string[];
+    /** The one field this case empties on the index's side. */
+    readonly book: Partial<CalibreBook>;
+    /** The placeholder, as the file beside the book carries it. */
+    readonly file: Partial<OpfRecord>;
+    /** The field under test, read off whichever door answered. */
+    readonly read: (book: CalibreBook) => unknown;
+    /** What that field reads as once the placeholder is refused. */
+    readonly empty: unknown;
+  }
+
+  const placeholders: readonly PlaceholderCase[] = [
+    {
+      key: "year",
+      what: "the undefined year",
+      rows: [
+        `INSERT INTO books (id, title, pubdate, path)
+           VALUES (1, 'Dune', '0101-01-01 00:00:00+00:00', 'x')`,
+      ],
+      book: { year: null },
+      file: { year: 101 },
+      read: (book: CalibreBook) => book.year,
+      empty: null,
+    },
+    {
+      key: "title",
+      what: "the placeholder title",
+      rows: [`INSERT INTO books (id, title, path) VALUES (1, 'Unknown', 'x')`],
+      book: { title: null },
+      file: { title: "Unknown" },
+      read: (book: CalibreBook) => book.title,
+      empty: null,
+    },
+    {
+      key: "author",
+      what: "the placeholder author",
+      rows: [
+        `INSERT INTO books (id, title, path) VALUES (1, 'Dune', 'x')`,
+        `INSERT INTO authors (id, name) VALUES (1, 'Unknown')`,
+        `INSERT INTO books_authors_link (book, author) VALUES (1, 1)`,
+      ],
+      book: { authors: [] },
+      file: { authors: ["Unknown"] },
+      read: (book: CalibreBook) => book.authors,
+      empty: [],
+    },
+  ];
+
+  for (const placeholder of placeholders) {
+    it(`refuses ${placeholder.what} in a row of the index`, async () => {
+      const [book] = await booksIn(...placeholder.rows);
+
+      expect(placeholder.read(book!)).toEqual(placeholder.empty);
+    });
+
+    it(`refuses ${placeholder.what} in the file beside the book`, () => {
+      // One field emptied, so the rest of the two fixtures still agree and
+      // the counts below are about this field and nothing else.
+      const checked = crossCheck(
+        { ...A_BOOK, ...placeholder.book },
+        { ...A_FILE, ...placeholder.file },
+      );
+
+      expect(placeholder.read(checked.book)).toEqual(placeholder.empty);
+      expect(checked.filled).toBe(0);
+      expect(checked.disagreed).toBe(0);
+    });
+  }
+
+  it("covers every predicate the set holds, and no other", () => {
+    // Sorted, because the order of the set's own keys is incidental and a
+    // reordering is not a hole. What this fails on is a member with no entry,
+    // which is a predicate no door above is driven to apply.
+    expect(placeholders.map((placeholder) => placeholder.key).sort()).toEqual(
+      Object.keys(CALIBRE_PLACEHOLDER).sort(),
+    );
   });
 });
