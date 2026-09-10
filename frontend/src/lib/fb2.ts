@@ -50,11 +50,8 @@
 
 import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
-import {
-  declaresEntities,
-  type FileIdentifier,
-  type FileMetadata,
-} from "./fileReaders";
+import { type FileIdentifier, type FileMetadata } from "./fileReaders";
+import { declaresEntities } from "./xmlEntities";
 import { openZip, ZipError, zipFailureAs } from "./zip";
 
 /**
@@ -473,7 +470,7 @@ function readIdentifiers(publishInfo: Element | null): FileIdentifier[] {
  * under its English title for some files and its Russian title for others.
  */
 export function readFb2Description(xml: string): FileMetadata | null {
-  // The entity refusal `fileReaders.declaresEntities` states, applied for the
+  // The entity refusal `xmlEntities.declaresEntities` states, applied for the
   // same reason and with its own count: expansion happens inside the engine
   // before any code here runs, so a byte cap on the read does not reach it.
   // 0 of 18 corpus files contain `<!ENTITY`, and 0 carry a `<!DOCTYPE` at all.

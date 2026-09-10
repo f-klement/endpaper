@@ -25,6 +25,7 @@ import covers
 from config import COVERS_DIR
 from tests.conftest import REAL_RESOLVE_AND_STORE
 from tests.helpers import JPEG_BYTES, PNG_BYTES, WEBP_BYTES
+from tests.test_house_rules import _is_vendored
 
 OPEN_LIBRARY = "https://covers.openlibrary.org/"
 DNB = "https://portal.dnb.de/opac/mvb/cover"
@@ -326,18 +327,32 @@ class TestNoOtherModuleBuildsACoverUrl:
     BACKEND = Path(__file__).resolve().parent.parent
 
     def modules(self) -> list[Path]:
-        return [
+        """Every module of ours but `covers.py`, which is the one that may.
+
+        **What vendored means is `test_house_rules._is_vendored`.** This walk
+        named `.venv` and `site-packages` for itself, which was right about
+        `site-packages` and blind to `.uv-cache/`: the pipeline sets
+        `UV_CACHE_DIR` inside `backend/`, so it read third party source there
+        and nowhere a developer would see it. The `site-packages` half is now in
+        the shared predicate, put there because this module and `test_marc.py`
+        reached it independently.
+
+        **The two names left are matched relative to `BACKEND`**, not against
+        the whole path: asked absolutely, a checkout under a directory called
+        `tests` empties this walk and every rule below it passes on nothing.
+        """
+        found = [
             path
             for path in self.BACKEND.rglob("*.py")
-            # `site-packages` as well as `.venv`: a dependency tree can land
-            # outside a directory called .venv depending on how the environment
-            # was built, and this walk must never leave first-party code.
-            if ".venv" not in path.parts
-            and "site-packages" not in path.parts
-            and "tests" not in path.parts
-            and "migrations" not in path.parts
+            if not _is_vendored(path, self.BACKEND)
+            and not {"tests", "migrations"}
+            & set(path.relative_to(self.BACKEND).parts)
             and path.name != "covers.py"
         ]
+        # The packages it must cover rather than a number: a count is satisfied
+        # by a walk that lost a whole directory. See `test_accounts._sources`.
+        assert {"routers", "schemas"} <= {path.parent.name for path in found}, found
+        return found
 
     @staticmethod
     def _literal_parts(node: ast.AST) -> list[str]:

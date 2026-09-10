@@ -251,11 +251,13 @@ function pair(what: string, fg: string, bg: string, floor: number): Pair {
  *
  * It is deliberately not the second, and the gap it used to leave is closed
  * elsewhere rather than here. Dark hover was the concentration of it: twelve
- * sites wrote `hover:text-accent-800` with no `dark:` variant and landed
- * between 1.36 and 2.85 on the dark card. All twelve are repaired, so the rule
- * that holds them shipped with no exemption list, in
- * `frontend/tests/houseRules.test.ts`. It is there and not here because it is
- * a rule about call sites, and this file measures tokens.
+ * sites wrote `hover:text-accent-800` with no `dark:` variant, which is a rung
+ * that clears the text floor on a light card and fails it on every dark one.
+ * All twelve are repaired, so the rule that holds them shipped with no
+ * exemption list, in `frontend/tests/houseRules.test.ts`. It is there and not
+ * here because it is a rule about call sites, and this file measures tokens.
+ * `the hover a dark ramp makes illegible` below is where that rung is
+ * recomputed; no band is quoted for it anywhere.
  *
  * The pairs those repairs use are already below: `accent-300` and `danger-300`
  * on the dark card. That is the arrangement to preserve. A repair that reached
@@ -627,6 +629,76 @@ describe("the card and the page are distinguishable", () => {
       ).toBeGreaterThan(1.01);
     });
   }
+});
+
+/**
+ * The hover a dark ramp makes illegible.
+ *
+ * **The reason `houseRules.test.ts::a dark hover state is stated, never
+ * inherited` exists, computed rather than quoted.** That rule refuses
+ * `hover:text-` written without a `dark:hover:` beside it. What makes it worth
+ * a guard is that the accent ramp runs the other way in the dark: `accent-800`
+ * is the darkest usable ink on a light card and is nearly the card itself on a
+ * dark one, so one hover spelled once is legible at rest and gone while
+ * pointed at.
+ *
+ * **A band was written into that comment and had drifted in both halves**, the
+ * palette count beside it and the number itself, which is what a figure in
+ * prose does: it is copied forward and never re-derived. This states the
+ * property instead and computes it here, over `PALETTES`, so a palette added
+ * tomorrow is measured rather than assumed. Nothing quotes a range.
+ *
+ * **Both directions, because either alone passes on a ramp that has stopped
+ * being a ramp.** A dark `accent-800` bleached to the same value as the light
+ * one would clear the floor in dark and fail nothing if only the dark arm were
+ * here; an accent-800 dropped to the card's own colour in light would fail
+ * nothing if only the light arm were.
+ */
+describe("the hover a dark ramp makes illegible", () => {
+  // The floor every text pair in the contract above is held to.
+  const FLOOR = 4.5;
+
+  it("clears the text floor on every light card", () => {
+    const cleared = THEMES.filter((palette) => {
+      const light = tokensFor(palette, "light");
+      return (
+        contrast(light["--color-accent-800"]!, light["--color-paper-0"]!) >=
+        FLOOR
+      );
+    });
+
+    expect(cleared).toEqual(THEMES);
+  });
+
+  it("fails it on every dark card, which is why the dark hover is stated", () => {
+    const legible = THEMES.filter((palette) => {
+      const dark = tokensFor(palette, "dark");
+      return (
+        contrast(dark["--color-accent-800"]!, dark["--color-paper-900"]!) >=
+        FLOOR
+      );
+    });
+
+    // Named rather than counted: a palette that put this pair over the floor
+    // would weaken the house rule's reason, and the fix is to argue it there
+    // rather than to relax this.
+    expect(legible).toEqual([]);
+  });
+
+  it("is reading a token that exists, in both modes", () => {
+    // **The dark arm passes on a value that is not a colour**, and that is the
+    // one direction neither arm above can see. A token left as
+    // `var(--color-accent-800)` by a chain `resolve` gave up on parses to NaN,
+    // every comparison against NaN is false, so the palette is filtered out of
+    // `legible` and the arm goes green having measured nothing. The light arm
+    // fails loudly on the same input, which is why only one of the two needs
+    // saying and both are covered by asserting the value here.
+    for (const palette of THEMES)
+      for (const mode of MODES)
+        expect(tokensFor(palette, mode)["--color-accent-800"]).toMatch(
+          /^#[0-9a-f]{6}$/i,
+        );
+  });
 });
 
 describe("more contrast is honoured on every palette, not only the default", () => {

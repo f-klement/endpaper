@@ -176,8 +176,40 @@ const SOURCES = import.meta.glob("../../src/**/*.{ts,tsx}", {
   eager: true,
 }) as Record<string, string>;
 
-/** The three names the reader family shares, which `fileReaders.ts` declares. */
-const SHARED = ["FileMetadata", "FileIdentifier", "declaresEntities"];
+const SEAM = "lib/fileReaders.ts";
+const ENTITY_GUARD = "lib/xmlEntities.ts";
+
+/**
+ * The family's shared vocabulary, and which module declares each part of it.
+ *
+ * **Two homes rather than one, because the family shares two different kinds of
+ * thing.** The seam says what a reader is and what it answers with, which every
+ * reader produces; the entity refusal is a rule about handing a member's
+ * document to a parser, which four readers apply and which nothing in the
+ * contract consults. A `FileReading` is the same shape whether or not the bytes
+ * went through a parser at all, so the second was moved out.
+ *
+ * **The rules below are the same for both and are written once**, which is what
+ * makes a third home a row here rather than a fourth arm: whatever a home
+ * declares, it declares under no second name, and every module using one of
+ * those names takes it from that home.
+ */
+const SHARED_HOMES = [
+  {
+    path: SEAM,
+    /** Spelled with the opening brace, so a re-export cannot satisfy it. */
+    declarations: [
+      "export interface FileMetadata {",
+      "export interface FileIdentifier {",
+    ],
+    names: ["FileMetadata", "FileIdentifier"],
+  },
+  {
+    path: ENTITY_GUARD,
+    declarations: ["export function declaresEntities("],
+    names: ["declaresEntities"],
+  },
+] as const;
 
 /** `[clause, path]` for every `import ... from` and `export ... from`. */
 function bindings(source: string): [string, string, string][] {
@@ -188,9 +220,9 @@ function bindings(source: string): [string, string, string][] {
   ].map(([, kind, clause, path]) => [kind!, clause!, path!]);
 }
 
-/** Whether a clause names one of the shared three. */
-function namesShared(clause: string): boolean {
-  return SHARED.some((name) => new RegExp(`\\b${name}\\b`).test(clause));
+/** Whether a clause names one of the vocabulary a home declares. */
+function names(clause: string, home: readonly string[]): boolean {
+  return home.some((name) => new RegExp(`\\b${name}\\b`).test(clause));
 }
 
 function modules(): [string, string][] {
@@ -200,12 +232,10 @@ function modules(): [string, string][] {
   ]);
 }
 
-const SEAM = "lib/fileReaders.ts";
-
 /**
- * Whether a specifier names the seam, extension or not.
+ * Whether a specifier names a given module, extension or not.
  *
- * **One predicate for both uses, because the two fail in opposite directions.**
+ * **One predicate for every use, because they fail in opposite directions.**
  * Asking `endsWith("/fileReaders")` reports a legitimate import as an offender
  * when the path carries an extension, which is loud, and stops seeing a
  * re-export of the seam, which is silent and reopens the rename evasion below.
@@ -224,8 +254,21 @@ const SEAM = "lib/fileReaders.ts";
  * The exclusion, which is what one optional group buys over a list of suffixes:
  * a sibling module named `fileReaders.<word>` would read as the seam here. None
  * exists, and a name with two dots does not match.
+ *
+ * **Built from the module's own path rather than written out per home**, so a
+ * third home cannot arrive with a predicate that is subtly a different
+ * question. The basename is taken from the path in the table, which is the same
+ * string the declaration arm reads the module by.
  */
-const isSeam = (from: string) => /\/fileReaders(\.\w+)?$/.test(from);
+function specifierFor(path: string): (from: string) => boolean {
+  const basename = path
+    .split("/")
+    .pop()!
+    .replace(/\.tsx?$/, "");
+  return (from: string) => new RegExp(`/${basename}(\\.\\w+)?$`).test(from);
+}
+
+const isSeam = specifierFor(SEAM);
 
 /** Every `import ... from` and `export ... from`, with its `type` marker. */
 const FROM_CLAUSE =
@@ -236,173 +279,199 @@ const REEXPORT =
   /\bexport\b\s*(?:type\s*)?(?:\*|\{[^}]*\})\s*from\s*"([^"]+)"/g;
 
 describe("the vocabulary the readers share", () => {
-  it("declares the shared three here and publishes them under no other name", () => {
-    // The half an import rule cannot assert. `fileReaders.ts` re-exporting these
-    // from somewhere else satisfies every import below while moving the
-    // declaration back out of the seam, which is the whole of what this ticket
-    // did. Measured: without this arm, moving all three to a new module and
-    // re-exporting them here goes green.
-    const seam = modules().find(([path]) => path === SEAM);
-    expect(seam).toBeDefined();
-    const source = seam![1];
+  it.each(SHARED_HOMES)(
+    "declares its own vocabulary in $path and publishes it under no other name",
+    (home) => {
+      // The half an import rule cannot assert. A home re-exporting these from
+      // somewhere else satisfies every import below while moving the declaration
+      // back out, which is the whole of what the ticket behind this file did.
+      // Measured: without this arm, moving all three to a new module and
+      // re-exporting them at the seam goes green.
+      const found = modules().find(([path]) => path === home.path);
+      expect(found).toBeDefined();
+      const source = found![1];
 
-    expect(source).toContain("export interface FileMetadata {");
-    expect(source).toContain("export interface FileIdentifier {");
-    expect(source).toContain("export function declaresEntities(");
-    // Declared, not passed through: an `export ... from` here would satisfy the
-    // three above only if it also spelled the bodies, which it cannot.
-    expect(
-      bindings(source).filter(
-        ([kind, clause]) => kind === "export" && namesShared(clause),
-      ),
-    ).toEqual([]);
+      for (const declaration of home.declarations) {
+        expect(source).toContain(declaration);
+      }
+      // An anchor, because a home whose table row lost its declarations would
+      // pass the loop above vacuously and every arm below with it.
+      expect(home.declarations.length).toBeGreaterThan(0);
+      // Declared, not passed through: an `export ... from` here would satisfy the
+      // declarations above only if it also spelled the bodies, which it cannot.
+      expect(
+        bindings(source).filter(
+          ([kind, clause]) => kind === "export" && names(clause, home.names),
+        ),
+      ).toEqual([]);
 
-    // **And not re-published under a second name, which is the door with no
-    // `from` in it.** `export { type FileMetadata as OpfRecord };` here
-    // declares nothing, passes nothing through, and hands every reader the
-    // format's name back: measured by the seat that did not write this arm,
-    // one line added and `SUITE EXIT: 0` on 128 of 128. Neither the naming arm
-    // below nor the import arm sees it, the first because a local alias is not
-    // an `export <kind> <name>`, the second because a reader importing
-    // `OpfRecord` names nothing in `SHARED` and is filtered out before the
-    // path test runs.
-    //
-    // **It belongs on this arm rather than in a further arm of its own**,
-    // because this is the arm that already owns the question of what the seam
-    // publishes as against what it declares. An alias is the third answer to
-    // it, after the declaration and the re-export.
-    //
-    // **The `from` is captured and required absent, not excluded by a
-    // lookahead.** `\}\s*(?!from)` reads correctly and is wrong: `\s*` gives
-    // back the space it matched, the lookahead then sits on ` from` rather
-    // than `from`, and every re-export matches too. Measured on all three
-    // spellings: an alias, `export { X } from`, and `export type { X } from`.
-    // Both patterns are quiet on the clean seam, so nothing here would have
-    // failed and the arm would have been reporting the wrong door.
-    //
-    // **The one direction it is wrong in, stated so nobody loosens it away.**
-    // The specifier is matched in double quotes only, so a re-export written
-    // with single quotes carries no captured `from` and reads here as an
-    // alias. That fires rather than passing, prettier settles the quoting, and
-    // the fix if somebody ever meets it is the quote and not this pattern. The
-    // same looseness costs one thing worth knowing, and it is two cases rather
-    // than the one it is tempting to write down. This half reads the seam's
-    // raw source, so the spelling fires from a comment AND from a string
-    // literal: `// like export { X } here` and `const s = "export { X }";` are
-    // both refused, measured, under this pattern and the one before it. So the
-    // seam cannot document this rule by quoting what it forbids.
-    //
-    // **No `withoutProse` pass, deliberately.** Stripping comments the way
-    // `houseRules.test.ts` does at its own copies would answer the first case
-    // and not the second, and a guard that handles one of two spellings under
-    // a name covering both is the shape this file keeps correcting. Zero
-    // occurrences at the seam today, it fails loudly, and if one ever arrives
-    // the answer is to decide between a strip and a bound rather than to
-    // loosen the pattern.
-    //
-    // **No name in this half, which is what makes it name blind.** Not
-    // structural, and the word matters: the keyword is still matched
-    // lexically, which is why every pattern in this file spells it
-    // `\bexport\b\s*` rather than `export\s+`. `export{a}` is valid
-    // ECMAScript, and the `\s+` spelling let the alias below back in with the
-    // space removed, measured green on all 11. Prettier would rewrite it and
-    // `format:check` runs in CI, so it could not reach main by the ordinary
-    // route, which is a different tool holding a rule this arm claims to hold.
-    // The leading `\b` is the other half: without it `myexport {}` matched.
-    //
-    // Filtering it
-    // by `namesShared` the way the `bindings` half is filtered leaves an alias
-    // OF a local alias open: `type SeamRecord = FileMetadata;` and then
-    // `export { type SeamRecord as OpfRecord };` names none of the three,
-    // declares nothing exportable, and was measured green on all 128. Asking
-    // instead whether the seam publishes anything under a second name at all
-    // closes that, and the alias of an alias of an alias with it, because no
-    // name appears in the question.
-    //
-    // **The two halves are filtered differently because they ask different
-    // questions.** `bindings` is about other modules, where an alias cannot be
-    // resolved without following it, so there the clause has to name one of
-    // the three. Here the seam is reading itself, and it has no business
-    // republishing anything of its own under a second name, which is what this
-    // arm's title says.
-    //
-    // **The cost, stated because it is why somebody would narrow it back**, and
-    // it is two spellings rather than one. A legitimate grouping,
-    // `export { A, B };`, fails here, and the fix for it is to move `export`
-    // onto the two declarations, which this arm's title asks for anyway. The
-    // empty module marker, `export {};`, fails too and **has no such fix**,
-    // since there is nothing to move `export` onto: a file with exports in it
-    // never needs the marker, so the answer there is to delete it, and if a
-    // future seam genuinely needs one this arm is what has to change. There is
-    // no `export {` at the seam today, so nothing pays either today.
-    const republishedLocally = [
-      ...source.matchAll(
-        /\bexport\b\s*(?:type\s*)?\{([^}]*)\}\s*(from\s*"[^"]+")?/g,
-      ),
-    ]
-      .filter(([, , from]) => from === undefined)
-      .map(([whole]) => whole.trim());
+      // **And not re-published under a second name, which is the door with no
+      // `from` in it.** `export { type FileMetadata as OpfRecord };` here
+      // declares nothing, passes nothing through, and hands every reader the
+      // format's name back: measured by the seat that did not write this arm,
+      // one line added and `SUITE EXIT: 0` on 128 of 128. Neither the naming arm
+      // below nor the import arm sees it, the first because a local alias is not
+      // an `export <kind> <name>`, the second because a reader importing
+      // `OpfRecord` names nothing this home declares and is filtered out before the
+      // path test runs.
+      //
+      // **It belongs on this arm rather than in a further arm of its own**,
+      // because this is the arm that already owns the question of what the seam
+      // publishes as against what it declares. An alias is the third answer to
+      // it, after the declaration and the re-export.
+      //
+      // **The `from` is captured and required absent, not excluded by a
+      // lookahead.** `\}\s*(?!from)` reads correctly and is wrong: `\s*` gives
+      // back the space it matched, the lookahead then sits on ` from` rather
+      // than `from`, and every re-export matches too. Measured on all three
+      // spellings: an alias, `export { X } from`, and `export type { X } from`.
+      // Both patterns are quiet on the clean seam, so nothing here would have
+      // failed and the arm would have been reporting the wrong door.
+      //
+      // **The one direction it is wrong in, stated so nobody loosens it away.**
+      // The specifier is matched in double quotes only, so a re-export written
+      // with single quotes carries no captured `from` and reads here as an
+      // alias. That fires rather than passing, prettier settles the quoting, and
+      // the fix if somebody ever meets it is the quote and not this pattern. The
+      // same looseness costs one thing worth knowing, and it is two cases rather
+      // than the one it is tempting to write down. This half reads the seam's
+      // raw source, so the spelling fires from a comment AND from a string
+      // literal: `// like export { X } here` and `const s = "export { X }";` are
+      // both refused, measured, under this pattern and the one before it. So the
+      // seam cannot document this rule by quoting what it forbids.
+      //
+      // **No `withoutProse` pass, deliberately.** Stripping comments the way
+      // `houseRules.test.ts` does at its own copies would answer the first case
+      // and not the second, and a guard that handles one of two spellings under
+      // a name covering both is the shape this file keeps correcting. Zero
+      // occurrences at the seam today, it fails loudly, and if one ever arrives
+      // the answer is to decide between a strip and a bound rather than to
+      // loosen the pattern.
+      //
+      // **No name in this half, which is what makes it name blind.** Not
+      // structural, and the word matters: the keyword is still matched
+      // lexically, which is why every pattern in this file spells it
+      // `\bexport\b\s*` rather than `export\s+`. `export{a}` is valid
+      // ECMAScript, and the `\s+` spelling let the alias below back in with the
+      // space removed, measured green on all 11. Prettier would rewrite it and
+      // `format:check` runs in CI, so it could not reach main by the ordinary
+      // route, which is a different tool holding a rule this arm claims to hold.
+      // The leading `\b` is the other half: without it `myexport {}` matched.
+      //
+      // Filtering it
+      // by `names` the way the `bindings` half is filtered leaves an alias
+      // OF a local alias open: `type SeamRecord = FileMetadata;` and then
+      // `export { type SeamRecord as OpfRecord };` names none of the three,
+      // declares nothing exportable, and was measured green on all 128. Asking
+      // instead whether the seam publishes anything under a second name at all
+      // closes that, and the alias of an alias of an alias with it, because no
+      // name appears in the question.
+      //
+      // **The two halves are filtered differently because they ask different
+      // questions.** `bindings` is about other modules, where an alias cannot be
+      // resolved without following it, so there the clause has to name one of
+      // the home's own. Here the module is reading itself, and it has no business
+      // republishing anything of its own under a second name, which is what this
+      // arm's title says.
+      //
+      // **The cost, stated because it is why somebody would narrow it back**, and
+      // it is two spellings rather than one. A legitimate grouping,
+      // `export { A, B };`, fails here, and the fix for it is to move `export`
+      // onto the two declarations, which this arm's title asks for anyway. The
+      // empty module marker, `export {};`, fails too and **has no such fix**,
+      // since there is nothing to move `export` onto: a file with exports in it
+      // never needs the marker, so the answer there is to delete it, and if a
+      // future home genuinely needs one this arm is what has to change. There is
+      // no `export {` in either home today, so nothing pays either today.
+      const republishedLocally = [
+        ...source.matchAll(
+          /\bexport\b\s*(?:type\s*)?\{([^}]*)\}\s*(from\s*"[^"]+")?/g,
+        ),
+      ]
+        .filter(([, , from]) => from === undefined)
+        .map(([whole]) => whole.trim());
 
-    expect(republishedLocally).toEqual([]);
-  });
+      expect(republishedLocally).toEqual([]);
+    },
+  );
 
-  it("is imported from the seam by everything that uses it", () => {
-    // The three names above were declared in `lib/opf.ts`, under two other
-    // spellings, so five modules that parse no package document imported the
-    // EPUB half of the app to say what a book is, and the author of a sixth
-    // reader would have had to do the same.
-    //
-    // **The rule is the seam and not one forbidden module**, which is the
-    // correction that bought this arm. Its first draft asserted the set of
-    // modules importing `lib/opf`, and that is a rule about one path: adding
-    // `export type { FileMetadata } from "./fileReaders"` to `lib/epub.ts` and
-    // pointing `pdf.ts` at `./epub` restores exactly the defect this ticket
-    // removed, through a module named for a format, and measured green on all
-    // 427 tests. Asking where each name comes FROM closes the family, because a
-    // reader has to name some path and only one of them passes.
-    //
-    // **Derived from the identifier and not from a list of modules**: a sixth
-    // reader naming any of the three joins this rule with no edit here, and a
-    // module that stops using them leaves it the same way.
-    //
-    // **The second door is a re-export, and it is closed structurally rather
-    // than by name.** Asking only where the three names come from leaves the
-    // rule one token short: `export { type FileMetadata as BookRecord } from
-    // "./fileReaders";` in `epub.ts` passes the path test, and `import type {
-    // BookRecord } from "./epub";` in `pdf.ts` then names none of the three, so
-    // the defect returns through a module named for a format with every arm
-    // green. So no module but the seam may re-export from the seam at all,
-    // whatever it calls what it takes: that enumerates no name and needs no edit
-    // when a fourth shared thing is added.
-    //
-    // **Matched on import syntax rather than on the word**, so a docstring
-    // naming `FileMetadata` is not an offender, which several are. The exclusion,
-    // stated because it costs a different instrument to close: a local alias,
-    // `import { type FileMetadata } from "./fileReaders"; export type BookRecord =
-    // FileMetadata;`, is not an `export ... from` and no import syntax matcher
-    // sees it. What this closes is the direct import and the re-export, which
-    // are what a reader writes.
-    const reachedFromElsewhere = ([path, source]: [string, string]) =>
-      bindings(source)
-        .filter(([, clause]) => namesShared(clause))
-        .filter(([, , from]) => !isSeam(from))
-        .map(([, , from]) => `${path} <- ${from}`);
+  it.each(SHARED_HOMES)(
+    "is the only route to what it declares, for $path",
+    (home) => {
+      // The three names above were declared in `lib/opf.ts`, under two other
+      // spellings, so five modules that parse no package document imported the
+      // EPUB half of the app to say what a book is, and the author of a sixth
+      // reader would have had to do the same.
+      //
+      // **The rule is the home and not one forbidden module**, which is the
+      // correction that bought this arm. Its first draft asserted the set of
+      // modules importing `lib/opf`, and that is a rule about one path: adding
+      // `export type { FileMetadata } from "./fileReaders"` to `lib/epub.ts` and
+      // pointing `pdf.ts` at `./epub` restores exactly the defect this ticket
+      // removed, through a module named for a format, and measured green on all
+      // 427 tests. Asking where each name comes FROM closes the family, because a
+      // reader has to name some path and only one of them passes.
+      //
+      // **Derived from the identifier and not from a list of modules**: a sixth
+      // reader naming any of the three joins this rule with no edit here, and a
+      // module that stops using them leaves it the same way.
+      //
+      // **The second door is a re-export, and it is closed structurally rather
+      // than by name.** Asking only where the three names come from leaves the
+      // rule one token short: `export { type FileMetadata as BookRecord } from
+      // "./fileReaders";` in `epub.ts` passes the path test, and `import type {
+      // BookRecord } from "./epub";` in `pdf.ts` then names none of the three, so
+      // the defect returns through a module named for a format with every arm
+      // green. So no module but a home may re-export from that home at all,
+      // whatever it calls what it takes: that enumerates no name and needs no edit
+      // when a fourth shared thing is added.
+      //
+      // **Run once per home rather than once for the seam**, because the entity
+      // refusal is reached by the same two doors: `export { declaresEntities }
+      // from "./xmlEntities";` in `epub.ts` and three readers pointed at `./epub`
+      // is the same defect one module over.
+      //
+      // **Matched on import syntax rather than on the word**, so a docstring
+      // naming `FileMetadata` is not an offender, which several are. The exclusion,
+      // stated because it costs a different instrument to close: a local alias,
+      // `import { type FileMetadata } from "./fileReaders"; export type BookRecord =
+      // FileMetadata;`, is not an `export ... from` and no import syntax matcher
+      // sees it. What this closes is the direct import and the re-export, which
+      // are what a reader writes.
+      const isHome = specifierFor(home.path);
 
-    const republished = ([path, source]: [string, string]) =>
-      [...source.matchAll(REEXPORT)]
-        .filter(([, from]) => isSeam(from!))
-        .map(([, from]) => `${path} re-exports ${from}`);
+      const reachedFromElsewhere = ([path, source]: [string, string]) =>
+        bindings(source)
+          .filter(([, clause]) => names(clause, home.names))
+          .filter(([, , from]) => !isHome(from))
+          .map(([, , from]) => `${path} <- ${from}`);
 
-    const offenders = modules()
-      .filter(([path]) => path !== SEAM)
-      .flatMap((entry) => [
-        ...reachedFromElsewhere(entry),
-        ...republished(entry),
-      ])
-      .sort();
+      const republished = ([path, source]: [string, string]) =>
+        [...source.matchAll(REEXPORT)]
+          .filter(([, from]) => isHome(from!))
+          .map(([, from]) => `${path} re-exports ${from}`);
 
-    expect(offenders).toEqual([]);
-  });
+      const elsewhere = modules().filter(([path]) => path !== home.path);
+      // An anchor, because a rule over a population nothing selects passes for
+      // ever: every one of these names is imported somewhere today, and a
+      // predicate that stopped matching would report no offenders rather than no
+      // importers.
+      expect(
+        elsewhere.filter(([, source]) =>
+          bindings(source).some(([, clause]) => names(clause, home.names)),
+        ).length,
+      ).toBeGreaterThan(0);
+
+      const offenders = elsewhere
+        .flatMap((entry) => [
+          ...reachedFromElsewhere(entry),
+          ...republished(entry),
+        ])
+        .sort();
+
+      expect(offenders).toEqual([]);
+    },
+  );
 
   it("is named for the family and never for a module that imports it", () => {
     // The defect this closes shipped once and was argued for in
@@ -509,12 +578,13 @@ describe("the vocabulary the readers share", () => {
 
   it("reaches the rest of the app eagerly through one module only", () => {
     // What keeps the graph acyclic, asserted because today it is an accident.
-    // `opf.ts` imports `declaresEntities` from here as a value, so there is a
-    // runtime edge from a reader's dependency into the seam. Nothing breaks
-    // only because every edge the other way is erased or deferred: the failure
-    // types are `import type` and the registry loads each reader with `await
-    // import`. One ordinary import added here closes a cycle, and no other test
-    // in this tree goes red when it does.
+    // `ScanPage/hooks.ts` imports `readerFor` as a value, so there is a runtime
+    // edge into the seam from outside the family, and moving `declaresEntities`
+    // to `lib/xmlEntities.ts` removed the one that ran from inside it. Nothing
+    // breaks only because every edge the other way is erased or deferred: the
+    // failure types are `import type` and the registry loads each reader with
+    // `await import`. One ordinary import added here closes a cycle, and no
+    // other test in this tree goes red when it does.
     //
     // **Stated as the exclusion and not as a list of readers**, which is the
     // correction that bought this wording. Its first draft forbade only the
@@ -548,5 +618,41 @@ describe("the vocabulary the readers share", () => {
       .filter((from) => from !== "./fileName");
 
     expect(eager).toEqual([]);
+  });
+
+  it("gives the entity refusal a home that depends on nothing", () => {
+    // The same rule as the arm above, one module over and stronger, because
+    // this one can be: the refusal is a substring test over a string and needs
+    // neither the seam nor a reader. A module with no edges out cannot be in a
+    // cycle at all, so the four readers that call it can import it eagerly
+    // whatever else they import.
+    //
+    // **Its own anchor rather than the arm above's**, because a pattern that
+    // stopped matching would report an empty list here and pass. Asked of a
+    // literal, so the anchor holds whatever the tree does.
+    expect([...'import x from "./y";'.matchAll(FROM_CLAUSE)]).toHaveLength(1);
+
+    const guard = modules().find(([path]) => path === ENTITY_GUARD)![1];
+
+    expect([...guard.matchAll(FROM_CLAUSE)].map(([, , from]) => from)).toEqual(
+      [],
+    );
+    // **And the import with no clause in it**, which is an eager edge that no
+    // `from` matcher sees: `import "./fileReaders";` measured green here by the
+    // design seat before this line. It is the spelling a cycle would arrive
+    // through if somebody wanted the seam's module scope run first, so the arm
+    // above claimed more than it checked.
+    expect([...guard.matchAll(/^\s*import\s*"[^"]+"/gm)]).toEqual([]);
+    // **And a top level `await import`, which is an eager edge with a call in
+    // it**: measured green by the design seat against the two matchers above,
+    // and prettier leaves it alone, so nothing else in this tree would have
+    // caught it.
+    expect([...guard.matchAll(/\bawait\s+import\s*\(/g)]).toEqual([]);
+    // **The one spelling all three still miss, stated rather than chased.** A
+    // side effect import sharing a line with another statement,
+    // `const x = 0;import "./fileReaders";`, defeats the `^\s*` anchor.
+    // Prettier splits that line and `format:check` runs in CI, so what closes
+    // it is a different tool holding a rule this arm claims, and the honest
+    // reading is that these three matchers cover what an author writes.
   });
 });

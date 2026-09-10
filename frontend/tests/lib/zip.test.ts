@@ -20,7 +20,7 @@
  * a new door is a bound gone rather than moved.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { openZip, ZipError, zipFailureAs } from "../../src/lib/zip";
 import {
@@ -30,6 +30,7 @@ import {
   STORED,
   type ArchiveSpec,
 } from "../zipFixtures";
+import { withoutDecompressionStream } from "./withoutDecompression";
 
 async function open(spec: ArchiveSpec) {
   return openZip(new Blob([await buildZip(spec)]));
@@ -740,14 +741,78 @@ describe("a zip's refusal in a format's own words", () => {
   });
 
   it("says no-inflate for a browser that cannot inflate", () => {
-    // The one arm nothing else reaches: `too-large`, `truncated`, `zip64`,
-    // `encrypted` and `unsupported` are each pinned by a named test in
-    // `tests/lib/epub.test.ts`, `cbz.test.ts` or `fb2.test.ts` that reads a
-    // real archive, and restating them here would be the copy of the table this
-    // helper exists to remove. Reaching this one through a reader would mean
-    // removing a global, which this suite installs only in `tests/setup.ts`.
+    // `too-large`, `truncated`, `zip64`, `encrypted` and `unsupported` are each
+    // pinned by a named test in `tests/lib/epub.test.ts`, `cbz.test.ts` or
+    // `fb2.test.ts` that reads a real archive, and restating them here would be
+    // the copy of the table this helper exists to remove. This one is mapped
+    // here and produced two blocks down, where a real archive is read on a
+    // runtime with no inflater.
     const refusal = new ZipError("no-inflate", "this browser cannot inflate");
 
     expect(zipFailureAs(refusal, "not-a-comic")).toBe("no-inflate");
+  });
+});
+
+describe("a runtime that cannot inflate", () => {
+  it("refuses a deflated entry rather than reading nothing", async () => {
+    // **A stored entry in the same archive is still read**, which is what says
+    // the refusal is about the compression rather than about the file: the
+    // central directory is parsed, the entry is found, and only the inflate is
+    // impossible.
+    //
+    // **The message and not only the failure**, and this is the correction
+    // that made the arm a test of the guard rather than of the arm below it.
+    // Deleting `zip.ts`'s `typeof DecompressionStream` refusal leaves the
+    // `ReferenceError` to the catch around the constructor, which answers the
+    // same `no-inflate` with its own sentence: measured by the design seat, the
+    // whole suite passed at 3,194 tests against a reader with that refusal
+    // removed. The two sentences are what tell the two arms apart.
+    const archive = await open(HELLO);
+
+    const refusal = await withoutDecompressionStream(async () => {
+      const stored = await archive.read(archive.find("one.txt")!, 1024);
+      expect(new TextDecoder().decode(stored)).toBe("hello");
+      try {
+        await archive.read(archive.find("two.txt")!, 1024);
+        return "no failure";
+      } catch (error) {
+        return error;
+      }
+    });
+
+    expect(refusal).toBeInstanceOf(ZipError);
+    expect((refusal as ZipError).failure).toBe("no-inflate");
+    expect((refusal as ZipError).message).toBe("this browser cannot inflate");
+  });
+
+  it("refuses when the constructor is there and the format is not", async () => {
+    // The second arm, and a real state rather than a defensive one:
+    // `deflate-raw` landed later than `deflate` and `gzip` in every engine, so
+    // a runtime with the constructor and without the format existed. Stubbed
+    // rather than deleted, because what is being reached here is the
+    // constructor throwing, which needs a constructor.
+    vi.stubGlobal(
+      "DecompressionStream",
+      class {
+        constructor() {
+          throw new TypeError("unsupported format");
+        }
+      },
+    );
+    const archive = await open(HELLO);
+
+    let refusal: unknown = "no failure";
+    try {
+      await archive.read(archive.find("two.txt")!, 1024);
+    } catch (error) {
+      refusal = error;
+    }
+
+    expect(refusal).toBeInstanceOf(ZipError);
+    expect((refusal as ZipError).failure).toBe("no-inflate");
+    // The other sentence, so the two arms cannot quietly become one.
+    expect((refusal as ZipError).message).toBe(
+      "this browser cannot inflate raw deflate",
+    );
   });
 });

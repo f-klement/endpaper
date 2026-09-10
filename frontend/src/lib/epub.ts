@@ -30,7 +30,8 @@
  * half: what comes out of here is bounded again before it can become a request.
  */
 
-import { declaresEntities, type FileMetadata } from "./fileReaders";
+import { type FileMetadata } from "./fileReaders";
+import { declaresEntities } from "./xmlEntities";
 import { readOpf } from "./opf";
 import { openZip, ZipError, zipFailureAs } from "./zip";
 

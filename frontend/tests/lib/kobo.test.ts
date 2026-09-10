@@ -22,7 +22,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  columnsIn,
   readKoboLibrary,
   type KoboBook,
   type KoboLibrary,
@@ -528,48 +527,6 @@ describe("an unreadable store is one skipped source, never a broken import", () 
     );
 
     expect(library).toMatchObject({ books: [], skipped: 1 });
-  });
-});
-
-describe("the table name a PRAGMA is given", () => {
-  /**
-   * Reached directly, because nothing else can reach it.
-   *
-   * `readKoboLibrary` passes one literal, so a test going through it is green
-   * whether the refusal is there or not: the guard would sit on the stated rung
-   * wearing a test's name. `calibre.ts` exports its own for the same reason.
-   */
-  async function opened(...statements: string[]) {
-    const reading = await openSqlite(await databaseOf(...statements), engine);
-    if (!reading.ok) throw new Error(`expected a database: ${reading.failure}`);
-    return reading;
-  }
-
-  it("gives back the columns for a name that is an identifier", async () => {
-    const reading = await opened(...KOBO_SCHEMA);
-    const columns = columnsIn(reading.database, "content");
-    reading.database.close();
-
-    expect(columns.has("ContentID")).toBe(true);
-    expect(columns.has("SeriesNumberFloat")).toBe(true);
-  });
-
-  it("gives back nothing for a name the engine would have accepted", async () => {
-    // **The case has to be one the engine would answer**, or the assertion is
-    // satisfied by the absence of the guard. Measured: with the refusal deleted
-    // and a name of `content); DROP TABLE content; --`, the statement throws,
-    // `sqlite.ts` answers `[]` for a statement it could not run, and the empty
-    // set comes back either way. That test passed against a reader with no
-    // guard in it at all.
-    //
-    // A quoted identifier is the case that separates them. SQLite accepts
-    // `PRAGMA table_info("content")` and hands back the columns, so an
-    // unguarded reader answers with them and this one refuses.
-    const reading = await opened(...KOBO_SCHEMA);
-    const columns = columnsIn(reading.database, '"content"');
-    reading.database.close();
-
-    expect(columns).toEqual(new Set());
   });
 });
 

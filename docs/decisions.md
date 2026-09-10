@@ -12495,3 +12495,119 @@ Measured before touching it: the marker occurs twice, counted over the file with
 collapsed and adjacent string literals joined. **Counting matching lines answers one**, because
 the second occurrence is split across a string concatenation, which is the instrument being
 wrong in the unit rather than in the range.
+
+## A guard's clearance is a prefix test standing in for a semantic one
+
+**Measured across four review rounds, 2026-09-10.** Two critic seats found eleven defects in
+the guards written for one wave, and after the first round **every one was the same shape**: a
+textual test standing in for the meaning it was supposed to check. None was reachable by
+reading the guard.
+
+| the guard asked | what it accepted |
+|---|---|
+| does `<=` appear | `length(x) < 121`, the same bound one spelling out |
+| does `length(` appear | `LENGTH(`, which the scan never reached, so it was neither classified nor reported |
+| is the chain closed | `length(a) + 1 <= 61`, dropped with no ceiling and no complaint |
+| does `instr(col, char(0)) = 0` appear | the same clause inside a disjunction, binding on no row |
+| does the term start `CAST(` | `CAST(x AS TEXT)`, which is still text, so `length()` still stops at the NUL |
+| does the byte arm's text appear | a budget widened 240 to 2400, since `<= 240` is a substring |
+| does the method end `.py` | `rglob("*")` with the suffix filtered in Python afterwards |
+| is it called `rglob` or `os.walk` | `glob("**/*.py")`, `Path.walk()`, a bare `walk` from `os` |
+
+**The fix is never a longer list.** Each was first fixed by extending the enumeration and each
+was then evaded one spelling further out. What closed them was making the guard **report what
+it cannot classify**: a bound it cannot read is an offence rather than a skip. That turns every
+future spelling from a silent pass into a loud failure, which is the only form of these rules
+that survives somebody who has not read them.
+
+**Two lessons about the tests of the guards rather than the guards.** A rule that sweeps
+`Base.metadata` cannot test its own clearing branches, because every constraint there is
+already correct: two branches shipped broken and read clean for two rounds, so the clearing
+logic has to be drivable against constructed text. And **a diagonal row whose two answers do
+not differ is not a test**: a row added to drive a keyword reading arm drove nothing, because
+an unreadable pattern counted as a walk anyway, so deleting the arm stayed green.
+
+**The counting instrument had a blind spot in three of four readings.** An `ast` script that
+joins string constants cannot read a constraint whose expression is built by a call, and two of
+the twenty seven are. What makes the number sound is the guard, which reads `Base.metadata` and
+therefore renders every constraint including those two. **No count went into a comment**, for
+that reason.
+
+## The `File` half of the no-custody predicate is inverted, and that is deliberate
+
+This tree spells its own types the way the DOM spells its handles: `FileMetadata` and
+`FileNaming` sit beside `FileList` and `FileSystemFileHandle`, and nothing in the text tells
+them apart. So the predicate refuses every `File` prefixed name and admits this repository's
+own by name. **The refused set is the open one**, which is the direction that fails loudly: a
+new `File` prefixed type of this tree's own is refused until somebody adds it, and it arrives
+as a named failure rather than as silence. Listing the DOM's handles instead is an open set
+that fails the other way. `FileReader` is refused and that is not an oversight: this tree
+declares one and it is a function type.
+
+**A prefix in the predicate has to be capitalised.** `\w*Array` read `isArray` and
+`arrayBuffer` as parameter types in two of the three guards applying the predicate;
+`(?:[A-Z]\w*)?` in front of the morpheme is what stops a method call being read as a type.
+Measured over `frontend/`: 23 distinct identifiers match, all PascalCase byte or media
+carriers.
+
+## `codeOnly` is gone, and what the parser gave up
+
+The rule forbidding a module mock stripped comments by line shape. Measured over the **618
+modules** under `frontend/tests` and `frontend/src`: none fails to parse, and the two
+instruments report the same empty offender set. The parser refuses exactly one thing the
+matcher returned something for, a bare continuation line, which was a synthetic fixture.
+
+What the swap gave up is a false positive: a call spelled inside a string literal is not a call
+expression. **That false positive is why the file used to assemble the forbidden name out of
+two string halves to escape its own rule**, and why it no longer needs to.
+
+## The dark hover band was never measured on the pair it named
+
+The rule stated `1.36 to 2.85 across the seven palettes` for one hover pairing on the dark
+card. Re-derived over the ten palettes that exist: **1.3616 (nord) to 2.6299 (ayu)**. The lower
+bound is that pair and the upper bound is not: `2.845` belongs to a different colour on Rose
+Pine, quoted two files away. **Bumping the count alone would have carried a number nobody had
+measured on either palette set**, which is what makes a spelled count worse than no count.
+
+## The reader seam is what a reader is, and a parsing rule is not
+
+`declaresEntities` sat at the seam and was the one thing there the reader contract did not
+consult: four readers apply it, and a reading is the same shape whether or not the bytes went
+through a parser. It was also the only reason `opf.ts` took a runtime rather than a type only
+dependency on the seam. Moved to `lib/xmlEntities.ts`, so the seam holds one idea and every
+edge into it from the family is erased at compile time. The cycle arm closed the hazard either
+way, which is why this was a question about contents rather than about risk.
+
+**The guard generalised rather than gaining an arm.** The shared vocabulary test reads a table
+of homes and asks the same two questions of each: what a home declares it declares under no
+second name, and every module using one of those names takes it from that home. A third home is
+a row rather than a fourth arm.
+
+## The untrusted row vocabulary is a module, and its rule is written down
+
+`columnsIn`, `text`, `integer` and `decimal` were declared identically in `calibre.ts` and
+`kobo.ts`, and a third local database reader is planned. They are neither the connection, which
+`sqlite.ts` owns, nor what a library means, which the readers own. `lib/sqliteRow.ts` holds the
+four and **states what may join it**, because the named trap is a helper module that grows into
+a second `sqlite.ts`: a function belongs there when it answers a question about a cell or a
+column without knowing what the value means. A reader's own `isTrue`, which reads two spellings
+of a boolean because one vendor's firmware writes two, is a fact about a vendor and stays in
+the reader.
+
+**Enforced against a derived population**: no module importing `./sqlite` may declare a name
+that module exports. A third reader joins that population by opening a database, where a list
+of readers would have gone stale in the commit that adds one.
+
+## A global stubbed to `undefined` does not test a `typeof` guard
+
+`no-inflate` is what a reader answers when the runtime has no `DecompressionStream`. It is the
+one refusal in the family whose cause is the browser rather than the file, so the wrong
+sentence sends somebody looking at a book that is fine.
+
+**Stubbing the global to `undefined` reaches the arm and tests nothing.** Both readers ask
+`typeof DecompressionStream === "undefined"`, and what `typeof` is for is a name that is not
+bound at all: a property left in place with an undefined value makes the guard's own line
+unnecessary, and deleting the line changes no answer. Deleting the property turns the same
+mutation into a `ReferenceError` that escapes the reader, which the arms observe. The helper
+deletes it for one call and restores it in a `finally`, and **refuses to run in an environment
+that never had one**, because an arm that passes vacuously is worse than an absent arm.

@@ -255,6 +255,90 @@ class TestQuote:
         db.commit()
         assert db.query(Quote).one().note is None
 
+    def test_a_nul_carrying_excerpt_cannot_walk_past_the_ceiling(self, db, user, book):
+        """The arm the character inequality cannot supply on its own, on the
+        schema a deployment runs.
+
+        SQLite's `length()` counts characters **up to the first NUL**, so this
+        value reports a length of 1 and carries 8,003 bytes. Pydantic refuses it
+        by counting the Python string, which counts past a NUL, and Pydantic is
+        exactly what `backup.restore` does not run. That leaves this constraint
+        as the only thing between a hand edited archive and an unbounded write.
+
+        **Against the migrated schema, not the model's declaration**, which is
+        the distinction `TestTheColumnRefusesWhatTheSchemaWouldHaveRefused`
+        states at its own site: editing `models.py` alone fails nothing.
+        `f4a1c62d0b97` is the revision this exercises.
+        """
+        db.add(Quote(book_id=book.id, user_id=user.id, text="a\x00" + "x" * 8_000))
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+    def test_a_nul_carrying_remark_cannot_either(self, db, user, book):
+        """The diagonal: the NUL in the second column rather than the first.
+
+        Without this, a byte arm covering `text` alone scores every other case
+        in this class, and `note` is the column an over-long value is likelier
+        to reach because nothing else looks at it.
+        """
+        db.add(
+            Quote(
+                book_id=book.id,
+                user_id=user.id,
+                text="a line",
+                note="a\x00" + "y" * 4_000,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+    def test_the_schema_admits_a_nul_which_is_why_this_column_bounds_bytes(self):
+        """The premise the byte arm rests on, at a rung above prose.
+
+        `f4a1c62d0b97` refuses `instr(text, char(0)) = 0`, which would make the
+        character ceiling exact, and the whole reason is that this schema stores
+        a NUL today: adding that arm would turn an upgrade that cannot fail on
+        any row this application wrote into one that fails on a row a member
+        could already have pasted in.
+
+        **That reason was recorded and nothing enforced it.** Add a control
+        character filter to `QuoteCreate` and the recorded reason silently
+        becomes false, so the cheaper arm would be available and nobody would
+        know. This is the tripwire: if it goes red, read the revision, because
+        the decision it records is open again.
+
+        `min_length` and `max_length` count a Python string, whose `len` counts
+        past a NUL, which is separately why no application path can write a row
+        the new ceiling refuses.
+        """
+        from schemas.quote import QuoteCreate
+
+        parsed = QuoteCreate(text="a\x00b")
+
+        assert parsed.text == "a\x00b"
+
+    def test_the_widest_legitimate_excerpt_is_still_stored(self, db, user, book):
+        """The other side, without which a constraint refusing everything passes
+        the two cases above.
+
+        **Exactly on the boundary.** Four bytes is UTF-8's widest character, so
+        an excerpt spending the whole character budget on four byte characters
+        is 8,000 bytes and lands on the byte arm rather than under it. One ASCII
+        character would leave three bytes of slack, which is room for a mutation
+        to shrink the multiplier and stay green.
+        """
+        db.add(
+            Quote(
+                book_id=book.id,
+                user_id=user.id,
+                text="\U0001f600" * 2_000,
+                note="\U0001f600" * 1_000,
+            )
+        )
+        db.commit()
+
+        assert len(db.query(Quote).one().text) == 2_000
+
     def test_the_book_id_index_is_the_composite_and_only_the_composite(self):
         """No standalone `ix_quotes_book_id` beside `ix_quotes_book_page`.
 

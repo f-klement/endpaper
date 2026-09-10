@@ -48,8 +48,25 @@ BACKEND = Path(__file__).resolve().parent.parent
 #:
 #: So the rule is structural: **a leading dot means a tool owns it**, which covers
 #: `.venv`, `.uv-cache`, `.mypy_cache`, `.ruff_cache`, `.pytest_cache` and whatever is
-#: next without an edit here. `__pycache__` and `node_modules` are the two that carry no
-#: dot and so still have to be named.
+#: next without an edit here. `__pycache__`, `node_modules`, `site-packages` and
+#: `dist-packages` are the four that carry no dot and so still have to be named.
+#:
+#: **The last two are an environment rather than a tool, and the dot does not cover
+#: one.** A virtualenv is `.venv` by convention and by nothing else: `test_marc.py`
+#: records CI putting one inside `backend/` under another name, after which its walk
+#: read `pydantic`, `packaging`, `urllib3` and the standard library's own `xml` and
+#: reported them for breaking a rule about this application. What is closed about an
+#: environment is not its directory's name but that everything installed into it sits
+#: under `site-packages`, or `dist-packages` where Debian put it. Two modules reached
+#: that conclusion independently, `test_covers.py` and `test_marc.py`, which is the same
+#: signal this list already rests on for `__pycache__` and `node_modules`.
+#:
+#: **The stronger structural marker is deliberately not here.** An environment always
+#: carries a `pyvenv.cfg` at its root, whatever it is called, and `test_marc.py` tests
+#: for it when choosing which directories to descend. That is a filesystem question and
+#: this is a path predicate: the diagonal below drives it against constructed trees and
+#: `test_roster_counts.py` drives it against paths that need not exist. Naming the two
+#: directories keeps this answerable from the path alone.
 #:
 #: **`root` exists because the same lesson was learned twice.** This rule was written
 #: here, and `test_roster_counts.py` was written later with a name list of its own that
@@ -64,7 +81,8 @@ BACKEND = Path(__file__).resolve().parent.parent
 #: twice.
 def _is_vendored(path: Path, root: Path = BACKEND) -> bool:
     return any(
-        part.startswith(".") or part in {"__pycache__", "node_modules"}
+        part.startswith(".")
+        or part in {"__pycache__", "node_modules", "site-packages", "dist-packages"}
         for part in path.relative_to(root).parts
     )
 
@@ -197,6 +215,13 @@ def _every_file_a_tool_does_not_own(root: Path = BACKEND) -> list[Path]:
 #: hold, and it is what makes the rule structural rather than a longer list.
 VENDORED_KINDS: Final = {
     "a virtualenv": ".venv/lib/python3.14/site-packages/pydantic",
+    # The same packages one level out of reach of the dot. CI has already built
+    # an environment under `backend/` whose directory carried no dot, and the
+    # walk that went into it reported the standard library's own `xml` for
+    # breaking a rule about this application. `.venv` above is caught by its
+    # dot and would be caught with `site-packages` removed from the predicate,
+    # so it is this row that drives that half and not that one.
+    "an environment whose directory is not hidden": "env/lib/python3.14/site-packages/pydantic",
     "the cache the pipeline creates under backend": ".uv-cache/cyclonedx/model",
     "bytecode beside a module of ours": "routers/__pycache__",
     "a dependency tree": "node_modules/marked/lib",
@@ -358,6 +383,78 @@ def _walk_names() -> tuple[set[str], set[str]]:
         f"nothing below covers them: {sorted(reaches - walks - {'_is_vendored'})}"
     )
     return walks, reaches
+
+
+def _is_a_walk(node: ast.AST, defines_walk: bool = False) -> bool:
+    """Whether this call reads a tree of Python files rather than one directory.
+
+    **Read off the pattern and off the name `walk`, never off the receiver.** The
+    version this replaced asked for `rglob` or an attribute of `os`, so
+    `glob("**/*.py")`, `Path.walk()` and a bare `walk` imported from `os` all
+    walked past it. Measured against four planted modules: one reported, three
+    clean.
+
+    `walk` under any spelling, because `os.walk`, `pathlib.Path.walk` and a bare
+    import are one operation with three addresses, and which one a module reaches
+    for says nothing about what it reads.
+
+    **Whether the pattern could yield a `.py` file, never whether it ends in
+    one.** A second version asked `pattern.endswith(".py")`, which reads the file
+    kind off the tail exactly as the first read recursion off the method name:
+    `rglob("*")` and `glob("**/*")` filtered in Python afterwards walked past it,
+    and so did `rglob(pattern="*.py")`, whose `args` are empty. `fnmatch` answers
+    the real question, so `*.ts*` and `*.md` stay out because no Python file can
+    match them, and `*` and `**/*` come in because one can. A pattern this cannot
+    read at all counts as a walk: assuming otherwise would make naming it the
+    next evasion.
+
+    **Two things share that word and neither is a filesystem walk**, so both are
+    excluded by what the call is rather than by a list of the modules that have
+    one. `ast.walk` takes a parse tree, and every module that walks a directory
+    here also walks an `ast`, so a rule matching the bare word reports all of
+    them and is deleted within the week. And a **locally defined** `walk` is a
+    recursion helper over routes, JSON schemas or AST nodes: three modules in
+    this tree have one, none of them touches the filesystem, and all three were
+    reported by the first draft of this predicate.
+
+    So `walk` counts when it is somebody else's: an attribute on anything but
+    `ast`, or a bare call in a module that does not define `walk` itself, which
+    is what `from os import walk` looks like. `defines_walk` is that second half
+    and the caller supplies it, because it is a fact about the module rather than
+    about the call.
+    """
+    if not isinstance(node, ast.Call):
+        return False
+    if (
+        isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "ast"
+    ):
+        return False
+    name = (
+        node.func.attr
+        if isinstance(node.func, ast.Attribute)
+        else node.func.id
+        if isinstance(node.func, ast.Name)
+        else ""
+    )
+    if name == "walk":
+        return isinstance(node.func, ast.Attribute) or not defines_walk
+    if name not in {"glob", "rglob"}:
+        return False
+    given = node.args or [
+        keyword.value for keyword in node.keywords if keyword.arg == "pattern"
+    ]
+    if not given:
+        return True
+    pattern = given[0]
+    if not isinstance(pattern, ast.Constant) or not isinstance(pattern.value, str):
+        # A pattern this cannot read is reported rather than assumed shallow.
+        return True
+    could_be_python = fnmatch("one.py", pattern.value) or fnmatch(
+        "under/a/directory/one.py", pattern.value
+    )
+    return could_be_python and (name == "rglob" or "**" in pattern.value)
 
 
 def _reached(name: str, root: Path) -> set[str]:
@@ -594,15 +691,16 @@ class TestTheSourceWalkSeesOnlyThisProject:
         is what says they still do: the names are read off the functions here
         that reach `_is_vendored`, so one added later is covered with no edit.
 
-        **It matches by name, and what that leaves out is not hypothetical.**
-        Other test modules walk `backend/` for `*.py` under names of their own
-        and filter it with a directory list of their own, none of which holds
-        the cache the pipeline creates; this reaches none of them. It was
-        written for the shape that produced the defect, where the offending
-        function in all three cases carried the name it was copied from, and it
-        makes that paste expensive rather than free. The rule for the rest is in
-        the tracker, because the walks differ in what else each excludes and one
-        of them wants a directory this predicate does not cover.
+        **It matches by name, and what that leaves out is covered by the rule
+        below rather than by the tracker.** Other test modules walked
+        `backend/` for `*.py` under names of their own and filtered with a
+        directory list of their own, none of which held the cache the pipeline
+        creates; this reaches none of them, because it was written for the shape
+        that produced the defect, where the offending function in all three
+        cases carried the name it was copied from. It makes that paste expensive
+        rather than free, and
+        `test_no_other_test_module_walks_the_backend_without_the_shared_rule`
+        catches the class it cannot see.
         """
         _, names = _walk_names()
         assert len(names) >= 6, f"the walks went missing from this file: {names}"
@@ -619,6 +717,151 @@ class TestTheSourceWalkSeesOnlyThisProject:
             "these keep their own copy of a walk this file owns, so what counts "
             f"as vendored is decided twice: {copies}"
         )
+
+    def test_no_other_test_module_walks_the_backend_without_the_shared_rule(
+        self,
+    ) -> None:
+        """The rule the test above cannot state, which is about the shape rather
+        than the name.
+
+        Nine test modules recursed `backend/` for `*.py` under names of their
+        own, each excluding a list of directory names it had heard of and **none
+        of them naming the cache the pipeline creates**. Two are security guards:
+        the rule that no module reads a catalogue's address off the roster table,
+        and the rule that keeps the password reset off HTTP. So a dependency
+        unpacked under `backend/` in the pipeline and nowhere else decided
+        whether either fired, which is green where it is written and red where it
+        is trusted.
+
+        **Recursion is read off the pattern, never off the method name**, and
+        that distinction is the whole rule. A first version matched `rglob` and
+        `os.walk` by name and said `glob` was safe because "a non recursive glob
+        reads one directory": `glob("**/*.py")` recurses and was passed unseen,
+        and so were `Path.walk()`, which 3.14 has, and a `walk` imported bare
+        from `os`. Measured on four planted modules, one control reported and
+        three evasions clean. So a call is a walk when its pattern carries `**`,
+        or when it is `rglob`, or when anything at all is called `walk`. What is
+        genuinely out is a `glob` whose pattern has no `**`, which reads one
+        directory and cannot enter a vendored tree at all; five sites here are
+        that shape.
+
+        **Asked of the module rather than of the function**, and the cost is
+        stated rather than discovered: a module that walks in one place and asks
+        the predicate in an unrelated one passes. The tighter rule reports three
+        modules that are correct, `test_classifications.py` among them, where the
+        walk calls a helper that calls the predicate. Reporting a module for a
+        split it was right to make is worse than the residue, and the diagonal
+        above is what covers the predicate itself.
+        """
+        mine = Path(__file__).resolve()
+        offenders: list[str] = []
+        checked: set[str] = set()
+
+        for path in _test_sources():
+            if path.resolve() == mine:
+                continue
+            tree = ast.parse(path.read_text())
+            defines_walk = any(
+                isinstance(node, _A_FUNCTION) and node.name == "walk"
+                for node in ast.walk(tree)
+            )
+            walks = [
+                node.lineno
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call) and _is_a_walk(node, defines_walk)
+            ]
+            if not walks:
+                continue
+            checked.add(str(path.relative_to(BACKEND)))
+            # **Any of the shared walks, not the predicate by name.** A module
+            # that imports `_source_modules` or `_markdown_sources` has asked the
+            # shared rule as surely as one that calls `_is_vendored`, and asking
+            # for the one spelling reported three modules that were already
+            # right. The set is read off this file rather than listed, so a walk
+            # added here is accepted with no edit.
+            _, shared = _walk_names()
+            if any(
+                isinstance(node, ast.Name) and node.id in shared
+                for node in ast.walk(tree)
+            ):
+                continue
+            offenders += [f"{path.relative_to(BACKEND)}:{line}" for line in walks]
+
+        # A floor, because a matcher that stopped matching would report no
+        # offender and no walk. It counts the modules this examined, which is
+        # the population rather than the verdict.
+        assert len(checked) >= 8, f"the walks went missing from the tests: {checked}"
+        assert not offenders, (
+            "these recurse `backend/` and decide what vendored means for "
+            f"themselves, so the pipeline's cache is read as ours: {offenders}"
+        )
+
+    @pytest.mark.parametrize(
+        ("call", "defines_walk", "recurses"),
+        [
+            ('BACKEND.rglob("*.py")', False, True),
+            ('BACKEND.glob("**/*.py")', False, True),
+            ("BACKEND.walk()", False, True),
+            ("walk(BACKEND)", False, True),
+            ("os.walk(BACKEND)", False, True),
+            ('BACKEND.glob("*.py")', False, False),
+            ("ast.walk(tree)", False, False),
+            ("walk(node)", True, False),
+            ("BACKEND.rglob(pattern)", False, True),
+            # Recursion with the file kind decided in Python afterwards, and the
+            # pattern handed over by keyword. These three are why this predicate
+            # asks `fnmatch` rather than reading the pattern's tail, and every
+            # one of them passed the version that read the tail.
+            ('BACKEND.rglob("*")', False, True),
+            ('BACKEND.glob("**/*")', False, True),
+            ('BACKEND.rglob(pattern="*.py")', False, True),
+            # **The row that actually drives the keyword arm.** The one above
+            # does not: with the arm removed the pattern is unreadable, and an
+            # unreadable pattern counts as a walk too, so both answers are
+            # `True` and deleting the arm stays green. Measured. Here the two
+            # answers differ, because a pattern that is read is judged.
+            ('DOCS.rglob(pattern="*.md")', False, False),
+            # Out of this rule's subject rather than evading it: no Python file
+            # can match either, so neither can reach vendored source.
+            ('FRONTEND.rglob("*.ts*")', False, False),
+            ('DOCS.rglob("*.md")', False, False),
+        ],
+    )
+    def test_what_counts_as_recursing_the_tree(
+        self, call: str, defines_walk: bool, recurses: bool
+    ) -> None:
+        """The predicate above, one spelling per row.
+
+        **Every row but the first is a spelling the tree does not hold**, which
+        is why this is here: the rule above is driven by ten real modules and
+        every one of them uses the first, so a matcher that had stopped reading
+        any of the rest would still pass it. Rows two, three and four are the
+        three evasions a critic measured against the version that matched
+        `rglob` and an attribute of `os` by name, and the three after the
+        unreadable pattern are the three it measured against the version that
+        asked whether the pattern ended in `.py`.
+
+        **Both sets came from the critic rather than from me**, and that is the
+        arrangement rather than an accident: the first draft of this table held
+        only the cases the rewrite had been designed against, so it scored clean
+        while `rglob("*")` sat outside it. A guard's author is the worst person
+        to choose its evasion.
+
+        **And for one round this docstring described five rows the table did not
+        have**, because the edit adding them died on a later assertion and wrote
+        nothing, and only the failing half was re-applied. Both halves of the fix
+        those rows exist for could then be reverted for `22 passed`. A comment
+        claiming a case is not the case: count the rows.
+
+        An unreadable pattern counts as a walk: a rule that assumed otherwise
+        would be evaded by naming the pattern. The last two rows are the other
+        side, and they are refusals of scope rather than misses: this rule is
+        about reaching vendored **Python**, and no Python file matches either.
+        """
+        statement = ast.parse(call).body[0]
+        assert isinstance(statement, ast.Expr)
+
+        assert _is_a_walk(statement.value, defines_walk) is recurses
 
 
 class TestEveryNumericQueryParamIsBoundedBothWays:
@@ -5216,3 +5459,566 @@ class TestOneInstanceIssuesALoan:
             "response and may say so; a model a caller can send is a way to "
             "claim another instance's authority for a row this one writes."
         )
+
+
+class TestEveryTextCeilingBindsOnBytesToo:
+    """A character ceiling in SQLite is not a ceiling until bytes are bounded too.
+
+    `length()` on text counts characters **up to the first NUL**. Measured
+    2026-09-10: `"a\\x00" + "x" * 10000` reports a `length()` of 1 and stores
+    10,002 bytes, so `length(col) <= 2000` admits a value nothing bounded. Every
+    such CHECK exists for `backup.restore`, which inserts through Core and runs
+    no Pydantic model, and that is exactly the path where the character
+    inequality does not bind.
+
+    **Two arms close it and this accepts either.** A byte budget of four times
+    the character budget, four bytes being UTF-8's widest character. Or a clause
+    refusing a NUL outright, `instr(col, char(0)) = 0`, which
+    `catalogue_credentials` and `opds_servers` already carry beside a charset
+    rule. Naming one of the two would have made the other a violation.
+
+    **Floors are not in the class.** A NUL shortens the count, so `length(x) > 0`
+    and `length(x) >= 40` become stricter on the same value rather than weaker,
+    and there is nothing to close.
+
+    **This reads every `length(` in the constraint and refuses to skip one**,
+    which is the difference between this rule and the version a critic evaded.
+    That version matched two spellings, `<=` and `BETWEEN`, so the same bound on
+    the same column written `length(x) < 121` was not a ceiling to it and shipped
+    unarmed with nothing red: measured on `loans.loaned_to_name`, `<= 120` failed
+    and `< 121` passed. **A longer list of operators would have been the same
+    defect one spelling further out.** So each occurrence is classified as a
+    ceiling, a floor or a byte arm, and one this cannot read is reported rather
+    than passed over. The operator list is still here and is now load bearing in
+    the other direction: getting it wrong fails loudly.
+
+    **`GLOB` charset rules are a different class and are deliberately outside
+    this rule**, stated so the boundary is a decision rather than a gap: GLOB is
+    a C string operation and stops at the first NUL too, but the threat is a
+    smuggled suffix in a value that reaches a query or a URL rather than an
+    unbounded write, and the arm is the `instr` one rather than a budget. The
+    ones that carry it bare are in the tracker.
+
+    **A ceiling written as a negated floor is outside it too, and that one is a
+    gap rather than a class.** `NOT (length(a) > 60)` is a real ceiling and this
+    reads it as a floor, so it passes. Nothing in the tree is spelled that way
+    and the cost of covering it is a negation pass over the whole expression, so
+    it is named here rather than closed: knowing which of the two it is matters
+    more than the line it would take.
+
+    **This reads the model's declaration, which enforces nothing by itself**;
+    `test_schema.py::TestEveryTextCeilingIsInstalledWithItsByteArm` is what holds
+    that declaration against the DDL a migrated database actually carries.
+    """
+
+    #: What may follow a `length(...)` term, and what each means for the value.
+    #:
+    #: **A closed set rather than a growing one**: these are every SQL
+    #: comparison, and the exhaustiveness check below is what says so at the
+    #: moment the rule runs rather than in this comment.
+    AN_UPPER_BOUND = ("<=", "<")
+    A_LOWER_BOUND = (">=", ">")
+
+    #: The names this rule reads, folded to the one spelling it compares
+    #: against. SQL folds a function name and this file does not: `models.py`
+    #: writes `CAST`, `BETWEEN`, `AND`, `GLOB` and `IN` upper case and `length`
+    #: and `instr` lower, and a rule matching literal text has to fold the same
+    #: way or it has a hole exactly where the next author disagrees about case.
+    #:
+    #: **`length` is the one whose absence is silent**, which is why this exists.
+    #: A scan for `length(` never reaches `LENGTH(`, so the occurrence is neither
+    #: classified nor reported as unreadable and the whole "refuses to skip one"
+    #: armour is bypassed. Measured on `ONE_BORROWER_SQL`: the same bound written
+    #: lower case fails the rule and written upper case passes it. The rest fold
+    #: here for consistency, and getting one of them wrong is loud rather than
+    #: quiet: a byte arm this cannot find is reported as missing.
+    #:
+    #: `length (x)` folds too, because the space is the same defect spelled with
+    #: whitespace.
+    FOLDED = (
+        (r"\blength\s*\(", "length("),
+        (r"\binstr\s*\(", "instr("),
+        (r"\bcast\s*\(", "CAST("),
+        (r"\bchar\s*\(", "char("),
+        (r"\bas\s+blob\b", "AS BLOB"),
+    )
+
+    @classmethod
+    def _canonical(cls, declared: str) -> str:
+        for pattern, spelling in cls.FOLDED:
+            declared = re.sub(pattern, spelling, declared, flags=re.IGNORECASE)
+        return declared
+
+    @classmethod
+    def _has_a_top_level_or(cls, declared: str) -> bool:
+        """Whether an `OR` sits outside every parenthesis in this constraint.
+
+        **SQL binds `AND` tighter than `OR`**, so `X OR Y AND Z` is `X OR (Y AND
+        Z)` and `Z` is not a rule about every row: on any row satisfying `X`
+        neither `Y` nor `Z` binds. `_conjuncts` splits on `AND` alone and hands
+        back `Z` as though it were top level, which cleared a ceiling that bound
+        on nothing. Measured against `ck_quotes_page_bounds`, whose text already
+        opens `page IS NULL OR (...)`: appending a real ceiling and a real NUL
+        clause to it left the whole suite green.
+
+        So a constraint shaped like that has its ceilings reported rather than
+        cleared: this rule cannot say which rows a clause in it binds on, and
+        saying so is the honest answer.
+
+        **Depth zero specifically, not any `OR`.** `ck_quotes_text_bounds`
+        depends on a correct conditional ceiling one level in, `(note IS NULL OR
+        (...))`, and a rule refusing every `OR` would break the one conditional
+        bound in the tree that is right.
+
+        **It costs nothing today**, measured over `models.py` rather than
+        assumed: nine constraints carry a depth zero `OR` and not one of them
+        holds a `length(` term. The count is nine rather than the eight a first
+        reading of the same file gave, which is why it is recomputed here by
+        `test_the_or_rule_costs_what_it_is_said_to_cost` instead of being written
+        down once.
+        """
+        depth = 0
+        for position, character in enumerate(declared):
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+            elif depth == 0 and declared[position : position + 4].upper() == " OR ":
+                return True
+        return False
+
+    @staticmethod
+    def _conjuncts(declared: str) -> list[str]:
+        """The constraint's top level `AND` terms, unparenthesised.
+
+        **A clause is only a rule about every row if it is one of these.** The
+        NUL branch below used to ask whether `instr(col, char(0)) = 0` appeared
+        anywhere in the text, and `(page IS NULL OR instr(text, char(0)) = 0)`
+        satisfies that while binding on no row carrying a page: measured, it
+        cleared a 500 character ceiling with no byte arm and nothing went red.
+
+        **It is not symmetric with the byte arm branch**, which is why this
+        matters more than it looks. A ceiling cleared by a byte arm has a
+        behavioural backstop, since `test_schema.py::_byte_armed_constraints`
+        keys on `AS BLOB` and `test_every_byte_armed_constraint_has_a_behavioural
+        _case` then forces a probe of it. A ceiling cleared by `instr` is not
+        byte armed, so nothing probes it and this text is the whole of the rule.
+
+        Splitting is naive about `BETWEEN`, whose own `AND` divides one term into
+        two. That only ever produces more terms than there are, so a clause this
+        finds is really a conjunct and a real one it splits in half is reported
+        rather than cleared, which is the safe direction.
+        """
+        terms: list[str] = []
+        depth = start = position = 0
+        while position < len(declared):
+            character = declared[position]
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+            elif depth == 0 and declared[position : position + 5].upper() == " AND ":
+                terms.append(declared[start:position].strip())
+                position += 5
+                start = position
+                continue
+            position += 1
+        terms.append(declared[start:].strip())
+        return terms
+
+    @staticmethod
+    def _closing(text: str, opened: int) -> int:
+        """Where the parenthesis opened at `opened` closes."""
+        depth = 0
+        for position in range(opened, len(text)):
+            if text[position] == "(":
+                depth += 1
+            elif text[position] == ")":
+                depth -= 1
+                if depth == 0:
+                    return position
+        raise AssertionError(f"unbalanced parentheses in {text!r}")
+
+    @classmethod
+    def _ceilings(cls, declared: str) -> tuple[list[tuple[list[str], int]], list[str]]:
+        """Every upper bound on a character length, and what could not be read.
+
+        A bound's left side may be a sum, which is how `digital_references`
+        bounds a root and a path **as a pair**, so the columns come back as a
+        list and the byte arm this implies is a sum in the same shape.
+        """
+        declared = cls._canonical(declared)
+        ceilings: list[tuple[list[str], int]] = []
+        unreadable: list[str] = []
+        chain: list[str] = []
+        position = 0
+        while (found := declared.find("length(", position)) != -1:
+            close = cls._closing(declared, found + len("length"))
+            inner = declared[found + len("length(") : close]
+            rest = declared[close + 1 :].lstrip()
+            position = close + 1
+            if inner.startswith("CAST("):
+                # **A byte arm only where the cast is to BLOB**, which is the
+                # one target that makes `length()` count bytes.
+                # `CAST(x AS TEXT)` is still text, so `length()` still stops at
+                # the first NUL and the ceiling over it is the very class this
+                # rule exists for: read as an arm it cleared itself, silently.
+                # Any other cast is reported rather than believed.
+                if not inner.rstrip().endswith("AS BLOB)"):
+                    unreadable.append(f"length({inner})")
+                # **A chain still open here is a sum mixing a character length
+                # with a byte one**, which is neither, so it is reported rather
+                # than dropped along with the reset.
+                unreadable += [f"length({one}) + length({inner})" for one in chain]
+                chain = []
+                continue
+            chain.append(inner.strip())
+            if rest.startswith("+"):
+                # A sum: the bound belongs to the last term in the chain. What is
+                # added has to be another `length(...)`, and anything else, `+ 1`
+                # for a separator being the obvious one, leaves the chain open
+                # and is reported at the foot of this loop.
+                continue
+            number = re.match(r"(<=|<|>=|>)\s*(\d+)", rest)
+            between = re.match(r"BETWEEN\s+\d+\s+AND\s+(\d+)", rest, re.IGNORECASE)
+            if between:
+                ceilings.append((chain, int(between.group(1))))
+            elif number and number.group(1) in cls.AN_UPPER_BOUND:
+                # `< N` bounds at `N - 1`, so the byte arm this implies is four
+                # times that and not four times the literal. Getting it wrong
+                # here would ask for an arm three bytes wider than the value it
+                # is supposed to bound exactly.
+                strict = 1 if number.group(1) == "<" else 0
+                ceilings.append((chain, int(number.group(2)) - strict))
+            elif number and number.group(1) in cls.A_LOWER_BOUND:
+                pass
+            else:
+                unreadable.append(f"length({inner}){rest[:24]}")
+            chain = []
+        # **A chain still open when the scan ends is a bound this cannot read**,
+        # and dropping it was the second hole in this rule: `length(a) + 1 <= 61`
+        # left `ceilings` and `unreadable` both empty, so the bound was skipped
+        # rather than cleared, which is the one thing the docstring above says
+        # cannot happen. `length(root_label) + length(relative_path) + 1` is the
+        # natural spelling the day `digital_references` counts its separator, and
+        # that pair is the only summed bound in this tree.
+        unreadable += [f"length({one}) + something this rule cannot read" for one in chain]
+        return ceilings, unreadable
+
+    @staticmethod
+    def _wanted(columns: list[str], ceiling: int) -> str:
+        """The byte arm one character ceiling implies, in the same shape.
+
+        Built from the bound's own left side rather than per column, so a bound
+        on a **pair** gets a byte arm on the pair. A rule stated per column would
+        be satisfied on `digital_references` by a term bounding one half.
+
+        **One spelling, deliberately.** A ceiling written some other way is told
+        the arm to add in the spelling this file endorses rather than being met
+        halfway, which is what keeps the constraints in this tree comparable.
+        """
+        terms = " + ".join(f"length(CAST({column} AS BLOB))" for column in columns)
+        return f"{terms} <= {4 * ceiling}"
+
+    @staticmethod
+    def _declared() -> dict[str, str]:
+        constraints: dict[str, str] = {}
+        for table in Base.metadata.tables.values():
+            for constraint in table.constraints:
+                if isinstance(constraint, CheckConstraint) and isinstance(
+                    constraint.name, str
+                ):
+                    constraints[constraint.name] = " ".join(
+                        str(constraint.sqltext).split()
+                    )
+        return constraints
+
+    @classmethod
+    def _offences(cls, name: str, raw: str) -> list[str]:
+        """What one constraint's text is doing wrong, if anything.
+
+        **Separated from the sweep so it can be driven against text**, which is
+        the only way the two clearing branches get tested at all: the sweep runs
+        over `Base.metadata`, where every constraint is already correct, so a
+        branch that cleared too readily was invisible there. Both branches had
+        exactly that defect and both were found by mutation rather than reading.
+        """
+        declared = cls._canonical(raw)
+        ceilings, unreadable = cls._ceilings(declared)
+        offences = [
+            f"{name}: this rule cannot read `{one}`, so it is skipping a "
+            "bound rather than clearing it"
+            for one in unreadable
+        ]
+        if ceilings and cls._has_a_top_level_or(declared):
+            # Neither branch below can clear a ceiling here, because no clause in
+            # this constraint is a rule about every row. See `_has_a_top_level_or`.
+            return offences + [
+                f"{name}: a ceiling of {ceiling} on {columns} shares a constraint "
+                "with a top level OR, so nothing in it binds on every row"
+                for columns, ceiling in ceilings
+            ]
+        conjuncts = cls._conjuncts(declared)
+        for columns, ceiling in ceilings:
+            # **A conjunct, not a substring.** A NUL clause inside a disjunction
+            # binds on some rows and reads as a rule about all of them.
+            if all(
+                f"instr({column}, char(0)) = 0" in conjuncts for column in columns
+            ):
+                continue
+            # **`(?!\d)`, because containment prefix matches a number.**
+            # Widening a budget from 240 to 2400 in both copies left this clean,
+            # since `<= 240` is a substring of `<= 2400`. The behavioural probe
+            # in `test_schema.py` catches that one out, which is exactly why both
+            # layers have to hold.
+            wanted = cls._wanted(columns, ceiling)
+            if re.search(f"{re.escape(wanted)}(?!\\d)", declared):
+                continue
+            offences.append(
+                f"{name}: a ceiling of {ceiling} on {columns} wants `{wanted}`"
+            )
+        return offences
+
+    #: One constraint's text, and whether this rule must object to it.
+    #:
+    #: Every row is a clearance that looked right and was not, which is why they
+    #: are here rather than trusted to the sweep: over `Base.metadata` every
+    #: constraint already passes, so a branch that cleared too readily reads
+    #: clean there for ever.
+    CLEARANCES: Final = (
+        ("length(text) <= 500", True),
+        ("length(text) <= 500 AND instr(text, char(0)) = 0", False),
+        # Binds on no row carrying a page, and cleared the ceiling anyway.
+        ("length(text) <= 500 AND (page IS NULL OR instr(text, char(0)) = 0)", True),
+        ("length(text) <= 500 AND length(CAST(text AS BLOB)) <= 2000", False),
+        # `<= 200` is a substring of `<= 2000`, and was accepted as the arm.
+        ("length(text) <= 50 AND length(CAST(text AS BLOB)) <= 2000", True),
+        # Still text, so `length()` still stops at the first NUL.
+        ("length(CAST(text AS TEXT)) <= 500", True),
+        # `AND` binds tighter than `OR`, so the NUL clause is inside the right
+        # arm and binds on no row where `page = 1`. It read as top level.
+        ("page = 1 OR length(text) <= 500 AND instr(text, char(0)) = 0", True),
+        # The conditional ceiling this tree actually has, one level in, which
+        # must keep clearing: a rule refusing every `OR` would break it.
+        (
+            "length(text) <= 2000 AND length(CAST(text AS BLOB)) <= 8000 "
+            "AND (note IS NULL OR (length(note) <= 1000 "
+            "AND length(CAST(note AS BLOB)) <= 4000))",
+            False,
+        ),
+    )
+
+    @pytest.mark.parametrize(("declared", "objects"), CLEARANCES)
+    def test_what_clears_a_ceiling_and_what_only_looks_like_it(
+        self, declared: str, objects: bool
+    ) -> None:
+        """The two clearing branches, driven against text.
+
+        A ceiling cleared by a **byte arm** has a behavioural backstop, since
+        `test_schema.py` forces a probe of every constraint carrying `AS BLOB`. A
+        ceiling cleared by **`instr`** has none, because it is not byte armed, so
+        the text is the whole of the rule and these rows are the whole of the
+        test of it.
+        """
+        assert bool(self._offences("ck_under_test", declared)) is objects
+
+    def test_the_or_rule_costs_what_it_is_said_to_cost(self) -> None:
+        """`_has_a_top_level_or` reports every ceiling in such a constraint, and
+        that is only affordable while no constraint has both.
+
+        **Recomputed here rather than written down**, because the number moved
+        between two readings of the same file: one gave eight and this gives
+        nine, the missing one being `ck_password_reset_requests_approval`. A
+        count in a docstring would have been copied forward wrong.
+
+        If this ever fails it is not a defect in the constraint, it is this rule
+        saying it cannot tell which rows that ceiling binds on. The answer then
+        is to parenthesise the constraint, which is what makes it readable to a
+        person too.
+        """
+        conditional = {
+            name
+            for name, raw in self._declared().items()
+            if self._has_a_top_level_or(self._canonical(raw))
+        }
+        both = {
+            name
+            for name in conditional
+            if self._ceilings(self._canonical(self._declared()[name]))[0]
+        }
+
+        assert len(conditional) >= 9, sorted(conditional)
+        assert not both, sorted(both)
+
+    def test_every_character_ceiling_carries_a_byte_arm_or_refuses_a_nul(self) -> None:
+        offenders: list[str] = []
+
+        for name, raw in self._declared().items():
+            offenders += self._offences(name, raw)
+
+        assert not offenders, (
+            "these bound a text column by characters, which SQLite counts only "
+            "up to the first NUL, so a Core insert walks past them: "
+            + "; ".join(offenders)
+        )
+
+    #: One spelling per row, and what this rule must make of it.
+    #:
+    #: `None` is a bound that is not a ceiling and needs no arm. A pair is the
+    #: ceiling it reads, columns and bound. `UNREADABLE` is a bound it cannot
+    #: classify, which is reported rather than skipped: the whole armour of this
+    #: rule is that the third answer exists.
+    UNREADABLE: Final = "unreadable"
+    SPELLINGS: Final = (
+        ("length(a) <= 60", (["a"], 60)),
+        ("length(a) < 61", (["a"], 60)),
+        ("length(a) BETWEEN 1 AND 60", (["a"], 60)),
+        ("length(a) + length(b) <= 60", (["a", "b"], 60)),
+        ("length(a) > 0", None),
+        ("length(a) >= 40", None),
+        ("length(trim(a)) > 0", None),
+        ("length(CAST(a AS BLOB)) <= 240", None),
+        ("length(a) <> 60", UNREADABLE),
+        ("LENGTH(a) <= 60", (["a"], 60)),
+        ("length (a) <= 60", (["a"], 60)),
+        ("length(a) + 1 <= 61", UNREADABLE),
+        ("length(a) + length(b) + 1 <= 61", UNREADABLE),
+        ("length(a) + length(CAST(b AS BLOB)) <= 60", UNREADABLE),
+        # A cast that is not to BLOB. `length()` on text still stops at the
+        # first NUL, so this is a character ceiling that read as its own arm.
+        ("length(CAST(a AS TEXT)) <= 120", UNREADABLE),
+    )
+
+    @pytest.mark.parametrize(("spelling", "expected"), SPELLINGS)
+    def test_the_rule_reads_every_spelling_of_a_bound(
+        self, spelling: str, expected: object
+    ) -> None:
+        """The diagonal, against constraint text this builds.
+
+        **Against constructed text, because against this tree it is vacuous.**
+        Only the first spelling appears in the tree, so a matcher that had
+        stopped reading any of the others would still pass the rule above.
+
+        **Every row but the first came from a critic**, over three rounds and
+        three axes. The operator axis: `< 61` and `<> 60`, against a version that
+        matched `<=` and `BETWEEN`. The case axis: `LENGTH(`, against a version
+        whose scan never reached it, which is the one shape that was neither
+        classified nor reported. And the summation axis: `+ 1`, against a version
+        that left the chain open and dropped it. **A guard's author is the worst
+        person to choose its evasion**, and the first draft of this table proved
+        it by holding only the cases the rewrite had been designed against.
+
+        Three answers rather than two, and that is the rule's armour: a bound it
+        cannot classify is reported. Two answers would make every future spelling
+        a silent pass.
+        """
+        ceilings, unreadable = self._ceilings(spelling)
+
+        if expected is None:
+            assert (ceilings, unreadable) == ([], [])
+        elif expected == self.UNREADABLE:
+            assert unreadable and not ceilings
+        else:
+            assert ceilings == [expected] and not unreadable
+
+    def test_the_rule_is_reading_the_constraints_it_thinks_it_is(self) -> None:
+        """A matcher that stopped matching would retire the rule above in silence.
+
+        The floor is what the tree holds today and is a lower bound rather than a
+        census, so adding a ceiling never fails this.
+        """
+        ceilings = [
+            one
+            for declared in self._declared().values()
+            for one in self._ceilings(declared)[0]
+        ]
+
+        assert len(ceilings) >= 9, ceilings
+        assert self._wanted(["a", "b"], 10) == (
+            "length(CAST(a AS BLOB)) + length(CAST(b AS BLOB)) <= 40"
+        )
+
+
+class TestEveryTableIsInTheDataModelDocument:
+    """`docs/data-model.md` describes the schema, so a table with no section is
+    a document that describes a different one.
+
+    Four tables had none, two of which hold credentials, in the document where
+    the privacy rule is stated **from the data side**. A reader checking what an
+    operator can see read a document that did not mention them, and nothing said
+    so: the totals the document used to carry were prose, and a number in prose
+    goes stale rather than failing.
+
+    **So this recomputes the set rather than restating a count.** There is no
+    number here to be wrong: `Base.metadata` is asked at the moment the rule
+    runs, and a table added tomorrow fails this until somebody writes its
+    section. That is the difference between the rule and the sentence it
+    replaces, which said sixteen of twenty when it was already both.
+
+    **A section is a bolded paragraph opener that is nothing but the table's
+    name**, which is how every one of them is written. The run has to be the
+    names and no prose, and that is not fussiness: a matcher taking any
+    backticked name inside any bold run reported `user_books` as documented
+    because of a paragraph two hundred lines away opening "**A log, not a
+    `current_page` column on `user_books`.**", so its own section could be
+    deleted and the rule stayed green. Measured on this document: the loose
+    matcher yields 26 names for 21 tables and covers `collections` twice; this
+    one yields exactly 21.
+
+    Matched on a single line, so a bold run spanning a paragraph cannot sweep up
+    a name below it either. `test_the_matcher_reads_an_opener_and_not_a_mention`
+    drives both refusals against a document it builds, because against this one a
+    matcher that had stopped being selective would still pass.
+    """
+
+    DOCUMENT = BACKEND.parent / "docs" / "data-model.md"
+
+    #: A paragraph opening with a bold run that is one table's name, or two
+    #: joined, and nothing else. The trailing full stop is optional because two
+    #: of the twenty one sections are written without it.
+    AN_OPENER = re.compile(
+        r"^\*\*(`[a-z_]+`(?: and `[a-z_]+`)*)\.?\*\*", re.MULTILINE
+    )
+
+    @classmethod
+    def _documented(cls, prose: str) -> set[str]:
+        return {
+            name
+            for run in cls.AN_OPENER.findall(prose)
+            for name in re.findall(r"`([a-z_]+)`", run)
+        }
+
+    def test_every_table_has_a_section(self) -> None:
+        undocumented = sorted(
+            set(Base.metadata.tables) - self._documented(self.DOCUMENT.read_text())
+        )
+
+        assert not undocumented, (
+            "these tables are in the schema and not in the document that "
+            f"describes it: {undocumented}"
+        )
+
+    def test_the_matcher_reads_an_opener_and_not_a_mention(self) -> None:
+        """Against a document this builds, because the rule above is satisfied
+        by a matcher that has stopped being selective.
+
+        Every direction in one document: the opener is found, the mention in
+        ordinary prose is not, **the mention inside somebody else's bold opener
+        is not**, and the joint opener naming two tables yields both.
+
+        Neither negative is hypothetical. The joint opener is how
+        `custom_fields` and `custom_field_values` are written, and the third line
+        here is copied from the paragraph that made `user_books` look documented
+        while its own section could be deleted.
+        """
+        found = self._documented(
+            "**`books`.** The catalogue.\n"
+            "\n"
+            "A row in `loans` is one lending event.\n"
+            "\n"
+            "**A log, not a `current_page` column on `user_books`.** Not a section.\n"
+            "\n"
+            "**`custom_fields` and `custom_field_values`.** A fact.\n"
+        )
+
+        assert found == {"books", "custom_fields", "custom_field_values"}

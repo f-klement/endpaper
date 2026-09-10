@@ -1,9 +1,9 @@
 # Backend test coverage
 
-**6495 tests**, in 99 files, recounted with `--collect-only` on 2026-09-10.
+**6586 tests**, in 99 files, recounted with `--collect-only` on 2026-09-10.
 
 **The headline equals the passed count today, and that is a fact about the tree rather than
-a simplification.** The gate reports `6495 passed`, with no skip and no `xfail`: the strict
+a simplification.** The gate reports `6586 passed`, with no skip and no `xfail`: the strict
 `xfail` that recorded a defect in the CSV importer is gone, because the work that closed the
 defect closed it.
 
@@ -15,7 +15,7 @@ the skip once made the check undoable, and a rule rewritten as `collected == pas
 the tree happens to have neither is one that fails for the wrong reason the day somebody adds
 either.
 
-**The rows below sum to 6446, forty nine short, and the shortfall is deliberate.** Those
+**The rows below sum to 6537, forty nine short, and the shortfall is deliberate.** Those
 tests live in six files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -87,7 +87,7 @@ why the helper uses regexes.
 | `test_auth.py` | 22 | Password hashing, JWT creation and the auth dependencies |
 | `test_accounts.py` | 66 | **Recovery and confirmation, where the rules live rather than where they are served.** That one function builds a reset request so an admin can approve but never start one, that redeeming ends every session on the account, that a code is single use and expires, and that both branches of a resend cost the same. |
 | `test_recover.py` | 7 | The command line reset, which is the path for a library whose only admin has nobody to approve their request. |
-| `test_models.py` | 159 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary |
+| `test_models.py` | 163 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary |
 | `test_importing.py` | 39 | **Applying a parsed export to a library.** The private-book oracle: a row whose ISBN belongs to a book the member cannot see is counted, never named, writes nothing |
 | `test_import_readers.py` | 16 | **What a reader IS, and that the set of them is closed.** That a reader is handed decoded text and nothing about how the file arrived, that every registered one honours a column correction, and that a service fitting the candidate names is names alone and no code. |
 | `test_authority.py` | 120 | **The network half of author identity.** That the four cross references a GND record carries are read off it, that the record's own scheme is never among them |
@@ -101,13 +101,13 @@ why the helper uses regexes.
 | `test_uploads.py` | 33 | Content-sniffed image validation and the size cap |
 | `test_middleware.py` | 27 | Security headers, CSP contents, HSTS conditions |
 | `test_main.py` | 59 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan, what the built files say about being reused, the shell that has to answer a client route |
-| `test_house_rules.py` | 226 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter. Also the one decision of what vendored code is: each of the five walks over this tree driven against a constructed tree with each kind of vendored path planted in front of it, and no other test module allowed to define a walk of its own |
+| `test_house_rules.py` | 271 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter. Also the one decision of what vendored code is: each of the five walks over this tree driven against a constructed tree with each kind of vendored path planted in front of it, and no other test module allowed to define a walk of its own |
 | `test_scratch_report.py` | 4 | **The scratch report names the filesystem the databases landed on.** `conftest._fastest_scratch()` falls back from `/dev/shm` to disk silently |
 | `test_roster_counts.py` | 78 | **A number spelled in prose, recomputed.** Every number written beside a roster noun is found by a census and must carry a verdict naming a cardinality computed from `sources.py`. The census walks the tree minus what a tool owns, so a new file is covered without anybody remembering, and it reads this register. |
 | `schemas/test_book.py` | 39 | **Two request bodies writing one column must agree about it.** `BookMatch` bounded four of its seventeen fields while `merge_into` wrote them all |
 | `schemas/test_settings.py` | 2 | **A row the router builds must carry every field the source describes.** The settings row is built by splatting the description into the response model |
 | `test_serialisation.py` | 47 | Assembling `BookOut`: the per-request fields, the tag suggestion by caption and by DDC number, that a tag name inside a longer word is not a caption match |
-| `test_schema.py` | 131 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial |
+| `test_schema.py` | 173 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial |
 | `schemas/test_digital.py` | 28 | What a client may say about a file it holds, bounded at the schema: the root, the path beneath it and the fingerprint, each refused at its ceiling rather than trusted for its width |
 | `test_env_example.py` | 4 | **Operator documentation that goes stale silently.** That every environment name `config.py` reads appears in `.env.example` and nothing appears there that the code ignores |
 | `test_database.py` | 27 | Engine setup and the session dependency |

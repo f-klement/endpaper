@@ -64,6 +64,7 @@
 import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
 import type { SqliteDatabase, SqliteRow } from "./sqlite";
+import { columnsIn, decimal, integer, text } from "./sqliteRow";
 
 /** What `MimeType` settles. Everything else is left unsaid. */
 export type KoboFormat = "EPUB" | "KEPUB" | "PDF";
@@ -222,21 +223,6 @@ const FORMATS = new Map<string, KoboFormat>([
   ["application/pdf", "PDF"],
 ]);
 
-function text(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed === "" ? null : trimmed;
-}
-
-function integer(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  return Math.trunc(value);
-}
-
-function decimal(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
 /**
  * A Kobo boolean, which is two different things.
  *
@@ -256,34 +242,6 @@ function isTrue(value: unknown): boolean {
   if (typeof value === "number") return value === 1;
   const written = text(value)?.toLowerCase();
   return written === "true" || written === "1";
-}
-
-/**
- * The columns one table has, so a firmware that renamed one costs a field.
- *
- * `PRAGMA` takes no bound parameter for a table name, and the only name passed
- * here is a literal in this module. The pattern is what keeps that true if
- * somebody ever passes a name read out of a member supplied file.
- *
- * **Exported for its own test and for nothing else**, `calibre.ts::columnsIn`'s
- * reason: the refusal has one call site and that site passes a literal, so a
- * test going through `readKoboLibrary` is green whether the check is there or
- * not, and a guard nothing can reach is on the stated rung wearing a test's
- * name.
- *
- * **The same function is in `calibre.ts` and is not imported from there**,
- * which is a fact stored twice and is deliberate for one build reason: this
- * module is measured as a reader that costs its own chunk and no more, and
- * importing from the Calibre reader would pull that module into this one's
- * chunk. The shared home both of them want is a helper module neither reader
- * owns, which is a change wider than this one.
- */
-export function columnsIn(db: SqliteDatabase, table: string): Set<string> {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) return new Set();
-  const rows = db.query(`PRAGMA table_info(${table})`);
-  return new Set(
-    rows.map((row) => text(row["name"])).filter((name) => name !== null),
-  );
 }
 
 /**

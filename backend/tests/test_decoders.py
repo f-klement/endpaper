@@ -36,6 +36,7 @@ import metadata
 import sources
 import targets
 from enums import Capability, CatalogueSource, SourceFamily
+from tests.test_house_rules import _is_vendored
 
 BACKEND = pathlib.Path(__file__).resolve().parent.parent
 FIXTURE = BACKEND / "tests" / "fixtures" / "marc21_one_record.xml"
@@ -282,14 +283,24 @@ def _production_sources() -> list[pathlib.Path]:
 
     Stated as the exclusion, so a package added later is read rather than
     skipped.
+
+    **What vendored means is `test_house_rules._is_vendored`.** The three names
+    this held were every cache anybody had seen locally, and the pipeline sets
+    `UV_CACHE_DIR` inside `backend/`, so `.uv-cache/` was read and any
+    dependency spelling `Decoding(` would have been reported for skipping this
+    application's projection.
     """
-    return [
+    found = [
         path
         for path in BACKEND.rglob("*.py")
-        if not any(
-            part in {"tests", ".venv", "__pycache__"} for part in path.relative_to(BACKEND).parts
-        )
+        if "tests" not in path.relative_to(BACKEND).parts
+        and not _is_vendored(path, BACKEND)
     ]
+    # The packages it must cover rather than a number, so a walk that lost a
+    # whole directory fails rather than passing on a smaller sweep. See
+    # `test_accounts._sources` for the mutation that made a count look adequate.
+    assert {"routers", "schemas"} <= {path.parent.name for path in found}, found
+    return found
 
 
 class TestOnlyTheProjectionTurnsARowIntoADecoding:

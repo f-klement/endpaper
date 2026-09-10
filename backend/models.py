@@ -417,8 +417,14 @@ class AuthorIdentifier(Base):
             "provenance <> 'catalogue' OR created_by_user_id IS NULL",
             name="ck_author_identifiers_asserter",
         ),
+        # The byte arm is what makes the ceiling bind on a Core insert; the
+        # floor needs none, because a NUL shortens the count and so makes a
+        # floor stricter rather than weaker. See `ck_digital_references_bounds`
+        # for the measurement and `TestEveryTextCeilingBindsOnBytesToo` for the
+        # rule that stops the next ceiling shipping without one.
         CheckConstraint(
-            f"length(identifier) > 0 AND length(identifier) <= {AUTHORITY_IDENTIFIER_MAX}",
+            f"length(identifier) > 0 AND length(identifier) <= {AUTHORITY_IDENTIFIER_MAX}"
+            f" AND length(CAST(identifier AS BLOB)) <= {4 * AUTHORITY_IDENTIFIER_MAX}",
             name="ck_author_identifiers_bounds",
         ),
     )
@@ -1474,9 +1480,29 @@ class Quote(Base):
         # same reason. Without this, "the ceiling is in the database" was a
         # false claim about the one column whose ceiling is the argument for
         # the whole table existing separately.
+        #
+        # **The byte arm is what makes the character arm a bound at all**, for
+        # the reason `ck_digital_references_bounds` states in full at its own
+        # site: SQLite's `length()` on text counts characters up to the first
+        # NUL, so a value of `"a\x00" + "x" * 10000` reports a length of 1 and
+        # stores 10,002 bytes. `QuoteCreate` bounds the Python string, whose
+        # `len` counts past a NUL, and `backup.restore` is exactly the path that
+        # runs no Pydantic model.
+        #
+        # It **caps** a NUL carrying value at four times the budget rather than
+        # refusing it, which is the slack the other site explains and does not
+        # take `instr` to close. Four bytes is UTF-8's widest character, so it
+        # refuses nothing NUL free the character arm admits.
+        #
+        # **This copy is a description; the migration is what installs it.**
+        # `f4a1c62d0b97` is the revision to change if you are changing a bound,
+        # and `tests/test_house_rules.py::TestEveryTextCeilingBindsOnBytesToo`
+        # is what stops a new one being written without the byte arm.
         CheckConstraint(
             f"length(text) <= {QUOTE_TEXT_MAX} "
-            f"AND (note IS NULL OR length(note) <= {QUOTE_NOTE_MAX})",
+            f"AND length(CAST(text AS BLOB)) <= {4 * QUOTE_TEXT_MAX} "
+            f"AND (note IS NULL OR (length(note) <= {QUOTE_NOTE_MAX} "
+            f"AND length(CAST(note AS BLOB)) <= {4 * QUOTE_NOTE_MAX}))",
             name="ck_quotes_text_bounds",
         ),
     )
@@ -1644,14 +1670,26 @@ class DigitalReference(Base):
         # Pydantic refuses a NUL, and Pydantic is exactly what a restore does
         # not run.
         #
-        # **It refuses exactly one class the character arm admits, and that
-        # class is the point**: a value carrying a NUL. Said the other way round
-        # it would argue this arm is redundant, two lines under the sentence
-        # explaining why it is not. What it never refuses is a **NUL free**
-        # value the character arm admits, and that is tight rather than merely
-        # safe: four bytes is UTF-8's widest character, so the widest legitimate
-        # pair is four times the character budget and lands exactly on this
-        # bound.
+        # **It caps a NUL carrying value; it does not refuse one**, and the
+        # difference is worth stating because an earlier draft of this comment
+        # claimed the stronger thing. A value carrying a NUL still passes the
+        # character arm on a count it does not have, and what this arm does is
+        # bound what it can then store at four times the budget. Measured: a
+        # pair of 8,000 bytes behind a NUL is accepted where 16,377 is not. That
+        # closes the unbounded write, which is what the constraint is for, and
+        # leaves a bounded slack rather than nothing.
+        #
+        # **Refusing a NUL outright is the tighter arm and is deliberately not
+        # taken here.** `instr(x, char(0)) = 0` is what the two credential
+        # columns carry, and it would make the character arm exact. It is right
+        # there because those columns are machine written and a NUL is never a
+        # legitimate value; a member's own text is different, and refusing one
+        # would be a rule about content rather than a bound on size.
+        #
+        # What it never refuses is a **NUL free** value the character arm
+        # admits, and that is tight rather than merely safe: four bytes is
+        # UTF-8's widest character, so the widest legitimate pair is four times
+        # the character budget and lands exactly on this bound.
         #
         # `file_modified_at` is deliberately not here, and that is a decision
         # rather than an omission: it arrives typed as a datetime, and the worst
@@ -2047,7 +2085,8 @@ class CustomField(Base):
     # is the one path that reaches this table without a Pydantic model.
     __table_args__ = (
         CheckConstraint(
-            f"length(name) > 0 AND length(name) <= {CUSTOM_FIELD_NAME_MAX}",
+            f"length(name) > 0 AND length(name) <= {CUSTOM_FIELD_NAME_MAX}"
+            f" AND length(CAST(name AS BLOB)) <= {4 * CUSTOM_FIELD_NAME_MAX}",
             name="ck_custom_fields_name_bounds",
         ),
         # **The enum is a plain VARCHAR, so this is what makes it closed.**
@@ -2128,8 +2167,12 @@ class CustomFieldValue(Base):
             "field_id",
             unique=True,
         ),
+        # The byte arm is what makes this a stored denial of service bound
+        # rather than a display one: without it a single NUL walks an archive's
+        # value past the ceiling. See `ck_digital_references_bounds`.
         CheckConstraint(
-            f"length(value) > 0 AND length(value) <= {CUSTOM_FIELD_VALUE_MAX}",
+            f"length(value) > 0 AND length(value) <= {CUSTOM_FIELD_VALUE_MAX}"
+            f" AND length(CAST(value AS BLOB)) <= {4 * CUSTOM_FIELD_VALUE_MAX}",
             name="ck_custom_field_values_bounds",
         ),
     )
@@ -2693,8 +2736,14 @@ class OpdsServer(Base):
     __tablename__ = "opds_servers"
 
     __table_args__ = (
+        # The byte arm for the reason the two constraints below carry
+        # `instr(..., char(0))`: SQLite's `length` stops at the first NUL, and
+        # `backup.restore` writes this column through Core. Those two need no
+        # byte arm because their charset rule already refuses a NUL outright;
+        # a name is free text and cannot.
         CheckConstraint(
-            "length(name) BETWEEN 1 AND 100",
+            "length(name) BETWEEN 1 AND 100 "
+            "AND length(CAST(name AS BLOB)) <= 400",
             name="ck_opds_servers_name",
         ),
         # **The same rule as `ck_catalogue_credentials_source`, and it is here

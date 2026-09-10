@@ -491,7 +491,7 @@ describe("a document that is not a FictionBook", () => {
     // document carrying a DTD internal subset is refused by the engine's own
     // parser and the guard never had to fire. `declaresEntities` is a plain
     // substring test, refusing the string even inside a comment, which is the
-    // exclusion `fileReaders.declaresEntities` states; putting it in a comment
+    // exclusion `xmlEntities.declaresEntities` states; putting it in a comment
     // is what makes the refusal the only difference between these two
     // documents.
     const ordinary = fb2(titleInfo("<book-title>Онегин</book-title>"));

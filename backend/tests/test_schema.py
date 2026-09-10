@@ -8,6 +8,7 @@ then check it is adopted without losing data.
 import random
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 import pytest
 from sqlalchemy import CheckConstraint, String, create_engine, inspect, text
@@ -26,6 +27,9 @@ from migrations.versions import (
 )
 from migrations.versions import (
     f1c30ab27d84_store_the_shelf_key_beside_the_number as revision,
+)
+from migrations.versions import (
+    f4a1c62d0b97_bind_every_text_ceiling_on_bytes_too as bind_every_text_ceiling,
 )
 from tests.test_filing import CORPUS
 
@@ -2760,3 +2764,441 @@ class TestTheMigratedDatabaseCarriesTheBoundsItPromises:
         assert where_a_book_file_is_said_to_be._MAX_SIZE == (
             models.DIGITAL_REFERENCE_MAX_SIZE
         )
+
+
+#: Every ceiling `f4a1c62d0b97` gave a byte arm, as `(table, column, others)`.
+#:
+#: **The character budget is deliberately not in this table.** It is read off
+#: the column's own `String(n)` width, which is a different instrument from the
+#: constraint text these cases are about: a probe built from the number the
+#: constraint states would agree with a constraint that had drifted. Every one of
+#: these columns is declared at exactly its ceiling, and
+#: `test_the_column_width_is_the_ceiling` is what says so rather than leaving it
+#: as the reason for a subtraction.
+#:
+#: `others` is what a bare insert needs beside the column under test: enough to
+#: satisfy the table's other constraints and nothing more. Foreign keys are not
+#: among them, because these run on an engine that has them off.
+_TEXT_CEILINGS: tuple[tuple[str, str, dict[str, object]], ...] = (
+    ("quotes", "text", {"book_id": 1, "user_id": 1}),
+    ("quotes", "note", {"book_id": 1, "user_id": 1, "text": "a line"}),
+    (
+        "author_identifiers",
+        "identifier",
+        {"author_key": "borges-jorge-luis", "scheme": "gnd", "provenance": "catalogue"},
+    ),
+    ("custom_fields", "name", {"kind": "text"}),
+    ("custom_field_values", "value", {"book_id": 1, "field_id": 1}),
+    (
+        "opds_servers",
+        "name",
+        {
+            "base_url": "https://books.example/opds",
+            "credential_key": "opds-0123456789abcdef",
+        },
+    ),
+)
+
+#: Which constraint each of those columns is bounded by.
+#:
+#: Two entries share one, which is why this is keyed on the column rather than
+#: folded into the table above.
+_CEILING_CONSTRAINTS: dict[tuple[str, str], str] = {
+    ("quotes", "text"): "ck_quotes_text_bounds",
+    ("quotes", "note"): "ck_quotes_text_bounds",
+    ("author_identifiers", "identifier"): "ck_author_identifiers_bounds",
+    ("custom_fields", "name"): "ck_custom_fields_name_bounds",
+    ("custom_field_values", "value"): "ck_custom_field_values_bounds",
+    ("opds_servers", "name"): "ck_opds_servers_name",
+}
+
+
+def _byte_armed_constraints() -> dict[str, str]:
+    """Every CHECK in `Base.metadata` carrying a byte arm, by name.
+
+    **Derived rather than listed**, so a ceiling given a byte arm later is
+    covered by the two rules below with no edit here, and one given a byte arm
+    that no revision installs fails rather than passing unexamined.
+    """
+    armed: dict[str, str] = {}
+    for table in Base.metadata.tables.values():
+        for constraint in table.constraints:
+            if not isinstance(constraint, CheckConstraint):
+                continue
+            declared = " ".join(str(constraint.sqltext).split())
+            if "AS BLOB" in declared.upper() and isinstance(constraint.name, str):
+                armed[constraint.name] = declared
+    return armed
+
+
+class TestEveryTextCeilingIsInstalledWithItsByteArm:
+    """`f4a1c62d0b97`, and whether every copy of it says the same thing.
+
+    SQLite's `length()` on text counts characters up to the first NUL, so a
+    ceiling written as a character inequality alone is not a ceiling on the one
+    path it exists for: `backup.restore` inserts through Core and runs no
+    Pydantic model. The arm that closes it is a byte budget of four times the
+    character budget, four bytes being UTF-8's widest character.
+
+    **Three rules, because no one of them is the guard.** The model's copy is a
+    description of the revision and enforces nothing in the ambient suite, so
+    `test_the_model_is_the_constraint_the_revision_installs` holds it against the
+    installed DDL. Containment accepts an installed constraint that appends to
+    the model's and refuses nothing, so
+    `test_a_nul_carrying_value_is_refused` probes behaviour. And a constraint
+    refusing everything passes that, so
+    `test_the_widest_legitimate_value_is_stored` is the other side.
+
+    **The behavioural pair runs on a throwaway engine**, which is what makes the
+    model's own declaration a rule rather than a comment; the shape is
+    `test_credentials.py::TestTheEnvelopeRuleAndItsConstraintAgree`, which got
+    here first. Foreign keys are off on such an engine, which is why the tables
+    these columns hang off are not created beside them.
+    """
+
+    @staticmethod
+    def _probe(table_name: str) -> Connection:
+        """This table alone, on an engine of this test's own, ready for a row."""
+        throwaway = create_engine("sqlite://")
+        Base.metadata.tables[table_name].create(throwaway)
+        return throwaway.connect()
+
+    @staticmethod
+    def _ceiling(table_name: str, column: str) -> int:
+        width = Base.metadata.tables[table_name].c[column].type
+        assert isinstance(width, String) and width.length
+        return width.length
+
+    @pytest.mark.parametrize(("table_name", "column", "others"), _TEXT_CEILINGS)
+    def test_the_column_width_is_the_ceiling(
+        self, table_name: str, column: str, others: dict[str, object]
+    ) -> None:
+        """The two cases below read the budget off the width, so this is what
+        says the width is the budget.
+
+        A `String(n)` refuses nothing in SQLite and is there to document the
+        column; where the two disagree, the probes would be aimed at a number
+        the constraint does not use and would pass against a drifted bound.
+        """
+        declared = _byte_armed_constraints()[_CEILING_CONSTRAINTS[table_name, column]]
+
+        assert f"length({column}) <= {self._ceiling(table_name, column)}" in declared or (
+            f"length({column}) BETWEEN 1 AND {self._ceiling(table_name, column)}"
+            in declared
+        ), f"{table_name}.{column} is declared wider or narrower than it is bounded"
+
+    @pytest.mark.parametrize(("table_name", "column", "others"), _TEXT_CEILINGS)
+    def test_a_nul_carrying_value_past_the_byte_budget_is_refused(
+        self, table_name: str, column: str, others: dict[str, object]
+    ) -> None:
+        """The class the character arm admits: `length()` reports 1 for this.
+
+        **Named for what it actually pins.** The arm caps a NUL carrying value
+        at the byte budget rather than refusing one, and a name saying otherwise
+        is how the claim got into three docstrings before a critic measured it;
+        `test_a_nul_carrying_value_under_the_byte_budget_is_stored` is the other
+        side of that boundary.
+
+        Sized off the byte budget rather than off some large number, so a
+        mutation shrinking the multiplier is still refused here and has to be
+        caught by the acceptance case instead. Both directions are wanted.
+
+        **The refusal is checked by name**, because `pytest.raises(IntegrityError)`
+        alone passes when the insert fails for an unrelated reason, such as a
+        column this row forgot. The acceptance case sharing the same `others`
+        closes that too, and one of the two should not be load bearing alone.
+        """
+        ceiling = self._ceiling(table_name, column)
+        insert = Base.metadata.tables[table_name].insert()
+
+        with (
+            self._probe(table_name) as connection,
+            pytest.raises(IntegrityError) as refusal,
+        ):
+            connection.execute(
+                insert.values(**others, **{column: "a\x00" + "x" * (4 * ceiling)})
+            )
+
+        assert _CEILING_CONSTRAINTS[table_name, column] in str(refusal.value)
+
+    @pytest.mark.parametrize(("table_name", "column", "others"), _TEXT_CEILINGS)
+    def test_a_nul_carrying_value_under_the_byte_budget_is_stored(
+        self, table_name: str, column: str, others: dict[str, object]
+    ) -> None:
+        """The boundary the docstrings now claim, asserted rather than described.
+
+        A NUL carrying value reports a `length()` of 1 whatever it holds, so what
+        stands between it and the disk is the byte arm alone: this one is exactly
+        at the budget and is **stored**. That is the slack `models.py` records as
+        accepted rather than closed with `instr(x, char(0)) = 0`, and it is
+        pinned here so the prose cannot drift back to the stronger claim without
+        something going red.
+
+        **It is not an endorsement of the slack.** Closing it is a behaviour
+        change with a migration of its own, and this case is what would have to
+        be deleted to make that change, which is where the argument belongs.
+        """
+        ceiling = self._ceiling(table_name, column)
+        table = Base.metadata.tables[table_name]
+        at_the_budget = "a\x00" + "x" * (4 * ceiling - 2)
+
+        with self._probe(table_name) as connection:
+            connection.execute(table.insert().values(**others, **{column: at_the_budget}))
+
+            assert connection.execute(
+                text(f"SELECT count(*) FROM {table_name}")
+            ).scalar() == 1
+
+    @pytest.mark.parametrize(("table_name", "column", "others"), _TEXT_CEILINGS)
+    def test_the_widest_legitimate_value_is_stored(
+        self, table_name: str, column: str, others: dict[str, object]
+    ) -> None:
+        """The other side, without which a constraint refusing everything passes.
+
+        **Exactly on the boundary.** The widest legitimate value spends the whole
+        character budget on four byte characters, which is four times the budget
+        and lands on the byte arm rather than under it. One ASCII character would
+        leave three bytes of slack, which is room for a mutation to shrink the
+        multiplier and stay green.
+        """
+        ceiling = self._ceiling(table_name, column)
+        table = Base.metadata.tables[table_name]
+
+        with self._probe(table_name) as connection:
+            connection.execute(
+                table.insert().values(**others, **{column: "\U0001f600" * ceiling})
+            )
+
+            assert connection.execute(
+                text(f"SELECT count(*) FROM {table_name}")
+            ).scalar() == 1
+
+    @pytest.mark.parametrize("name", sorted(_byte_armed_constraints()))
+    def test_the_model_is_the_constraint_the_revision_installs(self, name: str) -> None:
+        """The two copies, compared against the DDL a migrated database holds.
+
+        Against `sqlite_master` rather than against the revision's source,
+        because that is the artefact both copies describe and it cannot drift
+        from what a deployment runs.
+
+        **Containment, not equality**, and what that accepts is an installed
+        constraint appending to the model's. The behavioural pair above is what
+        closes that family, which is why this is not the only rule here.
+
+        **The whitespace normalisation is safe for these and not in general**:
+        none of these constraints holds a string literal with internal
+        whitespace.
+        """
+        drop_everything()
+        schema.upgrade_to_head()
+        declared = _byte_armed_constraints()[name]
+
+        installed = self._installed()
+
+        assert declared in installed, (
+            f"`{name}` in models.py is not the constraint any revision installs, "
+            f"so the model is describing a schema nobody runs.\n  model: {declared}"
+        )
+
+    def test_every_byte_armed_constraint_has_a_behavioural_case(self) -> None:
+        """A ceiling given a byte arm and no probe would be held by containment
+        alone, which an appending constraint satisfies.
+
+        The whole set at once, so a new one has to be given a row in
+        `_TEXT_CEILINGS` rather than inheriting a rule that cannot see it.
+        `ck_digital_references_bounds` is probed by
+        `TestTheMigratedDatabaseCarriesTheBoundsItPromises` instead, and is named
+        here because that is where its cases live.
+
+        **This is load bearing for a second reason, and a docstring giving one
+        of two is the shape where a reviewer agrees with the comment and the hole
+        survives.** The house rule in `test_house_rules.py` clears a ceiling when
+        it finds a byte arm **anywhere** in the constraint's text, so an arm
+        wrapped in a disjunction that binds on no row clears it there: measured,
+        `(page IS NULL OR length(CAST(text AS BLOB)) <= 8000)` leaves that rule
+        green. What refuses it is this side, because the constraint still carries
+        `AS BLOB`, so it is still forced into a probe and the probe still inserts
+        a value past the budget. The rule's `instr` branch has no such backstop,
+        which is why that one had to be tightened to a top level conjunct instead.
+        """
+        probed = set(_CEILING_CONSTRAINTS.values()) | {"ck_digital_references_bounds"}
+
+        assert set(_byte_armed_constraints()) == probed, (
+            "these carry a byte arm that nothing probes: "
+            f"{sorted(set(_byte_armed_constraints()) - probed)}"
+        )
+
+    PREVIOUS = "b2e94f7c1a03"
+
+    @staticmethod
+    def _installed() -> str:
+        with engine.connect() as connection:
+            return " ".join(
+                " ".join(str(row[0]).split())
+                for row in connection.execute(
+                    text("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL")
+                )
+            )
+
+    @staticmethod
+    def _only_row(result: Any) -> int:
+        """The id an insert just wrote. `inserted_primary_key` is optional to
+        the type checker and never None for a single-row insert here."""
+        key = result.inserted_primary_key
+        assert key is not None
+        return int(key[0])
+
+    @classmethod
+    def _installed_check(cls, name: str) -> str:
+        """One named CHECK's expression, as the database holds it.
+
+        **A whole clause rather than a substring, and that distinction caught a
+        mutation the substring form did not.** Dropping the floor from a
+        revision's `before`, leaving `length(identifier) <= 60`, is still
+        contained in the installed `length(identifier) > 0 AND
+        length(identifier) <= 60`, so a containment check passed on a downgrade
+        that would have left the column accepting an empty identifier. Reading
+        the constraint's own parentheses is what makes the comparison an
+        equality.
+        """
+        sql = cls._installed()
+        marker = f"CONSTRAINT {name} CHECK ("
+        assert marker in sql, f"the migrated schema carries no {name}"
+        start = sql.index(marker) + len(marker)
+        depth = 1
+        for position in range(start, len(sql)):
+            if sql[position] == "(":
+                depth += 1
+            elif sql[position] == ")":
+                depth -= 1
+                if depth == 0:
+                    return " ".join(sql[start:position].split())
+        raise AssertionError(f"{name}'s CHECK is unbalanced in sqlite_master")
+
+
+    @pytest.mark.parametrize(
+        ("table_name", "constraint", "before", "after"), bind_every_text_ceiling._CEILINGS
+    )
+    def test_the_downgrade_puts_each_ceiling_back(
+        self, table_name: str, constraint: str, before: str, after: str
+    ) -> None:
+        """`downgrade()`, run rather than read, and `before` checked against a
+        schema this revision did not write.
+
+        **The order of these three assertions is the whole test.** A first
+        version ran the downgrade and compared the result with `before`, which is
+        a tautology: `downgrade()` installs `before`, so any value is
+        self-consistent and both a wrong ceiling and a dropped floor scored 42
+        passed. What breaks the circle is asking the **previous** schema, built
+        by other revisions entirely, whether `before` is what this one found.
+
+        **And the comparison is an equality, which a second version was not.**
+        With `before` matched as a substring the wrong ceiling failed and the
+        dropped floor still passed, because `length(identifier) <= 60` is
+        contained in `length(identifier) > 0 AND length(identifier) <= 60`. See
+        `_installed_check`.
+
+        `before` is load bearing and nothing else touches it. `drop_constraint`
+        takes a name, so the upgrade never reads it and a wrong one breaks only
+        the way back, in the one situation nobody is watching.
+
+        Per constraint rather than in total, so a revision that put four back and
+        lost the fifth fails here.
+        """
+        from alembic import command
+
+        drop_everything()
+        schema.upgrade_to(self.PREVIOUS)
+
+        # The independent half: this schema is what the previous revisions
+        # installed, so it is evidence about `before` rather than an echo of it.
+        assert self._installed_check(constraint) == " ".join(before.split())
+
+        schema.upgrade_to_head()
+        assert self._installed_check(constraint) == " ".join(after.split())
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        assert self._installed_check(constraint) == " ".join(before.split())
+
+    def test_the_upgrade_refuses_a_row_the_new_ceiling_cannot_hold(self) -> None:
+        """The revision's own account of what it does to existing rows.
+
+        It says "nothing, or it refuses to run", and that is a claim about a
+        batch rebuild being `INSERT INTO new SELECT FROM old` with the new CHECK
+        applied to the copy. Prose is the weakest rung, so this runs it: a value
+        that `b2e94f7c1a03` accepts is planted, and the upgrade fails on it by
+        name.
+
+        **The row is one no application path can write**, which is the other half
+        of that paragraph and is why refusing is the right answer rather than a
+        hazard: `QuoteCreate` bounds the Python string, whose `len` counts past a
+        NUL and reads 10,002 here.
+        """
+        drop_everything()
+        schema.upgrade_to(self.PREVIOUS)
+        tables = Base.metadata.tables
+        with engine.connect() as connection:
+            # Through the `Table` objects rather than raw SQL, so the models'
+            # own column defaults apply: `users` has NOT NULL columns whose
+            # value a hand written INSERT has to know, and this revision adds no
+            # column, so today's metadata describes the previous schema exactly.
+            book = self._only_row(
+                connection.execute(
+                    tables["books"].insert().values(title="A book", ownership="owned")
+                )
+            )
+            member = self._only_row(
+                connection.execute(
+                    tables["users"].insert().values(username="a-member")
+                )
+            )
+            connection.execute(
+                tables["quotes"].insert().values(
+                    book_id=book, user_id=member, text="a\x00" + "x" * 10_000
+                )
+            )
+            connection.commit()
+
+        with pytest.raises(IntegrityError) as refusal:
+            schema.upgrade_to_head()
+
+        assert "ck_quotes_text_bounds" in str(refusal.value)
+
+        # **A failed batch rebuild leaves its scratch table behind**, and this
+        # test found that rather than assuming it: without this line the next
+        # case in this module dies on "table _alembic_tmp_quotes already
+        # exists", because `drop_everything` works from `Base.metadata` and that
+        # table is in no model. An operator retrying the upgrade meets the same
+        # thing, which is why the revision's docstring now says so.
+        with engine.connect() as connection:
+            connection.execute(text("DROP TABLE IF EXISTS _alembic_tmp_quotes"))
+            connection.commit()
+
+
+    @pytest.mark.parametrize(
+        ("table_name", "constraint", "before", "after"), bind_every_text_ceiling._CEILINGS
+    )
+    def test_the_revisions_text_is_the_models_text(
+        self, table_name: str, constraint: str, before: str, after: str
+    ) -> None:
+        """The revision writes its SQL out rather than importing a constant, so
+        the two copies are a fact stored twice and this is what stands between
+        them.
+
+        The `before` half is not compared: it describes the schema the revision
+        found, which by definition is no longer the one `models.py` declares.
+        `test_the_model_is_the_constraint_the_revision_installs` covers the
+        `after` half against a database rather than against a string, and this
+        covers it against the model, so a revision editing one table's text and
+        not the other's fails one of the two.
+        """
+        declared = " ".join(
+            str(next(
+                one
+                for one in Base.metadata.tables[table_name].constraints
+                if isinstance(one, CheckConstraint) and one.name == constraint
+            ).sqltext).split()
+        )
+
+        assert " ".join(after.split()) == declared

@@ -30,6 +30,7 @@ import {
   text,
   xmpPacket,
 } from "../pdfFixtures";
+import { withoutDecompressionStream } from "./withoutDecompression";
 
 /**
  * How long a sweep of malformed files may take.
@@ -799,6 +800,33 @@ describe("a number the file supplied that does not agree with the file", () => {
     );
 
     expect(outcome(await read(bytes))).toBe("damaged");
+  });
+
+  it("says the browser cannot inflate, not that the stream is broken", async () => {
+    // **Two sentences a member could be shown for the same file**, and only one
+    // of them is true: `damaged` sends somebody looking for another copy of a
+    // book that is fine, where `no-inflate` sends them to their browser. It is
+    // the one refusal in this reader whose cause is the runtime.
+    //
+    // The stream really is deflate, compressed before the inflater is taken
+    // away, so what separates this from the arm below is the runtime and
+    // nothing about the file.
+    const packet = await deflate(latin(xmpPacket({ title: "Dune" })));
+    const bytes = classicPdf(
+      [
+        object(1, "<< /Title (Fine) >>"),
+        object(2, "<< /Type /Catalog /Metadata 3 0 R >>"),
+        streamObject(3, "<< /Type /Metadata /Filter /FlateDecode >>", packet),
+      ],
+      "/Info 1 0 R /Root 2 0 R",
+    );
+    // The same file reads on a runtime that can inflate, which is what says the
+    // fixture is not simply broken.
+    expect(outcome(await read(bytes))).toBe("read: Fine");
+
+    expect(outcome(await withoutDecompressionStream(() => read(bytes)))).toBe(
+      "no-inflate",
+    );
   });
 
   it("reads a stream whose bytes are not deflate as a broken stream", async () => {

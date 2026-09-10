@@ -86,11 +86,8 @@
 
 import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
-import {
-  declaresEntities,
-  type FileIdentifier,
-  type FileMetadata,
-} from "./fileReaders";
+import { type FileIdentifier, type FileMetadata } from "./fileReaders";
+import { declaresEntities } from "./xmlEntities";
 import { openZip, ZipError, zipFailureAs, type ZipArchive } from "./zip";
 
 /**
@@ -288,7 +285,7 @@ function readTitle(
  * as an archive that carried none.
  *
  * **Entities are refused before anything is read**, through the same
- * `fileReaders.declaresEntities` the package document goes through and for the
+ * `xmlEntities.declaresEntities` the package document goes through and for the
  * reason stated there: expansion happens inside the engine's parser, before a
  * node exists to bound. A comic's metadata has no use for a DTD internal
  * subset.

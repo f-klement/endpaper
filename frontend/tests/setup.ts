@@ -4,6 +4,7 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, vi } from "vitest";
 
 import { resetZxingDouble } from "./doubles/zxing";
+import { hadDecompressionStream } from "./lib/withoutDecompression";
 
 // jsdom has no layout engine; some libraries measure on mount.
 //
@@ -300,6 +301,32 @@ const REAL_MEDIA_DEVICES =
     ? undefined
     : Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
 
+//: Whether this environment can inflate, seeded before any test can take it
+//: away.
+//:
+//: `tests/lib/withoutDecompression.ts` deletes this global to reach the one
+//: refusal in the reader family whose cause is the runtime rather than the
+//: file, and puts it back in a `finally`. The `afterEach` below is the backstop
+//: for a route that does not, and it is the storage probe's argument one object
+//: over: under `isolate: false` a global left missing reaches every later file
+//: in the worker, where five readers open a zip and the sixth inflates PDF
+//: streams, so what it produces is a file reporting a member's book as one this
+//: browser cannot read, in a file that did nothing wrong.
+//:
+//: **Called here and not only from the check, which is the whole of what makes
+//: it a backstop.** The memo answers what this worker started with, and it
+//: takes that answer from the first call: leave the first call to `afterEach`
+//: and a test that leaks the global before any test has finished seeds it
+//: `false`, silencing the check for every remaining file. Measured by the
+//: design seat, a leak in the first `it` of a file: `SUITE EXIT: 0` with
+//: nothing reported, against a named failure with this line present. Module
+//: scope here runs before any test body in the file, and the memo is per
+//: worker, so the seed happens once and before anything can move it.
+//:
+//: An environment that never had one is not a leak, which is why this is a
+//: question about what this worker started with rather than an assertion.
+hadDecompressionStream();
+
 afterEach(() => {
   // `cleanup()` unmounts React trees, of which a node-environment file has none.
   if (typeof document !== "undefined") cleanup();
@@ -343,6 +370,20 @@ afterEach(() => {
     } else {
       delete (navigator as { mediaDevices?: unknown }).mediaDevices;
     }
+  }
+
+  // **The inflater, asked of the memo seeded at module scope.** Neither
+  // `vi.unstubAllGlobals()` nor `vi.restoreAllMocks()` puts back a deleted
+  // property, for the reason the location descriptor above carries: they know
+  // about stubs vitest installed, and a `delete` is not one.
+  if (hadDecompressionStream() && typeof DecompressionStream === "undefined") {
+    throw new Error(
+      "This test left DecompressionStream missing. Under isolate: false that " +
+        "reaches every later file, where every reader that opens a zip then " +
+        "reports a member's file as one this browser cannot inflate. Remove " +
+        "it with withoutDecompressionStream() from tests/lib/" +
+        "withoutDecompression.ts, which puts it back in a finally.",
+    );
   }
 
   // **Last, after every restore above has had its chance.** Storage still

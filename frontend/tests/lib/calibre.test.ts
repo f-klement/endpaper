@@ -12,7 +12,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   CALIBRE_PLACEHOLDER,
-  columnsIn,
   crossCheck,
   indexOpfFiles,
   libraryPathOf,
@@ -21,7 +20,7 @@ import {
   type CalibreBook,
 } from "../../src/lib/calibre";
 import type { FileMetadata } from "../../src/lib/fileReaders";
-import { openSqlite, type SqliteDatabase } from "../../src/lib/sqlite";
+import { openSqlite } from "../../src/lib/sqlite";
 import { CALIBRE_SCHEMA, databaseOf, engine } from "./sqliteFixtures";
 
 /** A library holding whatever these rows put in it. */
@@ -255,62 +254,6 @@ describe("what Calibre writes where nobody said", () => {
     );
 
     expect(book!.seriesIndex).toBe(2);
-  });
-});
-
-describe("a table name that is not a table name", () => {
-  /**
-   * Asked of `columnsIn` directly, and that is why it is exported.
-   *
-   * Every caller inside the module passes a literal, so a test going through
-   * `readCalibreLibrary` cannot construct a name the check refuses and is green
-   * whether the check is there or not. The refusal is what stops the comment
-   * being the whole argument the first time somebody passes a name out of
-   * `tablesIn`, which is read from a member supplied file.
-   */
-  it("never reaches the database with a name that is not one", async () => {
-    // **Asserted on the statement, not on the answer**, and the first version
-    // of this was wrong for exactly that reason: it checked that a hostile name
-    // yielded no columns, which a database with the check deleted also does,
-    // because a syntax error comes back as an empty result. Deleting the guard
-    // scored 0 of 1. What only the guard produces is the query never being
-    // asked, so the database here records what it was asked.
-    const asked: string[] = [];
-    const recorder: SqliteDatabase = {
-      query: (sql) => {
-        asked.push(sql);
-        return [];
-      },
-      close: () => {},
-    };
-
-    for (const hostile of [
-      'books"; DROP TABLE books; --',
-      "books) UNION SELECT 1 --",
-      "sqlite_master; ATTACH DATABASE 'x' AS y",
-      "books-2",
-      "",
-    ]) {
-      expect(columnsIn(recorder, hostile).size).toBe(0);
-    }
-    expect(asked).toEqual([]);
-
-    // And an ordinary name still is asked, so the refusal is not simply always.
-    expect(columnsIn(recorder, "books").size).toBe(0);
-    expect(asked).toEqual(["PRAGMA table_info(books)"]);
-  });
-
-  it("reads the real columns of a real table", async () => {
-    const reading = await openSqlite(
-      await databaseOf(
-        `CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT)`,
-      ),
-      engine,
-    );
-    if (!reading.ok) throw new Error(reading.failure);
-
-    expect([...columnsIn(reading.database, "books")]).toEqual(["id", "title"]);
-    reading.database.close();
   });
 });
 

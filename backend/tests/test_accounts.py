@@ -15,6 +15,7 @@ import accounts
 import settings_store
 from enums import AuthMode, SettingKey, VerificationProvenance
 from models import PasswordResetRequest, User
+from tests.test_house_rules import _is_vendored
 
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -25,14 +26,33 @@ def _sources() -> list[Path]:
     **Stated as an exclusion.** An inclusion list is what goes stale the next
     time the backend grows a directory, which is the shape of guard defect this
     repository has already made once.
+
+    **What vendored means is `test_house_rules._is_vendored` and not a list
+    here.** This walk named `.venv` and nothing else, so in the pipeline, which
+    sets `UV_CACHE_DIR` inside `backend/`, it read third party source out of
+    `.uv-cache/` and would have reported it for constructing a reset request.
+    That is the environment difference the shared rule was written for, and a
+    second copy of it is a second thing to remember.
+
+    **The two names left here are matched against the path relative to
+    `BACKEND`.** Asked of the whole path, as this did, a checkout under a
+    directory called `tests` matches every file it holds and the walk returns
+    nothing, which passes every rule below it in silence.
     """
-    return [
+    found = [
         path
         for path in BACKEND.rglob("*.py")
-        if ".venv" not in path.parts
-        and "tests" not in path.parts
-        and "migrations" not in path.parts
+        if not {"tests", "migrations"} & set(path.relative_to(BACKEND).parts)
+        and not _is_vendored(path, BACKEND)
     ]
+    # **The packages it must cover, not a number.** A floor of `> 30` does not
+    # bind on a walk that reads 124 files: a mutation marking `routers` and
+    # `schemas` vendored left two guards of this shape green, and `routers/` is
+    # the exact directory the first version of one of them missed. A walk that
+    # stopped matching would otherwise retire the rules below it rather than
+    # failing them, which is the half a refusal test cannot see.
+    assert {"routers", "schemas"} <= {path.parent.name for path in found}, found
+    return found
 
 
 def _turn_the_policy_on(db) -> None:

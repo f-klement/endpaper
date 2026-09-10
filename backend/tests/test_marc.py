@@ -26,6 +26,7 @@ import metadata
 from catalogue import Heading
 from enums import ClassificationScheme
 from schemas.book import BookCreate
+from tests.test_house_rules import _is_vendored
 
 #: The application's own directory.
 #:
@@ -829,12 +830,18 @@ class TestTheSeamIntoMetadataIsPinned:
         packages = sorted(d for d in BACKEND.iterdir() if is_ours(d))
         def is_ours_file(f: pathlib.Path) -> bool:
             """Belt and braces under a package of ours: a nested environment or
-            cache is excluded by the same structural test, at any depth."""
-            parts = f.relative_to(BACKEND).parts
-            return not (
-                {"__pycache__", "site-packages", "dist-packages"} & set(parts)
-                or any(part.startswith(".") for part in parts)
-            )
+            cache is excluded at any depth.
+
+            **The same three names and the dot are now
+            `test_house_rules._is_vendored`.** This file and `test_covers.py`
+            reached `site-packages` independently, which is why the shared
+            predicate carries it: the dot alone does not cover an environment
+            whose directory is not called `.venv`, and that is the tree CI built
+            here. The `pyvenv.cfg` test in `is_ours` above stays, because it
+            answers a question about the filesystem that a path predicate
+            cannot.
+            """
+            return not _is_vendored(f, BACKEND)
 
         sources = sorted(BACKEND.glob("*.py")) + [
             f for d in packages for f in sorted(d.rglob("*.py")) if is_ours_file(f)

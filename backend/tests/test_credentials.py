@@ -23,6 +23,7 @@ from database import Base
 from enums import CatalogueSource, CredentialProvenance
 from models import CatalogueCredential
 from tests.helpers import sealed_before_the_origin_was_bound
+from tests.test_house_rules import _is_vendored
 
 #: The address the roster holds for the source these tests use.
 #:
@@ -714,18 +715,23 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
     #: which is a second instrument rather than a further arm on this one.
     MAY_USE_THE_ROSTER_TABLE = {"models.py", "main.py", "backup.py"}
 
-    #: What the walk does not read, stated rather than a list of what it does.
+    #: What the walk does not read **of this project's own**, stated rather
+    #: than as a list of what it does.
     #:
-    #: The tests, which name the table in order to check it, the migrations,
-    #: which are its history and necessarily name it, and **the virtualenv,
-    #: which is not this project's code at all**. Measured 2026-09-07: without
-    #: that last entry the walk read 3,148 files of which 3,068, or 97.5%, were
-    #: third party, so a dependency shipping a class of the same name, or a file
-    #: this Python cannot parse, would redden a guard about this repository. Everything else under
-    #: `backend/` is read, at every depth: the first version of this walk read
-    #: the top level only, so `routers/` was invisible and the exact change it
-    #: guards against passed it.
-    NOT_READ = {"tests", "migrations", "__pycache__", ".venv"}
+    #: The tests, which name the table in order to check it, and the migrations,
+    #: which are its history and necessarily name it.
+    #:
+    #: **What is not ours is `test_house_rules._is_vendored` and is no longer
+    #: named here.** This set held `.venv` and `__pycache__`, which is every
+    #: cache anybody had seen locally, and the pipeline sets `UV_CACHE_DIR`
+    #: inside `backend/`: measured 2026-09-07, without a vendored exclusion the
+    #: walk read 3,148 files of which 3,068, or 97.5%, were third party, so a
+    #: dependency shipping a class of this name would redden a guard about this
+    #: repository, in the environment where it is trusted and nowhere else.
+    #: Everything else under `backend/` is read, at every depth: the first
+    #: version of this walk read the top level only, so `routers/` was invisible
+    #: and the exact change it guards against passed it.
+    NOT_READ = {"tests", "migrations"}
 
     def _modules_naming_it_in_code(self) -> set[str]:
         """Which backend modules name `CatalogueTarget` as code, not as prose.
@@ -737,6 +743,7 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
 
         backend = Path(__file__).resolve().parents[1]
         found = set()
+        read: set[str] = set()
         # **`rglob`, and the first version of this said `glob`.** That reads the
         # top level only, so `routers/` was not scanned at all and the mutation
         # this guard exists to catch, a resolver reading the address off a row in
@@ -744,8 +751,9 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
         # table to check it, and the migrations, which are the history of it.
         for path in sorted(backend.rglob("*.py")):
             parts = set(path.relative_to(backend).parts)
-            if parts & self.NOT_READ:
+            if parts & self.NOT_READ or _is_vendored(path, backend):
                 continue
+            read.add(path.parent.name)
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 named = (
@@ -760,6 +768,11 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
                 )
                 if named:
                     found.add(path.name)
+        # **The packages it must cover, not a number.** This walk reads 81
+        # files, so a floor of `> 30` did not bind: a mutation marking `routers`
+        # and `schemas` vendored left this green, and `routers/` is the exact
+        # directory this walk's own comment records the first version missing.
+        assert {"routers", "schemas"} <= read, read
         return found
 
     def test_only_the_model_the_seeder_and_the_archive_use_the_roster_table(self):
@@ -838,10 +851,16 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
 
         backend = Path(__file__).resolve().parents[1]
         offenders = []
+        read: set[str] = set()
         for path in sorted(backend.rglob("*.py")):
             parts = set(path.relative_to(backend).parts)
-            if parts & self.NOT_READ or path.name == "targets.py":
+            if (
+                parts & self.NOT_READ
+                or _is_vendored(path, backend)
+                or path.name == "targets.py"
+            ):
                 continue
+            read.add(path.parent.name)
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
                 if not isinstance(node, (ast.Assign, ast.AnnAssign)):
                     continue
@@ -856,6 +875,11 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
             "was written there, so credentials._OPENABLE_VERSIONS must drop "
             "_UNBOUND_VERSION."
         )
+        # **The packages it must cover, not a number.** This walk reads 81
+        # files, so a floor of `> 30` did not bind: a mutation marking `routers`
+        # and `schemas` vendored left this green, and `routers/` is the exact
+        # directory this walk's own comment records the first version missing.
+        assert {"routers", "schemas"} <= read, read
 
     def test_no_module_reaches_the_roster_table_by_name_in_sql(self):
         """The third instrument, closing the one shape the first two miss.
@@ -877,6 +901,7 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
 
         backend = Path(__file__).resolve().parents[1]
         offenders = []
+        read: set[str] = set()
         for path in sorted(backend.rglob("*.py")):
             parts = set(path.relative_to(backend).parts)
             # **Not exempting the three allowed modules, unlike the walk
@@ -884,8 +909,9 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
             # allowed for; reaching the column by raw statement is a different
             # act and none of them does it. Exempting them here was free scope
             # given away for nothing.
-            if parts & self.NOT_READ:
+            if parts & self.NOT_READ or _is_vendored(path, backend):
                 continue
+            read.add(path.parent.name)
             tree = ast.parse(path.read_text(encoding="utf-8"))
             # Docstrings are `ast.Constant` too, and five modules discuss this
             # table in prose. Prose is not a query, so they are collected by
@@ -927,6 +953,11 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
             f"{offenders} names the roster table in SQL. See the assertion above "
             "for what that means for _OPENABLE_VERSIONS."
         )
+        # **The packages it must cover, not a number.** This walk reads 81
+        # files, so a floor of `> 30` did not bind: a mutation marking `routers`
+        # and `schemas` vendored left this green, and `routers/` is the exact
+        # directory this walk's own comment records the first version missing.
+        assert {"routers", "schemas"} <= read, read
 
     def test_the_roster_is_read_only_and_not_merely_a_constant_name(self):
         """The premise `_may_open_unbound` rests on, made self enforcing.

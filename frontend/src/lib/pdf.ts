@@ -1596,7 +1596,7 @@ interface XmpRecord {
  * leaves no prolog for one to be in, so the parser is handed a document that
  * *cannot* declare an entity rather than one that was checked for not doing so.
  * An entity reference with no declaration is then a well formedness error, and
- * a malformed document is `null` here. `fileReaders.declaresEntities` states
+ * a malformed document is `null` here. `xmlEntities.declaresEntities` states
  * the same rule for a document that arrives as a whole file, which has to scan
  * instead.
  */

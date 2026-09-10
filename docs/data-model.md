@@ -448,7 +448,11 @@ what let an imported review out. [decisions.md](decisions.md) carries the reason
   page. The bound is also the stored-denial-of-service guard, which is why it is in the
   database and not only in `QuoteCreate`. **The width is not what enforces it**: SQLite
   ignores VARCHAR width, measured at 50,000 characters stored in a `String(2000)` column
-  through Core, so `ck_quotes_text_bounds` is the rule and it covers `note` too.
+  through Core, so `ck_quotes_text_bounds` is the rule and it covers `note` too. That
+  CHECK bounds both columns **in bytes** as well, at four times the character budget, for
+  the reason `digital_references` states below: SQLite's `length()` counts characters only
+  up to the first NUL, so on the restore path the character arm alone lets a value carry
+  as much as it likes.
 * `page` is an integer, bounded 1 to 100,000 by `ck_quotes_page_bounds` as well as by the
   schema, so the list can come back in reading order. The cost is accepted rather than
   worked around: a passage from a roman-numbered preface has no page here and goes in
@@ -545,13 +549,69 @@ name.
 one value per definition, so bounding the definitions bounds every book's payload and every
 rename's blast radius. `ck_custom_field_values_bounds` refuses a zero-length value, which is
 what makes "a book with no value shows nothing" a property of the schema rather than a filter
-somebody has to remember, and it caps the value at 500 characters, which SQLite's VARCHAR
-width does not.
+somebody has to remember, and it caps the value at 500 characters and at 2,000 bytes, neither
+of which SQLite's VARCHAR width does. The byte half is what makes the character half bind on
+the restore path at all, for the reason `digital_references` gives above.
 
 Whether a value renders as a **link** is decided on every read, not stored:
 `custom_fields.link_target` hands back a target only for `http` or `https` with a real host,
 no credentials and a parseable port. A `url` field whose value does not survive that is
 served as text. See [security.md](security.md).
+
+**`catalogue_targets`.** One catalogue source as a row: its address, transport, which
+indexes it answers on, and the bounds a search is held to. The primary key holds a
+`CatalogueSource` value, and it is a `String(32)` with no CHECK: what closes the set is
+`sources.Plan.parse`, which validates a stored settings row against the enum, rather than
+anything in the column.
+
+**Seeded and read by nothing at runtime, and that is a security property rather than an
+oversight.** `main.seed_catalogue_targets` reconciles these rows against `targets.SEEDED`
+on every start, so a corrected constant reaches the table instead of drifting from it; what
+the lookup path asks is the module constant, never the row. `fetch.py` and `z3950.py` both
+argue they need no host allowlist **because** a target's address is a constant, so
+**reading an address off one of these rows** is a security decision with its own ticket
+rather than a refactor. Editing a row is harmless while nothing reads it, which is the
+order those two changes have to happen in. `is_seeded` is what a row somebody edits would
+lose, which is also what would stop it being reconciled.
+
+**`catalogue_credentials`.** A login at one catalogue's server, sealed. Two columns: the
+`source` it is for, and an `envelope`.
+
+**Not a settings row, and the difference is whose secret it is.** Every secret `settings`
+holds is this deployment's own, and `settings` is plaintext that `backup.py` copies
+wholesale. A row here is an institution's account with a third party, held on their behalf,
+so the failure mode is leaking somebody else's login. **The username is sealed with the
+password rather than stored beside it**, which is why the table is two columns: half a
+login is still half a login, this table rides in every archive, and nothing readable is
+left in one. An admin reading the database sees a source name and a base64 envelope; an
+admin reading an archive sees the same. What opens an envelope is a key the archive does
+not carry, and `credentials.seal` binds it to the address it was entered for, so a
+credential moved beside another address does not open at all.
+
+`source` is deliberately **not** keyed to the `CatalogueSource` enum and carries no foreign
+key into `catalogue_targets`: `backup.restore` deletes and reinserts whole tables through
+Core, so a constraint would let one credential for a source a later release dropped fail an
+entire restore. Two check constraints refuse what the application could never have written,
+which is what makes an archive's word on this column safe to put in a URL. See
+[decisions.md](decisions.md) and `backend/credentials.py`.
+
+**`opds_servers`.** One OPDS catalogue a household runs, as a row: a `name` for a screen, a
+`base_url` a sync walks, and a `credential_key` naming this server's row in
+`catalogue_credentials`.
+
+**Its own table rather than a row in `catalogue_targets`, because of that table's key
+space.** A household's own server inside the closed enum would be a member's private
+holdings selectable as a source answering another member's scan, which is the merge
+`enums.SourceFamily` exists to refuse. `credential_key` is **random rather than derived
+from the row id**, and that is a defect this table would otherwise have shipped with:
+SQLite reuses `max(rowid) + 1` after a delete unless the column is declared
+`AUTOINCREMENT`, and this one is not, so a key of `opds-<id>` would hand a newly added
+server the sealed login of the one that used to have that id. Randomness rather than
+`AUTOINCREMENT` because sixteen hex characters cannot be reused at all, where the keyword
+only stops the counter going backwards. The `opds-` prefix is
+what keeps the two key spaces in `catalogue_credentials.source` apart, and it is enforced
+by `ck_opds_servers_credential_key` rather than only by the function that generates it,
+because `backup.restore` is a second writer and an archive is a file somebody was handed.
 
 ## What `user_books` carries beyond a status
 

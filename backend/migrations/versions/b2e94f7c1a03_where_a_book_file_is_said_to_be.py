@@ -24,7 +24,10 @@ megabyte; `backup.restore` is that path and it sees no Pydantic model.
 counts characters up to the first NUL, so on a Core insert the character
 inequality alone passes on a value nothing bounded: measured, `"a\x00" + "x" *
 10000` reports a length of 1 and stores 10,002 bytes. Four bytes is UTF-8's
-widest character, so the byte arm never refuses what the character arm admits.
+widest character, so the byte arm never refuses a **NUL free** value the
+character arm admits. It **caps** a NUL carrying one at four times the budget
+rather than refusing it; `models.DigitalReference` carries why that slack is
+accepted rather than closed with `instr`.
 
 **The unique index is the identity.** A reference is identified by where the
 file is, not by a row id, which is what makes re-importing a folder somebody

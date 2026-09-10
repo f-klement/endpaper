@@ -4,6 +4,9 @@
 
 ### Security
 
+- **A text ceiling binds on bytes as well as characters**, so a value carrying a NUL cannot
+  walk past one on the restore path.
+
 - **A note the library cannot see now says so on screen**, and the box you write one in says
   what the default is before you write it: a note added in the app is visible to every member
   who can see that book. A badge cannot un-publish a note somebody typed believing it was
@@ -255,6 +258,15 @@
   than a permission lost. The About card's badge, the `LICENSE` file, both package manifests
   and the badges the README and the Docker Hub page draw all say MIT, and a test now fails
   when one of the four files that declare it disagrees with the others.
+- The no-custody predicate that keeps a member's book out of a request body refuses families
+  of binary type rather than four names: it admitted six spellings of a buffer, `DataView`
+  among them. The rule that forbids a module mock is parsed rather than matched by line shape,
+  and a contrast band that had been quoted in prose is recomputed from the palettes that exist.
+- Every backend test module that walks the source tree asks one rule what vendored code is, and
+  a guard catches the next one that decides for itself. `docs/data-model.md` has a section for
+  every table now, including the two that hold credentials.
+- The refusal a reader gives when the browser cannot inflate is reached by a test in all three
+  places it can fire, rather than being refused in two and asserted in neither.
 - Two file readers cited a rule at an address that had moved, crediting `readEpub` for a
   promise it stopped stating when the promise moved to the reader contract. Both now cite the
   contract, and the guard keeping a member's book out of a request body reads every module

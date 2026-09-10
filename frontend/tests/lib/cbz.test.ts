@@ -356,7 +356,7 @@ describe("a file that is not an archive", () => {
 describe("the document itself", () => {
   it("refuses one that declares its own entities", () => {
     // The same exposure the package document has and the same refusal, through
-    // `fileReaders.declaresEntities`: expansion happens inside the engine's
+    // `xmlEntities.declaresEntities`: expansion happens inside the engine's
     // parser, before any code here has a node to bound.
     const hostile = `<?xml version="1.0"?>
 <!DOCTYPE ComicInfo [<!ENTITY s "Saga">]>

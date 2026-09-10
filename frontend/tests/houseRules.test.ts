@@ -501,8 +501,48 @@ describe("a member's book file cannot leave the browser", () => {
       true,
     ],
     [
+      "a buffer view sharing no name with an array is refused",
+      "export function draftFromX(bytes: DataView): BookDraft {}",
+      true,
+    ],
+    [
+      "a Blob is refused, which is the pair this rule was written for",
+      "export function draftFromX(bytes: Blob): BookDraft {}",
+      true,
+    ],
+    [
+      "so is what a Blob is built out of, which a bare name admitted",
+      "export function draftFromX(bytes: BlobPart): BookDraft {}",
+      true,
+    ],
+    // `BufferSource` and not `ArrayBufferView`, which reads like the row for
+    // this arm and is not: everything spelled `*Array*` is caught by the array
+    // arm whether the buffer arm is there or not, so a row naming one leaves
+    // the buffer arm undriven. Measured by the design seat, which removed that
+    // arm and got a green suite.
+    [
+      "a buffer named without the word array is refused",
+      "export function draftFromX(bytes: BufferSource): BookDraft {}",
+      true,
+    ],
+    [
+      "bytes that arrive a chunk at a time are refused",
+      "export function draftFromX(bytes: ReadableStream): BookDraft {}",
+      true,
+    ],
+    [
+      "a handle onto a file the member picked is refused",
+      "export function draftFromX(picked: FileList): BookDraft {}",
+      true,
+    ],
+    [
       "a builder taking the parsed record is admitted",
-      "export function draftFromX(record: OpfRecord): BookDraft {}",
+      "export function draftFromX(record: FileMetadata): BookDraft {}",
+      false,
+    ],
+    [
+      "a parameter merely named for an array is admitted: a name is not a type",
+      "export function draftFromX(bookArray: NameClues): BookDraft {}",
       false,
     ],
     [
@@ -514,6 +554,87 @@ describe("a member's book file cannot leave the browser", () => {
 
   it.each(SHAPES)("%s", (_label, source, refused) => {
     expect(buildersIn(source, "ts").some(takesABook)).toBe(refused);
+  });
+
+  /**
+   * The one exception list `CARRIES_A_BOOK` carries, held against the tree.
+   *
+   * **The `File` half of that pattern refuses by default and admits by name**,
+   * because this repository's own types are spelled the way the DOM spells its
+   * handles and nothing in the text tells the two apart. That direction is the
+   * safe one and it has a cost: a new `File`-prefixed type of this tree's own
+   * is refused until somebody adds it. This is what makes that arrive as a
+   * failure naming the type rather than as a builder guard nobody can explain.
+   *
+   * **Both sides are asserted.** A pattern that stopped matching `File` at all
+   * would empty the refused set while leaving an admitted set that still read
+   * correctly, so the admitted half alone cannot see the rule switch off.
+   *
+   * Comments are stripped first: `Files` and `FileResponse` appear in this
+   * tree in prose only, and a census over the raw text asks somebody to
+   * classify a word in a sentence.
+   */
+  it("sorts every File name the source spells onto one side or the other", () => {
+    const names = new Set<string>();
+    for (const [, source] of entries())
+      for (const name of withoutProse(source).match(/\bFile\w*\b/g) ?? [])
+        names.add(name);
+
+    const sorted = [...names].sort();
+    expect(sorted.filter((name) => CARRIES_A_BOOK.test(name))).toEqual([
+      // The type itself.
+      "File",
+      // This tree declares its own, in `lib/fileReaders.ts`, and it is
+      // `(file: Blob) => Promise<FileReading>`. Refusing it is the point.
+      "FileReader",
+    ]);
+    expect(sorted.filter((name) => !CARRIES_A_BOOK.test(name))).toEqual([
+      // What a decoder reports about a file, and how it is named. No bytes.
+      "FileFailure",
+      "FileIdentifier",
+      "FileMetadata",
+      "FileNaming",
+      // The picker component, and its props.
+      "FilePickPanel",
+      "FilePickPanelProps",
+      // The other half of `FileReader`: what one resolves to.
+      "FileReading",
+    ]);
+  });
+
+  /**
+   * No exemption covers a name the tree does not spell.
+   *
+   * **A dead exemption is one waiting to cover something**, and this one had
+   * one: `FileResponse` was exempted and occurs in `src/` only inside a
+   * docstring, which the census above strips, so the census could not see it
+   * was dead. The backend returns a `FileResponse` from `routers/covers.py`,
+   * so a generated model of that name would have arrived already admitted.
+   * Both critic seats found it independently, which is what that costs.
+   *
+   * **Read out of the pattern rather than restated**, so this cannot pass by
+   * describing a lookahead the predicate no longer has.
+   *
+   * A prefix, not an equality: `PickPanel` exempts `FilePickPanelProps` too,
+   * and an exemption covering a name by prefix is doing its job.
+   */
+  it("exempts no File name the tree has stopped spelling", () => {
+    const lookahead = /File\(\?!([^)]*)\)/.exec(CARRIES_A_BOOK.source);
+    expect(lookahead).not.toBeNull();
+    const exemptions = lookahead![1]!.split("|");
+    expect(exemptions.length).toBeGreaterThan(0);
+
+    const spelled = new Set<string>();
+    for (const [, source] of entries())
+      for (const name of withoutProse(source).match(/\bFile\w*\b/g) ?? [])
+        spelled.add(name);
+
+    const dead = exemptions.filter(
+      (exemption) =>
+        ![...spelled].some((name) => name.startsWith(`File${exemption}`)),
+    );
+
+    expect(dead).toEqual([]);
   });
 });
 
@@ -544,7 +665,7 @@ describe("a member's book file cannot leave the browser", () => {
  * **What the `=>` arm newly over-matches is an arrow body, not a name.** After
  * an arrow the class runs to the next `;`, `{` or `=`, so a single expression
  * body naming the bare type reads here as a return annotation:
- * `const asDraft = (r: OpfRecord) => coerceRecord(r) as BookDraft;` puts its
+ * `const asDraft = (r: FileMetadata) => coerceRecord(r) as BookDraft;` puts
  * module in this set. Measured by appending that line to `lib/fb2.ts` with the
  * file filter left alone: `SUITE EXIT: 1`, this arm naming a module that
  * declares no builder. It fires on nothing in the tree today, and it is the
@@ -838,10 +959,14 @@ describe("a write names what it made stale", () => {
 describe("a dark hover state is stated, never inherited", () => {
   it("appears nowhere in the source", () => {
     // Every ramp runs the other way in the dark, so a hover written once is
-    // legible at rest and illegible while pointed at. Twelve sites were:
-    // `text-accent-700 hover:text-accent-800` measures 4.5:1 or better on a
-    // light card and **1.36 to 2.85** on a dark one across the seven palettes,
-    // because `accent-800` in a dark ramp is nearly the card itself.
+    // legible at rest and illegible while pointed at. Twelve sites were written
+    // that way: `text-accent-700 hover:text-accent-800` clears the 4.5 text
+    // floor on a light card and fails it on every dark one, because
+    // `accent-800` in a dark ramp is nearly the card itself.
+    //
+    // **No band is quoted here, deliberately.** The figure is recomputed by
+    // `tests/theme/palettes.test.ts::the hover a dark ramp makes illegible`,
+    // which is also where the reason it is not written down lives.
     //
     // This rule ships with no exemption list, which is a claim rather than an
     // omission: all twelve were repaired in the same change, so there is
@@ -1165,52 +1290,108 @@ describe("no fixture or string carries an address outside reserved space", () =>
   });
 });
 
+// The three names, and only the names: where the receiver is and how the call
+// is spelled across lines are the parser's problem now. Nothing here is an
+// inclusion list left to go stale, because `covers every vitest api that
+// replaces a module` builds the set it must contain from `vi` at run time.
+const REPLACES_A_MODULE = /^(?:mock|doMock|importMock)$/;
+
 /**
- * Source with every whole line comment removed.
+ * Does this source call a vitest api that replaces a module?
  *
- * **Every way this is wrong is a false positive, which is the direction a rule
- * has to be wrong in.** Measured, not reasoned about, after the first version
- * of this paragraph stated the bias backwards: three shapes are reported that
- * are not calls, and they are a call in a string literal, a call after code on
- * a line that ends in a trailing comment, and a call inside a block comment
- * whose own line carries no leading `//`, `*` or `/*`. Each fails loudly and is
- * reworded in a minute.
+ * **Parsed, not matched, because a comment is not a line shape.** This was a
+ * filter dropping lines beginning `//`, `*` or `/*` and a regex over what was
+ * left, which is a second parser for a language whose comments do not begin
+ * lines: a call after code on a line ending in a trailing comment, and a call
+ * inside a block comment whose own line carries no leading marker, were both
+ * reported. `parseAst` is what the decoder rule at the end of this file already
+ * reads its sources with.
  *
- * The only shape this misses is a call on a line that begins with one of those
- * three, and no line beginning that way is executed. So there is no false
- * negative here to trade against, which is not what the first draft claimed.
+ * **`withoutProse` further down this file is still a regex stripper**, and this
+ * did not remove it: fourteen rules read it, including the census above. So the
+ * claim is narrower than "one instrument in the file" and is worth stating
+ * exactly, because the broader one is what a reader would assume: what went is
+ * `codeOnly`, which had one consumer, this rule.
  *
- * **What it does not attempt is a receiver.** It matches the literal `vi.`, so
- * `v.mock(` after `import { vi as v }`, a destructured `mock`, `vi["mock"]` and
- * a call through a saved reference all pass. Adding an arm for each is the
- * enumeration this file argues against elsewhere, and none of them is a
- * spelling anybody reaches for by accident: the rule is a tripwire on the
- * idiomatic form, not a type checker.
+ * **What the swap gave up, which is the question to ask of a replacement.** The
+ * matcher saw a call spelled inside a string literal and this does not, because
+ * a literal is not a call expression. Nothing executes one, so what is lost is
+ * a false positive: it is why this file had to assemble the spelling out of two
+ * pieces to escape its own rule, and why it no longer does. The fixtures below
+ * are ordinary literals now, and the file stays inside the rule by
+ * construction rather than by hiding from it.
  *
- * A general comment stripper would be a second parser to get wrong. This one is
- * a line filter, and a parser is reachable: `parseAst`, which `vite`
- * re-exports, is what the decoder rule at the end of this file reads its
- * sources with. It hands back no comments, so it does not give this for free.
- * `typescript` is not the one to reach for either, and that was checked rather
- * than assumed: at 7.x it is the native compiler and exposes no
- * `createSourceFile` at all (it is `undefined` at runtime).
+ * **What it newly refuses is a source that does not parse.** The matcher
+ * returned something for any text at all. Measured across the 618 modules under
+ * `tests/` and `src/`: every one parses, and both instruments report the same
+ * empty offender set. `parses every file it reads` below is the arm that keeps
+ * that true, because a file this throws on takes the rule down with it rather
+ * than being skipped.
  *
- * Line anchoring was the other candidate and is strictly weaker: it sees only a
- * call that begins its own line, so anything at all before it hides it.
+ * **The receiver is still `vi`, and that is a choice rather than a limit of the
+ * instrument.** `v.mock(` after `import { vi as v }`, a destructured `mock` and
+ * a call through a saved reference all pass, as they did before; the rule is a
+ * tripwire on the idiomatic form, not a type checker. `vi["mock"]` is the one
+ * of the four the parser closes for free, since a computed member carries the
+ * name as a literal and reading it is not another arm.
  *
- * **The pattern requires the opening parenthesis, so prose naming the bare API
- * is invisible to it either way.** That is why this stripping is load bearing
- * for exactly one file in the tree, `tests/utils.tsx`, and not for the four
- * that mention the name: the other three write it bare. Attacking it is what
- * established that, and the first attempt at the check asserted the wrong
- * thing, that every file mentioning the API must be reported without the
- * stripping. Mentioning it is not spelling a call.
+ * `typescript` is not the parser to reach for, and that was checked rather than
+ * assumed: at 7.x it is the native compiler and exposes no `createSourceFile`
+ * at all (it is `undefined` at runtime).
  */
-function codeOnly(source: string): string {
-  return source
-    .split("\n")
-    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
-    .join("\n");
+function replacesAModule(source: string, lang: "ts" | "tsx"): boolean {
+  let found = false;
+  const named = (node: Node): string | null => {
+    // An identifier after a dot, or the literal inside brackets. Both are the
+    // name being called, and neither is a spelling this has to anticipate.
+    const property = node.property;
+    if (!isNode(property)) return null;
+    return (
+      text(property.name) ??
+      (typeof property.value === "string" ? property.value : null)
+    );
+  };
+  /**
+   * The receiver, by its rightmost name.
+   *
+   * **`globalThis.vi.mock()` is the same call**, and `vite.config.ts` sets
+   * `globals: true`, so `globalThis.vi === vi` in this suite. Reading only an
+   * identifier missed it, and the regex this replaced did not: that was a
+   * spelling the swap gave up, found by the security seat, and it is not the
+   * false positive the paragraph above talks about. Rightmost name rather than
+   * an arm for `globalThis` and another for `window`, which is the same rule
+   * already applied to the property.
+   */
+  const receiver = (node: Node): string | null =>
+    text(node.name) ?? named(node);
+  const walk = (value: unknown): void => {
+    if (found) return;
+    if (Array.isArray(value)) {
+      for (const item of value as unknown[]) walk(item);
+      return;
+    }
+    if (!isNode(value)) return;
+    const callee = value.callee;
+    if (
+      value.type === "CallExpression" &&
+      isNode(callee) &&
+      callee.type === "MemberExpression" &&
+      isNode(callee.object) &&
+      receiver(callee.object as Node) === "vi" &&
+      REPLACES_A_MODULE.test(named(callee) ?? "")
+    ) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(value)) walk(value[key]);
+  };
+  walk(parseAst(source, { lang }));
+  return found;
+}
+
+/** What a path says about how to parse it. */
+function langOf(path: string): "ts" | "tsx" {
+  return path.endsWith(".tsx") ? "tsx" : "ts";
 }
 
 /**
@@ -1222,30 +1403,6 @@ const TEST_SOURCES = import.meta.glob("./**/*.{ts,tsx}", {
   import: "default",
   eager: true,
 }) as Record<string, string>;
-
-/**
- * The forbidden spellings, assembled rather than written out.
- *
- * **This file would otherwise be the only offender in the suite**: the
- * fixtures below have to spell what the rule forbids, they sit in string
- * literals on ordinary code lines, and `codeOnly` keeps those by design. An
- * exception for this one path would be the obvious fix and is the worse one,
- * because it also stops the rule ever applying here. Assembling the spelling
- * keeps this file inside the rule it states.
- *
- * The pattern itself is safe unassembled: its source carries a backslash and
- * an alternation, so it does not contain the literal it matches.
- */
-// **`\s*` on both sides of the dot, because prettier puts them there.** When
-// the call heads an assignment chain it splits the receiver onto its own line:
-// `const setItem = vi\n  .spyOn(...)`. That shape occurs three times in this
-// tree, so `vi\n  .mock("./x")` is a spelling the formatter produces rather
-// than one an evader would have to invent, and the tighter pattern walked past
-// it. Found by attacking the rule after a first pass dismissed the same
-// evasion as contrived.
-const CALLS = /\bvi\s*\.\s*(mock|doMock|importMock)\s*\(/;
-const MOCK = "vi." + "mock";
-const DO_MOCK = "vi." + "doMock";
 
 describe("a module is replaced by an alias, never by a module mock", () => {
   /**
@@ -1270,7 +1427,7 @@ describe("a module is replaced by an alias, never by a module mock", () => {
    */
   it("is not called anywhere in the suite", () => {
     const offenders = Object.entries(TEST_SOURCES)
-      .filter(([, source]) => CALLS.test(codeOnly(source)))
+      .filter(([path, source]) => replacesAModule(source, langOf(path)))
       .map(([path]) => path.replace("./", "tests/"));
 
     expect(offenders).toEqual([]);
@@ -1281,30 +1438,70 @@ describe("a module is replaced by an alias, never by a module mock", () => {
     expect(Object.keys(TEST_SOURCES).length).toBeGreaterThan(100);
   });
 
+  it("parses every file it reads", () => {
+    // **The one failure mode the parser has and the line filter did not.** A
+    // file it throws on takes the rule above down with it, which is loud, and
+    // this is where that arrives naming the file rather than as a stack in the
+    // middle of a rule about mocks. Measured across the whole suite tree when
+    // the swap landed: nothing here fails to parse.
+    const refused = Object.entries(TEST_SOURCES)
+      .filter(([path, source]) => {
+        try {
+          replacesAModule(source, langOf(path));
+          return false;
+        } catch {
+          return true;
+        }
+      })
+      .map(([path]) => path.replace("./", "tests/"));
+
+    expect(refused).toEqual([]);
+  });
+
   it("tells a call apart from prose about one", () => {
     // Every live mention in this suite is prose: in `tests/utils.tsx`, in both
     // ScanPage test files, and in `tests/doubles/zxing.ts`. A rule matching the
     // spelling would report all of them and would have to be switched off, so
     // the two cases are pinned apart rather than left to a reader's judgement.
+    //
+    // **Written as a module rather than as loose lines**, because the parser
+    // refuses text that does not parse: a bare ` * continuation` line is a
+    // syntax error where the line filter returned something for it. Modelling
+    // the comment it came from is the honest fixture either way.
     const prose = [
-      `// ${MOCK}("react-router-dom") is refused: see the rule above.`,
-      ` * with a ${MOCK}("@zxing/library") the scanner gets the real decoder.`,
-      `  /* ${MOCK}("./thing"); */`,
+      `// vi.mock("react-router-dom") is refused: see the rule above.`,
+      `/**`,
+      ` * with a vi.mock("@zxing/library") the scanner gets the real decoder.`,
+      ` */`,
+      `/* vi.mock("./thing"); */`,
+      `const nothing = 1;`,
     ].join("\n");
-    expect(CALLS.test(codeOnly(prose))).toBe(false);
+    expect(replacesAModule(prose, "ts")).toBe(false);
+
+    // A call spelled inside a string is prose too, as far as a module is
+    // concerned, and this is the fixture that says so: it is why the file no
+    // longer assembles the name out of two pieces to escape its own rule.
+    expect(replacesAModule(`const said = "vi.mock(x)";`, "ts")).toBe(false);
 
     for (const code of [
-      `${MOCK}("@zxing/library", () => ({}));`,
-      `  ${DO_MOCK}("./thing");`,
+      `vi.mock("@zxing/library", () => ({}));`,
+      `  vi.doMock("./thing");`,
       // Not anchored to the start of a line: that was the cheaper rule and it
       // is blind to anything sharing the line with the call.
-      `const a = 1; ${MOCK}("./thing");`,
+      `const a = 1; vi.mock("./thing");`,
       // The receiver split onto its own line, which is what prettier does to a
       // call that heads an assignment chain, and which three real call sites in
-      // this tree are already written as.
-      `const m = vi\n  .${"mock"}("./thing");`,
+      // this tree are already written as. A regex needed a whitespace class on
+      // both sides of the dot to see this; the parser needs nothing.
+      `const m = vi\n  .mock("./thing");`,
+      // Bracketed rather than dotted, which the regex it replaced walked past.
+      `vi["mock"]("./thing");`,
+      // Reached through the global, which `vite.config.ts` puts it on and which
+      // the regex DID see: reading only an identifier for the receiver gave
+      // this up, and reading the rightmost name gives it back.
+      `globalThis.vi.mock("./thing");`,
     ]) {
-      expect(CALLS.test(codeOnly(code))).toBe(true);
+      expect(replacesAModule(code, "ts")).toBe(true);
     }
   });
 
@@ -1415,7 +1612,7 @@ describe("a module is replaced by an alias, never by a module mock", () => {
     // substring check would pass on a pattern that happens to mention the name
     // without matching a call.
     for (const name of replacers) {
-      expect(CALLS.test(codeOnly(`vi.${name}("./x");`))).toBe(true);
+      expect(replacesAModule(`vi.${name}("./x");`, "ts")).toBe(true);
     }
   });
 });

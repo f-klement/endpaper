@@ -656,9 +656,12 @@ describe("this module names a File exactly once", () => {
   });
 
   it("names a file type on the cover line and nowhere else", () => {
-    // Word bounded, so `draftFromFile` and `FileNaming` are not mentions of the
-    // type. Asserted as the line rather than as a count, because a count that
-    // stays right while the line moves is a guard that has stopped watching.
+    // Two different reasons, and they are worth telling apart. `draftFromFile`
+    // is not a mention because the pattern is word bounded and a name cannot
+    // start mid-word. `FileMetadata`, which this module does import, is not one
+    // because the predicate exempts this tree's own `File` types by name.
+    // Asserted as the line rather than as a count, because a count that stays
+    // right while the line moves is a guard that has stopped watching.
     const named = code()
       .split("\n")
       .filter((line) => CARRIES_A_BOOK.test(line))

@@ -27,6 +27,7 @@ from enums import ClassificationScheme, HeadingKind
 from models import Book, Classification
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.classification import ClassificationIn
+from tests.test_house_rules import _is_vendored
 
 
 class TestReadingAKindOffARow:
@@ -399,23 +400,23 @@ def _catalogues_stated_in(prose: str) -> int | None:
 def _is_this_app(parts: tuple[str, ...]) -> bool:
     """Whether a path under `backend/` is this application's own source.
 
-    **A dotted directory is tooling, and the rule is the dot rather than a list
-    of names.** Naming them one at a time is exactly what failed: this set said
-    `.venv`, and CI sets `UV_CACHE_DIR` to `.uv-cache` **inside `backend/`**, so
-    the walk read every vendored wheel it had unpacked. Every name then had a
-    caller somewhere, every reader looked reachable, and the derivation reported
-    **every catalogue in the roster** as feeding a heading, against a docstring
-    that says seven.
+    **What is not ours is `test_house_rules._is_vendored`**, which is where the
+    incident this used to recount is written down: this file named `.venv` and
+    nothing else, CI sets `UV_CACHE_DIR` to `.uv-cache` **inside `backend/`**,
+    and the derivation then reported **every catalogue in the roster** as
+    feeding a heading against a docstring that says seven. It passed locally and
+    failed only in CI, which is the worst shape a guard can have.
 
-    **It passed locally and failed only in CI**, because uv caches outside the
-    tree here, which is the worst shape a guard can have: green where it is
-    written, red where it is trusted. A rule that depends on knowing every
-    tool's directory name goes stale the day somebody sets an environment
-    variable, and no one edits this file when they do.
+    **The dot rule this held is a subset of that one**, and the difference is
+    not academic: an environment's directory need not carry a dot, and this
+    walk read `site-packages` under one that did not until the shared predicate
+    grew that name. What is left here is the half that is genuinely this
+    file's: two directories that **are** ours and are still not source a
+    catalogue reaches.
     """
     if _NOT_THIS_APP & set(parts):
         return False
-    return not any(part.startswith(".") for part in parts)
+    return not _is_vendored(BACKEND.joinpath(*parts), BACKEND)
 
 
 def _modules() -> list[pathlib.Path]:

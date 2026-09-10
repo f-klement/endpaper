@@ -34,7 +34,7 @@
  * **`DOMParser` rather than a library.** It is native, it is already in every
  * browser this app runs in, and the alternative is an XML parser in the bundle
  * for two small documents. What it costs is that the parse happens inside the
- * engine, before any code here runs, so `fileReaders.declaresEntities` refuses
+ * engine, before any code here runs, so `xmlEntities.declaresEntities` refuses
  * the one thing this module could not otherwise bound: see its docstring.
  *
  * Everything else about a hostile document is handled by reading it leniently.
@@ -49,11 +49,8 @@
  */
 
 import { plausibleYear } from "./bookBounds";
-import {
-  declaresEntities,
-  type FileIdentifier,
-  type FileMetadata,
-} from "./fileReaders";
+import { type FileIdentifier, type FileMetadata } from "./fileReaders";
+import { declaresEntities } from "./xmlEntities";
 import { parseIsbn } from "./isbn";
 
 const OPF_NAMESPACE = "http://www.idpf.org/2007/opf";

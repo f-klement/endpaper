@@ -564,9 +564,14 @@ ten is now Tokyo Night's rather than Nord's, and `green-800` still clears there
 by 1.28.
 
 **Dark hover is covered now.** Twelve sites wrote `hover:text-accent-800` with
-no `dark:` variant and measured **1.36 to 2.85** on the dark card: legible at
-rest, illegible while pointed at. All twelve are repaired, and
-`frontend/tests/houseRules.test.ts` holds the rule with no exemption list.
+no `dark:` variant: `accent-800` clears the 4.5 text floor on every light card
+and fails it on every dark one, so those sites were legible at rest and
+illegible while pointed at. All twelve are repaired, and
+`frontend/tests/houseRules.test.ts` holds the rule with no exemption list. The
+figure is not written down here, because a contrast band in prose is one nobody
+re-derives when a palette lands:
+`frontend/tests/theme/palettes.test.ts::the hover a dark ramp makes illegible`
+recomputes it over the palettes that exist.
 
 **The effort is still inverted in one place.** `paper-500` is held to 4.5 in
 all twenty theme-modes and painted at **zero** call sites, while the amber

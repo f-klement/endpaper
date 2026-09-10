@@ -26,6 +26,7 @@ import {
   STORED,
   type EpubSpec,
 } from "../zipFixtures";
+import { withoutDecompressionStream } from "./withoutDecompression";
 
 async function read(spec: EpubSpec = {}) {
   return readEpub(new Blob([await buildEpub(spec)]));
@@ -111,7 +112,7 @@ describe("a file that is not an EPUB", () => {
 
   it("refuses a container that declares its own entities", async () => {
     // The container is parsed by the same engine and is the same exposure as
-    // the package document. See `fileReaders.declaresEntities`.
+    // the package document. See `xmlEntities.declaresEntities`.
     const reading = await read({
       container: `<?xml version="1.0"?>
 <!DOCTYPE container [<!ENTITY p "OEBPS/content.opf">]>
@@ -185,5 +186,19 @@ describe("a file that cannot be read", () => {
     // three hundred files must not end at the first bad one.
     const reading = await readEpub(new Blob([bytes("nope")]));
     expect(reading.ok).toBe(false);
+  });
+
+  it("says the browser cannot inflate, not that the book is damaged", async () => {
+    // **The sentence a member reads is the point of this arm.** Every other
+    // failure here is about the file they picked, and this one is about the
+    // browser they picked it in: `ScanPage` renders `file.noInflate` for it and
+    // `damaged` for a broken archive, so a reader answering the wrong one of
+    // the two sends somebody looking at a book that is fine.
+    //
+    // The archive is the ordinary one, deflated as `buildZip` writes it, so
+    // what changed is the runtime and nothing else.
+    const reading = await withoutDecompressionStream(() => read());
+
+    expect(outcome(reading)).toBe("no-inflate");
   });
 });

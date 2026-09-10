@@ -64,6 +64,7 @@ import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
 import type { FileMetadata } from "./fileReaders";
 import type { SqliteDatabase, SqliteRow } from "./sqlite";
+import { columnsIn, decimal, integer, text } from "./sqliteRow";
 
 /**
  * How much of one `metadata.opf` will be read.
@@ -258,21 +259,6 @@ export const CALIBRE_PLACEHOLDER = {
  */
 const REQUIRED_TABLES = ["books", "books_authors_link"] as const;
 
-function text(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed === "" ? null : trimmed;
-}
-
-function integer(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  return Math.trunc(value);
-}
-
-function decimal(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
 /**
  * The names of the tables this database actually has.
  *
@@ -284,27 +270,6 @@ function tablesIn(db: SqliteDatabase): Set<string> {
   const rows = db.query(
     "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')",
   );
-  return new Set(
-    rows.map((row) => text(row["name"])).filter((name) => name !== null),
-  );
-}
-
-/**
- * The columns one table has, so a Calibre that renamed one loses a field.
- *
- * **Exported for its own test and for nothing else.** The refusal below has one
- * call site and that site passes a literal, so no name that fails the check is
- * ever constructed inside this module: a test going through `readCalibreLibrary`
- * is green whether the check is there or not. A guard nothing can reach is a
- * guard on the "stated" rung wearing a test's name.
- */
-export function columnsIn(db: SqliteDatabase, table: string): Set<string> {
-  // **A table name cannot be a bound parameter in `PRAGMA`, so it is checked
-  // rather than trusted.** Every value passed here today is a literal in this
-  // module, and a comment saying so is what stops holding when somebody passes
-  // a name out of `tablesIn`, which is read from a member supplied file.
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) return new Set();
-  const rows = db.query(`PRAGMA table_info(${table})`);
   return new Set(
     rows.map((row) => text(row["name"])).filter((name) => name !== null),
   );
