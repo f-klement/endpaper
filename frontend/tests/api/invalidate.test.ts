@@ -56,6 +56,14 @@ const KEYS: Record<string, readonly unknown[]> = {
   getQuotes: books.getGetQuotesQueryKey(7),
   listProgress: books.getListProgressQueryKey(7),
   enrichmentCandidates: books.getEnrichmentCandidatesQueryKey(7),
+  // A book's references to the files it was catalogued from. A child of
+  // `/api/books/{id}` and classified with notes, quotes and progress rather
+  // than with copies: it changes when it is written through its own routes and
+  // not when the catalogue moves. Nothing in the app writes one yet, and that
+  // is the reason to place it now rather than later: the hook that eventually
+  // does will find the classification already made rather than making it in a
+  // hurry.
+  listDigitalReferences: books.getListDigitalReferencesQueryKey(7),
   listAuthors: books.getListAuthorsQueryKey(),
   listAuthorSuggestions: books.getListAuthorSuggestionsQueryKey(),
   listSeries: books.getListSeriesQueryKey(),
@@ -213,7 +221,10 @@ describe("the inventory is complete", () => {
     // implementer would have guessed from "seven routes" is wrong again, in the
     // same direction as the credential work and for the same reason.
     expect(Object.keys(MODULES).length).toBeGreaterThan(5);
-    expect(Object.keys(KEYS).length).toBe(53);
+    // 54 on 2026-09-10, counted with that same command. A book's digital
+    // references are the arrival: four routes, one of them a read, and the
+    // other three writes that produce no key.
+    expect(Object.keys(KEYS).length).toBe(54);
   });
 });
 

@@ -32,7 +32,7 @@ import {
   type PendingBook,
 } from "../../../src/pages/ScanPage/types";
 import { TEXT_CEILINGS } from "../../../src/lib/bookBounds";
-import type { OpfRecord } from "../../../src/lib/fileReaders";
+import type { FileMetadata } from "../../../src/lib/fileReaders";
 import { CARRIES_A_BOOK } from "../../carriesABook";
 
 /**
@@ -424,9 +424,8 @@ describe("the copy request agrees with the API", () => {
   });
 });
 
-/** What a package document said, with everything present. */
-const RECORD: { [K in keyof OpfRecord]-?: OpfRecord[K] } = {
-  version: "3.0",
+/** What a file said about a book, with every field present. */
+const RECORD: { [K in keyof FileMetadata]-?: FileMetadata[K] } = {
   title: "Dune",
   subtitle: "A Novel",
   authors: ["Frank Herbert", "Brian Herbert"],
@@ -440,7 +439,7 @@ const RECORD: { [K in keyof OpfRecord]-?: OpfRecord[K] } = {
   seriesIndex: 1,
 };
 
-function record(patch: Partial<OpfRecord> = {}): OpfRecord {
+function record(patch: Partial<FileMetadata> = {}): FileMetadata {
   return { ...RECORD, ...patch };
 }
 

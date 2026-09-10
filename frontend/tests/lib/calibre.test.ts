@@ -20,7 +20,7 @@ import {
   readCalibreLibrary,
   type CalibreBook,
 } from "../../src/lib/calibre";
-import type { OpfRecord } from "../../src/lib/fileReaders";
+import type { FileMetadata } from "../../src/lib/fileReaders";
 import { openSqlite, type SqliteDatabase } from "../../src/lib/sqlite";
 import { CALIBRE_SCHEMA, databaseOf, engine } from "./sqliteFixtures";
 
@@ -461,8 +461,7 @@ const A_BOOK: CalibreBook = {
   formats: ["EPUB"],
 };
 
-const A_FILE: OpfRecord = {
-  version: "2.0",
+const A_FILE: FileMetadata = {
   title: "Dune",
   subtitle: null,
   authors: ["Frank Herbert"],
@@ -778,7 +777,7 @@ describe("the placeholder set, refused at both of a library's doors", () => {
     /** The one field this case empties on the index's side. */
     readonly book: Partial<CalibreBook>;
     /** The placeholder, as the file beside the book carries it. */
-    readonly file: Partial<OpfRecord>;
+    readonly file: Partial<FileMetadata>;
     /** The field under test, read off whichever door answered. */
     readonly read: (book: CalibreBook) => unknown;
     /** What that field reads as once the placeholder is refused. */

@@ -114,9 +114,6 @@ describe("reading a Kindle or Mobipocket file", () => {
       seriesName: null,
       seriesIndex: null,
       subtitle: null,
-      // No package document, so no package version. Not the MOBI header's own
-      // version number, which is a different fact under the same word.
-      version: null,
     });
   });
 });
@@ -523,7 +520,7 @@ describe("a value with padding in it", () => {
   });
 
   it("says nothing rather than an empty string when only padding is left", async () => {
-    // `OpfRecord` says every field is absent rather than empty, and the scan
+    // `FileMetadata` says every field is absent rather than empty, and the scan
     // page decides whether a file named a title by comparing against `""`. A
     // record holding two NULs has named no title, so the header's name is what
     // is left.

@@ -74,6 +74,8 @@ export * from "./customFieldOut.ts";
 export * from "./customFieldRename.ts";
 export * from "./customFieldValueOut.ts";
 export * from "./customFieldValueUpdate.ts";
+export * from "./digitalReferenceIn.ts";
+export * from "./digitalReferenceOut.ts";
 export * from "./divisionFacetOut.ts";
 export * from "./duplicateGroup.ts";
 export * from "./emailUpdate.ts";

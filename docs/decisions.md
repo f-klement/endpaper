@@ -12438,3 +12438,60 @@ every answer it gives is in group by construction, which makes the measurement v
 than favourable. **A source the sample does not measure cannot clear the bar, and not clearing
 it is not the same as failing it.** It refuses no ISBN and its block says so with the pass,
 because a source that silently declines to answer is worse than one that answers nothing.
+
+## A `CheckConstraint` in `models.py` is a description, not a second enforcement
+
+**Decided by measurement, 2026-09-10.** `main.py` calls `init_db()` at import and `init_db`
+calls `upgrade_to_head()`; `conftest` imports `main`, so Alembic has built every table before
+any fixture and `conftest`'s `create_all(checkfirst=True)` does nothing. The installed DDL is
+the revision's, in the suite and in production alike.
+
+So editing only a model's `CheckConstraint` changes no behaviour and fails no test. Measured
+three ways on the new bounds constraint, each in `models.py` alone against a fresh isolated
+copy: a constant false expression, one term of a two term sum zeroed, and the byte budget
+shrunk by three. **All three failed zero tests.**
+
+Two shapes make a model's copy real and this tree already held both. Compare it against the
+DDL a migrated database carries, or create the model's own table on a throwaway `sqlite://`
+engine and probe it. They close different families: the comparison sees a model and a revision
+that both enforce something sane and different; the probe sees a constraint whose text is a
+description of nothing. **A throwaway engine comes up with foreign keys off**, because the
+PRAGMA listener is bound to the application's engine rather than to the `Engine` class, which
+is why a probe omits the tables whose rule is a foreign key.
+
+## SQLite in the browser was already paid for, so a device store costs its reader
+
+The question the device library work had to settle once, rather than per device: reading a
+member's device database means a WASM SQLite engine, and if that cost is not worth paying then
+these become an export file route or they do not ship.
+
+**It is already paid.** The Calibre import loads that engine on a page members visit today.
+Measured by comparing two production builds differing only in a second page importing the
+engine and a reader over it: the engine asset is byte identical across both, by content hash,
+there is one wrapper chunk in both, and the new reader is its own chunk at **2.53 kB raw and
+1.20 kB gzipped**, with the main chunk moving 0.39 kB raw. So a second SQLite backed store
+costs its reader and its page code and **no engine**.
+
+**None of these is an integration with a company**, and the framing matters because it sets
+the design target. Each is reading a file the member already has on hardware they own; a
+vendor can change a local schema in any update and nothing here is a supported interface. So
+the target is graceful failure rather than fidelity: a store that cannot be read is one
+skipped source and never a broken import, and the member is told which store was unreadable.
+
+**No device was read to build the first one.** The Kobo fixtures are constructed from
+calibre's own KoboTouch driver, with the commit and the dates recorded beside them, and every
+file says so. Apple Books' plist half is unmeasured, so that store is outside this answer.
+
+## A number in prose is deleted rather than corrected, again
+
+`test_shelf.py`'s allowlist prose carried "two of the ten below" and "exactly ten and all ten
+are real queries", with a parenthetical recording that the number had already been wrong five
+times and that each correction had left a second wrong number standing above it. Adding
+entries made it wrong a sixth. **The numbers are deleted rather than updated**, and the two
+entries that are correct and reported anyway say so at their own line with a greppable marker.
+Self enforcing: there is no number left to go stale.
+
+Measured before touching it: the marker occurs twice, counted over the file with whitespace
+collapsed and adjacent string literals joined. **Counting matching lines answers one**, because
+the second occurrence is split across a string concatenation, which is the instrument being
+wrong in the unit rather than in the range.

@@ -53,6 +53,7 @@ from models import (
     Collection,
     CustomField,
     CustomFieldValue,
+    DigitalReference,
     Loan,
     Note,
     OpdsServer,
@@ -132,6 +133,19 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # quotes existed restores with none, which is the state it was written
         # in.
         ("quotes", Quote),
+        # After the quotes, which it sits beside for the same reason: its only
+        # foreign key is `books`, which is long since inserted by here.
+        #
+        # **Uncapped on restore, like every other table here.**
+        # `MAX_DIGITAL_REFERENCES_PER_BOOK` binds the two writers that add to a
+        # library; this one reinstates a whole database rather than adding to
+        # one, and refusing rows would produce a restore that silently differs
+        # from the archive. The same bargain `classifications` records.
+        #
+        # Absent from `_REQUIRED_TABLES` for the reason `quotes` is: an archive
+        # taken before this table existed restores with no references, which is
+        # the state it was written in.
+        ("digital_references", DigitalReference),
         # The author merge decisions. Its only foreign key is `users`, which is
         # first in this tuple, so it could sit anywhere after that; it is here
         # beside the other tables that hold what members decided rather than

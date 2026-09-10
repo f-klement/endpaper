@@ -148,7 +148,7 @@
 
 import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
-import type { OpfIdentifier, OpfRecord } from "./fileReaders";
+import type { FileIdentifier, FileMetadata } from "./fileReaders";
 
 /**
  * Why a file yielded nothing.
@@ -175,7 +175,7 @@ export type PdfFailure =
   | "no-inflate";
 
 export type PdfReading =
-  | { readonly ok: true; readonly metadata: OpfRecord }
+  | { readonly ok: true; readonly metadata: FileMetadata }
   | { readonly ok: false; readonly failure: PdfFailure };
 
 /**
@@ -704,7 +704,7 @@ function decodeText(bytes: Uint8Array): string {
 /**
  * A value with its whitespace collapsed, or `null` when nothing is left.
  *
- * `null` rather than `""`, for the reason `lib/mobi.ts` gives: `OpfRecord` says
+ * `null` rather than `""`, for the reason `lib/mobi.ts` gives: `FileMetadata` says
  * every field is absent rather than empty, and a caller reading `record.title`
  * to decide whether the file named one would take `""` for a title. **Six of
  * the 123 carry a `/Title` that is the empty string**, so this arm is the
@@ -1676,7 +1676,7 @@ function readYear(candidate: string | null): number | null {
  * Measured 3 of 123, and 2 of those 3 are DOIs rather than ISBNs, which is why
  * `parseIsbn` decides which of them is an ISBN rather than the field's name.
  */
-function readIdentifiers(xmp: XmpRecord | null): OpfIdentifier[] {
+function readIdentifiers(xmp: XmpRecord | null): FileIdentifier[] {
   if (xmp === null) return [];
   return xmp.identifiers.map((value) => ({
     scheme: parseIsbn(value) === null ? null : "ISBN",
@@ -1767,9 +1767,6 @@ export async function readPdf(file: Blob): Promise<PdfReading> {
     return {
       ok: true,
       metadata: {
-        // A PDF has no package document, so there is no version to name. Not
-        // the `%PDF-1.7` header, which is a different fact under one word.
-        version: null,
         title,
         // No field in either block means a subtitle, and no separator in a
         // title is reliably one: `Practical Guide to: Oracle SQL` is a whole

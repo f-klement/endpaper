@@ -7,7 +7,7 @@ import type {
 } from "../../api/generated/model";
 import { AUTHOR_SEPARATOR, boundNumber, boundText } from "../../lib/bookBounds";
 import { normaliseLocation } from "../../lib/lastLocation";
-import type { OpfRecord } from "../../lib/fileReaders";
+import type { FileMetadata } from "../../lib/fileReaders";
 import type { NameClues } from "../../lib/fileName";
 import type { AudiobookGroup } from "../../lib/audiobookGroups";
 
@@ -195,7 +195,7 @@ export function draftFromMatch(match: BookMatch): BookDraft {
  * should make them is a decision about the import flow rather than about this
  * reader.
  */
-export function draftFromFile(record: OpfRecord): BookDraft {
+export function draftFromFile(record: FileMetadata): BookDraft {
   return {
     isbn: boundText("isbn", record.isbn) ?? "",
     title: boundText("title", record.title) ?? "",

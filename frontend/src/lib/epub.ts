@@ -30,7 +30,7 @@
  * half: what comes out of here is bounded again before it can become a request.
  */
 
-import { declaresEntities, type OpfRecord } from "./fileReaders";
+import { declaresEntities, type FileMetadata } from "./fileReaders";
 import { readOpf } from "./opf";
 import { openZip, ZipError, zipFailureAs } from "./zip";
 
@@ -76,7 +76,7 @@ export type EpubFailure =
   | "no-inflate";
 
 export type EpubReading =
-  | { readonly ok: true; readonly metadata: OpfRecord }
+  | { readonly ok: true; readonly metadata: FileMetadata }
   | { readonly ok: false; readonly failure: EpubFailure };
 
 const utf8 = new TextDecoder("utf-8");

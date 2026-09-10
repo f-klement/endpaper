@@ -259,6 +259,14 @@
   promise it stopped stating when the promise moved to the reader contract. Both now cite the
   contract, and the guard keeping a member's book out of a request body reads every module
   rather than the one it was written against.
+- **A book can carry references to the files it was catalogued from.** A reference is a root
+  you confirmed, the path beneath it, and a fingerprint; **Endpaper never receives the file**,
+  so nothing stored has been read or checked by the server. It is reported by a client and
+  re-checked by one: a sighting refreshes the fingerprint, and a miss flags the row rather than
+  deleting it. The scan page does not send one yet.
+- **A device you own can be read as a library.** Kobo first, over the same SQLite engine the
+  Calibre import already loads, so a second store costs its reader and no engine. A store that
+  cannot be read is one skipped source and never a broken import.
 - **A queue of offered catalogue records can be kept in bulk, and those names can be asked
   about again.** A folder of three hundred files that matches most of them was one press per
   row. Keeping every name at once discards nothing: a row kept that way says so, is counted

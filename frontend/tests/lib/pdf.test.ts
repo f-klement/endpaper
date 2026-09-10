@@ -136,7 +136,6 @@ describe("reading a PDF that carries what a publisher wrote", () => {
     expect(reading.metadata.subtitle).toBeNull();
     expect(reading.metadata.seriesName).toBeNull();
     expect(reading.metadata.seriesIndex).toBeNull();
-    expect(reading.metadata.version).toBeNull();
   });
 });
 

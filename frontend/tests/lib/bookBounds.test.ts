@@ -457,7 +457,7 @@ describe("plausibleYear", () => {
     // readings of the same question, measured by two people who each thought
     // they had asked it. That disagreement is the argument against drawing the
     // line there, and it is worth more than either number. A predicate over
-    // `OpfRecord` is tighter at 9 modules and misses `fileName.ts`, which
+    // `FileMetadata` is tighter at 9 modules and misses `fileName.ts`, which
     // windows a year and builds no record. Neither is a complement, so neither
     // is here.
     //
@@ -513,6 +513,7 @@ describe("plausibleYear", () => {
       "../../src/lib/cbz.ts",
       "../../src/lib/fb2.ts",
       "../../src/lib/fileName.ts",
+      "../../src/lib/kobo.ts",
       "../../src/lib/mobi.ts",
       "../../src/lib/opf.ts",
       "../../src/lib/pdf.ts",

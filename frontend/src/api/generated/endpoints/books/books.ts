@@ -61,6 +61,8 @@ import type {
   CustomFieldRename,
   CustomFieldValueOut,
   CustomFieldValueUpdate,
+  DigitalReferenceIn,
+  DigitalReferenceOut,
   DuplicateGroup,
   EnrichBookParams,
   ExportBooksParams,
@@ -5808,6 +5810,540 @@ export const useSetCustomField = <
   TContext
 > => {
   return useMutation(getSetCustomFieldMutationOptions(options), queryClient);
+};
+export const getListDigitalReferencesUrl = (bookId: number) => {
+  return `/api/books/${bookId}/digital-references`;
+};
+
+/**
+ * Where this book's files have been reported to be.
+ *
+ * **Served here rather than on `BookOut`**, like notes and quotes and unlike
+ * tags. A listing of 25 books would otherwise selectin-load this relationship
+ * onto every row to render something no listing shows, which is the N+1
+ * `_books_to_out` exists to avoid.
+ *
+ * Nothing in the response has been verified by this server. `confirmed_at` is
+ * when it was last **told** the file was there.
+ * @summary List Digital References
+ */
+export const listDigitalReferences = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<DigitalReferenceOut[]> => {
+  return customFetch<DigitalReferenceOut[]>(
+    getListDigitalReferencesUrl(bookId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListDigitalReferencesQueryKey = (bookId: number) => {
+  return [`/api/books/${bookId}/digital-references`] as const;
+};
+
+export const getListDigitalReferencesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listDigitalReferences>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDigitalReferences>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListDigitalReferencesQueryKey(bookId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listDigitalReferences>>
+  > = ({ signal }) =>
+    listDigitalReferences(bookId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: bookId !== null && bookId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listDigitalReferences>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListDigitalReferencesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listDigitalReferences>>
+>;
+export type ListDigitalReferencesQueryError = HTTPValidationError;
+
+export function useListDigitalReferences<
+  TData = Awaited<ReturnType<typeof listDigitalReferences>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDigitalReferences>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDigitalReferences>>,
+          TError,
+          Awaited<ReturnType<typeof listDigitalReferences>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListDigitalReferences<
+  TData = Awaited<ReturnType<typeof listDigitalReferences>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDigitalReferences>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDigitalReferences>>,
+          TError,
+          Awaited<ReturnType<typeof listDigitalReferences>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListDigitalReferences<
+  TData = Awaited<ReturnType<typeof listDigitalReferences>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDigitalReferences>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Digital References
+ */
+
+export function useListDigitalReferences<
+  TData = Awaited<ReturnType<typeof listDigitalReferences>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDigitalReferences>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListDigitalReferencesQueryOptions(bookId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getReportDigitalReferenceUrl = (bookId: number) => {
+  return `/api/books/${bookId}/digital-references`;
+};
+
+/**
+ * A client reporting that it found this book's file at this location.
+ *
+ * **Idempotent on the location, and that is the design rather than a
+ * convenience.** A reference is identified by where the file is, so the same
+ * report twice is one reference: re-importing a folder somebody imported last
+ * month refreshes those rows instead of doubling them, which at the scale this
+ * runs at (a directory pick is hundreds of files in one gesture) is the
+ * difference between a feature and a mess.
+ *
+ * **200 rather than 201** for the same reason: the route is not a create. What
+ * happened to a given location is answerable by reading the list back, and a
+ * status that varied would be one more thing for a client committing 300
+ * files to branch on.
+ *
+ * **The report replaces the fingerprint whole rather than filling in the gaps
+ * in it.** A row says what one client saw in one look. Merging a new size with
+ * an old modification time would produce a fingerprint that no client ever
+ * reported and that no re-check could ever match.
+ *
+ * **A sighting clears `missing_since`.** Something has now looked and found
+ * it, which is the only evidence that ever contradicts a miss.
+ *
+ * The per book ceiling is counted here rather than trusted to the payload,
+ * which bounds one request and not the total: see
+ * `MAX_DIGITAL_REFERENCES_PER_BOOK`. It binds a **new** location only, so a
+ * book already at the ceiling can still re-confirm what it holds.
+ * @summary Report Digital Reference
+ */
+export const reportDigitalReference = async (
+  bookId: number,
+  digitalReferenceIn: DigitalReferenceIn,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<DigitalReferenceOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<DigitalReferenceOut>(
+    getReportDigitalReferenceUrl(bookId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(digitalReferenceIn),
+    },
+  );
+};
+
+export const getReportDigitalReferenceMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof reportDigitalReference>>,
+    TError,
+    ReportDigitalReferenceMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof reportDigitalReference>>,
+  TError,
+  ReportDigitalReferenceMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["reportDigitalReference"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof reportDigitalReference>>,
+    ReportDigitalReferenceMutationVariables
+  > = (props) => {
+    const { bookId, data } = props ?? {};
+
+    return reportDigitalReference(bookId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReportDigitalReferenceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof reportDigitalReference>>
+>;
+export type ReportDigitalReferenceMutationBody = DigitalReferenceIn;
+export type ReportDigitalReferenceMutationError = HTTPValidationError;
+export type ReportDigitalReferenceMutationVariables = {
+  bookId: number;
+  data: DigitalReferenceIn;
+};
+
+/**
+ * @summary Report Digital Reference
+ */
+export const useReportDigitalReference = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof reportDigitalReference>>,
+      TError,
+      ReportDigitalReferenceMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof reportDigitalReference>>,
+  TError,
+  ReportDigitalReferenceMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getReportDigitalReferenceMutationOptions(options),
+    queryClient,
+  );
+};
+export const getForgetDigitalReferenceUrl = (
+  bookId: number,
+  referenceId: number,
+) => {
+  return `/api/books/${bookId}/digital-references/${referenceId}`;
+};
+
+/**
+ * Forget a reference, because a Member said to.
+ *
+ * The one way a row leaves this table short of the book being purged. It is
+ * deliberately not what a missing report does: a person deciding the file is
+ * gone and a browser that could not see it are different statements, and only
+ * the first is evidence.
+ * @summary Forget Digital Reference
+ */
+export const forgetDigitalReference = async (
+  bookId: number,
+  referenceId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getForgetDigitalReferenceUrl(bookId, referenceId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getForgetDigitalReferenceMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof forgetDigitalReference>>,
+    TError,
+    ForgetDigitalReferenceMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof forgetDigitalReference>>,
+  TError,
+  ForgetDigitalReferenceMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["forgetDigitalReference"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof forgetDigitalReference>>,
+    ForgetDigitalReferenceMutationVariables
+  > = (props) => {
+    const { bookId, referenceId } = props ?? {};
+
+    return forgetDigitalReference(bookId, referenceId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ForgetDigitalReferenceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof forgetDigitalReference>>
+>;
+
+export type ForgetDigitalReferenceMutationError = HTTPValidationError;
+export type ForgetDigitalReferenceMutationVariables = {
+  bookId: number;
+  referenceId: number;
+};
+
+/**
+ * @summary Forget Digital Reference
+ */
+export const useForgetDigitalReference = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof forgetDigitalReference>>,
+      TError,
+      ForgetDigitalReferenceMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof forgetDigitalReference>>,
+  TError,
+  ForgetDigitalReferenceMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getForgetDigitalReferenceMutationOptions(options),
+    queryClient,
+  );
+};
+export const getReportDigitalReferenceMissingUrl = (
+  bookId: number,
+  referenceId: number,
+) => {
+  return `/api/books/${bookId}/digital-references/${referenceId}/missing`;
+};
+
+/**
+ * A client reporting that it looked and the file was not there.
+ *
+ * **The row is flagged and never deleted**, and that refusal is the whole
+ * route. A phone that cannot reach the NAS reports every file on the NAS
+ * missing and is telling the truth about what it can see; acting on it would
+ * let one browser with a drive unplugged erase the household's record of where
+ * its library is. The flag is for a person to read.
+ *
+ * **The timestamp does not move on a second report**, because the column
+ * records when this was *first* said. A client re-checking hourly would
+ * otherwise keep resetting the age of the problem to nothing.
+ *
+ * Reversed by an ordinary sighting: something looked and found it.
+ * @summary Report Digital Reference Missing
+ */
+export const reportDigitalReferenceMissing = async (
+  bookId: number,
+  referenceId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<DigitalReferenceOut> => {
+  return customFetch<DigitalReferenceOut>(
+    getReportDigitalReferenceMissingUrl(bookId, referenceId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getReportDigitalReferenceMissingMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof reportDigitalReferenceMissing>>,
+    TError,
+    ReportDigitalReferenceMissingMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof reportDigitalReferenceMissing>>,
+  TError,
+  ReportDigitalReferenceMissingMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["reportDigitalReferenceMissing"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof reportDigitalReferenceMissing>>,
+    ReportDigitalReferenceMissingMutationVariables
+  > = (props) => {
+    const { bookId, referenceId } = props ?? {};
+
+    return reportDigitalReferenceMissing(bookId, referenceId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReportDigitalReferenceMissingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof reportDigitalReferenceMissing>>
+>;
+
+export type ReportDigitalReferenceMissingMutationError = HTTPValidationError;
+export type ReportDigitalReferenceMissingMutationVariables = {
+  bookId: number;
+  referenceId: number;
+};
+
+/**
+ * @summary Report Digital Reference Missing
+ */
+export const useReportDigitalReferenceMissing = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof reportDigitalReferenceMissing>>,
+      TError,
+      ReportDigitalReferenceMissingMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof reportDigitalReferenceMissing>>,
+  TError,
+  ReportDigitalReferenceMissingMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getReportDigitalReferenceMissingMutationOptions(options),
+    queryClient,
+  );
 };
 export const getSetDiscussUrl = (bookId: number) => {
   return `/api/books/${bookId}/discuss`;

@@ -989,6 +989,15 @@ class Book(Base):
         cascade="all, delete-orphan",
         order_by="CustomFieldValue.field_id",
     )
+    # Cascaded like the notes and the quotes: a purged book's file references
+    # point at a book nobody holds. Ordered by id, which is insertion order, so
+    # a book referenced from two machines reads the same way twice.
+    digital_references: Mapped[list[DigitalReference]] = relationship(
+        "DigitalReference",
+        back_populates="book",
+        cascade="all, delete-orphan",
+        order_by="DigitalReference.id",
+    )
 
     @validates("cover_url")
     def _store_covers_over_https(self, _key: str, url: str | None) -> str | None:
@@ -1493,6 +1502,266 @@ class Quote(Base):
 
     book: Mapped[Book] = relationship("Book", back_populates="quotes")
     author: Mapped[User] = relationship("User")
+
+
+#: How wide either half of a digital reference's path may be.
+#:
+#: **Derived from the filesystem rather than chosen.** `getconf PATH_MAX /` on
+#: this host answers 4096 and `getconf NAME_MAX /` answers 255. PATH_MAX counts
+#: the terminating NUL, so 4095 characters are usable, and a root and the path
+#: beneath it are joined by one separator: 4094 for the pair.
+#:
+#: One constant for both column widths **and** for the CHECK that bounds their
+#: sum, so **the column is never the binding constraint**: the inequality on the
+#: pair is what refuses a value, and anything it admits always fits the column
+#: it lands in. Each half can therefore reach 4093, one short of the budget,
+#: because the other half is at least one character. There is no second literal
+#: to keep in step.
+#: `tests/test_models.py::TestThePathBoundIsDerivedFromTheFilesystem` recomputes
+#: it through `os.pathconf` rather than restating the number.
+#:
+#: **A ceiling, not an equivalence, and the direction matters.** SQLite's
+#: `length()` counts characters where PATH_MAX counts bytes, so a 4094 character
+#: path of non-ASCII names is past the real limit and this still accepts it.
+#: That is the harmless direction: this bound exists to refuse an unbounded
+#: write, and the machine that actually holds the file refuses the rest at open
+#: time. This server never opens it.
+DIGITAL_REFERENCE_PATH_MAX = 4094
+
+#: The largest file size a browser can report here without having already lost it.
+#:
+#: `File.size` is a JavaScript number and arrives as a JSON number, so anything
+#: above `Number.MAX_SAFE_INTEGER` was rounded before it was sent and is not the
+#: size of any file. Bounded at the producer's limit rather than at SQLite's,
+#: which is 2**63 and would store the rounded value as though it meant something.
+DIGITAL_REFERENCE_MAX_SIZE = 2**53 - 1
+
+
+class DigitalReference(Base):
+    """Where a Member says one of their book files is. **Never the file.**
+
+    Endpaper takes no custody of a Member's book file. No bytes reach this
+    server on this path, so nothing in a row here was read, opened or checked:
+    every row is one browser's account of what it found.
+
+    **The server cannot verify any of it**, and that is a property of the design
+    rather than a gap in it. It cannot see the file, so it cannot notice the
+    file has moved, cannot re-read it, and cannot tell a real path from a typed
+    one. `confirmed_at` is therefore the weakest sentence that is actually true:
+    the last time this server was **told**, never the last time anybody looked.
+    Anything stronger would be a freshness this application does not have,
+    written into a column where it would read as fact.
+
+    **A Member's own browser is not a trusted producer.** "It is our client" is
+    the argument that would otherwise be made here, and it is wrong for the same
+    reason it is wrong about a catalogue record: what arrives is a payload, the
+    sender is whoever holds a session, and the bound applies at the schema and
+    again at the column. `ck_digital_references_bounds` is that second half,
+    because `backup.restore` inserts through Core and sees no Pydantic model,
+    exactly as `ck_quotes_text_bounds` does.
+
+    **Its own table rather than columns on `books`, decided rather than
+    discovered.** Koha met this first and paid for it: MARC 856 is repeatable,
+    its `biblioitems.url` is one column, and the repeat has nowhere to go. The
+    case that turns a column into a table is the same book at two paths on two
+    machines, which is the ordinary household case here, so it is a table now
+    instead of a migration later.
+
+    **Book owned, with no Member of its own.** A reference is an ordinary field
+    on a Book and its visibility is the Book's entirely, so there is no
+    `added_by_user_id`. It would be provenance no query consults, and
+    `tests/test_shelf.py` records that a column of exactly that shape has
+    dropped a table out of the privacy guard before. This table is named in
+    `BOOK_OWNED_TABLES` there, which is what puts every read of it in front of a
+    person.
+
+    Deliberately absent, each because something already answers it:
+
+    * **A format or media type.** `relative_path`'s suffix carries it and
+      `books.format` says what kind of object the row is. Two facts, not three.
+    * **Link text, and MARC 856's second indicator** (the resource, or a version
+      of it). Both are facts about a URL to an online resource, which is
+      different work. A local file's label is its path, and which row carries
+      the reference already states the relationship, because `books.format` is
+      per row.
+    * **Anything naming how the file was reached.** A File System Access handle
+      lives in one browser's IndexedDB and cannot be stored here at all;
+      measured 2026-09-10, that API has no call site anywhere in this
+      repository. Whether a re-check is possible is a property of the browser
+      doing it at the moment it does it, not of this row. `root_confirmed` is
+      the part that **is** a property of the row, and it is a boolean because
+      the row has two answers to give: the structure beneath the root was
+      corroborated, or it was not. **If a third ever arrives this becomes a
+      migration**, and that is the trade rather than an argument against one:
+      an enum naming browser gestures would have shipped a member no code
+      writes, for a change nobody has scheduled.
+    """
+
+    __tablename__ = "digital_references"
+
+    __table_args__ = (
+        # One reference per file per book, and the identity is where the file
+        # is rather than a row id. That is what makes re-importing a folder
+        # somebody imported last month refresh the rows instead of doubling
+        # them, which is the mess this feature would otherwise create at the
+        # scale it runs at: a folder pick is hundreds of files at once.
+        #
+        # `book_id` therefore carries no `index=True` of its own, for the reason
+        # `quotes.book_id` does not: a composite leading with the same column
+        # serves every lookup a standalone one would, and shipping both writes a
+        # second B-tree on every insert for nothing.
+        Index(
+            "uq_digital_references_location",
+            "book_id",
+            "root_label",
+            "relative_path",
+            unique=True,
+        ),
+        # The bound repeated where a restore can reach it. `backup.restore`
+        # inserts through Core, so no Pydantic model and no `@validates` fires
+        # and an archive would otherwise decide these widths.
+        #
+        # **This copy is a description; the migration is what installs it.**
+        # `main.py` runs `init_db()` at import and Alembic owns the schema, so
+        # nothing anywhere, the suite included, ever builds a table from this
+        # expression. Editing it alone changes no behaviour and fails no test
+        # except the one written to notice: measured 2026-09-10, a constant
+        # false expression here failed nothing.
+        # `tests/test_schema.py::TestTheMigratedDatabaseCarriesTheBoundsItPromises`
+        # is what holds the two copies together, and the revision is the one to
+        # change if you are changing a bound.
+        #
+        # **The pair, not each column.** Either half may spend the whole path
+        # budget; what cannot happen is a root and a path that together name
+        # something no filesystem could open. See `DIGITAL_REFERENCE_PATH_MAX`.
+        #
+        # **The byte arm is what makes the character arm a bound at all, and
+        # without it this constraint does not bind on the one path it exists
+        # for.** SQLite's `length()` on text counts characters **up to the first
+        # NUL**. Measured 2026-09-10: a value of `"a\x00" + "x" * 10000`
+        # inserted through Core reports `length()` of 1 and stores 10,002 bytes,
+        # so the character inequality passes on a value nothing bounded.
+        # Pydantic refuses a NUL, and Pydantic is exactly what a restore does
+        # not run.
+        #
+        # **It refuses exactly one class the character arm admits, and that
+        # class is the point**: a value carrying a NUL. Said the other way round
+        # it would argue this arm is redundant, two lines under the sentence
+        # explaining why it is not. What it never refuses is a **NUL free**
+        # value the character arm admits, and that is tight rather than merely
+        # safe: four bytes is UTF-8's widest character, so the widest legitimate
+        # pair is four times the character budget and lands exactly on this
+        # bound.
+        #
+        # `file_modified_at` is deliberately not here, and that is a decision
+        # rather than an omission: it arrives typed as a datetime, and the worst
+        # a restored absurd value does is display a wrong date. The columns above
+        # are the ones where an unchecked value is an unbounded write or a
+        # number that means nothing.
+        CheckConstraint(
+            "length(root_label) >= 1 "
+            "AND length(relative_path) >= 1 "
+            f"AND length(root_label) + length(relative_path) <= {DIGITAL_REFERENCE_PATH_MAX} "
+            "AND length(CAST(root_label AS BLOB)) + length(CAST(relative_path AS BLOB)) "
+            f"<= {4 * DIGITAL_REFERENCE_PATH_MAX} "
+            "AND (size_bytes IS NULL OR (size_bytes >= 0 "
+            f"AND size_bytes <= {DIGITAL_REFERENCE_MAX_SIZE}))",
+            name="ck_digital_references_bounds",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # No `index=True`: `uq_digital_references_location` leads with this column.
+    book_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("books.id"), nullable=False
+    )
+
+    # ── What the client said ─────────────────────────────────────────────
+    #
+    # The server checked none of these. They are grouped because the grouping
+    # is the point: everything below this line is a claim, and everything under
+    # the next heading is this server's own clock. **Deliberately no count
+    # here**: this file has already spent five review rounds correcting a
+    # stated "exactly N", and the members of a group are the group.
+
+    #: What the Member calls the place the file lives under: "NAS books", or a
+    #: path they pasted. **The server never resolves it**, and it is not
+    #: required to be a path at all. A browser file picker cannot hand over a
+    #: real filesystem path, so this is whatever the Member confirmed and its
+    #: only reader is a person.
+    root_label: Mapped[str] = mapped_column(
+        String(DIGITAL_REFERENCE_PATH_MAX), nullable=False
+    )
+
+    #: The file beneath that root.
+    #:
+    #: **The picked directory's own name belongs to `root_label`, not here**,
+    #: and the contract says so because nothing here can enforce it. A browser's
+    #: `webkitRelativePath` leads with that name, so a client sending it whole
+    #: and a client stripping it produce two rows for one file under
+    #: `uq_digital_references_location`, which is the doubling this table's
+    #: identity exists to prevent. Both spellings are already in this project's
+    #: own frontend. The rule is settled the way every other two-homes question
+    #: here is: the root's name is in `root_label`, so repeating it as the first
+    #: segment would be the same fact stored twice.
+    relative_path: Mapped[str] = mapped_column(
+        String(DIGITAL_REFERENCE_PATH_MAX), nullable=False
+    )
+
+    #: Whether a browser corroborated the structure beneath the root, or the
+    #: Member supplied all of it.
+    #:
+    #: **This is the column that says which promise the row makes.** True means
+    #: a directory was picked and `webkitRelativePath` gave the path under it,
+    #: so going and looking is a thing somebody can do. False means the browser
+    #: gave a bare filename, the root is the Member's own guess, and the two
+    #: together may name nothing. Without it the two records are identical on
+    #: disk and nothing can tell a locatable file from a note to self.
+    root_confirmed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+
+    #: `File.size` as last reported, or null while nobody has said.
+    #: Half of the fingerprint a re-check compares against.
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    #: `File.lastModified` as last reported. The other half, and the half that
+    #: moves when somebody edits the file's metadata in place.
+    file_modified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # ── What this server knows ───────────────────────────────────────────
+    #
+    # Three columns, all of them this server's own clock, none of them a
+    # statement about the file.
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    #: When this server last received a report that the file was there.
+    #:
+    #: **Not "last seen", and the difference is the whole of this table's
+    #: honesty.** The server knows when it was told. It does not know that a
+    #: browser looked, that the browser looking was the one that can see this
+    #: root, or that what it found was this file. A name promising freshness
+    #: would be believed by every reader after it, which is how a reference that
+    #: cannot be re-checked becomes a claim that rots.
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
+
+    #: When this server first received a report that the file did not resolve,
+    #: or null while nothing has said so. Cleared by the next report that finds
+    #: it.
+    #:
+    #: **A flag a person reads, never a state the app acts on, and the row is
+    #: never deleted for it.** A phone that cannot reach the NAS reports every
+    #: file on the NAS missing, and it is telling the truth about what it can
+    #: see. Acting on that would let one browser with a drive unplugged erase
+    #: the household's record of where its library is. Koha reached the same
+    #: answer from the other end: its URL sweep produces a report a cataloguer
+    #: acts on and puts no freshness column on the record at all.
+    missing_since: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    book: Mapped[Book] = relationship("Book", back_populates="digital_references")
 
 
 #: A classification number, as text. `005.133` and `QA76.73.P98 V53 2021` are

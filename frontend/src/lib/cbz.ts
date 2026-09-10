@@ -88,8 +88,8 @@ import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
 import {
   declaresEntities,
-  type OpfIdentifier,
-  type OpfRecord,
+  type FileIdentifier,
+  type FileMetadata,
 } from "./fileReaders";
 import { openZip, ZipError, zipFailureAs, type ZipArchive } from "./zip";
 
@@ -144,7 +144,7 @@ export type CbzFailure =
   | "no-inflate";
 
 export type CbzReading =
-  | { readonly ok: true; readonly metadata: OpfRecord }
+  | { readonly ok: true; readonly metadata: FileMetadata }
   | { readonly ok: false; readonly failure: CbzFailure };
 
 const utf8 = new TextDecoder("utf-8");
@@ -152,13 +152,12 @@ const utf8 = new TextDecoder("utf-8");
 /**
  * What an archive with no readable `ComicInfo.xml` says, which is nothing.
  *
- * A function rather than a shared constant: `OpfRecord` is readonly to a
+ * A function rather than a shared constant: `FileMetadata` is readonly to a
  * caller and its two arrays are still one object, so a module level literal
  * would hand every reading of every file the same two arrays.
  */
-function nothing(): OpfRecord {
+function nothing(): FileMetadata {
   return {
-    version: null,
     title: null,
     subtitle: null,
     authors: [],
@@ -294,7 +293,7 @@ function readTitle(
  * node exists to bound. A comic's metadata has no use for a DTD internal
  * subset.
  */
-export function readComicInfo(xml: string): OpfRecord | null {
+export function readComicInfo(xml: string): FileMetadata | null {
   if (declaresEntities(xml)) return null;
   const document = new DOMParser().parseFromString(xml, "application/xml");
   // Both halves are needed. A parse error yields a document whose root is
@@ -311,14 +310,10 @@ export function readComicInfo(xml: string): OpfRecord | null {
   // whose own check digit does not close is not an ISBN however it was
   // labelled, so nothing here has to know the difference.
   const gtin = field(root, "GTIN");
-  const identifiers: OpfIdentifier[] =
+  const identifiers: FileIdentifier[] =
     gtin === null ? [] : [{ scheme: "GTIN", value: gtin }];
 
   return {
-    // The `package` element's version, which a ComicInfo has no counterpart
-    // for. Left null rather than filled with the schema's own version, which
-    // would be a different fact under the same name.
-    version: null,
     title: readTitle(series, number, field(root, "Title")),
     // ComicInfo has no subtitle, and `Title` is the title rather than one: see
     // this module's docstring for why that took two attempts to get right.

@@ -32,14 +32,14 @@
  *
  * A subtitle. FB2's `title-info` has one title element and no notion of a
  * second, so `subtitle` is always `null` here and nothing guesses one out of the
- * title. Page count, and a format's own `version`, for the reason `mobi.ts`
- * gives: there is no package document, so there is no package version.
+ * title. A page count: none of `title-info`, `document-info` or `publish-info`
+ * has a field for one, and an FB2 body is a flow with no pagination in it.
  * Everything else in the minimum field set arrives: title, authors as separate
  * values, ISBN, series and index, publisher, year, language and description.
  *
  * **`<genre>` is read by nothing here, and that is a destination problem rather
  * than a reading one**, which is the sentence `mobi.ts` writes about the EXTH
- * subject: `OpfRecord` has no tags and the scan page's draft sends none, so
+ * subject: `FileMetadata` has no tags and the scan page's draft sends none, so
  * there is nowhere to put it. It is carried by every file in the corpus, 35
  * elements across 18, as `lang` is, so it is the one exclusion here worth
  * revisiting when a draft can carry a tag.
@@ -52,8 +52,8 @@ import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
 import {
   declaresEntities,
-  type OpfIdentifier,
-  type OpfRecord,
+  type FileIdentifier,
+  type FileMetadata,
 } from "./fileReaders";
 import { openZip, ZipError, zipFailureAs } from "./zip";
 
@@ -136,7 +136,7 @@ export type Fb2Failure =
   | "no-inflate";
 
 export type Fb2Reading =
-  | { readonly ok: true; readonly metadata: OpfRecord }
+  | { readonly ok: true; readonly metadata: FileMetadata }
   | { readonly ok: false; readonly failure: Fb2Failure };
 
 /**
@@ -279,7 +279,7 @@ function headerDocument(xml: string): string | null {
  * **FB2 separates the parts and this is the only place they are joined.** The
  * element carries `first-name`, `middle-name` and `last-name` as elements, which
  * is better than the display string every other format in this set supplies, and
- * `OpfRecord.authors` is a list of people rather than one line, so the joining
+ * `FileMetadata.authors` is a list of people rather than one line, so the joining
  * that happens here is within one person and never between two.
  *
  * **An author with no name at all but a nickname is a real file**, not a
@@ -450,7 +450,7 @@ function yearIn(raw: string | null): number | null {
  * Everything goes through `parseIsbn`, so `Тут пишем ISBN код книги, если есть`,
  * which is what one file in the corpus has in that element, is not an ISBN.
  */
-function readIdentifiers(publishInfo: Element | null): OpfIdentifier[] {
+function readIdentifiers(publishInfo: Element | null): FileIdentifier[] {
   const raw = text(firstNamed(publishInfo, "isbn"));
   if (raw === null) return [];
   return raw
@@ -472,7 +472,7 @@ function readIdentifiers(publishInfo: Element | null): OpfIdentifier[] {
  * reader taking whichever came first would file a Russian translation of Gaiman
  * under its English title for some files and its Russian title for others.
  */
-export function readFb2Description(xml: string): OpfRecord | null {
+export function readFb2Description(xml: string): FileMetadata | null {
   // The entity refusal `fileReaders.declaresEntities` states, applied for the
   // same reason and with its own count: expansion happens inside the engine
   // before any code here runs, so a byte cap on the read does not reach it.
@@ -498,10 +498,6 @@ export function readFb2Description(xml: string): OpfRecord | null {
   const { seriesName, seriesIndex } = readSeries(titleInfo);
 
   return {
-    // No package document, so no package version. Null rather than the
-    // FictionBook namespace's own 2.0 or 2.1, which is a different fact under
-    // a name that already means something else.
-    version: null,
     title: text(firstNamed(titleInfo, "book-title")),
     // FB2 has no second title element. See this module's docstring.
     subtitle: null,
@@ -517,7 +513,7 @@ export function readFb2Description(xml: string): OpfRecord | null {
   };
 }
 
-function firstIsbn(identifiers: readonly OpfIdentifier[]): string | null {
+function firstIsbn(identifiers: readonly FileIdentifier[]): string | null {
   for (const identifier of identifiers) {
     const isbn = parseIsbn(identifier.value);
     if (isbn !== null) return isbn;

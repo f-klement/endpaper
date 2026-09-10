@@ -43,8 +43,8 @@
  * The engine is
  * `assets/sql-wasm-browser-*.wasm` at 658.41 kB raw and **326.00 kB gzipped**,
  * this module's own chunk is 41.10 kB raw and 14.67 gzipped, and `calibre.ts`
- * is 5.42 kB raw and 2.10 gzipped: 342.77 kB gzipped for the route, against a
- * main chunk of 334.67 kB gzipped that carries none of it.
+ * is 5.68 kB raw and 2.20 gzipped: 342.87 kB gzipped for the route, against a
+ * main chunk of 340.08 kB gzipped that carries none of it.
  *
  * **Every figure here is from one build and the two small ones move with any
  * code edit**, by hundredths of a kilobyte. Requote them from a build rather

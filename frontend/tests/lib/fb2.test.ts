@@ -63,7 +63,6 @@ function read(xml: string) {
 describe("reading a FictionBook's description", () => {
   it("yields every field the file carried", () => {
     expect(read(ORDINARY)).toEqual({
-      version: null,
       title: "Назад в юность",
       subtitle: null,
       authors: ["Александр Юрьевич Санфиров"],

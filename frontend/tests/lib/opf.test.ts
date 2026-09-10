@@ -402,11 +402,6 @@ describe("the rest of the record", () => {
     ]);
   });
 
-  it("reports the package version, which is how a reader knows which half it read", () => {
-    expect(readOpf(epub2(`<dc:title>Alice</dc:title>`))?.version).toBe("2.0");
-    expect(readOpf(epub3(`<dc:title>Alice</dc:title>`))?.version).toBe("3.0");
-  });
-
   it("reads a Dublin Core element that inherited the wrong namespace", () => {
     // A bare <title> under a default OPF namespace is in the OPF namespace,
     // not the Dublin Core one. Refusing it would lose a whole record over a

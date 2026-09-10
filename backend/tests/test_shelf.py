@@ -131,8 +131,15 @@ caught would prove nothing about the new one. What is *still* not caught:
   with no predicate. Not caught by passes 1 to 3, and **the reason is a cost,
   measured**: `Book` in a narrowing clause is **14 statements across 5 modules**
   outside `shelf.py` and off a shelf-rooted chain, and **22 across 9** counting
-  those, against the **7 across 3** the fourth pass carries. Extending the
+  those, against the **15 across 4** the fourth pass carries. Extending the
   clause rule to `Book` means classifying every one of them by hand.
+
+  That last pair said **7 across 3** until 2026-09-10 and both halves were
+  wrong: an `ast` walk over `BOOK_OWNED_READERS` answered 10 across 4 before a
+  table was added to the guard and 15 across 4 after, and the module count had
+  never been 3. It is the entries that are compared, because every one of them
+  is a statement somebody classified by hand, which is the cost the two figures
+  in front of it are measuring.
 
   That number replaces an example, and the example was wrong. This bullet used
   to name `routers/stats.py`'s `join(User, Book.added_by_user_id == User.id)`
@@ -310,7 +317,7 @@ def _children_of_books(metadata: MetaData) -> set[str]:
 
 #: Every child of `books`, pinned rather than only derived.
 #:
-#: **The pin is the guard.** A ninth child added tomorrow fails
+#: **The pin is the guard.** The next child added fails
 #: `test_every_child_of_books_is_classified` until somebody says which half of
 #: `BOOK_OWNED_TABLES` it belongs to, so a new table cannot default to
 #: unguarded. That is the whole reason this constant exists beside a
@@ -320,6 +327,7 @@ BOOK_CHILDREN = frozenset(
         "book_tags",
         "classifications",
         "custom_field_values",
+        "digital_references",
         "loans",
         "notes",
         "quotes",
@@ -351,7 +359,14 @@ BOOK_CHILDREN = frozenset(
 #: member on every row and their own ownership rule: `reading.py` owns
 #: `user_books` and `reading_progress` the same way this module owns `books`,
 #: and the routers own the rest per row.
-BOOK_OWNED_TABLES = frozenset({"book_tags", "classifications", "custom_field_values"})
+#: `digital_references` is the fourth and it was classified by hand like the
+#: rest. It carries no `added_by_user_id` **on purpose**: a column of that shape
+#: is exactly the counter-example above, so a reference that is a claim about a
+#: household's shelf would have looked, to a computed rule, like a row scoped to
+#: the Member who filed it. Its privacy is the Book's entirely.
+BOOK_OWNED_TABLES = frozenset(
+    {"book_tags", "classifications", "custom_field_values", "digital_references"}
+)
 
 
 def _book_owned_entities() -> tuple[frozenset[str], frozenset[str]]:
@@ -437,21 +452,29 @@ BOOK_OWNED, UNNAMEABLE_BOOK_OWNED = _book_owned_entities()
 # A **new correct caller does not pass on its merits.** Writing a perfectly
 # scoped index over `classifications` turns this build red and you have to come
 # here. That is the trade: correctness of these statements is a human judgement
-# recorded once, rather than a property re-derived on every run. Two of the ten
+# recorded once, rather than a property re-derived on every run. Some entries
 # below are correct, carefully written queries that the rule reports anyway,
-# and they are on the list for exactly that reason. (This sentence said
-# **three** for one review round, while four other places said two. Both
-# critics counted the markers. Fifth time this file has hit its own rule that a
-# claim of "exactly N" gets counted, and the fourth time the correction was
-# noted while the wrong number was left standing above it.)
+# and they are on the list for exactly that reason. **They say so at their own
+# line**, carrying the marker `Correct, and reported anyway`, so which ones
+# they are is a grep and not a sentence up here, and that grep matches this
+# paragraph too, which is what naming a marker costs. **Keep that marker on one
+# line** in any entry that carries it: a copy split across a string
+# concatenation is invisible to the grep this paragraph promises, which is what
+# the first version of this replacement did to one of the two.
+#
+# There was a count in this paragraph and it was wrong five times: three for
+# one review round while four other places said two, each correction noting the
+# error and leaving the wrong number standing above it. The sixth reader
+# deleted the number instead, which is the only version of this that cannot go
+# stale, and it went stale again the moment a table was added to the guard.
 #
 # **It can also report plain Python**, and this is the case most likely to look
 # like a bug rather than a rule. Six ordinary method names collide with
 # SQLAlchemy's: `count`, `get`, `join`, `union`, `update` and `values`. So
 # `'; '.join(c.number for c in rows)` and `d.get(Classification.number)` are
 # both reported if they name a guarded entity, because nothing here knows what
-# the receiver is. There are none in the tree today, which is why the count is
-# exactly ten and all ten are real queries, and `_entity_aliases` not following
+# the receiver is. There are none in the tree today, which is why every entry
+# below is a real query, and `_entity_aliases` not following
 # `book = Book(...)` is what keeps it that way. If you have met one: it is not
 # a bug, the answer is the same as for any other entry, and a reason saying
 # "this is a string join, not a query" is a perfectly good one.
@@ -487,7 +510,7 @@ BOOK_OWNED, UNNAMEABLE_BOOK_OWNED = _book_owned_entities()
 # and moving a statement means moving its entry. **Pick a fragment that is
 # distinctive within the module**: the check is positional, so it cannot tell
 # two adjacent statements apart if both contain the fragment. `.one_or_none()`
-# is the weakest of the ten on that count and would need replacing if a second
+# is the weakest of them on that count and would need replacing if a second
 # statement in `custom_fields.py` grew one. Without that check the reasons
 # were a list beside a list, lined up by counting and verified by nothing,
 # which under this rule is the one fact stored twice with no enforcement left:
@@ -573,13 +596,52 @@ BOOK_OWNED_READERS = {
             "moves the losing Books' classifications onto the keeper during a "
             "merge, keyed on ids the route resolved.",
         ),
+        (
+            "DigitalReference.book_id.in_(loser_ids)",
+            "moves the losing Books' file references onto the keeper in the "
+            "same merge, keyed on the same ids the same route resolved. A "
+            "write, and the rows it does not move it deletes.",
+        ),
+        (
+            "DigitalReference.id == reference_id",
+            "reads one reference so the route can flag or forget it. Narrowed "
+            "to a `Book` the dependency resolved **as well as** to the id, and "
+            "the pairing is the point: without it a reference id belonging to "
+            "another Book would be reachable through a Book the caller does "
+            "hold.",
+        ),
+        (
+            "return ( db.query(DigitalReference)",
+            "reads one Book's references for the route that lists them. Takes "
+            "a `Book` object and never an id, so `dependencies.book_for_read` "
+            "has already applied the privacy rule; the same argument "
+            "`custom_fields.py` makes twice above.",
+        ),
+        (
+            "DigitalReference.relative_path == payload.relative_path",
+            "looks up the reference at the location a client has just reported, "
+            "to decide whether that is a refresh or a new row. Narrowed to a "
+            "`Book` the dependency resolved; the two payload values narrow it "
+            "further and neither of them can widen it.",
+        ),
+        (
+            "func.count(DigitalReference.id)",
+            "counts one Book's references against the per book ceiling. "
+            "Publishes no rows and no values, only how many that Book holds, "
+            "and the Book is one the dependency resolved.",
+        ),
     ],
     "routers/stats.py": [
         (
             "Book.id == book_tags.c.book_id",
             "Tag counts for the statistics page, written through "
-            "`Shelf.select()` and joined to `books`. **Correct, and reported "
-            "anyway**, for the same reason as the Tag index above and verified "
+            "`Shelf.select()` and joined to `books`. "
+            # Kept on one line. The paragraph above points a grep at this
+            # marker, and a copy split across a concatenation is invisible to
+            # one: measured, the split cost this entry its line and the grep
+            # answered one where the answer is two.
+            "**Correct, and reported anyway**"
+            ", for the same reason as the Tag index above and verified "
             "the same way.",
         ),
     ],
@@ -2124,9 +2186,14 @@ class TestTheShelfIsTheOnlyWayIn:
         )
 
     def test_the_book_owned_set_is_the_entities_those_tables_map_to(self):
-        """The three the docstrings name, measured rather than asserted in
+        """The entities the docstrings name, measured rather than asserted in
         prose."""
-        assert set(BOOK_OWNED) == {"Classification", "CustomFieldValue", "book_tags"}, (
+        assert set(BOOK_OWNED) == {
+            "Classification",
+            "CustomFieldValue",
+            "DigitalReference",
+            "book_tags",
+        }, (
             "The guarded entities no longer match BOOK_OWNED_TABLES. If a table "
             "was renamed, rename it there; do not update this constant to make "
             "the test green, because that is how a table leaves the guard."

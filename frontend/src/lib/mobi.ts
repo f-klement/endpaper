@@ -62,7 +62,7 @@
 
 import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
-import type { OpfIdentifier, OpfRecord } from "./fileReaders";
+import type { FileIdentifier, FileMetadata } from "./fileReaders";
 
 /**
  * Why a file yielded nothing.
@@ -83,7 +83,7 @@ export type MobiFailure =
   | "protected";
 
 export type MobiReading =
-  | { readonly ok: true; readonly metadata: OpfRecord }
+  | { readonly ok: true; readonly metadata: FileMetadata }
   | { readonly ok: false; readonly failure: MobiFailure };
 
 /** The fixed Palm Database header, ahead of the record offset table. */
@@ -220,7 +220,7 @@ const EXTH_RECORD_HEADER_BYTES = 8;
  *   those 9. Neither is the author, and a reader taking it for one would file
  *   six books under the same typesetter.
  * * **105, the subject.** 62 of 69 carry it, usually several records. There is
- *   nowhere for it to go: `OpfRecord` has no tags and the scan page's draft
+ *   nowhere for it to go: `FileMetadata` has no tags and the scan page's draft
  *   sends none.
  */
 const AUTHOR = 100;
@@ -391,7 +391,7 @@ function text(
  * test that pins this apart from an ends only strip passes `A\0B` and expects
  * `AB`; the padded cases every real file has cannot tell the two apart.
  *
- * **An empty record answers `null` and never `""`.** `OpfRecord` says every
+ * **An empty record answers `null` and never `""`.** `FileMetadata` says every
  * field is absent rather than empty, and a caller reading `record.title` to
  * decide whether the file named one would take `""` for a title. The reader
  * that produced it is what has to hold that up.
@@ -494,7 +494,7 @@ function readIsbn(exth: ExthRecords, decode: TextDecoder): string | null {
 function readIdentifiers(
   exth: ExthRecords,
   decode: TextDecoder,
-): OpfIdentifier[] {
+): FileIdentifier[] {
   const isbn = text(exth, ISBN, decode);
   return isbn === null ? [] : [{ scheme: "ISBN", value: isbn }];
 }
@@ -586,10 +586,6 @@ export async function readMobi(file: Blob): Promise<MobiReading> {
   return {
     ok: true,
     metadata: {
-      // The `package` element's version, which a file with no package document
-      // does not have. Null rather than the MOBI header's own version number,
-      // which is a different fact under the same word.
-      version: null,
       title: readTitle(record, exth, decode),
       subtitle: null,
       authors: readAuthors(exth, decode),

@@ -458,8 +458,4 @@ describe("the document itself", () => {
     expect(record?.seriesName).toBe("Saga");
     expect(record?.authors).toEqual([]);
   });
-
-  it("reports no version, because a ComicInfo has none to report", () => {
-    expect(readComicInfo(WHOLE)?.version).toBeNull();
-  });
 });

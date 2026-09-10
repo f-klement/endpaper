@@ -6,6 +6,7 @@ behaviour under test belongs to the schema.
 
 import ast
 import itertools
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 
 import credentials
 import filing
+import models
 from database import Base
 from enums import (
     AuthorityProvenance,
@@ -1744,3 +1746,223 @@ class TestANoteReadIsNarrowedToItsReader:
         )
         assert _reads_and_returns_a_note(outer, _note_aliases(tree))
         assert not _narrows_to_its_reader(outer, _note_aliases(tree))
+
+
+class TestThePathBoundIsDerivedFromTheFilesystem:
+    """`DIGITAL_REFERENCE_PATH_MAX` and `DIGITAL_REFERENCE_MAX_SIZE`, recomputed.
+
+    **Both are derivations rather than choices**, and a test that restated
+    either number would be the same number stored twice with nothing checking
+    it. Each one below is recomputed from its own source: the first from this
+    host's own `pathconf`, the second from the arithmetic that makes a
+    JavaScript integer safe.
+    """
+
+    def test_the_path_ceiling_is_path_max_less_one_separator(self):
+        """A root and the path beneath it, joined, have to be an openable path.
+
+        `PATH_MAX` counts the terminating NUL, so one fewer character is
+        usable, and one more goes on the separator between the two halves.
+        """
+        path_max = os.pathconf("/", "PC_PATH_MAX")
+        derived = path_max - 2
+        assert derived == models.DIGITAL_REFERENCE_PATH_MAX
+
+    def test_both_path_columns_are_as_wide_as_the_pair_is_allowed_to_be(self):
+        """So the column never refuses what the CHECK admits, which is what
+        leaves the inequality on the pair as the only thing that binds. Read off
+        the table rather than restated."""
+        table = Base.metadata.tables["digital_references"]
+        for name in ("root_label", "relative_path"):
+            kind = table.c[name].type
+            assert isinstance(kind, String)
+            assert kind.length == models.DIGITAL_REFERENCE_PATH_MAX
+
+    def test_the_size_ceiling_is_the_largest_integer_a_browser_can_send(self):
+        """`File.size` arrives as a JSON number, so the bound is the largest
+        integer that survives being one.
+
+        The property, not the literal: `N` and `N + 1` are both exactly
+        representable as doubles, and that stops being true at `N + 1`.
+        """
+        ceiling = models.DIGITAL_REFERENCE_MAX_SIZE
+        assert int(float(ceiling)) == ceiling
+        assert int(float(ceiling + 1)) == ceiling + 1
+        assert int(float(ceiling + 2)) != ceiling + 2
+
+
+class TestTheColumnRefusesWhatTheSchemaWouldHaveRefused:
+    """`ck_digital_references_bounds`, exercised through Core.
+
+    **This is the layer `backup.restore` reaches and Pydantic does not.** A
+    restore inserts through Core, so `DigitalReferenceIn` never runs and the
+    archive would otherwise decide these widths.
+
+    **The constraint under test is the migration's, not the model's**, and that
+    is worth knowing before reading a failure here. `main.py` runs `init_db()`
+    at import and its comment says Alembic owns the schema "including creating
+    it from nothing"; `conftest` imports `main`, so every table exists before
+    `_schema_once` calls `create_all` and that call changes nothing. Editing
+    only `models.py`'s `CheckConstraint` therefore fails nothing anywhere,
+    measured three ways on 2026-09-10. What holds the two copies together is
+    `tests/test_schema.py::TestTheMigratedDatabaseCarriesTheBoundsItPromises`.
+
+    **The paragraph above is prose, which is the weakest rung**, so this class
+    asserts it instead: see `test_these_cases_are_answered_by_a_migrated_schema`.
+    Copied from `TestTheBorrowerRuleHasOneSpelling`, which got here first and
+    already states the trap in the same words.
+    """
+
+    def test_these_cases_are_answered_by_a_migrated_schema(self, db):
+        """Which of the two schemas every case below is answered by.
+
+        `create_all` takes `checkfirst`, so whichever ran first owns the table
+        and the other is silently a no op. A stamped `alembic_version` says the
+        migrations ran, and therefore that the constraint these cases exercise
+        is the one a deployment carries. Were the import order ever to change,
+        every case below would still pass and would quietly be comparing the
+        declaration with itself.
+        """
+        stamped = db.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        assert stamped, (
+            "The schema these cases are written against was not built by the "
+            "migrations, so the constraint they exercise is the one declared "
+            "in models.py rather than the one a deployment has."
+        )
+
+    def _book(self, db: Any) -> int:
+        book = models.Book(title="A book with a file somewhere")
+        db.add(book)
+        db.commit()
+        return book.id
+
+    def _insert(self, db: Any, book_id: int, **fields: Any) -> None:
+        db.execute(
+            Base.metadata.tables["digital_references"].insert().values(
+                book_id=book_id,
+                root_label=fields.pop("root_label", "/books"),
+                relative_path=fields.pop("relative_path", "a.epub"),
+                **fields,
+            )
+        )
+        db.commit()
+
+    def test_a_root_and_a_path_that_together_exceed_path_max_are_refused(self, db):
+        """The bound is on the **pair**, which is the half a `max_length` on
+        each field cannot express."""
+        book = self._book(db)
+        half = models.DIGITAL_REFERENCE_PATH_MAX // 2 + 1
+        with pytest.raises(IntegrityError):
+            self._insert(db, book, root_label="r" * half, relative_path="p" * half)
+
+    def test_a_root_and_a_path_that_together_fit_are_stored(self, db):
+        """The other side of the same inequality, so the test above is
+        measuring the bound rather than the insert."""
+        book = self._book(db)
+        half = models.DIGITAL_REFERENCE_PATH_MAX // 2
+        self._insert(db, book, root_label="r" * half, relative_path="p" * half)
+        assert db.query(models.DigitalReference).count() == 1
+
+    def test_an_empty_root_is_refused(self, db):
+        book = self._book(db)
+        with pytest.raises(IntegrityError):
+            self._insert(db, book, root_label="")
+
+    def test_an_empty_path_is_refused(self, db):
+        book = self._book(db)
+        with pytest.raises(IntegrityError):
+            self._insert(db, book, relative_path="")
+
+    def test_a_null_carrying_value_cannot_walk_past_the_character_bound(self, db):
+        """The arm a character inequality cannot supply on its own.
+
+        SQLite's `length()` on text counts characters **up to the first NUL**.
+        Measured 2026-09-10: a value of this shape reports a length of 1
+        whatever it carries, so the character arm passes on a value nothing
+        bounded. Pydantic refuses a NUL, and a restore is exactly the path that
+        does not run Pydantic, which is what makes the byte arm the bound
+        rather than a belt.
+
+        **Sized past the byte budget rather than merely past the character
+        one**, which is four times `DIGITAL_REFERENCE_PATH_MAX`: a first draft
+        of this test used 10,002 bytes, passed both arms honestly, and would
+        have read as the guard failing.
+        """
+        book = self._book(db)
+        past_the_byte_budget = 4 * models.DIGITAL_REFERENCE_PATH_MAX + 1
+        with pytest.raises(IntegrityError):
+            self._insert(
+                db,
+                book,
+                root_label="a\x00" + "x" * past_the_byte_budget,
+                relative_path="p",
+            )
+
+    def test_the_byte_arm_refuses_nothing_nul_free_the_character_arm_admits(
+        self, db
+    ):
+        """The other side, without which the test above is satisfied by a
+        constraint that refuses everything.
+
+        **Exactly on the boundary, not near it.** The widest legitimate pair is
+        the whole character budget spent on four byte characters in **both**
+        halves, which is four times the budget and lands on the bound. A first
+        draft left `relative_path` at one ASCII character, three bytes short, and
+        three bytes of slack is a place a mutation lives: shrinking the
+        multiplier by three left this green while a real all-four-byte path
+        started returning 500 where `docs/api.md` promises 422.
+        """
+        book = self._book(db)
+        widest = models.DIGITAL_REFERENCE_PATH_MAX - 1
+        self._insert(
+            db,
+            book,
+            root_label="\U0001f600" * widest,
+            relative_path="\U0001f600",
+        )
+        assert db.query(models.DigitalReference).count() == 1
+
+    def test_a_null_in_the_path_cannot_walk_past_it_either(self, db):
+        """The diagonal, which every other fixture below Pydantic misses.
+
+        Both NUL fixtures in this tree put the NUL in `root_label`, so zeroing
+        the `relative_path` term out of the byte arm leaves them green: the other
+        half's byte length still breaks the budget on its own. The arm is a sum
+        over two columns and this is the second one.
+        """
+        book = self._book(db)
+        past_the_byte_budget = 4 * models.DIGITAL_REFERENCE_PATH_MAX + 1
+        with pytest.raises(IntegrityError):
+            self._insert(
+                db,
+                book,
+                root_label="r",
+                relative_path="a\x00" + "x" * past_the_byte_budget,
+            )
+
+    def test_a_size_past_what_a_browser_could_have_reported_is_refused(self, db):
+        book = self._book(db)
+        with pytest.raises(IntegrityError):
+            self._insert(db, book, size_bytes=models.DIGITAL_REFERENCE_MAX_SIZE + 1)
+
+    def test_a_negative_size_is_refused(self, db):
+        book = self._book(db)
+        with pytest.raises(IntegrityError):
+            self._insert(db, book, size_bytes=-1)
+
+    def test_one_file_cannot_be_recorded_twice_against_one_book(self, db):
+        """`uq_digital_references_location` is what makes re-importing a folder
+        refresh rows rather than double them, so it is a constraint rather than
+        a convention the route happens to keep."""
+        book = self._book(db)
+        self._insert(db, book)
+        with pytest.raises(IntegrityError):
+            self._insert(db, book)
+
+    def test_the_same_file_may_be_recorded_against_two_books(self, db):
+        """The uniqueness is per book. Two rows of one title really can be
+        catalogued from one file, and refusing that would refuse a copy."""
+        first, second = self._book(db), self._book(db)
+        self._insert(db, first)
+        self._insert(db, second)
+        assert db.query(models.DigitalReference).count() == 2

@@ -1,9 +1,9 @@
 # Backend test coverage
 
-**6418 tests**, in 97 files, recounted with `--collect-only` on 2026-09-10.
+**6495 tests**, in 99 files, recounted with `--collect-only` on 2026-09-10.
 
 **The headline equals the passed count today, and that is a fact about the tree rather than
-a simplification.** The gate reports `6418 passed`, with no skip and no `xfail`: the strict
+a simplification.** The gate reports `6495 passed`, with no skip and no `xfail`: the strict
 `xfail` that recorded a defect in the CSV importer is gone, because the work that closed the
 defect closed it.
 
@@ -15,7 +15,7 @@ the skip once made the check undoable, and a rule rewritten as `collected == pas
 the tree happens to have neither is one that fails for the wrong reason the day somebody adds
 either.
 
-**The rows below sum to 6369, forty nine short, and the shortfall is deliberate.** Those
+**The rows below sum to 6446, forty nine short, and the shortfall is deliberate.** Those
 tests live in six files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -87,7 +87,7 @@ why the helper uses regexes.
 | `test_auth.py` | 22 | Password hashing, JWT creation and the auth dependencies |
 | `test_accounts.py` | 66 | **Recovery and confirmation, where the rules live rather than where they are served.** That one function builds a reset request so an admin can approve but never start one, that redeeming ends every session on the account, that a code is single use and expires, and that both branches of a resend cost the same. |
 | `test_recover.py` | 7 | The command line reset, which is the path for a library whose only admin has nobody to approve their request. |
-| `test_models.py` | 144 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary |
+| `test_models.py` | 159 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary |
 | `test_importing.py` | 39 | **Applying a parsed export to a library.** The private-book oracle: a row whose ISBN belongs to a book the member cannot see is counted, never named, writes nothing |
 | `test_import_readers.py` | 16 | **What a reader IS, and that the set of them is closed.** That a reader is handed decoded text and nothing about how the file arrived, that every registered one honours a column correction, and that a service fitting the candidate names is names alone and no code. |
 | `test_authority.py` | 120 | **The network half of author identity.** That the four cross references a GND record carries are read off it, that the record's own scheme is never among them |
@@ -107,7 +107,8 @@ why the helper uses regexes.
 | `schemas/test_book.py` | 39 | **Two request bodies writing one column must agree about it.** `BookMatch` bounded four of its seventeen fields while `merge_into` wrote them all |
 | `schemas/test_settings.py` | 2 | **A row the router builds must carry every field the source describes.** The settings row is built by splatting the description into the response model |
 | `test_serialisation.py` | 47 | Assembling `BookOut`: the per-request fields, the tag suggestion by caption and by DDC number, that a tag name inside a longer word is not a caption match |
-| `test_schema.py` | 124 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial |
+| `test_schema.py` | 131 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial |
+| `schemas/test_digital.py` | 28 | What a client may say about a file it holds, bounded at the schema: the root, the path beneath it and the fingerprint, each refused at its ceiling rather than trusted for its width |
 | `test_env_example.py` | 4 | **Operator documentation that goes stale silently.** That every environment name `config.py` reads appears in `.env.example` and nothing appears there that the code ignores |
 | `test_database.py` | 27 | Engine setup and the session dependency |
 | `test_fetch.py` | 65 | **The only door outwards.** That the body cap counts raw wire bytes and compression is never requested |
@@ -132,6 +133,7 @@ why the helper uses regexes.
 | `routers/test_books_collections.py` | 33 | Filing a book, the two list parameters and the 422 for both at once, the bulk verb, the merge that absorbs a collection, and the export column |
 | `routers/test_books_duplicates.py` | 32 | Duplicate detection and the merge, incl. the ORM cascade trap |
 | `routers/test_books_notes.py` | 13 | A note's own visibility over the four note routes: a private note absent from another member's listing and from an admin's, 404 rather than 403 on edit and delete for anybody but its author, and an edit that does not mention the flag leaving it alone |
+| `routers/test_books_digital_references.py` | 27 | The four routes a client uses to say where a book's file is: only the member's own references, a sighting that refreshes the fingerprint, a miss that flags the row rather than deleting it, and a book the caller cannot see answering 404 |
 | `routers/test_imports_marc.py` | 43 | **The import route.** Library mode enforced at 403, the file size ceiling, the preview counts and what each one discloses, that a matched Book never gains an ISBN |
 | `routers/test_books_classification_filter.py` | 29 | **Filtering by classification, and the order it comes back in.** Chiefly a privacy test: `classifications` carries no member column, so the filter is only as private as the shelf in front of it. |
 | `routers/test_books_classifications.py` | 36 | **A catalogue heading kept whole.** That the number survives the parse and a year does not become one, that a German caption still suggests a curated tag |

@@ -460,6 +460,63 @@ unlike reading progress, and it carries no privacy flag of its own: a quote is a
 transcription of the book's words where a note is the member's own. Both choices are argued
 in [decisions.md](decisions.md).
 
+**`digital_references`.** Where a member says one of their book files is: a `root_label`,
+a `relative_path` beneath it, and a fingerprint. **Never the file.** Endpaper takes no
+custody of a member's book file, so no bytes reach the server on this path and nothing in
+a row here has been read, opened or checked by anything.
+
+**The server cannot verify any of it, and the columns are grouped so that shows.** A
+client's claim: `root_label`, `relative_path`, `root_confirmed`, `size_bytes`,
+`file_modified_at`. The server's own clock: `created_at`, `confirmed_at`, `missing_since`.
+`confirmed_at` is **when this server was last told the file was there**,
+never when anybody looked: the server has no way to notice a file has moved, cannot re-read
+it, and cannot tell a real path from a typed one. A name promising freshness would be
+believed by every reader after it.
+
+* **The picked directory's own name belongs to `root_label`, and `relative_path` is what
+  lies beneath it.** Stated in the contract because nothing on the server can enforce it: a
+  browser's `webkitRelativePath` leads with that name, so a client that sends it whole and a
+  client that strips it write two rows for one file, which is the doubling the location
+  identity exists to prevent. The rule falls out of the one-home rule: the root's name is
+  already in `root_label`.
+* `root_confirmed` is the column that says which promise the row makes. True means a
+  browser gave the path under a directory the member picked, so going and looking is
+  something somebody can do. False means the browser gave a bare filename and the root is
+  the member's own guess, so the two together may name nothing. Without it the two records
+  are identical on disk.
+* **Staleness is detected by a client and reported, never determined here.** A client that
+  looks and finds the file reports it, which refreshes the fingerprint and clears
+  `missing_since`; a client that looks and does not find it sets `missing_since`, once. The
+  row is then **flagged and never deleted**, because a phone that cannot reach the NAS
+  reports every file on the NAS missing and is telling the truth about what it can see.
+  Only a member deleting the reference removes it. Koha reaches the same answer from the
+  other end: its URL sweep produces a report a cataloguer acts on, with no freshness column
+  on the record. **There is no shelf-wide reader for the flag**: references are listed per
+  book, so finding every flagged one means asking book by book. That is a limit of what is
+  built rather than of the design, and it is stated here so the paragraph above does not
+  promise a report nobody can run.
+* A table rather than columns on `books`, because the same book really is at two paths on
+  two machines. MARC 856 is repeatable and Koha's `biblioitems.url` is one column, which is
+  the prior art for what a scalar costs.
+* `root_label` and `relative_path` are each `String(4094)` and `ck_digital_references_bounds`
+  bounds **the pair** at the same number, which is this host's `PATH_MAX` less the NUL and
+  one separator. Two layers rather than two numbers: the schema refuses the same inequality,
+  and the CHECK is what a restore meets, since `backup.restore` inserts through Core and
+  sees no Pydantic model. The CHECK also bounds the pair **in bytes**, at four times that
+  number, and without it the character arm does not bind on that path at all: SQLite's
+  `length()` counts characters up to the first NUL, so a value carrying one reports a length
+  it does not have. The byte arm refuses nothing **NUL free** that the character arm admits,
+  and refusing the rest is the whole of its job. Four bytes is UTF-8's widest character, so
+  the widest legitimate pair lands exactly on the byte bound rather than under it. `size_bytes` is bounded at `Number.MAX_SAFE_INTEGER`, because the
+  producer is a browser and a larger value did not survive the JSON that carried it.
+* `uq_digital_references_location` makes the location the identity, so re-importing a folder
+  somebody imported last month refreshes those rows instead of doubling them.
+
+A reference carries no member of its own and is visible to exactly whoever can see the
+book, like a tag and unlike a note. It is not served on `BookOut`: like notes and quotes it
+has its own route, so a listing of 25 books does not load it to render something no listing
+shows.
+
 **`settings`.** A small key/value store for things an admin changes at runtime rather than
 at deploy time: the Google Books toggle and API key, the Goodreads lookup toggle, the
 default language, the days between reminders, and one group per reminder channel: the
@@ -856,8 +913,8 @@ scanned the barcode on its back cover.
 
 ## Cascades
 
-Deleting a book removes its `user_books`, `loans`, `notes`, `book_tags` and
-`custom_field_values` rows. Deleting a custom field definition removes its values, and
+Deleting a book removes its `user_books`, `loans`, `notes`, `book_tags`,
+`digital_references` and `custom_field_values` rows. Deleting a custom field definition removes its values, and
 `custom_fields.remove` does that itself rather than trusting the cascade, for the reason
 `delete_tag` clears its association rows: SQLite enforces a foreign key only while
 `PRAGMA foreign_keys` is on, and a migration's connection does not have it. Books,
@@ -1086,6 +1143,15 @@ the scan flow still looks an ISBN up on every add: the index is the lookup, the 
 is the rule. `deleted_at` is deliberately **not** in the predicate. A trashed row keeps its
 claim on the ISBN, which is the trap `_create_book` frees the holders to resolve, and excluding
 trashed rows here would move that trap rather than remove it.
+
+**One file reference per location per book** (migration `b2e94f7c1a03`).
+`uq_digital_references_location`, a unique index on
+`digital_references(book_id, root_label, relative_path)`. Where the file is **is** the
+identity: without it, re-importing a folder somebody imported last month writes a second row
+for every file in it. `digital_references.book_id` deliberately carries **no** index of its
+own, for the reason `quotes.book_id` does not: this composite leads with the same column and
+serves every lookup a standalone one would, so shipping both is a second B-tree written on
+every insert with no read behind it.
 
 **One name per collection, case insensitively** (migrations `c2f95a80d417`, then
 `e7b3d02a5c94`). `uq_collections_name_folded`, a unique index on the stored `name_folded`.

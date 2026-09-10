@@ -2757,6 +2757,138 @@
         "title": "CustomFieldValueUpdate",
         "type": "object"
       },
+      "DigitalReferenceIn": {
+        "description": "A browser reporting that it found this book's file at this location.\n\nOne shape for cataloguing a file and for re-checking it later, because they\nare the same sentence: a client looked and here is what it saw. What the\nserver does with it differs (a new location is stored, a known one is\nrefreshed), and that belongs at the route rather than in two payloads whose\nfields would be identical.",
+        "properties": {
+          "file_modified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Modified At"
+          },
+          "relative_path": {
+            "maxLength": 4094,
+            "minLength": 1,
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "root_confirmed": {
+            "default": false,
+            "title": "Root Confirmed",
+            "type": "boolean"
+          },
+          "root_label": {
+            "maxLength": 4094,
+            "minLength": 1,
+            "title": "Root Label",
+            "type": "string"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          }
+        },
+        "required": [
+          "root_label",
+          "relative_path"
+        ],
+        "title": "DigitalReferenceIn",
+        "type": "object"
+      },
+      "DigitalReferenceOut": {
+        "description": "One stored reference, read back.\n\n**Some of these are things a browser said and the rest are this server's**,\nand the grouping below is in that order rather than in column order, so a\nreader of the generated client meets the distinction rather than having to\nknow it. `id` is the server's too, and is first because it is what the other\nthree routes are addressed by.\n\nDeliberately no count of either group: the members of a group are the group,\nand a stated \"N of these\" is what goes stale when one is added.",
+        "properties": {
+          "confirmed_at": {
+            "format": "date-time",
+            "title": "Confirmed At",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "file_modified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Modified At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "missing_since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Since"
+          },
+          "relative_path": {
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "root_confirmed": {
+            "title": "Root Confirmed",
+            "type": "boolean"
+          },
+          "root_label": {
+            "title": "Root Label",
+            "type": "string"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          }
+        },
+        "required": [
+          "id",
+          "root_label",
+          "relative_path",
+          "root_confirmed",
+          "size_bytes",
+          "file_modified_at",
+          "created_at",
+          "confirmed_at",
+          "missing_since"
+        ],
+        "title": "DigitalReferenceOut",
+        "type": "object"
+      },
       "DivisionFacetOut": {
         "description": "One Dewey division in the library, with how many Books fall in it.",
         "properties": {
@@ -8713,6 +8845,233 @@
           }
         ],
         "summary": "Set Custom Field",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/digital-references": {
+      "get": {
+        "description": "Where this book's files have been reported to be.\n\n**Served here rather than on `BookOut`**, like notes and quotes and unlike\ntags. A listing of 25 books would otherwise selectin-load this relationship\nonto every row to render something no listing shows, which is the N+1\n`_books_to_out` exists to avoid.\n\nNothing in the response has been verified by this server. `confirmed_at` is\nwhen it was last **told** the file was there.",
+        "operationId": "list_digital_references",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DigitalReferenceOut"
+                  },
+                  "title": "Response List Digital References",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Digital References",
+        "tags": [
+          "books"
+        ]
+      },
+      "post": {
+        "description": "A client reporting that it found this book's file at this location.\n\n**Idempotent on the location, and that is the design rather than a\nconvenience.** A reference is identified by where the file is, so the same\nreport twice is one reference: re-importing a folder somebody imported last\nmonth refreshes those rows instead of doubling them, which at the scale this\nruns at (a directory pick is hundreds of files in one gesture) is the\ndifference between a feature and a mess.\n\n**200 rather than 201** for the same reason: the route is not a create. What\nhappened to a given location is answerable by reading the list back, and a\nstatus that varied would be one more thing for a client committing 300\nfiles to branch on.\n\n**The report replaces the fingerprint whole rather than filling in the gaps\nin it.** A row says what one client saw in one look. Merging a new size with\nan old modification time would produce a fingerprint that no client ever\nreported and that no re-check could ever match.\n\n**A sighting clears `missing_since`.** Something has now looked and found\nit, which is the only evidence that ever contradicts a miss.\n\nThe per book ceiling is counted here rather than trusted to the payload,\nwhich bounds one request and not the total: see\n`MAX_DIGITAL_REFERENCES_PER_BOOK`. It binds a **new** location only, so a\nbook already at the ceiling can still re-confirm what it holds.",
+        "operationId": "report_digital_reference",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DigitalReferenceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DigitalReferenceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Report Digital Reference",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/digital-references/{reference_id}": {
+      "delete": {
+        "description": "Forget a reference, because a Member said to.\n\nThe one way a row leaves this table short of the book being purged. It is\ndeliberately not what a missing report does: a person deciding the file is\ngone and a browser that could not see it are different statements, and only\nthe first is evidence.",
+        "operationId": "forget_digital_reference",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reference_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Reference Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Forget Digital Reference",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/digital-references/{reference_id}/missing": {
+      "post": {
+        "description": "A client reporting that it looked and the file was not there.\n\n**The row is flagged and never deleted**, and that refusal is the whole\nroute. A phone that cannot reach the NAS reports every file on the NAS\nmissing and is telling the truth about what it can see; acting on it would\nlet one browser with a drive unplugged erase the household's record of where\nits library is. The flag is for a person to read.\n\n**The timestamp does not move on a second report**, because the column\nrecords when this was *first* said. A client re-checking hourly would\notherwise keep resetting the age of the problem to nothing.\n\nReversed by an ordinary sighting: something looked and found it.",
+        "operationId": "report_digital_reference_missing",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reference_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Reference Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DigitalReferenceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Report Digital Reference Missing",
         "tags": [
           "books"
         ]

@@ -43,7 +43,7 @@ export type FileFailure =
   CbzFailure | EpubFailure | Fb2Failure | MobiFailure | PdfFailure;
 
 /** One identifier a file carried, with whatever the file said it was. */
-export interface OpfIdentifier {
+export interface FileIdentifier {
   /**
    * How to read `value`, or `null` where nothing said. **`opf.ts` is the only
    * reader that takes this from the file**, as `opf:scheme` in EPUB 2 or the
@@ -60,27 +60,29 @@ export interface OpfIdentifier {
 /**
  * What a reader says one book is, whichever format it read.
  *
- * **The shape is an OPF package document's and the name says so, because that
- * is where it came from.** Four of the five reader modules parse no package
- * document: they translate their own format into this, which is what lets the
- * scan page draft from any of them without asking which opened the file. Each
- * of those four sets `version` to `null`, saying at its own site that its
- * format has no package document, which is the one field here that only a
- * package document can fill.
+ * **Not one format's record, which is what a sixth reader has to know before
+ * it fills any of this in.** 10 of the 11 fields go through
+ * `ScanPage/types.draftFromFile` into `BookLookup` one line each, and only
+ * `identifiers` does not, so what a field holds is decided by what this app
+ * stores rather than by what any format spells. 6 of them carry a Dublin Core
+ * element's name, and every one is normalised rather than copied. The other 5
+ * name nothing in OPF at all: `subtitle` is a `title-type` refinement
+ * resolved, `isbn` is a parsed and check digit tested ISBN drawn from the
+ * identifiers whatever labelled them, `year` is a single number windowed out
+ * of whichever date the format offers, and the two series fields are Calibre's
+ * own `meta` names or an EPUB 3 collection.
  *
- * **That field is what the name rests on, and nothing reads it**: measured over
- * `src/`, 6 write sites and 0 reads. So the argument for the name is the shape
- * rather than a caller, and whoever proposes deleting `version` is also
- * proposing renaming this.
+ * **So the name is the family's and never a format's**, beside `FileReader`,
+ * `FileReading` and `FileFailure`. `tests/lib/fileReaders.test.ts` holds that
+ * against every module importing this one; `docs/decisions.md` carries why it
+ * had to be bought rather than chosen.
  *
  * **It lives here rather than in `opf.ts` so that the author of a sixth reader
  * does not import the EPUB module to say what a book is.** `opf.ts` reads it
  * back from here for the same reason: the format that shaped this record is a
  * producer of it like any other, not its owner.
  */
-export interface OpfRecord {
-  /** The `package` element's own `version`. `"2.0"` or `"3.0"` in practice. */
-  readonly version: string | null;
+export interface FileMetadata {
   readonly title: string | null;
   readonly subtitle: string | null;
   /**
@@ -91,7 +93,7 @@ export interface OpfRecord {
    * every later reader guess it back.
    */
   readonly authors: readonly string[];
-  readonly identifiers: readonly OpfIdentifier[];
+  readonly identifiers: readonly FileIdentifier[];
   /** Canonical ISBN-13, from whichever spelling the format carried one in. */
   readonly isbn: string | null;
   readonly publisher: string | null;
@@ -103,7 +105,7 @@ export interface OpfRecord {
 }
 
 export type FileReading =
-  | { readonly ok: true; readonly metadata: OpfRecord }
+  | { readonly ok: true; readonly metadata: FileMetadata }
   | { readonly ok: false; readonly failure: FileFailure };
 
 /**
@@ -123,7 +125,7 @@ export type FileReading =
  * rather than the exception. A reason here would put a sentence in front of a
  * member for the common case.
  *
- * **A field the file did not give is `null` and never `""`.** `OpfRecord` says
+ * **A field the file did not give is `null` and never `""`.** `FileMetadata` says
  * every field is absent rather than empty, and a caller reading `record.title`
  * to decide whether the file named one would take `""` for a title.
  *

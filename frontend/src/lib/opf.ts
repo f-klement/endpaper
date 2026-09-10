@@ -5,11 +5,14 @@
  * book in a Calibre library as `metadata.opf`. Pure: it takes the XML and
  * returns a record, and it knows nothing about zips, files or the API.
  *
- * **`OpfRecord` is shaped like what this reads and does not live here.** It is
- * what every reader answers with, so it sits in `fileReaders.ts` with the rest
- * of the vocabulary the family shares, and this module imports it back. The
- * import is types and one predicate: nothing here learns which reader opens
- * what, and the registry is not consulted.
+ * **`FileMetadata` does not live here, and it is not this format's record.**
+ * It is what every reader answers with, so it sits in `fileReaders.ts` with the
+ * rest of the vocabulary the family shares, and this module imports it back.
+ * What this reader supplies to it is Dublin Core normalised into the app's own
+ * fields rather than the package document's shape: a resolved subtitle, a
+ * parsed ISBN, a windowed year and a series, none of which a package document
+ * spells that way. The import is types and one predicate: nothing here learns
+ * which reader opens what, and the registry is not consulted.
  *
  * **EPUB 2 and EPUB 3 say the same things differently and both are in the
  * wild.** Measured over 79 real files, 20 were EPUB 2.0 and 59 EPUB 3.0, so
@@ -48,8 +51,8 @@
 import { plausibleYear } from "./bookBounds";
 import {
   declaresEntities,
-  type OpfIdentifier,
-  type OpfRecord,
+  type FileIdentifier,
+  type FileMetadata,
 } from "./fileReaders";
 import { parseIsbn } from "./isbn";
 
@@ -225,7 +228,7 @@ function isIsbnScheme(scheme: string | null): boolean {
 function readIdentifiers(
   metadata: Element,
   index: Refinements,
-): OpfIdentifier[] {
+): FileIdentifier[] {
   return dcChildren(metadata, "identifier")
     .map((element) => ({
       scheme:
@@ -254,7 +257,7 @@ function readIdentifiers(
  * Everything goes through `parseIsbn`, so a value that is not a Bookland
  * number with a holding check digit is not an ISBN however it was labelled.
  */
-function readIsbn(identifiers: readonly OpfIdentifier[]): string | null {
+function readIsbn(identifiers: readonly FileIdentifier[]): string | null {
   const declared = identifiers.filter((one) => isIsbnScheme(one.scheme));
   for (const candidate of [...declared, ...identifiers]) {
     // `urn:isbn:` is the EPUB 3 spelling of the same fact. `parseIsbn` strips
@@ -376,7 +379,7 @@ function readSeries(
  * is nothing here a caller could do differently for each of the ways it can be
  * malformed.
  */
-export function readOpf(xml: string): OpfRecord | null {
+export function readOpf(xml: string): FileMetadata | null {
   if (declaresEntities(xml)) return null;
   const document = new DOMParser().parseFromString(xml, "application/xml");
   // Both halves are needed. A parse error yields a document whose root is
@@ -395,7 +398,6 @@ export function readOpf(xml: string): OpfRecord | null {
   const { seriesName, seriesIndex } = readSeries(metas, index);
 
   return {
-    version: root.getAttribute("version"),
     title,
     subtitle,
     authors: readAuthors(metadata, index),

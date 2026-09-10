@@ -1376,6 +1376,73 @@ page.
 A `quote_id` belonging to a different book returns 404, for the same reason a `note_id`
 does.
 
+### Digital references
+
+Where a member says one of their book files is. **Endpaper never receives the file**: the
+client parses it in the browser and sends metadata, so no bytes reach the server on any
+route here and nothing the server stores has been read, opened or checked by it.
+
+| Method | Path | Access | Notes |
+|---|---|---|---|
+| GET | `/api/books/{id}/digital-references` | read | In insertion order |
+| POST | `/api/books/{id}/digital-references` | write | 200; a report, not a create |
+| POST | `/api/books/{id}/digital-references/{reference_id}/missing` | write | 200; flags, never deletes |
+| DELETE | `/api/books/{id}/digital-references/{reference_id}` | write | 204 |
+
+A reference is visible to exactly whoever can see the book, and whoever may write the book
+may write its references, which is the shared shelf rule tags and covers already follow. A
+reference on a book the caller cannot see is a **404 on the book**, never a row. A
+`reference_id` belonging to a different book is 404, for the same reason a `quote_id` is.
+
+**The picked directory's own name belongs to `root_label`; `relative_path` is what lies
+beneath it.** The server cannot enforce that, so it is a rule of the contract: a browser's
+`webkitRelativePath` leads with the picked directory's name, and a client that sends it whole
+and a client that strips it write two rows for one file.
+
+**The POST is a sighting and it is idempotent on the location.** A reference is identified
+by `(root_label, relative_path)`, so reporting the same file twice refreshes one row rather
+than making two: re-importing a folder somebody imported last month is the case that makes
+this matter, and a directory pick is hundreds of files in one gesture. It answers **200 and
+not 201** for the same reason: the route is not a create. A report replaces the fingerprint
+whole rather than filling gaps in it, because a row is what one client saw in one look.
+
+**What the server knows, and what it only stores.** `root_label`, `relative_path`,
+`root_confirmed`, `size_bytes` and `file_modified_at` are a client's claim and are accepted
+as one. `created_at`, `confirmed_at` and `missing_since` are the server's clock and **a
+client cannot set any of them**: a payload naming one is ignored. `confirmed_at` is when
+this server was last **told** the file was there, not when anybody looked; the server
+cannot see the file, so it can never say more than that.
+
+**Staleness is reported, never detected here.** A client that goes looking either reports a
+sighting, which refreshes the fingerprint and clears `missing_since`, or reports it missing,
+which sets `missing_since` once and does not move it on a repeat. **A missing report never
+deletes the row**: a phone that cannot reach the NAS reports every file on the NAS missing
+and is telling the truth about what it can see, so acting on it would let one browser with
+a drive unplugged erase where the library is. Only the DELETE removes a reference, and only
+a member issues that. **There is no shelf-wide listing of flagged references**: they are read
+per book, so finding all of them today is one request per book. That is a limit of what is
+built rather than of the design.
+
+Bounds, all of them 422 rather than 500: `root_label` and `relative_path` are each 1 to
+4,094 characters **and are bounded together at 4,094**, which is this host's `PATH_MAX` less
+the NUL and one separator. Either half may take all but one character of that budget. A NUL
+in either is refused, and nothing else about a path's shape is: a leading slash, a `..` and
+a drive letter are all things a real path looks like, and this server never resolves any of
+it. `size_bytes` is 0 to 9,007,199,254,740,991, which is the largest integer a browser's
+`File.size` survives being a JSON number as. Every one of those is stated again as
+`ck_digital_references_bounds`, because a restore inserts through Core and never sees the
+schema, **except the NUL refusal, which this CHECK does not make**. `length()` cannot
+express it, since it counts characters up to the first NUL and so reports a length a
+NUL-carrying value does not have. The constraint bounds the pair in bytes instead, at four
+times the character budget, which bounds such a value without having to detect it. That arm
+refuses nothing **NUL free** that the character arm admits, and refusing the rest is what it
+is for: UTF-8 is at most four bytes per character, so the widest legitimate pair lands
+exactly on the byte bound.
+
+One book holds at most 16 references, counted **per book rather than per request**, and the
+ceiling is a 409. It binds a new location only, so a book already at the ceiling can still
+re-confirm what it holds.
+
 ### Settings, stats, users
 
 | Method | Path | Access | Notes |

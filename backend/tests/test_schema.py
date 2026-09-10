@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 import pytest
-from sqlalchemy import String, inspect, text
+from sqlalchemy import CheckConstraint, String, create_engine, inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
@@ -21,6 +21,9 @@ import schema
 import targets
 from database import Base, engine
 from enums import AuthorityScheme, BookFormat, ClassificationScheme
+from migrations.versions import (
+    b2e94f7c1a03_where_a_book_file_is_said_to_be as where_a_book_file_is_said_to_be,
+)
 from migrations.versions import (
     f1c30ab27d84_store_the_shelf_key_beside_the_number as revision,
 )
@@ -1494,9 +1497,27 @@ class TestTheMigrationsAndTheModelsAgree:
     """What the suite builds and what production runs must be one schema.
 
     **This class exists because the two diverged and nothing could see it.**
-    `conftest.py` builds with `Base.metadata.create_all`, so every other test in
-    this repository sees the **models**; a deployment only ever sees the
-    **migrations**. `author_identifiers.created_at` shipped as `nullable=True`
+
+    **The premise in this paragraph was false and cost two review seats three
+    rounds on 2026-09-10.** It said `conftest.py` builds with `create_all`, so
+    every other test sees the models while a deployment sees the migrations. It
+    does call `create_all`, and the call does nothing: `main.py` runs
+    `init_db()` at **import**, `conftest` imports `main`, so every table is
+    already built by Alembic before any fixture runs. **The suite and a
+    deployment both see the migrations.**
+
+    Two files had it right first, and neither was found by the seats that spent
+    those rounds: `tests/test_credentials.py` says it in prose, reached by the
+    same mutation, and `test_models.py::TestTheBorrowerRuleHasOneSpelling`
+    **asserts** it, which is the durable form. Four other sentences in this file
+    and one in a revision still assert the false version. They are
+    named in the tracker issue about the suite's database being the migrations',
+    rather than corrected here: this file is one wave's to edit, and that is a
+    reconciliation across several.
+
+    What survives that correction is this class's whole reason: the two
+    declarations are two copies and only a comparison holds them together.
+    `author_identifiers.created_at` shipped as `nullable=True`
     in revision `a4c73e0b19d5` against a `Mapped[datetime]` that is NOT NULL,
     and the whole suite was green. It was found by a person reading the two
     files against each other, which is exactly the thing that does not scale.
@@ -2491,3 +2512,251 @@ class TestANoteCarriesItsOwnVisibility:
                 tuple(row) for row in connection.execute(text("SELECT content FROM notes"))
             ]
         assert stored == [("what I actually thought",)]
+
+
+class TestTheMigratedDatabaseCarriesTheBoundsItPromises:
+    """Revision `b2e94f7c1a03`, and whether the model still describes it.
+
+    **The migration is the schema everywhere, tests included, and that is the
+    fact this class was first written with backwards.** `main.py` calls
+    `init_db()` at **import** time and its comment says why: "Alembic owns the
+    schema, including creating it from nothing. There is no create_all() here on
+    purpose: two things that both create tables is how a database ends up in a
+    shape no migration accounts for." `conftest` imports `main`, so the
+    migrations have run before any fixture, and `_schema_once`'s `create_all`
+    then finds every table already present and does nothing.
+
+    So a `CheckConstraint` in `models.py` is by default a **description** of the
+    revision rather than a second enforcement of it. Measured 2026-09-10, three
+    ways: replacing this table's whole CHECK with a constant false expression in
+    `models.py` alone failed **nothing**, and neither did zeroing one of its
+    terms nor shrinking its byte budget. The imported model carried the mutation
+    and the installed DDL did not.
+
+    **By default, because a test can opt out of the ambient schema**, and one
+    does: `test_credentials.py::TestTheEnvelopeRuleAndItsConstraintAgree`
+    creates the model's own table on a throwaway `sqlite://` engine and probes
+    it, so the models' declaration is enforced there rather than described.
+    `test_the_model_declares_a_constraint_that_enforces_the_bound` below is that
+    shape applied here, and it is what makes this table's model side a rule.
+
+    That is the hole this class closes, and it is not the one the first draft
+    thought it was. `TestTheMigrationsAndTheModelsAgree` compares columns,
+    nullability and type, so a column **width** is covered there. Nothing
+    compared **this** constraint's two copies, and there are two copies because
+    a migration must not import a constant it would then change meaning with.
+    """
+
+    @staticmethod
+    def _migrated() -> int:
+        drop_everything()
+        schema.upgrade_to_head()
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO books (title, ownership) VALUES ('A book', 'owned')")
+            )
+            connection.commit()
+            book_id = connection.execute(text("SELECT id FROM books")).scalar()
+        assert isinstance(book_id, int)
+        return book_id
+
+    @staticmethod
+    def _insert(book_id: int, root: str, path: str) -> None:
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO digital_references (book_id, root_label, relative_path)"
+                    " VALUES (:book, :root, :path)"
+                ),
+                {"book": book_id, "root": root, "path": path},
+            )
+            connection.commit()
+
+    def test_the_pair_bound_survived_into_the_migration(self):
+        book = self._migrated()
+        half = models.DIGITAL_REFERENCE_PATH_MAX // 2 + 1
+
+        with pytest.raises(IntegrityError) as refusal:
+            self._insert(book, "r" * half, "p" * half)
+
+        assert "ck_digital_references_bounds" in str(refusal.value)
+
+    def test_a_null_carrying_value_cannot_walk_past_the_character_bound(self):
+        """The arm the character inequality cannot supply on its own.
+
+        SQLite's `length()` counts characters **up to the first NUL**, so this
+        value reports a length of 1 and carries 10,002 bytes. Pydantic refuses a
+        NUL and Pydantic is exactly what a restore does not run, which is what
+        makes the byte arm the thing standing between an archive and an
+        unbounded write.
+        """
+        book = self._migrated()
+        past_the_byte_budget = 4 * models.DIGITAL_REFERENCE_PATH_MAX + 1
+
+        with pytest.raises(IntegrityError) as refusal:
+            self._insert(book, "a\x00" + "x" * past_the_byte_budget, "p")
+
+        assert "ck_digital_references_bounds" in str(refusal.value)
+
+    def test_the_byte_arm_refuses_nothing_nul_free_the_character_arm_admits(self):
+        """The other side, without which the test above is satisfied by a
+        constraint that refuses everything.
+
+        **Exactly on the boundary.** The widest legitimate pair spends the whole
+        character budget on four byte characters in **both** halves, which is
+        four times the budget. One ASCII character on the right leaves three
+        bytes of slack, which is enough room for a mutation to shrink the
+        multiplier and stay green.
+        """
+        book = self._migrated()
+        widest = models.DIGITAL_REFERENCE_PATH_MAX - 1
+
+        self._insert(book, "\U0001f600" * widest, "\U0001f600")
+
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT count(*) FROM digital_references")
+            ).scalar() == 1
+
+    def test_the_location_is_unique_in_the_migration_too(self):
+        """The index that makes a re-import a refresh rather than a doubling.
+        Declared `unique=True` on the model; only this says the revision creates
+        it that way."""
+        book = self._migrated()
+        self._insert(book, "/books", "a.epub")
+
+        with pytest.raises(IntegrityError) as refusal:
+            self._insert(book, "/books", "a.epub")
+
+        # SQLite names the **columns** in a UNIQUE failure and not the index,
+        # so this asserts the three that make up the location. Asserting the
+        # index name instead passes on any unique index over any columns, which
+        # is what a first draft of this did.
+        assert "digital_references.book_id" in str(refusal.value)
+        assert "digital_references.root_label" in str(refusal.value)
+        assert "digital_references.relative_path" in str(refusal.value)
+
+    def test_the_model_declares_a_constraint_that_enforces_the_bound(self):
+        """The models' own table, built on a throwaway engine and probed.
+
+        **This is the difference between the model's CHECK being a rule and
+        being a comment.** Nothing in the ambient suite runs against the models'
+        DDL, so a `CheckConstraint` there can say anything; a table created on an
+        engine of this test's own cannot. The shape is
+        `test_credentials.py::TestTheEnvelopeRuleAndItsConstraintAgree._accepted`,
+        which got here first and states the reason at its own site.
+
+        **Behaviour, where the comparison below is text**, and that is why both
+        exist. This one closes the family a containment substring accepts, an
+        installed constraint that appends to the model's and refuses nothing:
+        such a constraint fails here at the first insert. The comparison closes
+        what behaviour cannot see, a model and a revision that both enforce
+        something sane and different.
+
+        Through `Base.metadata.tables` rather than `__table__`, which the ORM
+        types as a `FromClause`. Same object, and the name comes off the model.
+        No `books` table is created beside it: SQLite checks a foreign key only
+        with `PRAGMA foreign_keys` on, and this engine has it off.
+        """
+        engine = create_engine("sqlite://")
+        Base.metadata.tables["digital_references"].create(engine)
+        insert = text(
+            "INSERT INTO digital_references (book_id, root_label, relative_path)"
+            " VALUES (1, :root, :path)"
+        )
+        widest = models.DIGITAL_REFERENCE_PATH_MAX - 1
+
+        over_the_byte_budget = {
+            "root": "a\x00" + "x" * (4 * models.DIGITAL_REFERENCE_PATH_MAX),
+            "path": "p",
+        }
+        with engine.connect() as connection, pytest.raises(IntegrityError):
+            connection.execute(insert, over_the_byte_budget)
+
+        with engine.connect() as connection:
+            connection.execute(
+                insert,
+                {"root": "\U0001f600" * widest, "path": "\U0001f600"},
+            )
+            assert connection.execute(
+                text("SELECT count(*) FROM digital_references")
+            ).scalar() == 1
+
+    def test_the_model_still_describes_the_constraint_the_revision_installs(self):
+        """The two copies of the CHECK, compared as text.
+
+        This is what holds `ck_digital_references_bounds`'s two copies together.
+        Without it the model's copy can say anything, because everything else
+        runs on the revision's DDL: a constant false expression there fails
+        nothing, measured.
+
+        **Not the only such comparison in the tree**, and an earlier draft of
+        this line claimed it was. `test_models.py::TestTheBorrowerRuleHasOneSpelling`
+        reaches the same place for `loans` in two hops, pinning `ONE_BORROWER_SQL`
+        to the model's `CheckConstraint` and then finding it in `sqlite_master`.
+        That is the shape to copy, and it got here first.
+
+        Compared against the DDL SQLite actually holds rather than against the
+        revision's source, because that is the artefact both halves are supposed
+        to describe and it cannot drift from what a deployment runs.
+
+        **Containment, not equality, and here is what that accepts.** An
+        installed constraint that appends to the model's text, `(<model> OR
+        1=1)`, contains it and refuses nothing.
+
+        **What closes that family here is the three behavioural probes above,
+        not the plausibility of the accident.** A constraint refusing nothing
+        fails `test_the_pair_bound_survived_into_the_migration` and
+        `test_a_null_carrying_value_cannot_walk_past_the_character_bound` at
+        once. The distinction is load bearing because this test is the obvious
+        template for the other constraints, and one copied to a constraint with
+        no behavioural sibling keeps the containment and loses the thing that
+        was doing the work.
+
+        **The whitespace normalisation is safe here and not in general**: this
+        CHECK holds no string literal with internal whitespace, and the same
+        generalisation inherits that caveat too.
+        """
+        self._migrated()
+        table = Base.metadata.tables["digital_references"]
+        declared = next(
+            (
+                " ".join(str(constraint.sqltext).split())
+                for constraint in table.constraints
+                if isinstance(constraint, CheckConstraint)
+                and constraint.name == "ck_digital_references_bounds"
+            ),
+            None,
+        )
+        assert declared is not None, (
+            "`models.DigitalReference` no longer declares "
+            "`ck_digital_references_bounds`, so there is nothing to compare "
+            "against the revision."
+        )
+
+        with engine.connect() as connection:
+            installed = connection.execute(
+                text("SELECT sql FROM sqlite_master WHERE name='digital_references'")
+            ).scalar()
+
+        assert declared in " ".join(str(installed).split()), (
+            "`models.DigitalReference`'s CHECK is not the one the revision "
+            "installs, so the model is describing a schema nobody runs.\n"
+            f"  model:     {declared}\n"
+            f"  installed: {installed}"
+        )
+
+    def test_the_revisions_bounds_are_the_models_bounds(self):
+        """The two literals the revision keeps "in step with" `models.py`.
+
+        A migration must not import a constant, because it describes the schema
+        at one moment and would change meaning when the constant is retuned. The
+        cost of that rule is a fact stored twice, and this is what stands
+        between the copies.
+        """
+        assert where_a_book_file_is_said_to_be._PATH_MAX == (
+            models.DIGITAL_REFERENCE_PATH_MAX
+        )
+        assert where_a_book_file_is_said_to_be._MAX_SIZE == (
+            models.DIGITAL_REFERENCE_MAX_SIZE
+        )

@@ -62,7 +62,7 @@
 
 import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
-import type { OpfRecord } from "./fileReaders";
+import type { FileMetadata } from "./fileReaders";
 import type { SqliteDatabase, SqliteRow } from "./sqlite";
 
 /**
@@ -603,7 +603,7 @@ function readYear(value: unknown): number | null {
  * having been refused at the other one.
  *
  * **The year arm here is the one place the year member is still applied**, and
- * it is not reachable in production: the only producer of an `OpfRecord` that
+ * it is not reachable in production: the only producer of a `FileMetadata` that
  * reaches this door is `opf.readOpf`, which applies the window before handing
  * it over. It stays because that window is another module's and is guarded
  * there rather than here, and because this function's contract is a record's
@@ -623,7 +623,7 @@ function readYear(value: unknown): number | null {
  * `calibre:series` names a series, which is the same guard `readCalibreLibrary`
  * puts on the column. 0 of the 244 files measured carry either.
  */
-function withoutPlaceholders(opf: OpfRecord): OpfRecord {
+function withoutPlaceholders(opf: FileMetadata): FileMetadata {
   return {
     ...opf,
     title:
@@ -695,7 +695,7 @@ export interface CalibreCrossCheck {
  */
 export function crossCheck(
   book: CalibreBook,
-  file: OpfRecord,
+  file: FileMetadata,
 ): CalibreCrossCheck {
   // Before anything is compared or counted: a placeholder is neither a fill
   // nor a disagreement, and counting one as either is what puts 57 books of

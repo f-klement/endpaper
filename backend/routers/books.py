@@ -77,6 +77,7 @@ from models import (
     Classification,
     Collection,
     CustomField,
+    DigitalReference,
     Loan,
     Note,
     Quote,
@@ -91,6 +92,7 @@ from ratelimit import authority_limiter, cover_backfill_limiter, metadata_limite
 from reading import Reading, resolve_merge
 from schemas import (
     MAX_CLASSIFICATIONS_PER_BOOK,
+    MAX_DIGITAL_REFERENCES_PER_BOOK,
     MAX_ROW_ID,
     AuthorBatchMergeOut,
     AuthorIdentifierOut,
@@ -124,6 +126,8 @@ from schemas import (
     CustomFieldRename,
     CustomFieldValueOut,
     CustomFieldValueUpdate,
+    DigitalReferenceIn,
+    DigitalReferenceOut,
     DivisionFacetOut,
     DuplicateGroup,
     HeadingFacetOut,
@@ -2518,6 +2522,54 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
     for quote in db.query(Quote).filter(Quote.book_id.in_(loser_ids)).all():
         quote.book_id = keeper.id
 
+    # File references move with the quotes, deduplicated on the way for the
+    # reason the classifications above are: `uq_digital_references_location`
+    # would refuse the flush where the keeper and a loser were catalogued from
+    # the same file, which is the **likely** case rather than an edge, since
+    # two rows for one book are commonly two imports of one library.
+    #
+    # **Two arms, and they are two different events**, which is why they are not
+    # one condition. A duplicate is dropped and nothing is lost: two reports of
+    # one file are two accounts of the same thing, and the keeper already holds
+    # it. This is the difference from the classifications, where a duplicate is
+    # absorbed instead, because a caption where there was none is strictly more
+    # than before and a second report of a path is not.
+    #
+    # An overflow is a **loss**, and it is logged for that reason. The location
+    # was supplied by a Member and nothing regenerates it: no catalogue holds
+    # where somebody keeps their files. The classification block above logs its
+    # own drop and this one was silent, which is the shape where a comment
+    # saying "nothing is lost" sits over a statement that loses something.
+    #
+    # **`MAX_DIGITAL_REFERENCES_PER_BOOK` binds here too**, and this is the
+    # second of the two capped writers of this table, on the rule the
+    # classification ceiling records: a merge takes up to 20 books in one
+    # unlimited request, so an uncapped move is a stored write nobody bounded.
+    kept_files = {
+        (entry.root_label, entry.relative_path): entry
+        for entry in keeper.digital_references
+    }
+    for reference in (
+        db.query(DigitalReference)
+        .filter(DigitalReference.book_id.in_(loser_ids))
+        .order_by(DigitalReference.id)
+        .all()
+    ):
+        location = (reference.root_label, reference.relative_path)
+        if location in kept_files:
+            db.delete(reference)
+            continue
+        if len(kept_files) >= MAX_DIGITAL_REFERENCES_PER_BOOK:
+            logger.info(
+                "Book %s is at the digital reference ceiling; merge drops %r",
+                keeper.id,
+                reference.relative_path,
+            )
+            db.delete(reference)
+            continue
+        reference.book_id = keeper.id
+        kept_files[location] = reference
+
     moved = db.query(Loan).filter(Loan.book_id.in_(loser_ids)).all()
     for loan in moved:
         loan.book_id = keeper.id
@@ -3711,6 +3763,195 @@ def delete_quote(
     current_user: CurrentUser,
 ) -> None:
     db.delete(_quote_for_edit(quote_id, book, current_user, db))
+    db.commit()
+
+
+# ── Digital references ────────────────────────────────────────────────────────
+#
+# Where a Member says one of their book files is. **No bytes reach this server
+# on any route below**: the client parses the file and sends metadata, so
+# nothing here has been read, opened or checked, and every value stored is a
+# claim by whoever holds a session. `models.DigitalReference` carries the rest,
+# including why `confirmed_at` is not "last seen".
+#
+# **Every route is per book and goes through `dependencies`**, so the privacy
+# rule reaches a reference exactly as it reaches any other field on a book: a
+# reference on a book the caller cannot see is a 404 on the book, never a row.
+# The reads below are reported by `tests/test_shelf.py`'s fourth pass, because
+# `digital_references` is book owned, and each carries its reason in
+# `BOOK_OWNED_READERS`.
+
+
+def _digital_reference_for(book: Book, reference_id: int, db: Session) -> DigitalReference:
+    """One reference belonging to **this** book, or 404.
+
+    The book/reference pairing is enforced rather than assumed, for the reason
+    `_note_for_edit` enforces it: an id from another book must not be reachable
+    through a book the caller does happen to hold. There is no second
+    permission question after that, because a reference carries no Member of
+    its own: whoever may write the book may write its references, which is the
+    same rule `BookForWrite` states for tags and covers.
+    """
+    reference = (
+        db.query(DigitalReference)
+        .filter(
+            DigitalReference.id == reference_id,
+            DigitalReference.book_id == book.id,
+        )
+        .first()
+    )
+    if reference is None:
+        raise HTTPException(status_code=404, detail="Digital reference not found")
+    return reference
+
+
+@router.get("/{book_id}/digital-references", response_model=list[DigitalReferenceOut])
+def list_digital_references(book: BookForRead, db: DbSession) -> list[DigitalReference]:
+    """Where this book's files have been reported to be.
+
+    **Served here rather than on `BookOut`**, like notes and quotes and unlike
+    tags. A listing of 25 books would otherwise selectin-load this relationship
+    onto every row to render something no listing shows, which is the N+1
+    `_books_to_out` exists to avoid.
+
+    Nothing in the response has been verified by this server. `confirmed_at` is
+    when it was last **told** the file was there.
+    """
+    return (
+        db.query(DigitalReference)
+        .filter(DigitalReference.book_id == book.id)
+        .order_by(DigitalReference.id)
+        .all()
+    )
+
+
+@router.post("/{book_id}/digital-references", response_model=DigitalReferenceOut)
+def report_digital_reference(
+    payload: DigitalReferenceIn,
+    book: BookForWrite,
+    db: DbSession,
+) -> DigitalReference:
+    """A client reporting that it found this book's file at this location.
+
+    **Idempotent on the location, and that is the design rather than a
+    convenience.** A reference is identified by where the file is, so the same
+    report twice is one reference: re-importing a folder somebody imported last
+    month refreshes those rows instead of doubling them, which at the scale this
+    runs at (a directory pick is hundreds of files in one gesture) is the
+    difference between a feature and a mess.
+
+    **200 rather than 201** for the same reason: the route is not a create. What
+    happened to a given location is answerable by reading the list back, and a
+    status that varied would be one more thing for a client committing 300
+    files to branch on.
+
+    **The report replaces the fingerprint whole rather than filling in the gaps
+    in it.** A row says what one client saw in one look. Merging a new size with
+    an old modification time would produce a fingerprint that no client ever
+    reported and that no re-check could ever match.
+
+    **A sighting clears `missing_since`.** Something has now looked and found
+    it, which is the only evidence that ever contradicts a miss.
+
+    The per book ceiling is counted here rather than trusted to the payload,
+    which bounds one request and not the total: see
+    `MAX_DIGITAL_REFERENCES_PER_BOOK`. It binds a **new** location only, so a
+    book already at the ceiling can still re-confirm what it holds.
+    """
+    existing = (
+        db.query(DigitalReference)
+        .filter(
+            DigitalReference.book_id == book.id,
+            DigitalReference.root_label == payload.root_label,
+            DigitalReference.relative_path == payload.relative_path,
+        )
+        .first()
+    )
+    if existing is None:
+        # Narrowed to this book, and that narrowing **is** the ceiling: without
+        # it the count is the whole library's and one member filling their own
+        # shelf refuses everybody else's next reference.
+        held = (
+            db.query(func.count(DigitalReference.id))
+            .filter(DigitalReference.book_id == book.id)
+            .scalar()
+        )
+        if held >= MAX_DIGITAL_REFERENCES_PER_BOOK:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This book already holds "
+                    f"{MAX_DIGITAL_REFERENCES_PER_BOOK} file references"
+                ),
+            )
+        existing = DigitalReference(
+            book_id=book.id,
+            root_label=payload.root_label,
+            relative_path=payload.relative_path,
+        )
+        db.add(existing)
+
+    existing.root_confirmed = payload.root_confirmed
+    existing.size_bytes = payload.size_bytes
+    existing.file_modified_at = payload.file_modified_at
+    # The database's clock, not the client's, and not the client's word for when
+    # it looked. This column records when this server was told.
+    existing.confirmed_at = func.now()
+    existing.missing_since = None
+
+    db.commit()
+    db.refresh(existing)
+    return existing
+
+
+@router.post(
+    "/{book_id}/digital-references/{reference_id}/missing",
+    response_model=DigitalReferenceOut,
+)
+def report_digital_reference_missing(
+    reference_id: RowId,
+    book: BookForWrite,
+    db: DbSession,
+) -> DigitalReference:
+    """A client reporting that it looked and the file was not there.
+
+    **The row is flagged and never deleted**, and that refusal is the whole
+    route. A phone that cannot reach the NAS reports every file on the NAS
+    missing and is telling the truth about what it can see; acting on it would
+    let one browser with a drive unplugged erase the household's record of where
+    its library is. The flag is for a person to read.
+
+    **The timestamp does not move on a second report**, because the column
+    records when this was *first* said. A client re-checking hourly would
+    otherwise keep resetting the age of the problem to nothing.
+
+    Reversed by an ordinary sighting: something looked and found it.
+    """
+    reference = _digital_reference_for(book, reference_id, db)
+    if reference.missing_since is None:
+        reference.missing_since = func.now()
+        db.commit()
+        db.refresh(reference)
+    return reference
+
+
+@router.delete(
+    "/{book_id}/digital-references/{reference_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def forget_digital_reference(
+    reference_id: RowId,
+    book: BookForWrite,
+    db: DbSession,
+) -> None:
+    """Forget a reference, because a Member said to.
+
+    The one way a row leaves this table short of the book being purged. It is
+    deliberately not what a missing report does: a person deciding the file is
+    gone and a browser that could not see it are different statements, and only
+    the first is evidence.
+    """
+    db.delete(_digital_reference_for(book, reference_id, db))
     db.commit()
 
 

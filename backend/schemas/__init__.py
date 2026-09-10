@@ -73,6 +73,11 @@ from schemas.custom_field import (
     CustomFieldValueOut,
     CustomFieldValueUpdate,
 )
+from schemas.digital import (
+    MAX_DIGITAL_REFERENCES_PER_BOOK,
+    DigitalReferenceIn,
+    DigitalReferenceOut,
+)
 from schemas.imports import (
     ImportPreviewOut,
     ImportPreviewRow,
@@ -144,6 +149,7 @@ __all__ = [
     "DEFAULT_PAGE_SIZE",
     "MAX_PAGE_SIZE",
     "MAX_CLASSIFICATIONS_PER_BOOK",
+    "MAX_DIGITAL_REFERENCES_PER_BOOK",
     "MAX_ROW_ID",
     "AppearanceOut",
     "AppearanceUpdate",
@@ -184,6 +190,8 @@ __all__ = [
     "CollectionUpdate",
     "ClassificationFacets",
     "ClassificationIn",
+    "DigitalReferenceIn",
+    "DigitalReferenceOut",
     "ClassificationOut",
     "DivisionFacetOut",
     "HeadingFacetOut",
