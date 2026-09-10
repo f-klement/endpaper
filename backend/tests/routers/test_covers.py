@@ -10,8 +10,11 @@ The two that matter are `test_a_members_private_cover_is_not_readable_by_another
 and `test_an_invisible_cover_is_404_not_403`. Everything else is scaffolding.
 """
 
+import pytest
+
+import routers.covers as covers_router
 from auth import COVER_COOKIE_NAME
-from config import COVERS_DIR
+from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from tests.conftest import TEST_PASSWORD
 from tests.helpers import PNG_BYTES, proxy_headers
 
@@ -424,3 +427,100 @@ class TestTheLoginBackground:
         book_id = _add_book(client, admin, title="A diary", is_private=True)
         _upload_cover(client, admin, book_id)
         assert client.get(f"/covers/{book_id}.png").status_code == 401
+
+
+class TestTheMediaTypesAreNotDocuments:
+    """The `Content-Type` comes from the filename, so the table decides.
+
+    The route never opens the file to decide what it is. That is safe only
+    while every value in `_MEDIA_TYPES` is a type a browser renders and cannot
+    execute, and while the table's keys are exactly what the route admits.
+
+    A guard on the table rather than on one spelling: enumerating "not svg"
+    would pass the day somebody adds `image/svg+xml` under a different key, or
+    `text/html`, or `application/pdf`.
+    """
+
+    def test_the_table_and_the_allowlist_are_the_same_set(self):
+        """The route checks membership of one and indexes the other. An
+        extension in the allowlist with no entry here is a `KeyError`, which is
+        a 500 on an ordinary cover request."""
+        assert set(covers_router._MEDIA_TYPES) == set(ALLOWED_IMAGE_EXTENSIONS)
+
+    def test_every_served_type_is_an_image(self):
+        assert all(
+            media_type.startswith("image/")
+            for media_type in covers_router._MEDIA_TYPES.values()
+        )
+
+    def test_no_served_type_is_one_a_browser_treats_as_a_document(self):
+        """`image/svg+xml` is the trap: it is an `image/*` and it is also a
+        document with script in it, running under this app's own origin and
+        CSP. XML and HTML are here because a table is an open thing."""
+        assert not any(
+            "svg" in media_type or "xml" in media_type or "html" in media_type
+            for media_type in covers_router._MEDIA_TYPES.values()
+        )
+
+
+class TestWhatTheRouteDoesWithBytesThatAreNotAnImage:
+    """Measured behaviour, pinned so it cannot quietly change.
+
+    `backup._cover_bytes` keeps bytes that are not an image out of the directory
+    from now on. It says nothing about a file already on disk from before it, and
+    nothing about the label: a cover whose extension disagrees with its bytes is
+    written, deliberately, and served under the name's media type. So these pin
+    what the response says about a file the route cannot vouch for, which is why
+    the route itself needed no defence built into it.
+
+    **The bound**: this is what the headers say, not what a browser does with
+    them. No browser runs in this suite. Two different mechanisms are being
+    relied on and only one of them is `nosniff`. For a navigation, `nosniff` plus
+    an `image/*` type is what stops the response being read as a document. For an
+    `<img>`, nothing here matters: it decodes by magic number, which is exactly
+    why a mislabelled cover still renders and is kept. What holds in both cases
+    is that no type this route can send is scriptable, and that is asserted next
+    door in `TestTheMediaTypesAreNotDocuments` rather than inferred here.
+    """
+
+    def _served(self, client, admin, covers_dir, body: bytes):
+        book_id = _add_book(client, admin, title="Dune", is_private=False)
+        (COVERS_DIR / f"{book_id}.jpg").write_bytes(body)
+        response = client.get(f"/covers/{book_id}.jpg", headers=admin["headers"])
+        assert response.status_code == 200, response.text
+        return response
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            b"<!doctype html><script>alert(document.domain)</script>",
+            b'<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>',
+        ],
+    )
+    def test_it_is_labelled_by_its_name_and_the_browser_is_told_not_to_sniff(
+        self, client, admin, covers_dir, body
+    ):
+        response = self._served(client, admin, covers_dir, body)
+
+        assert response.headers["content-type"] == "image/jpeg"
+        assert response.headers["x-content-type-options"] == "nosniff"
+
+    def test_nothing_invites_the_response_to_be_framed(
+        self, client, admin, covers_dir
+    ):
+        """`frame-ancestors` and `X-Frame-Options` are the two directives a
+        non-document response actually enforces about itself, and they refuse
+        framing from anywhere.
+
+        **`object-src` is deliberately not asserted here.** It binds the
+        document doing the embedding, not the thing embedded, so its presence on
+        a cover response decides nothing: what it buys is that an injection in
+        this app's own pages cannot `<object>` a cover, and it is asserted where
+        that policy is pinned, in `tests/test_middleware.py`. A third party page
+        is not bound by our copy of it at all, and what makes a cover inert
+        there is the image media type plus `nosniff`.
+        """
+        response = self._served(client, admin, covers_dir, b"<html></html>")
+
+        assert response.headers["x-frame-options"] == "DENY"
+        assert "frame-ancestors 'none'" in response.headers["content-security-policy"]

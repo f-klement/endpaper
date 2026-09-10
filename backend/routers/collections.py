@@ -1,8 +1,8 @@
 """Named parts of the shelf: physical and ebook, kept and sold, yours and mine.
 
 **A collection is shelving, never permission.** Filing a book into one changes
-nothing about who may see it: `visible_to()` remains the only access control on
-content, and every count served here applies it. The temptation this module
+nothing about who may see it: a book's visibility is decided by `visible_to()`
+alone, and every count served here applies it. The temptation this module
 exists to resist is treating the collection as a second scoping axis beside
 privacy, because the two look alike from a distance and only one of them is
 enforced everywhere. See `docs/decisions.md`.

@@ -22,6 +22,7 @@ import pytest
 import respx
 
 import covers
+from config import COVERS_DIR
 from tests.conftest import REAL_RESOLVE_AND_STORE
 from tests.helpers import JPEG_BYTES, PNG_BYTES, WEBP_BYTES
 
@@ -977,3 +978,69 @@ def await_resolve_with_deadline(isbn: str, budget: float) -> str | None:
     import asyncio
 
     return asyncio.run(covers.resolve(isbn, deadline=monotonic() + budget))
+
+
+class TestResolvingACoverOnDiskIsDeterministic:
+    """Two formats of one base must resolve the same way twice.
+
+    `ALLOWED_IMAGE_EXTENSIONS` is a frozenset and its iteration order is not
+    stable between processes. A book can hold two formats: an upload sweeps the
+    losers, and `backup.restore` deliberately does not, because a restore
+    reproduces the directory the archive describes.
+
+    **The consequence is not cosmetic.** `merge_books` decides whether the keeper
+    adopts a cover by comparing `keeper.cover_url` against `local_url_for`, which
+    reads `stored_path`. Unordered, the same merge on the same files either
+    adopts the cover or hands the loser to `forget`, which deletes both.
+
+    These assert **stability, not a particular winner**: the order is arbitrary
+    and only being the same order twice is required.
+    """
+
+    def test_two_formats_of_one_base_resolve_to_the_same_file_every_time(
+        self, covers_dir
+    ):
+        (COVERS_DIR / "7.jpg").write_bytes(JPEG_BYTES)
+        (COVERS_DIR / "7.png").write_bytes(PNG_BYTES)
+        (COVERS_DIR / "7.webp").write_bytes(WEBP_BYTES)
+
+        answers = {covers.stored_path(7) for _ in range(20)}
+
+        # `None not in`, because {None} is the most stable answer there is: a
+        # lookup that stopped finding anything satisfies a bare length check.
+        assert None not in answers
+        assert len(answers) == 1
+
+    def test_the_order_does_not_depend_on_the_frozensets_own(
+        self, covers_dir, monkeypatch
+    ):
+        """The real test of the fix, and the one the loop above cannot be.
+
+        A frozenset iterates the same way inside one process, so twenty calls
+        agree whether or not anything sorts them. Re-presenting the allowlist in
+        a different order is what a second process does, and the answer must not
+        move.
+        """
+        (COVERS_DIR / "7.jpg").write_bytes(JPEG_BYTES)
+        (COVERS_DIR / "7.png").write_bytes(PNG_BYTES)
+
+        seen = set()
+        for order in (["jpg", "png", "webp", "jpeg"], ["webp", "png", "jpeg", "jpg"]):
+            monkeypatch.setattr(covers, "ALLOWED_IMAGE_EXTENSIONS", order)
+            seen.add(covers.stored_path(7))
+
+        assert None not in seen
+        assert len(seen) == 1
+
+    def test_local_url_for_is_stable_the_same_way(self, covers_dir, monkeypatch):
+        """`merge_books` compares against this, not against `stored_path`."""
+        (COVERS_DIR / "7.jpg").write_bytes(JPEG_BYTES)
+        (COVERS_DIR / "7.png").write_bytes(PNG_BYTES)
+
+        seen = set()
+        for order in (["jpg", "png", "webp", "jpeg"], ["webp", "png", "jpeg", "jpg"]):
+            monkeypatch.setattr(covers, "ALLOWED_IMAGE_EXTENSIONS", order)
+            seen.add(covers.local_url_for(7))
+
+        assert None not in seen
+        assert len(seen) == 1

@@ -178,6 +178,34 @@ class TestMerge:
         notes = client.get(f"/api/books/{keeper['id']}/notes", headers=admin["headers"]).json()
         assert [n["content"] for n in notes] == ["worth keeping"]
 
+    def test_moves_a_private_note_across_too(self, client, admin, db, make_book):
+        """A merge repoints **every** note on the losing book whatever its
+        author or its visibility, and the losing row is then destroyed with its
+        cascade. So a rule that skipped a private note here would not hide one,
+        it would delete it, and silently: the only rows this feature creates are
+        exactly the ones such a filter would drop.
+        """
+        from models import Note
+
+        keeper = make_book(admin["headers"], title="Dune")
+        loser = make_book(admin["headers"], title="Dune")
+        db.add(
+            Note(
+                book_id=loser["id"],
+                user_id=admin["user"]["id"],
+                content="what I actually thought",
+                is_private=True,
+            )
+        )
+        db.commit()
+
+        merge(client, admin["headers"], [keeper["id"], loser["id"]], keeper["id"])
+
+        notes = client.get(f"/api/books/{keeper['id']}/notes", headers=admin["headers"]).json()
+        assert [(n["content"], n["is_private"]) for n in notes] == [
+            ("what I actually thought", True)
+        ]
+
     def test_moves_a_reading_status_across(self, client, admin, make_book):
         keeper = make_book(admin["headers"], title="Dune")
         loser = make_book(admin["headers"], title="Dune")

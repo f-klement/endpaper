@@ -23,6 +23,7 @@ import filing
 import targets
 from authors import author_key
 from backup import RestoreError
+from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from database import Base, SessionLocal
 from enums import CatalogueSource, ClassificationScheme
 from models import (
@@ -37,7 +38,13 @@ from models import (
     Tag,
     UserBook,
 )
-from tests.helpers import sealed_before_the_origin_was_bound
+from tests.helpers import (
+    JPEG_BYTES,
+    PNG_BYTES,
+    WEBP_BYTES,
+    sealed_before_the_origin_was_bound,
+)
+from uploads import SNIFF_BYTES
 
 #: The roster's address for the source these tests seal a login for.
 #:
@@ -1815,3 +1822,313 @@ class TestARestoreDoesNotConfirmAnAccountTheArchiveLeftUnconfirmed:
             restored.email_verification_source
             == VerificationProvenance.NOT_REQUIRED.value
         )
+
+
+class TestARestoreWritesOnlyAnImage:
+    """The bytes decide whether an entry is written, not the suffix.
+
+    Restore was the one writer into `COVERS_DIR` that stored whatever an archive
+    named a cover. Every other writer sniffs, so this is the equality being put
+    back rather than a new rule.
+
+    **Not about script execution.** Measured: HTML stored as `1.jpg` is served
+    `content-type: image/jpeg` with `X-Content-Type-Options: nosniff`, so a
+    browser will not render it as a document, and no served type is scriptable.
+    What these pin is what may land on disk.
+
+    **Two bounds this file cannot see.** Whether
+    `uploads.sniff_image_extension` is a sufficient test of an image: it is the
+    magic bytes and nothing more, so a valid header followed by rubbish passes
+    here exactly as it passes an upload. That equality is deliberate, and it is
+    the bound: these pin that restore applies the **same** test, never that the
+    test is a decoder. And whether a browser renders a mislabelled image: no
+    browser runs in this suite, so
+    `test_a_real_image_under_another_formats_name_is_kept` states the reason it
+    is kept rather than demonstrating the rendering.
+    """
+
+    def _restored_with(self, client, admin, library, covers: dict[str, bytes]):
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        source = zipfile.ZipFile(BytesIO(data))
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for entry in source.namelist():
+                if not entry.startswith(backup.COVERS_PREFIX):
+                    archive.writestr(entry, source.read(entry))
+            for name, body in covers.items():
+                archive.writestr(name, body)
+        response = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", buffer.getvalue(), "application/zip")},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    @pytest.mark.parametrize(
+        ("name", "body"),
+        [
+            ("covers/1.jpg", b"<!doctype html><script>alert(1)</script>"),
+            ("covers/1.jpeg", b'<svg xmlns="http://www.w3.org/2000/svg"/>'),
+            ("covers/1.png", b"not an image at all"),
+            ("covers/1.webp", b"%PDF-1.4 not a cover either"),
+            ("covers/1.jpg", b""),
+            ("covers/1.jpg", b"RIFF\x00\x00\x00\x00NOPE"),
+        ],
+    )
+    def test_an_entry_that_is_not_an_image_is_not_written(
+        self, client, admin, library, covers_dir, name, body
+    ):
+        restored = self._restored_with(client, admin, library, {name: body})
+
+        assert list(COVERS_DIR.glob("*")) == []
+        assert restored["covers"] == 0
+
+    @pytest.mark.parametrize(
+        ("name", "body"),
+        [
+            ("covers/1.jpg", JPEG_BYTES),
+            ("covers/1.jpeg", JPEG_BYTES),
+            ("covers/1.png", PNG_BYTES),
+            ("covers/1.webp", WEBP_BYTES),
+            # Longer than `SNIFF_BYTES`, which every constant above is not: the
+            # header is read separately from the rest, so a body that fits
+            # inside the window never exercises the join.
+            ("covers/1.jpg", JPEG_BYTES + bytes(range(256)) * 40),
+        ],
+    )
+    def test_a_cover_this_app_would_have_accepted_on_upload_is_written(
+        self, client, admin, library, covers_dir, name, body
+    ):
+        """The half that stops this refusing the app's own backup.
+
+        Every one of these is what `uploads.read_image_upload` stores for that
+        format, so an archive of covers this instance wrote restores whole, byte
+        for byte.
+        """
+        restored = self._restored_with(client, admin, library, {name: body})
+
+        stored = {p.name: p.read_bytes() for p in COVERS_DIR.glob("*")}
+        assert stored == {name[len(backup.COVERS_PREFIX) :]: body}
+        assert restored["covers"] == 1
+
+    @pytest.mark.parametrize(
+        ("name", "body"),
+        [
+            ("covers/1.jpg", PNG_BYTES),
+            ("covers/1.png", JPEG_BYTES),
+            ("covers/1.webp", PNG_BYTES),
+            ("covers/1.jpeg", WEBP_BYTES),
+        ],
+    )
+    def test_a_real_image_under_another_formats_name_is_kept(
+        self, client, admin, library, covers_dir, name, body
+    ):
+        """Kept, deliberately, and this is the test that would be easiest to
+        write the other way round.
+
+        An `<img>` decodes by magic number, so each of these displays today
+        whatever the route labelled it. Requiring the name to agree with the
+        bytes would delete a working cover from a legacy library to correct a
+        label nothing reads, and the only signal would be a line in a log.
+        Correcting the name means renaming the file and repairing the row that
+        points at it, which is a different change.
+        """
+        restored = self._restored_with(client, admin, library, {name: body})
+
+        stored = {p.name: p.read_bytes() for p in COVERS_DIR.glob("*")}
+        assert stored == {name[len(backup.COVERS_PREFIX) :]: body}
+        assert restored["covers"] == 1
+
+    def test_the_good_covers_survive_the_bad_ones(
+        self, client, admin, library, covers_dir
+    ):
+        """One declined entry does not cost the others, or the rows.
+
+        The cover loop runs after the commit, so refusing the whole restore here
+        would leave a library that is neither the backup nor what was there
+        before. Skipping keeps every row and every real image.
+        """
+        restored = self._restored_with(
+            client,
+            admin,
+            library,
+            {
+                "covers/1.jpg": JPEG_BYTES,
+                "covers/2.jpg": b"<script>alert(1)</script>",
+                "covers/3.png": PNG_BYTES,
+            },
+        )
+
+        assert sorted(p.name for p in COVERS_DIR.glob("*")) == ["1.jpg", "3.png"]
+        assert restored["covers"] == 2
+        assert restored["books"] >= 1
+
+    def test_the_count_ignores_a_file_that_is_not_a_cover(
+        self, client, admin, library, covers_dir
+    ):
+        """The count is read off the directory, so it has to filter it.
+
+        The clear loop before the write only unlinks files with a cover suffix,
+        so anything else already in there survives a restore. Without the filter
+        such a file is reported as a restored cover, which is a count that lies
+        in the one direction nobody checks.
+        """
+        (COVERS_DIR / "notes.txt").write_bytes(b"not a cover")
+
+        restored = self._restored_with(
+            client, admin, library, {"covers/1.jpg": JPEG_BYTES}
+        )
+
+        assert restored["covers"] == 1
+        assert (COVERS_DIR / "notes.txt").is_file()
+
+    def test_a_declined_entry_is_named_in_the_log(
+        self, client, admin, library, covers_dir, caplog
+    ):
+        """A count alone is not actionable. `RestoreResult` is the OpenAPI
+        contract, so the admin's only signal is this line."""
+        with caplog.at_level("WARNING", logger="endpaper.backup"):
+            self._restored_with(client, admin, library, {"covers/9.jpg": b"nope"})
+
+        assert "9.jpg" in caplog.text
+
+    def test_a_declined_name_cannot_write_its_own_line_into_the_log(
+        self, client, admin, library, covers_dir, caplog
+    ):
+        """A zip name field holds 64 KB and may contain a newline.
+
+        Logged through `%r` per name, so a crafted archive cannot forge a line
+        that reads as this application's own.
+        """
+        with caplog.at_level("WARNING", logger="endpaper.backup"):
+            self._restored_with(
+                client,
+                admin,
+                library,
+                {"covers/a\nWARNING forged line b.jpg": b"nope"},
+            )
+
+        warnings = [r for r in caplog.records if r.name == "endpaper.backup"]
+        assert warnings
+        assert all("\n" not in record.getMessage() for record in warnings)
+
+    def test_a_declined_entry_is_read_by_its_header_not_its_length(
+        self, client, admin, library, covers_dir
+    ):
+        """A refusal costs a fixed window, not the entry's `file_size`.
+
+        `_reject_a_bomb` lets an archive declare up to `MAX_UNCOMPRESSED_BYTES`,
+        so materialising every declined entry to decide about it is the cost
+        this guard exists to avoid. Asserted on the bytes pulled from that
+        entry's stream rather than on a timing.
+
+        **What it does not measure**: bytes decompressed. `zipfile.ZipExtFile`
+        inflates in blocks of `MIN_READ_SIZE`, so a `read(12)` on a deflated
+        entry produces 4096 bytes inside the decompressor. Both are constants
+        and neither is `file_size`, which is the property that matters, but the
+        window is not the whole story and the docstring may not imply it is.
+        """
+        read_sizes: list[int] = []
+        original = zipfile.ZipExtFile.read
+
+        def counting_read(self, n=-1):
+            data = original(self, n)
+            # Only the cover entry. The manifest is read whole by design and
+            # would be the maximum of every read in the archive.
+            if self.name.startswith(backup.COVERS_PREFIX):
+                read_sizes.append(len(data))
+            return data
+
+        entry = b"not an image" + b"\x00" * (2 * 1024 * 1024)
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(zipfile.ZipExtFile, "read", counting_read)
+            self._restored_with(client, admin, library, {"covers/9.jpg": entry})
+
+        assert max(read_sizes) <= SNIFF_BYTES
+
+    def test_the_suffixes_archived_are_the_extensions_the_app_serves(self):
+        """One home for the format list, not a second literal.
+
+        A format added to `ALLOWED_IMAGE_EXTENSIONS`, to the sniffer and to the
+        route, and forgotten here, would make `create` stop archiving those
+        covers and `restore` stop writing them, with nothing failing.
+        """
+        assert {suffix.removeprefix(".") for suffix in backup._COVER_SUFFIXES} == set(
+            ALLOWED_IMAGE_EXTENSIONS
+        )
+
+    def test_an_uppercase_suffix_restores_to_a_name_the_route_can_serve(
+        self, client, admin, library, covers_dir
+    ):
+        """`_safe_cover_name` accepts `1.JPG`; the route only ever looks for a
+        lowercased extension, so writing the name as given restored a file
+        nothing could serve on a case sensitive filesystem."""
+        restored = self._restored_with(client, admin, library, {"covers/1.JPG": JPEG_BYTES})
+
+        assert [p.name for p in COVERS_DIR.glob("*")] == ["1.jpg"]
+        assert restored["covers"] == 1
+
+    def test_a_name_the_filesystem_refuses_is_declined_not_raised(
+        self, client, admin, library, covers_dir, caplog
+    ):
+        """An overlong name raises `OSError`, which is not `RestoreError`.
+
+        So before this it escaped as a 500 from a loop that runs after
+        `db.commit()` and after the directory was emptied: rows restored, covers
+        gone, the state this route promises never to produce. A full disk part
+        way through the loop is the same shape and the same answer.
+        `_safe_cover_name` admits the name, because containment is about
+        separators and says nothing about what a filesystem will accept.
+
+        **A NUL byte is deliberately not a case here**, though it raises
+        `ValueError` at the same site. Measured on CPython 3.14: `zipfile`
+        truncates a member name at the first NUL on the way in, both through
+        `writestr` and through a hand patched central directory, so
+        `covers/1\x00.jpg` reaches this code as `covers/1` and is refused for
+        having no suffix. A test written for it passes without ever reaching the
+        guard.
+        """
+        with caplog.at_level("WARNING", logger="endpaper.backup"):
+            restored = self._restored_with(
+                client, admin, library, {f"covers/{'n' * 300}.jpg": JPEG_BYTES}
+            )
+
+        assert restored["covers"] == 0
+        # **The count alone does not say the write was reached.** Zero covers is
+        # equally what an entry refused by `_safe_cover_name` upstream produces,
+        # so a length check added there later would leave this green and
+        # covering nothing. The log line is the proof, and the body is
+        # `JPEG_BYTES`, so the sniff cannot be the reason for the decline.
+        # 120 because the warning truncates each name at that.
+        assert "n" * 120 in caplog.text
+
+    @pytest.mark.parametrize("order", [("1.jpg", "1.png"), ("1.png", "1.jpg")])
+    def test_two_entries_sharing_a_base_both_survive(
+        self, client, admin, library, covers_dir, order
+    ):
+        """Restore reproduces the directory the archive describes.
+
+        A sweep here would delete a cover somebody can see. The route resolves a
+        cover by the extension in the row's `cover_url`, never by looking for
+        whatever is on disk, so for a library holding both the row names one of
+        them and removing the loser 404s that row while the count still says it
+        was restored. `uploads.write_image` is `replace_image` without the sweep
+        for exactly this reason.
+
+        **Parametrised over both orders, and that is the point**: an assertion on
+        how many files remain passes whichever one is deleted. Reversing the
+        archive's order must not change the answer.
+        """
+        first, second = order
+        bodies = {"1.jpg": JPEG_BYTES, "1.png": PNG_BYTES}
+        restored = self._restored_with(
+            client,
+            admin,
+            library,
+            {f"covers/{first}": bodies[first], f"covers/{second}": bodies[second]},
+        )
+
+        assert {p.name: p.read_bytes() for p in COVERS_DIR.glob("1.*")} == bodies
+        assert restored["covers"] == 2

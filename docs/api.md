@@ -386,7 +386,7 @@ reason: creating is additive and undone by deleting, while deleting strips a lab
 book in the house at once with no undo.
 
 **A collection is shelving, never permission.** Filing a book into one changes nothing about
-who can see it: `is_private` remains the only access control on content. Every count here is
+who can see it: a book's visibility is `is_private` and nothing else. Every count here is
 filtered by the caller's visibility, because the count is the one thing a library wide
 label could otherwise disclose.
 
@@ -1320,19 +1320,27 @@ long as it is overdue.
 
 | Method | Path | Access | Notes |
 |---|---|---|---|
-| GET | `/api/books/{id}/notes` | read | Oldest first |
-| POST | `/api/books/{id}/notes` | read | 201; content must be non-empty |
-| PUT | `/api/books/{id}/notes/{note_id}` | author or admin | **403** otherwise |
-| DELETE | `/api/books/{id}/notes/{note_id}` | author or admin | 204 |
+| GET | `/api/books/{id}/notes` | read | Oldest first; the shared ones and the caller's own |
+| POST | `/api/books/{id}/notes` | read | 201; content must be non-empty; shared |
+| PUT | `/api/books/{id}/notes/{note_id}` | author or admin, of a note they can read | **403** otherwise |
+| DELETE | `/api/books/{id}/notes/{note_id}` | author or admin, of a note they can read | 204 |
 
 A `note_id` belonging to a different book returns 404. The ids must agree, so a note cannot
 be reached through a book the caller happens to have access to.
 
+**A note carries `is_private`**, and a private one is visible to its author and to nobody
+else, an admin included. `NoteOut` reports the flag; `NoteCreate` does not accept it, so
+every note written through this API is shared and the private ones are what a CSV import
+writes for a review the file carried. A private note somebody else wrote is **404** on
+`PUT` and `DELETE`, not 403, because a 403 confirms it exists. The 403 above is for a
+**shared** note the caller did not write. [data-model.md](data-model.md) carries the rule.
+
 ### Quotes
 
-A passage copied out of a book, the page it is on, and optionally a remark about it. Same
-access rules as notes: a quote is visible to whoever can see the book, and only its author
-or an admin may change it.
+A passage copied out of a book, the page it is on, and optionally a remark about it. A quote
+is visible to whoever can see the book, and only its author or an admin may change it. It
+carries no privacy flag of its own, unlike a note: a quote is a transcription of the book's
+words where a note is the member's own.
 
 | Method | Path | Access | Notes |
 |---|---|---|---|

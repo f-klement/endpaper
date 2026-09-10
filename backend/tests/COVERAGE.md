@@ -1,9 +1,9 @@
 # Backend test coverage
 
-**6335 tests**, in 96 files, recounted with `--collect-only` on 2026-09-10.
+**6415 tests**, in 97 files, recounted with `--collect-only` on 2026-09-10.
 
 **The headline equals the passed count today, and that is a fact about the tree rather than
-a simplification.** The gate reports `6335 passed`, with no skip and no `xfail`: the strict
+a simplification.** The gate reports `6415 passed`, with no skip and no `xfail`: the strict
 `xfail` that recorded a defect in the CSV importer is gone, because the work that closed the
 defect closed it.
 
@@ -15,7 +15,7 @@ the skip once made the check undoable, and a rule rewritten as `collected == pas
 the tree happens to have neither is one that fails for the wrong reason the day somebody adds
 either.
 
-**The rows below sum to 6286, forty nine short, and the shortfall is deliberate.** Those
+**The rows below sum to 6366, forty nine short, and the shortfall is deliberate.** Those
 tests live in six files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -66,7 +66,7 @@ why the helper uses regexes.
 | `test_isbn.py` | 60 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms |
 | `conformance/test_isbn.py` | 33 | **The Python half of the shared fixture set.** Holds no ISBN expectation of its own: `conformance/cases/isbn.json` is the specification, and this is a dispatch table plus the guards that stop the suite passing while testing nothing |
 | `test_ddc.py` | 29 | **Dewey headings.** That a number splits from its caption and a year does not, that the segmentation prime is stripped rather than rejected, that the projection reads the number |
-| `test_backup.py` | 94 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores. |
+| `test_backup.py` | 119 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores. |
 | `test_lending.py` | 17 | **The loan clock.** Overdue, days overdue and days out, each arm of each; that a returned loan stops counting at its return; that `days_out`'s clamp is the reachable one |
 | `test_opds.py` | 81 | **The OPDS reader.** Which addresses this server will open, what one Atom entry becomes, the identifier the census says is not there, the doctype refusal, the decoder-on-a-file property, and the origin pin over paging. `TestNoResponseMovesTheOrigin` is the one to read first |
 | `routers/test_opds.py` | 44 | **The OPDS routes.** The admin gate on configuration against a member's right to sync, the credential lifecycle, and that deleting a server or moving it to another origin takes its login with it |
@@ -87,7 +87,7 @@ why the helper uses regexes.
 | `test_auth.py` | 22 | Password hashing, JWT creation and the auth dependencies |
 | `test_accounts.py` | 66 | **Recovery and confirmation, where the rules live rather than where they are served.** That one function builds a reset request so an admin can approve but never start one, that redeeming ends every session on the account, that a code is single use and expires, and that both branches of a resend cost the same. |
 | `test_recover.py` | 7 | The command line reset, which is the path for a library whose only admin has nobody to approve their request. |
-| `test_models.py` | 125 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary |
+| `test_models.py` | 144 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary |
 | `test_importing.py` | 39 | **Applying a parsed export to a library.** The private-book oracle: a row whose ISBN belongs to a book the member cannot see is counted, never named, writes nothing |
 | `test_import_readers.py` | 16 | **What a reader IS, and that the set of them is closed.** That a reader is handed decoded text and nothing about how the file arrived, that every registered one honours a column correction, and that a service fitting the candidate names is names alone and no code. |
 | `test_authority.py` | 120 | **The network half of author identity.** That the four cross references a GND record carries are read off it, that the record's own scheme is never among them |
@@ -98,7 +98,7 @@ why the helper uses regexes.
 | `test_authors.py` | 63 | Splitting a credit line, the key that folds without asking against the one that only suggests, the index, the four suggestion rules |
 | `test_auth_backends_bindguard.py` | 20 | **The empty-password guards**, at all three layers |
 | `test_ratelimit.py` | 37 | The sliding window, and the login/registration limits |
-| `test_uploads.py` | 25 | Content-sniffed image validation and the size cap |
+| `test_uploads.py` | 33 | Content-sniffed image validation and the size cap |
 | `test_middleware.py` | 27 | Security headers, CSP contents, HSTS conditions |
 | `test_main.py` | 59 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan, what the built files say about being reused, the shell that has to answer a client route |
 | `test_house_rules.py` | 226 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter. Also the one decision of what vendored code is: each of the five walks over this tree driven against a constructed tree with each kind of vendored path planted in front of it, and no other test module allowed to define a walk of its own |
@@ -107,7 +107,7 @@ why the helper uses regexes.
 | `schemas/test_book.py` | 39 | **Two request bodies writing one column must agree about it.** `BookMatch` bounded four of its seventeen fields while `merge_into` wrote them all |
 | `schemas/test_settings.py` | 2 | **A row the router builds must carry every field the source describes.** The settings row is built by splatting the description into the response model |
 | `test_serialisation.py` | 47 | Assembling `BookOut`: the per-request fields, the tag suggestion by caption and by DDC number, that a tag name inside a longer word is not a caption match |
-| `test_schema.py` | 122 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial |
+| `test_schema.py` | 124 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial |
 | `test_env_example.py` | 4 | **Operator documentation that goes stale silently.** That every environment name `config.py` reads appears in `.env.example` and nothing appears there that the code ignores |
 | `test_database.py` | 27 | Engine setup and the session dependency |
 | `test_fetch.py` | 65 | **The only door outwards.** That the body cap counts raw wire bytes and compression is never requested |
@@ -118,19 +118,20 @@ why the helper uses regexes.
 | `test_z3950_provisional.py` | 38 | The provisional ctypes client behind that door: every ZOOM call declared against the signatures it really has, NULL checks, the single worker and its lock |
 | `routers/test_public.py` | 51 | The first routes reachable without a session: the gate as a router dependency rather than per handler, that nothing under the prefix accepts a write, 404 never 403 |
 | `schemas/test_public.py` | 25 | That the public payload is a total partition of `BookOut`, 18 published and 27 withheld with a reason each, and that no public model carries an alias |
-| `test_covers.py` | 110 | Fetching, sniffing, storing and serving a cover, the per-hop host allowlist, and the same wire-byte reading the catalogue path uses |
+| `test_covers.py` | 113 | Fetching, sniffing, storing and serving a cover, the per-hop host allowlist, and the same wire-byte reading the catalogue path uses |
 | `test_reading.py` | 56 | **The seam every reading record goes through.** That a record is private to its member separately from the book being visible, and that rating a book or offering to discuss it stamps no dates. |
 | `test_custom_fields.py` | 106 | **Household defined fields on a book.** That every reader and writer takes `Book` objects rather than ids |
 | `routers/test_books_custom_fields.py` | 44 | The six routes: defining, renaming, filling in, and that a field on a book the caller cannot see is 404 rather than 403 |
 | `test_mailer.py` | 56 | **SMTP as a transport and its refusals.** That TLS cannot be switched off by any setting or environment variable, that a stripped STARTTLS raises rather than sending in the clear |
-| `routers/test_covers.py` | 34 | The cover routes: upload, fetch, serve, and the placeholder |
+| `routers/test_covers.py` | 40 | The cover routes: upload, fetch, serve, and the placeholder |
 | `routers/test_books_copies.py` | 37 | Copy groups: creating, listing and the shared-edition rules |
 | `routers/test_books_covers.py` | 27 | Cover routes hung off a book |
 | `routers/test_books_lending.py` | 25 | Loans: lending, returning, the reminder interval and who may see a loan |
 | `routers/test_books_bulk.py` | 32 | One verb applied to a selection, the three-way count, and that a row id past the largest a row can carry is a 404 rather than an `OverflowError` out of the driver |
 | `routers/test_collections.py` | 21 | **Shelving, never permission.** Naming a part of the shelf, the case-insensitive uniqueness the database enforces, in ASCII and outside it, counts filtered to the caller |
 | `routers/test_books_collections.py` | 33 | Filing a book, the two list parameters and the 422 for both at once, the bulk verb, the merge that absorbs a collection, and the export column |
-| `routers/test_books_duplicates.py` | 31 | Duplicate detection and the merge, incl. the ORM cascade trap |
+| `routers/test_books_duplicates.py` | 32 | Duplicate detection and the merge, incl. the ORM cascade trap |
+| `routers/test_books_notes.py` | 13 | A note's own visibility over the four note routes: a private note absent from another member's listing and from an admin's, 404 rather than 403 on edit and delete for anybody but its author, and an edit that does not mention the flag leaving it alone |
 | `routers/test_imports_marc.py` | 43 | **The import route.** Library mode enforced at 403, the file size ceiling, the preview counts and what each one discloses, that a matched Book never gains an ISBN |
 | `routers/test_books_classification_filter.py` | 29 | **Filtering by classification, and the order it comes back in.** Chiefly a privacy test: `classifications` carries no member column, so the filter is only as private as the shelf in front of it. |
 | `routers/test_books_classifications.py` | 36 | **A catalogue heading kept whole.** That the number survives the parse and a year does not become one, that a German caption still suggests a curated tag |
@@ -143,8 +144,8 @@ why the helper uses regexes.
 | `routers/test_books_google.py` | 44 | Enrichment, the chosen-edition apply and that its body cannot overflow the database |
 | `routers/test_books_search.py` | 55 | **Free-text search.** That it works with no API key, that the six catalogues a reader would doubt answer do, how they merge |
 | `routers/test_books_trash.py` | 43 | **Undoing a delete.** That a trashed book leaves every view, comes back whole, and frees its ISBN again |
-| `routers/test_settings.py` | 172 | Feature flags, the masked API key, the overdue webhook settings, admin-only writes |
-| `routers/test_imports.py` | 59 | The import, the private-ISBN branch, the tag caps, the rate limit, and the round trip: that every column of the live export is read back or named as unread, that each one lands in the field named for it, and that every importer field is filled or named as absent |
+| `routers/test_settings.py` | 173 | Feature flags, the masked API key, the overdue webhook settings, admin-only writes |
+| `routers/test_imports.py` | 61 | The import, the private-ISBN branch, the tag caps, the rate limit, and the round trip: that every column of the live export is read back or named as unread, that each one lands in the field named for it, and that every importer field is filled or named as absent |
 | `routers/test_books_tags.py` | 31 | **Two vocabularies in one table.** Who may create, who may delete, and the counts |
 | `routers/test_auth.py` | 81 | Registration, login, `/auth/me`, the registration switch, switching into a test account in all three modes, and that an address given at registration is stored, normalised |
 | `routers/test_loans.py` | 95 | Lending, returning, history, who may run the overdue digest, and the overdue list a member reads: whose loans it holds, the in app switch that empties it |

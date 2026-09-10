@@ -145,6 +145,36 @@ class TestSetLoginImage:
             )
         assert len(list(covers_dir.glob("login_bg.*"))) == 1
 
+    def test_which_background_is_served_does_not_depend_on_set_order(
+        self, client, covers_dir, monkeypatch
+    ):
+        """Two formats of the base can exist, so the lookup has to be stable.
+
+        The upload sweeps the losers, but `backup.restore` deliberately does not:
+        a restore reproduces the directory the archive describes. `_find_login_bg`
+        iterated `ALLOWED_IMAGE_EXTENSIONS`, a frozenset, whose order is not
+        stable between processes, so the public login page served a different
+        image after a pod restart with nothing having changed.
+
+        Re-presenting the allowlist in a different order is what a second process
+        does. This asserts **stability, not a winner**: the order is arbitrary and
+        being the same order twice is the whole requirement.
+        """
+        from routers import settings as settings_router
+
+        (covers_dir / "login_bg.jpg").write_bytes(JPEG_BYTES)
+        (covers_dir / "login_bg.png").write_bytes(PNG_BYTES)
+
+        seen = set()
+        for order in (["jpg", "png", "webp", "jpeg"], ["webp", "png", "jpeg", "jpg"]):
+            monkeypatch.setattr(settings_router, "ALLOWED_IMAGE_EXTENSIONS", order)
+            seen.add(settings_router._find_login_bg())
+
+        # `None not in`, because a lookup that stopped finding anything returns
+        # {None}, which is the most stable answer there is.
+        assert None not in seen
+        assert len(seen) == 1
+
 
 # ── Runtime settings ──────────────────────────────────────────────────────────
 

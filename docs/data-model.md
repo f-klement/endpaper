@@ -427,7 +427,12 @@ difference above.
 Lending **from** an external, a book the library has borrowed rather than lent, is
 deliberately not a loan. See [decisions.md](decisions.md).
 
-**`notes`.** Free text, attached to a book and authored by a user.
+**`notes`.** Free text, attached to a book and authored by a user. `is_private` says
+whether it is the author's alone: false, which is every note written through the app, means
+visible to whoever can see the book; true, which is what an import writes for a review the
+file carried, means visible to its author and to nobody else, an admin included. Authorship
+and visibility are two columns because they are two facts, and reading `user_id` as both is
+what let an imported review out. [decisions.md](decisions.md) carries the reasoning.
 
 **`quotes`.** A passage copied out of a book: `text`, an optional `page`, and an optional
 `note` about it. Three columns rather than one, and each of the three is a decision:
@@ -450,8 +455,10 @@ deliberately not a loan. See [decisions.md](decisions.md).
   unpaged.
 
 A quote hangs off the **book row**, not off `copy_group`, because a page number is a fact
-about an edition. It is visible to whoever can see the book, like a note and unlike
-reading progress. Both choices are argued in [decisions.md](decisions.md).
+about an edition. It is visible to whoever can see the book, like a **shared** note and
+unlike reading progress, and it carries no privacy flag of its own: a quote is a
+transcription of the book's words where a note is the member's own. Both choices are argued
+in [decisions.md](decisions.md).
 
 **`settings`.** A small key/value store for things an admin changes at runtime rather than
 at deploy time: the Google Books toggle and API key, the Goodreads lookup toggle, the
@@ -758,9 +765,9 @@ migration. So "in no collection" is an ordinary permanent state, like a null `fo
 `lending`, and the API names it: `GET /api/books?unfiled=true`.
 
 **Library wide, and never a privacy boundary.** Any member may create one, rename it, and
-file any book they can write to. Filing changes nothing about who can see the book:
-`visible_to()` remains the only access control on content, and it is not given a collection
-to consult. `Collection.created_by_user_id` is provenance and no query reads it, which is
+file any book they can write to. Filing changes nothing about who can see the book: a
+book's visibility is decided by `visible_to()` alone, which is not given a collection to
+consult. `Collection.created_by_user_id` is provenance and no query reads it, which is
 what keeps that true rather than merely intended.
 
 The one thing a library wide label could disclose is a **count**, so every count is
@@ -861,8 +868,9 @@ books they added, the loans they are in and the notes they wrote.
 
 ## The privacy rule
 
-`books.is_private` is the only access control on content, and it means: *visible to the
-account that added it, and to nobody else.*
+`books.is_private` is the first of the two access controls on content, and it means:
+*visible to the account that added it, and to nobody else.* The second is `notes.is_private`,
+below, which is narrower: it decides who reads one note on a book the caller can already see.
 
 This is enforced by one shared predicate, `visible_to(user_id)` in `models.py`:
 
@@ -911,9 +919,39 @@ that reaches for a value with an id off a URL gets a type error at the call site
 `CustomField` deliberately carries no `values` relationship, so a definition cannot be walked
 to every book's value for it.
 
-Privacy can be changed by the book's owner or by an admin. Admins can also delete anyone's
-note. There is no other privilege difference, and admin does not bypass the visibility
-predicate in listings.
+Privacy can be changed by the book's owner or by an admin. Admins can also edit or delete
+anyone's note **that they can read**. There is no other privilege difference, and admin does
+not bypass a visibility predicate: not the book's in listings, and not the note's, which is
+why somebody else's private note answers 404 to an admin as well.
+
+### A note carries the second one
+
+`notes.is_private` means *visible to the member who wrote it, and to nobody else*, and
+`note_visible_to(user_id)` in `models.py` is the predicate:
+
+```python
+or_(Note.is_private.is_(False), Note.user_id == user_id)
+```
+
+It is applied on top of the book's rule rather than instead of it: a caller has already been
+through `book_for_read` to be asking for a book's notes at all.
+
+Two things make a second per-row rule affordable here, where the entry on quotes priced it as
+too expensive to add. **The population is three functions, all in one module**,
+`backend/routers/books.py`, against the twenty-odd listings that made the book's rule need
+`shelf.py` to be a seam. And the guard over it is structural: any function under `backend/`
+that both queries `Note` and returns one must narrow it, which is a shape rather than a list
+of call sites. The guard asserts the population by name as well, so the count above is
+recomputed by a test rather than copied from here.
+
+A note the caller cannot read is **404 on every route, never 403**, for the reason a book is:
+a 403 confirms the row exists.
+
+**The default is false and the migration adding the column changed no stored row's meaning.**
+Every note in an existing database was written into a shared library and has been readable by
+the other members since it was saved. Reviews an earlier import wrote are not
+retro-privatised, because nothing on the row records that a note came from an import; each is
+its author's own note and they can delete it.
 
 ### A private book never leaves the instance
 

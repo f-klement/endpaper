@@ -85,6 +85,7 @@ from models import (
     User,
     book_tags,
     copy_group_token,
+    note_visible_to,
 )
 from ratelimit import authority_limiter, cover_backfill_limiter, metadata_limiter
 from reading import Reading, resolve_merge
@@ -3504,13 +3505,20 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
 
 
 @router.get("/{book_id}/notes", response_model=list[NoteOut])
-def get_notes(book: BookForRead, db: DbSession) -> list[Note]:
-    """Requires read access to the book. Without that check, the notes on a
-    private book were readable by anyone who guessed its id."""
+def get_notes(book: BookForRead, db: DbSession, current_user: CurrentUser) -> list[Note]:
+    """The notes on this book that the caller may read: the shared ones, and
+    their own private ones.
+
+    Two predicates, and neither is redundant. `BookForRead` answers 404 for a
+    book the caller may not see, without which the notes on a private book were
+    readable by anyone who guessed its id. `note_visible_to` then decides which
+    notes on a book they can see; `models.Note` says why authorship is not that
+    answer.
+    """
     return (
         db.query(Note)
         .options(joinedload(Note.author))
-        .filter(Note.book_id == book.id)
+        .filter(Note.book_id == book.id, note_visible_to(current_user.id))
         .order_by(Note.created_at, Note.id)
         .all()
     )
@@ -3527,7 +3535,24 @@ def add_note(
     db.add(note)
     db.commit()
     db.refresh(note)
-    return db.query(Note).options(joinedload(Note.author)).filter(Note.id == note.id).first()
+    return _note_for_reading_back(note.id, current_user, db)
+
+
+def _note_for_reading_back(note_id: int, current_user: User, db: Session) -> Note | None:
+    """The note just written, reloaded with its author for the response.
+
+    Narrowed by `note_visible_to` even though the caller wrote the row a
+    statement ago, so that **every** function here returning a `Note` carries
+    the predicate and none of them relies on an argument about why it need not.
+    `TestANoteReadIsNarrowedToItsReader` is the guard, and an unnarrowed
+    re-read is what it would report.
+    """
+    return (
+        db.query(Note)
+        .options(joinedload(Note.author))
+        .filter(Note.id == note_id, note_visible_to(current_user.id))
+        .first()
+    )
 
 
 def _note_for_edit(note_id: int, book: Book, current_user: User, db: Session) -> Note:
@@ -3535,8 +3560,24 @@ def _note_for_edit(note_id: int, book: Book, current_user: User, db: Session) ->
 
     The book/note pairing is enforced so a note id from another book cannot be
     edited through a book the caller happens to have access to.
+
+    **404 for a note the caller cannot read, 403 for one they can.** A 403 on a
+    private note would confirm that another member's private note exists, which
+    is what the privacy withholds; `dependencies._not_found` states the same
+    rule for a book. A shared note somebody else wrote is a 403 because its
+    existence is not a secret, only its authorship is.
+
+    **The admin arm stops at the visibility.** An admin may edit or delete any
+    note they can read, which is the moderation power `docs/data-model.md`
+    records. It does not reach a private note: nobody else reads one, so there
+    is nothing to moderate, and reaching it would make this the one route where
+    admin bypasses a visibility predicate.
     """
-    note = db.query(Note).filter(Note.id == note_id, Note.book_id == book.id).first()
+    note = (
+        db.query(Note)
+        .filter(Note.id == note_id, Note.book_id == book.id, note_visible_to(current_user.id))
+        .first()
+    )
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found")
     if note.user_id != current_user.id and not current_user.is_admin:
@@ -3555,7 +3596,7 @@ def edit_note(
     note = _note_for_edit(note_id, book, current_user, db)
     note.content = payload.content
     db.commit()
-    return db.query(Note).options(joinedload(Note.author)).filter(Note.id == note.id).first()
+    return _note_for_reading_back(note.id, current_user, db)
 
 
 @router.delete("/{book_id}/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -3571,12 +3612,15 @@ def delete_note(
 
 # ── Quotes ────────────────────────────────────────────────────────────────────
 #
-# The same access rules as notes, and deliberately so. A quote is visible to
-# whoever can see the book it came from: the shelf is shared, and a passage one
-# member copied out of a book the library holds is the library's to read.
-# It is not treated like `list_progress`, which returns only the caller's own
-# rows, because a reading log is a diary about a person and a quote is about
-# the book. `docs/decisions.md` records the choice.
+# A quote is visible to whoever can see the book it came from, and deliberately
+# so: the shelf is shared, and a passage one member copied out of a book the
+# library holds is the library's to read. It is not treated like
+# `list_progress`, which returns only the caller's own rows, because a reading
+# log is a diary about a person and a quote is about the book.
+#
+# **This is no longer the same rule as notes**, which now carry `is_private`.
+# The line between them is what the row holds: a note is the member's own words
+# and a quote is a transcription of the book's. `docs/decisions.md` records both.
 
 
 def _quotes_for(book: Book, db: Session) -> list[Quote]:
@@ -3598,10 +3642,12 @@ def _quotes_for(book: Book, db: Session) -> list[Quote]:
 
 @router.get("/{book_id}/quotes", response_model=list[QuoteOut])
 def get_quotes(book: BookForRead, db: DbSession) -> list[Quote]:
-    """Requires read access to the book, exactly as the notes route does.
+    """Requires read access to the book, and nothing else.
 
     `BookForRead` is the whole privacy check here: it answers 404 for a book
-    the caller may not see, so there is no path to the quotes on one.
+    the caller may not see, so there is no path to the quotes on one. A quote
+    carries no per-row visibility of its own, unlike a note, so there is no
+    second predicate to apply.
     """
     return _quotes_for(book, db)
 

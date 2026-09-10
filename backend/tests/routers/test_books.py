@@ -1015,7 +1015,9 @@ class TestNotes:
         assert res.status_code == 204
 
     def test_an_admin_may_edit_someone_else_s_note(self, client, admin, member, make_book):
-        """Documents the current rule: admin overrides the author check on edit too."""
+        """Documents the current rule: admin overrides the author check on edit
+        too. It stops at a note's visibility, which
+        `tests/routers/test_books_notes.py` pins from the other side."""
         book = make_book(member["headers"])
         note = client.post(
             f"/api/books/{book['id']}/notes", json={"content": "theirs"}, headers=member["headers"]

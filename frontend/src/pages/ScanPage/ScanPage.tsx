@@ -141,12 +141,16 @@ export default function ScanPage() {
             onDiscard={rapid.clear}
             waiting={rapid.waiting}
             deciding={rapid.deciding}
+            keptForNow={rapid.keptForNow}
             paceMinutes={rapid.paceMinutes}
+            keptPaceMinutes={rapid.keptPaceMinutes}
             isLookingUp={rapid.isLookingUp}
             onLookUp={rapid.lookUpTheNames}
             onStopLookUp={rapid.stopLookingUp}
             onChoose={rapid.chooseFor}
             onKeepName={rapid.keepTheName}
+            onKeepAllForNow={rapid.keepEveryNameForNow}
+            onLookUpKept={rapid.lookUpTheKeptNames}
             onSplit={rapid.splitApart}
           />
         </>

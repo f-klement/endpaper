@@ -603,6 +603,15 @@ export function useBookSearch(): UseBookSearchResult {
   };
 }
 
+/**
+ * How a row came to be standing under its own file name.
+ *
+ * A closed set, and it is a named type rather than an inline union so that
+ * `OFFERED_AGAIN` can be keyed on it: a fourth answer is then a compile error
+ * until somebody has decided whether it may be looked up again.
+ */
+export type CatalogueAnswer = "nothing" | "records" | "records-for-now";
+
 /** One book caught by the rapid scanner or picked as a file, and how it has gone so far. */
 export interface ScannedEntry {
   /**
@@ -662,18 +671,21 @@ export interface ScannedEntry {
    * What the catalogue answered, where the answer left the row under its own
    * name.
    *
-   * **Two values rather than one flag**, because the two ways a row keeps its
-   * file name are different sentences to the member. `"nothing"` is a catalogue
-   * with no record, which for a title that exists only as a file is the ordinary
+   * **Values rather than one flag**, because the ways a row keeps its file name
+   * are different sentences to the member. `"nothing"` is a catalogue with no
+   * record, which for a title that exists only as a file is the ordinary
    * outcome and is what `fallback.aboutEbooks` explains. `"records"` is a
    * catalogue that had some and a member who preferred the name, and saying
    * anything about ebooks to them would describe something that did not happen.
+   * `"records-for-now"` is the same records and a member who was clearing the
+   * queue rather than answering about this book, so the row can be asked
+   * again; `OFFERED_AGAIN` is where that difference is spent.
    *
    * **Absent means nothing has been asked**, which is what the run and the count
    * both read, and it is what a call that could not be made leaves behind: a
    * catalogue nobody reached has answered nothing and is worth asking again.
    */
-  answered?: "nothing" | "records";
+  answered?: CatalogueAnswer;
   /**
    * The audio files this one candidate was made of, and the rule that said so.
    *
@@ -780,17 +792,60 @@ function isBeingDecided(entry: ScannedEntry): boolean {
 }
 
 /**
+ * Whether an answer leaves the row worth offering a second pass.
+ *
+ * **A map keyed on the union rather than a disjunction**, which is what makes
+ * this self enforcing: a fourth answer does not compile until it appears here,
+ * so nobody can add one and inherit an offer, or the absence of one, by
+ * omission. The default is exactly what the author of a new answer would not
+ * think to state.
+ *
+ * A member who refused the records answered about that book and is not asked
+ * again. A member who kept the names in bulk was clearing a queue rather than
+ * answering, and the whole of the owner's decision on 2026-09-10 is that those
+ * can come back.
+ */
+const OFFERED_AGAIN: Record<CatalogueAnswer, boolean> = {
+  nothing: false,
+  records: false,
+  "records-for-now": true,
+};
+
+/**
  * An entry the catalogue has not been asked about and could be.
  *
  * One predicate rather than a filter written twice, because the count on the
  * button and the list the run walks have to be the same set: a button offering
  * to look up twelve and a run that looks up nine is a screen reporting
  * something the page did not do.
+ *
+ * **An answered row is never in here, whatever the answer**, which is the
+ * invariant the bulk keep was not allowed to cost: a member who picks ten more
+ * files and presses this must look up ten, not the two hundred and fifty they
+ * had just cleared off the screen. Those are `canBeAskedAgain`, which is a
+ * second control saying so in its own words.
  */
 function needsALookup(entry: ScannedEntry): boolean {
   return (
     entry.state === "derived" &&
     entry.answered === undefined &&
+    (entry.isbn !== "" || entry.query !== undefined)
+  );
+}
+
+/**
+ * An entry the catalogue answered, whose answer the member left open.
+ *
+ * **Disjoint from `needsALookup` by construction**, on `answered` being set
+ * against unset rather than on two lists that happen not to overlap: a row in
+ * both would be looked up twice by two presses that each said it was the whole
+ * of the work.
+ */
+function canBeAskedAgain(entry: ScannedEntry): boolean {
+  return (
+    entry.state === "derived" &&
+    entry.answered !== undefined &&
+    OFFERED_AGAIN[entry.answered] &&
     (entry.isbn !== "" || entry.query !== undefined)
   );
 }
@@ -846,8 +901,20 @@ export interface UseRapidIntakeResult {
    * function rather than a filter at each site.
    */
   deciding: number;
+  /**
+   * Files kept under their names in bulk, which the catalogues may be asked
+   * about again.
+   *
+   * **Not part of `waiting`, and that is the point of counting it separately.**
+   * A member who clears a queue of two hundred and fifty and then picks ten more
+   * files presses a button that says ten. These come back through a press of
+   * their own, which names them.
+   */
+  keptForNow: number;
   /** Roughly how long looking all of them up would take, in minutes. */
   paceMinutes: number;
+  /** The same figure for a second pass over the names kept in bulk. */
+  keptPaceMinutes: number;
   /**
    * Ask the catalogue about every file that has only its name.
    *
@@ -858,6 +925,14 @@ export interface UseRapidIntakeResult {
    * name a member did not choose to look up ever leaves the browser.
    */
   lookUpTheNames: () => void;
+  /**
+   * Ask the catalogues again about every name kept in bulk.
+   *
+   * The same paced run as `lookUpTheNames` over a different set, rather than a
+   * second mechanism: one pace, one stop, and one call per file whichever press
+   * started it.
+   */
+  lookUpTheKeptNames: () => void;
   /** Stop the paced run after the call in flight. */
   stopLookingUp: () => void;
   isLookingUp: boolean;
@@ -877,6 +952,22 @@ export interface UseRapidIntakeResult {
   chooseFor: (key: string, match: BookMatch) => void;
   /** Reject all of them and keep what the name said. */
   keepTheName: (key: string) => void;
+  /**
+   * Clear every row still being decided, keeping the names **for now**.
+   *
+   * **Not the same state as keeping one name, and that is the whole control.**
+   * Keeping one name is a member's answer about that book and stays answered.
+   * This is a member clearing a queue of three hundred, so every row it touches
+   * is offered a lookup again and the records it takes off the screen can be
+   * asked for a second time. Owner's decision, 2026-09-10, taken over a
+   * confirmation naming the count, which announces a discard rather than
+   * undoing one.
+   *
+   * **The set is `isBeingDecided`, which is the set `addAll` excludes.** A
+   * second predicate spelled the same way would let the control clear rows the
+   * batch would have added, or leave rows the batch still refuses.
+   */
+  keepEveryNameForNow: () => void;
   remove: (key: string) => void;
   clear: () => void;
 
@@ -1386,7 +1477,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
   }
 
   /**
-   * The paced run over everything that has only a name.
+   * The paced run, over whichever set the press that started it named.
    *
    * **Sequential, with a floor of `FALLBACK_INTERVAL_MS` between starts.** The
    * floor is measured from the start of the previous call rather than its end,
@@ -1396,28 +1487,54 @@ export function useRapidIntake(): UseRapidIntakeResult {
    * **Over the queue as it stood when the press happened**, which is what makes
    * the figure on the button true. A file picked during a run joins the next
    * one.
+   *
+   * **One loop for both presses, taking the predicate rather than the list.**
+   * The pace is priced against a limiter the whole page shares, so a second
+   * mechanism beside this one would be a second run able to start while this is
+   * going: `isLookingUp` is what refuses that, and it refuses it once here
+   * rather than once per caller. The predicate is passed rather than the
+   * filtered array so the run reads the entries it starts from, which is what
+   * makes the count on the button and the list the loop walks the same set.
    */
-  async function lookUpTheNames() {
+  async function runTheLookups(over: (entry: ScannedEntry) => boolean) {
     // **The rendered state, and a ref was tried here and taken back out.** A
     // press is a discrete event, which React flushes before it delivers the
-    // next, so a second press cannot see this as it was. Two calls inside one
-    // tick can, and a ref refused the second, but nothing observes the
-    // difference it makes: both loops walk the same list, ask the same query
-    // keys, and React Query answers the second from the first's flight. A guard
-    // nothing can watch go wrong is a guard nothing can watch go missing.
+    // next, so a second press cannot see this as it was, and there are two
+    // presses: one per set. Two calls inside one tick would both pass, and a
+    // ref refused the second.
+    //
+    // **What that would now cost is no longer nothing.** While there was one
+    // entry point the two loops walked the same list and asked the same query
+    // keys, so React Query answered the second out of the first's flight. The
+    // two sets here are disjoint by construction, so two runs would ask
+    // different rows: 30 starts a minute each is the whole of `METADATA_LIMIT`,
+    // which is the one outcome `FALLBACK_STARTS_PER_MINUTE` is priced to
+    // refuse. What holds is that nothing calls both in one tick. **Anything
+    // that ever does needs the ref back**, and it is this paragraph rather than
+    // a test that says so, because a guard nothing can watch go wrong is a
+    // guard nothing can watch go missing.
     if (isLookingUp) return;
-    const waiting = entries.filter(needsALookup);
-    if (waiting.length === 0) return;
+    const walking = entries.filter(over);
+    if (walking.length === 0) return;
 
     stopRequested.current = false;
     setIsLookingUp(true);
     try {
-      for (const [index, entry] of waiting.entries()) {
+      for (const [index, entry] of walking.entries()) {
         if (stopRequested.current) break;
-        settle(entry.key, { state: "searching" });
+        // **The note and the answer go with the state.** A row being asked
+        // about has no answer and is not standing under its name for a reason
+        // it can still state: leaving either behind renders a list of catalogue
+        // records under the sentence saying the name was kept, and leaves the
+        // row counted as kept while it is being decided again.
+        settle(entry.key, {
+          state: "searching",
+          answered: undefined,
+          reason: undefined,
+        });
         const startedAt = Date.now();
         await lookUpTheName(entry);
-        if (index === waiting.length - 1) break;
+        if (index === walking.length - 1) break;
         const remaining = FALLBACK_INTERVAL_MS - (Date.now() - startedAt);
         if (remaining > 0) await delay(remaining, endTheWait);
       }
@@ -1499,6 +1616,19 @@ export function useRapidIntake(): UseRapidIntakeResult {
   // figure beside it disagree the first time either is edited.
   const waiting = entries.filter(needsALookup).length;
   const deciding = entries.filter(isBeingDecided).length;
+  const keptForNow = entries.filter(canBeAskedAgain).length;
+
+  /**
+   * Roughly how long a paced run over this many files takes, in minutes.
+   *
+   * One arithmetic for both presses. Two counts is two numbers and it is the
+   * same pace: writing it twice is how the second control comes to quote a
+   * figure the run it starts does not keep. A floor of one minute, because
+   * "about 0 minutes" is not a wait anybody recognises.
+   */
+  function paceFor(count: number): number {
+    return Math.max(1, Math.ceil((count * FALLBACK_INTERVAL_MS) / 60_000));
+  }
 
   return {
     isActive,
@@ -1520,14 +1650,13 @@ export function useRapidIntake(): UseRapidIntakeResult {
     skipped,
     waiting,
     deciding,
+    keptForNow,
     // Derived from the pace rather than carried beside it, so the figure on the
-    // button cannot say one thing while the run does another. A floor of one
-    // minute, because "about 0 minutes" is not a wait anybody recognises.
-    paceMinutes: Math.max(
-      1,
-      Math.ceil((waiting * FALLBACK_INTERVAL_MS) / 60_000),
-    ),
-    lookUpTheNames: () => void lookUpTheNames(),
+    // button cannot say one thing while the run does another.
+    paceMinutes: paceFor(waiting),
+    keptPaceMinutes: paceFor(keptForNow),
+    lookUpTheNames: () => void runTheLookups(needsALookup),
+    lookUpTheKeptNames: () => void runTheLookups(canBeAskedAgain),
     stopLookingUp: () => {
       stopRequested.current = true;
       // The run may be between two calls rather than inside one, and the loop
@@ -1550,6 +1679,23 @@ export function useRapidIntake(): UseRapidIntakeResult {
         matches: undefined,
         reason: t("fallback.keptTheName"),
       }),
+    keepEveryNameForNow: () =>
+      setEntries((current) =>
+        current.map((entry) =>
+          isBeingDecided(entry)
+            ? {
+                ...entry,
+                state: "derived",
+                answered: "records-for-now",
+                // Dropped from the row rather than held for an undo: they are
+                // what the catalogue answers again, and holding them would be a
+                // second store of a record with no rule for how long it lives.
+                matches: undefined,
+                reason: t("fallback.keptForNow"),
+              }
+            : entry,
+        ),
+      ),
     remove: (key) =>
       setEntries((current) => current.filter((entry) => entry.key !== key)),
     splitApart: (key) => void splitTheGroup(key),

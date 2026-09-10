@@ -13,6 +13,7 @@ export interface NoteOut {
   content: string;
   created_at: string;
   id: number;
+  is_private: boolean;
   updated_at: string;
   user_id: number;
 }

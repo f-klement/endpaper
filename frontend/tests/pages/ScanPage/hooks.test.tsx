@@ -1525,6 +1525,273 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     expect(result.current.waiting).toBe(0);
   });
 
+  it("does not offer a lookup again for a name kept one row at a time", async () => {
+    // The member answered about this book. Asking again would spend the budget
+    // to be told what they have already refused, and would put a decision they
+    // made back on the screen. **This is the direction the bulk keep must not
+    // quietly weaken**: it is the half of the pair that stays answered.
+    api.on("/api/books/search", {
+      body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
+    });
+    const { result } = renderRapid();
+    act(() =>
+      result.current.pickFiles([new File(["%PDF"], "dispossessed.pdf")]),
+    );
+    await settled(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() =>
+      expect(result.current.entries[0]?.state).toBe("choosing"),
+    );
+
+    act(() => result.current.keepTheName(result.current.entries[0]!.key));
+
+    expect(result.current.entries[0]?.answered).toBe("records");
+    expect(result.current.waiting).toBe(0);
+  });
+
+  it(
+    "clears every row still being decided in one press",
+    async () => {
+      // The cost the owner's decision was taken against: a folder of 300 files
+      // that matches 250 is 250 presses. **Two rows, because one pins nothing**:
+      // a press that cleared only the row it was given would pass with one.
+      api.on("/api/books/search", {
+        body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
+      });
+      const { result } = renderRapid();
+      act(() =>
+        result.current.pickFiles([
+          new File(["%PDF"], "dispossessed.pdf"),
+          new File(["%PDF"], "Dune.pdf"),
+        ]),
+      );
+      await settled(result);
+      act(() => result.current.lookUpTheNames());
+      await waitFor(() => expect(result.current.deciding).toBe(2), {
+        timeout: FALLBACK_INTERVAL_MS * 2,
+      });
+
+      act(() => result.current.keepEveryNameForNow());
+
+      expect(result.current.deciding).toBe(0);
+      expect(result.current.entries.map((entry) => entry.state)).toEqual([
+        "derived",
+        "derived",
+      ]);
+    },
+    FALLBACK_INTERVAL_MS * 4,
+  );
+
+  it("offers a lookup again for a name kept in bulk", async () => {
+    // **What makes the press recoverable**, and the whole of the owner's
+    // decision of 2026-09-10: the records leave the screen and the row goes
+    // back into the set the lookup offers, so nothing is spent to get them
+    // back except the search itself.
+    api.on("/api/books/search", {
+      body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
+    });
+    const { result } = renderRapid();
+    act(() =>
+      result.current.pickFiles([new File(["%PDF"], "dispossessed.pdf")]),
+    );
+    await settled(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() =>
+      expect(result.current.entries[0]?.state).toBe("choosing"),
+    );
+
+    act(() => result.current.keepEveryNameForNow());
+
+    expect(result.current.entries[0]).toMatchObject({
+      state: "derived",
+      answered: "records-for-now",
+      draft: { title: "dispossessed" },
+      reason: "Kept under its file name for now, and can be looked up again.",
+    });
+    expect(result.current.entries[0]?.matches).toBeUndefined();
+    // **Both counts, because either alone passes on a constant.** The row is
+    // offered again by a press that names it, and not by the press that looks
+    // up files nobody has asked about.
+    expect(result.current.keptForNow).toBe(1);
+    expect(result.current.waiting).toBe(0);
+  });
+
+  it("does not offer a second pass for a name the catalogues answered nothing about", async () => {
+    // **The arm of the map the other tests never walk.** A catalogue with no
+    // record is the ordinary outcome for a folder of ebooks, so an answer
+    // treated as reopenable would offer a second pass over all three hundred
+    // rows, under a control that says the member kept them.
+    api.on("/api/books/search", {
+      body: { matches: [], asked: ["open_library"], unasked: [] },
+    });
+    const { result } = renderRapid();
+    act(() => result.current.pickFiles([new File(["%PDF"], "Dune.pdf")]));
+    await settled(result);
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.answered).toBe("nothing"),
+    );
+    expect(result.current.keptForNow).toBe(0);
+  });
+
+  it("does not put a name kept in bulk back into the ordinary lookup", async () => {
+    // **The invariant the bulk keep was not allowed to cost.** Ten more files
+    // picked after a queue of two hundred and fifty was cleared must be a press
+    // that looks up ten: without this the generic button drags every kept row
+    // back into the wall the member had just pressed their way out of.
+    api.on("/api/books/search", {
+      body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
+    });
+    const { result } = renderRapid();
+    act(() =>
+      result.current.pickFiles([new File(["%PDF"], "dispossessed.pdf")]),
+    );
+    await settled(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() =>
+      expect(result.current.entries[0]?.state).toBe("choosing"),
+    );
+    act(() => result.current.keepEveryNameForNow());
+
+    act(() => result.current.lookUpTheNames());
+
+    expect(result.current.entries[0]?.state).toBe("derived");
+    expect(searchCalls()).toBe(1);
+  });
+
+  it(
+    "leaves a row answered by hand where it is when the rest are kept in bulk",
+    async () => {
+      // The diagonal the two kinds of kept row have to pass: one press, two rows,
+      // and only one of them moves. Asserted on both, because a press that
+      // touched every derived row would pass on the row it was meant to touch.
+      api.on("/api/books/search", {
+        body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
+      });
+      const { result } = renderRapid();
+      act(() =>
+        result.current.pickFiles([
+          new File(["%PDF"], "dispossessed.pdf"),
+          new File(["%PDF"], "Dune.pdf"),
+        ]),
+      );
+      await settled(result);
+      act(() => result.current.lookUpTheNames());
+      await waitFor(() => expect(result.current.deciding).toBe(2), {
+        timeout: FALLBACK_INTERVAL_MS * 2,
+      });
+      act(() => result.current.keepTheName(result.current.entries[0]!.key));
+
+      act(() => result.current.keepEveryNameForNow());
+
+      expect(result.current.entries[0]).toMatchObject({
+        answered: "records",
+        reason: "Kept under its file name.",
+      });
+      expect(result.current.entries[1]?.answered).toBe("records-for-now");
+      // One of the two, which is the count that says which row came back.
+      expect(result.current.keptForNow).toBe(1);
+    },
+    FALLBACK_INTERVAL_MS * 4,
+  );
+
+  it("takes a name kept in bulk into the batch", async () => {
+    // The press is a member clearing a queue so that Add all can run, so a row
+    // it cleared has to be one the batch adds. Without this the control moves a
+    // row out of one excluded set and into another.
+    api.on("/api/books/search", {
+      body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
+    });
+    api.on("/api/books/scan", { body: makeBook() });
+    const { result } = renderRapid();
+    act(() =>
+      result.current.pickFiles([new File(["%PDF"], "dispossessed.pdf")]),
+    );
+    await settled(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() =>
+      expect(result.current.entries[0]?.state).toBe("choosing"),
+    );
+    act(() => result.current.keepEveryNameForNow());
+
+    act(() => result.current.addAll());
+
+    await waitFor(() => expect(result.current.result?.added).toBe(1));
+    expect(result.current.entries).toHaveLength(0);
+  });
+
+  it(
+    "asks only the kept names on the second pass",
+    async () => {
+      // **A kept row and a waiting row on screen at once**, which is the state no
+      // other test here produces and the one the second press could quietly widen
+      // in: a button that says two and starts a run over everything on the queue
+      // spends a budget priced for one run, under a figure that is not what it
+      // does.
+      api.on("/api/books/search", {
+        body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
+      });
+      const { result } = renderRapid();
+      act(() =>
+        result.current.pickFiles([new File(["%PDF"], "dispossessed.pdf")]),
+      );
+      await settled(result);
+      act(() => result.current.lookUpTheNames());
+      await waitFor(() =>
+        expect(result.current.entries[0]?.state).toBe("choosing"),
+      );
+      act(() => result.current.keepEveryNameForNow());
+      act(() => result.current.pickFiles([new File(["%PDF"], "Dune.pdf")]));
+      await settled(result);
+      expect(result.current.waiting).toBe(1);
+      expect(result.current.keptForNow).toBe(1);
+
+      act(() => result.current.lookUpTheKeptNames());
+
+      // Run to the end rather than to the first answer: a run that had taken the
+      // second row as well would still be between two calls at that point, and
+      // the count it had not yet spent would read as the count it never spends.
+      await waitFor(() => expect(result.current.isLookingUp).toBe(false), {
+        timeout: FALLBACK_INTERVAL_MS * 2,
+      });
+      expect(searchCalls()).toBe(2);
+      expect(result.current.entries[1]).toMatchObject({ state: "derived" });
+      expect(result.current.entries[1]?.answered).toBeUndefined();
+    },
+    FALLBACK_INTERVAL_MS * 4,
+  );
+
+  it("takes the kept note off a row it is asking about again", async () => {
+    // A row being asked about has no answer and is not standing under its name
+    // for a reason it can still state. Left behind, the note "kept under its
+    // file name for now" renders above the list of records the second pass just
+    // brought back, and the row is still counted as one of the kept.
+    api.on("/api/books/search", {
+      body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
+    });
+    const { result } = renderRapid();
+    act(() =>
+      result.current.pickFiles([new File(["%PDF"], "dispossessed.pdf")]),
+    );
+    await settled(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() =>
+      expect(result.current.entries[0]?.state).toBe("choosing"),
+    );
+    act(() => result.current.keepEveryNameForNow());
+
+    act(() => result.current.lookUpTheKeptNames());
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.state).toBe("choosing"),
+    );
+    expect(result.current.entries[0]?.reason).toBeUndefined();
+    expect(result.current.entries[0]?.answered).toBeUndefined();
+    expect(result.current.keptForNow).toBe(0);
+  });
+
   it(
     "paces the run rather than asking about every file at once",
     async () => {
@@ -1608,6 +1875,11 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     // 45 files at one start per two seconds is 90 seconds.
     expect(result.current.waiting).toBe(45);
     expect(result.current.paceMinutes).toBe(2);
+    // **The diagonal, and the only count where the two figures can differ.**
+    // A minute is the floor, so at any count under thirty one both figures read
+    // the same and a second pass quoting the first run's wait passes unseen.
+    expect(result.current.keptForNow).toBe(0);
+    expect(result.current.keptPaceMinutes).toBe(1);
   });
 });
 

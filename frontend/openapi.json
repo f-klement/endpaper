@@ -3783,6 +3783,10 @@
             "title": "Id",
             "type": "integer"
           },
+          "is_private": {
+            "title": "Is Private",
+            "type": "boolean"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -3798,6 +3802,7 @@
           "book_id",
           "user_id",
           "content",
+          "is_private",
           "created_at",
           "updated_at"
         ],
@@ -8963,7 +8968,7 @@
     },
     "/api/books/{book_id}/notes": {
       "get": {
-        "description": "Requires read access to the book. Without that check, the notes on a\nprivate book were readable by anyone who guessed its id.",
+        "description": "The notes on this book that the caller may read: the shared ones, and\ntheir own private ones.\n\nTwo predicates, and neither is redundant. `BookForRead` answers 404 for a\nbook the caller may not see, without which the notes on a private book were\nreadable by anyone who guessed its id. `note_visible_to` then decides which\nnotes on a book they can see; `models.Note` says why authorship is not that\nanswer.",
         "operationId": "get_notes",
         "parameters": [
           {
@@ -9522,7 +9527,7 @@
     },
     "/api/books/{book_id}/quotes": {
       "get": {
-        "description": "Requires read access to the book, exactly as the notes route does.\n\n`BookForRead` is the whole privacy check here: it answers 404 for a book\nthe caller may not see, so there is no path to the quotes on one.",
+        "description": "Requires read access to the book, and nothing else.\n\n`BookForRead` is the whole privacy check here: it answers 404 for a book\nthe caller may not see, so there is no path to the quotes on one. A quote\ncarries no per-row visibility of its own, unlike a note, so there is no\nsecond predicate to apply.",
         "operationId": "get_quotes",
         "parameters": [
           {
@@ -10294,7 +10299,7 @@
     },
     "/api/imports/csv": {
       "post": {
-        "description": "Apply a library export from Goodreads, LibraryThing, StoryGraph, Libib\nor anything else with a title column.\n\n**Declared `def`, not `async def`, and that is load bearing.** Everything\nbelow is blocking: SQLAlchemy has no async here. An `async` handler runs on\nthe event loop, so a running import stops the whole application answering.\nMeasured on a 3000 row file: `GET /api/books` went from 7ms to **14.4\nseconds**, and exactly one such request completed for the duration.\nFastAPI runs a `def` handler in a threadpool instead, which costs nothing\nand keeps the app alive while a library comes across.\n\nStatuses are **personal**, so this only ever writes the importing member's\nown `user_books` rows. Importing your shelves does not change what anyone\nelse has read, and two members can import their own exports without\nfighting over the same books.\n\nBooks created by `create_missing` are marked `ownership=unknown`: a reading\nhistory is not evidence of possession. They are then confirmed together\nfrom the library view, which is what the bulk ownership endpoint is for.\n\n`apply_tags` is off by default and deliberately so. A Goodreads export's\ntag column is its shelves, which for most people is a few hundred one-off\nnames, and turning all of them into tags here buries the curated list under\nsomebody's filing habits from another app.\n\n`reader` names which reader reads the file, and is left out for all but a\nfile the detector reads as the wrong service's. A row the file's own\nexclusion column marks as deleted is dropped and counted in `excluded`\nwhichever reader runs, so naming one never brings those titles back: the\ncolumn is read wherever it appears, and the preview shows the count and the\ncolumn before anything is written.",
+        "description": "Apply a library export from Goodreads, LibraryThing, StoryGraph, Libib\nor anything else with a title column.\n\n**Declared `def`, not `async def`, and that is load bearing.** Everything\nbelow is blocking: SQLAlchemy has no async here. An `async` handler runs on\nthe event loop, so a running import stops the whole application answering.\nMeasured on a 3000 row file: `GET /api/books` went from 7ms to **14.4\nseconds**, and exactly one such request completed for the duration.\nFastAPI runs a `def` handler in a threadpool instead, which costs nothing\nand keeps the app alive while a library comes across.\n\nStatuses are **personal**, so this only ever writes the importing member's\nown `user_books` rows. Importing your shelves does not change what anyone\nelse has read, and two members can import their own exports without\nfighting over the same books.\n\nA review the file carries is kept as a **private** note: visible to the\nmember who imported it and to nobody else, because the column another app\ncalled \"private notes\" must not become an instance-visible note under their\nown name. Notes written here through the app are unaffected and stay\nvisible to whoever can see the book.\n\nBooks created by `create_missing` are marked `ownership=unknown`: a reading\nhistory is not evidence of possession. They are then confirmed together\nfrom the library view, which is what the bulk ownership endpoint is for.\n\n`apply_tags` is off by default and deliberately so. A Goodreads export's\ntag column is its shelves, which for most people is a few hundred one-off\nnames, and turning all of them into tags here buries the curated list under\nsomebody's filing habits from another app.\n\n`reader` names which reader reads the file, and is left out for all but a\nfile the detector reads as the wrong service's. A row the file's own\nexclusion column marks as deleted is dropped and counted in `excluded`\nwhichever reader runs, so naming one never brings those titles back: the\ncolumn is read wherever it appears, and the preview shows the count and the\ncolumn before anything is written.",
         "operationId": "import_csv",
         "parameters": [
           {

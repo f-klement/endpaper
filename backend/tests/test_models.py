@@ -4,8 +4,10 @@ These exercise the ORM directly rather than through the API, because the
 behaviour under test belongs to the schema.
 """
 
+import ast
 import itertools
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -39,9 +41,16 @@ from models import (
     is_switch_target,
     names_exactly_one_borrower,
     new_opds_credential_key,
+    note_visible_to,
     switch_targets,
     visible_to,
 )
+
+# One walk of the tree, shared, so a rule added here scans the corpus every
+# other rule scans. See its docstring for why the exclusion lives there.
+from tests.test_house_rules import _source_modules
+
+BACKEND = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
@@ -1355,3 +1364,383 @@ class TestAnOpdsServerNeverBorrowsACatalogueLogin:
                     "VALUES ('', 'http://h/opds', 'opds-abc')"
                 )
             )
+
+
+class TestNoteVisibility:
+    """`note_visible_to()` as SQL, against rows rather than by reading it."""
+
+    def test_a_shared_note_is_visible_to_a_member_who_did_not_write_it(self, db, user, book):
+        author = User(username="author", password_hash="x")
+        db.add(author)
+        db.flush()
+        db.add(Note(book_id=book.id, user_id=author.id, content="shared"))
+        db.commit()
+
+        seen = db.query(Note).filter(note_visible_to(user.id)).all()
+        assert [note.content for note in seen] == ["shared"]
+
+    def test_a_private_note_is_visible_only_to_its_author(self, db, user, book):
+        author = User(username="author", password_hash="x")
+        db.add(author)
+        db.flush()
+        db.add(Note(book_id=book.id, user_id=author.id, content="mine", is_private=True))
+        db.commit()
+
+        assert db.query(Note).filter(note_visible_to(user.id)).all() == []
+        assert [n.content for n in db.query(Note).filter(note_visible_to(author.id))] == ["mine"]
+
+    def test_a_note_written_through_the_orm_is_shared_by_default(self, db, user, book):
+        """The default is what keeps every stored note meaning what it meant:
+        a note has always been readable by whoever can see its book."""
+        db.add(Note(book_id=book.id, user_id=user.id, content="typed"))
+        db.commit()
+        assert db.query(Note).one().is_private is False
+
+
+#: Local names that mean `models.Note`, per module, so a `from models import
+#: Note as N` cannot walk out of the rule. The same evasion `test_shelf.py`
+#: measured on `visible_to as _v`.
+def _note_aliases(tree: ast.AST) -> set[str]:
+    names = {"Note"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "models":
+            for alias in node.names:
+                if alias.name == "Note" and alias.asname:
+                    names.add(alias.asname)
+    return names
+
+
+def _own_body(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
+    """Every node inside `function` except its own annotations and anything
+    inside a nested function.
+
+    Without the nesting subtraction a helper defined inside a narrowed function
+    would lend it its predicate, and a narrowed function defined inside an
+    unnarrowed one would lend it back.
+
+    **The annotations come out for a sharper reason.** The population rule below
+    asks whether the body names `Note`, and a function's own `-> list[Note]` is
+    an `ast.Name` under the same node: leave it in and every function in the
+    population satisfies the rule by its own signature, which is a guard that
+    has stopped asking anything.
+
+    **Every argument, through `ast.walk` rather than `args.args`.** An
+    `ast.arguments` node holds annotations in five buckets, and naming one of
+    them made the verdict depend on how an argument was spelled: measured in
+    process on one pass-through function, `note: Note` came out of the
+    population and `*, note: Note`, `note: Note, /`, `*notes: Note` and
+    `**kw: Note` each stayed in it. The direction was a false offender rather
+    than a silent pass, so nothing got through, and it is still the enumerating
+    shape this rule dropped once already.
+    """
+    nested = {
+        inner
+        for node in ast.iter_child_nodes(function)
+        for inner in ast.walk(node)
+        if isinstance(inner, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    skip = {node for outer in nested for node in ast.walk(outer)}
+    annotations = [
+        node.annotation for node in ast.walk(function.args) if isinstance(node, ast.arg)
+    ]
+    for annotation in [function.returns, *annotations]:
+        if annotation is not None:
+            skip |= set(ast.walk(annotation))
+    return [node for node in ast.walk(function) if node not in skip and node is not function]
+
+
+def _reads_and_returns_a_note(
+    function: ast.FunctionDef | ast.AsyncFunctionDef, aliases: set[str]
+) -> bool:
+    """Whether this function **reaches for** an existing note and **returns**
+    one.
+
+    Two conditions, and the pair is what makes the rule structural instead of a
+    list of call sites. `_repoint_relations` reads `Note` and returns nothing,
+    because moving every note off a merged book is not a read for a viewer; it
+    is out by its own signature rather than by being named here, and a version
+    of it that started returning what it moves would walk in on the same day.
+
+    **Reaching is "names `Note` other than to construct one", not a list of
+    accessors.** The first draft asked for `query` or `select` by name, which is
+    the enumerating shape this repository keeps paying for: `db.get(Note, id)`
+    is the idiom used at nine live call sites under `backend/` and is exactly
+    `_note_for_reading_back`'s shape, and it satisfied neither name. A function
+    that never enters the population cannot move the population assertion
+    either, so that hole was invisible from both arms. Constructing is excluded
+    because `add_note` writes a `Note` and hands the read-back to a helper that
+    is itself in the population; counting the constructor would put a function
+    with no read in it and say nothing about the read.
+    """
+    annotation = function.returns
+    if annotation is None:
+        return False
+    if not any(
+        isinstance(node, ast.Name) and node.id in aliases for node in ast.walk(annotation)
+    ):
+        return False
+    body = _own_body(function)
+    constructed = {
+        node.func for node in body if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    return any(
+        isinstance(node, ast.Name) and node.id in aliases and node not in constructed
+        for node in body
+    )
+
+
+def _narrows_to_its_reader(
+    function: ast.FunctionDef | ast.AsyncFunctionDef, aliases: set[str]
+) -> bool:
+    """Whether `note_visible_to` appears in this function's own body.
+
+    **One accepted spelling, and the second one was cut rather than tightened.**
+    The first draft also accepted a `Note.user_id` anywhere in the body, on the
+    argument that restricting to the caller's own rows is equivalent. It does
+    not check what the column is compared against, or that it is compared at
+    all: `order_by(Note.user_id)` and `filter(Note.user_id != -1)` both read as
+    narrowed. Both critic seats found that independently, and the arm was dead
+    on arrival, since all three members of the population narrow with the
+    predicate. A rule with one spelling is also the reason the predicate has one
+    home: a second accepted way to say it is a second place for it to be said
+    wrongly.
+    """
+    return any(
+        isinstance(node, ast.Name) and node.id == "note_visible_to"
+        for node in _own_body(function)
+    )
+
+
+class TestANoteReadIsNarrowedToItsReader:
+    """House rule: a function that reads notes out of the database and hands
+    them back must say which member is reading.
+
+    **The population is stated as a shape, not as a list of names**: every
+    function under `backend/` whose return annotation mentions `Note` and whose
+    body names `Note` other than to construct one. That is what a rule about a
+    per-row visibility can afford here and a per-**book** one could not:
+    `visible_to` is applied by twenty-odd listings and needed `Shelf` to be a
+    seam, and this predicate has three call sites in one router.
+    `test_the_population_is_not_empty` asserts those three by name, so the
+    figure in this sentence is recomputed by a test rather than copied.
+
+    **What it does not see, listed rather than left to be found:**
+
+    * a function returning `Any`, a `dict`, or a Pydantic model built out of
+      notes, since the annotation is what puts it in the population;
+    * a query built in one function and returned by another whose own
+      annotation names nothing, which is the laundering path
+      `test_shelf.py` closes for books with a second pass over `.join`;
+    * `book.notes`, the relationship, which names no `Note` at all. Measured
+      over the tree on 2026-09-10: no module under `backend/` outside the tests
+      traverses it, so the rule's corpus is the whole of the live population
+      today and this is a hole in what it would catch tomorrow rather than one
+      it is standing over now;
+    * `backup.py`, which reads every row of every table through a loop
+      variable and names no model at a query at all. It is unfiltered on
+      purpose and admin only for that reason, which is the same exemption
+      `shelf.py`'s docstring already argues for books.
+    """
+
+    def test_every_function_returning_a_note_narrows_it(self):
+        offenders = []
+        for name, source in _source_modules().items():
+            tree = ast.parse(source)
+            aliases = _note_aliases(tree)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                if not _reads_and_returns_a_note(node, aliases):
+                    continue
+                if not _narrows_to_its_reader(node, aliases):
+                    offenders.append(f"{name}:{node.lineno}:{node.name}")
+        assert sorted(offenders) == [], (
+            "These functions read notes out of the database and return them "
+            "without saying who is reading, so a private note reaches whoever "
+            f"asked: {sorted(offenders)}"
+        )
+
+    def test_the_population_is_not_empty(self):
+        """A rule over a corpus it cannot find passes forever.
+
+        This is the arm that would have caught the guard being pointed at a
+        tree where the predicate had been renamed, the router split, or the
+        walk's exclusion widened until it reached nothing.
+        """
+        found = []
+        for name, source in _source_modules().items():
+            tree = ast.parse(source)
+            aliases = _note_aliases(tree)
+            found += [
+                f"{name}:{node.name}"
+                for node in ast.walk(tree)
+                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+                and _reads_and_returns_a_note(node, aliases)
+            ]
+        assert sorted(found) == [
+            "routers/books.py:_note_for_edit",
+            "routers/books.py:_note_for_reading_back",
+            "routers/books.py:get_notes",
+        ], sorted(found)
+
+    def test_the_predicate_is_defined_where_this_rule_says_it_is(self):
+        """The rule above is a name check, so the name is worth proving real: a
+        typo in it would pass over a tree that had dropped the predicate."""
+        assert "def note_visible_to(" in (BACKEND / "models.py").read_text()
+
+    def test_a_query_that_forgot_the_predicate_is_reported(self):
+        """The rule's own sensitivity check, on source this file owns rather
+        than on the tree, so it keeps reporting after the tree is fixed."""
+        source = (
+            "from models import Note\n"
+            "def get_notes(db) -> list[Note]:\n"
+            "    return db.query(Note).filter(Note.book_id == 1).all()\n"
+        )
+        tree = ast.parse(source)
+        aliases = _note_aliases(tree)
+        function = next(
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        )
+        assert _reads_and_returns_a_note(function, aliases)
+        assert not _narrows_to_its_reader(function, aliases)
+
+    def test_a_renamed_import_does_not_walk_out_of_the_rule(self):
+        source = (
+            "from models import Note as N\n"
+            "def get_notes(db) -> list[N]:\n"
+            "    return db.query(N).filter(N.book_id == 1).all()\n"
+        )
+        tree = ast.parse(source)
+        function = next(
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        )
+        assert _reads_and_returns_a_note(function, _note_aliases(tree))
+
+    def test_a_function_that_moves_notes_without_returning_them_is_not_in_it(self):
+        """`_repoint_relations`' shape. It reassigns every note on a merged
+        book whatever its author, which is right, and it hands none back."""
+        source = (
+            "from models import Note\n"
+            "def _repoint(db, losers) -> None:\n"
+            "    for note in db.query(Note).filter(Note.book_id.in_(losers)).all():\n"
+            "        note.book_id = 1\n"
+        )
+        tree = ast.parse(source)
+        function = next(
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        )
+        assert not _reads_and_returns_a_note(function, _note_aliases(tree))
+
+    def test_a_primary_key_fetch_is_in_the_population(self):
+        """`db.get(Note, id)`, which the first draft of the population rule
+        could not see. It is the repository's own idiom for a fetch by id and
+        it is the shape of the function that reads a note back after a write."""
+        source = (
+            "from models import Note\n"
+            "def read_back(db, note_id) -> Note | None:\n"
+            "    return db.get(Note, note_id)\n"
+        )
+        tree = ast.parse(source)
+        function = next(
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        )
+        assert _reads_and_returns_a_note(function, _note_aliases(tree))
+        assert not _narrows_to_its_reader(function, _note_aliases(tree))
+
+    def test_constructing_a_note_is_not_reaching_for_one(self):
+        """`add_note`'s shape. It writes a row and hands the read back to a
+        helper that is in the population itself, so counting the constructor
+        would put a function with no read into the rule and say nothing about
+        the read that follows."""
+        source = (
+            "from models import Note\n"
+            "def add(db, book_id) -> Note | None:\n"
+            "    note = Note(book_id=book_id, content='x')\n"
+            "    db.add(note)\n"
+            "    return read_back(db, note.id)\n"
+        )
+        tree = ast.parse(source)
+        function = next(
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        )
+        assert not _reads_and_returns_a_note(function, _note_aliases(tree))
+
+    def test_a_bare_mention_of_the_author_column_is_not_a_narrowing(self):
+        """What both critic seats found in the first draft, kept as an arm
+        rather than as a paragraph. `Note.user_id` appearing somewhere in a body
+        says nothing about what it is compared against, or whether it is
+        compared at all."""
+        source = (
+            "from models import Note\n"
+            "def get_notes(db, book_id) -> list[Note]:\n"
+            "    return db.query(Note).filter(Note.user_id != -1)"
+            ".order_by(Note.user_id).all()\n"
+        )
+        tree = ast.parse(source)
+        function = next(
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        )
+        assert _reads_and_returns_a_note(function, _note_aliases(tree))
+        assert not _narrows_to_its_reader(function, _note_aliases(tree))
+
+    def test_an_annotation_alone_does_not_satisfy_the_population_rule(self):
+        """What `_own_body` dropping the annotations buys. A function whose only
+        `Note` is its own return type reaches for nothing."""
+        source = (
+            "from models import Note\n"
+            "def nothing(db) -> list[Note]:\n"
+            "    return []\n"
+        )
+        tree = ast.parse(source)
+        function = next(
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        )
+        assert not _reads_and_returns_a_note(function, _note_aliases(tree))
+
+    @pytest.mark.parametrize(
+        "signature",
+        [
+            "note: Note",
+            "*, note: Note",
+            "note: Note, /",
+            "*notes: Note",
+            "**kw: Note",
+        ],
+    )
+    def test_an_argument_annotation_is_not_a_body_mention_however_it_is_spelled(
+        self, signature
+    ):
+        """An `ast.arguments` node holds annotations in five buckets, and a rule
+        naming one of them decides the same function differently depending on
+        how its arguments were written. Nothing in this class read an argument
+        at all until this arm."""
+        source = (
+            "from models import Note\n"
+            f"def pass_through({signature}) -> Note:\n"
+            "    return note\n"
+        )
+        tree = ast.parse(source)
+        function = next(
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        )
+        assert not _reads_and_returns_a_note(function, _note_aliases(tree))
+
+    def test_a_nested_helper_does_not_lend_its_predicate_to_its_parent(self):
+        """What `_own_body` buys. Without it the inner function's call counts
+        for the outer one, which is how a rule like this goes quiet."""
+        source = (
+            "from models import Note\n"
+            "from models import note_visible_to\n"
+            "def outer(db, viewer) -> list[Note]:\n"
+            "    def inner():\n"
+            "        return note_visible_to(viewer)\n"
+            "    return db.query(Note).all()\n"
+        )
+        tree = ast.parse(source)
+        outer = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "outer"
+        )
+        assert _reads_and_returns_a_note(outer, _note_aliases(tree))
+        assert not _narrows_to_its_reader(outer, _note_aliases(tree))

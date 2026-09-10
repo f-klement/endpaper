@@ -4,6 +4,19 @@
 
 ### Security
 
+- **A review carried by an imported CSV lands as a private note**, readable by the member who
+  imported it and by nobody else, an admin included. It was landing in a note every member of
+  the instance could read, under the importing member's own name, and a column an old app
+  called "private notes" was one of the headers that got there. Notes written through the app
+  are unchanged: they stay visible to whoever can see the book. **Reviews imported before this
+  version stay shared**, because nothing records that a note came from an import, and they can
+  be deleted like any other note.
+- **A restore writes a cover only when the bytes are an image this app serves.** It was
+  deciding from the archive entry's filename and never from its content, so an archive could
+  put anything at all into the covers directory under a cover's name. An entry that fails the
+  same test an upload gets is skipped, named in the log and left out of the restored count,
+  rather than failing the restore: the covers are written after the database is committed.
+
 - A stored catalogue or OPDS login is now sealed against the address it may be sent to as well
   as against its source, so an envelope cannot be opened beside an address a hand edited archive
   or a stray `UPDATE` put next to it. **Upgrading costs you no catalogue login**: one stored
@@ -230,6 +243,12 @@
   than a permission lost. The About card's badge, the `LICENSE` file, both package manifests
   and the badges the README and the Docker Hub page draw all say MIT, and a test now fails
   when one of the four files that declare it disagrees with the others.
+- **A queue of offered catalogue records can be kept in bulk, and those names can be asked
+  about again.** A folder of three hundred files that matches most of them was one press per
+  row. Keeping every name at once discards nothing: a row kept that way says so, is counted
+  back to you, and has a press of its own that offers the catalogues those names again. A row
+  you keep one at a time is still final, and now says so. The second pass may spend the search
+  budget again, which the queue tells you before you press.
 - The record every file reader answers with, the identifier type they build and the entity
   refusal they apply moved from `lib/opf.ts` to `lib/fileReaders.ts`. Six modules that parse no
   package document no longer import the EPUB half of the app to say what a book is. The record

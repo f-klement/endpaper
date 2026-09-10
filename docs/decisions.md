@@ -12278,3 +12278,105 @@ when the test runs, so it needs the spelling of one computed value rather than a
 spellings. **It catches the figure at the moment it is written, while it is still correct**,
 which is the only moment drift can be stopped. A count that is wrong the moment it is typed is
 invisible to it, stated here rather than discovered later.
+
+## A note carries its own visibility, and it is the second access control on content
+
+`books.is_private` used to be the only one. A note is now either shared with whoever can see
+the book, which is what every note has been until now, or private to its author.
+
+**Why a note and not a quote.** A note is the member's own words about a book. A quote is a
+transcription of the book's, which is why quotes stay visible to whoever can see the book:
+copying a passage out is the library saying this is worth reading. The distinction is what
+the author wrote, not what the row hangs off.
+
+**The cost the neighbouring entry refused, and why it is affordable here.** That entry priced
+a per row privacy flag as the expensive part: privacy in this schema is a property of the
+book, expressed once in `visible_to()`, and a second rule every query has to remember is the
+one that eventually gets forgotten. The pricing was right and the population is what changes
+the answer: **three** functions in the whole backend query a note and hand it back, all in
+`routers/books.py`, against the twenty odd book listings that made a per book flag need
+`Shelf`. The rule is written once as `models.note_visible_to()`, and the guard is structural
+rather than a list of call sites: a function anywhere in `backend/` whose return annotation
+mentions `Note` narrows by that predicate or by `Note.user_id`. `_repoint_relations`, which
+moves every note off a merged book regardless of author, is outside the population because it
+returns nothing, not because it is named.
+
+**Not a join table.** A `notes` row already carries `user_id`, so the pair a visibility would
+key on is one to one with the row. A second table spends a table, a foreign key and an index
+to store a boolean the row already determines. A pair table is the right shape for "shared
+with these three members", which nobody has asked for and which this column does not
+foreclose.
+
+**Existing rows keep their meaning.** The migration defaults every stored note to shared,
+which is what a note written through the API has always been. It does **not** retro-privatise
+reviews an earlier import wrote, and cannot: nothing records that a note came from an import,
+so the migration would be guessing, and a note other members have already read going invisible
+is a content removal nobody asked for. The residue is real and has a member facing remedy: an
+already imported review is the member's own note and they can delete it.
+
+**The admin exception stops at a private note.** An admin may delete, and today edit, any note
+they can see. That is a moderation power over content other members read, and a private note is
+read by nobody, so the exception does not reach it: another member's private note is 404 to an
+admin, exactly as another member's private book already is. Backup stays the admin's unfiltered
+route and is documented as one.
+
+**404 and not 403, at the rule's own site.** A note the caller cannot see answers 404 on edit
+and delete: a 403 would confirm that another member's private note exists, which is what the
+privacy withholds. A note the caller **can** see and did not write still answers 403, because
+its existence is not a secret.
+
+## A restored cover is written only when its bytes are an image this app serves
+
+The cover route reads a file's `Content-Type` off its **filename** and never off the file, so
+the invariant it rests on is that a cover's name tells the truth about its bytes. Every writer
+into the covers directory derived the extension from the bytes except one: `backup.restore`
+took the archive entry's suffix and wrote the bytes unread. Measured before the change, an
+archive naming four non image entries under cover suffixes had all four written and counted.
+
+**Neither of the other two alternatives.** The serving layer is already inert, measured live:
+a cover holding a script tag returns 200 with `content-type: image/jpeg` read off the name,
+`nosniff`, `X-Frame-Options: DENY`, and a CSP carrying `object-src 'none'` and
+`frame-ancestors 'none'`; `image/svg+xml` is absent from both the extension allowlist and the
+served types, because an SVG is a document with script in it running under this app's origin.
+And accepting it was the owner's call rather than a seat's, so it was not taken by default.
+
+**The same test an upload gets, and no stricter**, which is the property that stops a restore
+failing on this app's own backup. It asks whether the bytes are an image, not whether they are
+the image the name claims: an `<img>` decodes by magic number, so a legacy `.jpg` holding PNG
+bytes displays today, and correcting such a name means renaming the file and repairing the row
+that points at it, which is its own change.
+
+**Skip, not refuse.** The cover loop runs after the database is committed, so raising there
+leaves a library whose rows are restored and whose covers are half written, which is the
+partial state a restore must not produce. A skipped cover shows the placeholder and its row is
+intact.
+
+**What it does not buy, stated at the same time as what it does.** The sniff is not what stands
+between a restore and script execution today; `nosniff` and the extension allowlist are. It
+buys that the route's `Content-Type` stops being a guess, that a consumer which does not honour
+`nosniff` is not handed a mislabelled file, and that the covers directory is not a file store of
+arbitrary bytes on the app's own origin.
+
+## A bulk keep and a keep one row at a time are two different answers
+
+Owner's decision, 2026-09-10. Keeping a name individually is a member's answer about that book
+and stays answered; keeping in bulk is a member clearing a queue, so those rows are still
+offered a lookup later. A folder of three hundred files that matches two hundred and fifty was
+that many presses, and the control was refused once for discarding that many catalogue records
+irreversibly.
+
+**A third value on one field, not a second field.** `ScannedEntry.answered` gains
+`"records-for-now"` beside `"nothing"` and `"records"`, and `OFFERED_AGAIN` is a total record
+over that union, so a fourth answer does not compile until somebody decides whether it comes
+back. One fact, one home.
+
+**Two disjoint predicates rather than one widened one.** `needsALookup` still means never
+asked, so the ordinary press cannot drag kept rows back into it; `canBeAskedAgain` is the kept
+set and has a press of its own that names it. Disjoint on whether `answered` is set, rather
+than on two lists that happen not to overlap.
+
+**The distinction is visible to the member and not only in the data**, which is what the
+decision asked for: the row says it was kept for now and can be looked up again, the press is
+counted back through a live region, and the individual keep now says it is final. The second
+pass may spend the search budget again, and the queue says so before the press rather than
+after it.

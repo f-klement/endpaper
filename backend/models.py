@@ -139,11 +139,11 @@ class Collection(Base):
 
     **Library wide, and never a privacy boundary.** Any member may make one,
     rename it or delete it, and filing a book into one changes nothing about
-    who can see it. `visible_to()` remains the only access control on content,
-    and this is deliberately not a second scoping axis beside it: a label that
-    sometimes hides rows is a label somebody will eventually mistake for
-    permission, and the mistake is silent. `docs/decisions.md` records the
-    argument.
+    who can see it. `visible_to()` decides that on its own and is not given a
+    collection to consult, and this is deliberately not a second scoping axis
+    beside privacy: a label that sometimes hides rows is a label somebody will
+    eventually mistake for permission, and the mistake is silent.
+    `docs/decisions.md` records the argument.
 
     `created_by_user_id` is provenance and nothing else. No query consults it,
     which is what keeps the previous paragraph true rather than merely
@@ -1312,6 +1312,15 @@ class Loan(Base):
 
 
 class Note(Base):
+    """What one Member thought about one Book, shared or kept to themselves.
+
+    **`user_id` is authorship and `is_private` is visibility, and they are two
+    different facts.** Before the second column existed the first was read as
+    both: a note was per Member, so a reviewer took it for per Member *access*,
+    and `get_notes` filters on the Book alone. `docs/decisions.md` records the
+    decision and `note_visible_to()` is the rule.
+    """
+
     __tablename__ = "notes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -1320,6 +1329,18 @@ class Note(Base):
     )
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Whether this note is the author's alone. False is what every note written
+    # through the API has always been and stays: visible to whoever can see the
+    # Book. True is what an import writes, because the column a Member's old app
+    # called "private notes" must not become an instance-visible note under
+    # their own name.
+    #
+    # **Not indexed**, and that is a decision rather than an omission: this
+    # predicate only ever rides behind `book_id`, which is indexed, and one Book
+    # carries a handful of notes. A second B-tree written on every insert would
+    # narrow nothing the first has not already narrowed.
+    is_private: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -1372,8 +1393,15 @@ class Quote(Base):
     """A passage a member copied out of a book, and optionally why.
 
     Shaped after `Note`, which is the closest thing here: the same book and
-    author columns, the same edit rule, the same visibility. Three things
-    differ, and each was decided rather than inherited.
+    author columns and the same edit rule. Three things differ, and each was
+    decided rather than inherited.
+
+    **The visibility is no longer the same, and the reason is what the row
+    holds.** A note carries `is_private`, because a note is the Member's own
+    words and an import can arrive carrying words they never meant to publish
+    to the shelf. A quote is a transcription of the Book's words, so it stays
+    visible to whoever can see the Book: copying a passage out is the library
+    saying this is worth reading, which is the whole feature.
 
     **`text` is verbatim and `note` is not.** BookWyrm keeps the excerpt and
     the commentary in separate columns for this reason and it is the right
@@ -1402,8 +1430,9 @@ class Quote(Base):
     Deliberately absent, each because a reference implementation has one and
     this app has no use for it: an end position and a position mode (BookWyrm
     needs both for percentages and federated rendering), a per-row visibility
-    (BookLogr needs it for its public profile; nothing here is public), a
-    favourite flag, and a title.
+    (BookLogr needs it for its public profile; nothing here is public, and the
+    one this app grew sits on `Note` for the reason above), a favourite flag,
+    and a title.
     """
 
     __tablename__ = "quotes"
@@ -2111,6 +2140,28 @@ def in_trash_for(user_id: int) -> ColumnElement[bool]:
         Book.deleted_at.isnot(None),
         or_(Book.is_private.is_(False), Book.added_by_user_id == user_id),
     )
+
+
+def note_visible_to(user_id: int) -> ColumnElement[bool]:
+    """Filter predicate for the notes a given account is allowed to read.
+
+    A note is visible when it is shared, or when this account wrote it. **This
+    is the second access control on content in this schema**, `books.is_private`
+    being the first, and it is narrower rather than parallel: it decides who
+    reads a note on a Book they can already see. A caller still has to have got
+    past `book_for_read` to be asking.
+
+    **It carries no admin arm, deliberately.** An admin may moderate what other
+    Members read; a private note is read by nobody, so there is nothing to
+    moderate, and somebody else's private note is 404 to an admin exactly as
+    somebody else's private Book already is. `backup.py` stays the admin's
+    unfiltered route and is admin-only for that reason.
+
+    `.is_(False)` rather than `not Note.is_private`, for the reason
+    `visible_to()` states: the latter collapses to a constant and matches
+    every row.
+    """
+    return or_(Note.is_private.is_(False), Note.user_id == user_id)
 
 
 class CatalogueTarget(Base):

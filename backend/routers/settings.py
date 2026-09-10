@@ -152,7 +152,14 @@ def _refuse_if_pinned(key: SettingKey) -> None:
 
 
 def _find_login_bg() -> Path | None:
-    for extension in ALLOWED_IMAGE_EXTENSIONS:
+    """The login background on disk, or None.
+
+    `sorted` for `covers.stored_path`'s reason, which is that a frozenset does
+    not iterate in a stable order between processes and a restore can leave two
+    formats of this base on disk. Unordered, the public login page serves a
+    different image after a pod restart with nothing having changed.
+    """
+    for extension in sorted(ALLOWED_IMAGE_EXTENSIONS):
         candidate = COVERS_DIR / f"{LOGIN_BG_BASE}.{extension}"
         if candidate.exists():
             return candidate

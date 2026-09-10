@@ -23,13 +23,35 @@ interface RapidQueueProps {
    * something the page did not do.
    */
   deciding: number;
+  /**
+   * How many are standing under their file names in bulk, and can come back.
+   *
+   * Counted apart from `waiting` for the reason the hook counts it apart: the
+   * press that offers these names again names them, and the press that looks up
+   * files nobody has asked about does not quietly take them too.
+   */
+  keptForNow: number;
   /** Roughly how long looking all of those up would take, in minutes. */
   paceMinutes: number;
+  /** The same figure for a second pass over the names kept in bulk. */
+  keptPaceMinutes: number;
   isLookingUp: boolean;
   onLookUp: () => void;
   onStopLookUp: () => void;
   onChoose: (key: string, match: BookMatch) => void;
   onKeepName: (key: string) => void;
+  /**
+   * Keep the file name on every row still being decided, for now.
+   *
+   * **The one control on this screen whose effect is undone by pressing another
+   * one**: the rows it clears become rows the lookup offers again, so the queue
+   * grows a "Look up N by name" button back the moment it is pressed. That is
+   * what the member is being told by `fallback.keepAllNote`, and it is the
+   * reason this is not the refused "Keep every name".
+   */
+  onKeepAllForNow: () => void;
+  /** Ask the catalogues again about every name kept in bulk. */
+  onLookUpKept: () => void;
   /**
    * File one audiobook candidate's parts as a book each.
    *
@@ -61,12 +83,16 @@ export default function RapidQueue({
   onDiscard,
   waiting,
   deciding,
+  keptForNow,
   paceMinutes,
+  keptPaceMinutes,
   isLookingUp,
   onLookUp,
   onStopLookUp,
   onChoose,
   onKeepName,
+  onKeepAllForNow,
+  onLookUpKept,
   onSplit,
 }: RapidQueueProps) {
   const { t } = useTranslation();
@@ -78,6 +104,9 @@ export default function RapidQueue({
   // for, so `answered` carries the two apart.
   const anyEmptyAnswer = entries.some((entry) => entry.answered === "nothing");
   const busy = isAdding || isLookingUp;
+  // Rows standing under their names with somewhere to go back to, and no run in
+  // the way. Read three times below, so it is named once.
+  const showKept = keptForNow > 0 && !isLookingUp;
 
   // The banner sits above whatever is left rather than replacing it. Anything
   // still in the queue after a run is a book that did not go in.
@@ -297,11 +326,90 @@ export default function RapidQueue({
         ))}
       </ul>
 
+      {/* **The count, then the way out of it, then what that costs.** The same
+          three parts in the same order as the lookup control above, which is
+          the pattern a member has already read once on this screen: a figure,
+          a button, and the sentence saying what pressing it spends. */}
       {deciding > 0 && (
-        <p className="text-xs text-paper-600 leading-relaxed dark:text-paper-400">
-          {t("fallback.stillToDecide", { count: deciding })}
-        </p>
+        <div>
+          <p className="text-xs text-paper-600 leading-relaxed dark:text-paper-400">
+            {t("fallback.stillToDecide", { count: deciding })}
+          </p>
+          {/* Bordered rather than filled, and nowhere near the discard: this
+              writes nothing and throws nothing away, and a control that reads
+              as either would be pressed by fewer people than should press it.
+              The accent fill on this screen belongs to the one control that
+              writes. */}
+          <button
+            type="button"
+            onClick={onKeepAllForNow}
+            disabled={busy}
+            className="w-full mt-1.5 py-2 rounded-xl border border-paper-200 text-sm font-medium text-paper-700 hover:bg-paper-50 disabled:opacity-50 dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800"
+          >
+            {t("fallback.keepAllForNow", { count: deciding })}
+          </button>
+          <p className="text-xs text-paper-600 mt-1.5 leading-relaxed dark:text-paper-400">
+            {t("fallback.keepAllNote")}
+          </p>
+        </div>
       )}
+
+      {/* **What the press left, in the place the press was.** The control that
+          was here unmounts when the last row is decided, and a control that
+          disappears acknowledges nothing: this says how many rows are standing
+          under their names, and offers the way back beside it. Announced,
+          because the row it describes may be six scroll heights away.
+
+          **Mounted before there is anything to announce, and it is the text
+          that is gated rather than the region.** A live region inserted into the
+          page with its content already in it is the one a screen reader does not
+          speak, so gating the element would be an acknowledgement nobody hears.
+          Empty while a run is going, for the reason the button beside it is
+          hidden then and for a second one: the run settles one row at a time, so
+          a region left saying a count would say it once per row.
+
+          **`sr-only` on the wrapper while there is nothing to say, which is
+          what keeps it out of the flow.** The container's `space-y-3` puts a
+          margin between every pair of children, so a permanently present block
+          would open a gap for nothing; `sr-only` is absolutely positioned, so
+          the visible rows keep the spacing they had, and everything inside it
+          stays in the accessibility tree. The toggle is on the wrapper rather
+          than on the paragraph so that this block keeps the rhythm the lookup
+          control above it has: `space-y-1.5` between the sentence and its own
+          button, rather than the container's larger gap, which reads as a
+          separate instruction instead of as the sentence's button.
+
+          **`aria-live` rather than `role="status"`**, which is the same live
+          region: the banner above already answers to that role, and a second
+          element answering to it makes "the status" of this queue ambiguous to
+          anything asking by role, tests included. */}
+      <div className={showKept ? "space-y-1.5" : "sr-only"}>
+        <p
+          aria-live="polite"
+          aria-atomic="true"
+          className="text-xs text-paper-600 leading-relaxed dark:text-paper-400"
+        >
+          {showKept ? t("fallback.keptForNowCount", { count: keptForNow }) : ""}
+        </p>
+        {showKept && (
+          <>
+            <button
+              type="button"
+              onClick={onLookUpKept}
+              disabled={isAdding}
+              className="w-full py-2 rounded-xl border border-paper-200 text-sm font-medium text-paper-700 hover:bg-paper-50 disabled:opacity-50 dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800"
+            >
+              {t("fallback.lookUpAgain", { count: keptForNow })}
+            </button>
+            {/* The same disclosure the first pass carries, because it is the
+                same call: names leave the browser either way. Its own sentence,
+                which usually renders with the first one nowhere on screen. */}
+            <p className="text-xs text-paper-600 leading-relaxed dark:text-paper-400">
+              {t("fallback.paceAgain", { minutes: keptPaceMinutes })}
+            </p>
+          </>
+        )}
+      </div>
 
       <div className="flex gap-2">
         <button

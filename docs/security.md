@@ -993,6 +993,76 @@ different questions with different answers.
 admin-only, because `visible_to()` has no admin bypass and an admin-only backfill could
 therefore never repair another member's private books. It is rate limited instead.
 
+### Only an image reaches the covers directory
+
+The cover route reads a file's `Content-Type` off its **filename** and never off
+the file (`routers/covers.py:_MEDIA_TYPES`, indexed by the path parameter). What makes
+that safe is the extension allowlist rather than the accuracy of the name: every type it
+can produce is a raster format a browser decodes and cannot execute, and `image/svg+xml`
+is absent from both the allowlist and the served types, because an SVG is a document with
+script in it running under this app's own origin.
+
+So the property each writer into the covers directory has to hold is that the bytes are
+one of those formats:
+
+| writer | how the bytes are checked |
+|---|---|
+| the cover upload and the login background | `uploads.read_image_upload` sniffs the magic bytes |
+| a cover downloaded from an image service | `uploads.sniff_image_extension` on the body, above |
+| a merge or a copy (`covers.adopt`, `covers.duplicate`) | moves bytes one of the above already sniffed |
+| a restore (`backup._cover_bytes`) | the same sniff the upload path applies, and no stricter |
+
+**Restore was the exception and is not any more.** It took the archive entry's suffix and
+wrote the bytes unread, so an archive could put anything at all under a cover name. An
+entry whose bytes are not an image this app serves is now skipped, named in a warning, and
+left out of the restored count.
+
+**Skipped rather than refused**, and every failure of the write is skipped the same way,
+because the cover loop runs after the database is committed: raising there would answer 500
+on a library whose rows are restored and whose covers are gone, which is neither the backup
+nor what was there before. A skipped cover shows the placeholder and its row is intact.
+
+**Three bounds, stated rather than left to be assumed.**
+
+The sniff is the magic bytes and nothing more. It is not a decoder, and it is deliberately
+the same test an upload gets: a restore stricter than the upload path is one that fails on
+this app's own backup, which would cost a library its covers to buy nothing. A valid header
+followed by rubbish passes here exactly as it passes an upload.
+
+It asks whether the bytes are an image, **not whether they are the image the name claims**.
+Requiring the two to agree would delete a working cover: an `<img>` decodes by magic
+number, so a legacy `1.jpg` holding PNG bytes displays today, and the label the route reads
+off the filename is not what makes it appear. Correcting such a name means renaming the
+file and repairing the row that points at it, which is its own change.
+
+And the sniff is **not** what stops a stored file executing in a browser. Three mechanisms
+do, for three different loads, and it is worth separating them because each has a different
+reason to stay.
+
+A browser sniffs raster formats in an `<img>` and never sniffs its way *into* SVG, so what
+gates the scriptable case there is the declared type, and behind it the extension allowlist,
+which admits no scriptable type at all. That is why a mislabelled JPEG and PNG are
+interchangeable in an image tag and an SVG is not.
+
+For somebody who navigates straight to the URL it is `X-Content-Type-Options: nosniff`, which
+`middleware.py` sets on every response: measured, HTML stored as `1.jpg` is served
+`content-type: image/jpeg` with `nosniff`, so a browser will not render it as a document.
+
+**And `nosniff` has a sharper job here than the navigation case**, which is the one that
+would be missed if somebody ever weighed removing it from this route. The policy is
+`script-src 'self'` and `style-src 'self' 'unsafe-inline'`, so a cover URL is a same-origin
+URL that a `<script src>` or a `<link rel=stylesheet>` is permitted to load. The sniff above
+accepts a valid header followed by arbitrary bytes, and a stylesheet parser skips leading
+garbage, so `nosniff` plus the `image/*` type is the only thing refusing those two loads.
+`frame-ancestors 'none'` on the cover response refuses framing from anywhere, and
+`object-src 'none'` on this app's own pages stops an injection here from embedding one; a
+third party page is not bound by our `object-src`, and what makes a cover inert there is
+the image type plus `nosniff`.
+
+A crafted archive naming a path outside the directory is a separate and older question:
+`backup._safe_cover_name` takes the final component only and refuses anything carrying a
+separator, so nothing is written outside the covers directory whatever the entry is called.
+
 ## Catalogue requests
 
 Eleven third party catalogues are asked for records: Open Library, the DNB, K10plus, the

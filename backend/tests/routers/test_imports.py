@@ -655,6 +655,30 @@ class TestImportedReviews:
         ).json()
         assert [note["content"] for note in notes] == ["A desert planet."]
 
+    def test_the_note_it_writes_is_private(self, client, admin):
+        """The whole of the owner's decision, in one field. `private notes` is
+        one of the header names this review is read from, so the column another
+        app called private must not arrive here as an instance-visible note
+        under the importing member's own name."""
+        upload(client, admin["headers"], REVIEW_CSV, create_missing=True)
+
+        [book] = items(client.get("/api/books", headers=admin["headers"]))
+        notes = client.get(
+            f"/api/books/{book['id']}/notes", headers=admin["headers"]
+        ).json()
+        assert [note["is_private"] for note in notes] == [True]
+
+    def test_nobody_else_can_read_it(self, client, admin, member):
+        """The same claim from the other side, over the wire rather than off a
+        field, because the field is only worth what the listing does with it."""
+        upload(client, admin["headers"], REVIEW_CSV, create_missing=True)
+
+        [book] = items(client.get("/api/books", headers=member["headers"]))
+        notes = client.get(
+            f"/api/books/{book['id']}/notes", headers=member["headers"]
+        ).json()
+        assert notes == []
+
     def test_importing_twice_does_not_append_it_again(self, client, admin):
         upload(client, admin["headers"], REVIEW_CSV, create_missing=True)
         upload(client, admin["headers"], REVIEW_CSV, create_missing=True)

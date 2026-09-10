@@ -197,6 +197,12 @@ def import_csv(
     else has read, and two members can import their own exports without
     fighting over the same books.
 
+    A review the file carries is kept as a **private** note: visible to the
+    member who imported it and to nobody else, because the column another app
+    called "private notes" must not become an instance-visible note under their
+    own name. Notes written here through the app are unaffected and stay
+    visible to whoever can see the book.
+
     Books created by `create_missing` are marked `ownership=unknown`: a reading
     history is not evidence of possession. They are then confirmed together
     from the library view, which is what the bulk ownership endpoint is for.

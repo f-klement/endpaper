@@ -556,8 +556,20 @@ LOGIN_BG_BASE: Final = "login_bg"
 
 
 def stored_path(book_id: int) -> Path | None:
-    """The cover file this app holds for a book, in whatever format, or None."""
-    for extension in ALLOWED_IMAGE_EXTENSIONS:
+    """The cover file this app holds for a book, in whatever format, or None.
+
+    **`sorted`, and the order itself does not matter: being the same order twice
+    does.** `ALLOWED_IMAGE_EXTENSIONS` is a frozenset, whose iteration order is
+    not stable between processes, and a book can have two formats on disk: an
+    upload sweeps the losers but `backup.restore` deliberately does not, since a
+    restore reproduces the directory the archive describes. This function is what
+    `local_url_for` reads, and `merge_books` decides whether the keeper adopts a
+    cover by comparing `keeper.cover_url` against it. Unordered, that comparison
+    flips between processes: one run adopts the cover, the next hands the loser
+    to `forget`, which deletes both files. Alphabetical is arbitrary and stable,
+    which is the whole requirement.
+    """
+    for extension in sorted(ALLOWED_IMAGE_EXTENSIONS):
         candidate = Path(COVERS_DIR) / f"{book_id}.{extension}"
         if candidate.is_file():
             return candidate
@@ -657,6 +669,10 @@ def adopt(book_id: int, from_book_id: int) -> str | None:
     source = stored_path(from_book_id)
     if source is None:
         return None
+    # The **name's** extension, not the bytes'. `backup.restore` may have kept a
+    # legacy cover whose two disagree, and this is where such a file travels to a
+    # new book id. Re-deriving it from the bytes would rename the file and leave
+    # the `cover_url` this function returns pointing at the old name.
     extension = source.suffix.lstrip(".").lower()
     # Through `replace_image` rather than a rename, so the keeper's existing
     # covers in other formats go the same way they do on an upload.

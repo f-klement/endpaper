@@ -2406,3 +2406,88 @@ class TestTheBookFormatColumnOnAMigratedDatabase:
             }
 
         assert stored == {one.value for one in BookFormat}
+
+
+class TestANoteCarriesItsOwnVisibility:
+    """Migration `a3d7f1b09c25`, as schema and as what it did to stored rows.
+
+    The suite builds its tables from `Base.metadata`, so nothing else here runs
+    this revision. What is worth pinning is the half a reader has to take on
+    trust otherwise: that a note written before the column existed still means
+    what it meant, and that the downgrade's loss is the one the docstring
+    admits to.
+    """
+
+    PREVIOUS = "d9c1f47b2a06"
+
+    def _a_database_with_a_note(self) -> None:
+        drop_everything()
+        schema.upgrade_to_head()
+        from alembic import command
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO users (username, password_hash, is_admin) "
+                    "VALUES ('reader', 'x', 0)"
+                )
+            )
+            connection.execute(text("INSERT INTO books (title) VALUES ('Dune')"))
+            connection.execute(
+                text(
+                    "INSERT INTO notes (book_id, user_id, content) "
+                    "VALUES (1, 1, 'written before the column existed')"
+                )
+            )
+            connection.commit()
+
+    def test_a_note_that_predates_the_column_stays_shared(self):
+        """The migration's own claim: no stored row changes meaning. A note
+        written into a shared library has been readable by the other members
+        since it was saved, and running this must not take it off their
+        screens."""
+        self._a_database_with_a_note()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            stored = [
+                tuple(row)
+                for row in connection.execute(text("SELECT content, is_private FROM notes"))
+            ]
+        assert stored == [("written before the column existed", 0)]
+
+    def test_the_downgrade_loses_the_distinction_and_not_the_notes(self):
+        """Stated in the revision rather than worked around: there is no second
+        place the flag lives, so going back to a schema without the column
+        makes every private note readable again."""
+        from alembic import command
+
+        drop_everything()
+        schema.upgrade_to_head()
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO users (username, password_hash, is_admin) "
+                    "VALUES ('reader', 'x', 0)"
+                )
+            )
+            connection.execute(text("INSERT INTO books (title) VALUES ('Dune')"))
+            connection.execute(
+                text(
+                    "INSERT INTO notes (book_id, user_id, content, is_private) "
+                    "VALUES (1, 1, 'what I actually thought', 1)"
+                )
+            )
+            connection.commit()
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        columns = {column["name"] for column in inspect(engine).get_columns("notes")}
+        assert "is_private" not in columns
+        with engine.connect() as connection:
+            stored = [
+                tuple(row) for row in connection.execute(text("SELECT content FROM notes"))
+            ]
+        assert stored == [("what I actually thought",)]

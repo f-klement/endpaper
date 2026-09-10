@@ -21,17 +21,27 @@ function renderQueue(
     onDiscard: vi.fn(),
     waiting: 0,
     deciding: 0,
+    keptForNow: 0,
     paceMinutes: 1,
+    keptPaceMinutes: 1,
     isLookingUp: false,
     onLookUp: vi.fn(),
     onStopLookUp: vi.fn(),
     onChoose: vi.fn(),
     onKeepName: vi.fn(),
+    onKeepAllForNow: vi.fn(),
+    onLookUpKept: vi.fn(),
     onSplit: vi.fn(),
     ...overrides,
   };
-  renderLocalised(<RapidQueue {...props} />);
-  return props;
+  const { container, rerender } = renderLocalised(<RapidQueue {...props} />);
+  return {
+    ...props,
+    container,
+    /** Render again with some props changed, into the same mounted tree. */
+    again: (next: Partial<Parameters<typeof RapidQueue>[0]>) =>
+      rerender(<RapidQueue {...props} {...next} />),
+  };
 }
 
 /**
@@ -406,7 +416,9 @@ describe("RapidQueue and a book taken from its file name", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Keep the name" }),
+      screen.getByRole("button", {
+        name: "Keep this name and stop asking",
+      }),
     ).toBeInTheDocument();
   });
 
@@ -431,7 +443,11 @@ describe("RapidQueue and a book taken from its file name", () => {
     const entry = { ...derived, state: "choosing" as const, matches: [MATCH] };
     renderQueue({ entries: [entry], onKeepName });
 
-    await user.click(screen.getByRole("button", { name: "Keep the name" }));
+    await user.click(
+      screen.getByRole("button", {
+        name: "Keep this name and stop asking",
+      }),
+    );
 
     expect(onKeepName).toHaveBeenCalledWith(entry.key);
   });
@@ -490,6 +506,234 @@ describe("RapidQueue and a book taken from its file name", () => {
     expect(
       screen.getByText("1 still to decide. Add all leaves those in the queue."),
     ).toBeInTheDocument();
+  });
+
+  it("offers one press for every row still to decide", async () => {
+    // 250 presses for a folder of 300 files that matched 250 is what this
+    // replaces. The count beside it is the one the batch will leave.
+    const user = userEvent.setup();
+    const onKeepAllForNow = vi.fn();
+    renderQueue({
+      entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
+      deciding: 1,
+      onKeepAllForNow,
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Keep those file names for now (1)" }),
+    );
+
+    expect(onKeepAllForNow).toHaveBeenCalledTimes(1);
+  });
+
+  it("says what the press costs before it is pressed", () => {
+    // **Recoverability is the reason this control exists**, so the sentence
+    // that says nothing is discarded, and the one that says a second pass may
+    // be paid for, sit on the control rather than after the press.
+    renderQueue({
+      entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
+      deciding: 1,
+    });
+
+    expect(
+      screen.getByText(
+        "Nothing is discarded: those rows keep their file names and Add all takes them. Asking the catalogues again is offered afterwards, and a second pass may spend that budget again.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("does not offer the press when nothing is being decided", () => {
+    // Matched loosely, because the exact name carries the count: asserting the
+    // absence of "(1)" would pass on a button offering to keep nothing.
+    renderQueue({ entries: [derived] });
+
+    expect(
+      screen.queryByRole("button", { name: /Keep those file names for now/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says how many rows are standing under their names after the press", () => {
+    // **The acknowledgement the press gets**, in the place the press was: the
+    // control unmounts when the last row is decided, and a control that
+    // disappears says nothing to anybody.
+    renderQueue({
+      entries: [{ ...derived, answered: "records-for-now" as const }],
+      keptForNow: 1,
+    });
+
+    expect(
+      screen.getByText(
+        "Kept under their file names for now (1). Add all takes them.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("mounts the announcement before there is anything to announce", () => {
+    // **A live region inserted with its content already in it is the one that
+    // is not spoken**, so the acknowledgement this was written for would never
+    // reach the member who cannot see the queue. Asserted as the behaviour, one
+    // node across the change, rather than as the attribute that is only what
+    // the element is made of.
+    //
+    // Not observable here: the region is out of the flow while it is empty, so
+    // the queue's own spacing does not open a gap for a paragraph with nothing
+    // in it. This environment has no layout engine to measure that with.
+    const { again, container } = renderQueue({ entries: [derived] });
+
+    const region = container.querySelector('[aria-live="polite"]');
+    expect(region).not.toBeNull();
+    expect(region).toHaveTextContent("");
+    expect(region).toHaveAttribute("aria-atomic", "true");
+
+    again({ keptForNow: 2 });
+
+    expect(container.querySelector('[aria-live="polite"]')).toBe(region);
+    expect(region).toHaveTextContent(
+      "Kept under their file names for now (2). Add all takes them.",
+    );
+  });
+
+  it("offers a second pass over the names kept in bulk", async () => {
+    const user = userEvent.setup();
+    const onLookUpKept = vi.fn();
+    renderQueue({
+      entries: [{ ...derived, answered: "records-for-now" as const }],
+      keptForNow: 2,
+      keptPaceMinutes: 4,
+      onLookUpKept,
+    });
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Ask the catalogues again about those names (2)",
+      }),
+    );
+
+    expect(onLookUpKept).toHaveBeenCalledTimes(1);
+  });
+
+  it("says the names leave the browser on the second pass too", () => {
+    // The disclosure belongs on every control that sends a name, and this one
+    // sends the same names to the same catalogues as the first pass.
+    renderQueue({
+      entries: [{ ...derived, answered: "records-for-now" as const }],
+      keptForNow: 2,
+      keptPaceMinutes: 4,
+    });
+
+    expect(
+      screen.getByText(/The same file names go to the same catalogues/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Roughly 4 min/)).toBeInTheDocument();
+  });
+
+  it("says a different thing on each of the two lookup presses", () => {
+    // Both controls are on screen together after a run is stopped partway and
+    // the rows it did reach are kept. One paragraph printed twice is read once,
+    // and the half that goes is the half saying this press is a repeat.
+    renderQueue({
+      entries: [
+        derived,
+        {
+          ...derived,
+          key: "file:other.pdf:10:0",
+          answered: "records-for-now" as const,
+        },
+      ],
+      waiting: 1,
+      keptForNow: 1,
+    });
+
+    expect(
+      screen.getAllByText(/The file names, not the files, are sent/),
+    ).toHaveLength(1);
+    expect(
+      screen.getAllByText(/The same file names go to the same catalogues/),
+    ).toHaveLength(1);
+  });
+
+  it("offers no second pass while a run is going", () => {
+    // One run at a time, and the stop above is the control that ends it.
+    renderQueue({
+      entries: [{ ...derived, answered: "records-for-now" as const }],
+      keptForNow: 2,
+      isLookingUp: true,
+    });
+
+    expect(
+      screen.queryByRole("button", {
+        name: /Ask the catalogues again about those names/,
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers no press while the queue is being added", () => {
+    renderQueue({
+      entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
+      deciding: 1,
+      isAdding: true,
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Keep those file names for now (1)" }),
+    ).toBeDisabled();
+  });
+
+  it("offers no press while a lookup is running", () => {
+    // The other three controls here dim while a run is going, and a member
+    // cannot tell which press the page will honour if a fourth stays live.
+    renderQueue({
+      entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
+      deciding: 1,
+      isLookingUp: true,
+    });
+
+    expect(
+      screen.getByRole("button", { name: /Keep those file names for now/ }),
+    ).toBeDisabled();
+  });
+
+  it("counts only the rows still to decide on the press", () => {
+    // **Three rows, one of them being decided**, because the count and the
+    // queue agree at one row and disagree at three: a figure read off the queue
+    // would offer to keep three names and clear one.
+    renderQueue({
+      entries: [
+        { ...derived, state: "choosing", matches: [MATCH] },
+        { ...derived, key: "file:b.pdf:10:0" },
+        { ...derived, key: "file:c.pdf:10:0" },
+      ],
+      deciding: 1,
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Keep those file names for now (1)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("tells a member which kept rows can come back and which are answered", () => {
+    // **The distinction the owner asked to be visible**, not only held in the
+    // data: one of these rows is a member's answer about that book and the
+    // other is a queue they cleared, and only the second is offered again.
+    renderQueue({
+      entries: [
+        {
+          ...derived,
+          answered: "records" as const,
+          reason: "Kept under its file name.",
+        },
+        {
+          ...derived,
+          key: "file:other.pdf:10:0",
+          answered: "records-for-now" as const,
+          reason:
+            "Kept under its file name for now, and can be looked up again.",
+        },
+      ],
+    });
+
+    expect(screen.getByText(/Kept under its file name\./)).toBeInTheDocument();
+    expect(screen.getByText(/can be looked up again/)).toBeInTheDocument();
   });
 
   it("says nothing about deciding when nothing is being decided", () => {

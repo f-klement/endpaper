@@ -63,6 +63,29 @@ router = APIRouter(prefix="/covers", tags=["covers"])
 # member's cover to another, which is the whole point of the route existing.
 _CACHE_CONTROL: Final = "private, max-age=604800"
 
+#: The `Content-Type` a cover is served with, chosen by its **filename**.
+#:
+#: **What makes that safe is the allowlist, not the accuracy of the name.**
+#: Every value here is a raster type a browser decodes and cannot execute, and
+#: the route refuses any extension outside `ALLOWED_IMAGE_EXTENSIONS`, so the
+#: worst a wrong name produces is one of these four labels on another of the
+#: four formats. That is not a hole: an `<img>` decodes by magic number, so a
+#: `.jpg` holding PNG bytes renders regardless of what this table said about it.
+#:
+#: **`image/svg+xml` is the one that must never appear here.** It is an
+#: `image/*` and it is also a document with script in it, running under this
+#: app's own origin and CSP, so adding it is the edit that would undo the
+#: arrangement. `svg` is absent from `ALLOWED_IMAGE_EXTENSIONS` for the same
+#: reason. `tests/routers/test_covers.py::TestTheMediaTypesAreNotDocuments`
+#: holds both halves: these keys equal that allowlist, and no value is a
+#: scriptable type.
+#:
+#: What every writer into `COVERS_DIR` does guarantee is that the bytes are one
+#: of these formats: both upload routes through `uploads.read_image_upload`,
+#: the remote fetch through `covers.download`, `covers.adopt` and
+#: `covers.duplicate` by moving bytes one of those already sniffed, and
+#: `backup.restore` through `backup._cover_bytes`. Restore was the exception
+#: until then and would store anything at all under a cover name.
 _MEDIA_TYPES: Final[dict[str, str]] = {
     "jpg": "image/jpeg",
     "jpeg": "image/jpeg",

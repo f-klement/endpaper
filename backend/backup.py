@@ -39,7 +39,7 @@ import covers
 import credentials
 import filing
 import settings_store
-from config import COVERS_DIR
+from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from database import Base
 from enums import VerificationProvenance
 from models import (
@@ -66,6 +66,7 @@ from models import (
     book_tags,
     fold_collection_name,
 )
+from uploads import SNIFF_BYTES, sniff_image_extension, write_image
 
 logger = logging.getLogger("endpaper.backup")
 
@@ -280,7 +281,15 @@ _REQUIRED_TABLES: frozenset[str] = frozenset(
 #: A cover named anything else is not one of ours. Guards against a crafted
 #: archive writing outside the covers directory, which is what makes a zip a
 #: security question rather than a container format.
-_COVER_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
+#:
+#: **Derived from the app's own allowlist rather than written out beside it.**
+#: It was a second literal spelling the same four formats, and the drift is
+#: silent in the expensive direction: a format added to
+#: `ALLOWED_IMAGE_EXTENSIONS`, to `uploads.sniff_image_extension` and to
+#: `routers/covers._MEDIA_TYPES` but forgotten here makes `create` stop
+#: archiving those covers and `restore` stop writing them, with nothing failing
+#: and nothing logged. Sorted so the order is stable to read in a message.
+_COVER_SUFFIXES = tuple(sorted(f".{extension}" for extension in ALLOWED_IMAGE_EXTENSIONS))
 
 #: Total **uncompressed** bytes an archive may declare.
 #:
@@ -660,6 +669,60 @@ def _safe_cover_name(name: str) -> str | None:
     return tail.name
 
 
+def _cover_bytes(archive: zipfile.ZipFile, entry: str) -> bytes | None:
+    """This entry's bytes, if they are an image this app serves. Else None.
+
+    **Why the restore checks content at all**, given that an archive is written
+    by this app and restored by the person who owns the instance. Every other
+    writer into `COVERS_DIR` stores only bytes it has sniffed: both upload
+    routes through `uploads.read_image_upload`, the remote fetch through
+    `covers.download`, and `covers.adopt` / `covers.duplicate` by moving bytes
+    one of those already checked. Restore took the entry's suffix and wrote the
+    bytes unread, so it was the one way a file in that directory could be
+    something other than an image.
+
+    **The same test the upload path applies, and no stricter.** Deliberately
+    `uploads.sniff_image_extension` rather than a fuller decode: a restore that
+    refuses bytes this app itself would accept on upload is a restore that fails
+    on its own backup, which is the reason the ticket weighed refusing at all.
+    A valid header followed by rubbish passes here exactly as it passes an
+    upload.
+
+    **It asks whether these are an image, not whether they are the image the
+    name claims**, and the difference is a cover somebody would lose. A `.jpg`
+    holding PNG bytes renders today: an `<img>` decodes by magic number, so the
+    `Content-Type` the route reads off the filename is not what makes a cover
+    appear. `nosniff` does not change that, and does not apply to an image
+    destination at all. Requiring the two to agree would therefore delete a
+    working cover from a legacy library, silently, to correct a label nothing
+    reads. What the four suffixes already guarantee is the property that
+    matters: every one of them is a raster type with no script in it, and
+    `image/svg+xml` is absent from `ALLOWED_IMAGE_EXTENSIONS` for that reason.
+
+    **What this is not.** It is not what stands between a stored file and script
+    execution in a browser. That is the extension allowlist, plus
+    `X-Content-Type-Options: nosniff` for the navigation case: measured, HTML
+    stored as `1.jpg` is served `content-type: image/jpeg` with `nosniff`, so a
+    browser will not render it as a document.
+
+    Read through `archive.open` and decided on `uploads.SNIFF_BYTES` of header,
+    so a declined entry costs **a fixed window rather than its declared
+    `file_size`**, which `_reject_a_bomb` lets reach `MAX_UNCOMPRESSED_BYTES`.
+    Not twelve bytes: `zipfile.ZipExtFile` decompresses in blocks of
+    `MIN_READ_SIZE`, so the real figure is 4096 for a deflated entry. Measured
+    on CPython 3.14 against a 200 MB entry, tracemalloc peak 45,257 bytes here
+    against 458,834,368 for `archive.read`. **The accepted path is unchanged**,
+    measured at 437.6 MB peak either way, so nothing here bounds a cover that
+    passes: a single enormous entry inside `MAX_UNCOMPRESSED_BYTES` still OOMs
+    the pod, and that is its own ticket rather than something this closed.
+    """
+    with archive.open(entry) as handle:
+        header = handle.read(SNIFF_BYTES)
+        if sniff_image_extension(header) is None:
+            return None
+        return header + handle.read()
+
+
 def _refuse_a_colliding_pair(tables: dict[str, Any]) -> None:
     """Refuse an archive holding two collections whose names fold the same.
 
@@ -849,14 +912,74 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
         if existing.is_file() and existing.suffix.lower() in _COVER_SUFFIXES:
             existing.unlink()
 
-    covers_restored = 0
+    declined: list[str] = []
     for entry in archive.namelist():
         filename = _safe_cover_name(entry)
         if filename is None:
             continue
-        (COVERS_DIR / filename).write_bytes(archive.read(entry))
-        covers_restored += 1
-    restored["covers"] = covers_restored
+        body = _cover_bytes(archive, entry)
+        if body is None:
+            declined.append(filename)
+            continue
+        # Not `name`: this function already binds that to a table name, a
+        # `str`, in the insert loop above.
+        stored = Path(filename)
+        try:
+            # `write_image`, **not** `replace_image`, and the difference is a
+            # cover somebody can see. `replace_image` sweeps the other formats of
+            # a base, which is right for an upload and wrong here: the directory
+            # was emptied above, so the only file a sweep could reach is a
+            # sibling this same archive just wrote. An archive holding `1.jpg`
+            # and `1.png` describes a library that held both, and
+            # `routers/covers.get_cover` answers from the extension in the row's
+            # `cover_url`, so deleting the loser 404s that row, silently, with
+            # the count still reporting it restored. Leaving both is safe rather
+            # than merely easier: `covers.stored_path` and
+            # `routers/settings._find_login_bg` are the two lookups that resolve
+            # on disk and both are ordered, so a base with two files resolves the
+            # same way in every process. `write_image` still writes beside the
+            # destination and moves it into place, which is the half a bare
+            # `write_bytes` lacked.
+            #
+            # **Lowercased**, which a bare write did not do: `_safe_cover_name`
+            # accepts `1.JPG`, and the cover route builds its path from a
+            # lowercased extension, so on a case sensitive filesystem that file
+            # restored to a name nothing could ever serve. The **stem** is left
+            # alone: a book's is its id and the login background's is one fixed
+            # constant, so nothing legitimate needs folding, and folding it would
+            # merge two entries an archive deliberately spelled apart.
+            write_image(
+                COVERS_DIR,
+                stored.stem,
+                stored.suffix.lower().removeprefix("."),
+                body,
+            )
+        except (OSError, ValueError):
+            # **Declined, never raised.** This loop runs after `db.commit()` and
+            # after the directory was emptied, so anything escaping here is a
+            # 500 on a library whose rows are restored and whose covers are
+            # gone: the state this function promises not to produce. A zip entry
+            # may name a file with a NUL byte in it or one longer than the
+            # filesystem allows, and neither is `RestoreError`; a full disk part
+            # way through the loop is the same shape and the same answer.
+            declined.append(filename)
+    if declined:
+        # `%r` on each name, not `%s` on the join. A zip name field holds 64 KB
+        # and may contain a newline, so an archive could otherwise write its own
+        # lines into this log. `_parse_row` states the same rule at its own site.
+        logger.warning(
+            "Declined %d archive entries that are not an image this app serves: %s",
+            len(declined),
+            ", ".join(repr(name[:120]) for name in sorted(declined)[:20]),
+        )
+    # Counted off the directory rather than off the loop, so the number is what
+    # is actually there rather than what this function believes it put there.
+    # The two agree while nothing removes a file behind the count, which is the
+    # property `write_image` above exists to keep and which `replace_image`
+    # would have broken.
+    restored["covers"] = sum(
+        1 for path in COVERS_DIR.glob("*") if path.suffix.lower() in _COVER_SUFFIXES
+    )
 
     _repair_seeded_tags(db)
 

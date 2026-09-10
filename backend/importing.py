@@ -451,28 +451,42 @@ class Import:
                 existing_ids.add(tag.id)
 
     def _keep_review(self, index: _CatalogueIndex, *, book_id: int, text: str) -> None:
-        """Keep the review the export carried, as this Member's note.
+        """Keep the review the export carried, as this Member's private note.
 
         The parser has been reading "My Review" all along and the import threw
         it away, which is the same waste the rating and the finish date used to
         be. A review is written by one Member about one Book, and `Note` is the
         row that is keyed that way, so it lands there rather than on the Book.
 
-        **`Note` is per Member and is not private to them**, which this sentence
-        used to claim by arguing from "a review is personal" to a destination
-        that is not: `routers/books.py::get_notes` filters on the Book alone, so
-        every Member of the Library reads what an import wrote here. That is a
-        filed defect with an owner's decision behind it and is migration
-        bearing, so it is not fixed at this site; what is fixed is the reason
-        stated here, because a comment that argues for a property the code does
-        not have is what stops the next reader noticing.
+        **`is_private=True`, and the flag is the whole point of this line.**
+        `private notes` is one of the header names a review is read from, so
+        without it the column another app called private arrives under this
+        Member's own name for everyone to read. `models.Note` says why
+        authorship was not already the answer, and `docs/decisions.md` carries
+        the owner's decision of 2026-09-06.
+
+        **A note written here through the app is not private**, and that
+        asymmetry is deliberate rather than an oversight: somebody typing into
+        a shared library's note box can see the box is shared, and somebody
+        handing over a CSV cannot see where each column lands.
 
         Skipped when this Member already has a note on the Book: an import is
-        not a reason to append the same paragraph on every re-run.
+        not a reason to append the same paragraph on every re-run. **So an
+        earlier import's review stays as it was written, shared**, since
+        nothing records that a note came from an import and this line will not
+        run again for that Book. It is the Member's own note and they can
+        delete it.
         """
         if book_id in index.notes:
             return
-        self._db.add(Note(book_id=book_id, user_id=self._member_id, content=text[:5000]))
+        self._db.add(
+            Note(
+                book_id=book_id,
+                user_id=self._member_id,
+                content=text[:5000],
+                is_private=True,
+            )
+        )
         index.notes.add(book_id)
 
     def _apply_reading_record(

@@ -1088,6 +1088,8 @@ export const de: Messages = {
   "fallback.lookUp": "{count} über den Dateinamen suchen",
   "fallback.pace":
     "Die Dateinamen gehen an die Kataloge, in denen Endpaper sucht, die Dateien selbst nicht. Zeitlich gestreckt, damit ein einzelner Ordner nicht das ganze Budget einer Bibliothek auf einmal verbraucht. Ungefähr {minutes} min.",
+  "fallback.paceAgain":
+    "Dieselben Dateinamen gehen ein zweites Mal an dieselben Kataloge, die Dateien selbst weiterhin nicht. Genauso zeitlich gestreckt. Ungefähr {minutes} min.",
   "fallback.stop": "Suche beenden",
   "fallback.searching": "Die Kataloge werden gefragt...",
   "fallback.fromTheName": "Aus dem Dateinamen",
@@ -1096,14 +1098,23 @@ export const de: Messages = {
   "fallback.lookupFailed":
     "Die Kataloge waren nicht erreichbar, bleibt unter dem Dateinamen.",
   "fallback.keptTheName": "Bleibt unter dem Dateinamen.",
+  "fallback.keptForNow":
+    "Bleibt vorerst unter dem Dateinamen und lässt sich erneut suchen.",
   "fallback.aboutEbooks":
     "Die meisten Kataloge führen gedruckte Bücher. Ein Buch, das nur als Datei existiert, steht deshalb oft in keinem davon. Nichts ist fehlgeschlagen: solche Bücher werden mit dem Namen übernommen, den die Datei hatte, und lassen sich danach bearbeiten.",
   "fallback.matches": "Mögliche Treffer: {count}",
   "fallback.stillToDecide":
     "{count} noch zu entscheiden. Alle hinzufügen lässt diese in der Liste.",
+  "fallback.keepAllForNow": "Diese Dateinamen vorerst behalten ({count})",
+  "fallback.keepAllNote":
+    "Nichts wird verworfen: diese Zeilen behalten ihre Dateinamen und werden von Alle hinzufügen übernommen. Die Kataloge lassen sich danach erneut fragen, ein zweiter Durchlauf verbraucht dieses Budget unter Umständen noch einmal.",
+  "fallback.keptForNowCount":
+    "Bleiben vorerst unter ihren Dateinamen ({count}). Alle hinzufügen übernimmt sie.",
+  "fallback.lookUpAgain":
+    "Die Kataloge erneut zu diesen Dateinamen fragen ({count})",
   "fallback.use": "Übernehmen",
   "fallback.useFor": "Den Eintrag für {title} übernehmen",
-  "fallback.keep": "Dateinamen behalten",
+  "fallback.keep": "Diesen Dateinamen behalten, nicht mehr fragen",
   "fallback.pickFolderLabel": "Ein ganzer Ordner mit Büchern",
 
   // ── Hörbücher, bei denen ein Buch aus vielen Dateien besteht ────────────

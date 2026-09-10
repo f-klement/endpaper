@@ -1189,6 +1189,15 @@ export const en = {
   // not: the names go to the same public catalogues a title search reaches.
   "fallback.pace":
     "The file names, not the files, are sent to the catalogues Endpaper searches. Paced, so that one folder cannot spend a whole library's budget at once. Roughly {minutes} min.",
+  // **Written to stand alone, because that is how it usually renders.** The bulk
+  // keep clears the queue, so nothing is waiting and the paragraph above is off
+  // the screen: every fact this press discloses is in this string on its own,
+  // the names go, the files do not, it is paced, and roughly how long for. It is
+  // a second string rather than the one above because both controls are on
+  // screen together after a run is stopped partway, and a paragraph printed
+  // twice is read once.
+  "fallback.paceAgain":
+    "The same file names go to the same catalogues a second time, and the files themselves still do not. Paced the same way. Roughly {minutes} min.",
   "fallback.stop": "Stop looking up",
   "fallback.searching": "Asking the catalogues...",
   "fallback.fromTheName": "From the file name",
@@ -1197,14 +1206,38 @@ export const en = {
   "fallback.lookupFailed":
     "The catalogues could not be reached, kept under its file name.",
   "fallback.keptTheName": "Kept under its file name.",
+  // **The two sentences a member has to be able to tell apart**, and they differ
+  // by the words "for now": the one above is an answer about that book and is
+  // never asked again, this one is a queue cleared in bulk and comes back.
+  "fallback.keptForNow":
+    "Kept under its file name for now, and can be looked up again.",
   "fallback.aboutEbooks":
     "Most catalogues list printed books, so a book that exists only as a file is often in none of them. Nothing has failed: those are added with the name they had, and can be edited afterwards.",
   "fallback.matches": "Possible matches: {count}",
   "fallback.stillToDecide":
     "{count} still to decide. Add all leaves those in the queue.",
+  // **The count rides in parentheses**, because this catalogue has no plural
+  // rules and "Keep all 1 names" is what a count inside the sentence costs.
+  "fallback.keepAllForNow": "Keep those file names for now ({count})",
+  // **What the press costs, said before it is pressed, with the way back named
+  // rather than described.** The records go off the screen and the catalogues
+  // are what holds them, so the way back is a second run rather than an undo.
+  // "May", because that run is offered rather than automatic: the budget is
+  // spent when somebody presses it and not by this press.
+  "fallback.keepAllNote":
+    "Nothing is discarded: those rows keep their file names and Add all takes them. Asking the catalogues again is offered afterwards, and a second pass may spend that budget again.",
+  // **What the press left behind, where the press was.** A control that
+  // disappears is not an acknowledgement, and of two hundred and fifty kept rows
+  // a member sees six through the scroller.
+  "fallback.keptForNowCount":
+    "Kept under their file names for now ({count}). Add all takes them.",
+  "fallback.lookUpAgain":
+    "Ask the catalogues again about those names ({count})",
   "fallback.use": "Use",
   "fallback.useFor": "Use the record for {title}",
-  "fallback.keep": "Keep the name",
+  // **Says that it is final**, which it is and the bulk keep beside it is not:
+  // this row is a member's answer about this book and is never offered again.
+  "fallback.keep": "Keep this name and stop asking",
   "fallback.pickFolderLabel": "A whole folder of books",
 
   // ── Audiobooks, where one book is many files ────────────────────────────

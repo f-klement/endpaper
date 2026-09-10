@@ -40,10 +40,12 @@ be one:
   with rather than a door into it.
 * **What a handler does with a file it legitimately took.** A cover is an image,
   bounded by `uploads.read_image_upload`, and a restore is this instance's own
-  archive. Neither is re-checked here, and `backup.restore` writes an archive
-  entry into `COVERS_DIR` on the strength of its name rather than its content,
-  so bytes under a cover suffix are kept. Somebody restoring their own backup is
-  outside both rules below.
+  archive. Neither is re-checked here. What `backup.restore` checks is that an
+  entry's bytes are an image this app serves, through the same sniff an upload
+  gets; what it does **not** check is the entry's **name**, which is the
+  archive's rather than derived from the bytes, so a restored cover may be a PNG
+  called `1.jpg`. `backup._cover_bytes` carries why. Somebody restoring their own
+  backup is outside both rules below either way.
 * **Bytes this server fetches for itself.** `covers.store` writes a remote body
   into `COVERS_DIR` from the `cover_url` a member supplies, so bytes reach disk
   without passing any route this file reads. What stops a book file surviving

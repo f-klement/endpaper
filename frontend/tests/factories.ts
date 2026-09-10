@@ -140,6 +140,7 @@ export function makeNote(overrides: Partial<NoteOut> = {}): NoteOut {
     book_id: 1,
     user_id: 1,
     content: "A note",
+    is_private: false,
     created_at: "2026-03-01T00:00:00",
     updated_at: "2026-03-01T00:00:00",
     author: makeUser(),

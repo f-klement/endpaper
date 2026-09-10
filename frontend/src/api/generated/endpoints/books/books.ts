@@ -6361,8 +6361,14 @@ export const getGetNotesUrl = (bookId: number) => {
 };
 
 /**
- * Requires read access to the book. Without that check, the notes on a
- * private book were readable by anyone who guessed its id.
+ * The notes on this book that the caller may read: the shared ones, and
+ * their own private ones.
+ *
+ * Two predicates, and neither is redundant. `BookForRead` answers 404 for a
+ * book the caller may not see, without which the notes on a private book were
+ * readable by anyone who guessed its id. `note_visible_to` then decides which
+ * notes on a book they can see; `models.Note` says why authorship is not that
+ * answer.
  * @summary Get Notes
  */
 export const getNotes = async (
@@ -7456,10 +7462,12 @@ export const getGetQuotesUrl = (bookId: number) => {
 };
 
 /**
- * Requires read access to the book, exactly as the notes route does.
+ * Requires read access to the book, and nothing else.
  *
  * `BookForRead` is the whole privacy check here: it answers 404 for a book
- * the caller may not see, so there is no path to the quotes on one.
+ * the caller may not see, so there is no path to the quotes on one. A quote
+ * carries no per-row visibility of its own, unlike a note, so there is no
+ * second predicate to apply.
  * @summary Get Quotes
  */
 export const getQuotes = async (

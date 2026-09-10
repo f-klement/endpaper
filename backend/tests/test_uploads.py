@@ -5,14 +5,22 @@ Anything at all could be stored as `12.png` and then served back from this
 app's own origin.
 """
 
+import ast
+import pathlib
 from pathlib import Path
 
 import pytest
 from fastapi import HTTPException, UploadFile
 
-from config import MAX_UPLOAD_BYTES
+import uploads
+from config import ALLOWED_IMAGE_EXTENSIONS, MAX_UPLOAD_BYTES
 from tests.helpers import JPEG_BYTES, NOT_AN_IMAGE, PNG_BYTES, WEBP_BYTES
-from uploads import read_image_upload, replace_image, sniff_image_extension
+from uploads import (
+    SNIFF_BYTES,
+    read_image_upload,
+    replace_image,
+    sniff_image_extension,
+)
 
 
 def upload(data: bytes, filename: str = "whatever.png") -> UploadFile:
@@ -210,3 +218,114 @@ class TestReplaceImage:
         replace_image(tmp_path, "7", "png", PNG_BYTES)
         replace_image(tmp_path, "7", "png", PNG_BYTES)
         assert [p.name for p in tmp_path.iterdir()] == ["7.png"]
+
+
+#: One body per format the app accepts, keyed by what the sniffer answers for
+#: it. **Tied to `ALLOWED_IMAGE_EXTENSIONS` by a test below** rather than left as
+#: a hand written list: an enumeration is what goes stale when the app grows a
+#: format, and a window guard parametrised over a stale list is a guard that has
+#: stopped guarding without ever failing.
+SNIFFABLE: dict[str, bytes] = {
+    "jpg": JPEG_BYTES,
+    "jpeg": JPEG_BYTES,
+    "png": PNG_BYTES,
+    "webp": WEBP_BYTES,
+}
+
+
+class TestTheSnifferAnswersOnlyWhatTheAppServes:
+    def test_every_extension_the_sniffer_can_return_is_one_the_app_serves(self):
+        """Read off the source, not off a list kept beside it.
+
+        `read_image_upload` stores whatever this returns without checking it
+        against the allowlist, and the cover route refuses any extension outside
+        that allowlist, so an arm added here for a format the app does not serve
+        stores a file nothing can ever fetch. An `ast` pass rather than calling
+        it with samples, because a sample list cannot see an arm nobody wrote a
+        sample for.
+        """
+        source = ast.parse(pathlib.Path(uploads.__file__).read_text())
+        function = next(
+            node
+            for node in ast.walk(source)
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "sniff_image_extension"
+        )
+        returned = {
+            node.value.value
+            for node in ast.walk(function)
+            if isinstance(node, ast.Return)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        }
+
+        assert returned <= set(ALLOWED_IMAGE_EXTENSIONS)
+        assert returned, "the ast pass found no returned literal, so it is not reading it"
+
+        # **The shape, not only the values.** The pass above can only read a
+        # `return "literal"`, so an arm returning a name, an f-string or a
+        # lookup is invisible to it: `returned` stays correct, both assertions
+        # above pass, and the format the guard exists to catch walks straight
+        # through. This is what a guard enumerating statement kinds needs to say
+        # out loud rather than a further arm reading one more kind.
+        unreadable = [
+            ast.dump(node)
+            for node in ast.walk(function)
+            if isinstance(node, ast.Return)
+            and not (
+                node.value is None
+                or (
+                    isinstance(node.value, ast.Constant)
+                    and isinstance(node.value.value, str | None)
+                )
+            )
+        ]
+        assert not unreadable, (
+            "sniff_image_extension returns something this pass cannot read, so it "
+            f"is no longer checking what it claims to: {unreadable}"
+        )
+
+    def test_a_sample_exists_for_every_format_the_app_accepts(self):
+        """What makes the window guard below hold for a format added later."""
+        assert set(SNIFFABLE) == set(ALLOWED_IMAGE_EXTENSIONS)
+
+
+class TestTheSniffWindow:
+    """`SNIFF_BYTES` is what a caller reading from a stream may look at.
+
+    It exists so `backup.restore` declines an archive entry on a header instead
+    of on its declared `file_size`. It is derived from the magic numbers rather
+    than written as a number, so these check the derivation rather than a
+    literal: a window narrower than the sniffer reads makes the stream caller
+    decline a file the upload path accepts, which costs a cover.
+    """
+
+    @pytest.mark.parametrize("extension", sorted(SNIFFABLE))
+    def test_the_window_decides_every_format_the_app_accepts(self, extension):
+        """Truncated to the window, each format still sniffs to itself."""
+        body = SNIFFABLE[extension]
+        whole = sniff_image_extension(body)
+
+        assert whole is not None
+        assert sniff_image_extension(body[:SNIFF_BYTES]) == whole
+
+    def test_the_window_is_no_wider_than_it_needs_to_be(self):
+        """One byte short of the window must break at least one format.
+
+        Without this the derivation passes for any width large enough, including
+        one carrying a term nobody trimmed after a magic number got shorter, and
+        the constant stops describing the sniffer.
+        """
+        one_short = SNIFF_BYTES - 1
+        answers = [
+            sniff_image_extension(body[:one_short]) for body in SNIFFABLE.values()
+        ]
+
+        assert None in answers
+
+    def test_a_body_shorter_than_the_window_is_still_decided(self):
+        """A short read is what a stream returns at the end of a file, so the
+        sniffer must not depend on getting the whole window."""
+        assert sniff_image_extension(JPEG_BYTES[:3]) == "jpg"
+        assert sniff_image_extension(b"") is None
+        assert sniff_image_extension(NOT_AN_IMAGE[:SNIFF_BYTES]) is None

@@ -69,14 +69,14 @@ import { de } from "../../src/i18n";
  * * **`ihr`, bare and with no suffix.** It is the nominative of the same
  *   plural paradigm as `euch` and `eure`, so it is the likeliest way a `du`
  *   comes back: this file said "Eure Schlagwörter" until 2026-09-03. Measured
- *   over 888 values, standalone `ihr` occurs **0 times**, while the suffixed
- *   forms occur **8 times across 7 strings**, every one the third person
+ *   over 1075 values, standalone `ihr` occurs **0 times**, while the suffixed
+ *   forms occur **10 times across 9 strings**, every one the third person
  *   possessive ("behalten **ihren** Link", "in **ihrer** Umgebung"). So the
- *   bare form is free to add and `ihr\w*` would fail the build on seven
+ *   bare form is free to add and `ihr\w*` would fail the build on nine
  *   strings. That is why this one alternative carries no `\w*` and its
  *   neighbours do.
  *
- *   **Seven and eight are both right and are different units**, strings and
+ *   **Nine and ten are both right and are different units**, strings and
  *   occurrences: `settings.overduePrivacyNote` carries two in one value. That
  *   gap is the whole of it, and a reader reconciling one number to the other
  *   would make it wrong, so the test below recomputes both rather than leaving
@@ -246,14 +246,14 @@ describe("the set phrase exemption", () => {
   });
 
   it("keeps the two figures behind that decision honest, in their own units", () => {
-    // **Recomputed rather than asserted in prose.** Seven and eight are both
+    // **Recomputed rather than asserted in prose.** Nine and ten are both
     // correct and count different things, so each is the sort of number a
     // later reader "corrects" into being wrong. `settings.overduePrivacyNote`
     // carries two suffixed forms in one value, and that is the entire gap.
     // **Two constants, for the reason this trio already learned once.** A `/g`
     // regex carries `lastIndex` and `test` advances it, so counting strings
     // with the same object that counted occurrences is right only by luck: it
-    // survives here because the seven matching values are scattered among 888
+    // survives here because the nine matching values are scattered among 1075
     // and the index resets between them. Adjacent matches would drop one.
     // `gu` and not `g`: the two share a source, and the flag sets disagree
     // about what a source means. `\p{L}+` matches nothing under `g` and
@@ -272,8 +272,8 @@ describe("the set phrase exemption", () => {
     );
     const strings = values.filter((value) => suffixed.test(value)).length;
 
-    expect(occurrences).toBe(8);
-    expect(strings).toBe(7);
+    expect(occurrences).toBe(10);
+    expect(strings).toBe(9);
   });
 
   it("does not fail the build on a legitimate German word", () => {
