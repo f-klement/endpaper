@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.14.1
+
+_2026-09-11_
+
+- **A device or a store library can now be imported, from Settings, Your library.** Pick a
+  Kobo's database, a Google Play Books Takeout archive, an Apple Books library off your Mac or
+  Kindle for PC's catalogue. The file is read in this browser and nothing is uploaded. Several
+  can be picked at once, and a source that cannot be read is named with the reason and costs
+  that source alone while the others arrive.
+  **The Kobo and Play Books readers shipped in v0.14.0 and no member could reach either**: they
+  were libraries with no screen in front of them, and that release described both as things you
+  could do. This is the release where that became true.
+- **A tolino is expected to work through the Kobo reader**, and the card says so along with what
+  that rests on: a tolino runs Kobo's software and keeps the same file, this reader was built
+  from calibre's Kobo driver, which handles both, and **it has never been run against a tolino**.
+  Two things are worth reporting if you have one: books missing after an import, the sideloaded
+  ones especially, and a book borrowed from the tolino shop that arrives as though it is owned.
+- **An Apple Books library on your Mac reads as a library.** It costs its reader and no engine,
+  over the same one the Calibre import already loads. What an Apple Books library cannot say is
+  stated rather than guessed at: no publisher, no series it can name, and a format taken from
+  the book's own file rather than from a code nobody documents. Copy the `-wal` file across
+  beside the database if there is one: Apple Books writes recent changes there, and a database
+  copied without it can read as though the library is empty.
+- **A Kindle for PC library reads off the machine, metadata only.** The desktop app keeps a
+  catalogue of the account's library beside the downloaded files, and Endpaper reads it in the
+  browser: the title, every author, the publisher and the publication year. A sample is not a
+  book somebody owns and is not imported, nor is one issue of a magazine or a newspaper, and
+  the count of what was left out is reported beside what came in. Nothing here opens a book
+  file or goes near the protection on one. **Kindle for Mac is not covered**: the current app
+  keeps no such catalogue. The catalogue carries Amazon's own reference for each book and
+  Endpaper has nowhere to keep one yet, so an import brings the four fields above and no
+  identifier.
+
 ## v0.14.0
 
 _2026-09-10_

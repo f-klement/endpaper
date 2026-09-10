@@ -1,11 +1,17 @@
 /**
- * What a Calibre record becomes on the wire.
+ * What a record read off somebody's own library becomes on the wire.
  *
  * The same job `ScanPage/types.ts` does for a scanned or picked book, in the
  * page folder that owns the other end of it: this module is where what a reader
- * produced becomes what a request carries. `lib/calibre.ts` stays pure and
- * knows nothing about the API, which is what lets it be tested against a
- * database rather than against a schema.
+ * produced becomes what a request carries. `lib/calibre.ts` and `lib/stores.ts`
+ * stay pure and know nothing about the API, which is what lets them be tested
+ * against a database or an archive rather than against a schema.
+ *
+ * **Two builders and not one**, because Calibre answers a `CalibreBook` and a
+ * store answers a `StoreBook`, and the second is already the common record
+ * `lib/stores.ts` adapts every store into. Merging them would mean either
+ * putting Calibre through that adapter, which is a different ticket, or giving
+ * one function two shapes to tell apart.
  *
  * **Every value is bounded on the way through.** A `metadata.db` is somebody
  * else's data whatever route it took to the disk it is on, so the rule is the
@@ -22,6 +28,7 @@ import {
   boundText,
 } from "../../../lib/bookBounds";
 import type { CalibreBook } from "../../../lib/calibre";
+import type { StoreBook, StoreFormat } from "../../../lib/stores";
 
 /**
  * Calibre formats that mean a recording rather than a book to read.
@@ -105,6 +112,62 @@ export function toBookCreate(book: CalibreBook): BookCreate | null {
     is_private: false,
     // The library names neither, and an empty list is what the endpoint
     // already takes.
+    classifications: [],
+  };
+}
+
+/**
+ * What a store's answer about a copy is called on the wire.
+ *
+ * **A total `Record` rather than a cast**, although the two vocabularies spell
+ * their members identically today: a kind added to `StoreFormat` with no home
+ * here is a compile error, where a cast would send the endpoint a value its
+ * enum does not have and get a 422 in the middle of somebody's device.
+ *
+ * It sits here rather than in `lib/stores.ts` because that module may not name
+ * the API at all: `tests/houseRules.test.ts` denies every reader in that
+ * directory the generated client, and this translation is the seam that rule
+ * assumes exists.
+ */
+const STORE_FORMATS: Record<StoreFormat, BookFormat> = {
+  ebook: BookFormat.ebook,
+  audiobook: BookFormat.audiobook,
+  comic: BookFormat.comic,
+};
+
+/**
+ * One book off a store as `POST /api/books/scan` takes it, or `null`.
+ *
+ * `null` for a book with no title, `toBookCreate`'s rule and its reason: the
+ * API requires one and a record without it has nothing to file it under.
+ * Reported in the preview rather than left to a 422 halfway through a device.
+ *
+ * **The store already said what kind of copy this is**, so `format` is carried
+ * rather than derived. `lib/stores.ts` is where each store answers that
+ * question, because the answer is the store's: a Kobo says it in a mime type
+ * and a Takeout says it by the file having read as an EPUB.
+ *
+ * **`is_private` is `false` and `location` is `null`** for `toBookCreate`'s
+ * reason: no store here carries a shelf or a notion of a private book, so both
+ * take the value the column has for "not said" rather than one invented here.
+ */
+export function storeToBookCreate(book: StoreBook): BookCreate | null {
+  const title = boundText("title", book.title);
+  if (title === null) return null;
+
+  return {
+    title,
+    author: boundText("author", book.authors.join(AUTHOR_SEPARATOR)),
+    isbn: boundText("isbn", book.isbn),
+    publisher: boundText("publisher", book.publisher),
+    year: boundNumber("year", book.year),
+    description: boundText("description", book.description),
+    language: boundText("language", book.language),
+    series_name: boundText("series_name", book.seriesName),
+    series_index: boundNumber("series_index", book.seriesIndex),
+    format: book.format === null ? null : STORE_FORMATS[book.format],
+    location: null,
+    is_private: false,
     classifications: [],
   };
 }

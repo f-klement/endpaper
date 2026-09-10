@@ -45,6 +45,33 @@
  * carries a value none of this expects, which is the same thing every paragraph
  * above is about.
  *
+ * ## A tolino is expected to read here, and that expectation is untested
+ *
+ * tolino's platform is Kobo derived: the same database, the same table, and one
+ * firmware dependent spelling of one boolean, which `isTrue` below carries as
+ * calibre's own `in ('true', 1)`. The driver named above handles both devices
+ * through that one path, so nothing separate is needed here and nothing
+ * separate exists.
+ *
+ * **No tolino was read either, and unlike the Kobo case there is no device to
+ * read.** Owner's decision, 2026-09-10. So the store row in `lib/stores.ts`
+ * names tolino with that bound attached rather than either claiming support or
+ * saying nothing, and `stores.kobo.tolino` is the sentence a member meets.
+ *
+ * **The two places a difference would surface**, stated so that a report from
+ * an owner is legible rather than a mystery:
+ *
+ * - **The schema 188 boolean.** `isOwned` asks `IsDownloaded` about a
+ *   sideloaded row and about no other, so a firmware writing it in a spelling
+ *   neither arm of `isTrue` matches loses the books the member put on the
+ *   device themselves and keeps the ones they bought. **A library short of its
+ *   sideloads, not an empty one**, and the difference decides what an owner
+ *   would think to report.
+ * - **Adobe fulfilled shop titles.** A tolino shop book is fulfilled through
+ *   Adobe, so a borrowed title may sit in `content` looking like an owned one.
+ *   `OWNED_ACCESSIBILITY` is Kobo's vocabulary and nothing here has been shown
+ *   a tolino's, so a loan arriving as an owned book is the shape to expect.
+ *
  * ## What a Kobo cannot supply, stated rather than discovered
  *
  * - **Authors as separate values.** `Attribution` is one string and Kobo keeps
@@ -228,9 +255,14 @@ const FORMATS = new Map<string, KoboFormat>([
  *
  * `IsDownloaded` is the string `'true'` on the firmware calibre supports and a
  * real `1` on a Tolino at schema version 188 or later, which is the one
- * combination calibre gates its own boolean on. A reader that tests one of them
- * calls every book on the other kind of device deleted and imports nothing, so
- * calibre's own statement asks for `in ('true', 1)`.
+ * combination calibre gates its own boolean on, so calibre's own statement asks
+ * for `in ('true', 1)`.
+ *
+ * **What an unmatched spelling costs is bounded by where it is asked.**
+ * `isOwned` asks it of a sideloaded row alone, so an unmatched spelling loses
+ * the books the member put on the device themselves and leaves the bought ones
+ * standing. Stated because that is the narrower claim, and the narrower claim is
+ * the one an owner could recognise and report.
  *
  * **`'1'` is read as well, and it is not a fourth spelling.** SQLite gives a
  * column with text affinity to a value written as `1`, so the same firmware

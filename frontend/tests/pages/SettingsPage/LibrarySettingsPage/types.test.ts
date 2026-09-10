@@ -6,9 +6,10 @@
 /**
  * Tests for src/pages/SettingsPage/LibrarySettingsPage/types.ts.
  *
- * What a Calibre record becomes on the wire, checked against the committed
- * `openapi.json` rather than against a copy of it kept here: a bound that
- * agrees with a constant somebody typed is a bound that agrees with nothing.
+ * What a record read off somebody's own library becomes on the wire, checked
+ * against the committed `openapi.json` rather than against a copy of it kept
+ * here: a bound that agrees with a constant somebody typed is a bound that
+ * agrees with nothing.
  */
 
 import { readFileSync } from "node:fs";
@@ -16,9 +17,12 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { BookFormat } from "../../../../src/api/generated/model";
 import type { CalibreBook } from "../../../../src/lib/calibre";
+import type { StoreBook } from "../../../../src/lib/stores";
 import {
   formatOf,
+  storeToBookCreate,
   toBookCreate,
 } from "../../../../src/pages/SettingsPage/LibrarySettingsPage/types";
 
@@ -157,5 +161,89 @@ describe("what kind of object the copy is", () => {
     // Not an ebook. A Calibre record with no file is a book somebody
     // catalogued, and answering `ebook` asserts something the library does not.
     expect(formatOf(book({ formats: [] }))).toBeNull();
+  });
+});
+
+function storeBook(overrides: Partial<StoreBook> = {}): StoreBook {
+  return {
+    key: "a1b2c3d4",
+    title: "Dune",
+    authors: ["Frank Herbert"],
+    isbn: "9780441013593",
+    publisher: "Chilton Books",
+    year: 1965,
+    language: "en",
+    description: null,
+    seriesName: "Dune Chronicles",
+    seriesIndex: 1,
+    format: "ebook",
+    ...overrides,
+  } as StoreBook;
+}
+
+describe("one store record as a request", () => {
+  it("sends nothing the endpoint does not take", () => {
+    // The same failure the Calibre arm catches, and it has to be asked twice:
+    // a field renamed on the schema passes the type check on both builders and
+    // is ignored by the server on both.
+    const allowed = new Set(
+      Object.keys(SCHEMA.components.schemas.BookCreate.properties),
+    );
+
+    expect(
+      Object.keys(storeToBookCreate(storeBook())!).filter(
+        (k) => !allowed.has(k),
+      ),
+    ).toEqual([]);
+  });
+
+  it("spells every kind a store can answer the way the endpoint does", () => {
+    // The mapping is a total `Record`, so a kind added to `StoreFormat` with no
+    // home there is a compile error. What the type cannot see is a value that
+    // compiles and is not one the endpoint's own enum holds, which is a 422 in
+    // the middle of somebody's device.
+    const known = new Set(Object.values(BookFormat) as string[]);
+    for (const kind of ["ebook", "audiobook", "comic"] as const) {
+      const created = storeToBookCreate(storeBook({ format: kind }));
+      expect(known).toContain(created!.format);
+    }
+  });
+
+  it("carries what the store said about the kind of copy", () => {
+    // Carried rather than derived: `lib/stores.ts` is where each store answers
+    // that, because the answer is the store's. A Kobo says it in a mime type
+    // and a Takeout says it by the file having read as an EPUB.
+    expect(storeToBookCreate(storeBook({ format: null }))!.format).toBeNull();
+    expect(storeToBookCreate(storeBook())!.format).toBe("ebook");
+  });
+
+  it("joins authors with the separator the server splits on", () => {
+    expect(
+      storeToBookCreate(
+        storeBook({ authors: ["Terry Pratchett", "Neil Gaiman"] }),
+      )!.author,
+    ).toBe("Terry Pratchett, Neil Gaiman");
+  });
+
+  it("is null for a book with no title, which the endpoint requires", () => {
+    // Reported in the preview rather than left to a 422 halfway through a
+    // device: a Kobo row can carry a null `Title` and still be owned.
+    expect(storeToBookCreate(storeBook({ title: null }))).toBeNull();
+  });
+
+  it("cuts a title the column cannot hold rather than losing the book", () => {
+    const long = "a".repeat(600);
+
+    expect(storeToBookCreate(storeBook({ title: long }))!.title).toHaveLength(
+      500,
+    );
+  });
+
+  it("says nothing about a shelf or a private book, because no store does", () => {
+    expect(storeToBookCreate(storeBook())).toMatchObject({
+      location: null,
+      is_private: false,
+      classifications: [],
+    });
   });
 });

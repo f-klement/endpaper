@@ -2,6 +2,7 @@ import { useRef } from "react";
 
 import { errorText } from "../../../../components/ErrorState";
 import { useTranslation, type MessageKey } from "../../../../i18n";
+import { DUPLICATE_STATUS, FAILURES_SHOWN } from "../importing";
 import type {
   CalibreIntakeFailure,
   CalibrePreview,
@@ -246,7 +247,7 @@ export default function CalibreImport({
                   <li key={index} className="truncate">
                     {row.title}
                     {" · "}
-                    {row.status === DUPLICATE
+                    {row.status === DUPLICATE_STATUS
                       ? t("calibre.duplicate")
                       : t("calibre.notAdded")}
                   </li>
@@ -259,23 +260,6 @@ export default function CalibreImport({
     </div>
   );
 }
-
-/**
- * What the server answers for a book whose ISBN is already on the shelf.
- *
- * Named because it is the ordinary outcome rather than an error: importing the
- * same library twice is what a second run is, and a member who reads "could not
- * be added" for six hundred books believes something broke.
- */
-const DUPLICATE = 409;
-
-/**
- * How many failures are listed.
- *
- * Every failure is kept in the result, and a list of nine hundred is not a list
- * anybody reads. The count above it is the whole number.
- */
-const FAILURES_SHOWN = 20;
 
 /**
  * One sentence per refusal.

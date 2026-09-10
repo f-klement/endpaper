@@ -369,10 +369,12 @@ describe("plausibleYear", () => {
       .filter(([, text]) => DOORS.test(text));
 
     const READERS = [
+      "../../src/lib/appleBooks.ts",
       "../../src/lib/calibre.ts",
       "../../src/lib/cbz.ts",
       "../../src/lib/fb2.ts",
       "../../src/lib/fileName.ts",
+      "../../src/lib/kindle.ts",
       "../../src/lib/kobo.ts",
       "../../src/lib/mobi.ts",
       "../../src/lib/opf.ts",

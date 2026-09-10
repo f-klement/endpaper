@@ -24,8 +24,8 @@
  *
  * **Its own module rather than the reader seam, which is what
  * `fileReaders.ts` refuses to be.** That file says what a reader is and what it
- * answers with, and four readers apply this rule while nothing in the contract
- * consults it: a `FileReading` is the same shape whether or not the bytes went
+ * answers with, and the readers that apply this rule do so while nothing in the
+ * contract consults it: a `FileReading` is the same shape whether or not the bytes went
  * through a parser at all. Here it is also a rule with no dependency, so the
  * seam's runtime edge into a reader's dependency goes with it and every module
  * that names a reader's vocabulary takes it from the seam as a type.
@@ -34,13 +34,20 @@
  * join it is another refusal a caller cannot make after the parse; anything
  * that reads a document belongs to the format that spells it.
  *
- * A reader that hands a whole document to `DOMParser` as `application/xml`
- * calls this first, and four do.
+ * Every reader that hands a whole document to `DOMParser` as `application/xml`
+ * calls this first. **How many that is is deliberately not written here**, and
+ * neither is the list: `tests/lib/xmlEntities.test.ts` derives both from the
+ * source and asserts them in both directions. A count in prose does not
+ * recount itself when a reader lands beside it, and this docstring carried two
+ * that did not.
  *
- * **Two parses do not, and both are deliberate.** `pdf.ts` cuts the packet
- * down to its root element, so what it parses has no prolog for a declaration
- * to sit in, and says so at its own site. `calibre.ts::plainText` parses
- * `text/html`, which has no internal subset to expand.
+ * **One `application/xml` parse does not call it, and it is deliberate.**
+ * `pdf.ts` cuts the packet down to its root element, so what it parses has no
+ * prolog for a declaration to sit in, and says so at its own site.
+ *
+ * **A `text/html` parse is outside this rule rather than exempt from it**: that
+ * parser has no internal subset to expand. Which modules those are is the
+ * derivation's to say and not this paragraph's, for the reason above.
  */
 export function declaresEntities(xml: string): boolean {
   return xml.includes("<!ENTITY");

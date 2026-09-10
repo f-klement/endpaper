@@ -57,9 +57,12 @@ is what the comparison is for.
 which was 0.13 kB here.** It costs no engine at all: the asset is byte identical across the two
 builds and a second lazy importer shares the one wrapper chunk rather than emitting another.
 
-**What this does not settle.** A store that is not SQLite. Adobe Digital Editions keeps an XML
-catalogue and Apple Books keeps a plist beside its database, and neither needs an engine: each is
-a separate measurement, and the plist one is owed before Apple Books can be called covered.
+**What this did not settle, and what has since settled it.** Two questions were left open here
+and both are now answered below, by measurement rather than by argument. A store that is not
+SQLite needs no engine: `frontend/src/lib/kindle.ts` reads XML and loads nothing. And Apple Books'
+plist is not read at all, because it is not part of the library the SQLite half holds. **Adobe
+Digital Editions is the one still owed**, and it is XML, so the answer is expected rather than
+known.
 
 ## What follows for a store reader
 
@@ -76,7 +79,7 @@ different answers, because they are three different sentences to the person hold
 `frontend/tests/lib/kobo.test.ts` asserts that against databases built to break the reader, under
 `an unreadable store is one skipped source, never a broken import`.
 
-## The store that was built
+## The stores that were built
 
 Kobo, in `frontend/src/lib/kobo.ts`, chosen for being the best documented rather than the most
 wanted: calibre's KoboTouch driver is a working implementation of the same read, so the schema
@@ -87,3 +90,100 @@ provenance, and the fields a Kobo cannot supply.
 commit and date the module names, and the fixtures are constructed rather than captured. What
 that leaves open is whether real hardware carries a value none of this expects, which is the same
 thing every paragraph above is about.
+
+Google Play Books, in `frontend/src/lib/takeout.ts`, is a store rather than a device and needs no
+engine at all: a Takeout archive is a zip of EPUBs and their sidecars, so it reuses the EPUB
+reader the scan page already ships. That module carries what one real export held on one day.
+
+Apple Books, in `frontend/src/lib/appleBooks.ts`, is the second store over the engine and the one
+that proved the engine argument: it costs its reader and nothing else. It reads the Core Data
+store on a member's own Mac. **A member who copies only `BKLibrary-*.sqlite` and leaves its `-wal`
+sidecar behind gets a store that reads as empty**, measured at 0 rows from the file alone against
+3 with the sidecar, which is why the card says so where the copy is made rather than after it
+fails.
+
+Kindle for PC, in `frontend/src/lib/kindle.ts`, is the first store that is not SQLite, and it has
+a section of its own below because what it settles is larger than the store.
+
+
+## The plist half, measured
+
+This page owed a measurement on Apple Books' plist before that store could be called covered. It
+is owed no longer, and the answer is that no plist is read.
+
+**The two are not two halves of one library.** Measured 2026-09-10 against
+`github.com/tnahs/readstor` at `main`, which exports an Apple Books library and ships the
+artefacts it is tested against: its macOS path opens `BKLibrary*.sqlite` and reads no plist, and
+its iOS path reads `Books.plist` off a device over AFC. The SQLite store is the macOS library;
+the plist is the iOS one.
+
+**And the plist is a strict subset besides.** Its 15 keys carry four things a catalogue needs,
+`Name`, `Artist`, `Publisher Unique ID` and `MIME Type`, and `ZBKLIBRARYASSET`, which has 86
+columns and none of them named for an ISBN, carries all four and the year, the language and the
+description as well. So the engine question settles Apple Books after all: one reader, no parser,
+no bytes beyond a second SQLite reader's own.
+
+**Whether that plist is binary or XML has two answers and neither had to be chosen.** readstor's
+shipped iOS samples begin `<?xml`; a 2014 report of a macOS `Books.plist` under
+`com.apple.BKAgentService` describes a binary one under different keys. A store nothing reads is a
+format nothing has to parse.
+
+## The store that is not SQLite
+
+Kindle for PC, in `frontend/src/lib/kindle.ts`. The catalogue is `KindleSyncMetadataCache.xml`
+under the app's `Cache/` directory and **it is XML**, so this store answers the question the
+measurement above left open: a store that is not SQLite costs its reader and no engine at all,
+because it never loads one. That is structural rather than a byte figure, and the figure is owed
+once the reader is wired.
+
+`book_asset.db` sits beside it, is SQLite, and is not a library: nine tables of its own, a
+download ledger of asins, guids, sizes and local filenames, with no title, author or publisher in
+any of them. **The SQLite file is the wrong file**, which is worth stating because the engine
+already being carried is what would make it the first one somebody opened.
+
+**The identifier is an ASIN and it is never an ISBN.** That is what this route was preferred for:
+the Amazon account data export was refused on carrying neither. Measured over two published
+captures totalling 1,032 entries, every one carries a distinct ASIN, a title and at least one
+author, and none carries an ISBN, because the format has no element for one.
+
+**Kindle for PC only, and that is the finding rather than the scope.** Windows writes this file on
+every line of the app. The current Kindle for Mac does not write it at all: it keeps a different
+database, and reaching a Mac library needs a second reader and its own judgement about where
+metadata ends.
+
+**Metadata only, and this is the store where that line is closest.** The protected book file sits
+beside this catalogue. Nothing here reads, names or looks for it.
+
+**No machine was read.** The schema and the fixtures come from those published captures, at the
+blobs and dates the module names, and the fixtures are constructed rather than copied: the
+captures are real people's libraries.
+
+## Where a member picks one
+
+`frontend/src/lib/stores.ts` is the registry, and a store is a row in it: what it is called, what
+file to pick, what has not been tested, and an opener that loads its reader on demand. The card
+is `LibrarySettingsPage/components/StoreImport.tsx`, which draws one row per entry and names no
+store itself. **Adding a store is a row plus its reader**, which is the property this page's
+engine measurement was taken to make affordable.
+
+**A member picks several at once, and that is where the rule above becomes visible.** Each source
+reads on its own, the totals are over the ones that read, and a source that could not be read is
+named on its own row with the reason. `StoreFailure` is the union of every reader's reasons and
+the card holds a total `Record` over it, so a reader that grows a reason without a sentence for a
+member fails the build.
+
+## tolino, and what naming it rests on
+
+**The Kobo row names tolino and states its bound in the same sentence.** tolino runs Kobo derived
+firmware and keeps the same database, and the KoboTouch driver this reader was built from handles
+both devices through one path, which is why `kobo.ts` reads both spellings of `IsDownloaded`
+through one predicate, calibre's own `in ('true', 1)`.
+
+**No tolino has been read, and there is none to read.** Owner's decision, 2026-09-10: build from
+the driver and say what that rests on. So the claim a member meets is that a tolino is expected
+to work, was built from calibre's driver, and has never been run against one. A sentence claiming
+support without that bound would convert an inference into a promise, which is the failure this
+was written to avoid.
+
+`kobo.ts` carries the two places a difference would surface, the schema 188 boolean and Adobe
+fulfilled shop titles, beside the code each would break in. Not repeated here.

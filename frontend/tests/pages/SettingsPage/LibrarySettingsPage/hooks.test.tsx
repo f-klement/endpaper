@@ -1,5 +1,5 @@
 /**
- * Tests for `useCalibreImport` in
+ * Tests for `useCalibreImport` and `useStoreImport` in
  * src/pages/SettingsPage/LibrarySettingsPage/hooks.ts.
  *
  * The reader has its own file; what is pinned here is the orchestration, which
@@ -20,7 +20,10 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useCalibreImport } from "../../../../src/pages/SettingsPage/LibrarySettingsPage/hooks";
+import {
+  useCalibreImport,
+  useStoreImport,
+} from "../../../../src/pages/SettingsPage/LibrarySettingsPage/hooks";
 import { CALIBRE_SCHEMA, databaseOf } from "../../../lib/sqliteFixtures";
 import { renderHookWithProviders } from "../../../utils";
 
@@ -326,5 +329,329 @@ describe("writing the library", () => {
     // The preview survives a stop, which is what lets somebody press again
     // rather than picking the file a second time.
     expect(result.current.preview).not.toBeNull();
+  });
+});
+
+/**
+ * A Kobo device holding `count` books, plus one row nobody owns.
+ *
+ * Built through the real engine and read back through the real reader, so what
+ * is exercised is the seam this hook actually has rather than a stand in told
+ * what to answer.
+ */
+async function deviceFile(count: number): Promise<File> {
+  const rows: string[] = [
+    `INSERT INTO content
+       (ContentID, MimeType, BookID, Title, Accessibility, IsDownloaded)
+       VALUES ('advert', 'application/epub+zip', NULL, 'Try this', 4, 'true')`,
+  ];
+  for (let id = 1; id <= count; id += 1) {
+    rows.push(
+      `INSERT INTO content
+         (ContentID, MimeType, BookID, Title, Attribution, Accessibility,
+          IsDownloaded)
+         VALUES ('book-${id}', 'application/epub+zip', NULL, 'Book ${id}',
+                 'Author ${id}', 1, 'true')`,
+    );
+  }
+  const bytes = await databaseOf(
+    `CREATE TABLE content (
+       ContentID TEXT NOT NULL PRIMARY KEY,
+       MimeType TEXT,
+       BookID TEXT,
+       Title TEXT,
+       Attribution TEXT,
+       Accessibility INTEGER,
+       IsDownloaded BOOL
+     )`,
+    ...rows,
+  );
+  return new File([bytes], "KoboReader.sqlite");
+}
+
+function storeHook() {
+  return renderHookWithProviders(() => useStoreImport());
+}
+
+describe("what a session that never opens the store card pays", () => {
+  it("reaches every store reader through the registry's own thunks", () => {
+    // The engine and both readers are behind `lib/stores.ts`, whose openers
+    // import them. A static import of a reader here would compile, pass every
+    // other test in this file, and put a third of a megabyte of WebAssembly in
+    // the chunk the shell loads.
+    expect(HOOKS_SOURCE).not.toMatch(
+      /^import(?!\s+type\b)[^;]*?from "[^"]*lib\/(sqlite|kobo|takeout)"/m,
+    );
+  });
+});
+
+describe("picking one store", () => {
+  it("reports what the device held before anything is written", async () => {
+    const { result } = storeHook();
+
+    await act(async () => result.current.choose("kobo", await deviceFile(4)));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    expect(result.current.preview).toEqual({ total: 4, importable: 4 });
+    // The advert row is on the source rather than in the total: which device a
+    // number came from is what a member needs, and the card reads it there.
+    expect(result.current.sources.kobo).toMatchObject({
+      status: "read",
+      library: { skipped: 1, refused: 0 },
+    });
+    expect(posted).toHaveLength(0);
+  });
+
+  it("writes one request a book, in order, and clears the pick", async () => {
+    const { result } = storeHook();
+    await act(async () => result.current.choose("kobo", await deviceFile(3)));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(posted.map((one) => one.body["title"])).toEqual([
+      "Book 1",
+      "Book 2",
+      "Book 3",
+    ]);
+    expect(result.current.result?.added).toBe(3);
+    expect(result.current.sources).toEqual({});
+  });
+
+  it("keeps a refused book with its title rather than counting it", async () => {
+    answers = [null, 409, null];
+    const { result } = storeHook();
+    await act(async () => result.current.choose("kobo", await deviceFile(3)));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(result.current.result?.added).toBe(2);
+    expect(result.current.result?.failures).toEqual([
+      { title: "Book 2", status: 409 },
+    ]);
+  });
+
+  it("stops when it is told to, and keeps the pick so it can be pressed again", async () => {
+    const { result } = storeHook();
+    await act(async () => result.current.choose("kobo", await deviceFile(5)));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    await act(async () => {
+      result.current.confirm();
+      result.current.stop();
+    });
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(result.current.result?.stopped).toBe(true);
+    expect(posted.length).toBeLessThan(5);
+    expect(result.current.sources.kobo?.status).toBe("read");
+  });
+});
+
+/**
+ * A file whose bytes arrive when the test says so.
+ *
+ * **A `File` shaped argument, not a module double**, which is what the
+ * registry's openers take, so nothing here is a `vi.mock` and nothing is
+ * replaced. `zip.openZip` reads `size` and then awaits
+ * `slice(...).arrayBuffer()`, and holding that one promise is what lets two
+ * picks for one store settle in a chosen order. **Chosen rather than raced**: a
+ * race decided by which file is larger is a flake, and the guard under test is
+ * the one that only matters when the earlier read finishes last.
+ *
+ * The bytes it eventually gives are zeros, so the archive fails as
+ * `not-an-archive`. What is being asserted is which answer is written, not
+ * which answer it is.
+ */
+function heldFile(name: string) {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const bytes = new Uint8Array(64);
+  const file = {
+    name,
+    size: bytes.byteLength,
+    slice: () => ({
+      arrayBuffer: async () => {
+        await held;
+        return bytes.buffer;
+      },
+    }),
+  };
+  return { file: file as unknown as File, release };
+}
+
+/**
+ * Give a released read every chance to write before asserting it did not.
+ *
+ * **Measured rather than chosen, and the short window lied.** A single
+ * `setTimeout(0)` reported an empty card for both arms of the `confirm`
+ * mutation below, which reads as the guard being redundant; instrumenting the
+ * read showed it had not resumed inside that window at all. So a negative
+ * assertion taken on the short window is a test that cannot fail.
+ */
+async function settle() {
+  for (let turn = 0; turn < 40; turn += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+describe("a read the member has moved on from", () => {
+  it("writes a held read once it is released, which is what settle is for", async () => {
+    // **The positive control for `settle`, and the only arm here that fails
+    // when its window is too short.** Every other arm asserts that a released
+    // read did *not* write, and a window the read cannot resume inside
+    // satisfies all of them while testing nothing: measured, cutting `settle`
+    // to one turn left all of them green. This one asserts the write happens,
+    // through the same helper and the same held file, so a settle that stops
+    // being long enough is a failure here rather than silence everywhere.
+    const { result } = storeHook();
+    const held = heldFile("held.zip");
+
+    await act(async () => result.current.choose("playBooks", held.file));
+    expect(result.current.sources.playBooks?.status).toBe("reading");
+
+    await act(async () => {
+      held.release();
+      await settle();
+    });
+
+    expect(result.current.sources.playBooks).toMatchObject({
+      status: "failed",
+      fileName: "held.zip",
+    });
+  });
+
+  it("keeps the pick that replaced it, whichever read finishes last", async () => {
+    // The scenario the guard is named for. Without it the first read writes
+    // its answer whenever it finishes, so the file the member replaced comes
+    // back on screen after the one they chose.
+    const { result } = storeHook();
+    const first = heldFile("first.zip");
+
+    await act(async () => result.current.choose("playBooks", first.file));
+    await act(async () =>
+      result.current.choose("playBooks", new File(["nonsense"], "second.zip")),
+    );
+    await waitFor(() =>
+      expect(result.current.sources.playBooks).toMatchObject({
+        status: "failed",
+        fileName: "second.zip",
+      }),
+    );
+
+    await act(async () => {
+      first.release();
+      await settle();
+    });
+
+    expect(result.current.sources.playBooks).toMatchObject({
+      fileName: "second.zip",
+    });
+  });
+
+  it("never lands on a card an import has just cleared", async () => {
+    // The other half of what the guard is for, and the half `reset` does not
+    // reach: a source still reading when the write finishes would otherwise
+    // put a preview and an Import button back under a result the member has
+    // just been shown.
+    const { result } = storeHook();
+    const late = heldFile("late.zip");
+
+    await act(async () => result.current.choose("playBooks", late.file));
+    await act(async () => result.current.choose("kobo", await deviceFile(2)));
+    await waitFor(() => expect(result.current.preview?.total).toBe(2));
+
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+    expect(result.current.sources).toEqual({});
+
+    await act(async () => {
+      late.release();
+      await settle();
+    });
+
+    expect(result.current.sources).toEqual({});
+    expect(result.current.preview).toBeNull();
+  });
+
+  it("never lands on a card that has been cleared under it", async () => {
+    // **The control and the case, same file and same settle.** Without the
+    // guard the second read lands exactly as the first one does, and puts a
+    // preview back on a card that had just been cleared. A Takeout that is not
+    // a zip is used because it fails without touching the engine, so what is
+    // being asserted is the write and not a compile finishing in time.
+    const { result } = storeHook();
+    const file = new File(["nonsense"], "takeout.zip");
+
+    // **The control takes the same `settle()` as the case, and that is what
+    // makes the window self checking.** Taken with a `waitFor` it would wait
+    // only as long as it had to, so a settle that had become too short for the
+    // read would leave the case passing quietly instead of the control failing
+    // loudly, which is the failure `settle` itself is written about.
+    await act(async () => {
+      result.current.choose("playBooks", file);
+      await settle();
+    });
+    expect(result.current.sources.playBooks?.status).toBe("failed");
+
+    await act(async () => {
+      result.current.reset();
+      result.current.choose("playBooks", file);
+      result.current.reset();
+    });
+    await act(async () => {
+      await settle();
+    });
+
+    expect(result.current.sources).toEqual({});
+    expect(result.current.preview).toBeNull();
+  });
+});
+
+describe("an unreadable store is one skipped source", () => {
+  it("keeps the source that read and names the one that did not", async () => {
+    // The rule, at the only place a member can watch it happen. The Play Books
+    // pick is not an archive at all; the Kobo pick is a device.
+    const { result } = storeHook();
+
+    await act(async () => {
+      result.current.choose("kobo", await deviceFile(2));
+      result.current.choose("playBooks", new File(["nonsense"], "takeout.zip"));
+    });
+    await waitFor(() =>
+      expect(result.current.sources.playBooks?.status).toBe("failed"),
+    );
+    await waitFor(() =>
+      expect(result.current.sources.kobo?.status).toBe("read"),
+    );
+
+    expect(result.current.sources.playBooks).toEqual({
+      status: "failed",
+      fileName: "takeout.zip",
+      failure: "not-an-archive",
+    });
+    expect(result.current.preview?.total).toBe(2);
+  });
+
+  it("writes the source that read and nothing from the one that did not", async () => {
+    const { result } = storeHook();
+    await act(async () => {
+      result.current.choose("kobo", await deviceFile(2));
+      result.current.choose("playBooks", new File(["nonsense"], "takeout.zip"));
+    });
+    await waitFor(() => expect(result.current.preview?.total).toBe(2));
+
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(posted.map((one) => one.body["title"])).toEqual([
+      "Book 1",
+      "Book 2",
+    ]);
   });
 });

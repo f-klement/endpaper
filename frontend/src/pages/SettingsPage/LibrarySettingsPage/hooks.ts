@@ -12,7 +12,7 @@
  */
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   getListCustomFieldsQueryKey,
@@ -40,7 +40,21 @@ import type {
 import { useInvalidate } from "../../../api/invalidate";
 import type { CalibreBook, CalibreFailure } from "../../../lib/calibre";
 import type { SqliteFailure } from "../../../lib/sqlite";
-import { toBookCreate } from "./types";
+import {
+  STORE_IDS,
+  STORES,
+  type StoreBook,
+  type StoreFailure,
+  type StoreId,
+  type StoreLibrary,
+} from "../../../lib/stores";
+import {
+  writeBooks,
+  type ImportFailureRow,
+  type ImportOutcome,
+  type ImportProgress,
+} from "./importing";
+import { storeToBookCreate, toBookCreate } from "./types";
 
 /**
  * Bringing a library across from another service.
@@ -295,11 +309,16 @@ export function useMarcImport() {
   };
 }
 
-/** How far through a step that walks nine hundred things this one is. */
-export interface CalibreProgress {
-  readonly done: number;
-  readonly total: number;
-}
+/**
+ * The three names the Calibre card spells, over the shared shapes.
+ *
+ * Aliases rather than a rename: what the loop does is one thing for every
+ * import on this page, and what this card calls it is the card's own
+ * vocabulary. `./importing` is the one home of the behaviour.
+ */
+export type CalibreProgress = ImportProgress;
+export type CalibreFailureRow = ImportFailureRow;
+export type CalibreResult = ImportOutcome;
 
 /** One row of the sample the preview shows, so a wrong reading is visible. */
 export interface CalibrePreviewRow {
@@ -330,20 +349,6 @@ export interface CalibrePreview {
   /** Fields both carried, differently. The database kept its own. */
   readonly disagreed: number;
   readonly rows: readonly CalibrePreviewRow[];
-}
-
-/** What one book that could not be added was, and what the server answered. */
-export interface CalibreFailureRow {
-  readonly title: string;
-  /** The HTTP status, or `null` when the request never got one. */
-  readonly status: number | null;
-}
-
-export interface CalibreResult {
-  readonly added: number;
-  readonly failures: readonly CalibreFailureRow[];
-  /** True when the member stopped it, so a short count is not read as damage. */
-  readonly stopped: boolean;
 }
 
 /** Every way the pick can fail before there is a library to look at. */
@@ -531,54 +536,30 @@ export function useCalibreImport() {
     }
   }
 
-  /**
-   * Write them, one request each.
-   *
-   * **Sequential rather than `Promise.all`**, for the reason the rapid queue
-   * states: nine hundred concurrent requests against one SQLite writer is not a
-   * faster import, and a duplicate ISBN answering 409 has to be attributable to
-   * a book.
-   *
-   * **A failure is kept with its reason rather than counted.** "Sixty could not
-   * be added" after a nine hundred book import is unrecoverable: nothing says
-   * which sixty.
-   */
+  /** Write them, through the loop every import on this page shares. */
   async function confirm() {
     if (books === null || isImporting) return;
     stopped.current = false;
     setIsImporting(true);
     setResult(null);
-    const failures: CalibreFailureRow[] = [];
-    let added = 0;
 
-    const wanted = books
-      .map((book) => ({ book, body: toBookCreate(book) }))
-      .filter(
-        (
-          one,
-        ): one is { book: CalibreBook; body: NonNullable<typeof one.body> } =>
-          one.body !== null,
-      );
+    const bodies = books
+      .map((book) => toBookCreate(book))
+      .filter((body): body is NonNullable<typeof body> => body !== null);
 
-    setProgress({ done: 0, total: wanted.length });
-    for (const [position, one] of wanted.entries()) {
-      if (stopped.current) break;
-      try {
-        await scanAdd.mutateAsync({ data: one.body });
-        added += 1;
-      } catch (thrown) {
-        failures.push({ title: one.body.title, status: statusOf(thrown) });
-      }
-      setProgress({ done: position + 1, total: wanted.length });
-    }
+    const outcome = await writeBooks(bodies, {
+      post: (body) => scanAdd.mutateAsync({ data: body }),
+      onProgress: setProgress,
+      stopped: () => stopped.current,
+    });
 
     // Once for the batch rather than once a book: nine hundred invalidations
     // would refetch every catalogue view nine hundred times.
     invalidate.catalogue();
     setProgress(null);
     setIsImporting(false);
-    setResult({ added, failures, stopped: stopped.current });
-    if (!stopped.current) {
+    setResult(outcome);
+    if (!outcome.stopped) {
       setBooks(null);
       setPreview(null);
     }
@@ -611,14 +592,223 @@ export function useCalibreImport() {
 }
 
 /**
- * What the server answered for one book, or `null` when it never answered.
+ * What one picked source is doing, or turned out to be.
  *
- * The status rather than the sentence, and the sentence is built where the
- * catalogue is: a duplicate ISBN is the ordinary outcome of importing the same
- * library twice and is worth its own words, where everything else is one line
- * saying which book did not arrive.
+ * **Four states and not three**, and the fourth is the one this rule is for. A
+ * reader answers a `StoreFailure` for everything a file can contain, so `error`
+ * is a bug in a reader rather than a bad file; without it such a bug would have
+ * to reject out of the read and take every other source with it, which is
+ * exactly the failure "one skipped source, never a broken import" names.
  */
-function statusOf(thrown: unknown): number | null {
-  const status = (thrown as { status?: unknown } | null)?.status;
-  return typeof status === "number" ? status : null;
+export type StoreSource =
+  | { readonly status: "reading"; readonly fileName: string }
+  | {
+      readonly status: "read";
+      readonly fileName: string;
+      readonly library: StoreLibrary;
+    }
+  | {
+      readonly status: "failed";
+      readonly fileName: string;
+      readonly failure: StoreFailure;
+    }
+  | {
+      readonly status: "error";
+      readonly fileName: string;
+      readonly error: unknown;
+    };
+
+/**
+ * The sources this member has picked, by store.
+ *
+ * `Partial` because most stores are not picked, `fileReaders.READERS`'s reason:
+ * a total map would need an entry per store meaning "not chosen", which reads
+ * as though the absent ones were an oversight.
+ */
+export type StoreSources = Partial<Record<StoreId, StoreSource>>;
+
+/**
+ * What the picked sources hold together, before anything is written.
+ *
+ * **Two numbers, and they are the two the confirm button asks for**: how many
+ * books arrived and how many of them can be written. What each source held on
+ * its own, including what it skipped and what it refused, is on that source's
+ * own row, which is where a member reads which device a number came from. An
+ * aggregate of those here would be a second home for a fact with no screen.
+ */
+export interface StorePreview {
+  readonly total: number;
+  /** Books with a title, which is the one field the API requires. */
+  readonly importable: number;
+}
+
+/**
+ * Importing from the stores a member's own devices and exports carry.
+ *
+ * **Several sources in one pass, and that is the shape of the rule.** A member
+ * with a Kobo and a Play Books export picks both, and a file that has moved or
+ * that a firmware update changed costs that one source: the others are read,
+ * the totals are theirs, and the row that failed says which store it was and
+ * why. `lib/stores.ts` carries the same statement at the seam it is enforced
+ * at.
+ *
+ * Nothing is written until `confirm`, `useLibraryImport`'s reason: a library
+ * read wrong is invisible until afterwards, and afterwards the fix is finding
+ * and deleting the books it made.
+ *
+ * **Nothing is uploaded.** Every read happens in the browser, and the reader
+ * modules that hold a member's bytes cannot reach the network at all.
+ */
+export function useStoreImport() {
+  const invalidate = useInvalidate();
+  const scanAdd = useScanAdd();
+
+  const [sources, setSources] = useState<StoreSources>({});
+  const [progress, setProgress] = useState<ImportProgress | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [result, setResult] = useState<ImportOutcome | null>(null);
+  // A ref rather than state, `useCalibreImport`'s reason: the loop reads it
+  // between requests, and a state value captured when it started says `false`
+  // for ever.
+  const stopped = useRef(false);
+  /**
+   * The pick each store's answer is owed to.
+   *
+   * **A read writes its answer only where the pick it came from is still the
+   * current one.** Two picks for one store, or a pick and then a cancel, leave
+   * a read running whose file the member has already replaced: without this it
+   * lands whenever it finishes, so a slow first read overwrites the pick that
+   * replaced it, and a read still running when an import finishes puts a
+   * preview and an Import button back on a card that has just reported its
+   * result. Identity rather than a counter, so nothing has to be reset.
+   */
+  const picks = useRef(new Map<StoreId, object>());
+
+  /** Let go of every read in flight, so none of them writes after this. */
+  function abandonReads() {
+    picks.current.clear();
+  }
+
+  /**
+   * Read one picked file, and report what it turned out to be.
+   *
+   * **Every update is functional**, because two sources can be reading at once:
+   * a member picks a Kobo and an export in either order without waiting, and a
+   * write built from a snapshot taken when this read started would drop the
+   * other one's answer.
+   */
+  async function read(id: StoreId, file: File) {
+    const pick = {};
+    picks.current.set(id, pick);
+    setResult(null);
+    setSources((current) => ({
+      ...current,
+      [id]: { status: "reading", fileName: file.name },
+    }));
+
+    let answer: StoreSource;
+    try {
+      const reading = await STORES[id].open(file);
+      answer = reading.ok
+        ? { status: "read", fileName: file.name, library: reading.library }
+        : { status: "failed", fileName: file.name, failure: reading.failure };
+    } catch (thrown) {
+      // A reader answers rather than throws, so reaching here is a bug in one.
+      // It still costs one source: see `StoreSource`.
+      answer = { status: "error", fileName: file.name, error: thrown };
+    }
+
+    // **What the read found is decided first and written once**, so that the
+    // check below is one site rather than one per outcome. Written per outcome
+    // it was two arms of an open set, and only the arm somebody thought to
+    // test was tested: a reader that throws is the case least likely to be
+    // noticed in the wild and was the one arm no test reached.
+    if (picks.current.get(id) !== pick) return;
+    setSources((current) => ({ ...current, [id]: answer }));
+  }
+
+  /** Every book that read, in the order the stores are offered. */
+  function readBooks(): readonly StoreBook[] {
+    return STORE_IDS.flatMap((id) => {
+      const source = sources[id];
+      return source?.status === "read" ? [...source.library.books] : [];
+    });
+  }
+
+  /**
+   * What the sources that read hold together.
+   *
+   * **Memoised on `sources`, and it is not a micro optimisation.**
+   * `importable` is counted by building a `BookCreate` per book, so on a device
+   * holding nine hundred of them this is nine hundred objects. Recomputed every
+   * render it would run again on each of the progress updates the write loop
+   * makes, which is where a member is least able to afford it.
+   */
+  const preview = useMemo<StorePreview | null>(() => {
+    const read = STORE_IDS.map((id) => sources[id]).filter(
+      (source): source is Extract<StoreSource, { status: "read" }> =>
+        source?.status === "read",
+    );
+    if (read.length === 0) return null;
+    const books = read.flatMap((source) => [...source.library.books]);
+    return {
+      total: books.length,
+      importable: books.filter((book) => storeToBookCreate(book) !== null)
+        .length,
+    };
+  }, [sources]);
+
+  /** Write them, through the loop every import on this page shares. */
+  async function confirm() {
+    if (isImporting) return;
+    stopped.current = false;
+    setIsImporting(true);
+    setResult(null);
+
+    const bodies = readBooks()
+      .map((book) => storeToBookCreate(book))
+      .filter((body): body is NonNullable<typeof body> => body !== null);
+
+    const outcome = await writeBooks(bodies, {
+      post: (body) => scanAdd.mutateAsync({ data: body }),
+      onProgress: setProgress,
+      stopped: () => stopped.current,
+    });
+
+    // Once for the batch rather than once a book.
+    invalidate.catalogue();
+    setProgress(null);
+    setIsImporting(false);
+    setResult(outcome);
+    // **The sources are kept when the member stopped, and pressing Import again
+    // starts over rather than carrying on.** Every book is sent a second time
+    // and the ones already in answer 409, which the result names as duplicates;
+    // resuming where it stopped is a different ticket. They are kept so that
+    // pressing again does not mean picking the file a second time.
+    if (!outcome.stopped) {
+      abandonReads();
+      setSources({});
+    }
+  }
+
+  return {
+    sources,
+    preview,
+    progress,
+    result,
+    isReading: STORE_IDS.some((id) => sources[id]?.status === "reading"),
+    isImporting,
+    choose: (id: StoreId, file: File) => void read(id, file),
+    confirm: () => void confirm(),
+    stop: () => {
+      stopped.current = true;
+    },
+    reset: () => {
+      stopped.current = false;
+      abandonReads();
+      setSources({});
+      setResult(null);
+      setProgress(null);
+    },
+  };
 }

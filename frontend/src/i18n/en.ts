@@ -1497,6 +1497,81 @@ export const en = {
   "calibre.failureNotCalibre": "That database is not a Calibre library.",
   "calibre.failureEmpty": "That Calibre library has no books in it.",
 
+  // ── Importing from a device or a store ──────────────────────────────────
+  "stores.title": "Bring a library across from a device or a store",
+  "stores.explain":
+    "The file stays in this browser. What is read out of it is what the books say about themselves, and that is all that reaches the library. No book file is uploaded. Pick as many of these as apply: one that cannot be read costs that source and nothing else.",
+  "stores.kobo.name": "Kobo",
+  "stores.kobo.explain":
+    "A Kobo keeps its library in a file called KoboReader.sqlite, in a hidden folder named .kobo at the top of the device. Plug the reader in and pick that file.",
+  "stores.kobo.choose": "Choose KoboReader.sqlite",
+  // The bound travels with the claim, and it is the whole reason the claim is
+  // sayable: a tolino owner reading only "Kobo" has no reason to try, and a
+  // tolino owner told they are supported has been promised something nobody
+  // has ever run. The two symptoms named are the two places the difference
+  // would show, in the words a member could report them in.
+  "stores.kobo.tolino":
+    "A tolino is expected to work here as well. It runs Kobo's software and keeps the same file, and this reader was built from calibre's Kobo driver, which handles both. It has never been run against a tolino, so two things are worth reporting: books missing after an import, the ones put on the device by hand especially, and a book borrowed from the tolino shop that arrives as though it is owned.",
+  "stores.playBooks.name": "Google Play Books",
+  "stores.playBooks.explain":
+    "Ask Google Takeout for a Play Books export and pick the zip it makes. The books inside are opened here to read what they say about themselves, and the book file itself goes nowhere.",
+  "stores.playBooks.choose": "Choose a Takeout archive",
+  "stores.appleBooks.name": "Apple Books",
+  "stores.appleBooks.explain":
+    "Apple Books keeps its library in a file whose name starts with BKLibrary and ends in .sqlite, under Library/Containers on your Mac. Copy that file out and pick the copy.",
+  "stores.appleBooks.choose": "Choose a BKLibrary file",
+  // Said where the copy is made, because nothing here can fix it afterwards
+  // and the symptom is a library that reads as bare rather than as wrong.
+  "stores.appleBooks.sidecar":
+    "Copy the file ending in -wal across as well, if there is one, and keep it beside the database. Apple Books writes recent changes there, and a database copied without it can read as though the library is empty.",
+  "stores.kindle.name": "Kindle for PC",
+  "stores.kindle.explain":
+    "Kindle for PC keeps a catalogue of your library in a file called KindleSyncMetadataCache.xml, in the app's own folder. Pick that file. No book file is opened and nothing goes near the protection on one.",
+  "stores.kindle.choose": "Choose KindleSyncMetadataCache.xml",
+  // Named rather than left to be discovered: a Mac owner picking this row has
+  // nothing to pick, and the app gives them no other sign of that.
+  "stores.kindle.windowsOnly":
+    "Windows only. The Kindle app for Mac does not keep this file, so a Mac library cannot be read here yet.",
+  "stores.failureNotAnAppleBooksLibrary":
+    "That database is not an Apple Books library.",
+  "stores.failureNotAKindleLibrary": "That file is not a Kindle catalogue.",
+  "stores.reading": "Reading {file}...",
+  "stores.sourceRead": "{count} books read.",
+  "stores.sourceSkipped":
+    "{count} more entries were not books on this account.",
+  "stores.sourceRefused": "{count} books were named and could not be opened.",
+  "stores.sourceLost": "{store} was skipped: {reason}",
+  "stores.previewTitle": "{total} books in all, {importable} with a title.",
+  "stores.progress": "{done} of {total}",
+  "stores.confirm": "Import {count} books",
+  "stores.importing": "Importing...",
+  "stores.stop": "Stop",
+  "stores.result": "{added} books added.",
+  "stores.resultStopped": "Stopped. {added} books were added before that.",
+  "stores.resultFailures": "{count} could not be added:",
+  "stores.duplicate": "already in the catalogue",
+  "stores.notAdded": "not added",
+  "stores.failureNotADatabase": "That file is not a SQLite database.",
+  "stores.failureNotAKobo": "That database is not a Kobo library.",
+  "stores.failureNotAnArchive": "That file is not a zip archive.",
+  "stores.failureNotATakeout": "That archive holds no Play Books book.",
+  "stores.failureDamaged":
+    "That file is damaged and could not be read to the end.",
+  "stores.failureTooLarge": "That file is too large to read in a browser.",
+  "stores.failureNoEngine":
+    "This browser could not load the reader for SQLite files.",
+  "stores.failureNoInflate": "This browser cannot unpack zip archives.",
+  "stores.failureProtected": "That archive is password protected.",
+  "stores.failureUnsupported":
+    "That archive is packed in a way this cannot read.",
+  // Not "the device is empty", which is a stronger claim than the reader made
+  // and the wrong one to act on: a store copied off a device without the files
+  // sitting beside it reads as empty and is not. Same shape as the Calibre
+  // card's safety rule, and the same reason it is said to the member: they are
+  // the only one who can make the copy right.
+  "stores.failureEmpty":
+    "That source has no books in it. If the file was copied off a device, check that everything sitting beside it came too.",
+
   // ── Backup ──────────────────────────────────────────────────────────────
   "backup.title": "Backup",
   "backup.explain":

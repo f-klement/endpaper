@@ -59,6 +59,26 @@ describe("LibrarySettingsPage", () => {
     });
   }
 
+  it("offers the store import to every member, not only in library mode", async () => {
+    // The card the whole store surface hangs from. Two readers shipped before
+    // it existed and no member could reach either, so a route with the readers
+    // and no card is the failure this asserts against, not the layout.
+    stubLibraryMode(false);
+    render();
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Bring a library across from a device or a store",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Choose KoboReader.sqlite" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Choose a Takeout archive" }),
+    ).toBeInTheDocument();
+  });
+
   it("does not offer the MARC card to a household", async () => {
     // The server refuses both MARC routes without library mode, so this is
     // about not showing a household an exchange format nobody in it can use.

@@ -240,10 +240,12 @@ const FILE_READERS = [
   "lib/epub.ts",
   "lib/fb2.ts",
   "lib/fileReaders.ts",
+  "lib/kindle.ts",
   "lib/mobi.ts",
   "lib/opf.ts",
   "lib/pdf.ts",
   "lib/sqlite.ts",
+  "lib/stores.ts",
   "lib/takeout.ts",
   "lib/zip.ts",
 ];

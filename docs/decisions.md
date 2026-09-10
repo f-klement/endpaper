@@ -12638,3 +12638,33 @@ anything about.
 seats found the same hole twice, from different directions, and it was measured by running the
 module: an archive could drive **846 times its own size** through the reader before the first fix
 and 21.1 times after, against 0.4 for an honest archive.
+
+## `missing` means a column on Kobo and a value on Kindle, and one import surface renders both
+
+`kobo.ts` asks the device which columns its `content` table has, so a missing field is one the
+firmware could not record and no amount of data can produce one. `kindle.ts` has no schema to
+ask: its catalogue is XML and a field is missing when nothing in the document filled it. The
+word on screen is the same and the fact behind it is not, so a sentence written for one store
+is wrong for the other.
+
+The consequence worth knowing before writing that sentence: a Kindle document whose every
+publication date falls outside the year window reports `year` missing, which is true of what the
+reader could take out of it and reads oddly if the word is understood as Kobo's.
+
+## A store's own identifier is read and not kept, and the ASIN is where that first bit
+
+The Kindle desktop route was preferred over the Amazon account export on one measurement: the
+export carries neither an ASIN nor an ISBN, and the desktop catalogue carries an ASIN on every
+entry, 1,032 of 1,032 over two published captures. **That identifier survives the read and not
+the import.** `BookCreate` has one identifier field, `isbn`, and `storeToBookCreate` drops
+`StoreBook.key`, which is where `stores.ts` puts the ASIN.
+
+**It was not fixed by widening `isbn`**, and that is the decision rather than the omission.
+`books.isbn` is the importer's match key and every ISBN path check digits its input; an ASIN is
+ten characters beginning `B` and passes no such test, so a row carrying one would match nothing
+and would corrupt the dedupe surface for rows that do. A second identifier is a schema question
+about cardinality and lookup, which is a ticket rather than a line in an adapter.
+
+Google Play Books is in the same position with its volume id, so this is two of the four wired
+stores. What a Kindle import keeps today is the title, the authors, the publisher and the year,
+which is still four fields against the refused export's one of thirteen.

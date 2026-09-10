@@ -1339,6 +1339,72 @@ export const de: Messages = {
   "calibre.failureNotCalibre": "Diese Datenbank ist keine Calibre-Bibliothek.",
   "calibre.failureEmpty": "Diese Calibre-Bibliothek enthält keine Bücher.",
 
+  // ── Import von einem Gerät oder aus einem Shop ──────────────────────────
+  "stores.title":
+    "Eine Bibliothek von einem Gerät oder aus einem Shop übernehmen",
+  "stores.explain":
+    "Die Datei bleibt in diesem Browser. Gelesen wird daraus nur, was die Bücher über sich selbst angeben, und mehr erreicht die Bibliothek nicht. Keine Buchdatei wird hochgeladen. Es lassen sich mehrere Quellen wählen: was sich nicht lesen lässt, kostet diese eine Quelle und sonst nichts.",
+  "stores.kobo.name": "Kobo",
+  "stores.kobo.explain":
+    "Ein Kobo legt seine Bibliothek in einer Datei namens KoboReader.sqlite ab, in einem versteckten Ordner namens .kobo im Wurzelverzeichnis des Geräts. Das Gerät anschließen und diese Datei wählen.",
+  "stores.kobo.choose": "KoboReader.sqlite wählen",
+  "stores.kobo.tolino":
+    "Ein tolino sollte hier ebenfalls funktionieren. Er läuft mit Kobos Software und legt dieselbe Datei an, und dieser Leser wurde aus dem Kobo-Treiber von calibre gebaut, der beide Geräte bedient. Getestet wurde er nie an einem tolino, deshalb sind zwei Beobachtungen eine Rückmeldung wert: nach dem Import fehlende Bücher, besonders die selbst auf das Gerät kopierten, und ein im tolino-Shop geliehenes Buch, das ankommt, als wäre es gekauft.",
+  "stores.playBooks.name": "Google Play Books",
+  "stores.playBooks.explain":
+    "Bei Google Takeout einen Play-Books-Export anfordern und das erzeugte Zip wählen. Die Bücher darin werden hier geöffnet, um zu lesen, was sie über sich selbst angeben; die Buchdatei selbst verlässt den Browser nicht.",
+  "stores.playBooks.choose": "Ein Takeout-Archiv wählen",
+  "stores.appleBooks.name": "Apple Books",
+  "stores.appleBooks.explain":
+    "Apple Books legt seine Bibliothek in einer Datei ab, deren Name mit BKLibrary beginnt und auf .sqlite endet, unterhalb von Library/Containers auf dem Mac. Diese Datei herauskopieren und die Kopie wählen.",
+  "stores.appleBooks.choose": "Eine BKLibrary-Datei wählen",
+  "stores.appleBooks.sidecar":
+    "Falls vorhanden, auch die Datei mit der Endung -wal mitkopieren und neben der Datenbank belassen. Apple Books schreibt die jüngsten Änderungen dorthin, und eine ohne sie kopierte Datenbank kann so gelesen werden, als wäre die Bibliothek leer.",
+  "stores.kindle.name": "Kindle für PC",
+  "stores.kindle.explain":
+    "Kindle für PC führt ein Verzeichnis der eigenen Bibliothek in einer Datei namens KindleSyncMetadataCache.xml im Ordner der Anwendung. Diese Datei wählen. Es wird keine Buchdatei geöffnet und nichts kommt dem Kopierschutz einer solchen nahe.",
+  "stores.kindle.choose": "KindleSyncMetadataCache.xml wählen",
+  "stores.kindle.windowsOnly":
+    "Nur Windows. Die Kindle-App für Mac legt diese Datei nicht an, eine Mac-Bibliothek lässt sich hier daher noch nicht lesen.",
+  "stores.failureNotAnAppleBooksLibrary":
+    "Diese Datenbank ist keine Apple-Books-Bibliothek.",
+  "stores.failureNotAKindleLibrary": "Diese Datei ist kein Kindle-Verzeichnis.",
+  "stores.reading": "{file} wird gelesen...",
+  "stores.sourceRead": "{count} Bücher gelesen.",
+  "stores.sourceSkipped":
+    "{count} weitere Einträge waren keine Bücher dieses Kontos.",
+  "stores.sourceRefused":
+    "{count} Bücher waren benannt und ließen sich nicht öffnen.",
+  "stores.sourceLost": "{store} wurde übersprungen: {reason}",
+  "stores.previewTitle":
+    "{total} Bücher insgesamt, {importable} davon mit Titel.",
+  "stores.progress": "{done} von {total}",
+  "stores.confirm": "{count} Bücher importieren",
+  "stores.importing": "Wird importiert...",
+  "stores.stop": "Anhalten",
+  "stores.result": "{added} Bücher hinzugefügt.",
+  "stores.resultStopped":
+    "Angehalten. Vorher wurden {added} Bücher hinzugefügt.",
+  "stores.resultFailures": "{count} konnten nicht hinzugefügt werden:",
+  "stores.duplicate": "bereits im Katalog",
+  "stores.notAdded": "nicht hinzugefügt",
+  "stores.failureNotADatabase": "Diese Datei ist keine SQLite-Datenbank.",
+  "stores.failureNotAKobo": "Diese Datenbank ist keine Kobo-Bibliothek.",
+  "stores.failureNotAnArchive": "Diese Datei ist kein Zip-Archiv.",
+  "stores.failureNotATakeout": "Dieses Archiv enthält kein Play-Books-Buch.",
+  "stores.failureDamaged":
+    "Diese Datei ist beschädigt und ließ sich nicht bis zum Ende lesen.",
+  "stores.failureTooLarge":
+    "Diese Datei ist zu groß, um sie im Browser zu lesen.",
+  "stores.failureNoEngine":
+    "Dieser Browser konnte den Leser für SQLite-Dateien nicht laden.",
+  "stores.failureNoInflate": "Dieser Browser kann keine Zip-Archive entpacken.",
+  "stores.failureProtected": "Dieses Archiv ist passwortgeschützt.",
+  "stores.failureUnsupported":
+    "Dieses Archiv ist auf eine Art gepackt, die hier nicht gelesen werden kann.",
+  "stores.failureEmpty":
+    "Diese Quelle enthält keine Bücher. Falls die Datei von einem Gerät kopiert wurde: bitte prüfen, ob alles daneben ebenfalls mitkopiert wurde.",
+
   // ── Sicherung ───────────────────────────────────────────────────────────
   "backup.title": "Sicherung",
   "backup.explain":

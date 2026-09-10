@@ -10,12 +10,14 @@ import CoversSection from "./components/CoversSection";
 import CustomFieldsSection from "./components/CustomFieldsSection";
 import LibraryImport from "./components/LibraryImport";
 import MarcImport from "./components/MarcImport";
+import StoreImport from "./components/StoreImport";
 import {
   useCalibreImport,
   useCoverBackfill,
   useCustomFields,
   useLibraryImport,
   useMarcImport,
+  useStoreImport,
 } from "./hooks";
 
 /**
@@ -38,7 +40,14 @@ import {
  * **The Calibre card sits with the other imports and not on the scan page**,
  * which is the other place a file is read in this app. A Calibre library is a
  * library, not a book: what the scan page reads is one file a member is holding,
- * and what this reads is somebody's whole shelf.
+ * and what this reads is somebody's whole shelf. The store card is here for the
+ * same reason, and it sits after Calibre because Calibre is the richer route:
+ * whoever has both should meet the one that carries the identifiers first.
+ *
+ * **Two import cards and not one, and they are not merging.** The Calibre card
+ * has a preview and a cross check the store card has nothing to offer, and the
+ * store card reads several sources at once, which Calibre has no second library
+ * to do. What they do share, the write, is `./importing`.
  */
 export default function LibrarySettingsPage() {
   const { t } = useTranslation();
@@ -48,6 +57,7 @@ export default function LibrarySettingsPage() {
   const customFields = useCustomFields();
   const marcImport = useMarcImport();
   const calibreImport = useCalibreImport();
+  const storeImport = useStoreImport();
   // **The card is drawn only in library mode, and the server refuses the route
   // in any case.** Hiding a control is advice to one client; the 403 is the
   // guarantee. What this decides is whether a household is shown an exchange
@@ -89,6 +99,21 @@ export default function LibrarySettingsPage() {
           onConfirm={calibreImport.confirm}
           onStop={calibreImport.stop}
           onCancel={calibreImport.reset}
+        />
+      </SettingsSection>
+
+      <SettingsSection title={t("stores.title")} icon="book">
+        <StoreImport
+          sources={storeImport.sources}
+          preview={storeImport.preview}
+          progress={storeImport.progress}
+          result={storeImport.result}
+          isReading={storeImport.isReading}
+          isImporting={storeImport.isImporting}
+          onChoose={storeImport.choose}
+          onConfirm={storeImport.confirm}
+          onStop={storeImport.stop}
+          onCancel={storeImport.reset}
         />
       </SettingsSection>
 
