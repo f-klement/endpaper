@@ -54,6 +54,12 @@ const LABEL =
  * it to somebody else's host, are both the thing being refused. `lib/epub.ts`
  * carries the full statement.
  *
+ * **Custody of the file is not the whole of what a member is deciding.** A
+ * folder pick sends where the file was: the picked folder's name and the path
+ * beneath it, on a book every account that can see the book can read.
+ * `lib/digitalReference.ts` is what the browser may honestly claim, and
+ * `file.explain` says it here, because this is the press that starts it.
+ *
  * **Nothing opens by itself, and that is deliberate rather than incidental.**
  * The page next to this one says why for the camera: opening a camera is not
  * something a page should do because somebody looked at it. A file dialog is

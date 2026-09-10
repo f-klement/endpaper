@@ -14,6 +14,16 @@ the query's shape.
 three different facts about a catalogue, and the first target survey conflated two
 of them.
 
+**The address policy `fetch.py` grew for a typed host does not reach here, and
+the day it is needed the shape available is weaker.** `fetch.PinnedTransport`
+pins by rewriting an httpx request, and this speaks no HTTP: the only attachment
+point is `Client.open`, which takes a `Target` and hands the host to a client
+this module does not own. So the check there can classify an address and then
+ask somebody else to connect to a **name**, which is check then connect with the
+rebinding window still in it. `fetch.classify` and `fetch.AddressPolicy` are
+reusable as they stand; the pin is not. Nothing needs either today: every
+`Target` comes from `targets.SEEDED`, which is a module constant.
+
 The client is behind a `Session` and `Client` protocol and is not chosen yet. The
 bound by bound comparison with `fetch.py` is in `docs/decisions.md`.
 """

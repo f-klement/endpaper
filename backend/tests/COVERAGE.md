@@ -1,9 +1,9 @@
 # Backend test coverage
 
-**6586 tests**, in 99 files, recounted with `--collect-only` on 2026-09-10.
+**6675 tests**, in 99 files, recounted with `--collect-only` on 2026-09-10.
 
 **The headline equals the passed count today, and that is a fact about the tree rather than
-a simplification.** The gate reports `6586 passed`, with no skip and no `xfail`: the strict
+a simplification.** The gate reports `6675 passed`, with no skip and no `xfail`: the strict
 `xfail` that recorded a defect in the CSV importer is gone, because the work that closed the
 defect closed it.
 
@@ -15,7 +15,7 @@ the skip once made the check undoable, and a rule rewritten as `collected == pas
 the tree happens to have neither is one that fails for the wrong reason the day somebody adds
 either.
 
-**The rows below sum to 6537, forty nine short, and the shortfall is deliberate.** Those
+**The rows below sum to 6626, forty nine short, and the shortfall is deliberate.** Those
 tests live in six files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -68,7 +68,7 @@ why the helper uses regexes.
 | `test_ddc.py` | 29 | **Dewey headings.** That a number splits from its caption and a year does not, that the segmentation prime is stripped rather than rejected, that the projection reads the number |
 | `test_backup.py` | 119 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores. |
 | `test_lending.py` | 17 | **The loan clock.** Overdue, days overdue and days out, each arm of each; that a returned loan stops counting at its return; that `days_out`'s clamp is the reachable one |
-| `test_opds.py` | 81 | **The OPDS reader.** Which addresses this server will open, what one Atom entry becomes, the identifier the census says is not there, the doctype refusal, the decoder-on-a-file property, and the origin pin over paging. `TestNoResponseMovesTheOrigin` is the one to read first |
+| `test_opds.py` | 94 | **The OPDS reader.** Which addresses this server will open, what one Atom entry becomes, the identifier the census says is not there, the doctype refusal, the decoder-on-a-file property, and the origin pin over paging. `TestNoResponseMovesTheOrigin` is the one to read first |
 | `routers/test_opds.py` | 44 | **The OPDS routes.** The admin gate on configuration against a member's right to sync, the credential lifecycle, and that deleting a server or moving it to another origin takes its login with it |
 | `test_marc.py` | 61 | **The MARCXML reader and writer.** That MARC is read through `metadata.py`'s parser rather than a second one, what the importer refuses that a lookup does not |
 | `test_metadata.py` | 466 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache, that a stored login reaches the request it was stored for and no other, that every door needing one declares it, and which transport actually carries one |
@@ -108,10 +108,10 @@ why the helper uses regexes.
 | `schemas/test_settings.py` | 2 | **A row the router builds must carry every field the source describes.** The settings row is built by splatting the description into the response model |
 | `test_serialisation.py` | 47 | Assembling `BookOut`: the per-request fields, the tag suggestion by caption and by DDC number, that a tag name inside a longer word is not a caption match |
 | `test_schema.py` | 173 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial |
-| `schemas/test_digital.py` | 28 | What a client may say about a file it holds, bounded at the schema: the root, the path beneath it and the fingerprint, each refused at its ceiling rather than trusted for its width |
+| `schemas/test_digital.py` | 31 | What a client may say about a file it holds, bounded at the schema: the root, the path beneath it and the fingerprint, each refused at its ceiling rather than trusted for its width |
 | `test_env_example.py` | 4 | **Operator documentation that goes stale silently.** That every environment name `config.py` reads appears in `.env.example` and nothing appears there that the code ignores |
 | `test_database.py` | 27 | Engine setup and the session dependency |
-| `test_fetch.py` | 65 | **The only door outwards.** That the body cap counts raw wire bytes and compression is never requested |
+| `test_fetch.py` | 121 | **The only door outwards.** That the body cap counts raw wire bytes and compression is never requested |
 | `test_catalogue.py` | 173 | Folding what one source repeats, filling one row from another, merging two catalogues of one printing, how complete a record is, the two draft shapes |
 | `test_classifications.py` | 38 | **What a heading asserts, beside which file its number is in.** The kind a field carries, that a legacy row keeps its pair, and the derivation that counts the readers |
 | `test_filing.py` | 238 | **How each classification scheme's call numbers sort.** One rule per scheme answering three things: whether it recognises a number, the key that files it |
@@ -133,7 +133,7 @@ why the helper uses regexes.
 | `routers/test_books_collections.py` | 33 | Filing a book, the two list parameters and the 422 for both at once, the bulk verb, the merge that absorbs a collection, and the export column |
 | `routers/test_books_duplicates.py` | 32 | Duplicate detection and the merge, incl. the ORM cascade trap |
 | `routers/test_books_notes.py` | 13 | A note's own visibility over the four note routes: a private note absent from another member's listing and from an admin's, 404 rather than 403 on edit and delete for anybody but its author, and an edit that does not mention the flag leaving it alone |
-| `routers/test_books_digital_references.py` | 27 | The four routes a client uses to say where a book's file is: only the member's own references, a sighting that refreshes the fingerprint, a miss that flags the row rather than deleting it, and a book the caller cannot see answering 404 |
+| `routers/test_books_digital_references.py` | 44 | The four routes a client uses to say where a book's file is: only the member's own references, a sighting that refreshes the fingerprint, a miss that flags the row rather than deleting it, and a book the caller cannot see answering 404 |
 | `routers/test_imports_marc.py` | 43 | **The import route.** Library mode enforced at 403, the file size ceiling, the preview counts and what each one discloses, that a matched Book never gains an ISBN |
 | `routers/test_books_classification_filter.py` | 29 | **Filtering by classification, and the order it comes back in.** Chiefly a privacy test: `classifications` carries no member column, so the filter is only as private as the shelf in front of it. |
 | `routers/test_books_classifications.py` | 36 | **A catalogue heading kept whole.** That the number survives the parse and a year does not become one, that a German caption still suggests a curated tag |

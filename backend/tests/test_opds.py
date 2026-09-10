@@ -2,8 +2,12 @@
 
 The bounds are the subject of most of this file, because the address is typed by
 an admin and everything after the first request is written by whatever answered.
-`TestNoResponseMovesTheOrigin` is the class that matters most: it is the guard
-standing in for the address range refusal `opds.py` explains it cannot have.
+Two classes carry the address rules and they answer different questions.
+`TestNoResponseMovesTheOrigin` is about every address after the first, which is
+written by whatever answered. `TestAnAddressIsResolvedAndPinned` is about the
+first, which an admin typed: the range refusal that used to be impossible here
+arrived with `fetch.pinned_client`, and it is the only class in this file whose
+addresses are resolved rather than written as literals.
 """
 
 import pathlib
@@ -19,10 +23,24 @@ import opds
 from credentials import Credential
 from decoders import Decoding, Reader
 
+# **Imported, not copied.** The resolver double is one fact about how a lookup
+# is faked here, and `tests/test_fetch.py` is where the pin it feeds is tested.
+from tests.test_fetch import _Answers
+
 BACKEND = pathlib.Path(__file__).resolve().parent.parent
 FIXTURE = BACKEND / "tests" / "fixtures" / "opds_acquisition_feed.xml"
 
-BASE = "http://library.invalid:8083/opds/books"
+#: The server the walking tests point at, and it is a literal on purpose.
+#:
+#: `holdings` goes through `fetch.pinned_client`, which resolves a **name** and
+#: connects to the address it got. A literal reaches no resolver, here or in
+#: httpcore, so every test in this file runs the shipped transport end to end
+#: and makes no lookup of any kind. It is a private address because that is what
+#: a household server has and what `fetch.HOUSEHOLD_ADDRESSES` admits.
+#:
+#: The resolving path is tested where the resolution happens:
+#: `TestAnAddressIsResolvedAndPinned` here, and `tests/test_fetch.py`.
+BASE = "http://10.0.9.9:8083/opds/books"
 
 
 def _feed(entries: str, *, links: str = "") -> str:
@@ -48,8 +66,8 @@ class TestWhichAddressesThisServerWillOpen:
     @pytest.mark.parametrize(
         "url",
         [
-            "http://library.invalid:8083/opds",
-            "https://library.invalid/opds",
+            "http://10.0.9.9:8083/opds",
+            "https://10.0.9.9/opds",
             "http://10.0.0.10:8083/opds",
             "http://localhost:8083/opds",
             "http://[::1]:8083/opds",
@@ -58,9 +76,11 @@ class TestWhichAddressesThisServerWillOpen:
     def test_a_household_server_is_admitted(self, url):
         """Private space, loopback and plaintext are the ordinary case here.
 
-        This is the arm that would go red if somebody added the address range
-        refusal `opds.py` explains it deliberately does not have, so it is the
-        one that says the refusal is absent on purpose.
+        `is_fetchable` is the parse, not the address policy: it reads the text
+        an admin typed and never resolves anything, so a link local literal
+        passes it and is refused later, by `fetch.HOUSEHOLD_ADDRESSES` at the
+        connection. Two rules, one home each, and this is the arm that says
+        private space and loopback stay admitted at both of them.
         """
         assert opds.is_fetchable(url)
 
@@ -68,14 +88,14 @@ class TestWhichAddressesThisServerWillOpen:
         "url",
         [
             "file:///etc/passwd",
-            "gopher://library.invalid/opds",
-            "ftp://library.invalid/opds",
-            "//library.invalid/opds",
+            "gopher://10.0.9.9/opds",
+            "ftp://10.0.9.9/opds",
+            "//10.0.9.9/opds",
             "opds",
             "",
             "http://",
-            "http://library.invalid:99999/opds",
-            "http://library.invalid:notanumber/opds",
+            "http://10.0.9.9:99999/opds",
+            "http://10.0.9.9:notanumber/opds",
             "http://[::1/opds",
         ],
     )
@@ -85,8 +105,8 @@ class TestWhichAddressesThisServerWillOpen:
     @pytest.mark.parametrize(
         "url",
         [
-            "http://library.invalid@evil.invalid/opds",
-            "http://library.invalid:secret@evil.invalid/opds",
+            "http://10.0.9.9@evil.invalid/opds",
+            "http://10.0.9.9:secret@evil.invalid/opds",
             "https://calibre.home.example@evil.invalid:8083/opds",
         ],
     )
@@ -329,20 +349,22 @@ class TestADecoderWorksOnAFile:
 
 
 class TestNoResponseMovesTheOrigin:
-    """The guard that stands in for the address range refusal this cannot have.
+    """Every address after the first is written by whatever answered.
 
-    Every address after the first is written by whatever answered, so this is
-    the only place a response gets to choose where the next request goes.
+    So this is the only place a **response** gets to choose where the next
+    request goes, and it does not get to. Separate from the address policy,
+    which is about the address an admin typed:
+    `TestAnAddressIsResolvedAndPinned` is that one.
     """
 
     @pytest.mark.parametrize(
         "href",
         [
             "http://evil.invalid/opds",
-            "https://library.invalid:8083/opds",
-            "http://library.invalid:9090/opds",
-            "http://library.invalid/opds",
-            "http://library.invalid@evil.invalid:8083/opds",
+            "https://10.0.9.9:8083/opds",
+            "http://10.0.9.9:9090/opds",
+            "http://10.0.9.9/opds",
+            "http://10.0.9.9@evil.invalid:8083/opds",
             "file:///etc/passwd",
             "http://169.254.169.254/latest/meta-data/",
         ],
@@ -351,26 +373,28 @@ class TestNoResponseMovesTheOrigin:
         """Host, scheme and port each move the origin, and each is refused.
 
         The metadata endpoint is in this list because it is what an address
-        range refusal would exist to stop, and it is stopped here instead.
+        range refusal exists to stop, and this refuses it a second time and for
+        a different reason: here because it is not the configured origin, and in
+        `fetch.HOUSEHOLD_ADDRESSES` because of the range it is in.
         """
-        origin = "http://library.invalid:8083"
+        origin = "http://10.0.9.9:8083"
 
         with pytest.raises(opds.UnusableAddress):
             opds._next_page(BASE, href, origin)
 
     def test_a_relative_paging_link_resolves_against_the_page_it_was_on(self):
         following = opds._next_page(
-            BASE, "?page=2", "http://library.invalid:8083"
+            BASE, "?page=2", "http://10.0.9.9:8083"
         )
 
-        assert following == "http://library.invalid:8083/opds/books?page=2"
+        assert following == "http://10.0.9.9:8083/opds/books?page=2"
 
     def test_an_absolute_path_on_the_same_server_is_admitted(self):
         following = opds._next_page(
-            BASE, "/opds/books/2", "http://library.invalid:8083"
+            BASE, "/opds/books/2", "http://10.0.9.9:8083"
         )
 
-        assert following == "http://library.invalid:8083/opds/books/2"
+        assert following == "http://10.0.9.9:8083/opds/books/2"
 
     def test_the_comparison_is_against_the_configured_origin_not_the_last_hop(self):
         """A chain must not be able to walk one host at a time.
@@ -381,7 +405,7 @@ class TestNoResponseMovesTheOrigin:
         """
         with pytest.raises(opds.UnusableAddress):
             opds._next_page(
-                "http://evil.invalid/opds", "/page/2", "http://library.invalid:8083"
+                "http://evil.invalid/opds", "/page/2", "http://10.0.9.9:8083"
             )
 
 
@@ -395,7 +419,7 @@ class TestWalkingAFeed:
             ),
             headers={"content-type": "application/atom+xml"},
         )
-        respx.get("http://library.invalid:8083/opds/books/2").respond(
+        respx.get("http://10.0.9.9:8083/opds/books/2").respond(
             text=_feed(_book("Two"))
         )
 
@@ -434,7 +458,7 @@ class TestWalkingAFeed:
         respx.get(BASE).respond(
             text=_feed(_book("One"), links='<link rel="next" href="/opds/books/2"/>')
         )
-        respx.get("http://library.invalid:8083/opds/books/2").respond(
+        respx.get("http://10.0.9.9:8083/opds/books/2").respond(
             text=_feed(_book("Two"), links='<link rel="next" href="/opds/books/3"/>')
         )
 
@@ -513,7 +537,7 @@ class TestTheLoginGoesToOneOriginAndNoOther:
     @respx.mock
     async def test_the_credential_is_sent_to_the_configured_server(self):
         route = respx.get(BASE).respond(text=_feed(_book("One")))
-        credential = Credential("http://library.invalid:8083", "sam", "hunter2")
+        credential = Credential("http://10.0.9.9:8083", "sam", "hunter2")
 
         await opds.holdings(BASE, credential=credential)
 
@@ -602,10 +626,10 @@ class TestTheBoundsAreStatedInOnePlace:
         with pytest.raises(opds.OpdsError) as refusal:
             await opds.holdings(BASE)
 
-        assert "library.invalid" in str(
+        assert "10.0.9.9" in str(
             fetch.ResponseTooLarge(f"{BASE} answered with more than N bytes")
         ), "the control: this failure kind does name the address"
-        assert "library.invalid" not in str(refusal.value)
+        assert "10.0.9.9" not in str(refusal.value)
         assert "8083" not in str(refusal.value)
 
     @respx.mock
@@ -622,7 +646,7 @@ class TestTheBoundsAreStatedInOnePlace:
             )
             return httpx.Response(200, text=_feed(_book(f"Book {page}"), links=link))
 
-        respx.get(url__startswith="http://library.invalid:8083/opds/books").mock(
+        respx.get(url__startswith="http://10.0.9.9:8083/opds/books").mock(
             side_effect=record
         )
 
@@ -630,3 +654,175 @@ class TestTheBoundsAreStatedInOnePlace:
 
         assert len(seen) == 3
         assert seen == sorted(seen)
+
+
+class TestAnAddressIsResolvedAndPinned:
+    """The control the OPDS link local ticket was waiting on, at this door.
+
+    **Every other test in this file points at a literal address, which no
+    resolver ever sees**, so swapping `fetch.pinned_client` back to
+    `fetch.catalogue_client` in `holdings` would leave all of them green. These
+    are the ones that go red, and they are why `holdings` takes a `resolver`.
+
+    **respx matches the URL after the pin, not before it.** Its default mocker
+    patches httpcore, which is below `PinnedTransport`, so a route registered
+    under the name would not match even with a resolver injected: the routes
+    here are registered on the address the name resolves to.
+    """
+
+    NAME = "http://calibre.test:8083/opds/books"
+
+    async def test_a_name_is_resolved_and_the_request_goes_to_that_address(self):
+        with respx.mock:
+            route = respx.get(BASE).respond(text=_feed(_book("One")))
+
+            found = await opds.holdings(self.NAME, resolver=_Answers(("10.0.9.9",)))
+
+        assert [record.title for record in found.records] == ["One"]
+        assert route.calls[0].request.headers["host"] == "calibre.test:8083"
+
+    async def test_a_name_that_resolves_to_link_local_is_refused(self):
+        """The case a refusal on the URL text walks straight past.
+
+        This is what the owner's decision bought: the address is classified
+        after resolution, so the name spelling makes no difference to it.
+        """
+        with respx.mock:
+            route = respx.get(url__startswith="http://169.254.169.254").respond(
+                text=_feed(_book("Metadata"))
+            )
+
+            with pytest.raises(opds.UnusableAddress) as refusal:
+                await opds.holdings(
+                    "http://metadata.test/latest/meta-data/",
+                    resolver=_Answers(("169.254.169.254",)),
+                )
+
+        assert route.call_count == 0
+        assert "169.254" not in str(refusal.value)
+        assert "metadata.test" not in str(refusal.value)
+
+    async def test_the_same_address_typed_as_a_literal_is_refused_too(self):
+        """The accident the ticket was raised on, which is the cheaper half."""
+        with pytest.raises(opds.UnusableAddress):
+            await opds.holdings("http://169.254.169.254/latest/meta-data/")
+
+    @pytest.mark.parametrize(
+        "address",
+        ["http://127.0.0.1:8083/opds", "http://10.0.9.9:8083/opds"],
+    )
+    async def test_a_household_address_is_still_admitted(self, address):
+        """What this must **not** have refused.
+
+        A household's own server is on the household's own network, so the two
+        ranges that would have been the obvious thing to refuse alongside link
+        local are the feature itself.
+        """
+        with respx.mock:
+            respx.get(address).respond(text=_feed(_book("One")))
+
+            found = await opds.holdings(address)
+
+        assert [record.title for record in found.records] == ["One"]
+
+    async def test_a_name_that_answers_differently_on_the_second_page_is_refused(self):
+        """Rebinding across a walk, which is the case a check alone cannot see.
+
+        The name answers with the household's server, then with the metadata
+        endpoint for the next page. Each request resolves and classifies again,
+        so the walk stops rather than following the second answer.
+        """
+        resolver = _Answers(("10.0.9.9",), ("169.254.169.254",))
+        with respx.mock:
+            respx.get(BASE).respond(
+                text=_feed(_book("One"), links='<link rel="next" href="/opds/books/2"/>')
+            )
+            page_two = respx.get("http://10.0.9.9:8083/opds/books/2").respond(
+                text=_feed(_book("Two"))
+            )
+
+            with pytest.raises(opds.UnusableAddress):
+                await opds.holdings(self.NAME, resolver=resolver)
+
+        assert page_two.call_count == 0
+        assert len(resolver.asked) == 2
+
+
+class TestThePoliciesTheProseNames:
+    """The module docstring says which ranges this door admits. Read, not trusted.
+
+    A document stating something the code does not do is the failure this
+    converts into one failing test, and the precedent is
+    `test_ratelimit.py::TestTheRateLimitTableInTheDocsIsTheModule`.
+
+    **The phrase is derived from the class rather than written beside it**, and
+    that is a mutation this guard failed. The first version carried a mapping of
+    class to phrase; the other seat rebound one class's phrase to another
+    class's, and nothing went red, because the keys were checked as a set and
+    the phrases only for presence anywhere. A derived phrase cannot be rebound.
+
+    **What it still does not check, and this is the honest bound**: which
+    sentence carries which word. The check is presence plus distinctness, so a
+    prose edit that moves a class's name into the wrong sentence, or that says
+    a refused class is admitted, passes. Binding a word to its sentence needs
+    the prose to be structured rather than read, which is a larger change than
+    the drift it would catch.
+    """
+
+    @staticmethod
+    def _phrase(address_class: fetch.AddressClass) -> str:
+        """What the prose has to call this class: its own name, spaced."""
+        return address_class.value.replace("-", " ")
+
+    #: Derived from the policy at collection time rather than written out, so a
+    #: class added to `AddressClass` and refused arrives here with no edit, and
+    #: a class moved into the policy leaves. A skip would have done the same job
+    #: and cost the coverage register its "no skips" invariant.
+    REFUSED = sorted(set(fetch.AddressClass) - fetch.HOUSEHOLD_ADDRESSES.admits, key=str)
+
+    @pytest.mark.parametrize("address_class", REFUSED)
+    def test_a_class_the_policy_refuses_is_named_in_the_module_docstring(
+        self, address_class
+    ):
+        assert self._phrase(address_class) in (opds.__doc__ or "").casefold()
+
+    def test_the_policy_refuses_the_four_classes_this_file_was_written_against(self):
+        """An empty parameter set is a green test that checks nothing.
+
+        **Equality rather than a floor, and the name says which**: a class added
+        to `AddressClass` and refused by this policy arrives in `REFUSED` with no
+        edit, and this is the arm that stops it doing so silently. What it asks
+        for is a decision about the prose, not a bigger number.
+        """
+        assert len(self.REFUSED) == 4
+
+    def test_each_refused_class_asks_the_prose_for_a_different_word(self):
+        """The diagonal, and it is what a presence check cannot do on its own.
+
+        **Deriving the phrase from the class did not bind the two together.**
+        The other seat's mutation made every class ask for the same word, one
+        that is in the docstring, and every arm above stayed green: each was
+        only ever asking whether some word was present. This is the arm that
+        goes red for that, because four classes asking for one word is three
+        classes whose absence from the prose nothing would notice.
+
+        **It watches `_phrase` and never reads the docstring**, so it goes red
+        for a degenerate phrase and for nothing a prose edit can do. The arms
+        above are the ones that read the prose.
+        """
+        asked = [self._phrase(address_class) for address_class in self.REFUSED]
+
+        assert len(set(asked)) == len(self.REFUSED)
+
+    def test_the_two_ranges_a_household_needs_are_named_as_admitted(self):
+        """The other half: the prose has to say what is still reachable.
+
+        Refusing loopback or RFC 1918 would refuse the feature, so a reader
+        arriving at this door needs the admission written down as deliberate
+        rather than inferring it from an absence.
+        """
+        prose = opds.__doc__ or ""
+
+        assert fetch.AddressClass.LOOPBACK in fetch.HOUSEHOLD_ADDRESSES.admits
+        assert fetch.AddressClass.PRIVATE in fetch.HOUSEHOLD_ADDRESSES.admits
+        assert "Two of the three private ranges are admitted" in prose

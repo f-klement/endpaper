@@ -61,7 +61,7 @@
  *   book, and whether an import writes one is a decision about the import flow.
  */
 
-import { plausibleYear } from "./bookBounds";
+import { leadingYear } from "./year";
 import { parseIsbn } from "./isbn";
 import type { SqliteDatabase, SqliteRow } from "./sqlite";
 import { columnsIn, decimal, integer, text } from "./sqliteRow";
@@ -302,15 +302,14 @@ function isOwned(row: SqliteRow, present: Set<string>): boolean {
 /**
  * The publication year, or `null` where a book could not have one.
  *
- * `DateCreated` is an ISO timestamp as text. Only the leading four digits are
- * read, for `calibre.readYear`'s reason: a timezone offset makes the day either
- * side of midnight ambiguous and no book's year turns on it. The window is
- * `bookBounds.plausibleYear`'s, which is the one home of that question.
+ * `DateCreated` is an ISO timestamp as text, and `year.leadingYear` is
+ * the one home of what a leading four digit run means and which of them is a
+ * year. **What is left here is the half that knows it is reading a SQLite
+ * cell**, which is the same shape `calibre.readYear` keeps for the same
+ * reason.
  */
 function readYear(value: unknown): number | null {
-  const match = /^(\d{4})/.exec(text(value) ?? "");
-  if (match === null) return null;
-  return plausibleYear(Number(match[1]));
+  return leadingYear(text(value));
 }
 
 /**

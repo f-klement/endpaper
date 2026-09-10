@@ -495,10 +495,16 @@ believed by every reader after it.
   reports every file on the NAS missing and is telling the truth about what it can see.
   Only a member deleting the reference removes it. Koha reaches the same answer from the
   other end: its URL sweep produces a report a cataloguer acts on, with no freshness column
-  on the record. **There is no shelf-wide reader for the flag**: references are listed per
-  book, so finding every flagged one means asking book by book. That is a limit of what is
-  built rather than of the design, and it is stated here so the paragraph above does not
-  promise a report nobody can run.
+  on the record. **The flag's reader is `GET /api/books/digital-references/missing`**, a
+  paginated book query through the shelf, and the one route in this family that is not per
+  book. It is scoped by the shelf and by nothing else, which is this table's own rule: a
+  reference carries no member, so its visibility is its book's entirely. **A per member view
+  would need a reporter column, and there is none by design**: whoever may read a book may
+  report a file on it, so the reporter is not the book's adder and scoping by the adder
+  would hide a member's own missing files on books somebody else added. What the listing
+  discloses is therefore what the per book listing already does, an unverified path on
+  somebody's machine, at one request instead of one per book. The sweep half stays where it
+  has to be, in a client: the server never sees the file.
 * A table rather than columns on `books`, because the same book really is at two paths on
   two machines. MARC 856 is repeatable and Koha's `biblioitems.url` is one column, which is
   the prior art for what a scalar costs.

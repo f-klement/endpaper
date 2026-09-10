@@ -1168,13 +1168,29 @@ export const en = {
   "rapid.adding": "Adding...",
   "rapid.discard": "Discard",
   "rapid.added": "{count} added. {failed} still below, with the reason.",
+  // **Says what was lost and what was not.** The books are in the catalogue;
+  // what did not get recorded is where their files are, which is the one thing
+  // a folder pick is for beyond the metadata. Named as a second pick rather
+  // than as a retry, because there is no control that retries one.
+  "rapid.unreferenced":
+    "{count} of those were added without where their file is. Picking the folder again records it.",
   "rapid.removeFromQueue": "Remove {label} from the queue",
   "rapid.nothingScanned": "Nothing scanned yet",
 
   // ── Adding books from their files ───────────────────────────────────────
   "file.title": "Add from a file",
+  // **The last sentence says what the press does and not only what it refuses.**
+  // "Never uploaded" was the whole of it, and it stayed true when a folder pick
+  // began recording where a file is: the file does not leave the browser and
+  // its name and folder do, on a book everybody in the library can see.
+  // Somebody deciding whether to point at a folder is deciding about that.
+  //
+  // **"A book that is one file" is the scope and not a hedge.** An audiobook is
+  // a folder of chapters standing as one book, and nothing records where those
+  // are: `ScannedEntry.reference` says why. A sentence promising it for every
+  // book would be false on exactly the pick that has the most files in it.
   "file.explain":
-    "Pick book files, or a whole folder, and Endpaper reads what it can out of them. Anything a file does not say is looked up by its name. The files are read here in your browser and are never uploaded.",
+    "Pick book files, or a whole folder, and Endpaper reads what it can out of them. Anything a file does not say is looked up by its name. The files are read here in your browser and are never uploaded. From a folder, a book that is one file also gets that file's name and the folders above it saved on it, so you can find it again, and everyone who can see the book can see them.",
   "file.pickLabel": "Book files",
   "file.readingFiles": "Reading the files you picked...",
   "file.notAnEpub": "Not an EPUB file.",
@@ -1247,10 +1263,23 @@ export const en = {
   "fallback.lookUpAgain":
     "Ask the catalogues again about those names ({count})",
   "fallback.use": "Use",
-  "fallback.useFor": "Use the record for {title}",
+  // **Names the record and the row, because either alone collides.** The row
+  // alone is the same on all five records inside it; the record alone is the
+  // same on two rows a catalogue answered alike, and a folder holding
+  // `Dune.epub` beside `Dune.mobi` is two rows with one top match.
+  // **`{record}` and not `{title}`**: it carries the whole line, the title, the
+  // author and the year, which is what a translator has to know to place it.
+  "fallback.useFor": "Use the record {record} for {label}",
   // **Says that it is final**, which it is and the bulk keep beside it is not:
   // this row is a member's answer about this book and is never offered again.
   "fallback.keep": "Keep this name and stop asking",
+  // **The visible word is the same on every row and the accessible name is
+  // not**, which is `fallback.useFor`'s reason one control over: a queue of
+  // thirty files still deciding renders thirty of these, and somebody
+  // navigating by button list met thirty called "Keep this name and stop
+  // asking". Named by the row's label rather than by a record's title, because
+  // this press is about the file and the records are what it rejects.
+  "fallback.keepFor": "Keep the name {label} and stop asking",
   "fallback.pickFolderLabel": "A whole folder of books",
 
   // ── Audiobooks, where one book is many files ────────────────────────────

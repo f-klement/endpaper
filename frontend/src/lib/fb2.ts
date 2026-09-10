@@ -38,17 +38,19 @@
  * values, ISBN, series and index, publisher, year, language and description.
  *
  * **`<genre>` is read by nothing here, and that is a destination problem rather
- * than a reading one**, which is the sentence `mobi.ts` writes about the EXTH
- * subject: `FileMetadata` has no tags and the scan page's draft sends none, so
- * there is nowhere to put it. It is carried by every file in the corpus, 35
- * elements across 18, as `lang` is, so it is the one exclusion here worth
- * revisiting when a draft can carry a tag.
+ * than a reading one**, which is the sentence `mobi.ts`, `opf.ts` and `cbz.ts`
+ * each write about their own format's spelling of a subject. `FileMetadata` has
+ * no field for one, and no request body this app sends has anywhere to put it:
+ * `BookCreate` takes no `categories` and no free text tag, so a subject read
+ * here would reach a screen and no column. It is carried by every file in the
+ * corpus, 35 elements across 18, as `lang` is, so it is the one exclusion here
+ * worth revisiting when that door exists.
  *
  * **Lazy loaded**, like every reader: `lib/fileReaders.ts` imports this only
  * when a member picks a file whose name ends in one of the two extensions.
  */
 
-import { plausibleYear } from "./bookBounds";
+import { plausibleYear } from "./year";
 import { parseIsbn } from "./isbn";
 import { type FileIdentifier, type FileMetadata } from "./fileReaders";
 import { declaresEntities } from "./xmlEntities";

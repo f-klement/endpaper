@@ -11124,34 +11124,30 @@ at all.** `catalogue_credentials.source` was deliberately not keyed to the enum 
 added by a curated registry, or a typed host, gets a credential with no migration, and this is
 that row arriving.
 
-## An OPDS server gets no address range refusal, and what stands in its place
+## An OPDS server is refused link local after resolution, and admitted everywhere else private
 
-A household's own server is on the household's own network, so a loopback address and a
-private range address are the ordinary case rather than the attack, and refusing private space
-would refuse the feature.
+A household's own server is on the household's own network, so a loopback address and an RFC
+1918 address are the ordinary case rather than the attack: refusing private space would refuse
+the feature. **Link local is the exception**, because it is never a household's own server and
+it is the range holding the cloud metadata endpoint.
 
-A literal address range test on the URL text was considered and refused. Done properly it needs
-resolve-then-pin at connect time, which this transport does not do, so a name resolving into
-private space walks past it; done on the text it is a stated bound that guards nothing.
+**The owner's decision of 2026-09-07 was to wait for resolve-then-pin rather than refuse the
+literal**, on the grounds that refusing the literal does not refuse a name resolving into the
+range, so it would guard the accident while reading as though it guarded the attacker. **A
+control that reads stronger than it is was judged worse than the stated gap.**
+`fetch.pinned_client` is now that control: one lookup per request, every answer classified, and
+the connection made to the literal that passed, carrying the name as the `Host` header and as
+the TLS server name, so there is no second lookup for a rebinding to move.
 
-**What stands in its place is that no byte of any response may move the origin.** The address is
-fixed when an admin saves the server; a paging link is resolved against the page it came from
-and then compared to that configured origin, never to the previous hop, so a chain cannot walk
-one host at a time. `fetch._same_host_hop` refuses a redirect off the host and
+**What stands beside it is unchanged**: no byte of any response may move the origin, the address
+is fixed when an admin saves the server, a paging link is compared to that configured origin
+rather than to the previous hop, `fetch._same_host_hop` refuses a redirect off the host, and
 `credentials.Credential.header_for` refuses to attach the login anywhere else.
 
-**Left open, and the owner closed it on 2026-09-07: wait for resolve-then-pin, do not refuse
-the literal.** Link local is the one range that is never a household's own server and is the
-range holding the cloud metadata endpoint, so the argument above is true of loopback and RFC
-1918 and not of it. The reason a literal refusal was refused anyway is that it does not refuse
-a name resolving into that range, so it would guard the accident and read as though it guarded
-the attacker. **A control that reads stronger than it is was judged worse than the stated gap**,
-which is the same reasoning this file applies to a bound that stops guarding without failing.
-
-So it is an accepted risk until the outbound policy work lands resolve-then-pin at connect
-time. What limits it meanwhile: configuration is admin only, an admin already restores backups
-and reads every secret, a member can only sync an address an admin chose, and no response body
-reaches the caller.
+**What it is not, stated because the entry above it was rewritten and could otherwise read as a
+clean bill.** Under this policy the OPDS door is still not a request forgery control: an admin's
+address, or a name resolving to one, still reaches this pod's loopback, every ClusterIP and the
+router. **One range changed, not the class.**
 
 ## An entitlement is not a holding
 
@@ -12611,3 +12607,34 @@ unnecessary, and deleting the line changes no answer. Deleting the property turn
 mutation into a `ReferenceError` that escapes the reader, which the arms observe. The helper
 deletes it for one call and restores it in a `finally`, and **refuses to run in an environment
 that never had one**, because an arm that passes vacuously is worse than an absent arm.
+
+## An export that contains the books is read in the browser, not in the import seam
+
+The ticket put the Takeout reader in `backend/import_readers.py`, which is a reader per service
+and already has three. That seam is handed decoded text; a Takeout archive is tens of megabytes
+of the member's own EPUB files, and uploading it to be unzipped server side is exactly the
+custody the EPUB reader refuses to take.
+
+**So the shape of the source decides the seam.** An export that is a table of rows *about* books
+is a backend reader; an export that *contains* the books is a browser one, beside the EPUB reader
+it can then reuse.
+
+## A container of books is a library source, not a file reader
+
+`fileReaders.READERS` is keyed on an extension and answers one record per file. A Takeout archive
+is neither: `.zip` is deliberately not a supported extension, admitting it would make every zip a
+book candidate in the picker's walk, and the answer is many books plus counts, which one reading
+cannot say. So it sits beside the Calibre and Kobo readers as a **library source** and uses the
+file reader family rather than joining it. It reaches `readEpub` by direct import rather than
+through `readerFor`, **because `readerFor` asks the name and the name is the thing this archive
+gets wrong**: every book in it is named `.pdf` and is an EPUB.
+
+**Three counts, because they are three different facts a member can act on**: refused, a book the
+export named that could not be read; skipped, a pair that was read and was not a Play Books book;
+and no count at all for what was never read, whose unit is zip entries and which no member can do
+anything about.
+
+**The budget had to cover reads inside a book, and then reads that were refused.** Both critic
+seats found the same hole twice, from different directions, and it was measured by running the
+module: an archive could drive **846 times its own size** through the reader before the first fix
+and 21.1 times after, against 0.4 for an honest archive.

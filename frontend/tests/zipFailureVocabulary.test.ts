@@ -241,15 +241,21 @@ describe("a module that reads a zip does not map its failures itself", () => {
     expect(naming("ZipError")).toEqual(naming("zipFailureAs("));
   });
 
-  it("is one of the three zipped formats and no others", () => {
+  it("is the three zipped formats and the archive holding them, and no others", () => {
     // The non vacuity check for the equality above, which two empty lists would
-    // also satisfy. Both directions: a fourth reader added and not named here
-    // fails, which is the prompt to read the rule above, and a name deleted
-    // from here fails too.
+    // also satisfy. Both directions: a reader added and not named here fails,
+    // which is the prompt to read the rule above, and a name deleted from here
+    // fails too.
+    //
+    // **`lib/takeout.ts` is not a fourth format.** It is a zip of zips, so it
+    // opens two archives per book and has two sites where a `ZipError` becomes
+    // a word for a member. Both go through the helper, which is what the
+    // equality above asserts; this is the half that says it is here at all.
     expect(naming("zipFailureAs(")).toEqual([
       "lib/cbz.ts",
       "lib/epub.ts",
       "lib/fb2.ts",
+      "lib/takeout.ts",
     ]);
   });
 

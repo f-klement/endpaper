@@ -60,7 +60,7 @@
  * this reader does not open records.
  */
 
-import { plausibleYear } from "./bookBounds";
+import { leadingYear } from "./year";
 import { parseIsbn } from "./isbn";
 import type { FileIdentifier, FileMetadata } from "./fileReaders";
 
@@ -220,8 +220,10 @@ const EXTH_RECORD_HEADER_BYTES = 8;
  *   those 9. Neither is the author, and a reader taking it for one would file
  *   six books under the same typesetter.
  * * **105, the subject.** 62 of 69 carry it, usually several records. There is
- *   nowhere for it to go: `FileMetadata` has no tags and the scan page's draft
- *   sends none.
+ *   nowhere for it to go, which `fb2.ts`, `opf.ts` and `cbz.ts` each say about
+ *   their own spelling of one: `FileMetadata` has no field for a subject, and
+ *   `BookCreate` takes no `categories` and no free text tag, so one read here
+ *   would reach a screen and no column.
  */
 const AUTHOR = 100;
 const PUBLISHER = 101;
@@ -465,15 +467,14 @@ function readTitle(
 /**
  * The year, when the declared date carries a plausible one.
  *
- * The value is an ISO date in most files and a bare `YYYY-MM-DD` in some, so
- * the leading four digits are read and the rest ignored. **Plausible rather
- * than storable**: `bookBounds.plausibleYear` holds the window, and the value
- * out of these 69 files that made one necessary.
+ * The value is an ISO date in most files and a bare `YYYY-MM-DD` in some, and
+ * `year.leadingYear` is where reading the front of one and windowing it
+ * lives. **Plausible rather than storable**, and that module carries the value
+ * out of these 69 files that made a window necessary. What stays here is
+ * `clean`, which is the only normaliser of the four that strips a NUL.
  */
 function readYear(exth: ExthRecords, decode: TextDecoder): number | null {
-  const raw = text(exth, PUBLISHED, decode);
-  const match = raw === null ? null : /^(\d{4})/.exec(raw);
-  return match === null ? null : plausibleYear(Number(match[1]));
+  return leadingYear(text(exth, PUBLISHED, decode));
 }
 
 /**

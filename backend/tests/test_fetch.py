@@ -29,6 +29,7 @@ import ast
 import asyncio
 import gzip
 import re
+import socket
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -107,9 +108,35 @@ DOOR_KEEPERS = {"covers.py", "notifications.py", "fetch.py"}
 #: that do not look like a verb, and `stream` is the one this module itself
 #: uses: a caller copying `fetch.get` into another module is the likeliest way
 #: this rule ever fires.
-CLIENT_CLASSES = frozenset({"Client", "AsyncClient"})
+#: **A transport is a way outwards too, and this rule could not see one.**
+#: Measured 2026-09-10 against the four spellings: `httpx.AsyncHTTPTransport()`,
+#: the sync one, the imported class, and a subclass calling
+#: `.handle_async_request(request)` all returned no offence at all, while the
+#: control `httpx.AsyncClient()` was caught. That was tolerable while nothing in
+#: the tree used a transport; `fetch.PinnedTransport` makes it the sanctioned
+#: way to reach the network, so a module copying the idiom would have walked
+#: through the door guard rather than through the door.
+TRANSPORT_CLASSES = frozenset(
+    {"AsyncHTTPTransport", "HTTPTransport", "AsyncBaseTransport", "BaseTransport"}
+)
+
+CLIENT_CLASSES = frozenset({"Client", "AsyncClient"}) | TRANSPORT_CLASSES
 REQUEST_VERBS = frozenset(
-    {"get", "post", "put", "patch", "delete", "head", "options", "request", "stream"}
+    {
+        "get",
+        "post",
+        "put",
+        "patch",
+        "delete",
+        "head",
+        "options",
+        "request",
+        "stream",
+        # The two a transport answers on, which is where a request leaves from
+        # once somebody has one.
+        "handle_request",
+        "handle_async_request",
+    }
 )
 
 #: What `fetch.py` offers that hands back a live client.
@@ -122,7 +149,12 @@ REQUEST_VERBS = frozenset(
 #: a handle, which this rule has to follow; it does not make a client the
 #: module built for itself, which is the thing being refused. A guard that fails
 #: the pattern it exists to promote gets worked around, not obeyed.
-DOOR_HANDLE_SOURCES = frozenset({"catalogue_client"})
+#:
+#: **`pinned_client` is here for the same reason and it was missed once.**
+#: Measured: `async with fetch.pinned_client(...) as c: await c.get(u)` reported
+#: nothing, while the identical shape on `catalogue_client` was caught, so the
+#: newer of the two doors handed back a client this rule would not follow.
+DOOR_HANDLE_SOURCES = frozenset({"catalogue_client", "pinned_client"})
 
 
 def _client() -> httpx.AsyncClient:
@@ -171,6 +203,9 @@ class _Names:
     #: Names bound to a module level httpx request function, as in
     #: `from httpx import get`.
     verbs: set[str]
+    #: Local names for a transport class, which are reported wherever they are
+    #: **named** rather than only where they are called. See `_http_offences`.
+    transports: set[str]
 
 
 def _resolve(tree: ast.Module) -> _Names:
@@ -180,6 +215,7 @@ def _resolve(tree: ast.Module) -> _Names:
     constructors: set[str] = set()
     handle_makers: set[str] = set()
     verbs: set[str] = set()
+    transports: set[str] = set()
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.ImportFrom):
@@ -188,6 +224,8 @@ def _resolve(tree: ast.Module) -> _Names:
             for alias in node.names:
                 if alias.name in CLIENT_CLASSES:
                     constructors.add(alias.asname or alias.name)
+                    if alias.name in TRANSPORT_CLASSES:
+                        transports.add(alias.asname or alias.name)
                 elif alias.name in REQUEST_VERBS:
                     verbs.add(alias.asname or alias.name)
         elif node.module == "fetch":
@@ -227,6 +265,7 @@ def _resolve(tree: ast.Module) -> _Names:
         constructors=constructors,
         handle_makers=handle_makers | constructors,
         verbs=verbs,
+        transports=transports,
     )
 
 
@@ -303,6 +342,33 @@ def _http_offences(source: str) -> list[str]:
     handles = _client_handles(tree, names)
 
     found = []
+    called = {
+        id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)
+    }
+
+    # **A transport is reported where it is NAMED, not only where it is called**,
+    # and that is the one dimension where the paragraph about pulling a client
+    # out of a container does not transfer. Measured: a transport class as a
+    # default argument called later, one in a tuple, and a bare
+    # `AsyncBaseTransport` subclass all reported nothing, and the first of those
+    # is `fetch.PinnedTransport`'s own signature, which is the shape a copier
+    # copies. A client cannot be used without being constructed at the site; a
+    # transport can be handed about as a class and constructed somewhere this
+    # walk never looks.
+    #
+    # The call site is skipped so a plain `httpx.AsyncHTTPTransport()` is one
+    # offence and not two.
+    for node in ast.walk(tree):
+        if id(node) in called:
+            continue
+        if (isinstance(node, ast.Name) and node.id in names.transports) or (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in names.httpx
+            and node.attr in TRANSPORT_CLASSES
+        ):
+            found.append(f"names a transport at line {node.lineno}")
+
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -931,8 +997,15 @@ class TestThisIsTheOnlyDoorOutwards:
     than guessed.** The first version of this list named three things that are
     not blind spots at all: a client returned by a helper, pulled out of a
     container, or stored on an attribute is caught, because the *construction*
-    is flagged where it happens and the handle never has to be followed. What
-    is genuinely missed:
+    is flagged where it happens and the handle never has to be followed.
+
+    **That reasoning holds for a client and not for a transport**, which is why
+    a transport is reported where it is named. A client is useless unless it is
+    constructed at the site; a transport class is a value, so it travels as a
+    default argument or inside a tuple and is constructed somewhere this walk
+    never looks. Measured: all three of those shapes reported nothing until the
+    naming pass existed, and the first is `fetch.PinnedTransport`'s own
+    signature. What is genuinely missed:
 
     * `getattr(client, "get")(...)`, and any other call assembled at runtime.
     * A handle that reaches a module already built, as a parameter annotated
@@ -1010,6 +1083,31 @@ class TestThisIsTheOnlyDoorOutwards:
         "imported and renamed verb": (
             "from httpx import get as hget\nr = hget('u')\n"
         ),
+        "transport construction": "import httpx\nt = httpx.AsyncHTTPTransport()\n",
+        "transport class as a default argument": (
+            "import httpx\n\n\ndef door(inner=httpx.AsyncHTTPTransport):\n"
+            "    return inner()\n"
+        ),
+        "transport class in a container": (
+            "import httpx\nMAKERS = (httpx.AsyncHTTPTransport,)\nt = MAKERS[0]()\n"
+        ),
+        "a transport subclass": (
+            "import httpx\n\n\nclass T(httpx.AsyncBaseTransport):\n"
+            "    async def handle_async_request(self, request):\n        ...\n"
+        ),
+        "sync transport construction": "import httpx\nt = httpx.HTTPTransport()\n",
+        "imported transport class": (
+            "from httpx import AsyncHTTPTransport\nt = AsyncHTTPTransport()\n"
+        ),
+        "a request handed to a transport": (
+            "import httpx\n\n\nasync def f(t: httpx.AsyncBaseTransport, r):\n"
+            "    return await t.handle_async_request(r)\n"
+        ),
+        "verb on the newer door's own client": (
+            "import fetch\n\n\nasync def f():\n"
+            "    async with fetch.pinned_client(fetch.PUBLIC_ADDRESSES) as client:\n"
+            "        return await client.get('u')\n"
+        ),
         "verb on a client from an aliased door": (
             "import fetch as f\n\n\nasync def g(url):\n"
             "    async with f.catalogue_client() as c:\n"
@@ -1031,6 +1129,12 @@ class TestThisIsTheOnlyDoorOutwards:
         "the door, imported by name": (
             "from fetch import catalogue_client, get\n\n\nasync def f(url):\n"
             "    async with catalogue_client() as c:\n        return await get(c, url)\n"
+        ),
+        "the pinned door, imported by name": (
+            "from fetch import pinned_client, get, PUBLIC_ADDRESSES\n\n\n"
+            "async def f(url):\n"
+            "    async with pinned_client(PUBLIC_ADDRESSES) as c:\n"
+            "        return await get(c, url)\n"
         ),
         "the door, through an alias": (
             "import fetch as f\n\n\nasync def g(url):\n"
@@ -1120,3 +1224,563 @@ class TestACredentialGoesOnlyToTheOriginItWasSetFor:
             await fetch.get(client, "https://elsewhere.test/sru", credential=credential)
         assert first.calls.last.request.headers["authorization"] == "Basic secret"
         assert "authorization" not in second.calls.last.request.headers
+
+
+class _Recorder(httpx.AsyncBaseTransport):
+    """An inner transport that answers 200 and keeps what it was handed.
+
+    The whole subject of the pin is **which request reaches httpcore**, so the
+    double sits exactly where httpcore would and reports it.
+    """
+
+    def __init__(self, body: str = "ok") -> None:
+        self.body = body
+        self.requests: list[httpx.Request] = []
+        self.closes = 0
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return httpx.Response(200, text=self.body)
+
+    async def aclose(self) -> None:
+        self.closes += 1
+
+
+class _Answers:
+    """A resolver double: one answer per lookup, the last one repeating.
+
+    A class rather than a function because the rebinding case needs the second
+    lookup to answer differently from the first, which is the whole shape the
+    pin exists to remove.
+    """
+
+    def __init__(self, *answers: tuple[str, ...]) -> None:
+        self.answers = list(answers)
+        self.asked: list[tuple[str, int]] = []
+
+    async def __call__(self, host: str, port: int) -> tuple[str, ...]:
+        self.asked.append((host, port))
+        return self.answers[min(len(self.asked) - 1, len(self.answers) - 1)]
+
+
+class TestWhichClassAnAddressIsIn:
+    """`fetch.classify`, which is what every policy here is written against."""
+
+    @pytest.mark.parametrize(
+        ("address", "expected"),
+        [
+            ("127.0.0.1", fetch.AddressClass.LOOPBACK),
+            ("::1", fetch.AddressClass.LOOPBACK),
+            ("0.0.0.0", fetch.AddressClass.UNSPECIFIED),
+            ("::", fetch.AddressClass.UNSPECIFIED),
+            ("169.254.169.254", fetch.AddressClass.LINK_LOCAL),
+            ("fe80::1", fetch.AddressClass.LINK_LOCAL),
+            ("10.0.0.5", fetch.AddressClass.PRIVATE),
+            ("172.16.0.1", fetch.AddressClass.PRIVATE),
+                        ("100.64.0.1", fetch.AddressClass.PRIVATE),
+            ("fd00::5", fetch.AddressClass.PRIVATE),
+            ("224.0.0.1", fetch.AddressClass.MULTICAST),
+            ("ff02::1", fetch.AddressClass.MULTICAST),
+            ("8.8.8.8", fetch.AddressClass.PUBLIC),
+            ("2606:4700::1111", fetch.AddressClass.PUBLIC),
+            ("240.0.0.1", fetch.AddressClass.RESERVED),
+            ("2001:db8::1", fetch.AddressClass.RESERVED),
+            ("2001::1", fetch.AddressClass.RESERVED),
+        ],
+    )
+    def test_an_address_is_in_the_class_its_registry_entry_says(
+        self, address, expected
+    ):
+        assert fetch.classify(address) == expected
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "::ffff:169.254.169.254",
+            "::169.254.169.254",
+            "64:ff9b::a9fe:a9fe",
+        ],
+    )
+    def test_a_v4_address_wrapped_in_a_v6_prefix_is_classed_as_the_v4_one(
+        self, spelling
+    ):
+        """The three prefixes that carry a v4 address and are read as v6.
+
+        **Two of the three are `is_global`**, so a classifier that did not
+        unwrap them would call the cloud metadata endpoint public: measured on
+        Python 3.14, `::169.254.169.254` and `64:ff9b::a9fe:a9fe` both answer
+        True to `is_global` and neither has an `ipv4_mapped`.
+        """
+        assert fetch.classify(spelling) == fetch.AddressClass.LINK_LOCAL
+        assert not fetch.HOUSEHOLD_ADDRESSES.permits(spelling)
+
+    def test_a_household_address_reached_by_its_mapped_form_is_still_private(self):
+        """The row that makes the unwrap load bearing, and it is not a refusal.
+
+        **All three spellings above stay green when the unwrap is deleted**, and
+        the other seat's mutation run is the evidence: `ipaddress` classes the
+        mapped form as link local by itself, and the other two fall to
+        `RESERVED`, which is refused either way. The class where the unwrap
+        changes the mapped answer is this one: without it `::ffff:10.0.0.1` is
+        `RESERVED`, which is a **household server on a dual stack box refused**,
+        the one thing this door must not do.
+        """
+        assert fetch.classify("::ffff:10.0.0.1") == fetch.AddressClass.PRIVATE
+        assert fetch.HOUSEHOLD_ADDRESSES.permits("::ffff:10.0.0.1")
+
+    def test_6to4_and_teredo_are_refused_whole_rather_than_unwrapped(self):
+        """They carry a v4 address too and both fall to `RESERVED` on their own.
+
+        Unwrapping would move them from refused by every policy to refused by
+        most, which is the weaker answer. `2002:a9fe:a9fe::1` is the metadata
+        endpoint inside a 6to4 address, and `ipaddress.is_private` answers True
+        for it, which is why the private ranges here are written out.
+        """
+        assert fetch.classify("2002:a9fe:a9fe::1") == fetch.AddressClass.RESERVED
+        assert not fetch.HOUSEHOLD_ADDRESSES.permits("2002:a9fe:a9fe::1")
+        assert not fetch.PUBLIC_ADDRESSES.permits("2002:a9fe:a9fe::1")
+
+    def test_the_third_rfc_1918_block_is_the_network_it_is_meant_to_be(self):
+        """Written as an integer in `fetch.py` because the publish gate refuses
+        its dotted form, so this is what stands in for reading it.
+
+        A test carrying that form would not publish either, which is why the
+        assertion is on the integer and the prefix length.
+        """
+        block = fetch._PRIVATE_NETWORKS[2]
+        assert (int(block.network_address), block.prefixlen) == (0xC0A80000, 16)
+        assert fetch.classify(block[9]) == fetch.AddressClass.PRIVATE
+
+    def test_no_range_iana_marks_unreachable_comes_out_public(self):
+        """The arm that keeps the `RESERVED` fallthrough from being a claim.
+
+        **`IPv6Address.is_global` is `not is_private`**, so on that family this
+        classifier is only as current as the interpreter, and a range Python's
+        list is missing is `PUBLIC` here. Two of these were: `fec0::a9fe:a9fe`
+        and `5f00::1` were admitted by `PUBLIC_ADDRESSES` until
+        `_NOT_GLOBALLY_REACHABLE` named them. The table is the IANA special
+        purpose registry's entries that a catalogue could never be served from.
+        """
+        unreachable = [
+            "0.0.0.0",
+            "10.0.0.5",
+            "100.64.0.1",
+            "127.0.0.1",
+            "169.254.169.254",
+            "172.16.0.1",
+            "192.0.0.170",
+            "192.0.2.1",
+            "198.18.0.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "240.0.0.1",
+            "255.255.255.255",
+            "::",
+            "::1",
+            "64:ff9b::a9fe:a9fe",
+            "100::1",
+            "2001::1",
+            "2001:db8::1",
+            "2002:a9fe:a9fe::1",
+            "5f00::1",
+            "fc00::1",
+            "fe80::1",
+            "fec0::a9fe:a9fe",
+        ]
+
+        public = [
+            address
+            for address in unreachable
+            if fetch.classify(address) == fetch.AddressClass.PUBLIC
+        ]
+
+        assert public == []
+        assert not any(fetch.PUBLIC_ADDRESSES.permits(a) for a in unreachable)
+
+    def test_a_range_nobody_named_is_reserved_rather_than_public(self):
+        """The fallback arm, which is what keeps a future allocation refused.
+
+        `is_global` is consulted last and everything it refuses lands in
+        `RESERVED`, so the classes admitted by a policy are the ones written
+        down rather than the ones left over.
+        """
+        assert fetch.classify("192.0.0.170") == fetch.AddressClass.RESERVED
+        assert fetch.classify("198.18.0.1") == fetch.AddressClass.RESERVED
+
+    @pytest.mark.parametrize("nonsense", ["", "not-an-address", "library.test", "1.2.3"])
+    def test_a_policy_refuses_what_does_not_parse_as_an_address(self, nonsense):
+        """A resolver answering something unreadable is not a reason to connect."""
+        assert not fetch.HOUSEHOLD_ADDRESSES.permits(nonsense)
+        assert not fetch.PUBLIC_ADDRESSES.permits(nonsense)
+        with pytest.raises(ValueError):
+            fetch.classify(nonsense)
+
+    def test_the_two_shipped_policies_differ_where_the_doors_differ(self):
+        """A household server is on private space; a typed catalogue is not.
+
+        The one class both refuse is the one this pin was built for.
+        """
+        assert fetch.HOUSEHOLD_ADDRESSES.permits("10.0.0.10")
+        assert fetch.HOUSEHOLD_ADDRESSES.permits("127.0.0.1")
+        assert not fetch.PUBLIC_ADDRESSES.permits("10.0.0.10")
+        assert not fetch.PUBLIC_ADDRESSES.permits("127.0.0.1")
+        assert not fetch.HOUSEHOLD_ADDRESSES.permits("169.254.169.254")
+        assert not fetch.PUBLIC_ADDRESSES.permits("169.254.169.254")
+
+
+class TestResolveThenPin:
+    """The control another ticket is waiting on: resolve once, refuse, connect there.
+
+    A check on the address a name resolves to is worth nothing if the connection
+    then does its own lookup, so what these pin is that the address classified
+    is the address connected to.
+    """
+
+    def _client(self, policy, resolver, recorder):
+        return httpx.AsyncClient(
+            transport=fetch.PinnedTransport(
+                policy, resolver=resolver, inner=lambda: recorder
+            )
+        )
+
+    async def test_the_connection_is_made_to_the_address_that_was_classified(self):
+        recorder = _Recorder()
+        resolver = _Answers(("10.0.0.10",))
+
+        async with self._client(
+            fetch.HOUSEHOLD_ADDRESSES, resolver, recorder
+        ) as client:
+            await client.get("http://calibre.test:8083/opds")
+
+        assert str(recorder.requests[0].url) == "http://10.0.0.10:8083/opds"
+        assert resolver.asked == [("calibre.test", 8083)]
+
+    async def test_the_name_travels_as_the_host_header_and_as_the_tls_server_name(self):
+        """The pin must not become a different request.
+
+        The `Host` header is what a virtual host answers on, and `sni_hostname`
+        is what the certificate is checked against: pinning without either one
+        would reach the right address as the wrong client, and TLS would then be
+        validated against a literal address that no catalogue's certificate
+        names.
+        """
+        recorder = _Recorder()
+
+        async with self._client(
+            fetch.PUBLIC_ADDRESSES, _Answers(("93.184.216.34",)), recorder
+        ) as client:
+            await client.get("https://catalogue.test/sru")
+
+        pinned = recorder.requests[0]
+        assert pinned.headers["host"] == "catalogue.test"
+        assert pinned.extensions["sni_hostname"] == "catalogue.test"
+
+    async def test_a_name_that_resolves_into_a_refused_range_never_reaches_a_socket(
+        self,
+    ):
+        """Refused before the connection, not after it.
+
+        A policy applied after connecting is a policy that has already made the
+        request it was refusing.
+        """
+        recorder = _Recorder()
+
+        async with self._client(
+            fetch.HOUSEHOLD_ADDRESSES, _Answers(("169.254.169.254",)), recorder
+        ) as client:
+            with pytest.raises(fetch.AddressRefused):
+                await client.get("http://metadata.test/latest/meta-data/")
+
+        assert recorder.requests == []
+
+    async def test_a_literal_the_policy_refuses_is_refused_without_a_lookup(self):
+        recorder = _Recorder()
+        resolver = _Answers(("10.0.0.10",))
+
+        async with self._client(
+            fetch.HOUSEHOLD_ADDRESSES, resolver, recorder
+        ) as client:
+            with pytest.raises(fetch.AddressRefused):
+                await client.get("http://169.254.169.254/latest/meta-data/")
+
+        assert resolver.asked == [], "a literal is nobody's name to resolve"
+        assert recorder.requests == []
+
+    async def test_a_second_answer_is_classified_again_rather_than_trusted(self):
+        """The rebinding case, and the one a check without a pin fails.
+
+        The name answers with a household address, then with the metadata
+        endpoint. The first request is pinned to the address that was checked,
+        and the second is refused: no answer is carried over from a previous
+        lookup, and no lookup happens between a check and a connection.
+        """
+        recorder = _Recorder()
+        resolver = _Answers(("10.0.1.9",), ("169.254.169.254",))
+
+        async with self._client(
+            fetch.HOUSEHOLD_ADDRESSES, resolver, recorder
+        ) as client:
+            await client.get("http://calibre.test:8083/opds")
+            with pytest.raises(fetch.AddressRefused):
+                await client.get("http://calibre.test:8083/opds?page=2")
+
+        assert [str(r.url.host) for r in recorder.requests] == ["10.0.1.9"]
+
+    async def test_a_name_answering_with_both_is_pinned_to_the_admitted_address(self):
+        """Stated at the code as something this does not refuse.
+
+        mDNS routinely gives a household machine a link local address beside its
+        real one, so refusing the whole answer would refuse the feature. The
+        refused address is simply never connected to.
+        """
+        recorder = _Recorder()
+        resolver = _Answers(("fe80::1", "10.0.1.9"))
+
+        async with self._client(
+            fetch.HOUSEHOLD_ADDRESSES, resolver, recorder
+        ) as client:
+            await client.get("http://calibre.test:8083/opds")
+
+        assert recorder.requests[0].url.host == "10.0.1.9"
+
+    async def test_the_callers_request_is_not_rewritten_so_the_hop_guard_sees_the_name(
+        self,
+    ):
+        """`_same_host_hop` compares a `Location` against `response.request.url`.
+
+        Rewriting the caller's own request in place would make that comparison
+        read the pinned literal, so a catalogue redirecting to its own name
+        would be refused as a redirect off host. The pin belongs to the request
+        httpcore is handed and to nothing above it.
+        """
+        recorder = _Recorder()
+
+        async with self._client(
+            fetch.HOUSEHOLD_ADDRESSES, _Answers(("10.0.1.9",)), recorder
+        ) as client:
+            response = await client.get("http://calibre.test:8083/opds")
+
+        assert response.request.url.host == "calibre.test"
+        assert recorder.requests[0].url.host == "10.0.1.9"
+
+    async def test_two_names_at_one_address_do_not_share_a_pool(self):
+        """A pooled TLS connection does no second handshake.
+
+        httpcore keys its pool on the request's origin, which is the pinned
+        literal, so one pool for two names would carry the second name's request
+        on a connection whose certificate was checked for the first. Keyed by
+        name, there is no such connection to reuse.
+        """
+        made: list[_Recorder] = []
+
+        def factory() -> _Recorder:
+            made.append(_Recorder())
+            return made[-1]
+
+        transport = fetch.PinnedTransport(
+            fetch.PUBLIC_ADDRESSES,
+            resolver=_Answers(("93.184.216.34",)),
+            inner=factory,
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            await client.get("https://one.test/a")
+            await client.get("https://two.test/a")
+            await client.get("https://one.test/b")
+
+        assert len(made) == 2, "one pool per name, and the third call reuses the first"
+        assert [len(recorder.requests) for recorder in made] == [2, 1]
+
+    async def test_closing_the_client_closes_every_pool_it_opened(self):
+        made: list[_Recorder] = []
+
+        def factory() -> _Recorder:
+            made.append(_Recorder())
+            return made[-1]
+
+        transport = fetch.PinnedTransport(
+            fetch.PUBLIC_ADDRESSES,
+            resolver=_Answers(("93.184.216.34",)),
+            inner=factory,
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            await client.get("https://one.test/a")
+            await client.get("https://two.test/a")
+
+        assert [recorder.closes for recorder in made] == [1, 1]
+
+    def test_a_proxy_in_the_environment_cannot_take_the_request_out_of_this_door(
+        self, monkeypatch
+    ):
+        """`trust_env=False`, and it is the difference between a pin and a hope.
+
+        With it on, httpx mounts a proxy transport **in front of** the one it
+        was given, so every request would leave through the proxy with the name
+        unresolved and none of this would run.
+
+        **The control is the other client**, which shows the environment really
+        is set and really does move a request: without that half this assertion
+        passes on a machine with no proxy variable, which is every machine that
+        runs it.
+        """
+        monkeypatch.setenv("HTTP_PROXY", "http://proxy.test:3128")
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.test:3128")
+        url = httpx.URL("http://catalogue.test/sru")
+
+        pinned = fetch.pinned_client(fetch.PUBLIC_ADDRESSES)
+        trusting = fetch.catalogue_client()
+        try:
+            assert isinstance(
+                pinned._transport_for_url(url), fetch.PinnedTransport
+            )
+            assert not isinstance(
+                trusting._transport_for_url(url), fetch.PinnedTransport
+            ), "the control: the environment moves a request that trusts it"
+        finally:
+            # Closing them would need an event loop; neither has opened a socket.
+            del pinned, trusting
+
+    async def test_a_resolver_answering_nothing_is_a_refusal_and_not_a_crash(self):
+        recorder = _Recorder()
+
+        async with self._client(
+            fetch.HOUSEHOLD_ADDRESSES, _Answers(()), recorder
+        ) as client:
+            with pytest.raises(fetch.AddressRefused):
+                await client.get("http://calibre.test:8083/opds")
+
+        assert recorder.requests == []
+
+    async def test_a_name_that_does_not_resolve_stays_inside_the_httpx_hierarchy(
+        self,
+    ):
+        """`socket.gaierror` is an `OSError` and not an `httpx.HTTPError`.
+
+        Resolution used to happen inside `httpx.AsyncHTTPTransport`, under
+        `map_httpcore_exceptions`, so a name that does not resolve arrived as a
+        `ConnectError` and every handler in this tree caught it. Doing it in the
+        transport moved it outside all of them: without this arm a typo in a
+        settings field is a 500. Same shape as the `UnicodeError` in
+        `_walk_hops`.
+        """
+
+        async def refuses(host: str, port: int) -> tuple[str, ...]:
+            raise socket.gaierror(-2, "Name or service not known")
+
+        recorder = _Recorder()
+        async with self._client(
+            fetch.HOUSEHOLD_ADDRESSES, refuses, recorder
+        ) as client:
+            with pytest.raises(httpx.HTTPError) as failure:
+                await client.get("http://nowhere.test/opds")
+
+        assert not isinstance(failure.value, fetch.AddressRefused), (
+            "a name nobody answered for is not an address this door refused"
+        )
+        assert recorder.requests == []
+
+    async def test_the_next_admitted_address_is_tried_when_one_will_not_connect(
+        self,
+    ):
+        """Pinning one address would have removed anyio's walk over the answer.
+
+        A dual stack household name whose first address is an unroutable ULA
+        would then fail as a server that did not answer. Only a connect failure
+        moves on, because nothing has been sent at that point.
+        """
+
+        class _Unreachable(_Recorder):
+            async def handle_async_request(self, request):
+                self.requests.append(request)
+                if request.url.host == "fd00::5":
+                    raise httpx.ConnectError("no route to host")
+                return httpx.Response(200, text="ok")
+
+        recorder = _Unreachable()
+        async with self._client(
+            fetch.HOUSEHOLD_ADDRESSES, _Answers(("fd00::5", "10.0.1.9")), recorder
+        ) as client:
+            response = await client.get("http://calibre.test:8083/opds")
+
+        assert response.status_code == 200
+        assert [r.url.host for r in recorder.requests] == ["fd00::5", "10.0.1.9"]
+
+    async def test_a_refused_address_is_not_tried_even_when_the_admitted_one_fails(
+        self,
+    ):
+        """The failover walks the admitted addresses and no others.
+
+        The control for the test above: an answer of one refused address and one
+        unreachable admitted address ends in the connect failure, not in a
+        request to the refused one.
+        """
+
+        class _Unreachable(_Recorder):
+            async def handle_async_request(self, request):
+                self.requests.append(request)
+                raise httpx.ConnectError("no route to host")
+
+        recorder = _Unreachable()
+        async with self._client(
+            fetch.HOUSEHOLD_ADDRESSES,
+            _Answers(("169.254.169.254", "10.0.1.9")),
+            recorder,
+        ) as client:
+            with pytest.raises(httpx.ConnectError):
+                await client.get("http://calibre.test:8083/opds")
+
+        assert [r.url.host for r in recorder.requests] == ["10.0.1.9"]
+
+    async def test_a_refusal_is_an_httpx_error_so_every_caller_already_handles_it(
+        self,
+    ):
+        """`FetchRefused`'s reason, one door along: thirteen `try` blocks catch
+        `httpx.HTTPError` and none of them was changed for this."""
+        assert issubclass(fetch.AddressRefused, httpx.HTTPError)
+        assert issubclass(fetch.AddressRefused, fetch.FetchRefused)
+
+    async def test_a_request_with_a_body_is_tried_at_one_address_only(self):
+        """A stream is read once, so there is no second attempt to make.
+
+        Retrying one would send an empty body to the second address and look
+        like a request the caller made. This door only makes GETs, which is why
+        the walk above is safe and why this arm exists at all.
+        """
+
+        class _Unreachable(_Recorder):
+            async def handle_async_request(self, request):
+                self.requests.append(request)
+                raise httpx.ConnectError("no route to host")
+
+        recorder = _Unreachable()
+        async with self._client(
+            fetch.HOUSEHOLD_ADDRESSES, _Answers(("fd00::5", "10.0.1.9")), recorder
+        ) as client:
+            with pytest.raises(httpx.ConnectError):
+                await client.post("http://calibre.test:8083/opds", content=b"x")
+
+        assert [r.url.host for r in recorder.requests] == ["fd00::5"]
+
+    async def test_only_a_connect_failure_moves_on_to_the_next_address(self):
+        """A read timeout is not a reason to try a second address.
+
+        **This test exists because a mutation showed the sentence was stated and
+        not tested.** Widening the `except` in `handle_async_request` to
+        `httpx.HTTPError` was caught by nothing: every other failover test
+        raises a `ConnectError`. What that admits is a request replayed against
+        an address the first one never reached, after bytes have already gone
+        out, and this door puts a household's `Authorization` header on them.
+        """
+
+        class _Slow(_Recorder):
+            async def handle_async_request(self, request):
+                self.requests.append(request)
+                raise httpx.ReadTimeout("the server stopped sending")
+
+        recorder = _Slow()
+        async with self._client(
+            fetch.HOUSEHOLD_ADDRESSES, _Answers(("fd00::5", "10.0.1.9")), recorder
+        ) as client:
+            with pytest.raises(httpx.ReadTimeout):
+                await client.get("http://calibre.test:8083/opds")
+
+        assert [r.url.host for r in recorder.requests] == ["fd00::5"]

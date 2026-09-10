@@ -69,6 +69,7 @@ import type {
   HTTPValidationError,
   ListAuthorSuggestionsParams,
   ListBooksParams,
+  ListMissingDigitalReferencesParams,
   ListQuotesParams,
   ListTrashParams,
   LocationOut,
@@ -78,6 +79,7 @@ import type {
   NoteOut,
   OwnershipUpdate,
   PageBookOut,
+  PageMissingDigitalReferenceOut,
   PageQuoteWithBookOut,
   PrivacyUpdate,
   ProgressCreate,
@@ -2762,6 +2764,248 @@ export const useRenameCustomField = <
 > => {
   return useMutation(getRenameCustomFieldMutationOptions(options), queryClient);
 };
+export const getListMissingDigitalReferencesUrl = (
+  params?: ListMissingDigitalReferencesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/books/digital-references/missing?${stringifiedParams}`
+    : `/api/books/digital-references/missing`;
+};
+
+/**
+ * Every file the caller can see that a client looked for and did not find.
+ *
+ * The reader for `missing_since`. Without it the flag is answerable only one
+ * book at a time, so finding every flagged file is one request per book across
+ * the whole catalogue, and almost every book holds none.
+ *
+ * **Scoped by the Shelf and by nothing else, which is the table's own rule
+ * rather than a choice made here**: a reference is an ordinary field on a Book
+ * and carries no Member of its own, so its visibility is the Book's entirely.
+ * `models.DigitalReference` says that at the column, and it is why there is no
+ * `added_by_user_id` to scope by.
+ *
+ * **A narrower scope was written first and removed, and the reason is worth
+ * keeping.** The arm was `Book.added_by_user_id == current_user.id`, meant to
+ * give a member their own references and nobody else's. It cannot: any member
+ * who may read a Book may report a file on it, so the row's reporter is not
+ * the Book's adder and is recorded nowhere. That arm hid a member's own misses
+ * on Books somebody else added, which is the ordinary household case and the
+ * feature's main one, while still showing another member's paths on Books the
+ * caller added. A filter whose key is not the thing its reason names is not a
+ * narrowing, and "my own references" needs a reporter column on the table,
+ * which is a migration and not this route.
+ *
+ * **So say plainly what a row discloses**, since nothing here prevents it: a
+ * reference is `root_label` plus `relative_path`, an unverified path on
+ * somebody's machine, and the flag adds that a client could not reach it. This
+ * listing hands the caller every such row on the shelf they can see in one
+ * request, where reading them per book is one request each. It is the same
+ * disclosure at a different price, because a Book the caller cannot see is not
+ * on this shelf and its references are unreachable here as they are anywhere
+ * else.
+ *
+ * Rows are references, not books, and that is the decision this route makes
+ * rather than discovers. The flag is per location: a book at three paths with
+ * one gone is not a missing book, and a listing of books cannot say which of
+ * the three to go and look at. "Which of my books have gone missing" is read
+ * off the book column here; the reverse needs a request per book, which is the
+ * cost this route exists to remove.
+ *
+ * Newest miss first. A miss reported minutes ago is the one whose cause a
+ * member can still name (a drive unplugged, a folder moved this morning), and
+ * a client sweeping a directory posts its misses in one burst, so the burst
+ * arrives as a block rather than scattered down the tail. **Tied on the id**,
+ * because that burst shares one `CURRENT_TIMESTAMP` value: without the
+ * tiebreak two pages of one burst can repeat a row and drop another.
+ *
+ * Trashed books are absent, and that falls out of `Shelf.seen_by` rather than
+ * being a clause here.
+ *
+ * The total counts references, like the rows: a member with one book at three
+ * missing locations has three. It is scoped for the reason the quotes listing
+ * scopes its own, since an unscoped total announces how many rows are hidden.
+ * @summary List Missing Digital References
+ */
+export const listMissingDigitalReferences = async (
+  params?: ListMissingDigitalReferencesParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<PageMissingDigitalReferenceOut> => {
+  return customFetch<PageMissingDigitalReferenceOut>(
+    getListMissingDigitalReferencesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListMissingDigitalReferencesQueryKey = (
+  params?: ListMissingDigitalReferencesParams,
+) => {
+  return [
+    `/api/books/digital-references/missing`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListMissingDigitalReferencesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListMissingDigitalReferencesParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listMissingDigitalReferences>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListMissingDigitalReferencesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listMissingDigitalReferences>>
+  > = ({ signal }) =>
+    listMissingDigitalReferences(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listMissingDigitalReferences>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListMissingDigitalReferencesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listMissingDigitalReferences>>
+>;
+export type ListMissingDigitalReferencesQueryError = HTTPValidationError;
+
+export function useListMissingDigitalReferences<
+  TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
+  TError = HTTPValidationError,
+>(
+  params: undefined | ListMissingDigitalReferencesParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listMissingDigitalReferences>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listMissingDigitalReferences>>,
+          TError,
+          Awaited<ReturnType<typeof listMissingDigitalReferences>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListMissingDigitalReferences<
+  TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListMissingDigitalReferencesParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listMissingDigitalReferences>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listMissingDigitalReferences>>,
+          TError,
+          Awaited<ReturnType<typeof listMissingDigitalReferences>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListMissingDigitalReferences<
+  TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListMissingDigitalReferencesParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listMissingDigitalReferences>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Missing Digital References
+ */
+
+export function useListMissingDigitalReferences<
+  TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListMissingDigitalReferencesParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listMissingDigitalReferences>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListMissingDigitalReferencesQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getListDuplicatesUrl = () => {
   return `/api/books/duplicates`;
 };

@@ -178,19 +178,23 @@ const SOURCES = import.meta.glob("../../src/**/*.{ts,tsx}", {
 
 const SEAM = "lib/fileReaders.ts";
 const ENTITY_GUARD = "lib/xmlEntities.ts";
+const YEAR_RULES = "lib/year.ts";
 
 /**
  * The family's shared vocabulary, and which module declares each part of it.
  *
- * **Two homes rather than one, because the family shares two different kinds of
- * thing.** The seam says what a reader is and what it answers with, which every
- * reader produces; the entity refusal is a rule about handing a member's
- * document to a parser, which four readers apply and which nothing in the
- * contract consults. A `FileReading` is the same shape whether or not the bytes
- * went through a parser at all, so the second was moved out.
+ * **Three homes rather than one, because the family shares three different
+ * kinds of thing.** The seam says what a reader is and what it answers with,
+ * which every reader produces; the entity refusal is a rule about handing a
+ * member's document to a parser, which four readers apply and which nothing in
+ * the contract consults; the year rules say what a number has to be to be a
+ * publication year, which eight readers reach for and which is neither the seam
+ * nor a bound on a request body. A `FileReading` is the same shape whether or
+ * not the bytes went through a parser at all, so the second was moved out, and
+ * the third for the same reason one module over.
  *
- * **The rules below are the same for both and are written once**, which is what
- * makes a third home a row here rather than a fourth arm: whatever a home
+ * **The rules below are the same for all three and are written once**, which is
+ * what makes a fourth home a row here rather than a fourth arm: whatever a home
  * declares, it declares under no second name, and every module using one of
  * those names takes it from that home.
  */
@@ -208,6 +212,17 @@ const SHARED_HOMES = [
     path: ENTITY_GUARD,
     declarations: ["export function declaresEntities("],
     names: ["declaresEntities"],
+  },
+  {
+    // What a year is, which four readers had spelled as their own function and
+    // four more reach for the window of. A row rather than a fourth arm, which
+    // is what this table is for.
+    path: YEAR_RULES,
+    declarations: [
+      "export function plausibleYear(",
+      "export function leadingYear(",
+    ],
+    names: ["plausibleYear", "leadingYear"],
   },
 ] as const;
 

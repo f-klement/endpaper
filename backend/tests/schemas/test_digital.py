@@ -14,7 +14,11 @@ from models import (
     DIGITAL_REFERENCE_PATH_MAX,
     DigitalReference,
 )
-from schemas.digital import DigitalReferenceIn, DigitalReferenceOut
+from schemas.digital import (
+    DigitalReferenceIn,
+    DigitalReferenceOut,
+    MissingDigitalReferenceOut,
+)
 
 
 def reference(**fields):
@@ -161,3 +165,53 @@ class TestWhatAClientMayNotSay:
         assert set(DigitalReferenceIn.model_fields) <= set(
             DigitalReferenceOut.model_fields
         )
+
+
+class TestTheRowOfTheShelfWideListing:
+    """`MissingDigitalReferenceOut`: the field it narrows, and the ones it adds.
+
+    `missing_since` is non-null here because the route's WHERE clause is what
+    selects the row, and putting that in the type is what stops every client
+    branching on a null the query has already excluded.
+    """
+
+    def _row(self, **fields):
+        return MissingDigitalReferenceOut(
+            **(
+                {
+                    "id": 1,
+                    "book_id": 2,
+                    "root_label": "/books",
+                    "relative_path": "a/b.epub",
+                    "root_confirmed": True,
+                    "size_bytes": None,
+                    "file_modified_at": None,
+                    "created_at": "2026-01-01T00:00:00",
+                    "confirmed_at": "2026-01-01T00:00:00",
+                    "missing_since": "2026-02-01T00:00:00",
+                    "book_title": "A Book",
+                }
+                | fields
+            )
+        )
+
+    def test_a_row_that_is_not_flagged_is_refused(self):
+        """Every row on that page is there *because* the column is set, so a
+        null is a query that has stopped filtering rather than a row to render.
+        Loud beats a client showing "missing since never"."""
+        with pytest.raises(ValidationError):
+            self._row(missing_since=None)
+
+    def test_a_row_names_the_book_it_is_on(self):
+        """`book_id` is on the base, where `NoteOut` and `QuoteOut` both put it:
+        one shape for one row, and the cross shelf listing is where it earns its
+        place, since nothing there can be acted on without it."""
+        assert "book_id" in DigitalReferenceOut.model_fields
+        assert self._row().book_id == 2
+
+    def test_a_row_carries_the_book_scalars_a_listing_renders(self):
+        """Three scalars rather than a nested `BookOut`, which is the N+1 this
+        listing exists on the far side of."""
+        row = self._row(book_author=None, book_cover_url=None)
+        assert row.book_title == "A Book"
+        assert row.book_author is None

@@ -1384,6 +1384,7 @@ route here and nothing the server stores has been read, opened or checked by it.
 
 | Method | Path | Access | Notes |
 |---|---|---|---|
+| GET | `/api/books/digital-references/missing` | signed in | Every flagged reference on the shelf the caller can see, newest miss first, paginated |
 | GET | `/api/books/{id}/digital-references` | read | In insertion order |
 | POST | `/api/books/{id}/digital-references` | write | 200; a report, not a create |
 | POST | `/api/books/{id}/digital-references/{reference_id}/missing` | write | 200; flags, never deletes |
@@ -1419,9 +1420,27 @@ which sets `missing_since` once and does not move it on a repeat. **A missing re
 deletes the row**: a phone that cannot reach the NAS reports every file on the NAS missing
 and is telling the truth about what it can see, so acting on it would let one browser with
 a drive unplugged erase where the library is. Only the DELETE removes a reference, and only
-a member issues that. **There is no shelf-wide listing of flagged references**: they are read
-per book, so finding all of them today is one request per book. That is a limit of what is
-built rather than of the design.
+a member issues that.
+
+**`GET /api/books/digital-references/missing` is the reader for the flag**, and the only
+route in this family that is not per book. Declared before `/{id}`, like `/quotes` and
+`/trash`, and paginated: it is a book query, so `visible_to()` filters the rows and the
+count. The rows are references rather than books, because the flag is per location and a
+book at three paths with one gone is not a missing book. Newest miss first, tied on the id
+so a burst of misses sharing one clock value cannot repeat a row across a page boundary.
+Each row carries `book_id`, which is what makes it actionable, plus the book's title,
+author and cover.
+
+**It is scoped by the shelf and by nothing else**, which is the same rule as the per book
+listing above rather than a looser one: a reference has no member of its own, so its
+visibility is its book's entirely, and a book the caller cannot see is unreachable here as
+it is anywhere else. **What it changes is the price, so say what it discloses**: a
+reference is an unverified path on somebody's machine, and this route hands over every
+flagged one on the shelf in a single request where reading them per book is one request
+each. **There is deliberately no "my own references" view.** It would need a reporter
+column the table does not have: whoever may read a book may report a file on it, so the
+row's reporter is not the book's adder, and scoping by the adder would hide a member's own
+missing files on books somebody else added, which is the ordinary household case.
 
 Bounds, all of them 422 rather than 500: `root_label` and `relative_path` are each 1 to
 4,094 characters **and are bounded together at 4,094**, which is this host's `PATH_MAX` less

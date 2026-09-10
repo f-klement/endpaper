@@ -262,8 +262,29 @@ describe("RapidQueue", () => {
   });
 
   it("reports the outcome, failures included", () => {
-    renderQueue({ result: { added: 12, failed: 2 } });
+    renderQueue({ result: { added: 12, failed: 2, unreferenced: 0 } });
     expect(screen.getByRole("status")).toHaveTextContent("12 added");
+  });
+
+  it("says how many books were added without where their file is", () => {
+    // **The count and the sentence are two things and only one was covered.**
+    // The hook's own arms drive the number; nothing rendered it, so the whole
+    // block could be deleted with every test green.
+    renderQueue({ result: { added: 12, failed: 0, unreferenced: 2 } });
+
+    expect(
+      screen.getByText(
+        "2 of those were added without where their file is. Picking the folder again records it.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about locations for a batch that offered none", () => {
+    // Every batch of barcodes, and every pick of single files. A sentence that
+    // appeared at zero would report an absence as a loss.
+    renderQueue({ result: { added: 12, failed: 0, unreferenced: 0 } });
+
+    expect(screen.queryByText(/without where their file is/)).toBeNull();
   });
 
   it("names the books that could not be added, and why", () => {
@@ -282,7 +303,7 @@ describe("RapidQueue", () => {
           reason: "Book with this ISBN already in catalog",
         }),
       ],
-      result: { added: 12, failed: 1 },
+      result: { added: 12, failed: 1, unreferenced: 0 },
     });
 
     expect(screen.getByText(/Dune/)).toBeInTheDocument();
@@ -299,7 +320,7 @@ describe("RapidQueue", () => {
           reason: "Nope",
         }),
       ],
-      result: { added: 1, failed: 1 },
+      result: { added: 1, failed: 1, unreferenced: 0 },
     });
 
     expect(screen.getByRole("status")).toBeInTheDocument();
@@ -412,12 +433,12 @@ describe("RapidQueue and a book taken from its file name", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: "Use the record for The Dispossessed",
+        name: "Use the record The Dispossessed, Ursula K. Le Guin (1974) for The Dispossessed.pdf",
       }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: "Keep this name and stop asking",
+        name: "Keep the name The Dispossessed.pdf and stop asking",
       }),
     ).toBeInTheDocument();
   });
@@ -430,7 +451,7 @@ describe("RapidQueue and a book taken from its file name", () => {
 
     await user.click(
       screen.getByRole("button", {
-        name: "Use the record for The Dispossessed",
+        name: "Use the record The Dispossessed, Ursula K. Le Guin (1974) for The Dispossessed.pdf",
       }),
     );
 
@@ -445,11 +466,102 @@ describe("RapidQueue and a book taken from its file name", () => {
 
     await user.click(
       screen.getByRole("button", {
-        name: "Keep this name and stop asking",
+        name: "Keep the name The Dispossessed.pdf and stop asking",
       }),
     );
 
     expect(onKeepName).toHaveBeenCalledWith(entry.key);
+  });
+
+  it("tells two rows deciding at once apart by accessible name", async () => {
+    // **Two rows and not one**, because a name is distinguishing or it is not,
+    // and a queue of one cannot show the difference: the visible word is the
+    // same on every row, so a single row passes whatever the name says. A
+    // member navigating by button list met thirty called "Keep this name and
+    // stop asking" and could not tell which book each one answered.
+    const user = userEvent.setup();
+    const onKeepName = vi.fn();
+    const second: ScannedEntry = {
+      ...derived,
+      key: "file:The Left Hand of Darkness.epub:10:0",
+      label: "The Left Hand of Darkness.epub",
+      state: "choosing",
+      matches: [MATCH],
+    };
+    renderQueue({
+      entries: [{ ...derived, state: "choosing", matches: [MATCH] }, second],
+      onKeepName,
+    });
+
+    // `getByRole` throws where a name matches more than one element, so each of
+    // these is itself the assertion that the pair is distinguishable.
+    await user.click(
+      screen.getByRole("button", {
+        name: "Keep the name The Left Hand of Darkness.epub and stop asking",
+      }),
+    );
+
+    expect(onKeepName).toHaveBeenCalledWith(second.key);
+    expect(
+      screen.getByRole("button", {
+        name: "Keep the name The Dispossessed.pdf and stop asking",
+      }),
+    ).toBeInTheDocument();
+
+    // **The same hole one control over, and the same instrument.** Both rows
+    // were offered the same record, which is what a folder holding one book in
+    // two formats produces, so naming the record alone gives two buttons one
+    // name and `getByRole` throws on the pair.
+    expect(
+      screen.getByRole("button", {
+        name: "Use the record The Dispossessed, Ursula K. Le Guin (1974) for The Dispossessed.pdf",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Use the record The Dispossessed, Ursula K. Le Guin (1974) for The Left Hand of Darkness.epub",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("names a record that carries no title by what it does carry", () => {
+    // `BookMatch.title` is nullable, and composing the line out of three
+    // fragments that each assume the one before printed a leading comma, into
+    // the accessible name as well as onto the screen.
+    const untitled = { ...MATCH, title: null, year: 1965 };
+    renderQueue({
+      entries: [{ ...derived, state: "choosing", matches: [untitled] }],
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: "Use the record Ursula K. Le Guin (1965) for The Dispossessed.pdf",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("tells two records offered for one file apart by accessible name", () => {
+    // **The collision inside a row, which naming the row does not answer.** A
+    // fan out over several catalogues answers one ISBN with several records
+    // that agree about the title and differ past it, so the title alone gives
+    // one name to every button in the row. The visible line already carried the
+    // author and the year; the accessible name did not.
+    const other = { ...MATCH, author: "U. K. Le Guin", year: 1975 };
+    renderQueue({
+      entries: [{ ...derived, state: "choosing", matches: [MATCH, other] }],
+    });
+
+    // Two lookups, so `getByRole` throwing on either is the assertion.
+    expect(
+      screen.getByRole("button", {
+        name: "Use the record The Dispossessed, Ursula K. Le Guin (1974) for The Dispossessed.pdf",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Use the record The Dispossessed, U. K. Le Guin (1975) for The Dispossessed.pdf",
+      }),
+    ).toBeInTheDocument();
   });
 
   it("says why a book stayed under its file name, once and not per row", () => {

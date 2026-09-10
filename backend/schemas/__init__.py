@@ -77,6 +77,7 @@ from schemas.digital import (
     MAX_DIGITAL_REFERENCES_PER_BOOK,
     DigitalReferenceIn,
     DigitalReferenceOut,
+    MissingDigitalReferenceOut,
 )
 from schemas.imports import (
     ImportPreviewOut,
@@ -192,6 +193,7 @@ __all__ = [
     "ClassificationIn",
     "DigitalReferenceIn",
     "DigitalReferenceOut",
+    "MissingDigitalReferenceOut",
     "ClassificationOut",
     "DivisionFacetOut",
     "HeadingFacetOut",

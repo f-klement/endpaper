@@ -1065,13 +1065,15 @@ export const de: Messages = {
   "rapid.adding": "Wird hinzugefügt...",
   "rapid.discard": "Verwerfen",
   "rapid.added": "{count} hinzugefügt. {failed} stehen unten, mit dem Grund.",
+  "rapid.unreferenced":
+    "Bei {count} davon wurde nicht gespeichert, wo die Datei liegt. Den Ordner noch einmal auswählen speichert es.",
   "rapid.removeFromQueue": "{label} aus der Liste entfernen",
   "rapid.nothingScanned": "Noch nichts gescannt",
 
   // ── Bücher aus ihren Dateien hinzufügen ─────────────────────────────────
   "file.title": "Aus einer Datei hinzufügen",
   "file.explain":
-    "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht. Die Dateien werden hier im Browser gelesen und niemals hochgeladen.",
+    "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht. Die Dateien werden hier im Browser gelesen und niemals hochgeladen. Bei einem Ordner wird für ein Buch aus einer einzigen Datei auch deren Name samt der Ordner darüber beim Buch gespeichert, damit die Datei wiederzufinden ist, und alle, die das Buch sehen, sehen auch das.",
   "file.pickLabel": "Buchdateien",
   "file.readingFiles": "Die ausgewählten Dateien werden gelesen...",
   "file.notAnEpub": "Keine EPUB-Datei.",
@@ -1121,8 +1123,9 @@ export const de: Messages = {
   "fallback.lookUpAgain":
     "Die Kataloge erneut zu diesen Dateinamen fragen ({count})",
   "fallback.use": "Übernehmen",
-  "fallback.useFor": "Den Eintrag für {title} übernehmen",
+  "fallback.useFor": "Den Eintrag {record} für {label} übernehmen",
   "fallback.keep": "Diesen Dateinamen behalten, nicht mehr fragen",
+  "fallback.keepFor": "Den Dateinamen {label} behalten, nicht mehr fragen",
   "fallback.pickFolderLabel": "Ein ganzer Ordner mit Büchern",
 
   // ── Hörbücher, bei denen ein Buch aus vielen Dateien besteht ────────────

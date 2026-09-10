@@ -162,7 +162,7 @@ describe("what Calibre writes where nobody said", () => {
   });
 
   it("does not read a pubdate no book could have been published in", async () => {
-    // The window is `bookBounds.plausibleYear`'s, and this is the arm that says
+    // The window is `year.plausibleYear`'s, and this is the arm that says
     // which values it refuses here. The caller scan in
     // `tests/lib/bookBounds.test.ts` asserts that this module names the
     // function and that it calls it, and it does both by matching text: it

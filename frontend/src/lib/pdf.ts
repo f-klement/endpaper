@@ -146,7 +146,7 @@
  * a read takes.
  */
 
-import { plausibleYear } from "./bookBounds";
+import { plausibleYear } from "./year";
 import { parseIsbn } from "./isbn";
 import type { FileIdentifier, FileMetadata } from "./fileReaders";
 
@@ -1661,7 +1661,7 @@ function readXmp(packet: string): XmpRecord | null {
  * publication date. `XmpRecord` says why `/CreationDate` is not a second one.
  *
  * **Plausible rather than storable**, and the window is
- * `bookBounds.plausibleYear`'s rather than this reader's.
+ * `year.plausibleYear`'s rather than this reader's.
  */
 function readYear(candidate: string | null): number | null {
   const match = candidate === null ? null : /(\d{4})/.exec(candidate);

@@ -17,6 +17,14 @@ a fetch policy. What the two do share is the *shape* of the read loop, and both
 now have it: refuse a hop that leaves the host, count raw bytes, stop at a
 deadline. See `docs/security.md`.
 
+**That argument is about the allowlist and says nothing about the address policy
+this module also holds**, which touches neither `COVER_HOSTS` nor the CSP.
+Covers is unpinned because it has a read loop of its own rather than because
+pinning would cost anything there, so a listed host whose resolver answers
+inside this cluster is still fetched. It is the one door whose URL a **member**
+supplies, which makes it the next one to wire rather than the one that needed it
+least.
+
 **"There is no allowlist here because the host is a module constant" is true of
 `metadata.py` and `google_books.py` and is no longer true of this module's
 callers as a set.** `opds.py` is the third one, and its address is typed by an
@@ -24,18 +32,28 @@ admin, which is #131's concession 1 arriving. It is admitted here rather than
 given a fourth read loop because a fourth copy of these four bounds is how one
 of them comes to be missing, and because it brings its own admission rule and
 its own origin pin and applies both **before** every call into this module: no
-byte of any response it reads may move the address of the next request. What
-this module contributes to that is the hop guard, which refuses a redirect off
-the host whoever the caller is. Read `opds.py`'s docstring for the whole policy,
-including the one control of #131's that deliberately does not apply there.
+byte of any response it reads may move the address of the next request.
+
+What this module contributes to that is two things. The hop guard, which refuses
+a redirect off the host whoever the caller is. And **the address policy**:
+`pinned_client` resolves the name once, classifies every address it answers
+with, and connects to the literal that passed, so the address a policy refused
+is one no lookup afterwards can restore. That is resolve-then-pin, and it is
+what makes an address range refusal worth writing down: on the URL text alone it
+would be a bound that a name resolving into the range walks straight past.
+**Which classes a door admits is the door's own decision** and the two policies
+here differ: read `opds.py`'s docstring for what a household server may be at.
 """
 
 import asyncio
+import ipaddress
 import json as jsonlib
 import logging
+import socket
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Final, Protocol
 from urllib.parse import urljoin
 
@@ -234,6 +252,254 @@ class UnrequestedEncoding(FetchRefused):
     """
 
 
+class AddressRefused(FetchRefused):
+    """The address this name resolved to is not one the caller's policy admits.
+
+    **Not a statement that the host is hostile.** It says the address this
+    server was about to open a connection to is in a range the door refuses,
+    which is as much as any address policy ever knows.
+    """
+
+
+class AddressClass(Enum):
+    """What kind of address this is, as an outbound policy has to decide it.
+
+    **Seven values, and the seventh is a fallback rather than a range.**
+    `RESERVED` is everything the other six did not name: 6to4, Teredo, the
+    documentation and benchmarking ranges all land there, and a policy admits
+    classes it names rather than whatever was left over. Enumerating what is
+    **admitted** is the direction `opds.HOLDING_RELS` gives the reason for.
+
+    **But the fallthrough is not the backstop it reads as, and the difference is
+    a measurement.** `classify` reaches it through `is_global`, which on IPv6 is
+    defined as `not is_private`, so a range `ipaddress` has not been taught is
+    `PUBLIC` here and not `RESERVED`: `fec0::a9fe:a9fe` was admitted by both
+    policies until `_NOT_GLOBALLY_REACHABLE` named it. What actually keeps this
+    current is the interpreter, and that tuple is the seam for a range it has
+    not caught up with.
+    """
+
+    UNSPECIFIED = "unspecified"
+    LOOPBACK = "loopback"
+    LINK_LOCAL = "link-local"
+    MULTICAST = "multicast"
+    PRIVATE = "private"
+    RESERVED = "reserved"
+    PUBLIC = "public"
+
+
+#: The ranges `AddressClass.PRIVATE` means, written out rather than asked for.
+#:
+#: **`ipaddress.is_private` is not this question and admits things a policy
+#: naming private space must not.** Measured on Python 3.14: it answers True for
+#: `2001:db8::1`, for `198.18.0.1`, for `203.0.113.5`, for the whole of 6to4 and
+#: for Teredo, so a household policy admitting "private" through that property
+#: would admit `2002:a9fe:a9fe::1`, whose embedded address is the cloud metadata
+#: endpoint. These five are the ranges a machine on somebody's own network
+#: actually has.
+#:
+#: 100.64/10 is here because a household behind a carrier grade NAT has one, and
+#: refusing it would refuse that household's own server.
+#:
+#: **RFC 1918's third block is spelled as an integer, and that is not
+#: obfuscation.** The publish pipeline fails on that block's dotted form in any
+#: file it publishes, which this one is, so written out it would stop a release
+#: rather than fail a test. The guard is untouched by this and still catches
+#: somebody writing that address in prose, which is what it is for; this is the
+#: one place in the tree that legitimately needs the range itself.
+#: `tests/test_fetch.py::TestWhichClassAnAddressIsIn` checks the block is the one
+#: intended, by its integer, since a test carrying the dotted form would not
+#: publish either.
+_PRIVATE_NETWORKS: Final = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.IPv4Network((0xC0A80000, 16)),
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("fc00::/7"),
+)
+
+#: Ranges `ipaddress` does not know are unreachable, refused as `RESERVED`.
+#:
+#: **`IPv6Address.is_global` is defined as `not is_private`**, so on that family
+#: the `RESERVED` fallthrough catches only what the interpreter already refuses,
+#: and any v6 range Python's list is missing comes out `PUBLIC` rather than
+#: reserved. Measured on Python 3.14: `fec0::a9fe:a9fe` classified `public` and
+#: `PUBLIC_ADDRESSES` admitted it.
+#:
+#: So the freshness of this classification is the interpreter's rather than this
+#: file's, and this tuple is where a range it has not caught up with goes.
+#: `fec0::/10` is site local, deprecated by RFC 3879 and never a household's own
+#: server; `5f00::/16` is the SRv6 block RFC 9602 marks not globally reachable.
+_NOT_GLOBALLY_REACHABLE: Final = (
+    ipaddress.ip_network("fec0::/10"),
+    ipaddress.ip_network("5f00::/16"),
+)
+
+#: IPv6 prefixes that carry an IPv4 address in their low 32 bits.
+#:
+#: **Unwrapped before classification, because two of the three are `is_global`
+#: and would otherwise be `PUBLIC`.** Measured on Python 3.14:
+#: `::169.254.169.254` (the deprecated IPv4 compatible form) and
+#: `64:ff9b::a9fe:a9fe` (the well known NAT64 prefix, which a host with NAT64
+#: translates straight back to the v4 address) both answer `is_global=True`,
+#: and `::ffff:169.254.169.254` is the mapped form every v4 only check is
+#: written round.
+#:
+#: **6to4 and Teredo are deliberately not unwrapped.** They carry a v4 address
+#: too, and both fall to `RESERVED` on their own, so unwrapping would move them
+#: from refused-by-every-policy to refused-by-most. Refusing the whole prefix is
+#: the stronger answer and the shorter one.
+_EMBEDDED_V4: Final = (
+    ipaddress.ip_network("::ffff:0:0/96"),
+    ipaddress.ip_network("::/96"),
+    ipaddress.ip_network("64:ff9b::/96"),
+)
+
+
+def _embedded_ipv4(address: ipaddress.IPv6Address) -> ipaddress.IPv4Address | None:
+    """The IPv4 address inside a v6 one, where the prefix carries one."""
+    if address.ipv4_mapped is not None:
+        return address.ipv4_mapped
+    for network in _EMBEDDED_V4:
+        if address in network:
+            return ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
+    return None
+
+
+def classify(address: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> AddressClass:
+    """Which `AddressClass` an address is in. Raises `ValueError` on a non-address.
+
+    **The order is load bearing at the top and at the bottom.** Unspecified and
+    loopback are decided before the v4 unwrap, because `::1` and `::` are inside
+    `::/96` and unwrapping them first would call `::1` whatever `0.0.0.1` is.
+    `is_global` is consulted last, because it is True for multicast on both
+    families, measured: `224.0.0.1` and `ff02::1` are both global and neither is
+    a host this server has any business connecting to.
+
+    The recursion terminates on the first step: what comes back from
+    `_embedded_ipv4` is an `IPv4Address`, and an IPv4 address embeds nothing.
+    """
+    parsed = ipaddress.ip_address(address)
+    if parsed.is_unspecified:
+        return AddressClass.UNSPECIFIED
+    if parsed.is_loopback:
+        return AddressClass.LOOPBACK
+    if isinstance(parsed, ipaddress.IPv6Address):
+        inner = _embedded_ipv4(parsed)
+        if inner is not None:
+            return classify(inner)
+    if parsed.is_link_local:
+        return AddressClass.LINK_LOCAL
+    if parsed.is_multicast:
+        return AddressClass.MULTICAST
+    if any(parsed in network for network in _PRIVATE_NETWORKS):
+        return AddressClass.PRIVATE
+    if any(parsed in network for network in _NOT_GLOBALLY_REACHABLE):
+        return AddressClass.RESERVED
+    if parsed.is_global:
+        return AddressClass.PUBLIC
+    return AddressClass.RESERVED
+
+
+@dataclass(frozen=True)
+class AddressPolicy:
+    """Which classes of address one door will open a connection to.
+
+    **A policy per door rather than one for the application**, because the doors
+    do not reach the same places and a single policy would have to be the looser
+    of the two: a household's own OPDS server is at `10.0.0.10` or `localhost`,
+    so refusing private space there refuses the feature, and a catalogue
+    somebody typed has no business at any address inside this cluster.
+
+    `name` is for the log line, so a refusal says which door refused.
+    """
+
+    name: str
+    admits: frozenset[AddressClass]
+
+    def permits(self, address: str) -> bool:
+        """Whether this policy will connect to this address.
+
+        Anything that does not parse as an address is refused, which is the same
+        answer `covers.is_fetchable` gives a URL it cannot parse: a resolver
+        answering something unreadable is not a reason to connect to it.
+        """
+        try:
+            return classify(address) in self.admits
+        except ValueError:
+            return False
+
+
+#: The policy for a server on the household's own network, which is `opds.py`.
+#:
+#: **Loopback and private space are admitted deliberately and that is the whole
+#: shape of this row.** A household library server is on the household's own
+#: network, so `http://10.0.0.10:8083` and `http://localhost:8083` are the
+#: ordinary case rather than the attack.
+#:
+#: **Link local is refused, and it is the one private range that is never a
+#: household's own server.** It is where the cloud metadata endpoint sits, and
+#: refusing it is the owner's decision of 2026-09-07 on the OPDS link local
+#: ticket: not the literal, which guards the accident and not the attacker, but
+#: the resolved address, which is what `PinnedTransport` makes possible.
+HOUSEHOLD_ADDRESSES: Final = AddressPolicy(
+    name="household",
+    admits=frozenset(
+        {AddressClass.LOOPBACK, AddressClass.PRIVATE, AddressClass.PUBLIC}
+    ),
+)
+
+#: The policy for a host somebody typed into a settings screen.
+#:
+#: **Public addresses only**, which is #131's own case: a catalogue an admin
+#: names is on the internet, and every other class of address is either this
+#: pod's own network or a range no catalogue is served from.
+#:
+#: **It has no caller in this build.** The typed target feature is not written,
+#: and this constant exists so the door it will use is the one already tested
+#: rather than one written the day the row lands. The curated registry that
+#: comes before it is vendored, so its hosts ship with the build and it needs
+#: none of this: pointing that at this policy would refuse a registry entry
+#: whose address is not public, which is a narrowing nobody asked for.
+#:
+#: **It is not the whole of what a typed target needs.** That design also
+#: requires **no redirects at all**, and a client from `pinned_client` still
+#: walks `_walk_hops`'s two same host hops, which is right for a catalogue and
+#: is not what was specified there. Whoever builds the row adds that refusal;
+#: this constant does not carry it.
+PUBLIC_ADDRESSES: Final = AddressPolicy(
+    name="public", admits=frozenset({AddressClass.PUBLIC})
+)
+
+
+class Resolver(Protocol):
+    """A name to addresses, asked once per request. The seam tests replace.
+
+    A protocol rather than a function type so a double can be a class with
+    state, which is what a rebinding test needs: the second call answers
+    differently from the first.
+    """
+
+    async def __call__(self, host: str, port: int) -> Sequence[str]: ...
+
+
+async def system_resolver(host: str, port: int) -> Sequence[str]:
+    """Every address this host resolves to, in the order the resolver gave them.
+
+    `loop.getaddrinfo` rather than `socket.getaddrinfo`, because the second
+    blocks the event loop for the length of a DNS lookup, which a hostile or
+    merely broken nameserver chooses.
+
+    Duplicates are dropped and the order is kept: `dict.fromkeys` is the idiom
+    for that, and the order matters because the first admitted address is the
+    one connected to.
+    """
+    infos = await asyncio.get_running_loop().getaddrinfo(
+        host, port, type=socket.SOCK_STREAM
+    )
+    return tuple(dict.fromkeys(str(info[4][0]) for info in infos))
+
+
 @dataclass(frozen=True)
 class Fetched:
     """A response whose body has already been read, and bounded.
@@ -301,8 +567,271 @@ def catalogue_client() -> httpx.AsyncClient:
     holds for anything this client is used for. See `_IDENTITY`, and `_AGENT`
     for why there is a `user-agent` beside it.
     """
+    return _client()
+
+
+class PinnedTransport(httpx.AsyncBaseTransport):
+    """Resolve the name, refuse the address, connect to that same address.
+
+    **This is resolve-then-pin, and the pin is the half that is not a check.**
+    Classifying the address a name resolves to is worth nothing on its own: the
+    connection does its own lookup, the second answer may differ from the first,
+    and that gap is DNS rebinding. So the name is resolved here, once **per
+    request** and not once per caller, every address it answered with is
+    classified, and the request handed to httpcore carries the **literal
+    address** that passed, with the `Host` header and the TLS server name still
+    carrying the name. httpcore resolves a literal to itself, so there is no
+    second lookup left to move. A two hundred page walk therefore resolves two
+    hundred times and classifies each answer, which is the property that makes a
+    rebinding attempt land on a refusal rather than on a stale pin.
+
+    **The caller's own request object is never rewritten**, and that is not
+    tidiness. `httpx.AsyncClient` sets `response.request` to the object it was
+    given, and `_same_host_hop` compares a `Location` against
+    `response.request.url`: rewriting in place would make that comparison read
+    the pinned literal, so a catalogue redirecting to its own name would be
+    refused as a redirect off host and a relative `Location` would be walked as
+    an address with no name attached. A second `httpx.Request` carrying the same
+    stream and headers is what keeps both halves honest.
+
+    **One inner transport per TLS server name**, and this is the subtle one.
+    httpcore keys its connection pool on the request's origin, which is the
+    pinned literal here, so two different names pinned to one address and port
+    would share a pooled connection: the second name's request would travel on a
+    TLS connection authenticated for the first name's certificate, since a
+    reused connection does no handshake. Keying the pool by name removes that by
+    construction rather than by nobody having done it yet.
+
+    **What this does not stop**, none of which is narrowed by having it:
+
+    * **Most of what an address policy is usually bought for, under
+      `HOUSEHOLD_ADDRESSES`.** That policy admits loopback and RFC 1918 because
+      a household server is there, so a name an admin types still reaches this
+      pod's own loopback, every ClusterIP in the cluster and the router's
+      administration page. **One range changed.** Read this as a link local
+      refusal that a name cannot walk past, and not as request forgery having
+      been closed at that door: what limits the rest is that configuration is
+      admin only.
+    * **A host at an admitted address that is itself the attack.** A name that
+      resolves to a public address and proxies inward reaches whatever it likes,
+      and no address policy anywhere can see that. This refuses addresses, not
+      hosts.
+    * **A name answering with both admitted and refused addresses.** The
+      admitted ones are tried in turn, one per connect failure, and the refused
+      ones are never used at all, so such a name is pinned rather than refused.
+      The alternative, refusing the whole answer, refuses a household server
+      whose name also carries a link local address, which mDNS routinely gives
+      one.
+    * **Anything about the response.** The bytes are `get`'s problem: the cap,
+      the deadline and the hop guard are unchanged and still do all of that.
+    * **The other outbound doors.** `covers.py` has its own read loop and its
+      own host allowlist, and `z3950.py` is not HTTP at all, so neither is
+      wired to this. Both reach hosts this build ships rather than hosts
+      somebody typed, which is why that is a gap and not a hole.
+    * **A proxy.** An egress proxy would take the connection out of this
+      transport's hands entirely, which is why `pinned_client` refuses to read
+      one from the environment. A deployment that needs one needs this decision
+      re-taken rather than the variable set.
+    """
+
+    def __init__(
+        self,
+        policy: AddressPolicy,
+        *,
+        resolver: Resolver = system_resolver,
+        inner: Callable[[], httpx.AsyncBaseTransport] = httpx.AsyncHTTPTransport,
+    ) -> None:
+        self._policy = policy
+        self._resolve = resolver
+        self._inner_factory = inner
+        self._inner: dict[str, httpx.AsyncBaseTransport] = {}
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        # The punycode form, not `url.host`, which is the unicode one: it is
+        # what goes on the wire as `Host`, what a certificate is checked
+        # against, and what the resolver is asked about.
+        name = request.url.raw_host.decode("ascii")
+        # Refused before a pool is opened for the name, rather than after.
+        addresses = await self._admitted(name, _port(request.url))
+        transport = self._transport_for(name)
+
+        # **Only a connect failure moves on**, and that is pinned by
+        # `test_only_a_connect_failure_moves_on_to_the_next_address` rather than
+        # stated here: widening this to `httpx.HTTPError` was caught by nothing
+        # until that test existed, and what it admits is a request replayed
+        # against a second address after bytes, and this door's `Authorization`
+        # header, have already gone out.
+        #
+        # **A second address is only for a request with no body.** A stream is
+        # read once, so replaying one would send an empty body to the second
+        # address and look like a request the caller made. Every caller of this
+        # door makes a GET; this is here so the first one that does not is not
+        # silently given that.
+        if request.method not in ("GET", "HEAD"):
+            addresses = addresses[:1]
+
+        # **Every admitted address in turn, and this is a reachability rule
+        # rather than a security one.** Pinning removes the happy eyeballs walk
+        # anyio does over `getaddrinfo`'s whole answer, so a dual stack
+        # household name whose first address is an unroutable ULA would fail
+        # here where it worked before, reported as a server that did not answer.
+        # Only a **connect** failure moves on: nothing has been sent at that
+        # point, so the next address is a first attempt rather than a replay.
+        #
+        # The last address is outside the loop rather than inside it, so its
+        # failure is raised as it stands and there is no arm for a case
+        # `_admitted` has already refused: it raises rather than answering with
+        # nothing, so this is never empty.
+        for address in addresses[:-1]:
+            try:
+                return await transport.handle_async_request(
+                    self._pinned(request, name, address)
+                )
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                logger.info("%s did not answer at %s, trying the next", name, address)
+        return await transport.handle_async_request(
+            self._pinned(request, name, addresses[-1])
+        )
+
+    def _pinned(
+        self, request: httpx.Request, name: str, address: str
+    ) -> httpx.Request:
+        """The same request, addressed to a literal, still speaking as the name.
+
+        A second request rather than a rewrite of the caller's, because
+        `httpx.AsyncClient` sets `response.request` to the object it was given
+        and `_same_host_hop` compares a `Location` against that URL.
+        """
+        return httpx.Request(
+            request.method,
+            request.url.copy_with(host=address),
+            headers=request.headers,
+            # `stream=` rather than `content=`, because it is the arm of
+            # `httpx.Request.__init__` that populates no headers of its own: the
+            # `Host` this carries is the one built from the name, and rebuilding
+            # it from the pinned URL is exactly what must not happen.
+            stream=request.stream,
+            extensions={**request.extensions, "sni_hostname": name},
+        )
+
+    async def _admitted(self, name: str, port: int) -> tuple[str, ...]:
+        """The addresses this request may be made to, in order. Refuses if none.
+
+        **Resolved here and nowhere else.** What this returns goes into the URL
+        as a literal, and httpcore resolves a literal to itself, so the answer
+        classified is the answer connected to.
+        """
+        try:
+            ipaddress.ip_address(name)
+        except ValueError:
+            candidates = await self._lookup(name, port)
+        else:
+            # A literal reaches no resolver, in this transport or in httpcore,
+            # so it is classified as it stands. Without this arm every literal
+            # address would go to `getaddrinfo`, which answers it back, at the
+            # cost of a syscall and of a code path that is not the one read.
+            candidates = (name,)
+
+        admitted = tuple(
+            address for address in candidates if self._policy.permits(address)
+        )
+        if not admitted:
+            logger.warning(
+                "Refused %s under the %s address policy: %s",
+                name,
+                self._policy.name,
+                ", ".join(candidates) or "no address",
+            )
+            raise AddressRefused(
+                f"{name[:200]} answers at no address this server will connect to"
+            )
+        return admitted
+
+    async def _lookup(self, name: str, port: int) -> tuple[str, ...]:
+        """The resolver's answer, with a lookup failure kept inside `httpx`.
+
+        **`OSError` is caught because `socket.gaierror` is not an
+        `httpx.HTTPError`.** Resolution used to happen inside
+        `httpx.AsyncHTTPTransport`, under `map_httpcore_exceptions`, which
+        turned a name that does not resolve into a `ConnectError`; doing it here
+        moved it outside every handler in this tree, so a typo in a settings
+        field became a 500 rather than "that server did not answer". Same shape
+        as the `UnicodeError` `_walk_hops` records, and found the same way.
+
+        Raised as the error httpx itself would have raised, so a lookup failure
+        stays distinguishable from a refusal: `AddressRefused` means an admin's
+        address is one this door will not open, and this means nobody answered
+        for the name.
+        """
+        try:
+            return tuple(await self._resolve(name, port))
+        except OSError as unresolvable:
+            raise httpx.ConnectError(
+                f"{name[:200]} could not be resolved"
+            ) from unresolvable
+
+    def _transport_for(self, name: str) -> httpx.AsyncBaseTransport:
+        """The pool for one server name. See the class docstring for why per name."""
+        transport = self._inner.get(name)
+        if transport is None:
+            transport = self._inner[name] = self._inner_factory()
+        return transport
+
+    async def aclose(self) -> None:
+        for transport in self._inner.values():
+            await transport.aclose()
+        self._inner.clear()
+
+
+def pinned_client(
+    policy: AddressPolicy, *, resolver: Resolver = system_resolver
+) -> httpx.AsyncClient:
+    """A catalogue client that resolves, refuses by address class, and pins.
+
+    Every bound `catalogue_client` carries, plus `PinnedTransport`. Use it for a
+    door whose host is configuration rather than a module constant.
+
+    **`trust_env=False`, and it is the difference between a pin and a
+    suggestion.** With it on, httpx reads `HTTP_PROXY`, `HTTPS_PROXY` and
+    `ALL_PROXY` from the environment and mounts a proxy transport **in front of
+    the one passed here**, so every request would leave through the proxy with
+    the name unresolved and none of this would run. It also stops a `.netrc`
+    putting credentials on a request this door makes.
+
+    **The belt is httpx's own `allow_env_proxies = trust_env and transport is
+    None`**, which already refuses an environment proxy for any client given a
+    transport. This flag is the brace, and it is the half that survives somebody
+    dropping the explicit `transport=` in a refactor. Both are here because
+    either alone is one edit from nothing.
+
+    **So no test can see this flag move, and that is measured rather than
+    assumed.** Flipping it to `True` was caught by nothing, including the test
+    named for it, because that test asserts the property (the request still
+    leaves through this transport with a proxy set in the environment) and the
+    belt alone satisfies it. The flag sits at the "stated" rung deliberately: a
+    test that could tell it apart would have to assert the argument rather than
+    the behaviour, which is a guard on an implementation detail of httpx.
+
+    **This says nothing about the app's other outbound doors.**
+    `catalogue_client` trusts the environment, so the eleven seeded catalogues
+    still honour a proxy variable, which is the right answer for a host that is
+    a module constant.
+    """
+    return _client(transport=PinnedTransport(policy, resolver=resolver), trust_env=False)
+
+
+def _client(
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    trust_env: bool = True,
+) -> httpx.AsyncClient:
+    """The settings both clients share, in one place so they cannot drift."""
     return httpx.AsyncClient(
-        timeout=TIMEOUT_SECONDS, follow_redirects=False, headers=_IDENTITY | _AGENT
+        timeout=TIMEOUT_SECONDS,
+        follow_redirects=False,
+        headers=_IDENTITY | _AGENT,
+        transport=transport,
+        trust_env=trust_env,
     )
 
 

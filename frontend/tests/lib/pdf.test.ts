@@ -335,7 +335,7 @@ describe("the XMP packet", () => {
   });
 
   it("refuses a year no book could have been published in", async () => {
-    // The window is `bookBounds.plausibleYear`'s, shared with every other
+    // The window is `year.plausibleYear`'s, shared with every other
     // reader that takes a year out of a file, and this is the arm that notices
     // this one letting go of it: a mutation dropping the call went unreported
     // before it existed. The value is Calibre's undefined date, which is what

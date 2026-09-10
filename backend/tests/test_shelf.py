@@ -603,6 +603,29 @@ BOOK_OWNED_READERS = {
             "write, and the rows it does not move it deletes.",
         ),
         (
+            "shelf.select(func.count(DigitalReference.id))",
+            "counts the flagged references on the Books the caller may see, for "
+            "the shelf-wide listing. Written through `Shelf.select()` and joined "
+            "outward to `books`, so the count is scoped by the same predicate as "
+            "the rows: an unscoped total announces how many rows are hidden. "
+            "**Correct, and reported anyway**, like the Tag index above, and the "
+            "join is the load bearing half here rather than the filter, since "
+            "`Shelf.select()` documents that a missing one is a cartesian "
+            "product and not an error.",
+        ),
+        (
+            "shelf.select(DigitalReference, Book.title, Book.author, Book.cover_url)",
+            "the rows of that same listing: every reference a client reported "
+            "missing, on a Book the caller may see, with the three Book scalars "
+            "a row renders. Scoped by the Shelf and by nothing else, which is "
+            "this table's own rule: a reference carries no Member, so its "
+            "visibility is its Book's entirely. The route's docstring states "
+            "what that discloses, which is an unverified path on somebody's "
+            "machine, and why a per reporter view would need a column the table "
+            "deliberately does not have. Paginated, so it is bounded like every "
+            "other many-book query here.",
+        ),
+        (
             "DigitalReference.id == reference_id",
             "reads one reference so the route can flag or forget it. Narrowed "
             "to a `Book` the dependency resolved **as well as** to the id, and "

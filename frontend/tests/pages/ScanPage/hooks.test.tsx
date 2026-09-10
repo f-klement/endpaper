@@ -551,7 +551,11 @@ describe("useRapidIntake", () => {
     act(() => result.current.addAll());
 
     await waitFor(() =>
-      expect(result.current.result).toEqual({ added: 0, failed: 1 }),
+      expect(result.current.result).toEqual({
+        added: 0,
+        failed: 1,
+        unreferenced: 0,
+      }),
     );
   });
 
@@ -1001,6 +1005,234 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       state: "derived",
       draft: { title: "Dune", year: 1965 },
     });
+  });
+
+  it("says where a file picked out of a folder is, once the book exists", async () => {
+    // The sentence the whole feature opens with: the page reads a file, adds
+    // the book, and used to forget which file it came from. No byte of the file
+    // is sent; a root the member picked and the path beneath it are.
+    api.on("/api/books/scan", { body: makeBook({ id: 42 }) });
+    api.on("/api/books/42/digital-references", { body: {} });
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([
+        inFolder("Dune.pdf", "Books/Frank Herbert/Dune.pdf"),
+      ]),
+    );
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.added).toBe(1));
+
+    expect(
+      api.lastCall("/api/books/42/digital-references", "POST")?.body,
+    ).toMatchObject({
+      // **The picked folder's own name is the root and never the head of the
+      // path.** The server cannot enforce it, and two clients disagreeing
+      // write two rows for one file.
+      root_label: "Books",
+      relative_path: "Frank Herbert/Dune.pdf",
+      root_confirmed: true,
+    });
+  });
+
+  it("sends no location for a file picked one at a time", async () => {
+    // A bare pick gives a name and no path, so there is no root to name and no
+    // screen in which a member names one. Nothing is sent rather than a guess
+    // being sent with `root_confirmed` false.
+    api.on("/api/books/scan", { body: makeBook({ id: 43 }) });
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([new File(["%PDF-1.4"], "Dune (1965).pdf")]),
+    );
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.added).toBe(1));
+
+    expect(
+      api.calls.some((call) => call.url.includes("digital-references")),
+    ).toBe(false);
+  });
+
+  it("sends no location for an audiobook, which is not one file", async () => {
+    // The format's own inversion again: a row standing for three chapter files
+    // has no one file to point at, and a book holds sixteen references at the
+    // most, so a folder of forty would spend the ceiling on one book.
+    api.on("/api/books/scan", { body: makeBook({ id: 44 }) });
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([
+        chapterFile(0, "Robinson Crusoe"),
+        chapterFile(1, "Robinson Crusoe"),
+      ]),
+    );
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.added).toBe(1));
+
+    expect(
+      api.calls.some((call) => call.url.includes("digital-references")),
+    ).toBe(false);
+  });
+
+  it("counts a book whose location was refused, and still counts it added", async () => {
+    // **The book exists by the time this runs.** Reporting it as failed would
+    // put a created book back in the queue with a reason, and a member reading
+    // that adds it again into a duplicate. What was lost is the answer to
+    // "where is the file", which is its own count and its own sentence.
+    api.on("/api/books/scan", { body: makeBook({ id: 45 }) });
+    api.on("/api/books/45/digital-references", { status: 500, body: {} });
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([inFolder("Dune.pdf", "Books/Dune.pdf")]),
+    );
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(result.current.result).toEqual({
+      added: 1,
+      failed: 0,
+      unreferenced: 1,
+    });
+    expect(result.current.entries).toHaveLength(0);
+  });
+
+  const DUPLICATE = {
+    status: 409,
+    body: {
+      detail: {
+        message: "Book with this ISBN already in catalog",
+        book_id: 77,
+      },
+    },
+  };
+
+  it("records the location on the book a duplicate turned out to be", async () => {
+    // **The case the sighting was made idempotent for.** Re importing a folder
+    // somebody imported last month answers 409 on every book in it, so a
+    // reference sent only after a successful create is sent on exactly the
+    // pick that needs it least.
+    //
+    // An EPUB rather than a PDF, and that is the arm below's subject: this file
+    // states its own identifier, so the book the 409 names is a book this row
+    // has evidence about.
+    api.on("/api/books/scan", DUPLICATE);
+    api.on("/api/books/77/digital-references", { body: {} });
+    const file = await epubFile("dune.epub");
+    Object.defineProperty(file, "webkitRelativePath", {
+      value: "Books/dune.epub",
+    });
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+    expect(result.current.entries[0]?.state).toBe("found");
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    expect(
+      api.lastCall("/api/books/77/digital-references", "POST")?.body,
+    ).toMatchObject({ root_label: "Books", relative_path: "dune.epub" });
+    // The row is still a failure and still says why, which is what the member
+    // acts on. The location is not a second reason.
+    expect(result.current.result?.unreferenced).toBe(0);
+  });
+
+  it("writes no location onto a stranger's book on an ISBN read out of a name", async () => {
+    // **A duplicate 409 names a book this member did not add.** A row standing
+    // under its file name has whatever `fileName.isbnIn` found in that name,
+    // and a ten digit run passes modulus 11 about one time in eleven, so
+    // following it would write this member's own folder names onto somebody
+    // else's book and spend one of its sixteen references, on a row the screen
+    // calls failed.
+    api.on("/api/books/scan", DUPLICATE);
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([
+        inFolder("Dune 9780441013593.pdf", "Books/Dune 9780441013593.pdf"),
+      ]),
+    );
+    await settled(result);
+    // The row does carry the ISBN, which is what makes this a refusal rather
+    // than a case that could not arise.
+    expect(result.current.entries[0]).toMatchObject({
+      state: "derived",
+      isbn: "9780441013593",
+    });
+
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    expect(
+      api.calls.some((call) => call.url.includes("digital-references")),
+    ).toBe(false);
+  });
+
+  it("writes none either once the catalogue has answered about that name", async () => {
+    // **The case the first draft of this gate did not refuse.** A name carrying
+    // a ten digit token that passes modulus 11 takes the route a barcode takes,
+    // and a successful lookup promotes the row to `found`, so a gate reading the
+    // state saw a file that had stated its own identifier. It had not: the
+    // lookup answered about the ISBN and says nothing about where the ISBN came
+    // from.
+    api.on("/api/books/lookup", {
+      body: {
+        isbn: "9780441013593",
+        title: "Dune",
+        author: "Frank Herbert",
+        suggested_tag_ids: [],
+      },
+    });
+    api.on("/api/books/scan", DUPLICATE);
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([
+        inFolder("Dune 9780441013593.pdf", "Books/Dune 9780441013593.pdf"),
+      ]),
+    );
+    await settled(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() => expect(result.current.entries[0]?.state).toBe("found"));
+
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    expect(
+      api.calls.some((call) => call.url.includes("digital-references")),
+    ).toBe(false);
+  });
+
+  it("records the location once a member has taken a catalogue record", async () => {
+    // The other side of the same rule, so the gate is a refusal of one
+    // provenance rather than of every row that ever stood under its own name.
+    api.on("/api/books/search", {
+      body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
+    });
+    api.on("/api/books/scan", DUPLICATE);
+    api.on("/api/books/77/digital-references", { body: {} });
+    const { result } = renderRapid();
+
+    act(() =>
+      result.current.pickFiles([inFolder("Dune.pdf", "Books/Dune.pdf")]),
+    );
+    await settled(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() =>
+      expect(result.current.entries[0]?.state).toBe("choosing"),
+    );
+    act(() => result.current.chooseFor(result.current.entries[0]!.key, MATCH));
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    expect(
+      api.lastCall("/api/books/77/digital-references", "POST")?.body,
+    ).toMatchObject({ root_label: "Books", relative_path: "Dune.pdf" });
   });
 
   it("asks no catalogue while reading, because the lookup is offered", async () => {

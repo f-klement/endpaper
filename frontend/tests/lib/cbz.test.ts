@@ -376,7 +376,7 @@ describe("the document itself", () => {
   });
 
   it("does not read a year no comic could have been published in", () => {
-    // The window is `bookBounds.plausibleYear`'s, and this is the arm that says
+    // The window is `year.plausibleYear`'s, and this is the arm that says
     // which values it refuses here: the caller scan in
     // `tests/lib/bookBounds.test.ts` reads neither end of the window, so it
     // cannot tell this door applying it from this door widening it.

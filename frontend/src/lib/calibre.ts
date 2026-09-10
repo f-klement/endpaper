@@ -60,7 +60,7 @@
  * the set has three members today rather than why it may only ever have three.
  */
 
-import { plausibleYear } from "./bookBounds";
+import { leadingYear } from "./year";
 import { parseIsbn } from "./isbn";
 import type { FileMetadata } from "./fileReaders";
 import type { SqliteDatabase, SqliteRow } from "./sqlite";
@@ -533,16 +533,17 @@ function readDescription(html: string | null): string | null {
 /**
  * The publication year, or `null` where a book could not have one.
  *
- * `pubdate` is an ISO timestamp as text. Only the leading four digits are read,
- * for `opf.readYear`'s reason: a timezone offset makes the day either side of
- * midnight ambiguous and no book's year turns on it.
+ * `pubdate` is an ISO timestamp as text, and what a leading four digit run
+ * means is `year.leadingYear`'s question. **This function is the half
+ * that knows it is reading a SQLite cell**, which is why it is still here: the
+ * shared half took nothing of `sqliteRow`'s vocabulary with it.
  *
- * **The window is `bookBounds.plausibleYear`'s, and it replaced a refusal of
- * `CALIBRE_UNDEFINED_YEAR` by name.** The name refused one value out of a band
- * this door left open at both ends, so a `pubdate` of `1200-01-01` arrived as
- * the year 1200. The window refuses that value and 101 with it, so nothing the
- * name refused is accepted now, and refusing both ways would be one fact
- * written twice. `CALIBRE_PLACEHOLDER` carries what the dropped arm cost.
+ * **The window it applies replaced a refusal of `CALIBRE_UNDEFINED_YEAR` by
+ * name.** The name refused one value out of a band this door left open at both
+ * ends, so a `pubdate` of `1200-01-01` arrived as the year 1200. The window
+ * refuses that value and 101 with it, so nothing the name refused is accepted
+ * now, and refusing both ways would be one fact written twice.
+ * `CALIBRE_PLACEHOLDER` carries what the dropped arm cost.
  *
  * Measured 2026-09-10 over the household's 897 book reference library, every
  * `books` row: 29 carry the year 101, 0 carry any other year outside the
@@ -550,9 +551,7 @@ function readDescription(html: string | null): string | null {
  * is empty in that library and the window changes no book in it.
  */
 function readYear(value: unknown): number | null {
-  const match = /^(\d{4})/.exec(text(value) ?? "");
-  if (match === null) return null;
-  return plausibleYear(Number(match[1]));
+  return leadingYear(text(value));
 }
 
 /**

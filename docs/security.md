@@ -774,11 +774,18 @@ from the app's own network position. That is real, and it is the same class of c
 as restore, which replaces every account in the database: an admin is already trusted with
 the library.
 
-A blocklist of private ranges is deliberately **not** implemented. It would look like a
-control without being one: DNS resolves after the check, so a name that answers with
-`127.0.0.1` walks straight through it, and the check would still have to be repeated at
-connect time to mean anything. What is enforced instead is the scheme, `http` or `https`
-only, at the point the URL is saved and again before every send.
+A blocklist of private ranges is deliberately **not** implemented here, and the reason
+recorded for that has changed. It used to be that such a check could not be a control at
+all: DNS resolves after the check, so a name answering with `127.0.0.1` walks straight
+through it, and the check would have to be repeated at connect time to mean anything.
+**That repetition now exists in the tree**, as `fetch.pinned_client`, which resolves,
+classifies the address and connects to that same address. So the reason this door has no
+address policy is no longer that one is impossible: it is that **nobody has decided which
+one**. A household's own ntfy or Gotify is on the household's network, so the policy that
+fits a typed catalogue host would refuse the ordinary case here, exactly as it would at the
+OPDS door. That is an owner's decision rather than an implementation gap. What is enforced
+meanwhile is the scheme, `http` or `https` only, at the point the URL is saved and again
+before every send.
 
 The failure log names the **host** and never the URL. Slack, Discord and every "post here"
 integration put the credential in the path or the query string, so logging the destination
@@ -1082,7 +1089,11 @@ the protocol answers a search with a hit count and hands over records only for t
 positions asked for; and one absolute deadline covers the open, every search and every
 record on an association. It has no host allowlist for the reason above, and the reason
 holds only while a `Target` is built from module constants: the day one is built from
-stored configuration or a request body, that changes.
+stored configuration or a request body, that changes. **What is available on that day is
+half of what the HTTP door has**: `fetch.classify` and `fetch.AddressPolicy` are reusable,
+and the pin is not, because pinning is done by rewriting an httpx request and this speaks
+no HTTP. `backend/z3950.py` names `Client.open` as the only attachment point and says what
+that costs.
 
 **There is no host allowlist here, and that is the difference from a cover.** A cover URL is
 member input, so `covers.is_fetchable` has to decide whether this server may connect at all,
@@ -1090,6 +1101,45 @@ per redirect hop. A catalogue URL is a module constant plus a query string, so a
 cannot choose the host and there is nothing an allowlist would refuse. Merging the two would
 mean adding eleven catalogue hosts to `COVER_HOSTS`, which is what the CSP's `img-src` is
 generated from: the browser policy would be widened to pay for a fetch policy.
+
+### An address a person typed is resolved once and connected to at that address
+
+**The argument above holds for a module constant and for nothing else**, and two doors'
+addresses are typed by an admin: the household OPDS server, and the webhook URL, whose own
+section is above. `fetch.pinned_client` is what the first of them goes through; the webhook
+is not wired to it, and that section says why the decision is open rather than made.
+
+**What the OPDS door's client does.** `fetch.pinned_client` resolves the name, classifies
+**every** address the resolver answered with, refuses the ones its policy does not admit, and
+then makes the request to the literal address that passed, carrying the name in the `Host`
+header and as the TLS server name. That last step is the one that matters: a check on its own
+is walked past by a second lookup answering differently, which is DNS rebinding, and there is
+no second lookup here. Each
+request in a walk resolves and classifies again, so a name that changes its answer between
+one page and the next is refused on the page where it changed.
+
+**Which addresses are refused is the door's decision, not the mechanism's.**
+`fetch.HOUSEHOLD_ADDRESSES` admits loopback, RFC 1918 and public addresses, because a
+household's own library server is on the household's own network. It refuses link local,
+which is never a household server and is where the cloud metadata endpoint sits, along with
+multicast, the unspecified address and every range nobody enumerated.
+`fetch.PUBLIC_ADDRESSES` admits public addresses only and has no caller in this build: it is
+for a catalogue host somebody types, which is not built.
+
+**What this is not.** Under the household policy this is not a request forgery control: an
+admin's address still reaches this pod's own loopback, every ClusterIP and the router, and
+so does a name that resolves to any of them. **One range changed.** What limits the rest is
+unchanged and is in Known limits below. A name at a public address that proxies inward is
+refused by nothing here, and no address policy anywhere can see it.
+
+**Four of the five outbound doors are not wired to it**, and the count is worth reading
+against the list rather than past it. The eleven seeded catalogues are not, because their
+hosts are module constants. Covers is not, because it has a read loop of its own, so a listed
+image host whose resolver answers inside this cluster is still fetched, and it is the one door
+whose URL a **member** supplies. The webhook is not, because which policy fits it is undecided
+rather than known. Z39.50 cannot be, because pinning is done by rewriting an HTTP request and
+it speaks none: `fetch.classify` and `fetch.AddressPolicy` are reusable there, and the pin is
+not.
 
 **Redirects are walked here, and only to the same host.** Measured live with redirects off,
 Open Library is the only source that redirects at all, once, and to its own host. So
@@ -1620,17 +1670,18 @@ Worth knowing before exposing this beyond a private network:
 - **A household OPDS server's address is fetched by this server, with no host allowlist.**
   Loopback and private space are admitted deliberately: a household's own library server
   is on the household's own network, so refusing private space would refuse the feature.
-  The after-resolution refusal that the typed host design specifies is not applied here,
-  so a name that resolves into private space is not treated differently from a literal
-  one. **Link local is admitted too, and whether it should be is open**, since it is the
-  one range that is never a household's own server and is where the cloud metadata
-  endpoint sits. `backend/opds.py` carries the reasoning, what does bound it, and which
-  control of the typed host design does not apply here. **An admin chooses the address and
-  any member can make the request**, so an admin gains a capability no other setting on
-  their list gives them. No bytes of the response are echoed, though its status code is,
-  and so are titles parsed out of it. **http is admitted and https is not required**,
-  because these servers rarely carry a certificate, so a login stored for an `http` feed
-  travels as `Authorization: Basic` in the clear on the household's own network.
+  So an admin's address, or a name resolving to one, still reaches this pod's loopback,
+  every ClusterIP and the router's administration page. **Link local is refused**, after
+  resolution rather than on the text, which is the one range that is never a household's
+  own server and is where the cloud metadata endpoint sits; see the catalogue requests
+  section above for how, and `backend/opds.py` for what else bounds this door. **An admin
+  chooses the address and any member can make the request**, so an admin gains a capability
+  no other setting on their list gives them. No bytes of the response are echoed, though
+  its status code is, and so are the titles and authors parsed out of it, which makes the
+  door a small oracle rather than a blind one. **http is admitted and https is not
+  required**, because these servers rarely carry a certificate, so a login stored for an
+  `http` feed travels as `Authorization: Basic` in the clear on the household's own
+  network.
 - **No account lockout.** The login limiter bounds guessing; nothing disables an account
   after a run of failures, deliberately, because a limiter keyed on a caller supplied
   username is a lockout somebody else can trigger.

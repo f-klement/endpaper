@@ -244,6 +244,7 @@ const FILE_READERS = [
   "lib/opf.ts",
   "lib/pdf.ts",
   "lib/sqlite.ts",
+  "lib/takeout.ts",
   "lib/zip.ts",
 ];
 

@@ -133,6 +133,7 @@ from schemas import (
     HeadingFacetOut,
     LocationOut,
     MergeRequest,
+    MissingDigitalReferenceOut,
     NoteCreate,
     NoteOut,
     OwnershipUpdate,
@@ -2948,6 +2949,115 @@ def empty_trash(db: DbSession, current_user: CurrentUser) -> PurgeResult:
     return PurgeResult(purged=len(purged))
 
 
+# ── Files reported missing, across the shelf ──────────────────────────────────
+#
+# The one digital-reference route that is not per book. Its four siblings are
+# in their own section far below, beside the writes they belong with; this one
+# is **here**, on this side of the `/{book_id}` boundary, because FastAPI
+# matches in declaration order and a two segment path is not what saves it: the
+# day somebody declares `/{book_id}/missing` above, a request for this listing
+# becomes a request for the book with id "digital-references". Declared with
+# `/quotes`, `/trash` and `/export` for that reason.
+
+
+@router.get(
+    "/digital-references/missing", response_model=Page[MissingDigitalReferenceOut]
+)
+def list_missing_digital_references(
+    db: DbSession,
+    current_user: CurrentUser,
+    paging: Paging,
+) -> Page[MissingDigitalReferenceOut]:
+    """Every file the caller can see that a client looked for and did not find.
+
+    The reader for `missing_since`. Without it the flag is answerable only one
+    book at a time, so finding every flagged file is one request per book across
+    the whole catalogue, and almost every book holds none.
+
+    **Scoped by the Shelf and by nothing else, which is the table's own rule
+    rather than a choice made here**: a reference is an ordinary field on a Book
+    and carries no Member of its own, so its visibility is the Book's entirely.
+    `models.DigitalReference` says that at the column, and it is why there is no
+    `added_by_user_id` to scope by.
+
+    **A narrower scope was written first and removed, and the reason is worth
+    keeping.** The arm was `Book.added_by_user_id == current_user.id`, meant to
+    give a member their own references and nobody else's. It cannot: any member
+    who may read a Book may report a file on it, so the row's reporter is not
+    the Book's adder and is recorded nowhere. That arm hid a member's own misses
+    on Books somebody else added, which is the ordinary household case and the
+    feature's main one, while still showing another member's paths on Books the
+    caller added. A filter whose key is not the thing its reason names is not a
+    narrowing, and "my own references" needs a reporter column on the table,
+    which is a migration and not this route.
+
+    **So say plainly what a row discloses**, since nothing here prevents it: a
+    reference is `root_label` plus `relative_path`, an unverified path on
+    somebody's machine, and the flag adds that a client could not reach it. This
+    listing hands the caller every such row on the shelf they can see in one
+    request, where reading them per book is one request each. It is the same
+    disclosure at a different price, because a Book the caller cannot see is not
+    on this shelf and its references are unreachable here as they are anywhere
+    else.
+
+    Rows are references, not books, and that is the decision this route makes
+    rather than discovers. The flag is per location: a book at three paths with
+    one gone is not a missing book, and a listing of books cannot say which of
+    the three to go and look at. "Which of my books have gone missing" is read
+    off the book column here; the reverse needs a request per book, which is the
+    cost this route exists to remove.
+
+    Newest miss first. A miss reported minutes ago is the one whose cause a
+    member can still name (a drive unplugged, a folder moved this morning), and
+    a client sweeping a directory posts its misses in one burst, so the burst
+    arrives as a block rather than scattered down the tail. **Tied on the id**,
+    because that burst shares one `CURRENT_TIMESTAMP` value: without the
+    tiebreak two pages of one burst can repeat a row and drop another.
+
+    Trashed books are absent, and that falls out of `Shelf.seen_by` rather than
+    being a clause here.
+
+    The total counts references, like the rows: a member with one book at three
+    missing locations has three. It is scoped for the reason the quotes listing
+    scopes its own, since an unscoped total announces how many rows are hidden.
+    """
+    shelf = Shelf.seen_by(db, current_user.id)
+    flagged = DigitalReference.missing_since.isnot(None)
+
+    total = (
+        shelf.select(func.count(DigitalReference.id))
+        .join(DigitalReference, DigitalReference.book_id == Book.id)
+        .filter(flagged)
+        .scalar()
+        or 0
+    )
+
+    rows = (
+        shelf.select(DigitalReference, Book.title, Book.author, Book.cover_url)
+        .join(DigitalReference, DigitalReference.book_id == Book.id)
+        .filter(flagged)
+        .order_by(DigitalReference.missing_since.desc(), DigitalReference.id.desc())
+        .offset(paging.offset)
+        .limit(paging.limit)
+        .all()
+    )
+
+    return Page[MissingDigitalReferenceOut](
+        items=[
+            MissingDigitalReferenceOut(
+                **DigitalReferenceOut.model_validate(reference).model_dump(),
+                book_title=title,
+                book_author=author,
+                book_cover_url=cover_url,
+            )
+            for reference, title, author, cover_url in rows
+        ],
+        total=total,
+        page=paging.page,
+        page_size=paging.page_size,
+    )
+
+
 # ── Single book ───────────────────────────────────────────────────────────────
 
 
@@ -3774,12 +3884,18 @@ def delete_quote(
 # claim by whoever holds a session. `models.DigitalReference` carries the rest,
 # including why `confirmed_at` is not "last seen".
 #
-# **Every route is per book and goes through `dependencies`**, so the privacy
-# rule reaches a reference exactly as it reaches any other field on a book: a
-# reference on a book the caller cannot see is a 404 on the book, never a row.
-# The reads below are reported by `tests/test_shelf.py`'s fourth pass, because
-# `digital_references` is book owned, and each carries its reason in
-# `BOOK_OWNED_READERS`.
+# **Every route in this section is per book and goes through `dependencies`**,
+# so the privacy rule reaches a reference exactly as it reaches any other field
+# on a book: a reference on a book the caller cannot see is a 404 on the book,
+# never a row. The reads below are reported by `tests/test_shelf.py`'s fourth
+# pass, because `digital_references` is book owned, and each carries its reason
+# in `BOOK_OWNED_READERS`.
+#
+# **The fifth route is not here and not per book**: `GET /digital-references/
+# missing` reads the flag across the shelf and is declared before `/{book_id}`,
+# which is why it sits with `/quotes` rather than with its own family. It is
+# scoped by the Shelf and by nothing else, which is this table's rule and not a
+# looser reading of it: a reference has no Member of its own.
 
 
 def _digital_reference_for(book: Book, reference_id: int, db: Session) -> DigitalReference:

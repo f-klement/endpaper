@@ -46,9 +46,17 @@
  * will accept is `bookBounds.ts`, and joining authors onto one line is
  * `ScanPage/types.ts`, because both are about the destination rather than about
  * the file.
+ *
+ * **`dc:subject` is read by nothing here, and it is a destination problem
+ * rather than a reading one.** `fb2.ts`, `mobi.ts` and `cbz.ts` each write the
+ * same sentence about their own format's spelling of a subject, and this reader
+ * was the fourth with the same wall and no sentence. `FileMetadata` has no
+ * field for one, and no request body this app sends has anywhere to put it:
+ * `BookCreate` takes no `categories` and no free text tag, so a subject read
+ * here would reach a screen and no column.
  */
 
-import { plausibleYear } from "./bookBounds";
+import { leadingYear } from "./year";
 import { type FileIdentifier, type FileMetadata } from "./fileReaders";
 import { declaresEntities } from "./xmlEntities";
 import { parseIsbn } from "./isbn";
@@ -278,7 +286,7 @@ function readIsbn(identifiers: readonly FileIdentifier[]): string | null {
  * reach it.
  *
  * **Plausible rather than storable**, and the window is
- * `bookBounds.plausibleYear`'s rather than this reader's. Choosing among the
+ * `year.leadingYear`'s rather than this reader's. Choosing among the
  * dates does not make the chosen one a date: every branch above can land on the
  * value that bought the window, the last two by having nothing else to land on.
  *
@@ -304,8 +312,7 @@ function readYear(metadata: Element): number | null {
     dates.find((element) => opfAttribute(element, "event") === null) ??
     dates[0];
 
-  const match = /^(\d{4})/.exec(text(chosen) ?? "");
-  return match === null ? null : plausibleYear(Number(match[1]));
+  return leadingYear(text(chosen));
 }
 
 /** A `<meta name="..." content="...">`, which is how EPUB 2 says everything. */

@@ -64,6 +64,14 @@ const KEYS: Record<string, readonly unknown[]> = {
   // does will find the classification already made rather than making it in a
   // hurry.
   listDigitalReferences: books.getListDigitalReferencesQueryKey(7),
+  // Every flagged reference across the shelf, rather than one book's. Placed
+  // with its per book sibling above and for the same reason: it changes when a
+  // reference is written through its own routes. **Its membership also depends
+  // on the shelf**, since a trashed book's references leave the list, and that
+  // is the half nothing invalidates today. Nothing reads this key yet, so the
+  // screen that first does has to decide whether trashing a book drops it here
+  // as well; this line is where that decision belongs when it is taken.
+  listMissingDigitalReferences: books.getListMissingDigitalReferencesQueryKey(),
   listAuthors: books.getListAuthorsQueryKey(),
   listAuthorSuggestions: books.getListAuthorSuggestionsQueryKey(),
   listSeries: books.getListSeriesQueryKey(),
@@ -224,7 +232,10 @@ describe("the inventory is complete", () => {
     // 54 on 2026-09-10, counted with that same command. A book's digital
     // references are the arrival: four routes, one of them a read, and the
     // other three writes that produce no key.
-    expect(Object.keys(KEYS).length).toBe(54);
+    //
+    // 55 later the same day: the shelf wide reader over the same table, which
+    // is one route and one key.
+    expect(Object.keys(KEYS).length).toBe(55);
   });
 });
 

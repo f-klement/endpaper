@@ -2,18 +2,22 @@
 
 Shaped after the notes and quotes tests, because it is the same kind of thing:
 a per book sub-resource behind `dependencies`. What is tested here beyond that
-shape is the four things this feature does differently, and each of them is the
-reason the ticket was not a column.
+shape is what this feature does differently, and each of those is the reason
+the ticket was not a column.
 
 * A report is **idempotent on the location**, so re-importing a folder refreshes
   rows instead of doubling them.
 * `confirmed_at` is this server's clock and a client cannot set it.
 * A missing report **flags and never deletes**, and its timestamp does not move.
 * Nothing here is verified, so no route claims it was.
+* The flag has one reader that is **not** per book, and what scopes it is the
+  Shelf alone, because a reference has no Member of its own:
+  `TestTheShelfWideReaderOfTheFlag`.
 """
 
 from datetime import timedelta
 
+from main import app, iter_api_routes
 from models import DIGITAL_REFERENCE_PATH_MAX, DigitalReference
 from schemas.digital import MAX_DIGITAL_REFERENCES_PER_BOOK
 
@@ -423,3 +427,329 @@ class TestMergingTwoBooksKeepsTheirReferences:
         )
         assert res.status_code == 200
         assert len(listing(client, admin["headers"], keeper["id"]).json()) == 1
+
+
+MISSING_URL = "/api/books/digital-references/missing"
+
+
+def flag(client, headers, book_id, **fields):
+    """Report a file at a location and then report that it is not there."""
+    one = report(client, headers, book_id, **fields).json()["id"]
+    res = client.post(f"{URL.format(book_id)}/{one}/missing", headers=headers)
+    assert res.status_code == 200, res.text
+    return one
+
+
+def missing(client, headers, **params):
+    return client.get(MISSING_URL, headers=headers, params=params)
+
+
+def age(db, reference_id, days):
+    """Move a flag back in time, because `CURRENT_TIMESTAMP` has one second.
+
+    Two flags raised in one test land on the same value, so an ordering
+    assertion over them observes a second boundary rather than the ordering.
+    """
+    row = db.query(DigitalReference).filter(DigitalReference.id == reference_id).one()
+    row.missing_since = row.missing_since - timedelta(days=days)
+    db.commit()
+
+
+class TestTheShelfWideReaderOfTheFlag:
+    """The one route in this family that is not per book.
+
+    It exists because the flag otherwise has no reader at shelf scale: finding
+    every flagged file meant one request per book across the whole catalogue,
+    and almost every book holds none.
+    """
+
+    def test_a_flagged_reference_is_listed_with_its_book(
+        self, client, admin, make_book
+    ):
+        book = make_book(admin["headers"], title="The Dispossessed")
+        flag(client, admin["headers"], book["id"], relative_path="ursula/d.epub")
+
+        body = missing(client, admin["headers"]).json()
+        assert body["total"] == 1
+        row = body["items"][0]
+        assert row["relative_path"] == "ursula/d.epub"
+        assert row["book_title"] == "The Dispossessed"
+        assert row["missing_since"] is not None
+
+    def test_a_row_carries_the_book_it_is_on(self, client, admin, make_book):
+        """Without `book_id` no row on this page can be acted on: flagging,
+        re-confirming and forgetting are all addressed by book. It lives on
+        `DigitalReferenceOut`, where `NoteOut` and `QuoteOut` both put it."""
+        book = make_book(admin["headers"])
+        flag(client, admin["headers"], book["id"])
+        assert missing(client, admin["headers"]).json()["items"][0]["book_id"] == book["id"]
+
+    def test_a_reference_nobody_reported_missing_is_not_listed(
+        self, client, admin, make_book
+    ):
+        book = make_book(admin["headers"])
+        report(client, admin["headers"], book["id"])
+        assert missing(client, admin["headers"]).json()["total"] == 0
+
+    def test_a_sighting_takes_it_off_the_list(self, client, admin, make_book):
+        """Something looked and found it, which is the only evidence that ever
+        contradicts a miss."""
+        book = make_book(admin["headers"])
+        flag(client, admin["headers"], book["id"])
+        report(client, admin["headers"], book["id"])
+        assert missing(client, admin["headers"]).json()["total"] == 0
+
+    def test_a_flagged_reference_on_a_book_somebody_else_added_is_listed(
+        self, client, admin, member, make_book
+    ):
+        """The disclosure this route makes, pinned rather than left to be
+        discovered.
+
+        A reference has no Member of its own, so its visibility is its Book's
+        entirely, and this listing is that rule at shelf scale: every flagged
+        row on a Book the caller can see, in one request, where reading them per
+        book is one request each. A row is an unverified path on somebody's
+        machine, so that is what is being handed over, and the honest place to
+        say so is here and at the route.
+        """
+        theirs = make_book(member["headers"], title="Their Book")
+        flag(
+            client,
+            member["headers"],
+            theirs["id"],
+            root_label="their-nas",
+            relative_path="their/layout/x.epub",
+        )
+
+        body = missing(client, admin["headers"]).json()
+        assert body["total"] == 1
+        assert body["items"][0]["relative_path"] == "their/layout/x.epub"
+
+    def test_a_flagged_reference_on_a_private_book_is_not_listed(
+        self, client, admin, member, make_book
+    ):
+        """**The leak this route must never make**, and the test that goes red
+        if the query stops going through the Shelf.
+
+        A private Book is invisible to everybody but its adder, so its
+        references are too. Reaching one here would disclose the Book, the path
+        and that the member holds it, in a single 200.
+        """
+        theirs = make_book(member["headers"], title="Their Diary", is_private=True)
+        flag(
+            client,
+            member["headers"],
+            theirs["id"],
+            relative_path="private/diary.epub",
+        )
+
+        res = missing(client, admin["headers"])
+        assert res.json()["total"] == 0
+        assert res.json()["items"] == []
+        assert "private/diary.epub" not in res.text
+
+    def test_a_members_own_report_on_a_book_somebody_else_added_is_listed(
+        self, client, admin, member, make_book
+    ):
+        """The case an ownership arm hid, and the reason there is no arm.
+
+        Whoever may read a Book may report a file on it, so a member's own files
+        are catalogued against Books other members added: that is the ordinary
+        household shelf. Scoping this listing by who added the Book would drop
+        exactly those rows, which is the half of the feature somebody would
+        actually be looking for.
+        """
+        theirs = make_book(member["headers"], title="Their Book")
+        flag(
+            client,
+            admin["headers"],
+            theirs["id"],
+            root_label="my-nas",
+            relative_path="mine/on/their/book.epub",
+        )
+
+        body = missing(client, admin["headers"]).json()
+        assert [row["relative_path"] for row in body["items"]] == [
+            "mine/on/their/book.epub"
+        ]
+
+    def test_a_plain_member_gets_the_reader(self, client, member, make_book):
+        """Not an admin report, asserted by somebody who is not one.
+
+        Every other test in this class holds the `admin` fixture, and only
+        because it is the first account this app makes. A class that never calls
+        the route as anybody else cannot tell `CurrentUser` from an admin gate,
+        and a fix round deleted the one test that did while the count went up:
+        measured 2026-09-10, swapping the dependency for `require_admin` left
+        the whole class green without it.
+        """
+        theirs = make_book(member["headers"])
+        one = flag(client, member["headers"], theirs["id"], relative_path="theirs.epub")
+
+        body = missing(client, member["headers"]).json()
+        assert [row["id"] for row in body["items"]] == [one]
+
+    def test_a_reference_on_a_book_in_the_trash_is_not_listed(
+        self, client, admin, make_book
+    ):
+        """The Shelf's other refusal, and the one privacy alone would not make.
+
+        A trashed Book is still visible to its adder in the trash, so what
+        excludes it here is `visible_to`'s `deleted_at IS NULL` rather than
+        anything about who may see it. Red if the query stops going through the
+        Shelf.
+        """
+        book = make_book(admin["headers"])
+        flag(client, admin["headers"], book["id"])
+        client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
+        body = missing(client, admin["headers"]).json()
+        # Both halves. A `total` alone is answered by the count query and says
+        # nothing about the rows: measured, a mutation dropping the Shelf from
+        # the rows query only left this test green.
+        assert body["total"] == 0
+        assert body["items"] == []
+
+    def test_the_listing_is_paginated(self, client, admin, make_book):
+        """Bounded like every other many-book query here. The test that goes red
+        when the page's limit comes off the query."""
+        book = make_book(admin["headers"])
+        for index in range(3):
+            flag(client, admin["headers"], book["id"], relative_path=f"{index}.epub")
+
+        body = missing(client, admin["headers"], page_size=2).json()
+        assert len(body["items"]) == 2
+        assert body["total"] == 3
+        assert body["page_size"] == 2
+
+    def test_the_total_counts_references_and_not_books(
+        self, client, admin, make_book
+    ):
+        """A book at three paths with two of them gone is two rows, because the
+        flag is per location and so is the thing to go and look at."""
+        book = make_book(admin["headers"])
+        flag(client, admin["headers"], book["id"], root_label="nas")
+        flag(client, admin["headers"], book["id"], root_label="laptop")
+        report(client, admin["headers"], book["id"], root_label="phone")
+
+        assert missing(client, admin["headers"]).json()["total"] == 2
+
+    def test_the_newest_miss_comes_first(self, client, admin, make_book, db):
+        """A miss reported minutes ago is the one whose cause a member can still
+        name."""
+        book = make_book(admin["headers"])
+        old = flag(client, admin["headers"], book["id"], relative_path="old.epub")
+        flag(client, admin["headers"], book["id"], relative_path="new.epub")
+        age(db, old, days=1)
+
+        paths = [row["relative_path"] for row in missing(client, admin["headers"]).json()["items"]]
+        assert paths == ["new.epub", "old.epub"]
+
+    def test_it_is_declared_before_every_single_book_route(self):
+        """The ordering itself, asserted against the app rather than inferred
+        from a 200.
+
+        A request answering 200 today proves nothing about the ordering: this
+        path has two segments and `/{book_id}` has one, so nothing collides
+        **yet**. What the ordering protects against is the day somebody declares
+        a second segment under `/{book_id}`, and by then the route has moved and
+        the 200 is gone. So the assertion is on the declaration order, which is
+        the property the section comment claims, and it goes red if this route
+        is relocated below `/{book_id}`.
+
+        **Below every route under `/{book_id}` and not merely the bare one**,
+        because a path param matches one segment: what collides with this route
+        is a two segment `/{book_id}/<anything>`, and the bare route is only the
+        first of that family in declaration order today.
+
+        **Through `iter_api_routes`, because `app.routes` does not hold these
+        routes at all**: `include_router` appends a wrapper around the child
+        router rather than splicing its routes in, which `main.py` records as
+        how the first version of its own check passed while testing nothing.
+        Measured here on the way to the same mistake: `app.routes` is 19 entries
+        and not one of them is under `/api/books`.
+        """
+        paths = [route.path for route in iter_api_routes(app.routes)]
+        mine = paths.index("/api/books/digital-references/missing")
+        # **Every** route under `/{book_id}`, not the bare one. The bare route
+        # is simply the first of that section today, so anchoring on it would
+        # pass a `/{book_id}/missing` declared above it, which is the exact
+        # collision the section comment is about.
+        swallowers = [
+            index
+            for index, path in enumerate(paths)
+            if path.startswith("/api/books/{book_id}")
+        ]
+        assert swallowers, (
+            "no route under /api/books/{book_id} was found, so this guard is "
+            "anchored on nothing and is passing for the wrong reason"
+        )
+        assert mine < min(swallowers)
+
+    def test_it_takes_a_session(self, client):
+        assert client.get(MISSING_URL).status_code == 401
+
+    def test_page_two_returns_the_rest(self, client, admin, make_book, db):
+        """The offset, which a first page cannot exercise: without it every page
+        is page one and a client paging through a burst never reaches the end.
+        """
+        book = make_book(admin["headers"])
+        for index in range(3):
+            one = flag(
+                client, admin["headers"], book["id"], relative_path=f"{index}.epub"
+            )
+            age(db, one, days=index)
+
+        body = missing(client, admin["headers"], page_size=2, page=2).json()
+        assert [row["relative_path"] for row in body["items"]] == ["2.epub"]
+        assert body["page"] == 2
+
+    def test_two_misses_at_one_instant_come_back_newest_id_first(
+        self, client, admin, make_book, db
+    ):
+        """The tiebreak, pinned as the contract rather than as a consequence.
+
+        `func.now()` is `CURRENT_TIMESTAMP`, one second wide, and a client
+        sweeping a directory posts its misses inside one tick, so ties are the
+        ordinary case here and not a corner. Ordering on that column alone
+        leaves their order to the database, which no SQL requires to be the same
+        twice, and a paged reader of one burst can then see a row twice and
+        never see another.
+
+        **What this asserts is the order of the tied pair, and that is
+        deliberate**: the repeat-across-pages failure is undefined behaviour and
+        cannot be provoked on demand, so a test shaped like it passes on a
+        mutant. Measured 2026-09-10 on this file: with the tiebreak deleted, a
+        two page walk still returned both rows and caught nothing, while this
+        assertion goes red, because SQLite falls back to rowid order and hands
+        the pair back oldest first.
+        """
+        book = make_book(admin["headers"])
+        first = flag(client, admin["headers"], book["id"], relative_path="a.epub")
+        second = flag(client, admin["headers"], book["id"], relative_path="b.epub")
+        at = db.query(DigitalReference).filter(DigitalReference.id == first).one()
+        other = db.query(DigitalReference).filter(DigitalReference.id == second).one()
+        other.missing_since = at.missing_since
+        db.commit()
+
+        rows = missing(client, admin["headers"]).json()["items"]
+        assert [row["id"] for row in rows] == [second, first]
+
+    def test_the_total_does_not_multiply_by_the_books_on_the_shelf(
+        self, client, admin, make_book
+    ):
+        """One flagged reference is one, however many books the caller holds.
+
+        The count is written through `Shelf.select()`, whose docstring records
+        that a caller naming another table and forgetting to join it gets a
+        cartesian product rather than an error. Every other test here has one
+        book on the shelf, where that product is indistinguishable from the
+        right answer.
+        """
+        make_book(admin["headers"], title="One")
+        make_book(admin["headers"], title="Two")
+        third = make_book(admin["headers"], title="Three")
+        flag(client, admin["headers"], third["id"])
+
+        body = missing(client, admin["headers"]).json()
+        assert body["total"] == 1
+        assert len(body["items"]) == 1

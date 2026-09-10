@@ -2813,6 +2813,10 @@
       "DigitalReferenceOut": {
         "description": "One stored reference, read back.\n\n**Some of these are things a browser said and the rest are this server's**,\nand the grouping below is in that order rather than in column order, so a\nreader of the generated client meets the distinction rather than having to\nknow it. `id` is the server's too, and is first because it is what the other\nthree routes are addressed by.\n\nDeliberately no count of either group: the members of a group are the group,\nand a stated \"N of these\" is what goes stale when one is added.",
         "properties": {
+          "book_id": {
+            "title": "Book Id",
+            "type": "integer"
+          },
           "confirmed_at": {
             "format": "date-time",
             "title": "Confirmed At",
@@ -2877,6 +2881,7 @@
         },
         "required": [
           "id",
+          "book_id",
           "root_label",
           "relative_path",
           "root_confirmed",
@@ -3768,6 +3773,110 @@
         "title": "MergeRequest",
         "type": "object"
       },
+      "MissingDigitalReferenceOut": {
+        "description": "One flagged reference, with enough of its book to render a row.\n\nThe shape `QuoteWithBookOut` already has, for the same reason: a listing\nspanning the shelf renders a title and a cover per row, and fetching the\nBook per row is the N+1 `serialisation.books_to_out` exists to avoid. Three\nscalars rather than a nested `BookOut`, which carries tags, the adder, the\nactive loan and the caller's own reading state, none of which a row shows.\n\n**`missing_since` is narrowed to non-null**, which is the only field this\ntype narrows rather than adds. Every row is here *because* the column is\nset, so the base's `datetime | None` would make every client branch on a\nnull the route's WHERE clause has already excluded. The guarantee lives in\nthat clause; if it ever loosens, this narrowing turns a row into a 500\nrather than into a client rendering \"missing since never\", and loud is the\nfailure to prefer.",
+        "properties": {
+          "book_author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Author"
+          },
+          "book_cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Cover Url"
+          },
+          "book_id": {
+            "title": "Book Id",
+            "type": "integer"
+          },
+          "book_title": {
+            "title": "Book Title",
+            "type": "string"
+          },
+          "confirmed_at": {
+            "format": "date-time",
+            "title": "Confirmed At",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "file_modified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Modified At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "missing_since": {
+            "format": "date-time",
+            "title": "Missing Since",
+            "type": "string"
+          },
+          "relative_path": {
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "root_confirmed": {
+            "title": "Root Confirmed",
+            "type": "boolean"
+          },
+          "root_label": {
+            "title": "Root Label",
+            "type": "string"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          }
+        },
+        "required": [
+          "id",
+          "book_id",
+          "root_label",
+          "relative_path",
+          "root_confirmed",
+          "size_bytes",
+          "file_modified_at",
+          "created_at",
+          "confirmed_at",
+          "missing_since",
+          "book_title"
+        ],
+        "title": "MissingDigitalReferenceOut",
+        "type": "object"
+      },
       "MonthStat": {
         "properties": {
           "count": {
@@ -4289,6 +4398,41 @@
           "page_size"
         ],
         "title": "Page[LoanOut]",
+        "type": "object"
+      },
+      "Page_MissingDigitalReferenceOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MissingDigitalReferenceOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[MissingDigitalReferenceOut]",
         "type": "object"
       },
       "Page_PublicBookOut_": {
@@ -7683,6 +7827,73 @@
           }
         ],
         "summary": "Rename Custom Field",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/digital-references/missing": {
+      "get": {
+        "description": "Every file the caller can see that a client looked for and did not find.\n\nThe reader for `missing_since`. Without it the flag is answerable only one\nbook at a time, so finding every flagged file is one request per book across\nthe whole catalogue, and almost every book holds none.\n\n**Scoped by the Shelf and by nothing else, which is the table's own rule\nrather than a choice made here**: a reference is an ordinary field on a Book\nand carries no Member of its own, so its visibility is the Book's entirely.\n`models.DigitalReference` says that at the column, and it is why there is no\n`added_by_user_id` to scope by.\n\n**A narrower scope was written first and removed, and the reason is worth\nkeeping.** The arm was `Book.added_by_user_id == current_user.id`, meant to\ngive a member their own references and nobody else's. It cannot: any member\nwho may read a Book may report a file on it, so the row's reporter is not\nthe Book's adder and is recorded nowhere. That arm hid a member's own misses\non Books somebody else added, which is the ordinary household case and the\nfeature's main one, while still showing another member's paths on Books the\ncaller added. A filter whose key is not the thing its reason names is not a\nnarrowing, and \"my own references\" needs a reporter column on the table,\nwhich is a migration and not this route.\n\n**So say plainly what a row discloses**, since nothing here prevents it: a\nreference is `root_label` plus `relative_path`, an unverified path on\nsomebody's machine, and the flag adds that a client could not reach it. This\nlisting hands the caller every such row on the shelf they can see in one\nrequest, where reading them per book is one request each. It is the same\ndisclosure at a different price, because a Book the caller cannot see is not\non this shelf and its references are unreachable here as they are anywhere\nelse.\n\nRows are references, not books, and that is the decision this route makes\nrather than discovers. The flag is per location: a book at three paths with\none gone is not a missing book, and a listing of books cannot say which of\nthe three to go and look at. \"Which of my books have gone missing\" is read\noff the book column here; the reverse needs a request per book, which is the\ncost this route exists to remove.\n\nNewest miss first. A miss reported minutes ago is the one whose cause a\nmember can still name (a drive unplugged, a folder moved this morning), and\na client sweeping a directory posts its misses in one burst, so the burst\narrives as a block rather than scattered down the tail. **Tied on the id**,\nbecause that burst shares one `CURRENT_TIMESTAMP` value: without the\ntiebreak two pages of one burst can repeat a row and drop another.\n\nTrashed books are absent, and that falls out of `Shelf.seen_by` rather than\nbeing a clause here.\n\nThe total counts references, like the rows: a member with one book at three\nmissing locations has three. It is scoped for the reason the quotes listing\nscopes its own, since an unscoped total announces how many rows are hidden.",
+        "operationId": "list_missing_digital_references",
+        "parameters": [
+          {
+            "description": "1-based page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number",
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Rows per page",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_MissingDigitalReferenceOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Missing Digital References",
         "tags": [
           "books"
         ]

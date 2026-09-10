@@ -4,6 +4,13 @@
 
 ### Security
 
+- **A household OPDS server's address is resolved and pinned before the request is made.** The
+  name is looked up once, every address it answers with is classified, and the connection goes
+  to the literal address that passed, carrying the name as the `Host` header and as the TLS
+  server name, so no second lookup can move it. **Link local is refused**, which is the range
+  that is never a household's own server and is where a cloud metadata endpoint sits. Loopback
+  and private space stay admitted, because that is where a household's own server is: this
+  closes one range rather than the class.
 - **A text ceiling binds on bytes as well as characters**, so a value carrying a NUL cannot
   walk past one on the restore path.
 
@@ -271,6 +278,21 @@
   promise it stopped stating when the promise moved to the reader contract. Both now cite the
   contract, and the guard keeping a member's book out of a request body reads every module
   rather than the one it was written against.
+- **A book catalogued from a file picked out of a folder records where that file is**, so it can
+  be found again. Endpaper still never receives the file: what is sent is the folder you picked,
+  the path beneath it, and the size and modification time the browser already had. A file picked
+  one at a time records nothing, because there is no folder to name, and the picker says so.
+- **A file reported missing can be found without opening its book.** Every flagged reference on
+  the shelf you can see, newest miss first, paginated. There is no per member view: a reference
+  carries no member of its own, so its visibility is its book's.
+- **A Google Play Books library imports from a Google Takeout archive**, read in the browser like
+  every other file route. The archive's books are named `.pdf` and are EPUBs, so the format is
+  decided from the bytes rather than the name, and each goes to the EPUB reader that already
+  exists. A file the sniff refuses is one named book rather than a broken import. The Google
+  Books volume id in each sidecar is the only identifier such an archive carries: there is no
+  ISBN anywhere in one.
+- **The scan queue's per row controls name the book they answer**, so a queue of thirty files is
+  navigable by button list.
 - **A book can carry references to the files it was catalogued from.** A reference is a root
   you confirmed, the path beneath it, and a fingerprint; **Endpaper never receives the file**,
   so nothing stored has been read or checked by the server. It is reported by a client and

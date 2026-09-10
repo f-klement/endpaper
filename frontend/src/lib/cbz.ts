@@ -78,13 +78,19 @@
  *
  * **The month and the day.** The column holds a year.
  *
+ * **`Genre`, and it is a destination problem rather than a reading one**, which
+ * is the sentence `mobi.ts` and `fb2.ts` each write about their own spelling of
+ * a subject: `FileMetadata` has no field for one, and no request body this app
+ * sends has anywhere to put it either. `BookCreate` takes no `categories` and
+ * no free text tag, so a subject read here would reach a screen and no column.
+ *
  * **Whether the entries are images.** This does not check, because the set of
  * image formats is open and refusing one nobody listed would refuse a real
  * comic. A zip that is not a comic yields an empty record and falls to its
  * name, which is what a comic carrying no `ComicInfo.xml` does anyway.
  */
 
-import { plausibleYear } from "./bookBounds";
+import { plausibleYear } from "./year";
 import { parseIsbn } from "./isbn";
 import { type FileIdentifier, type FileMetadata } from "./fileReaders";
 import { declaresEntities } from "./xmlEntities";
@@ -223,7 +229,7 @@ function toNumber(raw: string | null): number | null {
  * second comparison here for the one sentinel.
  *
  * **Plausible rather than storable**, and the window is
- * `bookBounds.plausibleYear`'s rather than this reader's, which is where the
+ * `year.plausibleYear`'s rather than this reader's, which is where the
  * difference between reading a year and bounding one is stated.
  */
 function readYear(root: Element): number | null {

@@ -34,27 +34,37 @@ that grows one adapter at a time.
 deployed OPDS at large. A server outside the set may emit an identifier, so
 `entry_record` reads one where it finds one rather than asserting there is none.
 
-## What is refused, and what stands in for the control that cannot apply
+## What is refused, and which range refusal this door does and does not take
 
 The address is typed by an admin, so this is a request forgery shape and is
-treated as one. #131 designs the policy for a typed catalogue host and requires
-**refusing loopback, private and link local addresses after resolution**. That
-control cannot apply here and is deliberately not applied: a household's own
-OPDS server is on the household's own network, and `http://10.0.0.10:8083` and
-`http://localhost:8083` are the ordinary case rather than the attack. Refusing
-private space would refuse the feature.
+treated as one. The address policy the typed catalogue host design requires is
+**an address range refusal after resolution**, and this door now takes it, in
+the one form that is worth taking: `fetch.HOUSEHOLD_ADDRESSES`, applied by
+`fetch.pinned_client`, which resolves the name once, refuses the address by its
+class, and connects to that same address rather than looking it up again.
 
-**A literal address range test on the URL text was considered and refused.**
-Done properly it needs resolve-then-pin at connect time, which this transport
-does not do, so a name that resolves into private space walks past it. Done on
-the text it is a stated bound that guards nothing, which is the shape this
-repository keeps finding.
+**Two of the three private ranges are admitted, and that is the whole shape of
+this row.** A household's own OPDS server is on the household's own network, so
+`http://10.0.0.10:8083` and `http://localhost:8083` are the ordinary case rather
+than the attack: refusing loopback or RFC 1918 would refuse the feature.
+**Link local is refused**, because it is the one range that is never a
+household's own server and is where the cloud metadata endpoint sits. So are
+multicast, the unspecified address, and every range nobody enumerated, which
+`fetch.AddressClass.RESERVED` collects.
 
-What is enforced instead, all of it by construction:
+**Refusing the literal was considered and refused, twice, and the second time it
+was the owner's call.** A range test on the URL text is walked past by any name
+that resolves into the range, which is a bound that guards the accident and not
+the attacker. What makes the refusal above worth writing down is that the
+address it classified is the address connected to, so no second lookup is left
+to move it.
+
+What is enforced, all of it by construction:
 
 | bound | where |
 |---|---|
 | http or https, no userinfo, a parseable port | `is_fetchable`, over the address and over every paging link |
+| **the address connected to is one the policy admits** | `fetch.HOUSEHOLD_ADDRESSES`, per request |
 | **no byte of any response may move the origin** | `_next_page`, against the configured origin |
 | a redirect may not leave the host | `fetch._same_host_hop` |
 | the login is attached to that origin and no other | `credentials.Credential.header_for` |
@@ -62,33 +72,31 @@ What is enforced instead, all of it by construction:
 | at most `fetch.TIMEOUT_SECONDS` on one page | the `min` in `holdings`, not `fetch.get`'s own default |
 | a whole sync deadline, a page cap, an entry cap | `holdings` |
 
-**The sixth row names where the bound is applied rather than the constant it
+**The seventh row names where the bound is applied rather than the constant it
 comes from, and that is the correction a critic made rather than a style
 choice.** It read `fetch.TIMEOUT_SECONDS`, which is not what bounded a page
 here: `fetch.get` treats a deadline it is given as the whole budget, so a walk
 handing it the sync deadline left the per request bound unapplied while the
 table claimed it.
 
-**What that table bounds is every address after the first, and the first
-address is not bounded by any of it.** The origin is fixed when an admin saves
-the server and is never re-derived: a paging link is resolved against the page it
-came from and then compared to the configured origin, so a hostile or
-compromised feed cannot walk this server onto a second host. That is a different
-claim from the one #131's address range refusal makes, which is about the
-address an admin **types**, and it must not be read as replacing it: an admin
-who types `http://169.254.169.254/latest/meta-data/` gets a request to it, and
-the only thing between that and a member is that configuration is admin only.
-This is #131's concession 2 arriving with the range refusal deliberately not
-applied, and it is written here rather than left for a reader to infer from a
-table.
+**The origin pin and the address policy answer two different questions, and
+neither replaces the other.** The origin is fixed when an admin saves the server
+and is never re-derived: a paging link is resolved against the page it came from
+and then compared to the configured origin, so no byte of any response can walk
+this server onto a second host. The address policy is about the address an admin
+**types**, which nothing in a response chose.
 
-**Whether link local should be refused even though the rest of private space
-cannot be is raised rather than settled here**, because it changes what the
-feature admits: it is the one range that is never a household's own server, and
-it is the range the cloud metadata endpoint sits in. Refusing it on the address
-as written would not stop a name that resolves into it, so it is a narrower
-control than it looks, and narrowing what a shipped feature accepts is the
-owner's call rather than this module's.
+**What an admin can still aim this at, with both applied.** Any machine on the
+household's own network, which is the feature: `http://10.0.0.1/` is a router's
+administration page and this will fetch it. Any public address, including one
+whose host proxies inward, which no address policy can see. What they can no
+longer aim it at is link local, whether they type `169.254.169.254` or a name
+that resolves there, and `tests/test_opds.py::TestNoResponseMovesTheOrigin`
+carries that address by name.
+
+**Nothing here bounds what a member can start**: configuration is admin only, but
+a member's sync is what makes the request. The response is never echoed, its
+status code is, and titles parsed out of it are.
 
 **An entry this reader passes over is counted and reported, and there are two
 kinds.** An OPDS entry is a book only if it carries a link relation that says
@@ -494,10 +502,11 @@ def read_page(body: str, decoding: Decoding = DECODING) -> Page:
 def _next_page(here: str, href: str, origin: str) -> str:
     """The paging link, resolved and held to the origin the admin configured.
 
-    **This is the guard that stands in for the address range test this feature
-    cannot have.** The first address is an admin's; every one after it is
-    written by whatever answered, so this is the only place a response gets to
-    choose where the next request goes. It does not get to.
+    **This is the half the address policy does not cover.** The first address is
+    an admin's and `fetch.HOUSEHOLD_ADDRESSES` is what refuses it by range;
+    every address after it is written by whatever answered, and this is the only
+    place a response gets to choose where the next request goes. It does not get
+    to, and it would not get to even if the policy admitted the range it named.
 
     Resolved against the page it was written on, because a feed is free to write
     `?page=2`, then compared to the origin computed from the address that was
@@ -533,6 +542,7 @@ async def holdings(
     max_pages: int = MAX_PAGES,
     max_entries: int = MAX_ENTRIES,
     deadline_seconds: float = SYNC_DEADLINE_SECONDS,
+    resolver: fetch.Resolver = fetch.system_resolver,
 ) -> Holdings:
     """Walk one acquisition feed and answer what it says the member holds.
 
@@ -554,6 +564,13 @@ async def holdings(
     Refuses rather than degrades: every caller here is a route acting on one
     address a person just chose, so "this server is unavailable" is the answer
     they need rather than an empty import that looks like success.
+
+    **`resolver` is a seam and never a policy.** It says who answers the name,
+    not which answers are admitted, so a caller cannot widen what this door
+    connects to by passing one: `fetch.HOUSEHOLD_ADDRESSES` is applied to
+    whatever comes back. It exists because a test of the rebinding case has to
+    answer differently on the second call, and because no test in this tree may
+    make a real lookup.
     """
     if not is_fetchable(base_url):
         raise UnusableAddress(
@@ -577,7 +594,15 @@ async def holdings(
     seen: set[str] = set()
     target: str | None = base_url
 
-    async with fetch.catalogue_client() as client:
+    # **The pinned client, not `fetch.catalogue_client`.** The seeded catalogues
+    # use that one because their host is a module constant; this address is
+    # typed, so the name is resolved once, the address is classified against
+    # `fetch.HOUSEHOLD_ADDRESSES`, and the connection is made to that same
+    # address. Swapping this line for `catalogue_client` puts the range refusal
+    # back to nothing while every other bound still reads as present.
+    async with fetch.pinned_client(
+        fetch.HOUSEHOLD_ADDRESSES, resolver=resolver
+    ) as client:
         while target is not None:
             if pages >= max_pages or len(found) >= max_entries:
                 truncated = True
@@ -602,6 +627,16 @@ async def holdings(
                     deadline=min(ends, time.monotonic() + fetch.TIMEOUT_SECONDS),
                     credential=credential,
                 )
+            except fetch.AddressRefused as refusal:
+                # Ahead of the `httpx.HTTPError` arm below, which this is a
+                # subclass of. A refused address is a fact about the address an
+                # admin configured rather than about the server being down, and
+                # the two need different messages: "unavailable" would send
+                # somebody looking for a server that answered fine.
+                logger.warning("OPDS feed at %s is at a refused address: %s", origin, refusal)
+                raise UnusableAddress(
+                    "That server is at an address this library will not connect to."
+                ) from refusal
             except httpx.HTTPError as refusal:
                 # `fetch.FetchRefused` is an `httpx.HTTPError` on purpose, so
                 # one arm covers this module's four bounds and every transport

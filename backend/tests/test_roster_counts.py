@@ -1447,6 +1447,11 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         Counts("the whole roster")
     ],
     ("backend/fetch.py", "{n} third party catalogues"): [Counts("the whole roster")],
+    # Both sides of one sentence about which doors the address policy is wired
+    # to. "Seeded" is the distinction being drawn, not a smaller set: every
+    # source in the roster is seeded, and a typed host is not a source at all.
+    ("backend/fetch.py", "{n} seeded catalogues"): [Counts("the whole roster")],
+    ("docs/security.md", "{n} seeded catalogues"): [Counts("the whole roster")],
     # The OPDS route's three, and all three count the **search** fan out rather
     # than the roster. `holdings` prices its own sequential walk against what
     # `metadata.search` does concurrently, and the other two say how much of

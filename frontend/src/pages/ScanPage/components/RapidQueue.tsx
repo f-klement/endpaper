@@ -2,10 +2,31 @@ import { useTranslation } from "../../../i18n";
 import type { BookMatch } from "../../../api/generated/model";
 import type { ScannedEntry } from "../hooks";
 
+/**
+ * One catalogue record as one line: what is shown, and what is announced.
+ *
+ * **One function because the two must not drift**, and they did: the line was
+ * composed inline in the JSX and the accessible name took `match.title` alone,
+ * so two records differing only in author or year were one name to a screen
+ * reader and two visibly different rows to everybody else.
+ *
+ * Empty where a record names nothing at all, which the caller reads as its
+ * signal to fall back to the file's own label.
+ */
+function recordLine(match: BookMatch): string {
+  // **Built from the parts that are there**, rather than from three fragments
+  // that assume the one before them. A `BookMatch.title` is nullable, and
+  // composing the separators into each fragment printed `, Frank Herbert
+  // (1965)` for a record with no title, on the visible line and in the
+  // accessible name with it.
+  const named = [match.title, match.author].filter(Boolean).join(", ");
+  return match.year ? `${named} (${match.year})`.trim() : named;
+}
+
 interface RapidQueueProps {
   entries: ScannedEntry[];
   isAdding: boolean;
-  result: { added: number; failed: number } | null;
+  result: { added: number; failed: number; unreferenced: number } | null;
   onRemove: (key: string) => void;
   onAddAll: () => void;
   onDiscard: () => void;
@@ -120,6 +141,15 @@ export default function RapidQueue({
       }`}
     >
       {t("rapid.added", { count: result.added, failed: result.failed })}
+      {/* **A second sentence rather than a third number in the first.** A book
+          whose location was not recorded is in the catalogue and is not a
+          failure, so saying it inside "N added, M below" would read as one.
+          Absent at zero, which is every batch of barcodes. */}
+      {result.unreferenced > 0 && (
+        <span className="block mt-1">
+          {t("rapid.unreferenced", { count: result.unreferenced })}
+        </span>
+      )}
     </p>
   ) : null;
 
@@ -292,9 +322,7 @@ export default function RapidQueue({
                       className="flex items-center gap-2 text-xs"
                     >
                       <span className="min-w-0 flex-1 truncate text-paper-700 dark:text-paper-200">
-                        {match.title}
-                        {match.author ? `, ${match.author}` : ""}
-                        {match.year ? ` (${match.year})` : ""}
+                        {recordLine(match)}
                       </span>
                       <button
                         type="button"
@@ -302,8 +330,22 @@ export default function RapidQueue({
                         // accessible name is not: a screen reader in a queue of
                         // thirty files would otherwise meet a hundred and fifty
                         // buttons called "Use".
+                        //
+                        // **Both halves, because either alone collides.** The
+                        // record alone is shared by two rows a catalogue
+                        // answered alike, which a folder holding one book in
+                        // two formats produces; the row alone is shared by
+                        // every record offered inside it.
+                        //
+                        // **The whole line and not the title**, which is the
+                        // half a fan out collides on: two sources answering one
+                        // ISBN both say "Dune", and the author and the year are
+                        // what a member is choosing between. Rendered from the
+                        // same function that draws the line beside it, so the
+                        // name a member hears is the row they can see.
                         aria-label={t("fallback.useFor", {
-                          title: match.title ?? entry.label,
+                          record: recordLine(match) || entry.label,
+                          label: entry.label,
                         })}
                         onClick={() => onChoose(entry.key, match)}
                         className="shrink-0 px-2 py-1 rounded-lg border border-paper-200 font-medium text-paper-700 hover:bg-paper-50 dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800"
@@ -315,6 +357,10 @@ export default function RapidQueue({
                 </ul>
                 <button
                   type="button"
+                  // Named by the row, for the reason the button above is named
+                  // by the record: thirty rows still deciding render thirty of
+                  // these, and the visible word is the same on every one.
+                  aria-label={t("fallback.keepFor", { label: entry.label })}
                   onClick={() => onKeepName(entry.key)}
                   className="text-xs text-paper-600 underline hover:text-paper-800 dark:text-paper-400 dark:hover:text-paper-200"
                 >

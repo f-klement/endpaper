@@ -19,6 +19,7 @@
  * and a stated "N of these" is what goes stale when one is added.
  */
 export interface DigitalReferenceOut {
+  book_id: number;
   confirmed_at: string;
   created_at: string;
   file_modified_at: string | null;

@@ -151,7 +151,8 @@ export function supportedExtension(name: string): SupportedExtension | null {
 // Both live in `bookBounds.ts`, which owns what a request will take. Re-exported
 // rather than re-declared so this module's callers need not know that, and so the
 // number cannot come back here as a fourth copy.
-import { plausibleYear, QUERY_CEILING, QUERY_FLOOR } from "./bookBounds";
+import { QUERY_CEILING, QUERY_FLOOR } from "./bookBounds";
+import { plausibleYear } from "./year";
 
 export { QUERY_CEILING, QUERY_FLOOR };
 
@@ -204,7 +205,7 @@ export interface NameClues {
   title: string;
   /** A folder that also appears in the name, or null. Never a guessed one. */
   author: string | null;
-  /** A four digit year `bookBounds.plausibleYear` believes, or null. */
+  /** A four digit year `year.plausibleYear` believes, or null. */
   year: number | null;
   /**
    * What to ask the catalogue, bounded, or null when nothing usable is left.
@@ -279,7 +280,7 @@ function yearIn(stem: string): number | null {
 /**
  * The first four digit run in the text that is a plausible year.
  *
- * **The window is `bookBounds.plausibleYear`'s**, which is where a year a file
+ * **The window is `year.plausibleYear`'s**, which is where a year a file
  * claims is believed or not.
  *
  * **A run outside it is skipped and the scan goes on**, rather than ending the

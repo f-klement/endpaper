@@ -14,10 +14,13 @@ import credentials
 import fetch
 from models import CatalogueCredential, OpdsServer
 
-BASE = "http://library.invalid:8083/opds/books"
+BASE = "http://10.0.9.9:8083/opds/books"
 
 #: Where a writer that is not a route moves a server to.
-MOVED = "http://attacker.invalid:8083/opds/books"
+#:
+#: A second literal address rather than a name, for `BASE`'s reason: a sync
+#: reaches the pinned transport, and a name there would be a real lookup.
+MOVED = "http://10.0.9.10:8083/opds/books"
 
 FEED = (
     '<?xml version="1.0" encoding="UTF-8"?>'
@@ -141,9 +144,9 @@ class TestAddingAndEditingAServer:
         "address",
         [
             "file:///etc/passwd",
-            "gopher://library.invalid/opds",
-            "http://library.invalid@evil.invalid/opds",
-            "http://library.invalid:99999/opds",
+            "gopher://10.0.9.9/opds",
+            "http://10.0.9.9@evil.invalid/opds",
+            "http://10.0.9.9:99999/opds",
             "not an address",
         ],
     )
@@ -240,8 +243,8 @@ class TestALoginNeverFollowsAServerToADifferentMachine:
         "moved_to",
         [
             "http://elsewhere.invalid:8083/opds/books",
-            "https://library.invalid:8083/opds/books",
-            "http://library.invalid:9090/opds/books",
+            "https://10.0.9.9:8083/opds/books",
+            "http://10.0.9.9:9090/opds/books",
         ],
     )
     def test_moving_to_another_origin_drops_the_login(
@@ -531,7 +534,7 @@ class TestASync:
         )
 
         assert response.status_code == 502
-        assert "library.invalid" not in response.text
+        assert "10.0.9.9" not in response.text
 
     @respx.mock
     def test_a_failure_never_names_the_login(self, client, admin, encryption_key):

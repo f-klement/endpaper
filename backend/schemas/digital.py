@@ -149,6 +149,15 @@ class DigitalReferenceOut(BaseModel):
 
     id: int
 
+    #: Which Book the reference is on. Here rather than on the cross shelf
+    #: subclass alone, because `NoteOut` and `QuoteOut` both carry it and both
+    #: are per book addressed sub-resources with a cross book listing: the
+    #: listing is where it earns its place, and one shape for one row is worth
+    #: more than saving a field on four responses that already know their Book.
+    #: Without it no row of that listing can be acted on, since flagging,
+    #: re-confirming and forgetting are all `/books/{book_id}/...`.
+    book_id: int
+
     # What a client said. Unverified, every one of them.
     root_label: str
     relative_path: str
@@ -166,3 +175,30 @@ class DigitalReferenceOut(BaseModel):
     #: When this server first received a report that it did not resolve, or null
     #: while nothing has said so.
     missing_since: datetime | None
+
+
+class MissingDigitalReferenceOut(DigitalReferenceOut):
+    """One flagged reference, with enough of its book to render a row.
+
+    The shape `QuoteWithBookOut` already has, for the same reason: a listing
+    spanning the shelf renders a title and a cover per row, and fetching the
+    Book per row is the N+1 `serialisation.books_to_out` exists to avoid. Three
+    scalars rather than a nested `BookOut`, which carries tags, the adder, the
+    active loan and the caller's own reading state, none of which a row shows.
+
+    **`missing_since` is narrowed to non-null**, which is the only field this
+    type narrows rather than adds. Every row is here *because* the column is
+    set, so the base's `datetime | None` would make every client branch on a
+    null the route's WHERE clause has already excluded. The guarantee lives in
+    that clause; if it ever loosens, this narrowing turns a row into a 500
+    rather than into a client rendering "missing since never", and loud is the
+    failure to prefer.
+    """
+
+    #: When this server was first told the file did not resolve. Never null
+    #: here, which is what this listing selects on.
+    missing_since: datetime
+
+    book_title: str
+    book_author: str | None = None
+    book_cover_url: str | None = None

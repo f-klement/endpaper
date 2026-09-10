@@ -265,8 +265,16 @@ export interface ZipArchive {
    * `limit` is the caller's business because the seam has no opinion about what
    * an entry is for: a package document is measured in kilobytes and a comic
    * page in megabytes.
+   *
+   * **The buffer is a plain `ArrayBuffer` and saying so is load bearing**, the
+   * same reason `inflateRaw` gives for its own source: a `Uint8Array` over an
+   * unnamed `ArrayBufferLike` may be a view over a `SharedArrayBuffer`, which is
+   * not a `BlobPart`. `readEntry` has always returned the narrow one, so a
+   * caller wrapping an entry back into a `Blob`, which is what an archive
+   * holding archives has to do, was casting to recover a guarantee this already
+   * made. Widening it again fails `tsc` at that call rather than here.
    */
-  read: (entry: ZipEntry, limit: number) => Promise<Uint8Array>;
+  read: (entry: ZipEntry, limit: number) => Promise<Uint8Array<ArrayBuffer>>;
   /**
    * The first `bounds.prefix` bytes of the entry, stopping rather than failing.
    *

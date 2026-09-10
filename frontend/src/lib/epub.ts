@@ -33,7 +33,13 @@
 import { type FileMetadata } from "./fileReaders";
 import { declaresEntities } from "./xmlEntities";
 import { readOpf } from "./opf";
-import { openZip, ZipError, zipFailureAs } from "./zip";
+import {
+  openZip,
+  ZipError,
+  zipFailureAs,
+  type ZipArchive,
+  type ZipEntry,
+} from "./zip";
 
 /**
  * How much `META-INF/container.xml` may inflate to.
@@ -113,22 +119,95 @@ function packagePath(xml: string): string | null {
 }
 
 /**
+ * What a caller may know about what this inflated, and why anything wants to.
+ *
+ * **Two entries out of an archive is a bound on one file and not on a run.** A
+ * caller reading one picked EPUB is done at 4.06 MiB and needs none of this.
+ * `takeout.ts` reads one per book out of an archive the member picked, so what
+ * bounds it is the total, and every byte inflated here is a byte that total has
+ * to see: measured by the security seat, 300 books whose package documents are
+ * deflate bombs inflate 1.26 GB out of a 1.5 MB archive, all of it invisible to
+ * a caller that can only count the bytes it handed in.
+ *
+ * **Told rather than asked**, so nothing here can be stopped halfway: the two
+ * ceilings above already bound one file, and this reports what they cost. A
+ * caller out of budget stops before the next file rather than inside this one.
+ *
+ * **It is told about a read that failed as well as one that worked**, and that
+ * is the half a first draft left out. A read stopped at its ceiling inflated
+ * those bytes and threw them away, so a charge taken from what came back
+ * charges nothing for the most expensive thing this module can do, and a
+ * package document declaring a kilobyte and holding four megabytes repeats it
+ * once per file. See `readSpending`.
+ */
+export type EpubCharge = (bytes: number) => void;
+
+/**
+ * One entry, charged whether it arrives or not.
+ *
+ * **Three rules in four lines, and each of them was bought.** The declared size
+ * is asked first, because a refusal there inflated nothing and charging it
+ * would make an honestly oversized package document cost a caller its whole
+ * allowance. A read that returns is charged what it produced. A read that
+ * throws is charged the ceiling, because that is what it may have inflated
+ * before it stopped.
+ *
+ * **The over charge is real and is the safe direction**: an entry refused for
+ * a truncated local header inflated nothing and is charged the ceiling anyway.
+ * A caller can lose a budget to a broken archive; it cannot lose a tab to a
+ * crafted one.
+ */
+async function readSpending(
+  archive: ZipArchive,
+  entry: ZipEntry,
+  limit: number,
+  charge: EpubCharge | undefined,
+): Promise<Uint8Array<ArrayBuffer>> {
+  if (entry.uncompressedSize > limit) {
+    throw new ZipError(
+      "too-large",
+      `${entry.name} declares more than ${limit}`,
+    );
+  }
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = await archive.read(entry, limit);
+  } catch (error) {
+    charge?.(limit);
+    throw error;
+  }
+  charge?.(bytes.length);
+  return bytes;
+}
+
+/**
  * Read one EPUB's metadata.
  *
  * Never throws for anything the file did, which is the contract
  * `fileReaders.FileReader` states for every reader, along with the reason it is
  * worth stating. The one thing this does not catch is a bug in this module,
  * which should not be turned into "not an EPUB".
+ *
+ * **The second parameter is optional and the type still fits `FileReader`**,
+ * which takes one argument: a caller with no total to keep passes nothing and
+ * pays nothing.
  */
-export async function readEpub(file: Blob): Promise<EpubReading> {
+export async function readEpub(
+  file: Blob,
+  charge?: EpubCharge,
+): Promise<EpubReading> {
   try {
     const archive = await openZip(file);
 
     const container = archive.find(CONTAINER_PATH);
     if (container === undefined) return { ok: false, failure: "not-an-epub" };
-    const path = packagePath(
-      utf8.decode(await archive.read(container, MAX_CONTAINER_BYTES)),
+    const containerBytes = await readSpending(
+      archive,
+      container,
+      MAX_CONTAINER_BYTES,
+      charge,
     );
+    const path = packagePath(utf8.decode(containerBytes));
     if (path === null) return { ok: false, failure: "not-an-epub" };
 
     // The path is a URI reference, so a producer may have escaped a space or a
@@ -138,9 +217,13 @@ export async function readEpub(file: Blob): Promise<EpubReading> {
     const entry = archive.find(path) ?? archive.find(unescapePath(path));
     if (entry === undefined) return { ok: false, failure: "not-an-epub" };
 
-    const metadata = readOpf(
-      utf8.decode(await archive.read(entry, MAX_PACKAGE_BYTES)),
+    const packageBytes = await readSpending(
+      archive,
+      entry,
+      MAX_PACKAGE_BYTES,
+      charge,
     );
+    const metadata = readOpf(utf8.decode(packageBytes));
     if (metadata === null) return { ok: false, failure: "not-an-epub" };
     return { ok: true, metadata };
   } catch (error) {

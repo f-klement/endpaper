@@ -25,6 +25,7 @@ import {
   useListLocations,
   useListTags,
   useLookupIsbn,
+  useReportDigitalReference,
   useScanAdd,
   useSearchBooks,
   useUploadCover,
@@ -35,10 +36,12 @@ import type {
   BookMatch,
   BookSearchOut,
   CatalogueSource,
+  DigitalReferenceIn,
   LocationOut,
   TagOut,
 } from "../../api/generated/model";
 import { QUERY_FLOOR } from "../../lib/bookBounds";
+import { referenceFor } from "../../lib/digitalReference";
 import { useTranslation, type MessageKey } from "../../i18n";
 import type { FileFailure } from "../../lib/fileReaders";
 import type { AudioFailure, AudioTags } from "../../lib/audiobook";
@@ -714,6 +717,36 @@ export interface ScannedEntry {
    * fact in two fields that agree by construction and by nothing else.
    */
   claims?: readonly string[];
+  /**
+   * Where the file this row was drafted from is, as the server takes it.
+   *
+   * **Derived at the pick and carried, because the `File` does not survive the
+   * read.** Only the key and the label go into the queue, so by the time the
+   * batch runs there is nothing left to ask. `lib/digitalReference.ts` decides
+   * what this browser may honestly claim, and answers nothing for a file picked
+   * one at a time.
+   *
+   * **Absent for an audiobook row**, and that is the format's own inversion
+   * again rather than an omission: a row standing for forty chapter files has
+   * no one file to point at, and a book holds sixteen references at the most.
+   */
+  reference?: DigitalReferenceIn;
+  /**
+   * Whether this row's ISBN was read out of the file's **name**.
+   *
+   * **Carried rather than read off the state, because the state deliberately
+   * stops saying it.** `lookUpTheName` promotes a row to `found` whenever the
+   * ISBN lookup answers, and every row reaching that line is one standing under
+   * its own name, so after a successful lookup `found` covers a file that
+   * stated its identifier and a name that happened to contain one. The comment
+   * there says as much: a name carrying an ISBN takes the route a barcode
+   * takes. That collapse is right for the lookup and wrong for anything asking
+   * where the identifier came from.
+   *
+   * Set by `fromTheName` and cleared by `chooseFor`, which are the only two
+   * places that know. `theIsbnWasRead` is the one reader.
+   */
+  isbnFromTheName?: true;
 }
 
 /**
@@ -771,10 +804,12 @@ function pickedKey(file: File): string {
 /**
  * The folders above a picked file, outermost first.
  *
- * `webkitRelativePath` is the browser's own answer and it is relative to the
- * folder the member chose, so nothing above that folder is visible here and no
- * path off their disk can be read. A file picked one at a time carries none at
- * all, which is the ordinary case and reads as no folders.
+ * **What `webkitRelativePath` is, and what its first segment means, is stated
+ * once in `lib/digitalReference.ts`** and not again here: these are two
+ * decompositions of one string, this one dropping the file's own name and that
+ * one splitting the picked root off the front, and the fact they share is the
+ * one that goes stale twice if it is written twice. A file picked one at a time
+ * carries no path at all, which is the ordinary case and reads as no folders.
  *
  * Outermost first is what `readName` wants: in a library on disk the author is
  * the folder **above** the book, and the folder immediately over a file is
@@ -789,6 +824,48 @@ function foldersOf(file: File): string[] {
 /** An entry with records offered and neither taken nor refused. */
 function isBeingDecided(entry: ScannedEntry): boolean {
   return entry.state === "choosing";
+}
+
+/**
+ * Whether this row's ISBN is good enough to write a location onto somebody
+ * else's book.
+ *
+ * **A duplicate 409 names a book this member did not add, and the location
+ * follows the ISBN.** So the question is not whether the ISBN is well formed,
+ * which the parser already answered, but where it came from.
+ *
+ * **A name is the one provenance that invents one.** `fileName.isbnIn` takes a
+ * ten digit candidate only as a whole token, and its own docstring carries the
+ * reason: a random ten digit run passes modulus 11 about one time in eleven. A
+ * false positive there used to cost a failed row and nothing else. Following it
+ * would write a member's own folder names onto a stranger's book, spend one of
+ * that book's sixteen references, and leave the row on screen saying failed
+ * with nothing saying a write had happened.
+ *
+ * **The first draft read `state === "found"` and did not refuse that case at
+ * all.** `lookUpTheName` promotes a row to `found` on a successful ISBN lookup,
+ * and every row reaching that call is one standing under its own name, so the
+ * one provenance this refuses was the one being promoted past it. A state that
+ * two paths deliberately collapse cannot answer a question about which path it
+ * came from. `ScannedEntry.isbnFromTheName` carries it from the site that
+ * knows.
+ *
+ * **What the refusal costs, and it is larger than the first draft of this
+ * paragraph said.** A genuine ISBN in a file name is common, and a re import of
+ * such a file loses its location: the book is already in the catalogue, the
+ * create 409s, and nothing is recorded.
+ *
+ * **There is no press that gets it back**, which is the half worth stating,
+ * because this is the paragraph somebody will read to judge whether the gate is
+ * too strict. A flagged row has a non empty `isbn`, so `lookUpTheName` returns
+ * from the ISBN branch before the search, and the search branch is the only
+ * producer of `choosing`. No records are ever offered for such a row, so there
+ * is no record to take, and `OFFERED_AGAIN` is false for both answers it can
+ * end on. The location is not recoverable inside a rapid run. Both critic seats
+ * reached that independently, 2026-09-10.
+ */
+function theIsbnWasRead(entry: ScannedEntry): boolean {
+  return entry.isbnFromTheName !== true;
 }
 
 /**
@@ -973,7 +1050,23 @@ export interface UseRapidIntakeResult {
 
   addAll: () => void;
   isAdding: boolean;
-  result: { added: number; failed: number } | null;
+  /**
+   * What the batch did, once it has run.
+   *
+   * `unreferenced` is books that were added and whose location was not
+   * recorded, which is a different sentence from `failed`: the book is in the
+   * catalogue and only the answer to "where is the file" was lost. Zero for a
+   * pick that offered no location at all, so the screen says nothing about a
+   * batch of barcodes.
+   *
+   * **A row that never had a location to send is not counted here**, and the
+   * two are different sentences too: a refusal is worth re picking the folder
+   * for, since the sighting is idempotent on the pair and a second pick costs
+   * nothing, and an audiobook has nothing a second pick would change.
+   * `file.explain` scopes what it promises to a book that is one file for that
+   * reason.
+   */
+  result: { added: number; failed: number; unreferenced: number } | null;
 }
 
 /**
@@ -1010,11 +1103,13 @@ export function useRapidIntake(): UseRapidIntakeResult {
   const [result, setResult] = useState<{
     added: number;
     failed: number;
+    unreferenced: number;
   } | null>(null);
 
   const queryClient = useQueryClient();
   const invalidate = useInvalidate();
   const scanAdd = useScanAdd();
+  const reportReference = useReportDigitalReference();
   const locations = useKnownLocations();
   // For the per-row failure reason: a rejected fetch has no message worth
   // showing, so `errorText` needs the catalogue to supply one. The locale is
@@ -1136,6 +1231,9 @@ export function useRapidIntake(): UseRapidIntakeResult {
         ...(pending ? [pending] : []),
         ...fresh.map((walk) => ({
           key: pickedKey(walk.file),
+          // Taken while the `File` is still in hand. After the read the queue
+          // holds a key and a label and could not derive this if it wanted to.
+          reference: referenceFor(walk.file) ?? undefined,
           // Cleaned for the reason every derived value is: a name is somebody
           // else's text, and this one is printed beside a title that was.
           label: plainName(walk.file.name),
@@ -1204,6 +1302,10 @@ export function useRapidIntake(): UseRapidIntakeResult {
       draft,
       query: clues.query ?? undefined,
       reason: note,
+      // The one site that knows, and it stays true through the lookup that
+      // promotes this row to `found`: what the catalogue answered about an ISBN
+      // does not change where the ISBN came from.
+      isbnFromTheName: draft.isbn === "" ? undefined : true,
     };
   }
 
@@ -1556,6 +1658,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
     setIsAdding(true);
     const shelf = normaliseLocation(location);
     let added = 0;
+    let unreferenced = 0;
     const failures: ScannedEntry[] = [];
 
     for (const entry of ready) {
@@ -1570,7 +1673,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
         // run does not offer takes its blank value: no cover, no tags, not
         // private. `format` is the exception and is carried off the entry,
         // because a picked file answers it and a barcode does not.
-        await scanAdd.mutateAsync({
+        const book = await scanAdd.mutateAsync({
           data: toScanRequest({
             ...blankPending(shelf),
             format: entry.format,
@@ -1578,7 +1681,52 @@ export function useRapidIntake(): UseRapidIntakeResult {
           }),
         });
         added += 1;
+        if (entry.reference) {
+          // **Its own `try`, outside the book's, and that placement is the
+          // whole of it.** The book exists by the time this runs, so a throw
+          // caught by the arm below would report a created book as failed and
+          // a member would add it again into a duplicate. Same shape as the
+          // cover and the tags in `useScanFlow.confirm`, for the same reason.
+          //
+          // **A second request per book, sequential with the first.** There is
+          // no batched route: the contract is one sighting per location, and a
+          // sighting is idempotent on the pair, so a folder imported twice
+          // refreshes rows rather than doubling them. A three hundred book
+          // pick is six hundred requests against one SQLite writer, which is
+          // the reason this loop was already sequential.
+          try {
+            await reportReference.mutateAsync({
+              bookId: book.id,
+              data: entry.reference,
+            });
+          } catch {
+            // Counted rather than swallowed. A member who pointed at a folder
+            // so the library would know where their files are should not be
+            // told three hundred were added and left to discover that none of
+            // them says where it came from.
+            //
+            // **Not counted as refused**, which this arm also catches: a
+            // dropped connection, a timeout and a browser that went offline all
+            // land here and none of them is the server saying no.
+            unreferenced += 1;
+          }
+        }
       } catch (error) {
+        // **The book this row is a duplicate of is where its file is.** Re
+        // importing a folder somebody imported last month is the case the
+        // sighting was made idempotent for, and every book in it answers 409,
+        // so a reference posted only after a successful create would be posted
+        // on exactly the pick that needs it least. `bookId` is present only
+        // where the holder is visible to this member, which is the same test
+        // `addCopy` applies before offering to copy it.
+        const holder = error instanceof ApiError ? error.bookId : undefined;
+        if (holder !== undefined && entry.reference && theIsbnWasRead(entry)) {
+          // The row is a failure whichever way this goes, and it carries its
+          // reason on screen, so a refusal here is not counted a second time.
+          await reportReference
+            .mutateAsync({ bookId: holder, data: entry.reference })
+            .catch(() => undefined);
+        }
         // Kept, with its reason, rather than counted. "6 could not be added"
         // after scanning a shelf of thirty is unrecoverable: nothing says
         // which six, and the queue that knew has just been cleared.
@@ -1609,7 +1757,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
         .map((entry) => failed.get(entry.key) ?? entry),
     );
     setIsAdding(false);
-    setResult({ added, failed: failures.length });
+    setResult({ added, failed: failures.length, unreferenced });
   }
 
   // One filter, read twice. Two would let the count on the button and the
@@ -1671,6 +1819,18 @@ export function useRapidIntake(): UseRapidIntakeResult {
         isbn: match.isbn13 ?? "",
         draft: draftFromMatch(match),
         matches: undefined,
+        // A member looked at this record and took it, so the identifier is the
+        // catalogue's rather than the name's. `settle` spreads, so the explicit
+        // `undefined` clears what `fromTheName` set.
+        //
+        // **It clears nothing today, and that is stated rather than left to be
+        // reasoned from.** A flagged row has a non empty `isbn`, so
+        // `lookUpTheName` returns from the ISBN branch and never produces the
+        // `choosing` state this control is rendered under, so no flagged row
+        // reaches here. Kept because it is correct and free, and because the
+        // path that would produce one is exactly the remedy this refusal is
+        // missing. Deleting it fails no test, which is the honest rung.
+        isbnFromTheName: undefined,
       }),
     keepTheName: (key) =>
       settle(key, {
