@@ -687,13 +687,22 @@ pair misses. Measured over the same 500 ISBNs: **1.435s per lookup becoming 1.33
 **The Spanish National Library declares no remit**, unlike the two above it, and that is a
 measurement rather than an omission: it alone answers four books outside `978-84`, one
 Portuguese, one Argentine and two Uruguayan. A remit would stop it being asked about them.
-So it is the one national catalogue in phase two that every lookup can reach.
+
+**Any lookup that reaches phase two can reach three national catalogues**: the Czech, the
+Spanish and the Argentine. The first two are measured and fail the zero book bar below.
+The Argentine one is not measured at all: the survey never put these ISBNs to it, so
+there is no evidence either way and a group rule there would be a guess. It is also the
+only catalogue in the roster carrying a login over a plaintext connection, which is what
+makes its fan out worth stating rather than leaving to be discovered.
 
 **No book is lost to it, and that is a measured bound rather than an intention.** A
 catalogue may carry a remit only if there is no book it alone answers outside that remit,
 which rules the Czech National Library out on two: a Portuguese one and an Argentinian one
-that nothing else in the roster holds. `backend/sources.py` carries the table and the
-measurement, as `SERVES_GROUPS`.
+that nothing else in the surveyed sample holds. The survey covers fewer catalogues than
+the roster does, so a claim here that nothing else holds a book is a claim about the
+sample and not about the roster. Each catalogue declares its own remit, as
+`serves_groups` on its row in `backend/targets.py`; `backend/sources.py` derives
+`SERVES_GROUPS` from those rows and carries the rule and the measurement.
 
 **Three things are asked anyway**, and each is a place the rule declines to make a claim
 rather than a hole in it. Phase one is never filtered, so a catalogue a library has

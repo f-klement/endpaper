@@ -2428,8 +2428,8 @@ def _nkp_record(
 #     2 Uruguayan, and nothing in the four non Romance frames.
 #   * Lookup latency min 0.122s, median 0.155s, p90 0.276s, max 1.030s.
 #
-# **Its remit is deliberately not declared in `sources.SERVES_GROUPS`**, and
-# that is a measurement rather than an omission. The rule there is that a remit
+# **Its `serves_groups` is deliberately empty**, and that is a measurement
+# rather than an omission. The rule in `sources.SERVES_GROUPS` is that a remit
 # is listed only where no book the source alone answers falls outside it, and
 # this one alone answers **four** books outside `978-84`: one Portuguese, one
 # Argentine and two Uruguayan. A `978-84` remit would stop it being asked about
@@ -2494,8 +2494,40 @@ def _nkp_record(
 # **What it costs, stated rather than left to be discovered.** Every install now
 # asks a plaintext Argentine catalogue about any ISBN the sources above it miss,
 # where before only an install that had entered a login did. This row declares
-# no remit in `sources.SERVES_GROUPS`, so that is every miss rather than the
-# Argentine ones, and narrowing it is a measurement nobody has taken.
+# an empty `serves_groups`, so that is every miss rather than the Argentine
+# ones: the member's ISBN reaches a further third party, the library sees fan
+# out from one account for books it is unlikely to hold, and the tail pays a
+# request for a source that will usually answer nothing.
+#
+# **Narrowing it was measured on 2026-09-07 and refused, and the refusal is the
+# measurement's answer rather than a deferral.** Argentina's groups are
+# `978-950` and `978-987`; the question a remit turns on is what this catalogue
+# answers *outside* them, and this sample cannot be asked it. This source has no
+# column in the 500 rows, and the pass below covered the fifty Argentine rows
+# only, so 450 were never put to it. Inside those fifty the answer is vacuous by
+# construction: all 50 carry an Argentine group, 36 `978-950` and 14 `978-987`,
+# so the remit would have refused 0 of the 10 answers because the frame holds
+# nothing for it to refuse.
+#
+# **What is measured points the other way.** Over the five sampled sources with
+# a country of their own, the DNB, the OeNB, the NLG, the NKP and the BNE, the
+# share of yield outside the source's own groups runs 0% at the NLG to 17.5% at
+# the BNE. Named rather than counted, because "national catalogue" is used
+# further down this module to mean the five added most recently, which excludes
+# the DNB and would make the same sentence read four. So a group rule is not
+# disqualified by
+# most of the yield sitting elsewhere. It is disqualified by the bar in
+# `sources.SERVES_GROUPS`, which is zero books lost, and by the nearest measured
+# analogue failing that bar worst: 4 of the 18 books the BNE alone answers fall
+# outside `978-84`, and **one of the four is Argentine**. A Spanish catalogue
+# holds an Argentine book this chain has nowhere else, which is exactly the
+# shape a `978-950` remit here would lose in the other direction.
+#
+# **And there is nothing else for a remit to key on.** `Plan.lookup_in_turn`
+# takes a registration group, and a group is the only thing an ISBN carries
+# about where it came from. Another key means another input, and on the lookup
+# path, before any record comes back, there is none. Moving this needs the 500
+# put to this catalogue, which is a probe rather than a pass over the fixture.
 #
 # **A rotated credential has to read as a credential**, which is the ticket's
 # own requirement and was not true of this application before this row. Any SRU

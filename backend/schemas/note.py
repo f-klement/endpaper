@@ -23,10 +23,9 @@ class NoteOut(BaseModel):
     #: also takes, so a client that omitted the field would un-private the row
     #: on every edit.
     #:
-    #: **On the wire, and no screen renders it yet.** It is what a member would
-    #: need to tell which of their notes the rest of the library cannot see, and
-    #: until something draws it they cannot: the field is here so the marker is
-    #: not a second schema change behind the badge that shows it.
+    #: **Drawn**, by `NoteList.tsx`, which marks a true and states the false as
+    #: the default above the form that writes one. Both tellings are needed and
+    #: that component's docstring says which question each answers.
     #:
     #: Nothing leaks by reporting it: a note the caller may not read is not in
     #: the response at all, so the only `true` anybody sees is their own.

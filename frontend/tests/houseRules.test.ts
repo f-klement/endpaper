@@ -31,6 +31,10 @@ import * as zxingDouble from "@zxing/library";
 // the figure it refuses is computed rather than written here.
 import { COLUMN_SPECS } from "../src/lib/libraryColumns";
 
+// The refusal this file and the ScanPage guard both apply, in one home: the
+// module says why it is not a copy per guard.
+import { CARRIES_A_BOOK } from "./carriesABook";
+
 // **This file's own source, which no glob here can supply.** The reason and
 // the measurement are at `SELF` in the address rule below, which is the one
 // place this tree states it: a rule reading a glob written here is exempt from
@@ -359,36 +363,343 @@ describe("a member's book file cannot leave the browser", () => {
   });
 
   it("keeps the picked file out of the value a request is built from", () => {
-    // The `draftFrom*` family is the seam between the reading path and the
-    // request path, and the property is the parameter: each takes what was
-    // parsed, so a `File` has nowhere to travel. Taking one would compile, would
-    // pass every other test, and would put the bytes one spread away from a
-    // body.
-    //
-    // **Every one of them, matched by shape rather than by name.** This asserted
-    // `draftFromFile` alone while there were two of them and now there are five,
-    // and the next reader is added by somebody writing a format, which is not
-    // the moment anybody rereads this file.
-    const types = entries().find(([path]) =>
-      path.endsWith("pages/ScanPage/types.ts"),
-    );
-    expect(types).toBeDefined();
+    // The draft builders are the seam between the reading path and the request
+    // path, and the property is the parameter: each takes what was parsed, so a
+    // member's book has nowhere to travel. Taking one would compile, would pass
+    // every other test, and would put the bytes one spread away from a body.
+    const offenders = draftBuilders()
+      .filter(takesABook)
+      .map((one) => `${one.path}: ${one.name ?? "an anonymous export"}`);
 
-    const signatures = [
-      ...withoutProse(types![1]).matchAll(
-        /export function (draftFrom\w+)\(([^)]*)\)/g,
+    expect(offenders).toEqual([]);
+  });
+
+  it("reads every draft builder the tree spells, wherever it sits", () => {
+    // **Two instruments and no number.** The text finds every `draftFrom`
+    // identifier the source spells, a declaration or a call alike; the walk
+    // finds what is declared. A name spelled and not declared is a file the
+    // walk did not reach, a parse that returned an empty program, or a glob
+    // that matched nothing, and each of those arrives here as a disagreement
+    // rather than as the rule above passing over an empty set.
+    const spelled = new Set(
+      entries().flatMap(([, source]) =>
+        [...withoutProse(source).matchAll(/\bdraftFrom\w*/g)].map(
+          (match) => match[0],
+        ),
       ),
-    ];
-    // A regex that matched nothing would make the assertion below pass for
-    // ever, and renaming the family is exactly how that happens.
-    expect(signatures.length).toBeGreaterThan(1);
+    );
+    const declared = new Set(draftBuilders().map((one) => one.name));
+
+    expect([...spelled].filter((name) => !declared.has(name))).toEqual([]);
+    expect(spelled.size).toBeGreaterThan(1);
+  });
+
+  it("visits every module that annotates a draft as a return", () => {
+    // The other half of the file set, and the half the arm above cannot hold: a
+    // builder called something else is never spelled `draftFrom`, so narrowing
+    // the walk's file filter would hide it with that arm green. This asks the
+    // text where a draft is returned and requires the walk to have been in that
+    // file. It exists because it was evaded: the filter narrowed to one module,
+    // with a renamed builder written into another, passed every other arm here.
+    const annotates = entries()
+      .filter(([, source]) => ANNOTATES_A_DRAFT.test(withoutProse(source)))
+      .map(([path]) => path);
+    const visited = new Set(draftBuilders().map((one) => one.path));
+
+    expect(annotates.filter((path) => !visited.has(path))).toEqual([]);
+    expect(annotates.length).toBeGreaterThan(0);
+  });
+
+  it("reads a draft return in the spellings a builder writes it", () => {
+    // **The pattern is driven rather than described**, because nothing else
+    // drives it: it is the second instrument, so it can narrow until it matches
+    // nothing and the arm above passes over an empty set. Its first draft
+    // required `BookDraft` to be the first token after the colon, which an
+    // async builder's `Promise<BookDraft>` walks straight past. Both critic
+    // seats measured that independently, each with a diagonal differing in the
+    // return spelling alone, which is why these are rows rather than a sentence.
+    expect(ANNOTATES_A_DRAFT.test("): BookDraft {")).toBe(true);
+    expect(ANNOTATES_A_DRAFT.test("): Promise<BookDraft> {")).toBe(true);
+    expect(ANNOTATES_A_DRAFT.test("): null | BookDraft {")).toBe(true);
+    expect(ANNOTATES_A_DRAFT.test("): Readonly<BookDraft> {")).toBe(true);
     expect(
-      signatures
-        .filter((match) => /\bFile\b/.test(match[2]!))
-        .map((match) => match[1]),
-    ).toEqual([]);
+      ANNOTATES_A_DRAFT.test("const make: (cover: File) => BookDraft = f;"),
+    ).toBe(true);
+    expect(ANNOTATES_A_DRAFT.test("): Request {")).toBe(false);
+    expect(
+      ANNOTATES_A_DRAFT.test("const f = (x: number) => makeBookDraft();"),
+    ).toBe(false);
+  });
+
+  it("finds a builder by what it returns and not only by its name", () => {
+    // The half that goes quiet without failing. Where the return arm stops
+    // matching, a parser property renamed under it or a `BookDraft` reached
+    // through an alias, this rule degrades to the name check it already was and
+    // nothing goes red. Asserted as "at least one", not as the member that
+    // satisfies it today, so it does not become a list to keep.
+    expect(draftBuilders().filter((one) => !one.byName)).not.toHaveLength(0);
+  });
+
+  /**
+   * What the derivation says about each shape, as a table.
+   *
+   * A table rather than a run of assertions in one test, so a row that stops
+   * holding names itself: the run aborts at the first failure, and a mutation
+   * that weakened two arms would be reported as one.
+   *
+   * **It drives `takesABook`, which is the predicate the rule above applies**,
+   * rather than a second spelling of it. A table asserting its own copy cannot
+   * see that copy diverge, and that is not hypothetical: narrowing the rule to
+   * `File` alone left every row here green and admitted a `Blob`.
+   *
+   * The refused rows are evasions somebody ran rather than shapes somebody
+   * imagined. An arrow, and a second bracket in a parameter list, are what
+   * `tests/pages/ScanPage/types.test.ts` records against the signature regex
+   * this replaced. An overload set and an anonymous default export are what the
+   * walk that replaced it admitted on its first draft.
+   */
+  const SHAPES: [string, string, boolean][] = [
+    [
+      "a declaration taking a File is refused",
+      "export function draftFromX(file: File): BookDraft {}",
+      true,
+    ],
+    [
+      "an arrow assigned to a const is refused",
+      "export const draftFromX = (file: File): BookDraft => 0;",
+      true,
+    ],
+    [
+      "an overload is refused for what it declares, not what it implements",
+      "export function draftFromX(file: File): BookDraft;\n" +
+        "export function draftFromX(input: unknown): BookDraft {}",
+      true,
+    ],
+    [
+      "an anonymous default export is refused",
+      "export default function (file: File): BookDraft {}",
+      true,
+    ],
+    [
+      "a callable held as an object property is refused",
+      "export const built = { draftFromX: (file: File) => 0 };",
+      true,
+    ],
+    [
+      "a File behind two other parameters is refused",
+      "export function draftFromX(c: NameClues, done: () => void, f: File) {}",
+      true,
+    ],
+    [
+      "a builder renamed out of the family is refused for its return",
+      "function make(cover: File): BookDraft {}",
+      true,
+    ],
+    [
+      "an array view is refused, and not only a File",
+      "export function draftFromX(bytes: Uint8Array): BookDraft {}",
+      true,
+    ],
+    [
+      "a builder taking the parsed record is admitted",
+      "export function draftFromX(record: OpfRecord): BookDraft {}",
+      false,
+    ],
+    [
+      "a function that builds no draft is admitted",
+      "export function elsewhere(file: File): Request {}",
+      false,
+    ],
+  ];
+
+  it.each(SHAPES)("%s", (_label, source, refused) => {
+    expect(buildersIn(source, "ts").some(takesABook)).toBe(refused);
   });
 });
+
+/**
+ * Where the text says a draft is returned.
+ *
+ * **The walk's own test for the return derivation, spelled for source text**: a
+ * `BookDraft` anywhere in the annotation rather than the whole of it, because
+ * two instruments disagreeing about what a member is leave the gap between them
+ * unheld. That gap was measured twice, each time as a diagonal differing in the
+ * return spelling alone: the first draft asked for the bare type and missed
+ * `Promise<BookDraft>`, the second read only the colon and missed
+ * `(cover: File) => BookDraft`, which is a callable type and a member.
+ *
+ * **Both introducers, and there are two**: TypeScript writes a return
+ * annotation after `:` or after `=>`, so the alternation is closed and a third
+ * arm is not waiting to be found. Measured over the 430 modules under `src/`
+ * with comments stripped: this, the colon only form and a newline bounded
+ * variant all select the same one module, so the widest of them requires no
+ * extra visit today.
+ *
+ * **The class stops at `;`, `{` and `=` and not at a newline**, so a wrapped
+ * annotation is still seen. The cost is that a match can reach from one line
+ * into a mention below it, and the direction is deliberate: an extra file in
+ * this set demands a visit that is not needed, which fails loudly, where a file
+ * missing from it is a builder nothing holds and fails not at all.
+ *
+ * **What the `=>` arm newly over-matches is an arrow body, not a name.** After
+ * an arrow the class runs to the next `;`, `{` or `=`, so a single expression
+ * body naming the bare type reads here as a return annotation:
+ * `const asDraft = (r: OpfRecord) => coerceRecord(r) as BookDraft;` puts its
+ * module in this set. Measured by appending that line to `lib/fb2.ts` with the
+ * file filter left alone: `SUITE EXIT: 1`, this arm naming a module that
+ * declares no builder. It fires on nothing in the tree today, and it is the
+ * loud direction, so it is a cost rather than a defect. **It is written down
+ * for whoever it fires on**: told the cost is a name prefix, they would read a
+ * failing cast as the pattern being wrong and narrow it, and narrowing it is
+ * the regression found twice already here. The negative row in the fixture
+ * below is about the word boundaries and is not this case.
+ *
+ * **Stopping at `{` is also what it does not see**: an inline object return,
+ * `): { draft: BookDraft; warnings: string[] }`, is outside this. The rule
+ * still refuses such a builder, since the walk reads the whole annotation; what
+ * is not held for it is the file set, and only where somebody has also narrowed
+ * the filter. A bounded run of any character would reach it and buys a number
+ * nobody can re-derive, and a third stop character is the enumeration this file
+ * argues against everywhere else.
+ */
+const ANNOTATES_A_DRAFT = /\)\s*(?::|=>)[^;{=]*\bBookDraft\b/;
+
+/** One function that builds a draft: where it is, and what it takes. */
+type DraftBuilder = {
+  path: string;
+  /** As bound, or `null` where nothing binds it. */
+  name: string | null;
+  /** Found by its name rather than by its return type. */
+  byName: boolean;
+  /** Each parameter as it is written, annotation included. */
+  params: string[];
+};
+
+/**
+ * Does this builder take a member's book?
+ *
+ * **One predicate, used by the rule and by the table that measures the rule.**
+ * Spelled twice they drift, and the drift is silent in the direction that
+ * matters: narrowed to `File` in the rule and left whole in the table, a
+ * builder taking a `Blob` is admitted with every arm green.
+ */
+function takesABook(one: DraftBuilder): boolean {
+  return one.params.some((param) => CARRIES_A_BOOK.test(param));
+}
+
+/**
+ * Every draft builder in one source, found by two derivations.
+ *
+ * **Two, because either alone is beaten by the rename the other sees.** A name
+ * beginning `draftFrom` is the family as it is written today; an annotated
+ * return of `BookDraft` is what a member of it *is*, and that arm is what makes
+ * a builder called something else a member. It is also the only thing that
+ * makes an anonymous one a member, which is what
+ * `export default function (file: File): BookDraft` established.
+ *
+ * **A callable is anything carrying a `params` array**, which is the whole
+ * family: a declaration, an expression, an arrow, a method, an accessor, an
+ * overload signature and a function type. That is the structural test `defers`
+ * makes further down this file, and it replaces two named node kinds that
+ * between them saw neither an overload nor an anonymous export.
+ *
+ * **A name is the `id` or the `key` of the callable or of the node above it**,
+ * which is every field this AST binds a name in, rather than a list of the node
+ * kinds that do the binding. A callable bound by neither is anonymous, and is a
+ * member only by what it returns.
+ *
+ * **Parsed rather than matched, and the parameter is taken as source text.**
+ * The shape is what matters and not how the line is spelled, and a default
+ * value with a bracket in it truncates a captured parameter list without
+ * changing how many matches there are. Both are evasions this tree measured
+ * against the regex that stood here.
+ *
+ * **The exclusions, which are what this does not close.** A builder both
+ * renamed and left with no return annotation is in neither derivation. A
+ * parameter typed through an alias reads as the alias, whether that is the type
+ * itself (`type Picked = File`) or an object holding one (`{ file: File }`).
+ * And the whole rule is about a parameter: a builder reaching a file through a
+ * closure or a module global takes nothing and is invisible here, which is why
+ * `tests/pages/ScanPage/types.test.ts` holds the stronger rule, every mention
+ * in the module rather than every parameter, over the one file the family lives
+ * in today.
+ */
+function buildersIn(source: string, lang: "ts" | "tsx"): DraftBuilder[] {
+  const found: DraftBuilder[] = [];
+  const slice = (node: Node): string =>
+    source.slice(Number(node.start), Number(node.end));
+  const bound = (node: Node | null): string | null => {
+    for (const field of ["id", "key"] as const) {
+      const named = node?.[field];
+      if (isNode(named) && named.type === "Identifier") return text(named.name);
+    }
+    return null;
+  };
+  const consider = (node: Node, parent: Node | null): void => {
+    if (!Array.isArray(node.params)) return;
+    const name = bound(node) ?? bound(parent);
+    const byName = name !== null && name.startsWith("draftFrom");
+    const returns = isNode(node.returnType) ? slice(node.returnType) : "";
+    if (!byName && !/\bBookDraft\b/.test(returns)) return;
+    found.push({
+      path: "",
+      name,
+      byName,
+      params: (node.params as unknown[]).filter(isNode).map(slice),
+    });
+  };
+  const walk = (value: unknown, parent: Node | null): void => {
+    if (Array.isArray(value)) {
+      for (const item of value as unknown[]) walk(item, parent);
+      return;
+    }
+    if (!isNode(value)) return;
+    consider(value, parent);
+    for (const key of Object.keys(value)) walk(value[key], value);
+  };
+  walk(parseAst(source, { lang }), null);
+  return found;
+}
+
+/**
+ * The draft builders in the tree, which is every module and not one file.
+ *
+ * **The file set is the exclusion this fix was for.** This read
+ * `pages/ScanPage/types.ts` alone, found by `endsWith`, while its comment
+ * claimed the family: a builder written in any other module was outside it with
+ * nothing red. Every builder sits in that module today, so the wider read
+ * refuses nothing extra now and needs no revisiting when the family moves or
+ * grows a second home.
+ *
+ * Files are skipped rather than declarations, and by the identifiers a builder
+ * cannot be declared without spelling.
+ *
+ * **What holds the file set, measured rather than claimed.** Narrowing this
+ * filter back passes on today's tree, since every builder is in that module.
+ * With one written elsewhere it fails "reads every draft builder the tree
+ * spells" where that builder is named for the family, and "visits every module
+ * that annotates a draft as a return" where it is not. **One arm per
+ * derivation**, each the text instrument for one of the two things that make a
+ * callable a member, `ANNOTATES_A_DRAFT` being the second. What holds is only
+ * what those instruments read, which is why the second says which spellings of
+ * a return it sees and which it does not: a member written in a spelling it
+ * misses still fails the rule itself, and does not hold the file set. The first
+ * was the whole answer until a renamed builder in another module passed every
+ * arm, and the second missed an async return, then a callable type.
+ */
+function draftBuilders(): DraftBuilder[] {
+  return entries()
+    .filter(
+      ([, source]) =>
+        source.includes("draftFrom") || source.includes("BookDraft"),
+    )
+    .flatMap(([path, source]) =>
+      buildersIn(source, path.endsWith(".tsx") ? "tsx" : "ts").map((one) => ({
+        ...one,
+        path,
+      })),
+    );
+}
 
 /** The source with comments removed, so a rule cannot be satisfied by prose. */
 function withoutProse(source: string): string {

@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 import sources
+import targets
 from enums import CatalogueSource
 from isbn import registration_group
 
@@ -1180,8 +1181,13 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         has measured.
 
         The NKP is the case: it would be the largest single saving here, and it
-        is the only source in the roster holding `9789727765584` (Portuguese)
-        and `9789878853932` (Argentinian). `TIER_MAX_CONCENTRATION` refused it
+        is the only source **in the sample** holding `9789727765584`
+        (Portuguese) and `9789878853932` (Argentinian). In the sample and not in
+        the roster, because this loop iterates the sample's columns and there are
+        seven of those against eleven seeded rows: the Argentine catalogue has no
+        column, and an Argentine book is the one it would most likely answer.
+
+        `TIER_MAX_CONCENTRATION` refused it
         on a different measurement, so this is the second rule to and the
         catalogue is not the worse for either: it answers 42 of the 278 the
         leading pair misses.
@@ -1197,6 +1203,90 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         ]
         assert sorted(lost) == ["9789727765584", "9789878853932"]
         assert CatalogueSource.NKP not in sources.SERVES_GROUPS
+
+    def test_a_remit_may_only_be_declared_for_a_source_the_sample_measures(self):
+        """**Not clearing the bound above is not the same as clearing it**, and
+        without this the difference is invisible.
+
+        That test reads `row[source.value]`, so a source the sample has no column
+        for raises `KeyError` rather than stating a rule, and the repair a reader
+        reaches for is to skip a source with no column. Skipping is what makes
+        the bound vacuous for precisely the rows that most need it: a catalogue
+        nobody measured is the one whose remit is a guess. Stated here as the
+        rule, so what fails names it.
+
+        **Read off the fixture's own columns rather than off `SAMPLED`**, which
+        selects the same set today by a different rule: `SAMPLED` derives from
+        `MEASURED`, the sources needing no credential, and this is asking which
+        sources the sample holds an answer for. Against `SAMPLED` the
+        remedy the tree recommends would not work, because putting the 500 to a
+        credentialled catalogue and committing its column would leave this
+        assertion refusing it, and the only way through would be adding a row to
+        `MEASURED` that two comments there forbid. So the coupling is loosened at
+        the guard rather than argued about at the fixture.
+        """
+        columns = {
+            key
+            for key in _sample()[0]
+            if key not in {"frame", "isbn"} and not key.startswith("seconds_")
+        }
+        assert set(sources.SERVES_GROUPS) <= {CatalogueSource(name) for name in columns}
+
+    def test_the_argentine_frame_cannot_give_the_argentine_catalogue_a_remit(self):
+        """**A remit is what the Argentine row would buy most, and this sample
+        cannot sell it one.** Written as a test because the tempting number
+        reads the other way and somebody will find it again.
+
+        Shipping that row's login made every install ask a plaintext catalogue,
+        carrying HTTP Basic, about every ISBN the chain misses, so `978-950` and
+        `978-987` look like the obvious narrowing. The pass behind it covered
+        the Argentine frame only, and every row of that frame is already in an
+        Argentine group, so the remit would have refused none of its ten answers
+        **because the frame holds nothing for it to refuse**. That zero is a
+        property of how the frame was drawn, not of the catalogue, and the
+        question a remit turns on is the one thing 450 unsampled rows could have
+        answered.
+        """
+        rows = _sample()
+        # Every row, not `rows[0]`. The premise of this whole test is that the
+        # column is absent, and one row of 500 carrying the claim is how a
+        # column added to 499 of them would pass here.
+        assert not any(CatalogueSource.BNA.value in row for row in rows)
+        assert targets.SEEDED[CatalogueSource.BNA].serves_groups == frozenset()
+        argentine = [row for row in rows if row["frame"] == "argentina"]
+        assert Counter(registration_group(row["isbn"]) for row in argentine) == {
+            "978-950": 36,
+            "978-987": 14,
+        }
+        assert CatalogueSource.BNA not in sources.SERVES_GROUPS
+
+    def test_the_remit_is_the_row_s_own_object_rather_than_a_copy_of_it(self):
+        """**The remit is declared on the target row and this module derives
+        it**, the way `METERED` and `NEEDS_A_KEY` already do.
+
+        Identity rather than equality, because equality is what a hand written
+        entry put back here would also satisfy: a literal spelling the same two
+        groups is an equal set and a different object, and it is the drift this
+        derivation exists to make impossible. The second half is the other
+        direction, so a row that declares a remit cannot go unread here.
+
+        **This is about the wiring and not about the content**, which is worth
+        saying because both halves derive from the same predicate the code does
+        and so agree with it whatever it holds. What pins the content is
+        elsewhere and unchanged: `test_a_restricted_source_is_not_asked_outside_it`
+        for a remit that stops being applied, and
+        `test_no_source_with_a_remit_uniquely_answers_outside_it` for one that
+        reaches too far. `Target.serves_groups` being required is what closes the
+        third case, a remit vanishing by omission, and it closes it at import
+        rather than here.
+        """
+        for source, groups in sources.SERVES_GROUPS.items():
+            assert groups is targets.SEEDED[source].serves_groups, source
+        assert set(sources.SERVES_GROUPS) == {
+            source
+            for source, target in targets.SEEDED.items()
+            if target.serves_groups
+        }
 
     def test_the_rule_costs_the_sample_no_book_at_all(self):
         """The bound above is per source. This is the same question asked of the

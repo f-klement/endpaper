@@ -1719,11 +1719,10 @@ function readAuthors(author: string | null, xmp: XmpRecord | null): string[] {
 /**
  * Read one PDF's metadata.
  *
- * Never throws for anything the file did, for the reason `readEpub` states: a
- * picked file that is not what it claimed is one entry's failure, which is what
- * lets a member point at a folder and get a queue rather than an error page.
- * **A file that carries nothing is `ok` with a record of nulls**, which is the
- * ordinary outcome for this format and is what hands it to the filename path.
+ * Never throws for anything the file did, and answers `ok` with a record of
+ * nulls for a file that carried nothing. Both are contracts
+ * `fileReaders.FileReader` states for every reader, along with the reason each
+ * is worth stating and which of them is this format's ordinary outcome.
  */
 export async function readPdf(file: Blob): Promise<PdfReading> {
   try {

@@ -538,9 +538,10 @@ function recordZeroExtent(
 /**
  * Read one Kindle or Mobipocket file's metadata.
  *
- * Never throws for anything the file did, for the reason `readEpub` states: a
- * picked file that is not what it claimed is one entry's failure, which is what
- * lets a member point at a folder and get a queue rather than an error page.
+ * Never throws for anything the file did, which is the contract
+ * `fileReaders.FileReader` states for every reader, along with the reason it is
+ * worth stating. Nothing in this function catches: every read is bounded
+ * instead, so there is no arm here to turn a bug into a bad file.
  */
 export async function readMobi(file: Blob): Promise<MobiReading> {
   const head = new DataView(

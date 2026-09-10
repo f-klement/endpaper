@@ -334,6 +334,19 @@ export const en = {
   "notes.placeholder": "Add a note...",
   "notes.addLabel": "Add a note",
   "notes.editLabel": "Edit note",
+  // The two halves of the same fact, said in the two places a member asks it.
+  // The badge borrows `book.privateToggle`'s words on purpose: one phrase for
+  // privacy across the app, so a member who has read it on a book does not
+  // have to work out whether a note means something else by it.
+  //
+  // The hint says "added here" rather than naming the note as private or not,
+  // because it is about a note that does not exist yet. That is also why it is
+  // the half that cannot be dropped: it is the only one of the two that a
+  // member reads before writing, and a badge cannot un-publish a note somebody
+  // typed believing it was private.
+  "notes.privateBadge": "Only visible to me",
+  "notes.sharedHint":
+    "Notes added here are visible to every member who can see this book.",
 
   // ── Custom fields ───────────────────────────────────────────────────────
   // A fact the household keeps that the schema does not know about. The first

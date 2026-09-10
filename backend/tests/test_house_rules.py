@@ -3183,13 +3183,16 @@ class TestNoModuleHardCodesASourceOrder:
     exemption: it is a `frozenset` and says which sources are docked a point,
     not in what order.
 
-    Six exemptions over seven names, each a deliberate table that something
+    Five exemptions over six names, each a deliberate table that something
     else pins. The counts differ because one bullet covers the two dispatch
     tables together:
 
     * `sources.DEFAULT_ORDER`, the seeded order itself.
     * `metadata._MATCH_PRECEDENCE`, which source is believed about a shared
-      field. Deliberately not reachable from the settings list.
+      field, deliberately not reachable from the settings list, and
+      `metadata._BESPOKE_LOOKUPS` beside it. This is the bullet the count below
+      means by covering two names, and naming the second is what stops the
+      sentence explaining an arithmetic nobody can check against it.
     * `targets.SEEDED`, the eleven catalogue rows. **A mapping consulted by key**,
       the narrower claim `SERVES_GROUPS` makes: `metadata` reaches it with
       `SEEDED[name]`, and the four derivations in `sources.py` build
@@ -3214,16 +3217,15 @@ class TestNoModuleHardCodesASourceOrder:
       `test_the_marginal_table_covers_the_whole_measured_tail` and whose values
       are recomputed from the committed sample. It is what orders the tail, so
       it is data the order is derived **from** rather than a copy of the order.
-    * `sources.SERVES_GROUPS`, which registration groups a catalogue's collecting
-      remit covers. **A mapping consulted by key and never iterated**, which is
-      the narrower claim than `MEASURED`'s and is what makes the exemption safe
-      here: `sources._serves` and `sources.describe` both reach it with `.get`,
-      so its key order is not read anywhere and cannot be an order. Its
-      membership is pinned by
-      `test_a_group_set_only_belongs_to_a_source_that_answers_an_isbn`, its
-      spellings by `test_every_declared_group_is_a_group_the_decoder_recognises`,
-      and its values by `test_no_source_with_a_remit_uniquely_answers_outside_it`
-      against the committed sample.
+      **`sources.SERVES_GROUPS` left the same way and for the same reason**, so
+      it is recorded here rather than only in the history: it was a dict literal
+      keyed on sources and is a comprehension over `targets.SEEDED` now, the
+      remit having moved onto the row. A comprehension is not a literal, the
+      guard cannot report it, and an exemption for it would have no subject.
+      `test_dropping_an_exemption_surfaces_only_its_own_literal` is what said so,
+      by surfacing nothing when its entry was dropped. What still checks that
+      table is unchanged and is in `test_sources.py`: its membership,
+      its spellings, and its values against the committed sample.
     * `sources.MEASURED`, what each lookup source needing no credential was
       measured to do.
       **Justified by what is checkable rather than by what is obvious.** Nothing
@@ -3266,7 +3268,7 @@ class TestNoModuleHardCodesASourceOrder:
 
     #: Where an ordered literal of sources is still allowed, by module and name.
     ALLOWED = {
-        "sources.py": {"DEFAULT_ORDER", "MEASURED", "TAIL_MARGINAL", "SERVES_GROUPS"},
+        "sources.py": {"DEFAULT_ORDER", "MEASURED", "TAIL_MARGINAL"},
         "metadata.py": {"_MATCH_PRECEDENCE", "_BESPOKE_LOOKUPS"},
         # The literal is inline in the `MappingProxyType` call, so the exempt
         # name and the literal are the same assignment again. Naming the view

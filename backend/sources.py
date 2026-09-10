@@ -530,10 +530,27 @@ ALWAYS_ASKED: Final = 2
 #: **A remit is only listed where there is no book the source alone answers
 #: outside it.** That is why the Czech National Library carries none: the rule is
 #: about what a source is *for*, and a wrong entry silently stops asking the one
-#: catalogue that holds a book.
+#: catalogue that holds a book. It answers 59 and holds 2 nobody else does
+#: outside `978-80`, and the Biblioteca Nacional de España 57 and 4 outside
+#: `978-84`, so both fail a bar whose only tolerable number is zero.
+#:
+#: **A source the committed sample does not measure cannot clear that bar**, and
+#: not clearing it is not the same as failing it. That distinction is load
+#: bearing at exactly one row, the Argentine one, and `metadata`'s block for it
+#: carries the pass and the numbers.
+#:
+#: **Derived from the rows rather than written out here.** The literal lived in
+#: this module until the owner's decision of 2026-09-07, and the reason for
+#: moving it is the same one that moved `METERED` and `NEEDS_A_KEY`: a remit is a
+#: fact about the catalogue, so it belongs beside its address. What stays here is
+#: the measurement, which is a fact about this roster against one sample rather
+#: than about any one library. **An empty remit is absent rather than present**,
+#: which is what keeps `_serves` reading "no row" and "no groups" as one thing;
+#: its docstring's last paragraph is the argument.
 SERVES_GROUPS: Final[dict[CatalogueSource, frozenset[str]]] = {
-    CatalogueSource.NLG: frozenset({"978-960", "978-618"}),
-    CatalogueSource.OENB: frozenset({"978-3"}),
+    target.source: target.serves_groups
+    for target in targets.SEEDED.values()
+    if target.serves_groups
 }
 
 

@@ -26,6 +26,7 @@ def _seeded(**overrides: object) -> targets.Target:
         "answers_search": True,
         "metered": False,
         "needs_key": False,
+        "serves_groups": frozenset(),
         "sru_version": "1.1",
         "query_parameter": "query",
         "query_language": targets.QueryLanguage.CQL,
@@ -253,6 +254,7 @@ class TestARowCannotCarryQueryStructure:
                 answers_search=True,
                 metered=False,
                 needs_key=False,
+                serves_groups=frozenset(),
                 isbn_index="dc.isbn",
             )
 

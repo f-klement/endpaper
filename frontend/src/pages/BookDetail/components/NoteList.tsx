@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 
 import type { NoteOut, UserOut } from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
+import { Icon } from "../../../components";
 
 export function formatDate(iso: string, locale?: string): string {
   return new Date(iso).toLocaleDateString(locale, {
@@ -20,7 +21,30 @@ interface NoteListProps {
   onRemove: (noteId: number) => void;
 }
 
-/** Reader notes on a book. Used only by BookDetail. */
+/**
+ * Reader notes on a book. Used only by BookDetail.
+ *
+ * ## Two states, and the member is told about both at two different moments
+ *
+ * `is_private` true means visible to the note's author and to nobody else, an
+ * admin included; false, which is every note written through this form, means
+ * visible to whoever can see the book.
+ *
+ * **The two tellings land at different moments, which is what makes them two
+ * and not a repetition.** The marker is read-time: it answers which of these
+ * rows the rest of the library cannot see, and it is on the private rows
+ * only, since false is the default and a marker on every row is a marker that
+ * means nothing. The line above the form is write-time, and it is the only
+ * one of the pair that arrives before the act it is about. A member who
+ * believes a note they are typing is private has already published it by the
+ * time any marker could correct them, and a marker cannot reach a member who
+ * holds no private note to contrast against.
+ *
+ * **Neither is a control, and that is deliberate.** `NoteCreate` carries no
+ * `is_private`, so a note written here is shared and there is no route that
+ * would change one afterwards. A marker drawn as a pressable pill, or a line
+ * phrased as a setting, would promise a thing this app cannot do.
+ */
 export default function NoteList({
   notes,
   currentUser,
@@ -30,6 +54,12 @@ export default function NoteList({
   onRemove,
 }: NoteListProps) {
   const { t, locale } = useTranslation();
+  // `useId`, not a literal: a literal's uniqueness rests on this component
+  // being rendered once per page, which is a docstring sentence rather than a
+  // rule. A second instance would point both textareas at the first hint, and
+  // a duplicate id breaks `aria-describedby` silently, in the one place whose
+  // whole job is telling a member something before they act.
+  const hintId = useId();
   const [draft, setDraft] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
@@ -101,10 +131,45 @@ export default function NoteList({
                   <p className="text-sm text-paper-700 leading-relaxed dark:text-paper-200">
                     {note.content}
                   </p>
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-xs text-paper-600 dark:text-paper-400">
-                      {note.author?.username} ·{" "}
-                      {formatDate(note.created_at, locale)}
+                  <div className="flex items-center justify-between gap-2 mt-2">
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-paper-600 dark:text-paper-400">
+                      <span>
+                        {note.author?.username} ·{" "}
+                        {formatDate(note.created_at, locale)}
+                      </span>
+                      {/* Read off the server's answer, never inferred from
+                          authorship. `note_visible_to` narrows every route
+                          that returns a note, so a `true` reaching a client
+                          is that client's own row and the first person
+                          wording holds; deriving it here from `isAuthor`
+                          instead would mark a member's shared notes private
+                          and say so in the first person, which is the
+                          surprise this marker exists to stop, printed. */}
+                      {note.is_private && (
+                        <span
+                          // Ink and a lock, with no fill behind them. A tinted
+                          // chip is what this started as, and it fails twice:
+                          // `paper-100` on the card measures 1.05 (everforest)
+                          // to 1.11 (nord) in light and `paper-800` 1.17
+                          // (nord) to 1.38 (catppuccin) in dark, across all
+                          // ten themes, so the boundary carrying the meaning
+                          // sits far under the 3:1 of WCAG 1.4.11; and a
+                          // filled pill is the one thing here that reads as
+                          // pressable, which this marker must not, there
+                          // being no route that would change a note's
+                          // privacy.
+                          //
+                          // A rung darker than the metadata beside it, which
+                          // is what separates it without a fill: 5.30
+                          // (kanagawa) to 8.80 light and 7.00 (everforest) to
+                          // 11.64 dark on the card, better in every theme
+                          // than the chip it replaces.
+                          className="inline-flex items-center gap-1 font-medium text-paper-700 dark:text-paper-300"
+                        >
+                          <Icon name="lock" className="w-3 h-3" />{" "}
+                          {t("notes.privateBadge")}
+                        </span>
+                      )}
                     </span>
                     {canDelete && (
                       <div className="flex gap-2">
@@ -143,6 +208,16 @@ export default function NoteList({
         })}
       </div>
 
+      {/* Above the form, not under it: it is what the member needs before
+          they decide what to write, and `aria-describedby` puts it in the
+          same order for a reader who never sees the layout. */}
+      <p
+        id={hintId}
+        className="text-xs text-paper-600 mb-2 dark:text-paper-400"
+      >
+        {t("notes.sharedHint")}
+      </p>
+
       <form onSubmit={submit} className="flex gap-2">
         <textarea
           value={draft}
@@ -150,6 +225,7 @@ export default function NoteList({
           rows={2}
           placeholder={t("notes.placeholder")}
           aria-label={t("notes.addLabel")}
+          aria-describedby={hintId}
           className="flex-1 px-3 py-2 rounded-lg border border-paper-200 text-sm resize-none dark:border-paper-700"
         />
         <button

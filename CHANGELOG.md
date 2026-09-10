@@ -4,6 +4,18 @@
 
 ### Security
 
+- **A note the library cannot see now says so on screen**, and the box you write one in says
+  what the default is before you write it: a note added in the app is visible to every member
+  who can see that book. A badge cannot un-publish a note somebody typed believing it was
+  private, which is why the sentence sits at the writing end as well as the reading end.
+- **A catalogue is asked only where it collects**, where a remit is known. Every catalogue row
+  now carries the registration groups it serves, and a source with a remit is not asked outside
+  it. Two rows have one today and both were measured to cost nothing: the Greek national
+  library answers nothing at all outside its two groups, and every answer the Austrian one
+  gives outside German language publishing is already given by a source asked earlier. Where
+  the sample shows a catalogue holding books nobody else holds outside its group, it keeps no
+  remit and is still asked everywhere.
+
 - **A review carried by an imported CSV lands as a private note**, readable by the member who
   imported it and by nobody else, an admin included. It was landing in a note every member of
   the instance could read, under the importing member's own name, and a column an old app
@@ -243,6 +255,10 @@
   than a permission lost. The About card's badge, the `LICENSE` file, both package manifests
   and the badges the README and the Docker Hub page draw all say MIT, and a test now fails
   when one of the four files that declare it disagrees with the others.
+- Two file readers cited a rule at an address that had moved, crediting `readEpub` for a
+  promise it stopped stating when the promise moved to the reader contract. Both now cite the
+  contract, and the guard keeping a member's book out of a request body reads every module
+  rather than the one it was written against.
 - **A queue of offered catalogue records can be kept in bulk, and those names can be asked
   about again.** A folder of three hundred files that matches most of them was one press per
   row. Keeping every name at once discards nothing: a row kept that way says so, is counted

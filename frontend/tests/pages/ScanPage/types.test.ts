@@ -33,6 +33,7 @@ import {
 } from "../../../src/pages/ScanPage/types";
 import { TEXT_CEILINGS } from "../../../src/lib/bookBounds";
 import type { OpfRecord } from "../../../src/lib/fileReaders";
+import { CARRIES_A_BOOK } from "../../carriesABook";
 
 /**
  * One value per draft field, all of them set.
@@ -510,24 +511,16 @@ describe("draftFromFile", () => {
 });
 
 /**
- * What a value has to be typed as to carry a member's book.
- *
- * `File` extends `Blob`, and both of the array views are what a reader hands
- * back, so naming only the first is the weaker of two spellings of one rule.
- * `tests/lib/fileName.test.ts` holds the same literal over the derivation
- * module, and the test below asserts it does.
- */
-const CARRIES_A_BOOK = /\b(?:File|Blob|ArrayBuffer|Uint8Array)\b/;
-
-/**
  * One `File` in this module, and it is the cover the page sends on purpose.
  *
- * `tests/houseRules.test.ts` holds this over `draftFromFile` by name, and gives
- * the reason: taking a `File` there would compile, would pass every other test
- * in the tree, and would put a member's book one spread away from a request
- * body. That guard stays. This one is the same property over the whole module,
- * because a rule naming one member of a family is the shape the working
- * agreement says to fix structurally rather than by adding an arm.
+ * `tests/houseRules.test.ts` holds this over every draft builder the tree
+ * declares, wherever it is written, and gives the reason: taking a `File` there
+ * would compile, would pass every other test in the tree, and would put a
+ * member's book one spread away from a request body. That guard stays. This one
+ * is the same property over the whole module, and the two are not one check
+ * twice: that one reads a parameter list, this one reads every line, so a
+ * builder holding a file through a closure or a field is refused here and
+ * invisible there.
  *
  * **It is about a mention, not about custody.** A `File` does reach
  * `toScanRequest` and `toCopyRequest`, inside `PendingBook.coverFile`, and the
@@ -535,8 +528,8 @@ const CARRIES_A_BOOK = /\b(?:File|Blob|ArrayBuffer|Uint8Array)\b/;
  * is a second one appearing anywhere without somebody deciding it should, and a
  * new field or parameter naming one is meant to fail here and be argued for.
  *
- * **What counts as carrying a book is `CARRIES_A_BOOK` and is explained there**,
- * once.
+ * **What counts as carrying a book is `CARRIES_A_BOOK`, in `tests/carriesABook.ts`
+ * and explained there**, once, and imported by every rule that applies it.
  *
  * **Written as the one line rather than as a parser, because the parser was
  * evaded twice.** This block shipped for one commit matching
@@ -644,14 +637,16 @@ describe("this module names a File exactly once", () => {
     expect(code()).toContain("export function draftFromName");
   });
 
-  it("spells the refusal the way the reader side guard spells it", () => {
-    // **Two files hold this rule and one literal defines it.** The two shipped
-    // one commit apart naming different sets, `File` here and `File|Blob`
-    // there, and both critic seats found the gap: a `File` is a `Blob`, so the
-    // narrower one admitted a parameter taking a member's book with no cast.
-    // Two spellings of one rule is the defect `backend/targets.py` records
-    // shipping once already, so this asserts the other file carries this exact
-    // source text rather than trusting that somebody kept them level.
+  it("spells the refusal the way the name side guard spells it", () => {
+    // **One literal, and the one file that does not import it.** This rule and
+    // the house rule over every draft builder both import `CARRIES_A_BOOK`, so
+    // holding it is using it. `tests/lib/fileName.test.ts` writes it out, and
+    // that pair shipped one commit apart naming different sets, `File` here and
+    // `File|Blob` there, until both critic seats found the gap: a `File` is a
+    // `Blob`, so the narrower admitted a parameter taking a member's book with
+    // no cast. Two spellings of one rule is the defect `backend/targets.py`
+    // records shipping once already, so this asserts that file carries this
+    // exact source text rather than trusting that somebody kept them level.
     const sibling = SOURCE["../../lib/fileName.test.ts"] ?? "";
     expect(sibling.length).toBeGreaterThan(1000);
     // **Stripped, like every other reading here.** Against the raw source the

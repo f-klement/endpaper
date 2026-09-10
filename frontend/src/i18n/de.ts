@@ -333,6 +333,14 @@ export const de: Messages = {
   "notes.placeholder": "Notiz hinzufügen...",
   "notes.addLabel": "Notiz hinzufügen",
   "notes.editLabel": "Notiz bearbeiten",
+  // "Nur für mich sichtbar" is `book.privateToggle`'s own wording, kept
+  // verbatim so privacy reads the same on a note as on a book.
+  //
+  // The hint is address free like the rest of this file: "hier hinzugefügte
+  // Notizen" carries the "here" without a `du` or a `Sie` to own it.
+  "notes.privateBadge": "Nur für mich sichtbar",
+  "notes.sharedHint":
+    "Hier hinzugefügte Notizen sind für alle Mitglieder sichtbar, die dieses Buch sehen können.",
 
   // ── Custom fields ───────────────────────────────────────────────────────
   "customFields.title": "Eigene Felder",

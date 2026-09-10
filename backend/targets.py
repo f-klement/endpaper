@@ -372,6 +372,33 @@ class Target:
     #: Needs a credential the household supplies. `sources.NEEDS_A_KEY` derives
     #: from this.
     needs_key: bool
+    #: Which ISBN registration groups this library's collecting remit covers, as
+    #: `978-960`. Empty where the catalogue is not asked to have one.
+    #: `sources.SERVES_GROUPS` derives from this and `sources._serves` applies
+    #: it, to the sources asked one at a time and never to the gathered tier.
+    #:
+    #: **A fact about the catalogue, so it is a column here rather than a table
+    #: in `sources.py`.** What a library collects is the same kind of statement
+    #: as what it charges for and what it wants a login for, which are the two
+    #: fields above. It was a per source dict in `sources.py` until the owner's
+    #: decision of 2026-09-07.
+    #:
+    #: **Required, with no default, and that is the whole of what the move
+    #: buys.** The reason for the field is that every catalogue the breadth work
+    #: adds arrives with this question, and a defaulted field asks a new row
+    #: nothing: it answers "no remit" on the row's behalf. **What required buys
+    #: is the deletion arm and not a recorded decision**, which is worth stating
+    #: because the larger claim is the tempting one: typing `frozenset()`
+    #: records nothing, and six of the empty rows carry exactly that and no
+    #: comment. What it does buy is that the Argentine row's refusal cannot be
+    #: tidied away, since deleting that line is a `TypeError` at import rather
+    #: than a default silently taking over.
+    #:
+    #: **Too wide costs a round trip; too narrow loses a book and says
+    #: nothing**, and that asymmetry is why the bar for a non empty value is
+    #: zero rather than a threshold. `sources.SERVES_GROUPS` carries the rule,
+    #: the measurement and which rows fail it.
+    serves_groups: frozenset[str]
     #: The login this build ships for the target, where the library publishes
     #: one about itself. None everywhere else, which is every row but one.
     #:
@@ -792,6 +819,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             answers_search=True,
             metered=False,
             needs_key=False,
+            serves_groups=frozenset(),
             sru_version="1.1",
             query_parameter="query",
             query_language=QueryLanguage.CQL,
@@ -818,6 +846,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             answers_search=True,
             metered=False,
             needs_key=False,
+            serves_groups=frozenset(),
             sru_version="1.1",
             query_parameter="query",
             query_language=QueryLanguage.CQL,
@@ -839,6 +868,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             answers_search=True,
             metered=False,
             needs_key=False,
+            serves_groups=frozenset(),
         ),
         CatalogueSource.NKP: Target(
             source=CatalogueSource.NKP,
@@ -856,6 +886,13 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             answers_search=False,
             metered=False,
             needs_key=False,
+            # Empty, and measured rather than assumed: it answers 59 and holds 2
+            # outside `978-80` that nothing else **in the sample** does, so it
+            # fails the zero book bar in `sources.SERVES_GROUPS` by two books.
+            # The sample is seven columns of an eleven row roster, so that is the
+            # scope of the claim; one of the two is Argentine and the catalogue
+            # most likely to hold it has no column here.
+            serves_groups=frozenset(),
             sru_version="1.1",
             query_parameter="x-pquery",
             query_language=QueryLanguage.PQF,
@@ -888,6 +925,10 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             answers_search=False,
             metered=False,
             needs_key=False,
+            # Empty, and measured: 4 of the 18 books it alone answers fall outside
+            # `978-84`, one Portuguese, one Argentine and two Uruguayan. `metadata`'s
+            # block for this row carries the pass.
+            serves_groups=frozenset(),
             sru_version="1.2",
             query_parameter="query",
             query_language=QueryLanguage.CQL,
@@ -913,6 +954,10 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             answers_search=True,
             metered=False,
             needs_key=False,
+            # Greek publishing, both groups, and it answers nothing at all
+            # outside the two. Naming only `978-960` would cost seven of its 37
+            # sampled answers, in silence.
+            serves_groups=frozenset({"978-960", "978-618"}),
             sru_version="1.1",
             query_parameter="query",
             query_language=QueryLanguage.CQL,
@@ -938,6 +983,11 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             answers_search=True,
             metered=False,
             needs_key=False,
+            # `978-3` is German language publishing rather than Austria, so this
+            # is wider than the country and is the group the catalogue actually
+            # collects in. Five of its 55 sampled answers fall outside it, and
+            # the leading pair holds every one of the five.
+            serves_groups=frozenset({"978-3"}),
             sru_version="1.2",
             query_parameter="query",
             query_language=QueryLanguage.CQL,
@@ -986,6 +1036,14 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             # test: unauthenticated the endpoint answers SRU diagnostic 1/3,
             # `Authentication error`, and with this pair it answers records.
             shipped_credential=ShippedCredential("Z39.50", "Z39.50"),
+            # **Empty because it was measured and refused, which is the one
+            # thing this row's emptiness must not be read as not having been.**
+            # A remit is worth more here than anywhere else on the roster, since
+            # shipping this login made every install ask a plaintext catalogue,
+            # carrying HTTP Basic, about every ISBN the chain misses. The
+            # committed sample cannot support one, and `metadata`'s block for
+            # this row is where that pass and its numbers live.
+            serves_groups=frozenset(),
             sru_version="1.1",
             query_parameter="x-pquery",
             query_language=QueryLanguage.PQF,
@@ -1005,6 +1063,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             answers_search=True,
             metered=True,
             needs_key=True,
+            serves_groups=frozenset(),
         ),
         CatalogueSource.BNF: Target(
             source=CatalogueSource.BNF,
@@ -1016,6 +1075,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             answers_search=True,
             metered=False,
             needs_key=False,
+            serves_groups=frozenset(),
             sru_version="1.2",
             query_parameter="query",
             query_language=QueryLanguage.CQL,
@@ -1035,6 +1095,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             answers_search=True,
             metered=False,
             needs_key=False,
+            serves_groups=frozenset(),
             sru_version="1.1",
             query_parameter="query",
             query_language=QueryLanguage.CQL,

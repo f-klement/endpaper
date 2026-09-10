@@ -1,9 +1,9 @@
 # Backend test coverage
 
-**6415 tests**, in 97 files, recounted with `--collect-only` on 2026-09-10.
+**6418 tests**, in 97 files, recounted with `--collect-only` on 2026-09-10.
 
 **The headline equals the passed count today, and that is a fact about the tree rather than
-a simplification.** The gate reports `6415 passed`, with no skip and no `xfail`: the strict
+a simplification.** The gate reports `6418 passed`, with no skip and no `xfail`: the strict
 `xfail` that recorded a defect in the CSV importer is gone, because the work that closed the
 defect closed it.
 
@@ -15,7 +15,7 @@ the skip once made the check undoable, and a rule rewritten as `collected == pas
 the tree happens to have neither is one that fails for the wrong reason the day somebody adds
 either.
 
-**The rows below sum to 6366, forty nine short, and the shortfall is deliberate.** Those
+**The rows below sum to 6369, forty nine short, and the shortfall is deliberate.** Those
 tests live in six files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -78,7 +78,7 @@ why the helper uses regexes.
 | `test_schemas.py` | 66 | Request/response contracts and their validation rules |
 | `test_google_books.py` | 41 | Volume mapping, the gap-filling merge, upstream failures, and that `merge_into` takes a `BookMatch` rather than a dictionary, pinned on the signature itself so a third call site inherits the bound |
 | `test_notifications.py` | 129 | **The overdue digest.** Selection and the reminder interval, that a private book never reaches the wire, the signature, redirects refused, that a failure leaves the loan to retry |
-| `test_sources.py` | 95 | **The provider roster.** That off means not asked rather than deprioritised, that the stored order is the order sources are asked and not which is believed |
+| `test_sources.py` | 98 | **The provider roster.** That off means not asked rather than deprioritised, that the stored order is the order sources are asked and not which is believed, and the catalogue remit: a remit may only be declared for a source the committed sample measures, the Argentine frame cannot give that catalogue one, and the derived table holds the rows' own objects |
 | `test_targets.py` | 71 | **A catalogue as a row.** The seeded roster field by field, what a row may carry, and the two query builders |
 | `test_decoders.py` | 26 | **What a decoder is, and what it is never told.** The contract, a catalogue decoder reading a record off a file with no `Target`, and the two family refusal |
 | `test_sru.py` | 205 | **The SRU server: the protocol, driven as a function over a query string.** That no index reaches a private or a trashed book |

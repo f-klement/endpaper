@@ -7784,7 +7784,7 @@ there is no book it alone answers outside it. There is no gap to place a value i
 the objection the whole rule has to answer is that a catalogue quietly stops being asked
 about a book it holds. Measured on the committed sample: the NLG answers nothing at all
 outside its two groups, the OeNB answers five and the leading pair holds every one of them,
-and the NKP answers two that nothing else in the roster holds. The NKP is therefore refused,
+and the NKP answers two that nothing else in the sample holds. The NKP is therefore refused,
 and it would have been the largest single saving.
 
 **Where the groups live: a per source constant, not a per install setting.** Which groups
@@ -12380,3 +12380,61 @@ decision asked for: the row says it was kept for now and can be looked up again,
 counted back through a live region, and the individual keep now says it is final. The second
 pass may spend the search budget again, and the queue says so before the press rather than
 after it.
+
+## A draft builder is found by two derivations, and the file set is not one of them
+
+The rule that a draft builder takes what was parsed and never the file is the browser half of
+the no custody claim. It was asserted over `pages/ScanPage/types.ts` alone, found by
+`endsWith`, under a comment saying "every one of them, matched by shape rather than by name".
+The shape match was real and the file set was an inclusion list of one, which is the shape this
+register keeps recording: a description written from what a check was intended to cover rather
+than from what it covers.
+
+**Widened rather than narrowed in prose, because the author of a sixth builder is exactly who
+puts it in another module.** Measured before the change: five `draftFrom*` functions and one
+further `BookDraft` return, all in that module, so the widened read refuses nothing extra
+today.
+
+**Two derivations, because either alone is beaten by the rename the other sees.** A name
+beginning `draftFrom` is the family as written; an annotated `BookDraft` return is what a
+member of it is. A builder both renamed and left unannotated is in neither, and that is stated
+at the derivation rather than quietly closed.
+
+**A citation to an address that has moved is worse than the duplication it replaced.** The
+never throws rule moved to the reader contract's docstring, and two readers went on restating
+it while crediting `readEpub`, which no longer says it: a reader following that pointer
+concludes the rule is written down nowhere. Both now cite the contract. The ticket's third
+claim, that a custody line names four citers where the tree has five, **does not reproduce**:
+no line anywhere counts them. Every count that file does carry was recounted instead and each
+holds.
+
+## A catalogue is asked only where it collects, and the bar for saying so is zero
+
+Shipping a catalogue's published login changed who asks: every install reached it on any miss
+rather than on an ISBN plausibly within its remit, which is a request to a third party, over
+plain HTTP, carrying HTTP Basic, from installs that never opted in. The owner's decision of
+2026-09-07 was a remit as a field on the row rather than a branch in the lookup, because the
+breadth work adds catalogues on the same terms and a rule spelled per source is one somebody
+has to remember to extend.
+
+**The measurement came first and it refused the obvious rule.** An ISBN's registration group
+says where the **publisher** registered, not where a book is held, so a group filter can refuse
+exactly the long tail a national catalogue was added for. Over the committed 500 ISBN sample,
+outside group share of yield runs 0% for the Greek national library, 9.1% for the Austrian,
+14.3% for the German, 16.9% for the Czech and 17.5% for the Spanish: a minority everywhere, so
+"most of its yield is elsewhere" disqualifies none of them.
+
+**What disqualifies a row is holding a book nobody else holds outside its group, and the bar's
+only tolerable number is zero.** The Czech catalogue answers two such books and the Spanish
+four, so neither gets a remit and both are still asked everywhere. The Greek one answers
+nothing at all outside its two groups, and every one of the five answers the Austrian one gives
+outside German language publishing is already given by a source asked earlier, so both remits
+were measured to cost no answer a member would otherwise see.
+
+**The Argentine row, which is the ticket's own subject, gets no remit at all**, and the reason
+is a frame rather than a yield: the sample has no column for that catalogue, and its recorded
+pass covered the fifty Argentine rows only, so 450 of 500 never reached it. Inside that frame
+every answer it gives is in group by construction, which makes the measurement vacuous rather
+than favourable. **A source the sample does not measure cannot clear the bar, and not clearing
+it is not the same as failing it.** It refuses no ISBN and its block says so with the pass,
+because a source that silently declines to answer is worse than one that answers nothing.
