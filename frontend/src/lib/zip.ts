@@ -104,6 +104,87 @@ export class ZipError extends Error {
   }
 }
 
+/**
+ * What a `ZipFailure` becomes in a format's own union, for the arms a format
+ * does not choose.
+ *
+ * `damaged`, `protected` and `too-large` are the names `lib/fileReaders.ts`
+ * argues every reader should share: a damaged archive is damaged whichever
+ * format claimed it, and only "this is a different kind of file" is per format,
+ * because that is the one sentence telling a member to look at what they
+ * picked. `unsupported` and `no-inflate` are this seam's own words, and
+ * `lib/pdf.ts` carries the second for the same reason.
+ *
+ * **It is still nothing about books**, which is what the module docstring above
+ * claims: these say what happened to a file, and the name for what the file
+ * turned out not to be is the word its reader supplies.
+ */
+export type ZipSharedFailure =
+  "damaged" | "protected" | "too-large" | "unsupported" | "no-inflate";
+
+/**
+ * The answer for every arm but the one a reader has to supply.
+ *
+ * Total over `ZipFailure` less `not-a-zip`, so a member added to that union is
+ * a compile error here, which is where the totality the three copies had went.
+ */
+const SHARED_ANSWER: Record<
+  Exclude<ZipFailure, "not-a-zip">,
+  ZipSharedFailure
+> = {
+  zip64: "unsupported",
+  encrypted: "protected",
+  unsupported: "unsupported",
+  truncated: "damaged",
+  "too-large": "too-large",
+  "no-inflate": "no-inflate",
+};
+
+/**
+ * A zip's refusal in the words a member needs, given the one word this seam
+ * cannot supply.
+ *
+ * **The answer and not the table, because a table can be copied and a copy can
+ * be wrong.** Each reader held its own total `Record<ZipFailure, XFailure>`,
+ * identical but for `"not-a-zip"`, so the author of a fourth copied every
+ * decision in order to make one and a copy carrying `truncated: "unsupported"`
+ * compiled and shipped. Handing that table back rather than declaring it moves
+ * the fault one rung and no further: a caller can spread it and override an
+ * arm, and where an arm's key is also its answer, no test in this tree would
+ * notice. A reader handed the answer has no table to copy or to spread.
+ *
+ * **What it is still free to do is rewrite the answer where it stands**, and
+ * nothing here refuses that: measured, `said === "unsupported" ? "damaged" :
+ * said` at a reader's own catch passes the compiler and every test in this
+ * tree. It is one line at one site rather than a table, which is the shape
+ * somebody copies without reading.
+ *
+ * **If a new arm's answer is a name outside `ZipSharedFailure`** it is a
+ * compile error at every caller as well as here, where the answer becomes that
+ * caller's own failure, because no reader's union carries that name yet.
+ *
+ * **The supplied word may not be one of the shared names.** Without the
+ * constraint, `zipFailureAs(error, "protected")` type checks, because that name
+ * is a member of the caller's own union, and every file that is not a zip is
+ * then reported to a member as DRM. The table this replaced put the key in
+ * front of its author and a call does not, so the constraint carries that back.
+ *
+ * A helper a fourth reader simply does not call would leave the hole open, so
+ * `tests/zipFailureVocabulary.test.ts` is the half of this that no type says.
+ */
+export function zipFailureAs<N extends string>(
+  error: ZipError,
+  notAZip: N extends ZipSharedFailure ? never : N,
+): ZipSharedFailure | N {
+  return error.failure === "not-a-zip"
+    ? // The parameter's type is the constraint rather than `N` itself, and a
+      // conditional type is not resolved until `N` is. The cast is over a value
+      // the caller passed, from which the compiler has already refused every
+      // name it may not be.
+      (notAZip as N)
+    : SHARED_ANSWER[error.failure];
+}
+
 /** Little endian readers. A zip is little endian throughout. */
 function u16(view: DataView, at: number): number {
   return view.getUint16(at, true);

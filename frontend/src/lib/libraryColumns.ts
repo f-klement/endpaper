@@ -110,10 +110,9 @@ const HOUSEHOLD = ["household"] as const;
  * it is" against a header reading "Location" is one column presented as two,
  * and the reader cannot tell which one they just turned off.
  *
- * **`offeredTo` is wider than `defaultIn` on purpose for thirteen of these.** A
- * small archive still lends books and still records what a copy cost, so the
- * household's own columns are turned off for a cataloguer rather than taken
- * away.
+ * **`offeredTo` is wider than `defaultIn` on purpose for the household's own
+ * columns.** A small archive still lends books and still records what a copy
+ * cost, so those are turned off for a cataloguer rather than taken away.
  */
 export const COLUMN_SPECS: Record<ColumnKey, ColumnSpec> = {
   title: { label: "field.title", offeredTo: BOTH, defaultIn: BOTH },

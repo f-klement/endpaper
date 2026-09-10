@@ -137,7 +137,7 @@ describe("BookTable", () => {
   });
 
   it("marks a sortable column before it is the active one", () => {
-    // 6 of the 23 columns can be sorted. With the chevron shown only when
+    // Only six of them can be sorted. With the chevron shown only when
     // active, the only always-visible difference was a hover colour, so the
     // feature was there and nobody could find it.
     renderTable({ sort: BookSort.title_asc });

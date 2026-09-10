@@ -108,7 +108,7 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
   same list. Private books are never included: every one of those goes to a place with no
   single account behind it
 - **Three ways to look at it**: a grid of covers whose cards fold out for the details, a
-  dense list of one line per book, or a table of twenty three metadata columns. Your choice
+  dense list of one line per book, or a table of metadata columns. Your choice
   is remembered in your browser
 - **Backup and restore**: download the whole library, covers included, and put it back
 - **Search and filters**: by title, author, ISBN, tag, series, shelf location or format

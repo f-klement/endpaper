@@ -20,7 +20,7 @@ import {
   readCalibreLibrary,
   type CalibreBook,
 } from "../../src/lib/calibre";
-import type { OpfRecord } from "../../src/lib/opf";
+import type { OpfRecord } from "../../src/lib/fileReaders";
 import { openSqlite, type SqliteDatabase } from "../../src/lib/sqlite";
 import { CALIBRE_SCHEMA, databaseOf, engine } from "./sqliteFixtures";
 
@@ -141,7 +141,10 @@ describe("reading a library", () => {
 describe("what Calibre writes where nobody said", () => {
   it("does not file a library under the year 101", async () => {
     // `UNDEFINED_DATE` is `0101-01-01`, and 101 is inside the year column's
-    // range, so nothing downstream would have caught it.
+    // range, so nothing downstream would have caught it. Refused here by the
+    // window rather than by the name it used to be refused by; the arm stays
+    // because it is the value that bought the window and the one this library
+    // actually carries, 29 rows of 897 measured 2026-09-10.
     const [book] = await booksIn(
       `INSERT INTO books (id, title, pubdate, path)
          VALUES (1, 'Dune', '0101-01-01 00:00:00+00:00', 'x')`,
@@ -157,6 +160,63 @@ describe("what Calibre writes where nobody said", () => {
     );
 
     expect(book!.year).toBe(1965);
+  });
+
+  it("does not read a pubdate no book could have been published in", async () => {
+    // The window is `bookBounds.plausibleYear`'s, and this is the arm that says
+    // which values it refuses here. The caller scan in
+    // `tests/lib/bookBounds.test.ts` asserts that this module names the
+    // function and that it calls it, and it does both by matching text: it
+    // reads neither end of the window, so it cannot tell this door applying it
+    // from this door widening it. Its call arm matches `plausibleYear(`, which
+    // is a spelling a docstring can carry; no module under `src/lib/` carries
+    // it in prose today, so a dropped call is red there as things stand.
+    //
+    // `1200-01-01` is the ticket's value and the refusal this door did not
+    // make: the name it refused by covered 101 and nothing else, so a row a
+    // second early enough arrived as a fact.
+    const [medieval] = await booksIn(
+      `INSERT INTO books (id, title, pubdate, path)
+         VALUES (1, 'Dune', '1200-01-01 00:00:00+00:00', 'x')`,
+    );
+
+    expect(medieval!.year).toBeNull();
+
+    // **The point immediately outside each end, and that choice is the arm.**
+    // A number far outside catches a reader that drops the window and nothing
+    // else; a reader keeping a second, wider window of its own answers from
+    // that one for a contiguous band, and any contiguous widening of an end has
+    // to contain the point just outside it. Same reasoning as `cbz.test.ts`,
+    // and the values are that file's, not this seat's.
+    const [tooEarly] = await booksIn(
+      `INSERT INTO books (id, title, pubdate, path)
+         VALUES (1, 'Dune', '1449-12-31 00:00:00+00:00', 'x')`,
+    );
+    const [tooLate] = await booksIn(
+      `INSERT INTO books (id, title, pubdate, path)
+         VALUES (1, 'Dune', '2101-01-01 00:00:00+00:00', 'x')`,
+    );
+
+    expect(tooEarly!.year).toBeNull();
+    expect(tooLate!.year).toBeNull();
+  });
+
+  it("reads a pubdate on either edge of the window as its year", async () => {
+    // The inside of each end, because every arm above expects `null`: a reader
+    // that answers `null` for every year passes all of them. This is the side
+    // of the boundary they do not reach, and it is what refuses a window
+    // narrowed by one at either end.
+    const [earliest] = await booksIn(
+      `INSERT INTO books (id, title, pubdate, path)
+         VALUES (1, 'Dune', '1450-01-01 00:00:00+00:00', 'x')`,
+    );
+    const [latest] = await booksIn(
+      `INSERT INTO books (id, title, pubdate, path)
+         VALUES (1, 'Dune', '2100-12-31 00:00:00+00:00', 'x')`,
+    );
+
+    expect(earliest!.year).toBe(1450);
+    expect(latest!.year).toBe(2100);
   });
 
   it("treats the placeholder title as no title", async () => {
@@ -544,8 +604,9 @@ describe("checking a book against the file beside it", () => {
   });
 
   describe("the placeholders, arriving by the file's door instead", () => {
-    // `readCalibreLibrary` refuses all three by name. `opf.ts` refuses the year
-    // one by its plausibility window and hands the other two straight back, so
+    // `readCalibreLibrary` refuses the two string placeholders by name and the
+    // year one inside the same window. `opf.ts` refuses the year one by that
+    // window and hands the other two straight back, so
     // a Calibre library's own `metadata.opf` still reaches this door with them.
     // These arms drive `crossCheck` directly, which is what keeps the year arm
     // covered now that `opf.readYear` cannot produce 101 in production.
@@ -693,6 +754,12 @@ describe("the placeholder set, refused at both of a library's doors", () => {
    * `series_index` is deliberately absent. Both doors refuse it structurally,
    * by reading a position only where a series is named, so there is no value
    * to hand a predicate and nothing here could drive it.
+   *
+   * **The year case is a door short**: its index door arm passes on the window
+   * `readYear` applies rather than on the set's member, so the coupling this
+   * block claims holds for `title` and `author` only. `CALIBRE_PLACEHOLDER`'s
+   * docstring is the home of that exception. The arm stays because it asserts
+   * what the door does, and the file door arm below is the member's coverage.
    */
   /** One placeholder, and the two doors it has to be refused at. */
   interface PlaceholderCase {

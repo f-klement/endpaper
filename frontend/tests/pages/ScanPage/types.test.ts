@@ -32,7 +32,7 @@ import {
   type PendingBook,
 } from "../../../src/pages/ScanPage/types";
 import { TEXT_CEILINGS } from "../../../src/lib/bookBounds";
-import type { OpfRecord } from "../../../src/lib/opf";
+import type { OpfRecord } from "../../../src/lib/fileReaders";
 
 /**
  * One value per draft field, all of them set.

@@ -62,7 +62,7 @@
 
 import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
-import type { OpfIdentifier, OpfRecord } from "./opf";
+import type { OpfIdentifier, OpfRecord } from "./fileReaders";
 
 /**
  * Why a file yielded nothing.

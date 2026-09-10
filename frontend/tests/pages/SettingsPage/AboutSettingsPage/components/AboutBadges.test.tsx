@@ -76,10 +76,11 @@ describe("AboutBadges", () => {
   it("states the licence and links the file that says it", () => {
     renderLocalised(<AboutBadges />);
 
-    expect(screen.getByText("Apache 2.0")).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "Licence Apache 2.0" }),
-    ).toHaveAttribute("href", `${REPOSITORY}/blob/main/LICENSE`);
+    expect(screen.getByText("MIT")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Licence MIT" })).toHaveAttribute(
+      "href",
+      `${REPOSITORY}/blob/main/LICENSE`,
+    );
   });
 
   it("links the source", () => {
@@ -139,7 +140,7 @@ describe("AboutBadges", () => {
     expect(screen.getByText("Lizenz")).toBeInTheDocument();
     expect(screen.getByText("Quelltext")).toBeInTheDocument();
     expect(screen.getByText("GitHub")).toBeInTheDocument();
-    expect(screen.getByText("Apache 2.0")).toBeInTheDocument();
+    expect(screen.getByText("MIT")).toBeInTheDocument();
   });
 
   it("keeps its ink off the rung the status pill fails on", () => {

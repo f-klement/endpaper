@@ -191,29 +191,27 @@ export default defineConfig({
     // happy-dom, not jsdom. Measured on this suite: `environment` was 160s of a
     // 322s run, paid once per test file to build a DOM, and happy-dom
     // constructs one substantially faster for the same API surface this suite
-    // uses. The nineteen DOM-free files opt out entirely with a
+    // uses. The DOM-free files opt out entirely with a
     // `@vitest-environment node` docblock and are unaffected either way.
     //
-    // **Recount that nineteen with the docblock ANCHORED, or it comes out one too
-    // high**:
+    // **How many of them there are is deliberately not written here.** It moves
+    // whenever a file is marked, and this sentence carried a number that went
+    // stale twice over: eleven on 2026-08-30 by its own account, then nineteen
+    // when it was last written down, against a tree that had twenty five by the
+    // time anybody counted again. Count them with the docblock ANCHORED:
     // `grep -rlE '^\s*\*\s*@vitest-environment node' tests | wc -l`.
-    // The obvious `grep -rl '@vitest-environment node' tests` answers twenty,
-    // because `tests/setup.ts` *mentions* the docblock in a comment explaining
-    // that setup also runs for the files carrying it. `setup.ts` is not one of
-    // them and does not opt out of anything. Counting the string rather than
-    // the docblock turned this number from correct to wrong twice in one
-    // ticket, in both directions, which is why the command is written down
-    // rather than left to whoever edits next.
+    // The obvious `grep -rl '@vitest-environment node' tests` answers one too
+    // high, because `tests/setup.ts` *mentions* the docblock in a comment
+    // explaining that setup also runs for the files carrying it. `setup.ts` is
+    // not one of them and does not opt out of anything. Counting the string
+    // rather than the docblock turned this number from correct to wrong twice
+    // in one ticket, in both directions, which is why the command is written
+    // down rather than left to whoever edits next.
     //
-    // Eleven described the tree from 2026-08-30, and it was thirteen by
-    // 2026-09-04 without this comment moving: two files arrived carrying the
-    // docblock and nothing recounts this sentence. Eighteen is 2026-09-04, after
-    // five more DOM-free files were marked. **The effect of those five is below
-    // this machine's noise floor** and is not claimed as a speedup: repeated
-    // whole-suite runs on the same tree spread over roughly eight seconds, so a
-    // change worth about one cannot be seen. They are marked because a file that
-    // needs no DOM should not build one, which is the same reason the other
-    // thirteen are.
+    // **The effect of marking a file is below this machine's noise floor** and
+    // is not claimed as a speedup: repeated whole-suite runs on the same tree
+    // spread over roughly eight seconds, so a change worth about one cannot be
+    // seen. A file that needs no DOM is marked because it should not build one.
     //
     // The risk is real and is why this is worth a note rather than a swap:
     // happy-dom is not jsdom, and a test relying on a corner jsdom implements

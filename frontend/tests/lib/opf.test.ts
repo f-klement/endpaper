@@ -337,13 +337,14 @@ describe("the year", () => {
   });
 
   it("is null for the undefined date Calibre writes into dc:date", () => {
-    // The window is `bookBounds.plausibleYear`'s, and this is the arm that
-    // notices this reader letting go of it: the caller scan in
-    // `tests/lib/bookBounds.test.ts` still passes on a module that keeps the
-    // name in its prose and drops the call. 101 is inside `NUMBER_RANGES.year`,
-    // so nothing downstream reports it, and the value is not rare:
-    // `calibre.ts::withoutPlaceholders` carries the count against a real
-    // library.
+    // The window is `bookBounds.plausibleYear`'s, and this is the arm that says
+    // which values it refuses here: the caller scan in
+    // `tests/lib/bookBounds.test.ts` reads neither end of the window, so it
+    // cannot tell this door applying it from this door widening it.
+    //
+    // 101 is inside `NUMBER_RANGES.year`, so nothing downstream reports it, and
+    // the value is not rare: `calibre.ts::withoutPlaceholders` carries the
+    // count against a real library.
     const undefinedDate = "0101-01-01T00:00:00+00:00";
 
     expect(

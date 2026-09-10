@@ -339,13 +339,13 @@ interface BookTableProps {
 /**
  * The library as a table, for reading the metadata rather than the covers.
  *
- * Twenty three columns exist and no phone will fit them, which is not meant to
- * be fixed by drawing fewer: **the table scrolls inside its own container**,
+ * More columns exist than a phone will fit, which is not meant to be fixed by
+ * drawing fewer: **the table scrolls inside its own container**,
  * so the page body never scrolls sideways. A body that scrolls horizontally
  * takes the navigation and the header with it, which on a touch device is how
  * a reader loses the app.
  *
- * **Which of the twenty three are drawn is not this component's decision.** It
+ * **Which of them are drawn is not this component's decision.** It
  * draws what `columns` names, in `COLUMN_KEYS` order. Where those come from,
  * and why a household and a cataloguer get different ones, is
  * `lib/libraryColumns.ts`.
@@ -419,10 +419,10 @@ export default function BookTable({
                           </span>
                         )}
                         {/* Always drawn, dimmed until this column is the one
-                            ordering the list. Only 6 of the 23 columns can be
-                            sorted, and with the chevron shown only when active
-                            the sole always-visible difference was a hover
-                            colour: the feature was there and undiscoverable.
+                            ordering the list. Only six of them can be sorted,
+                            and with the chevron shown only when active the
+                            sole always-visible difference was a hover colour:
+                            the feature was there and undiscoverable.
                             `aria-hidden` because `aria-sort` on the header
                             already says this, in words. */}
                         <Icon

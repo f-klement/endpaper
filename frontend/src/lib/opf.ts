@@ -5,6 +5,12 @@
  * book in a Calibre library as `metadata.opf`. Pure: it takes the XML and
  * returns a record, and it knows nothing about zips, files or the API.
  *
+ * **`OpfRecord` is shaped like what this reads and does not live here.** It is
+ * what every reader answers with, so it sits in `fileReaders.ts` with the rest
+ * of the vocabulary the family shares, and this module imports it back. The
+ * import is types and one predicate: nothing here learns which reader opens
+ * what, and the registry is not consulted.
+ *
  * **EPUB 2 and EPUB 3 say the same things differently and both are in the
  * wild.** Measured over 79 real files, 20 were EPUB 2.0 and 59 EPUB 3.0, so
  * reading one spelling is reading half a library. Each rule below names both.
@@ -25,8 +31,8 @@
  * **`DOMParser` rather than a library.** It is native, it is already in every
  * browser this app runs in, and the alternative is an XML parser in the bundle
  * for two small documents. What it costs is that the parse happens inside the
- * engine, before any code here runs, so `declaresEntities` refuses the one
- * thing this module could not otherwise bound: see its docstring.
+ * engine, before any code here runs, so `fileReaders.declaresEntities` refuses
+ * the one thing this module could not otherwise bound: see its docstring.
  *
  * Everything else about a hostile document is handled by reading it leniently.
  * A parse error yields a document whose root is `parsererror`, which is not a
@@ -40,41 +46,14 @@
  */
 
 import { plausibleYear } from "./bookBounds";
+import {
+  declaresEntities,
+  type OpfIdentifier,
+  type OpfRecord,
+} from "./fileReaders";
 import { parseIsbn } from "./isbn";
 
 const OPF_NAMESPACE = "http://www.idpf.org/2007/opf";
-
-/** One `dc:identifier`, with whatever the file said it was. */
-export interface OpfIdentifier {
-  /** `opf:scheme` in EPUB 2, the `identifier-type` refinement in EPUB 3. */
-  readonly scheme: string | null;
-  readonly value: string;
-}
-
-/** What one package document asserts. Every field is absent rather than empty. */
-export interface OpfRecord {
-  /** The `package` element's own `version`. `"2.0"` or `"3.0"` in practice. */
-  readonly version: string | null;
-  readonly title: string | null;
-  readonly subtitle: string | null;
-  /**
-   * Separate values, in document order.
-   *
-   * **Not one string.** A creator is one person and the file already separates
-   * them, so joining here would throw away a fact the file supplied and make
-   * every later reader guess it back.
-   */
-  readonly authors: readonly string[];
-  readonly identifiers: readonly OpfIdentifier[];
-  /** Canonical ISBN-13, from whichever of the three spellings carried one. */
-  readonly isbn: string | null;
-  readonly publisher: string | null;
-  readonly year: number | null;
-  readonly language: string | null;
-  readonly description: string | null;
-  readonly seriesName: string | null;
-  readonly seriesIndex: number | null;
-}
 
 /** Children of `parent` whose local name matches, in document order. */
 function childrenNamed(parent: Element, local: string): Element[] {
@@ -387,30 +366,6 @@ function readSeries(
     seriesName: text(chosen),
     seriesIndex: toNumber(refinement(index, chosen, "group-position")),
   };
-}
-
-/**
- * Whether a document declares its own entities.
- *
- * **The one attack this module cannot bound after the fact.** Expansion happens
- * inside the engine's parser, before `readOpf` sees a node, so a document
- * declaring nested entities is measured in what it expands to rather than in
- * what it weighs, and the caller's byte cap on the entry does not reach it.
- * Engines cap expansion themselves, but by how much is theirs to change and is
- * not something this reader can assert.
- *
- * Refusing costs nothing: an EPUB has no use for a DTD internal subset, and
- * **0 of 79 real files measured contain `<!ENTITY` in either document.**
- *
- * A plain substring rather than a regular expression over the prolog, which
- * would need to know where the prolog ends and would then be wrong about a
- * comment containing a tag. The exclusions, stated: an unescaped `<!ENTITY`
- * inside a `CDATA` section or inside a comment is refused as well. 0 of 79
- * files carry a `CDATA` section at all, and being told a file is not an EPUB is
- * a smaller harm than an unbounded parse.
- */
-export function declaresEntities(xml: string): boolean {
-  return xml.includes("<!ENTITY");
 }
 
 /**

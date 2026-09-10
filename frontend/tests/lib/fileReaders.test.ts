@@ -156,3 +156,204 @@ describe("which reader opens a picked file", () => {
     expect(await readerFor("DRACULA.EPUB")).toBeTypeOf("function");
   });
 });
+
+/**
+ * Every module, read as text, because the rules below are about the import
+ * graph and a module's own exports, neither of which is visible from a value.
+ *
+ * `import.meta.glob` rather than `node:fs`, for the reason
+ * `tests/houseRules.test.ts` gives at its own copy: a guard test is a poor
+ * reason to add `@types/node` and widen the global types.
+ *
+ * **Here rather than beside that copy**, which is where a tree wide rule
+ * belongs, because this one is about a single seam and this is that seam's test
+ * file. `houseRules.test.ts` is also owned by another change this wave, and a
+ * rule about `fileReaders.ts` should not need an edit there to be added.
+ */
+const SOURCES = import.meta.glob("../../src/**/*.{ts,tsx}", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
+/** The three names the reader family shares, which `fileReaders.ts` declares. */
+const SHARED = ["OpfRecord", "OpfIdentifier", "declaresEntities"];
+
+/** `[clause, path]` for every `import ... from` and `export ... from`. */
+function bindings(source: string): [string, string, string][] {
+  return [
+    ...source.matchAll(
+      /(import|export)\s+(?:type\s+)?\{([^}]*)\}\s*from\s*"([^"]+)"/g,
+    ),
+  ].map(([, kind, clause, path]) => [kind!, clause!, path!]);
+}
+
+/** Whether a clause names one of the shared three. */
+function namesShared(clause: string): boolean {
+  return SHARED.some((name) => new RegExp(`\\b${name}\\b`).test(clause));
+}
+
+function modules(): [string, string][] {
+  return Object.entries(SOURCES).map(([path, source]) => [
+    path.replace("../../src/", ""),
+    source,
+  ]);
+}
+
+const SEAM = "lib/fileReaders.ts";
+
+/**
+ * Whether a specifier names the seam, extension or not.
+ *
+ * **One predicate for both uses, because the two fail in opposite directions.**
+ * Asking `endsWith("/fileReaders")` reports a legitimate import as an offender
+ * when the path carries an extension, which is loud, and stops seeing a
+ * re-export of the seam, which is silent and reopens the rename evasion below.
+ * A guard with one fail open and one fail closed use of the same test is worth
+ * fixing whatever the spelling's odds, and the odds are not long. Measured over
+ * `src/`, occurrences rather than files, counting a relative specifier ending
+ * `.ts`, `.tsx`, `.js` or `.jsx`: **305**, in 84 files, every one of them
+ * generated under `api/generated/` and none elsewhere. `tsconfig.json` sets
+ * `allowImportingTsExtensions`, so the spelling typechecks and a future author
+ * has a working precedent in this tree to copy.
+ *
+ * **The pattern is stated because it is what the number turns on**, not the
+ * range: the same question asked of `./` alone answers 292, and the 13 between
+ * them are the `../` specifiers this predicate also has to accept.
+ *
+ * The exclusion, which is what one optional group buys over a list of suffixes:
+ * a sibling module named `fileReaders.<word>` would read as the seam here. None
+ * exists, and a name with two dots does not match.
+ */
+const isSeam = (from: string) => /\/fileReaders(\.\w+)?$/.test(from);
+
+/** Every `import ... from` and `export ... from`, with its `type` marker. */
+const FROM_CLAUSE = /(?:import|export)\s+(type\s+)?[^;]*?from\s*"([^"]+)"/g;
+
+/** An `export ... from`, whether it names members or re-exports everything. */
+const REEXPORT = /export\s+(?:type\s+)?(?:\*|\{[^}]*\})\s*from\s*"([^"]+)"/g;
+
+describe("the vocabulary the readers share", () => {
+  it("is declared at the seam and nowhere else", () => {
+    // The half an import rule cannot assert. `fileReaders.ts` re-exporting these
+    // from somewhere else satisfies every import below while moving the
+    // declaration back out of the seam, which is the whole of what this ticket
+    // did. Measured: without this arm, moving all three to a new module and
+    // re-exporting them here goes green.
+    const seam = modules().find(([path]) => path === SEAM);
+    expect(seam).toBeDefined();
+    const source = seam![1];
+
+    expect(source).toContain("export interface OpfRecord {");
+    expect(source).toContain("export interface OpfIdentifier {");
+    expect(source).toContain("export function declaresEntities(");
+    // Declared, not passed through: an `export ... from` here would satisfy the
+    // three above only if it also spelled the bodies, which it cannot.
+    expect(
+      bindings(source).filter(
+        ([kind, clause]) => kind === "export" && namesShared(clause),
+      ),
+    ).toEqual([]);
+  });
+
+  it("is imported from the seam by everything that uses it", () => {
+    // `OpfRecord`, `OpfIdentifier` and `declaresEntities` were declared in
+    // `lib/opf.ts`, so five modules that parse no package document imported the
+    // EPUB half of the app to say what a book is, and the author of a sixth
+    // reader would have had to do the same.
+    //
+    // **The rule is the seam and not one forbidden module**, which is the
+    // correction that bought this arm. Its first draft asserted the set of
+    // modules importing `lib/opf`, and that is a rule about one path: adding
+    // `export type { OpfRecord } from "./fileReaders"` to `lib/epub.ts` and
+    // pointing `pdf.ts` at `./epub` restores exactly the defect this ticket
+    // removed, through a module named for a format, and measured green on all
+    // 427 tests. Asking where each name comes FROM closes the family, because a
+    // reader has to name some path and only one of them passes.
+    //
+    // **Derived from the identifier and not from a list of modules**: a sixth
+    // reader naming any of the three joins this rule with no edit here, and a
+    // module that stops using them leaves it the same way.
+    //
+    // **The second door is a re-export, and it is closed structurally rather
+    // than by name.** Asking only where the three names come from leaves the
+    // rule one token short: `export { type OpfRecord as BookRecord } from
+    // "./fileReaders";` in `epub.ts` passes the path test, and `import type {
+    // BookRecord } from "./epub";` in `pdf.ts` then names none of the three, so
+    // the defect returns through a module named for a format with every arm
+    // green. So no module but the seam may re-export from the seam at all,
+    // whatever it calls what it takes: that enumerates no name and needs no edit
+    // when a fourth shared thing is added.
+    //
+    // **Matched on import syntax rather than on the word**, so a docstring
+    // naming `OpfRecord` is not an offender, which several are. The exclusion,
+    // stated because it costs a different instrument to close: a local alias,
+    // `import { type OpfRecord } from "./fileReaders"; export type BookRecord =
+    // OpfRecord;`, is not an `export ... from` and no import syntax matcher
+    // sees it. What this closes is the direct import and the re-export, which
+    // are what a reader writes.
+    const reachedFromElsewhere = ([path, source]: [string, string]) =>
+      bindings(source)
+        .filter(([, clause]) => namesShared(clause))
+        .filter(([, , from]) => !isSeam(from))
+        .map(([, , from]) => `${path} <- ${from}`);
+
+    const republished = ([path, source]: [string, string]) =>
+      [...source.matchAll(REEXPORT)]
+        .filter(([, from]) => isSeam(from!))
+        .map(([, from]) => `${path} re-exports ${from}`);
+
+    const offenders = modules()
+      .filter(([path]) => path !== SEAM)
+      .flatMap((entry) => [
+        ...reachedFromElsewhere(entry),
+        ...republished(entry),
+      ])
+      .sort();
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("reaches the rest of the app eagerly through one module only", () => {
+    // What keeps the graph acyclic, asserted because today it is an accident.
+    // `opf.ts` imports `declaresEntities` from here as a value, so there is a
+    // runtime edge from a reader's dependency into the seam. Nothing breaks
+    // only because every edge the other way is erased or deferred: the failure
+    // types are `import type` and the registry loads each reader with `await
+    // import`. One ordinary import added here closes a cycle, and no other test
+    // in this tree goes red when it does.
+    //
+    // **Stated as the exclusion and not as a list of readers**, which is the
+    // correction that bought this wording. Its first draft forbade only the
+    // modules the registry loads with `import()`, and `opf.ts` is not one of
+    // them: `import { readOpf } from "./opf";` closed opf into a cycle with the
+    // arm green. `calibre.ts` and `zip.ts` were open the same way. The rule is
+    // now the file's own property, one eager relative import, so a module that
+    // never joins the registry is covered too.
+    //
+    // **The edge is refused whatever it carries**, because what a cycle costs
+    // is decided by the binding and not by the edge: `readOpf` is a hoisted
+    // function declaration and survives one, while `opf.ts`'s module scope
+    // `const OPF_NAMESPACE` read from inside the same cycle is in its temporal
+    // dead zone. A rule that asked which binding was imported would be asking
+    // after the edge already existed.
+    //
+    // **`./fileName` is named rather than counted**, so adding a second eager
+    // import is a decision somebody makes here rather than a number that drifts.
+    //
+    // The exclusion: an inline `import { type X }` is not read as type only, and
+    // none is written that way in this file. A bare specifier is a package and
+    // cannot close a cycle in this tree, so only relative paths are asked about.
+    const seam = modules().find(([path]) => path === SEAM)![1];
+    const statements = [...seam.matchAll(FROM_CLAUSE)];
+    // A regex that matched nothing would make the assertion below pass for ever.
+    expect(statements.length).toBeGreaterThan(0);
+
+    const eager = statements
+      .filter(([, isType, from]) => !isType && from!.startsWith("."))
+      .map(([, , from]) => from!)
+      .filter((from) => from !== "./fileName");
+
+    expect(eager).toEqual([]);
+  });
+});

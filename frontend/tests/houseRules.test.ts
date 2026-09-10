@@ -21,10 +21,25 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { parseAst } from "vite";
 
 // Imported through the specifier the application uses, so this is the double
 // only if the alias is in force.
 import * as zxingDouble from "@zxing/library";
+
+// The subject of the column count rule at the foot of this file. Imported so
+// the figure it refuses is computed rather than written here.
+import { COLUMN_SPECS } from "../src/lib/libraryColumns";
+
+// **This file's own source, which no glob here can supply.** The reason and
+// the measurement are at `SELF` in the address rule below, which is the one
+// place this tree states it: a rule reading a glob written here is exempt from
+// itself. Restating it instead of pointing at it is how the column count rule
+// came to assert the opposite in its own docstring while passing.
+//
+// A `?raw` specifier is a different module id, so this is a string and not a
+// cycle.
+import ownSource from "./houseRules.test.ts?raw";
 
 const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
   query: "?raw",
@@ -861,11 +876,13 @@ describe("no fixture or string carries an address outside reserved space", () =>
  * spelling anybody reaches for by accident: the rule is a tripwire on the
  * idiomatic form, not a type checker.
  *
- * A general comment stripper would be a second parser to get wrong, and this
- * project has none to borrow: both were checked rather than assumed.
- * `typescript` is at 7.x, which is the native compiler and exposes no
- * `createSourceFile` (it is `undefined` at runtime), and rolldown re-exports no
- * parser either.
+ * A general comment stripper would be a second parser to get wrong. This one is
+ * a line filter, and a parser is reachable: `parseAst`, which `vite`
+ * re-exports, is what the decoder rule at the end of this file reads its
+ * sources with. It hands back no comments, so it does not give this for free.
+ * `typescript` is not the one to reach for either, and that was checked rather
+ * than assumed: at 7.x it is the native compiler and exposes no
+ * `createSourceFile` at all (it is `undefined` at runtime).
  *
  * Line anchoring was the other candidate and is strictly weaker: it sees only a
  * call that begins its own line, so anything at all before it hides it.
@@ -1089,5 +1106,637 @@ describe("a module is replaced by an alias, never by a module mock", () => {
     for (const name of replacers) {
       expect(CALLS.test(codeOnly(`vi.${name}("./x");`))).toBe(true);
     }
+  });
+});
+
+type Node = { type: string } & Record<string, unknown>;
+
+function isNode(value: unknown): value is Node {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { type?: unknown }).type === "string"
+  );
+}
+
+function text(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+/**
+ * Does the node at `at` defer what is written inside it to a later call?
+ *
+ * **Anything carrying a `params` array is a callable**, which is the whole
+ * family (a declaration, an expression, an arrow, a method, an accessor) and
+ * not a list of node names for a new syntax to grow past.
+ *
+ * **A callable a call expression holds directly is refused**, whether it is the
+ * callee, as `(() => …)()` is, or an argument the call hands on, as the arrow
+ * in `["utf-16be"].map(…)` is. The second is the one that matters: it is a one
+ * line rewrite of the two constructions this rule was written for, and reading
+ * "is it the callee" accepted it. Refused rather than called there, and the
+ * difference is the point: a `setTimeout(() => …, 0)` at module scope is held
+ * by a call and runs later, and it is refused too. The walk climbs a member
+ * expression on the way out, which is the shape `.call` and `.apply` have, so
+ * neither is named here.
+ *
+ * A callable the walk cannot show to be called is treated as deferring, which
+ * is the lenient direction and is where the remaining holes are: a callable
+ * reached by a call through something else, `wrap({ make: () => … })`, defers
+ * as far as this can tell. A callable it can show is refused whether or not it
+ * runs, so `.bind` on an arrow is refused, which is the strict one.
+ */
+function defers(ancestors: Node[], at: number): boolean {
+  const node = ancestors[at];
+  if (node === undefined || !Array.isArray(node.params)) return false;
+  let child = node;
+  for (let above = at - 1; above >= 0; above -= 1) {
+    const outer = ancestors[above];
+    if (outer === undefined) return true;
+    if (outer.type === "CallExpression" || outer.type === "NewExpression") {
+      return false;
+    }
+    if (outer.type !== "MemberExpression" || outer.object !== child)
+      return true;
+    child = outer;
+  }
+  return true;
+}
+
+/**
+ * Is this node a construction of the platform's `TextDecoder`?
+ *
+ * The name is read off the identifier, or off the property at the end of a
+ * member expression, so `new globalThis.TextDecoder(...)` is this constructor
+ * spelled differently rather than a way past the rule.
+ *
+ * **Two references are out of reach and stay out of it**: an alias
+ * (`const D = TextDecoder`) and a computed property
+ * (`globalThis["TextDecoder"]`). Neither is a spelling of the label written at
+ * the call, which is what the rule is about, and following a binding to its
+ * declaration is a different instrument from reading a call.
+ */
+function isDecoderConstruction(node: Node): boolean {
+  if (node.type !== "NewExpression") return false;
+  const callee = node.callee;
+  if (!isNode(callee)) return false;
+  const named =
+    callee.type === "MemberExpression" && isNode(callee.property)
+      ? callee.property
+      : callee;
+  return text(named.name) === "TextDecoder";
+}
+
+/** The label a construction passes, or `null` where it is not a string literal. */
+function labelOf(node: Node): string | null {
+  const args = node.arguments;
+  if (!Array.isArray(args)) return null;
+  // No argument at all is UTF-8 by the specification, and cannot throw.
+  if (args.length === 0) return "utf-8";
+  const first: unknown = args[0];
+  if (!isNode(first) || first.type !== "Literal") return null;
+  const label = text(first.value);
+  return label === null ? null : label.toLowerCase();
+}
+
+/**
+ * One construction: the label it passes, and whether a callable defers it.
+ *
+ * `deferred` and not `atModuleEvaluation`, because that is what is computed. A
+ * class field initialiser defers to instantiation and no callable holds it, so
+ * it reads `false` here and the rule refuses it; naming the field for module
+ * evaluation would have made the offender list say something untrue about it.
+ */
+type Construction = { label: string | null; deferred: boolean };
+
+/**
+ * Every `new TextDecoder(...)` in one source file, and what defers each.
+ *
+ * Parsed rather than matched, because the rule is about where a construction
+ * sits and not about how its line is spelled: an export, a `let`, an explicit
+ * type annotation and a value inside an object literal are four anchors to a
+ * regular expression and one shape to a parser. **The parser is imported from
+ * `vite`, which re-exports it**, and not from the package underneath: that one
+ * is reachable only because a dependency of a dependency is hoisted, and this
+ * file publishes. Where it is ever gone, this file fails to import, which is
+ * louder than a rule that has quietly stopped matching anything.
+ */
+function decoderConstructions(
+  source: string,
+  lang: "ts" | "tsx",
+): Construction[] {
+  const found: Construction[] = [];
+  const ancestors: Node[] = [];
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value as unknown[]) walk(item);
+      return;
+    }
+    if (!isNode(value)) return;
+    if (isDecoderConstruction(value)) {
+      found.push({
+        label: labelOf(value),
+        deferred: ancestors.some((_node, at) => defers(ancestors, at)),
+      });
+    }
+    ancestors.push(value);
+    for (const key of Object.keys(value)) walk(value[key]);
+    ancestors.pop();
+  };
+  walk(parseAst(source, { lang }));
+  return found;
+}
+
+function decoders(): [string, Construction][] {
+  return (
+    entries()
+      // A construction cannot hide from the identifier it names, so this skips
+      // files rather than constructions.
+      .filter(([, source]) => source.includes("TextDecoder"))
+      .flatMap(([path, source]) =>
+        decoderConstructions(source, path.endsWith(".tsx") ? "tsx" : "ts").map(
+          (one): [string, Construction] => [path, one],
+        ),
+      )
+  );
+}
+
+/** The one label every runtime is required to carry. */
+const UNIVERSAL_LABEL = "utf-8";
+
+/**
+ * The rule itself, in one place.
+ *
+ * Written once because the tests below would otherwise hold two copies of it,
+ * the live one and the fixtures', and a fixture that exercises its own copy
+ * reports on a rule the tree is not being read against.
+ */
+function refused(one: Construction): boolean {
+  return !one.deferred && one.label !== UNIVERSAL_LABEL;
+}
+
+/**
+ * What has to be in the text for a construction to exist, as a second
+ * instrument on the same question.
+ *
+ * Deliberately not the string `decoders()` prefilters on: two instruments
+ * keyed on one spelling agree with each other while missing the same file, and
+ * the only thing this comparison is for is the case where they disagree.
+ */
+const CONSTRUCTION = /new\s+(?:[A-Za-z_$][\w$]*\.)*TextDecoder\s*\(/g;
+
+describe("a decoder a runtime may not carry is never built at module scope", () => {
+  it("passes no other label where no callable defers the construction", () => {
+    // `new TextDecoder` throws a `RangeError` for a label the runtime has no
+    // table for. Inside a function that costs the one call, which every caller
+    // here already has a fallback for; at module scope it escapes module
+    // evaluation, the dynamic import in `readerFor` rejects, and a whole format
+    // reads as unreadable rather than one string. Two constructions in `pdf.ts`
+    // were that, and three other readers had already guarded theirs.
+    //
+    // **Stated as an exclusion.** Not "no utf-16be", which is the one that was
+    // wrong, and not a list of the labels a runtime is required to have, which
+    // is a thing to be right about later and fails silently when it is not. A
+    // label that is not a string literal is refused for the same reason: what
+    // cannot be shown to be the universal one is not it.
+    //
+    // The whole of `src` and not the readers alone: what makes a construction
+    // dangerous is module evaluation, which every module has. Measured on the
+    // tree this arrived in, all 13 constructions are under `src/lib`, so the
+    // wider rule refuses nothing extra today and needs no revisiting when a
+    // reader moves.
+    const offenders = decoders()
+      .filter(([, one]) => refused(one))
+      .map(([path, one]) => `${path}: ${one.label ?? "not a literal"}`);
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("is reading the constructions there are, and all of them", () => {
+    // Two instruments, and no number written down: the walk counts
+    // `NewExpression` nodes, the text count counts what has to be present for
+    // one to exist. A glob that matched nothing, a parser that returned an
+    // empty program and a walk that stopped descending all arrive here as a
+    // disagreement rather than as a rule passing over an empty set.
+    //
+    // Prose in `src` writing a construction out in full would fail this too.
+    // That is the trade for a check with no constant in it, and the fix is to
+    // write the constructor without the `new`, as `audiobook.ts` does.
+    const written = entries()
+      .map(([, source]) => (source.match(CONSTRUCTION) ?? []).length)
+      .reduce((total, count) => total + count, 0);
+
+    expect(decoders().length).toBe(written);
+    expect(written).toBeGreaterThan(0);
+  });
+
+  /**
+   * Every shape the rule has an opinion about, and what it says about each.
+   *
+   * A table rather than a run of assertions in one test, so a row that stops
+   * holding names itself: the run aborts at the first failure, and a mutation
+   * that weakened two arms would be reported as one.
+   */
+  const SHAPES: [string, "ts" | "tsx", boolean][] = [
+    // Module scope, whatever statement is written around it.
+    [`const d = new TextDecoder("utf-16be");`, "ts", true],
+    [`export const d = new TextDecoder("utf-16be");`, "ts", true],
+    [`let d: TextDecoder = new TextDecoder("utf-16be");`, "ts", true],
+    [`const all = { be: new TextDecoder("utf-16be") };`, "ts", true],
+    // The same constructor, named through the object that carries it.
+    [`const d = new globalThis.TextDecoder("utf-16be");`, "ts", true],
+    // A callable a call holds directly is called there and shelters nothing,
+    // as the callee or as an argument. The `map` row is the two constructions
+    // this rule was written for, rewritten in one line.
+    [`const d = (() => new TextDecoder("utf-16be"))();`, "ts", true],
+    [`const d = (function () { return new TextDecoder("x"); })();`, "ts", true],
+    [`const d = (() => new TextDecoder("utf-16be")).call(null);`, "ts", true],
+    [`const ds = ["utf-16be"].map((l) => new TextDecoder(l));`, "ts", true],
+    [`Array.from([1], () => new TextDecoder("utf-16be"));`, "ts", true],
+    // Not a literal, so not shown to be the universal label.
+    [`const d = new TextDecoder(LABEL);`, "ts", true],
+    // A field initialiser defers to instantiation, and no callable holds it.
+    // Refused, which is the strict direction.
+    [`class C { d = new TextDecoder("utf-16be"); }`, "ts", true],
+    // The other language the glob matches. No `.tsx` file in the tree names a
+    // decoder today, so nothing else exercises that arm, and a `.tsx` source
+    // handed to the `.ts` grammar throws at its first tag rather than passing.
+    [`const view = <p x={new TextDecoder("utf-16be")} />;`, "tsx", true],
+
+    // Deferred, in each shape that defers.
+    [`function f() { return new TextDecoder("utf-16be"); }`, "ts", false],
+    [`const f = () => new TextDecoder("utf-16be");`, "ts", false],
+    [`const o = { f() { return new TextDecoder("utf-16be"); } };`, "ts", false],
+    [
+      `const o = { get f() { return new TextDecoder("utf-16be"); } };`,
+      "ts",
+      false,
+    ],
+    [`class C { f() { return new TextDecoder("utf-16be"); } }`, "ts", false],
+    [
+      `function f() { return [1].map(() => new TextDecoder("x")); }`,
+      "ts",
+      false,
+    ],
+    // The universal label at module scope, in any spelling of it. Labels are
+    // matched case insensitively by the specification.
+    [`const d = new TextDecoder("utf-8");`, "ts", false],
+    [`const d = new TextDecoder("UTF-8");`, "ts", false],
+    [`const d = new TextDecoder();`, "ts", false],
+  ];
+
+  it.each(SHAPES)("reads %s", (source, lang, refuses) => {
+    expect(decoderConstructions(source, lang).some(refused)).toBe(refuses);
+  });
+});
+
+/**
+ * Every Markdown document this repository versions.
+ *
+ * **The exclusion is stated and it is build output, not a corner of the
+ * tree.** An earlier draft globbed the repository root and one level of
+ * `docs/`, which is an inclusion list: it read 11 of the 18 published
+ * documents and left the rest unjudged, `DOCKERHUB.md` among them, which is
+ * derived from the README's feature bullets and so is the likeliest place a
+ * deleted sentence is copied back to. `backend/tests/test_roster_counts.py`
+ * measured that same shape, replaced it and pinned against it.
+ *
+ * **What decides publication is the declaration in a document's header**,
+ * applied by `scope` below. It is the property the publish gate reads, so the
+ * two cannot drift, and a document added anywhere needs no entry anywhere.
+ */
+const DOCUMENTS = import.meta.glob(
+  [
+    "../../**/*.md",
+    "!../../**/node_modules/**",
+    "!../../**/.venv/**",
+    "!../../**/.git/**",
+    // The stripped tree the publish script materialises at the repository root,
+    // gitignored. Every file in it is a copy of one already in scope, so
+    // including it scans the corpus twice, and a **stale** copy reports a
+    // violation the source no longer has: measured 2026-09-10, a four day old
+    // copy of `docs/featurelist.md` failed the column count rule on a sentence
+    // deleted in the same merge. Whether it exists at all depends on whether
+    // somebody ran the publish script locally, which is not something a test
+    // result may turn on.
+    "!../../public/**",
+  ],
+  {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  },
+) as Record<string, string>;
+
+/**
+ * No register is excluded, and the two that invite one are read.
+ *
+ * **`docs/decisions.md` was excluded in a draft of this rule on the reasoning
+ * that its counts are dated, and that reasoning does not hold.**
+ * `backend/tests/test_roster_counts.py` reached the same exclusion first,
+ * published the refutation, and pins against re-taking it: that register
+ * carries no version headings and records decisions that still bind, so its
+ * counts read as present tense, and it held four stale roster counts when that
+ * file landed. `CHANGELOG.md` is dated by its own structure and is excluded
+ * there for a reason that does hold; it is read here because a changelog entry
+ * describing a count is a sentence somebody may copy forward.
+ *
+ * **The cost is a false positive this rule cannot resolve, and it is not
+ * hypothetical.** Both registers carry historical column counts. The day
+ * `COLUMN_SPECS` passes through one of those values, a correct historical
+ * sentence is reported and must not be corrected. Resolving one needs a
+ * verdict saying what the number counts, which is the census architecture in
+ * the file named above; the answer then is to write the verdict, not to
+ * exclude the register.
+ */
+
+/**
+ * The publish gate's own anchor for an internal document, and its window.
+ *
+ * **A copy, and the third the repository holds.** A published file cannot read
+ * the gate's script, which is stripped, so the number is written out rather
+ * than derived, here and in
+ * `backend/tests/test_roster_counts.py::test_the_window_is_the_number_the_publish_gate_uses`.
+ * **That test pins that file's copy and not this one**, which an earlier
+ * draft of this comment claimed the other way round: change the constant here
+ * alone and it stays green. This copy is pinned by a literal in
+ * `reads the declaration the way the publish gate reads it` below, and it has
+ * to be, because the boundary fixture there is built from `HEADER_LINES` and
+ * so moves with it: measured, the arm is green at every value from 3 to 200
+ * while the set of documents it drops moves by six.
+ *
+ * **Getting the window wrong here is quiet rather than loud.** A narrower one
+ * keeps a document whose declaration sits below it, which widens the rule's
+ * scope and can only add a report; a wider one drops a document that merely
+ * discusses the convention, which is the direction the gate's own comment says
+ * the bound exists to protect.
+ */
+const INTERNAL = /^[^A-Za-z0-9]{0,6}[ \t]*\*\*This file is internal\.\*\*/m;
+const HEADER_LINES = 30;
+
+/**
+ * Whether a document declares itself internal in its opening lines.
+ *
+ * **Lines, and the same count the gate uses.** Anything measured another way
+ * is a second rule wearing the gate's name.
+ */
+function declaresItselfInternal(source: string): boolean {
+  return INTERNAL.test(source.split("\n").slice(0, HEADER_LINES).join("\n"));
+}
+
+const ONES = [
+  "zero",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+  "eleven",
+  "twelve",
+  "thirteen",
+  "fourteen",
+  "fifteen",
+  "sixteen",
+  "seventeen",
+  "eighteen",
+  "nineteen",
+];
+const TENS = [
+  "",
+  "",
+  "twenty",
+  "thirty",
+  "forty",
+  "fifty",
+  "sixty",
+  "seventy",
+  "eighty",
+  "ninety",
+];
+
+/**
+ * How English spells one number below a hundred, in both spellings it uses.
+ *
+ * **A table bounded by the language, not by this repository**, which is what
+ * separates it from the enumeration the working notes refuse: it is asked for
+ * the spelling of one value that is computed, and it does not grow when the
+ * tree does.
+ */
+function inWords(n: number): string[] {
+  const small = ONES[n];
+  if (small !== undefined) return [small];
+  const tens = TENS[Math.floor(n / 10)];
+  const unit = ONES[n % 10];
+  // **Throws rather than returning nothing.** An empty list would leave the
+  // pattern below built from the digit alone, still passing, and guarding half
+  // of what its name says. A count this cannot spell breaks the run instead.
+  if (tens === undefined || unit === undefined || tens === "") {
+    throw new Error(`no spelling for ${n}`);
+  }
+  return n % 10 === 0 ? [tens] : [`${tens} ${unit}`, `${tens}-${unit}`];
+}
+
+/**
+ * One line of text out of wrapped prose, with the emphasis markers dropped.
+ *
+ * **The markers are removed because they hide a count from the pattern
+ * below.** A gap that has to begin with whitespace does not see a bolded
+ * number ahead of its noun, and a leading underscore is a word character, so
+ * no boundary holds before an italicised one either.
+ * `backend/tests/test_roster_counts.py` measured that hole in its own grammar
+ * and describes it at length; the house writes bolded numbers throughout, so
+ * it is a spelling this prose produces rather than one an evader has to reach
+ * for.
+ *
+ * **Neither of those examples is spelled out here, and that is the rule this
+ * comment broke.** Quoting one costs the markers that made it a quote, which
+ * is exactly what this function removes, so the example becomes the claim and
+ * the rule below reports its own docstring. Found by a critic; the fixtures
+ * three arms down were already built from the count for this reason.
+ *
+ * **They are dropped unconditionally, and the two kinds differ.** An asterisk
+ * and a backtick are not word characters, so removing one can only join and
+ * never split. An underscore is, so removing it can also split: that is what
+ * makes an italicised count visible at all, and it is the arm below relying on
+ * it. Both directions only add reports, because the pattern needs a boundary
+ * before the number and an invented one can only produce a match to look at.
+ */
+function flattened(source: string): string {
+  return source
+    .replace(/\n[ \t]*(?:\*|\/\/|#)?[ \t]*/g, " ")
+    .replace(/[*_`]/g, "");
+}
+
+/** A number, at most two words, then the noun. */
+function stated(n: number): RegExp {
+  const forms = [String(n), ...inWords(n)];
+  return new RegExp(
+    String.raw`\b(?:${forms.join("|")})\b[ \t]+(?:[A-Za-z]+[ \t]+){0,2}columns?\b`,
+    "i",
+  );
+}
+
+/**
+ * The size of `COLUMN_SPECS` is not restated in prose anywhere.
+ *
+ * **The figure was written down in six published places and recomputed in
+ * none**, and it had already drifted: the README stated a count the table had
+ * outgrown while `docs/featurelist.md` stated the right one. Deleting the
+ * figure is the fix, because a count that is never written cannot go stale,
+ * and this is what stops it being written again.
+ *
+ * **It looks for the count the tree has, not for a number.** The pattern is
+ * built from `COLUMN_SPECS` when the test runs, so adding a column moves what
+ * this refuses without anybody editing it, and no spelling of any other value
+ * is named here.
+ *
+ * **What it catches is the figure arriving while it is still correct**, which
+ * is the only moment drift can be stopped: a number has to be written before
+ * it can go stale, and every one of the six was right on the day somebody
+ * wrote it. A count that is wrong the moment it is typed is invisible here,
+ * and stating that is cheaper than a verdict table for one noun.
+ *
+ * **Two bounds, and the grammar is the one a reader does not expect.** The
+ * first is the glob: the frontend source, every test file, this file's own
+ * source added back for the reason `SELF` above records, and every Markdown
+ * document less those declaring themselves internal. The second is
+ * the shape of the sentence: a number, at most two words, then the noun. A
+ * count reaching its noun any other way is invisible, and the ones known to be
+ * are an elided noun ("all of them are drawn"), an ordinal, and a number and
+ * noun in different table cells. `flattened` closes the markup case, which was
+ * the fourth and is the one the house prose produces.
+ *
+ * The backend's equivalent machinery is `backend/tests/test_roster_counts.py`,
+ * which is a census with a verdict for every candidate rather than one noun
+ * and one computed value.
+ */
+describe("the number of table columns is not written down", () => {
+  const count = Object.keys(COLUMN_SPECS).length;
+
+  function scope(): [string, string][] {
+    return [
+      ...Object.entries(SOURCES),
+      ...Object.entries(TEST_SOURCES),
+      ["./houseRules.test.ts", ownSource] as [string, string],
+      ...Object.entries(DOCUMENTS).filter(
+        ([, source]) => !declaresItselfInternal(source),
+      ),
+    ];
+  }
+
+  it("reads the source documents and not a materialised copy of them", () => {
+    // The exclusion above, asserted rather than trusted: a glob that silently
+    // stops excluding is the failure this arm exists for, and it costs nothing.
+    expect(
+      Object.keys(DOCUMENTS).filter((path) => path.startsWith("../../public/")),
+    ).toEqual([]);
+  });
+
+  it("is a count this spelling table can spell", () => {
+    expect(count).toBeGreaterThan(0);
+    // The edges of the table, so a count growing past it is known to stop the
+    // run rather than to leave the digit arm guarding on its own.
+    expect(() => inWords(100)).toThrow();
+    expect(() => inWords(-1)).toThrow();
+  });
+
+  it("appears in no source file and no published document", () => {
+    const pattern = stated(count);
+    const found = scope()
+      .filter(([, source]) => pattern.test(flattened(source)))
+      .map(([path]) => path);
+
+    expect(found).toEqual([]);
+  });
+
+  it("reads the declaration the way the publish gate reads it", () => {
+    // **Pinned on synthetic input, never on a count over the corpus.** The
+    // number of documents this drops is positive here and **zero** in the
+    // mirror, by construction: the gate refuses to publish a file that
+    // declares itself internal, so the published tree holds none. This file
+    // publishes and the mirror carries a runnable suite, so an arm resting on
+    // that count would pass here and fail there.
+    expect(declaresItselfInternal("**This file is internal.**\n")).toBe(true);
+    // Any short run of non-alphanumerics may precede it, which is the gate's
+    // anchor rather than a list of the comment prefixes somebody thought of.
+    expect(declaresItselfInternal("> **This file is internal.**\n")).toBe(true);
+    // **The false direction is the one that matters, and it was unpinned.** A
+    // filter stuck at true drops every document, leaving the rule above
+    // judging the source trees alone, and a count of what it dropped rises
+    // rather than falls. Nothing else here would notice.
+    const past = `${"x\n".repeat(HEADER_LINES)}**This file is internal.**\n`;
+    expect(declaresItselfInternal(past)).toBe(false);
+    expect(declaresItselfInternal("nothing to declare\n")).toBe(false);
+    // **The window itself, as a literal.** Every assertion above is built from
+    // `HEADER_LINES`, so all of them follow it wherever it goes and none of
+    // them bounds it. Without this line the constant is at the "stated" rung
+    // while the comment above it claims "tested".
+    expect(HEADER_LINES).toBe(30);
+  });
+
+  it("is reading the documents at all", () => {
+    // **Asserted against `scope()` and not against the glob**, which is the
+    // same distinction one level up: a filter that dropped everything would
+    // leave an unfiltered glob still holding every one of these.
+    const paths = scope().map(([path]) => path);
+    expect(paths).toContain("../../README.md");
+    // Deliberately not the two an inclusion list would have reached anyway.
+    // These four sit in four different places and each was unjudged while the
+    // scope was the repository root and one level of `docs/`.
+    expect(paths).toContain("../../DOCKERHUB.md");
+    expect(paths).toContain("../../CHANGELOG.md");
+    expect(paths).toContain("../../conformance/README.md");
+    // The two coverage registers sit beside this file, and a specifier that
+    // resolves back into this directory is keyed relative to it rather than by
+    // the way it was written. Matched by suffix so the assertion is about the
+    // document rather than about that normalisation.
+    expect(paths.some((path) => path.endsWith("COVERAGE.md"))).toBe(true);
+    expect(Object.keys(TEST_SOURCES).length).toBeGreaterThan(0);
+    // **This file has to be in the set it is scanning.** The rule's docstring
+    // says its own prose is inside its subject rather than exempted, and that
+    // was a sentence rather than a test: the run stayed green while this file
+    // carried a live count in a docstring, which is either a glob that skips
+    // its importer or a scope that forgets it, and neither is visible by
+    // reading.
+    expect(scope().map(([path]) => path)).toContain("./houseRules.test.ts");
+  });
+
+  it("sees a count that markup has wrapped", () => {
+    // The shape the house prose actually produces. Each of these was invisible
+    // while the gap after the number had to begin with whitespace.
+    const words = inWords(count)[0];
+    const pattern = stated(count);
+    expect(pattern.test(flattened(`**${words}** columns`))).toBe(true);
+    expect(pattern.test(flattened(`**${count}** columns`))).toBe(true);
+    expect(pattern.test(flattened(`_${words}_ columns`))).toBe(true);
+    expect(pattern.test(flattened(`\`${count}\` columns`))).toBe(true);
+    expect(pattern.test(flattened(`**${words} columns**`))).toBe(true);
+  });
+
+  it("refuses the sentence this rule was written for", () => {
+    // Built from the count rather than typed, so this file does not become an
+    // instance of what it refuses.
+    const words = inWords(count)[0];
+    expect(stated(count).test(`a table of ${words} metadata columns`)).toBe(
+      true,
+    );
+    expect(stated(count).test(`the table carries ${count} columns`)).toBe(true);
+    // Across a wrapped comment, which is where four of the six sites sat.
+    expect(stated(count).test(flattened(` * ${words}\n * columns exist`))).toBe(
+      true,
+    );
+  });
+
+  it("says nothing about a count that is not this one", () => {
+    // "two columns" is ordinary English and the tree is full of it. Only the
+    // live size is refused, which is what keeps this off every other sentence.
+    expect(stated(count).test("two columns")).toBe(false);
+    expect(stated(count).test(`${count + 1} columns`)).toBe(false);
+    expect(stated(count).test(`${count} rows`)).toBe(false);
   });
 });

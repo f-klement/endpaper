@@ -3,7 +3,6 @@ import type { EpubFailure } from "./epub";
 import type { Fb2Failure } from "./fb2";
 import type { MobiFailure } from "./mobi";
 import type { PdfFailure } from "./pdf";
-import type { OpfRecord } from "./opf";
 import { supportedExtension, type SupportedExtension } from "./fileName";
 
 /**
@@ -43,6 +42,66 @@ import { supportedExtension, type SupportedExtension } from "./fileName";
 export type FileFailure =
   CbzFailure | EpubFailure | Fb2Failure | MobiFailure | PdfFailure;
 
+/** One identifier a file carried, with whatever the file said it was. */
+export interface OpfIdentifier {
+  /**
+   * How to read `value`, or `null` where nothing said. **`opf.ts` is the only
+   * reader that takes this from the file**, as `opf:scheme` in EPUB 2 or the
+   * `identifier-type` refinement in EPUB 3, and it is also the only place that
+   * interprets it, in `readIsbn`. The others label it themselves, because their
+   * formats carry the identifier in a field whose name already says what it is:
+   * `cbz.ts`, `mobi.ts` and `fb2.ts` write a literal, and `pdf.ts` infers it
+   * from the value, XMP naming no scheme of its own.
+   */
+  readonly scheme: string | null;
+  readonly value: string;
+}
+
+/**
+ * What a reader says one book is, whichever format it read.
+ *
+ * **The shape is an OPF package document's and the name says so, because that
+ * is where it came from.** Four of the five reader modules parse no package
+ * document: they translate their own format into this, which is what lets the
+ * scan page draft from any of them without asking which opened the file. Each
+ * of those four sets `version` to `null`, saying at its own site that its
+ * format has no package document, which is the one field here that only a
+ * package document can fill.
+ *
+ * **That field is what the name rests on, and nothing reads it**: measured over
+ * `src/`, 6 write sites and 0 reads. So the argument for the name is the shape
+ * rather than a caller, and whoever proposes deleting `version` is also
+ * proposing renaming this.
+ *
+ * **It lives here rather than in `opf.ts` so that the author of a sixth reader
+ * does not import the EPUB module to say what a book is.** `opf.ts` reads it
+ * back from here for the same reason: the format that shaped this record is a
+ * producer of it like any other, not its owner.
+ */
+export interface OpfRecord {
+  /** The `package` element's own `version`. `"2.0"` or `"3.0"` in practice. */
+  readonly version: string | null;
+  readonly title: string | null;
+  readonly subtitle: string | null;
+  /**
+   * Separate values, in document order.
+   *
+   * **Not one string.** A creator is one person and the file already separates
+   * them, so joining here would throw away a fact the file supplied and make
+   * every later reader guess it back.
+   */
+  readonly authors: readonly string[];
+  readonly identifiers: readonly OpfIdentifier[];
+  /** Canonical ISBN-13, from whichever spelling the format carried one in. */
+  readonly isbn: string | null;
+  readonly publisher: string | null;
+  readonly year: number | null;
+  readonly language: string | null;
+  readonly description: string | null;
+  readonly seriesName: string | null;
+  readonly seriesIndex: number | null;
+}
+
 export type FileReading =
   | { readonly ok: true; readonly metadata: OpfRecord }
   | { readonly ok: false; readonly failure: FileFailure };
@@ -72,6 +131,43 @@ export type FileReading =
  * them at the type instead of by reading five modules.
  */
 export type FileReader = (file: Blob) => Promise<FileReading>;
+
+/**
+ * Whether a document declares its own entities, which a reader refuses to parse.
+ *
+ * **The one attack a reader cannot bound after the fact.** Expansion happens
+ * inside the engine's parser, before any code here sees a node, so a document
+ * declaring nested entities is measured in what it expands to rather than in
+ * what it weighs, and a caller's byte cap on the entry does not reach it.
+ * Engines cap expansion themselves, but by how much is theirs to change and is
+ * not something a reader can assert.
+ *
+ * Refusing costs nothing, and **each caller measured its own format rather than
+ * inheriting a figure from here**: 0 of the 79 EPUBs `opf.ts` describes carry
+ * `<!ENTITY` in either their container or their package document, and 0 of
+ * `fb2.ts`'s 18 corpus files carry one. `cbz.ts` refuses on the specification
+ * alone, having no corpus, and says so at its own site. None of these formats
+ * has a use for a DTD internal subset.
+ *
+ * A plain substring rather than a regular expression over the prolog, which
+ * would need to know where the prolog ends and would then be wrong about a
+ * comment containing a tag. The exclusions, stated: an unescaped `<!ENTITY`
+ * inside a `CDATA` section or inside a comment is refused as well. 0 of those
+ * 79 files carry a `CDATA` section at all, and being told a file is not the
+ * format it claimed is a smaller harm than an unbounded parse.
+ *
+ * **It sits at the seam because it is a rule about parsing a member's document
+ * and not about any one format.** A reader that hands a whole document to
+ * `DOMParser` as `application/xml` calls this first, and four do.
+ *
+ * **Two parses here do not, and both are deliberate.** `pdf.ts` cuts the packet
+ * down to its root element, so what it parses has no prolog for a declaration
+ * to sit in, and says so at its own site. `calibre.ts::plainText` parses
+ * `text/html`, which has no internal subset to expand.
+ */
+export function declaresEntities(xml: string): boolean {
+  return xml.includes("<!ENTITY");
+}
 
 /**
  * Readers by extension, loaded on demand.

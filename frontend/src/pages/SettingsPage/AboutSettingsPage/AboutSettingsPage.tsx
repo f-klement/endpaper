@@ -14,7 +14,7 @@ import AboutBadges from "./components/AboutBadges";
  * sentence describing the app was written and cut: somebody reading this is
  * already inside it and does not need to be told what it is. What is left is
  * what an About card is for. A version number is what gets quoted in a bug
- * report, and the source link is what an Apache-2.0 reader goes looking for.
+ * report, and the source link is what a reader of the licence goes looking for.
  * Both are now badges, in `AboutBadges`, which is why the paragraph that used
  * to carry them is gone rather than sitting above them: two statements of the
  * same two facts is what the badge row was added to remove.

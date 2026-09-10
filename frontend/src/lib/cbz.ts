@@ -86,8 +86,12 @@
 
 import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
-import { declaresEntities, type OpfIdentifier, type OpfRecord } from "./opf";
-import { openZip, ZipError, type ZipArchive, type ZipFailure } from "./zip";
+import {
+  declaresEntities,
+  type OpfIdentifier,
+  type OpfRecord,
+} from "./fileReaders";
+import { openZip, ZipError, zipFailureAs, type ZipArchive } from "./zip";
 
 /**
  * How much `ComicInfo.xml` may inflate to.
@@ -142,22 +146,6 @@ export type CbzFailure =
 export type CbzReading =
   | { readonly ok: true; readonly metadata: OpfRecord }
   | { readonly ok: false; readonly failure: CbzFailure };
-
-/**
- * A zip's refusal in the words a member needs.
- *
- * A `Record` rather than a switch, so a `ZipFailure` added to that closed union
- * is a type error here rather than a file that silently reports the last arm.
- */
-const FROM_ZIP: Record<ZipFailure, CbzFailure> = {
-  "not-a-zip": "not-a-comic",
-  zip64: "unsupported",
-  encrypted: "protected",
-  unsupported: "unsupported",
-  truncated: "damaged",
-  "too-large": "too-large",
-  "no-inflate": "no-inflate",
-};
 
 const utf8 = new TextDecoder("utf-8");
 
@@ -301,9 +289,10 @@ function readTitle(
  * as an archive that carried none.
  *
  * **Entities are refused before anything is read**, through the same
- * `opf.declaresEntities` the package document goes through and for the reason
- * stated there: expansion happens inside the engine's parser, before a node
- * exists to bound. A comic's metadata has no use for a DTD internal subset.
+ * `fileReaders.declaresEntities` the package document goes through and for the
+ * reason stated there: expansion happens inside the engine's parser, before a
+ * node exists to bound. A comic's metadata has no use for a DTD internal
+ * subset.
  */
 export function readComicInfo(xml: string): OpfRecord | null {
   if (declaresEntities(xml)) return null;
@@ -367,7 +356,7 @@ export async function readCbz(file: Blob): Promise<CbzReading> {
     return { ok: true, metadata: metadata ?? nothing() };
   } catch (error) {
     if (error instanceof ZipError) {
-      return { ok: false, failure: FROM_ZIP[error.failure] };
+      return { ok: false, failure: zipFailureAs(error, "not-a-comic") };
     }
     throw error;
   }

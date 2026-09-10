@@ -7,7 +7,7 @@ import type {
 } from "../../api/generated/model";
 import { AUTHOR_SEPARATOR, boundNumber, boundText } from "../../lib/bookBounds";
 import { normaliseLocation } from "../../lib/lastLocation";
-import type { OpfRecord } from "../../lib/opf";
+import type { OpfRecord } from "../../lib/fileReaders";
 import type { NameClues } from "../../lib/fileName";
 import type { AudiobookGroup } from "../../lib/audiobookGroups";
 

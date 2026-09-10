@@ -3852,7 +3852,7 @@ look like a simplification.
 | Badge | Value | Where it comes from |
 |---|---|---|
 | Version | `__APP_VERSION__` | substituted by `vite.config.ts` |
-| Licence | Apache 2.0 | static, links the LICENSE file |
+| Licence | MIT | static, links the LICENSE file |
 | Source | GitHub | static, links the repository |
 
 **Three, where the README has five.** Languages was cut because the Language card sits on the
@@ -3862,7 +3862,7 @@ and a latest release are absent because both need a host the CSP does not carry,
 typed into the source is wrong within a week and says nothing about being wrong. The README
 keeps them because shields.io fetches them at render time.
 
-**"Apache 2.0" and "GitHub" are constants, not catalogue entries.** A message key whose value
+**"MIT" and "GitHub" are constants, not catalogue entries.** A message key whose value
 is byte identical in every language is a translation nobody can make. The labels stay
 translated: "Licence" is "Lizenz", "Source" is "Quelltext".
 
@@ -9483,7 +9483,7 @@ detector reports `NOASSERTION`.
 2's whole-work clause, "the distribution of the whole must be on the terms of this Licence",
 so it is still copyleft; what does not survive is any way to reason about it. A real GPL-2.0
 has thirty years of compatibility analysis behind it, and a bespoke copyleft licence that
-merely resembles one has none. Endpaper is Apache-2.0. **A README is not a licence, and this
+merely resembles one has none. Endpaper is MIT. **A README is not a licence, and this
 is the case that shows why**: the sentence everybody quotes and the file it points at say
 different things.
 
@@ -11605,9 +11605,9 @@ which deliberately reads none because the year on a recording is not the book's:
 | `cbz.ts` | ComicInfo `Year` | nothing: it refuses every year at or below zero, where ComicRack's `-1` for unknown lands, which is reading the format rather than bounding it |
 | `fb2.ts` | `publish-info/year`, then `title-info/date` | nothing |
 
-**This table is the state that motivated the change and not the state today.** The last three
-rows now read `plausibleYear`: see "The plausibility window belongs to reading a year, not to
-bounding one" below, which also carries what stayed open at the `calibre.ts` door.
+**This table is the state that motivated the change and not the state today.** All four rows
+that read something else now read `plausibleYear`, the `calibre.ts` row last, on 2026-09-10:
+see "The plausibility window belongs to reading a year, not to bounding one" below.
 
 Measured 2026-09-08 by running the real parsers: `readOpf` answers 101 for
 `<dc:date>0101-01-01T00:00:00+00:00</dc:date>` in both the EPUB 2 and the EPUB 3 spelling,
@@ -11677,6 +11677,10 @@ one predicate a placeholder and both doors are driven from it. The constants wer
 homed and that was not enough: what drifts is the **application**, one field at a time, and it
 had already drifted, in whether the file door's author refusal depended on a name's position.
 A fourth placeholder is one entry in that set and a failing test at whichever door forgets it.
+**The year member is the exception, and the window made it one**: since 2026-09-10 both doors
+read a year through `plausibleYear`, which refuses 101 as one of its own values, so no test at
+either door can tell a door that applies the member from one that does not. The coupling still
+binds `title` and `author`, which are strings no window reaches.
 
 ## Neither source wins the 70 that are left, and each is right about a different field
 
@@ -11841,7 +11845,7 @@ sentence.** The rules that fall out, each bought by a failure here:
 
 ## The plausibility window belongs to reading a year, not to bounding one
 
-Six readers take a publication year out of a file, and each of their modules
+Seven readers take a publication year out of a file, and each of their modules
 says in its own docstring that it reports what the file claims. That reads as an
 argument against a window at the reader: a value the file carries is a value the
 file carries. It is not one. A number outside the window is not a publication
@@ -11852,14 +11856,16 @@ conclusion independently for ComicRack's `-1` sentinel before the window existed
 `bookBounds.plausibleYear` is the one home of that sentence. Each reader points
 at it and none restates it.
 
-**The exclusion is `calibre.ts::readYear`**, which takes a year out of a
-`metadata.db` row and refuses the literal 101 by name rather than by window, so
-`[1, 1449]` and `[2101, 2200]` stay open at that door and a `pubdate` of
-`1200-01-01` arrives as the year 1200. It is the door with the only incidence
-measured against a real library. It is stated in `bookBounds.ts` and in the
-caller scan's own comment rather than left as a silent hole inside a sentence
-that reads as a universal; closing it is a separate change and is in the
-tracker.
+**There is no exclusion. `calibre.ts::readYear` was the last one and it closed
+2026-09-10**, replacing a refusal of the literal 101 by name that left
+`[1, 1449]` and `[2101, 2200]` open at that door. What the window adds over that
+refusal was measured before the change rather than assumed, because it decides
+whether the hole is one a library meets: over all 897 rows of the household
+reference library's `books` table, 29 carry the undefined date and **no row
+carries any other year outside the window**, by two instruments, a SQL grouping
+on `substr(pubdate,1,4)` and a python walk applying the reader's own regular
+expression. So the door was reachable by another library or by hand, and not by
+this one.
 
 **What the window costs on the Calibre route.** `opf.readOpf` is also the
 Calibre import's reader, so the window now applies to a `metadata.opf` beside a
@@ -11867,12 +11873,24 @@ book as well as to a file picked on the scan page. The ticket's own case is
 unchanged there, because `calibre.ts::withoutPlaceholders` already refused the
 year 101 by name on that route. **The door is not unchanged**: that arm can no
 longer fire in production, since `opf.readYear` cannot return 101 any more. It
-stays because the placeholder set drives both doors and the database door still
-needs it, and `calibre.test.ts` still drives it directly with a hand built
-`OpfRecord`. What also moves is a file claiming a year like 1200, which
+stays for a reason that outlived the database door taking the window: the record
+it sieves is handed over by `opf.readOpf`, which is another module's window, and
+this function's contract is a record's placeholders out rather than a windowed
+record's. `calibre.test.ts` drives it directly with a hand built `OpfRecord`,
+which is what keeps the arm covered. What also moves is a file claiming a year like 1200, which
 `crossCheck` used to count as a filled field or a disagreement and now does not
 see at all. The 57 of 243 and the 28 and 29 recorded for that door were measured
 before the window and count arrivals at `opf.readYear`, not at the arm.
+
+**Those counts survive the database door taking the window too, in this library
+and not in general.** `crossCheck` compares the file's record against
+`book.year`, and `book.year` moves only for a row whose year is outside the
+window and is not the placeholder: 0 of that library's 897 rows, measured
+2026-09-10. Elsewhere they need not. A row carrying `1200-01-01` used to arrive
+as the year 1200 and now arrives as nothing, which turns a disagreement against
+the file into a filled field, or into neither where the file has no year, so
+`filled` can only rise and `disagreed` can only fall, by at most the number of
+such rows.
 
 ## The window sits in `fb2.yearIn`, not at the end of `fb2.readYear`
 
@@ -11902,8 +11920,8 @@ did not prefer` pins it.
 
 ## Why no complement guard was built for the caller list
 
-The caller scan in `tests/lib/bookBounds.test.ts` is an inclusion list, and a
-seventh reader added with no window names nothing and passes it, which is
+The caller scan in `tests/lib/bookBounds.test.ts` is an inclusion list, and an
+eighth reader added with no window names nothing and passes it, which is
 exactly how the three readers this work fixed sat unwindowed with nothing red.
 The complement was measured rather than assumed unbuildable. Under `src/lib/`,
 `grep -rlE '(^|[^A-Za-z_])year\??\s*:'` finds 9 modules carrying a year
@@ -12044,3 +12062,219 @@ fits `notes.content` today, which is `Text`, so the claim went past what any rul
 enforces and past what `README.md` says in the same commit. The published prose
 now carries the route half only, in both files, and the column rule keeps its own
 narrower statement in the test: no column carries **bytes**.
+
+## A decoder a runtime may not carry is never built at module scope
+
+`new TextDecoder` throws a `RangeError` for a label the runtime has no table for. Inside a
+function that costs one call, and every caller here has a fallback for it. At module scope it
+escapes module evaluation, the dynamic import in `readerFor` rejects, and `ScanPage` reads a
+whole format as unreadable: `pdf.ts` built two such decoders, where `mobi.ts`, `fb2.ts` and
+`audiobook.ts` had already wrapped theirs.
+
+**The rule is stated as an exclusion**: the only label passed to a `new TextDecoder(...)` that
+runs at module evaluation is `utf-8`. Not "no `utf-16be`", which is only the label that was
+wrong, and not a list of the labels a runtime is required to have, which fails silently when it
+is out of date.
+
+**A behavioural test cannot be that guard**, because it observes only the labels absent from the
+runtime it runs in, and Node has `utf-16be`. `frontend/tests/houseRules.test.ts` parses the
+source with `vite`'s `parseAst` and refuses any construction no callable defers.
+
+**Parsed rather than matched**, because the rule is about where a construction sits and not how
+its line is spelled: an export, a `let`, an explicit type annotation and a value in an object
+literal are four anchors to a regular expression and one shape to a parser. The parser comes
+from `vite`, which re-exports it, rather than from the package underneath, which is reachable
+only through a hoisted transitive dependency. Where it is absent the test file fails to import,
+which is louder than a rule that has quietly stopped matching.
+
+**The rule covers `src`, not `src/lib`.** What makes a construction dangerous is module
+evaluation, which every module has, and a directory in the rule is an inclusion list that goes
+stale when a reader moves. All 13 constructions are under `src/lib` today, so the wider rule
+refuses nothing extra.
+
+**What defers a construction is a callable that holds it**, and a callable held directly by a
+call expression is being called there, as callee or as argument. That second half is what the
+guard's first draft missed, and `["utf-16be"].map((l) => new TextDecoder(l))` is this defect
+rewritten in one line.
+
+**Three limits, one of them strict.** Lenient: a construction reached through an alias or a
+computed property is not seen, and a callable a call reaches through something else
+(`wrap({ make: () => … })`) is read as deferring. Strict: a class field initialiser is refused
+although it runs at instantiation rather than at module evaluation, because what proves a
+construction safe here is a callable to defer it and a field has none.
+
+**Measured against evasion**, with both critic seats choosing the mutations: 6 of 7 single
+change mutations are caught, each by a named test. The seventh is the file filter narrowed onto
+the text instrument's own spelling, caught by the count comparison as soon as it hides a
+construction and not before, which is why the two spellings are kept different.
+
+## A zipped reader is handed a zip's refusal, not a table of them
+
+`epub.ts`, `cbz.ts` and `fb2.ts` each declared `FROM_ZIP`, a total `Record<ZipFailure,
+XFailure>` identical but for the `not-a-zip` arm. Totality was already compiler held, so a new
+`ZipFailure` was a compile error in all three. What was not held is a fourth zipped format
+copying the block and getting a shared arm wrong: it compiles and ships with nothing red.
+
+**The helper returns the answer rather than the map, and the reason is the property the map
+cannot give.** A returned map is spreadable, so `{ ...zipFailureMap("not-an-fb2"), unsupported:
+"damaged" }` type checks and passes every guard: `unsupported`, `too-large` and `no-inflate`
+answer with their own names, so no scan can forbid them while also permitting each reader's own
+union. A reader handed an answer holds no table to override. Both critic seats reached this
+independently. `SHARED_ANSWER` in `zip.ts` is where the totality the three copies had now lives.
+
+**What the three copies refused that the one declaration accepts**: a format that wants a shared
+arm to say something else. It now changes it in `zip.ts`, for everybody. That is the trade
+`fileReaders.ts` already argues for, and in three copies a deliberate difference could not be
+told from a typo.
+
+**The rung is mixed and the honest half is tested.** Compiler held: totality, an answer outside
+`ZipSharedFailure`, a shared name used as a format's own sentence, and no table at a call site
+to spread. Tested: that a zipped reader calls the helper at all, and that the union parse read
+the whole declaration. Held by neither: a reader that calls the helper and then rewrites the
+answer at its own catch, which passes the compiler and every test in this tree. That is stated
+at all three sites that previously implied otherwise.
+
+**Both of the guard's rules are derived rather than enumerated.** A module naming `ZipError`
+calls `zipFailureAs(`, and the set of such modules is exactly the three zipped readers, which is
+the direction that makes a deleted call fail. And no module outside `lib/zip.ts` spells a
+failure name that is zip's own, where the names are computed by subtracting the helper's answers
+from the arms it answers for, so a member added to `ZipFailure` joins the rule with no edit. Two
+modules miss the second rule on punctuation alone and are named at the assertion.
+
+**The mutation that bought the most was the one that survived twice.** Aliasing a union member
+left the type identical and the parse short, and a member the pattern loses simply stops being
+forbidden, which is silent where a member it invents is loud: `readZipFailureUnion().unread`
+now asserts the declaration less its quoted members is empty. Rewriting the answer at `fb2.ts`'s
+catch survived and bought three sentences of prose rather than code, because it is not a
+regression: the three copies accepted it too.
+
+## MIT, and the four places that have to agree about it
+
+Endpaper is MIT. It was Apache-2.0 until 2026-09-10, and the switch is the owner's call: the
+git history carries one author and a dependency bot, so there is no third party whose consent
+a relicence would need.
+
+**The copyright permissions do not narrow and one thing a downstream reader had in writing is
+gone.** Apache-2.0 §3 grants a patent licence from every contributor and terminates it on a
+patent suit; MIT says nothing about patents, so that permission is left to implication. The
+NOTICE machinery goes with it, which is an obligation dropped rather than a permission lost.
+Recorded in that order because the shorter licence is not uniformly the more permissive one,
+and a changelog line calling the loss a simplification is the wrong way round.
+
+**Four files declare it and none can see the others**: `LICENSE`, `frontend/package.json`,
+`backend/pyproject.toml` and `AboutBadges.tsx`, which puts the name in front of a member.
+A change reaching three of the four is silent, and the badge is the one whose staleness
+misinforms somebody rather than merely reading wrong. `frontend/tests/licence.test.ts`
+compares all four against `package.json` and asserts agreement rather than policy: what the
+licence **is** lives in `LICENSE`, and a project that moves all four together passes.
+
+**The guard requires the badge's name and the SPDX id to be the same string**, which is true
+of `MIT` and was not true before: the badge read `Apache 2.0` against an id of `Apache-2.0`,
+a hyphen apart with nothing comparing them. A licence whose display name differs from its id
+fails that arm, and the fix is to record both names there rather than to delete it.
+
+**Neither badge needs an edit and both depend on the file being verbatim.** `README.md` and
+`DOCKERHUB.md` draw shields.io's `github/license` badge, which reads whatever GitHub detects
+from the mirrored `LICENSE` at render time, so both follow the file. Detection wants the
+verbatim SPDX text: a reworded licence is detected as `NOASSERTION` and both badges go blank
+without failing anything. **That is the one claim here with teeth**, so it is a test rather
+than a sentence: the guard pins a digest of the licence body, after a mutation that changed
+one clause of it and passed every other arm with exit 0. **The body and not the file**, and
+the reason is the same detector: it strips the copyright line and collapses whitespace before
+matching, so a whole file pin fires on a copyright year bump and on a trailing space, neither
+of which can blank a badge and one of which is certain to happen. The digest is a change
+detector and validates nothing, which is why its failure message sends a reader to the SPDX
+text rather than to the digest.
+
+**The image is a copy and now carries the notice.** MIT conditions the grant on it; the
+Dockerfile never copied `LICENSE` in, and Apache-2.0 clause 4(a) had wanted the same for as
+long as that licence stood. **The guard reads the last stage only**, because a `COPY` in a
+builder stage ships nothing and the first version of that arm, which read the whole file,
+passed green with the instruction moved into the frontend build stage. It reads the
+instruction rather than a built image, which is stated at the arm and is where that stops.
+
+**What none of it covers, stated because the file is a source read**: prose. A sentence in a
+document naming the licence is not a declaration, and a grep for the old name is the
+enumerating shape this register keeps refusing.
+
+## The shared record moved to the seam and kept its name
+
+`OpfRecord`, `OpfIdentifier` and `declaresEntities` were declared in `opf.ts`, the module
+named for one format. Measured over `frontend/src` before the move, in files rather than
+occurrences: **9 modules name `OpfRecord` and 6 of them read no OPF**, and `declaresEntities`
+was imported by 3 of which **2 parse no package document**. A second instrument, per file
+occurrence counts crossed against every `DOMParser` site and every import of `./opf`, gives
+the tighter reading that **only `epub.ts` calls `readOpf`**.
+
+**The name stays, and the field that decides it is `version`.** `cbz.ts`, `fb2.ts`, `mobi.ts`
+and `pdf.ts` each set `version: null` and each says why: their format has no package document.
+The record is faithfully the OPF shape and the readers translate into it, so the name reports
+where the shape came from. Rename it and `version` becomes a field with no justification,
+which the next author either invents a meaning for or deletes. The defect fixed here is the
+module a reader has to import, not the word it writes. Whether the field survives at all is a
+separate question and is in the tracker.
+
+**The ticket's premise was false and the move is still right.** It said `fileReaders.ts` "is
+already imported by everything in the family". Nothing in the family imported it: the edges
+ran the other way and type only. The move creates them, which is why one arm asserts the seam
+opens no cycle.
+
+**Every arm was beaten by the seat that did not write it, three rounds running, and each
+correction replaced an inclusion with an exclusion.** The first draft asserted which modules
+import `lib/opf`; a re-export from `epub.ts` with `pdf.ts` importing from `./epub` restored
+the exact defect through a format named module, green on all 427 tests. Asking where each
+name comes **from** closes that family. The rename evasion beat it again one round later, and
+is closed by forbidding any module but the seam to re-export from the seam, which enumerates
+no name. The cycle arm forbade only the modules the registry loads with `import()`, so an
+eager `./opf` import in the seam passed: `opf.ts` holds a module scope `const` that a cycle
+entered there reads in its temporal dead zone. It now asserts the file's own property, one
+eager relative import.
+
+**A predicate written twice fails in opposite directions.** Both halves of the import arm
+compared paths with `endsWith("/fileReaders")`. On the import side a `.ts` suffix makes a real
+path stop looking like the seam, which is loud; on the re-export side it makes an evasion stop
+looking like the seam, which is silent. The premise for leaving it was measured false: **305
+relative specifiers under `src/` carry an extension, across 84 files**, all under
+`api/generated/`, and `allowImportingTsExtensions` is set, so the precedent to copy is in the
+tree. One predicate now serves both sites. The two seats measured 305 and 292 and neither was
+wrong: the difference is exactly the 13 `../` specifiers, which the question about `src/`
+includes.
+
+**What it does not see**, since the ways round it are an open set: a local alias
+(`import { type OpfRecord } …; export type BookRecord = OpfRecord;`) is not an `export … from`
+and no import syntax matcher sees it, nor is an alias in `vite.config.ts`. It closes the direct
+import and the re-export, which are what a reader writes.
+
+## A count in prose is deleted before it is guarded
+
+Guarding a spelled out count needs a matcher for number words, which is a list of spellings,
+which is the enumerating shape this tree refuses. The cheaper move is to stop the prose
+carrying the number, and it was available at every one of the six sites the column count
+occupied. **The README had already drifted a column behind the table**, which is the drift
+arriving before the guard debate finished.
+
+**Sizing the class is what decided it.** Over the 883 file tree the publish script builds,
+spelled out numbers above twelve are 688 read as numbers and 696 read as word tokens;
+the gap is six backend test modules where a number word sits inside an underscored identifier,
+which `\b` joins and a letter lookaround splits. **The Markdown figure moves with the word
+list, so quote the pair**: excluding the two dated registers, thirteen through ninety nine
+gives 37 occurrences in 12 files, and adding `hundred`, `thousand` and `million` gives 52 in
+the same 12. Three routes agree on both, one of them a critic's. Reading all 52, **21 count a
+set this repository defines** and can therefore drift.
+
+**The classification rule, so the 21 is re-derivable rather than copyable.** In scope: a
+precise present tense count of something this tree contains. Out: external standards, a
+magnitude in an example, a dated measurement of an outside sample, a hedged approximation, and
+past tense history.
+
+**The first draft of that paragraph said 13 of 51 in 16 files, and all three were read off a
+screen rather than counted.** This register's own rule about a number being copied instead of
+re-derived landed on the paragraph stating it.
+
+So the class is not two and a general guard is not affordable: it is a second census with a
+verdict per candidate, and the roster census has already measured what widening one costs and
+refused it. What ships is narrow and derived: the rule builds its pattern from `COLUMN_SPECS`
+when the test runs, so it needs the spelling of one computed value rather than a list of
+spellings. **It catches the figure at the moment it is written, while it is still correct**,
+which is the only moment drift can be stopped. A count that is wrong the moment it is typed is
+invisible to it, stated here rather than discovered later.

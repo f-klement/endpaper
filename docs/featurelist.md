@@ -142,7 +142,7 @@ be saved as a view.
 **Card, list or table.** The list is one dense row per book: a tiny cover, the
 title, and the author, series, year and reading status beside it, plus a marker
 where the book is out on loan or nobody has confirmed the library holds it. The
-table carries twenty three columns, sorts on what the server can genuinely
+table carries the metadata columns, sorts on what the server can genuinely
 order by, and draws whichever of them you pick. Both the view and the columns
 are remembered in the browser, and both are remembered per mode: a library
 opens on the dense list and a household opens on the cards, and neither

@@ -356,8 +356,8 @@ describe("a file that is not an archive", () => {
 describe("the document itself", () => {
   it("refuses one that declares its own entities", () => {
     // The same exposure the package document has and the same refusal, through
-    // `opf.declaresEntities`: expansion happens inside the engine's parser,
-    // before any code here has a node to bound.
+    // `fileReaders.declaresEntities`: expansion happens inside the engine's
+    // parser, before any code here has a node to bound.
     const hostile = `<?xml version="1.0"?>
 <!DOCTYPE ComicInfo [<!ENTITY s "Saga">]>
 <ComicInfo><Series>&s;</Series><Number>12</Number></ComicInfo>`;
@@ -376,10 +376,10 @@ describe("the document itself", () => {
   });
 
   it("does not read a year no comic could have been published in", () => {
-    // The window is `bookBounds.plausibleYear`'s, and this is the arm that
-    // notices this reader letting go of it: the caller scan in
-    // `tests/lib/bookBounds.test.ts` still passes on a module that keeps the
-    // name in its prose and drops the call.
+    // The window is `bookBounds.plausibleYear`'s, and this is the arm that says
+    // which values it refuses here: the caller scan in
+    // `tests/lib/bookBounds.test.ts` reads neither end of the window, so it
+    // cannot tell this door applying it from this door widening it.
     //
     // `101` is the value that bought the window and it is inside
     // `NUMBER_RANGES.year`, so nothing downstream reports it. The comparison it

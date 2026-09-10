@@ -22,7 +22,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { openZip, ZipError } from "../../src/lib/zip";
+import { openZip, ZipError, zipFailureAs } from "../../src/lib/zip";
 import {
   buildZip,
   bytes,
@@ -716,5 +716,38 @@ describe("reading the head of an entry", () => {
     ).toBe("too-large");
     // The local header and nothing else. 64 KiB would be the whole entry.
     expect(watched.largestSlice()).toBeLessThan(1024);
+  });
+});
+
+describe("a zip's refusal in a format's own words", () => {
+  it("is the caller's own sentence for a file that is not a zip", () => {
+    const refusal = new ZipError("not-a-zip", "no end of central directory");
+
+    expect(zipFailureAs(refusal, "not-a-comic")).toBe("not-a-comic");
+  });
+
+  it("refuses a shared name as the format's own sentence", () => {
+    // A compile time assertion rather than a run time one. `"protected"` is a
+    // member of every reader's own union, so without the constraint on the
+    // helper this type checks, and every file that is not a zip is then
+    // reported to a member as DRM. `@ts-expect-error` fails the build if that
+    // error ever stops happening, which is the arm a run time check cannot
+    // reach: the call still answers at run time, and answers wrongly.
+    const refusal = new ZipError("not-a-zip", "no end of central directory");
+
+    // @ts-expect-error a format's own sentence may not be a shared name
+    expect(zipFailureAs(refusal, "protected")).toBe("protected");
+  });
+
+  it("says no-inflate for a browser that cannot inflate", () => {
+    // The one arm nothing else reaches: `too-large`, `truncated`, `zip64`,
+    // `encrypted` and `unsupported` are each pinned by a named test in
+    // `tests/lib/epub.test.ts`, `cbz.test.ts` or `fb2.test.ts` that reads a
+    // real archive, and restating them here would be the copy of the table this
+    // helper exists to remove. Reaching this one through a reader would mean
+    // removing a global, which this suite installs only in `tests/setup.ts`.
+    const refusal = new ZipError("no-inflate", "this browser cannot inflate");
+
+    expect(zipFailureAs(refusal, "not-a-comic")).toBe("no-inflate");
   });
 });

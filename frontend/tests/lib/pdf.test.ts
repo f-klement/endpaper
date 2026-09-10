@@ -153,6 +153,41 @@ describe("the text a string carries", () => {
     expect(outcome(reading)).toBe("read: Das Buch");
   });
 
+  it("falls back for a runtime that has no utf-16be", async () => {
+    // Why the construction sits inside `decodeText` is `decodeText`'s own
+    // docstring. What this asserts is the half of it that is observable here:
+    // the string falls back rather than the read failing.
+    //
+    // The stand-in refuses that one label and passes everything else to the
+    // real constructor, so nothing else in the process is changed while it is
+    // installed. `tests/setup.ts` takes it off again after the test.
+    const real = globalThis.TextDecoder;
+    class WithoutUtf16Be extends real {
+      constructor(label?: string, options?: TextDecoderOptions) {
+        if (label?.toLowerCase() === "utf-16be") {
+          throw new RangeError(`unsupported label: ${label}`);
+        }
+        super(label, options);
+      }
+    }
+    vi.stubGlobal("TextDecoder", WithoutUtf16Be);
+
+    const bytes = concat("<< /Title <FEFF00440061007300200042007500630068> >>");
+    const reading = await read(
+      classicPdf(
+        [object(1, bytes), object(2, "<< /Type /Catalog >>")],
+        "/Info 1 0 R /Root 2 0 R",
+      ),
+    );
+
+    // The bytes fall to PDFDocEncoding, which is what they would have been read
+    // as with no byte order mark: the mark itself becomes two Latin-1
+    // characters and each NUL becomes the space that `clean` collapses. Stated
+    // in full rather than as "not the title", because a fallback that produced
+    // nothing at all would also satisfy that.
+    expect(outcome(reading)).toBe("read: þÿ D a s B u c h");
+  });
+
   it("reads the 32 bytes where PDFDocEncoding is not Latin-1", async () => {
     // Measured in the household's 123: reading these as Latin-1 was wrong in 3
     // of the 71 titles, which is the whole reason the table exists. \x92 is a

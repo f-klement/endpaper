@@ -100,6 +100,13 @@ from database import Base
 from enums import CustomFieldKind
 from models import Book, CustomField, CustomFieldValue, User
 
+# **Imported, not copied.** What counts as a module of this project is one fact
+# and `_is_vendored` is where it is decided. This walk used to be spelled out
+# here, excluding `{"tests", "migrations", ".venv"}` by name, which is the
+# directory a developer has and not the one the pipeline creates under
+# `backend/` for its uv cache.
+from tests.test_house_rules import _source_modules
+
 BACKEND = Path(__file__).resolve().parent.parent
 
 #: Where `CustomFieldValue` may be imported.
@@ -349,15 +356,6 @@ NOT_SIGNATURE_OFFENCES: dict[str, str] = {
         "    return None\n"
     ),
 }
-
-
-def _source_modules() -> dict[str, str]:
-    """Every backend module this rule applies to, keyed by relative path."""
-    return {
-        str(path.relative_to(BACKEND)): path.read_text()
-        for path in BACKEND.rglob("*.py")
-        if path.relative_to(BACKEND).parts[0] not in {"tests", "migrations", ".venv"}
-    }
 
 
 @pytest.fixture

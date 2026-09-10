@@ -162,8 +162,8 @@ export default function Home() {
             aria-busy={library.isStale}
           >
             {/* Selecting forces the grid: the checkbox lives on a card, and
-                neither a table of twenty three columns nor a dense list is where
-                somebody ticks twenty books off. Starting a selection therefore
+                neither the metadata table nor a dense list is where somebody
+                ticks twenty books off. Starting a selection therefore
                 shows the covers again, rather than offering a selection that
                 does nothing.
 

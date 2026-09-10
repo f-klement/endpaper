@@ -222,6 +222,26 @@
   browser compile the SQLite engine the Calibre import reads with. `'unsafe-eval'` and
   `'unsafe-inline'` are still refused for scripts, and the whole policy is now pinned by exact
   equality in a test.
+- **Endpaper is now under the MIT licence**, where it was Apache-2.0. The condition is the
+  whole of it: keep the copyright notice and the permission text with any copy. The copyright
+  permissions do not narrow, and one thing you had in writing is gone: Apache-2.0
+  granted a patent licence from every contributor expressly, and MIT says nothing about
+  patents at all. The NOTICE machinery goes with it, which is an obligation dropped rather
+  than a permission lost. The About card's badge, the `LICENSE` file, both package manifests
+  and the badges the README and the Docker Hub page draw all say MIT, and a test now fails
+  when one of the four files that declare it disagrees with the others.
+- The record every file reader answers with, the identifier type they build and the entity
+  refusal they apply moved from `lib/opf.ts` to `lib/fileReaders.ts`. Six modules that parse no
+  package document no longer import the EPUB half of the app to say what a book is. The record
+  keeps its name, because the field that reports an EPUB package version is still in it.
+- Three test modules stopped keeping their own copy of the walk over the backend source tree,
+  so what counts as vendored code is decided in one place. Each walk is now driven against a
+  constructed tree with each kind of vendored path put in front of it, rather than observed
+  against this one.
+- The three readers that open a zipped file take what a zip's refusal means from one
+  declaration and supply only their own "this is not that kind of file" sentence. Three copies
+  of the same mapping differed in one line each, so a fourth zipped format copying the block and
+  getting a shared arm wrong would have compiled and shipped with nothing red.
 
 ### Fixed
 
@@ -238,7 +258,29 @@
   one. An EPUB's `dc:date`, a CBZ's `ComicInfo.xml` `<Year>` and a FictionBook's
   `publish-info/year` or `title-info/date` all go through `lib/bookBounds.plausibleYear`, so
   Calibre's undefined date of `0101-01-01` no longer drafts a scanned book as published in the
-  year 101. Six readers now share the one window; three of them had none.
+  year 101. Seven readers now share the one window; four of them had none.
+
+- **A count of table columns is no longer written down anywhere.** It sat in six published
+  places and was recomputed in none, and the README had already drifted a column behind the
+  table. Every sentence works without it, so the number is gone rather than guarded, and a
+  rule building its pattern from the column definitions at run time refuses it coming back.
+- **Two stale table counts in the data model documents are gone the same way.** One said
+  thirteen tables and one said sixteen, against twenty, counted by grep and by an `ast` walk
+  of the models.
+
+- **A Calibre library's index no longer reports a publication year no book could have been
+  published in.** `metadata.db`'s `pubdate` was refused only for Calibre's own undefined date
+  and was otherwise read as written, so a row carrying `1200-01-01` drafted a book as published
+  in 1200. It goes through the same window as every other year read out of a file, which covers
+  the undefined date as one of its own values. Measured over an 897 book library: 29 rows carry
+  the undefined date and no row carries any other year outside the window, so this closes a door
+  rather than changing what that library imports.
+
+- **A PDF read on a runtime without a `utf-16be` decoder now loses one string rather than the
+  whole format.** Both UTF-16 decoders are built where they are used instead of when the module
+  loads: a label the runtime has no table for threw as the module was evaluated, which made the
+  reader's import reject and showed every PDF in the pick as unreadable. The string falls back
+  to PDFDocEncoding, and no other reader built a decoder that way.
 
 - **A Calibre library no longer imports Calibre's own blanks as facts.** `metadata.opf` is
   written by Calibre from the same rows as the index, so the values it writes where nobody typed

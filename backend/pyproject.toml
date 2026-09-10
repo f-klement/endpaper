@@ -6,7 +6,7 @@ name = "endpaper-backend"
 # number here would only rot into a second answer to "what am I running".
 version = "0.0.0"
 description = "Endpaper backend (FastAPI)"
-license = "Apache-2.0"
+license = "MIT"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.115.8",

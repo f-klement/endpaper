@@ -30,8 +30,9 @@
  * half: what comes out of here is bounded again before it can become a request.
  */
 
-import { declaresEntities, readOpf, type OpfRecord } from "./opf";
-import { openZip, ZipError, type ZipFailure } from "./zip";
+import { declaresEntities, type OpfRecord } from "./fileReaders";
+import { readOpf } from "./opf";
+import { openZip, ZipError, zipFailureAs } from "./zip";
 
 /**
  * How much `META-INF/container.xml` may inflate to.
@@ -77,22 +78,6 @@ export type EpubFailure =
 export type EpubReading =
   | { readonly ok: true; readonly metadata: OpfRecord }
   | { readonly ok: false; readonly failure: EpubFailure };
-
-/**
- * A zip's refusal in the words a member needs.
- *
- * A `Record` rather than a switch, so a `ZipFailure` added to that closed union
- * is a type error here rather than a file that silently reports the last arm.
- */
-const FROM_ZIP: Record<ZipFailure, EpubFailure> = {
-  "not-a-zip": "not-an-epub",
-  zip64: "unsupported",
-  encrypted: "protected",
-  unsupported: "unsupported",
-  truncated: "damaged",
-  "too-large": "too-large",
-  "no-inflate": "no-inflate",
-};
 
 const utf8 = new TextDecoder("utf-8");
 
@@ -159,7 +144,7 @@ export async function readEpub(file: Blob): Promise<EpubReading> {
     return { ok: true, metadata };
   } catch (error) {
     if (error instanceof ZipError) {
-      return { ok: false, failure: FROM_ZIP[error.failure] };
+      return { ok: false, failure: zipFailureAs(error, "not-an-epub") };
     }
     throw error;
   }

@@ -209,10 +209,8 @@ export function boundNumber(
  * `tests/lib/bookBounds.test.ts` names the callers, so the list is not written
  * out here as well.
  *
- * **The exclusion, and it is the door with the only incidence measured against
- * a real library.** `calibre.ts::readYear` takes a year out of a `metadata.db`
- * row and refuses the literal 101 by name rather than by window, so the rest of
- * the band is open there and a `pubdate` of `1200-01-01` arrives as 1200.
+ * **Every reader that takes a year out of a file calls it, with no exception**,
+ * which is what that list asserts rather than merely records.
  *
  * **A window is part of reading a year, not part of bounding one for the API.**
  * Every one of those readers says in its own docstring that it reports what its

@@ -111,7 +111,7 @@ describe("a file that is not an EPUB", () => {
 
   it("refuses a container that declares its own entities", async () => {
     // The container is parsed by the same engine and is the same exposure as
-    // the package document. See `opf.declaresEntities`.
+    // the package document. See `fileReaders.declaresEntities`.
     const reading = await read({
       container: `<?xml version="1.0"?>
 <!DOCTYPE container [<!ENTITY p "OEBPS/content.opf">]>

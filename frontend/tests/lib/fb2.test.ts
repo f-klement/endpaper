@@ -357,10 +357,10 @@ describe("the year, which the format says twice", () => {
   });
 
   it("reads no year no book could have been published in", () => {
-    // The window is `bookBounds.plausibleYear`'s, and this is the arm that
-    // notices this reader letting go of it: the caller scan in
-    // `tests/lib/bookBounds.test.ts` still passes on a module that keeps the
-    // name in its prose and drops the call.
+    // The window is `bookBounds.plausibleYear`'s, and this is the arm that says
+    // which values it refuses here: the caller scan in
+    // `tests/lib/bookBounds.test.ts` reads neither end of the window, so it
+    // cannot tell this door applying it from this door widening it.
     //
     // `0101` is the undefined date its producer writes where a book has none,
     // and it is inside `NUMBER_RANGES.year`, so nothing downstream reports it.
@@ -492,8 +492,9 @@ describe("a document that is not a FictionBook", () => {
     // document carrying a DTD internal subset is refused by the engine's own
     // parser and the guard never had to fire. `declaresEntities` is a plain
     // substring test, refusing the string even inside a comment, which is the
-    // exclusion `opf.ts` states; putting it in a comment is what makes the
-    // refusal the only difference between these two documents.
+    // exclusion `fileReaders.declaresEntities` states; putting it in a comment
+    // is what makes the refusal the only difference between these two
+    // documents.
     const ordinary = fb2(titleInfo("<book-title>Онегин</book-title>"));
     expect(read(ordinary)?.title).toBe("Онегин");
 

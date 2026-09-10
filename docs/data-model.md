@@ -1,8 +1,8 @@
 # Data model
 
-Sixteen tables in `backend/models.py`, counted off `Base.metadata`: fourteen entities, one
-association table (`book_tags`), and one key/value store for runtime settings
-(`settings`).
+Every table is declared in `backend/models.py` and reaches the schema through
+`Base.metadata`: the entities, one association table (`book_tags`), and one
+key/value store for runtime settings (`settings`).
 
 ```
       User ──────┬──── added_by ────────► Book ◄──── book_tags ────► Tag

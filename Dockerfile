@@ -224,6 +224,12 @@ COPY backend/ .
 # no TypeScript sources in the shipped image.
 COPY --from=frontend /app/frontend/dist ./static
 
+# The licence travels with the copy, because MIT conditions the grant on the
+# notice being included in every copy of the software and an image is a copy.
+# Apache-2.0 clause 4(a) asked for the same and this line was missing under it.
+# `frontend/tests/licence.test.ts` fails if it goes.
+COPY LICENSE ./LICENSE
+
 # DATA_DIR holds the SQLite database and uploaded covers, and is the path to
 # mount a volume at. Created here so a first run works with no volume.
 ENV DATA_DIR=/app/data

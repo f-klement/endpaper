@@ -148,7 +148,7 @@
 
 import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
-import type { OpfIdentifier, OpfRecord } from "./opf";
+import type { OpfIdentifier, OpfRecord } from "./fileReaders";
 
 /**
  * Why a file yielded nothing.
@@ -659,29 +659,34 @@ const PDF_DOC_ENCODING =
   // has no exemption list by design. Spelling them out keeps the rule total.
   "\u2022\u2020\u2021\u2026\u2014\u2013ƒ⁄‹›−‰„" + "“”‘’‚™ﬁﬂŁŒŠŸŽıłœšž�";
 
-const utf16be = new TextDecoder("utf-16be");
-const utf16le = new TextDecoder("utf-16le");
 const utf8 = new TextDecoder("utf-8");
 
 /**
  * A PDF text string as text.
  *
  * Three encodings and the file says which with its first two bytes: a UTF-16
- * byte order mark either way, and PDFDocEncoding when there is none. A
- * `TextDecoder` for `utf-16be` is not universal, so the failure is caught and
- * the bytes fall to the encoding they would have had.
+ * byte order mark either way, and PDFDocEncoding when there is none.
+ *
+ * **Both UTF-16 decoders are built inside the `try` and not at module scope**,
+ * because `new TextDecoder` throws a `RangeError` for a label the runtime has
+ * no table for and `utf-16be` is not one every runtime carries. At module scope
+ * that throw escapes module evaluation, so `readerFor`'s import of this module
+ * rejects and every PDF in the pick reads as unreadable; here it costs the one
+ * string, which falls to PDFDocEncoding as a failed decode already does. The
+ * construction is not on a hot path: three metadata fields are read per file.
+ * `tests/houseRules.test.ts` holds the rule for the whole of `src`.
  */
 function decodeText(bytes: Uint8Array): string {
   if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
     try {
-      return utf16be.decode(bytes.subarray(2));
+      return new TextDecoder("utf-16be").decode(bytes.subarray(2));
     } catch {
       /* falls through to PDFDocEncoding */
     }
   }
   if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
     try {
-      return utf16le.decode(bytes.subarray(2));
+      return new TextDecoder("utf-16le").decode(bytes.subarray(2));
     } catch {
       /* falls through to PDFDocEncoding */
     }
@@ -1591,8 +1596,9 @@ interface XmpRecord {
  * leaves no prolog for one to be in, so the parser is handed a document that
  * *cannot* declare an entity rather than one that was checked for not doing so.
  * An entity reference with no declaration is then a well formedness error, and
- * a malformed document is `null` here. `lib/opf.ts` states the same rule for a
- * package document, which arrives as a whole file and so has to scan instead.
+ * a malformed document is `null` here. `fileReaders.declaresEntities` states
+ * the same rule for a document that arrives as a whole file, which has to scan
+ * instead.
  */
 const RDF_OPEN = /<([A-Za-z_][\w.-]*:)?RDF[\s>]/;
 

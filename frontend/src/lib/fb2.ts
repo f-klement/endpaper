@@ -50,8 +50,12 @@
 
 import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
-import { declaresEntities, type OpfIdentifier, type OpfRecord } from "./opf";
-import { openZip, ZipError, type ZipFailure } from "./zip";
+import {
+  declaresEntities,
+  type OpfIdentifier,
+  type OpfRecord,
+} from "./fileReaders";
+import { openZip, ZipError, zipFailureAs } from "./zip";
 
 /**
  * How much of a bare `.fb2` is read off the disk.
@@ -134,22 +138,6 @@ export type Fb2Failure =
 export type Fb2Reading =
   | { readonly ok: true; readonly metadata: OpfRecord }
   | { readonly ok: false; readonly failure: Fb2Failure };
-
-/**
- * A zip's refusal in the words a member needs.
- *
- * A `Record` rather than a switch, so a `ZipFailure` added to that closed union
- * is a type error here rather than a file that silently reports the last arm.
- */
-const FROM_ZIP: Record<ZipFailure, Fb2Failure> = {
-  "not-a-zip": "not-an-fb2",
-  zip64: "unsupported",
-  encrypted: "protected",
-  unsupported: "unsupported",
-  truncated: "damaged",
-  "too-large": "too-large",
-  "no-inflate": "no-inflate",
-};
 
 /**
  * Children of `parent` whose local name matches, in document order.
@@ -485,10 +473,10 @@ function readIdentifiers(publishInfo: Element | null): OpfIdentifier[] {
  * under its English title for some files and its Russian title for others.
  */
 export function readFb2Description(xml: string): OpfRecord | null {
-  // The entity refusal `opf.ts` states, applied for the same reason and with
-  // its own count: expansion happens inside the engine before any code here
-  // runs, so a byte cap on the read does not reach it. 0 of 18 corpus files
-  // contain `<!ENTITY`, and 0 carry a `<!DOCTYPE` at all.
+  // The entity refusal `fileReaders.declaresEntities` states, applied for the
+  // same reason and with its own count: expansion happens inside the engine
+  // before any code here runs, so a byte cap on the read does not reach it.
+  // 0 of 18 corpus files contain `<!ENTITY`, and 0 carry a `<!DOCTYPE` at all.
   if (declaresEntities(xml)) return null;
   const header = headerDocument(xml);
   if (header === null) return null;
@@ -613,7 +601,7 @@ export async function readFb2Archive(file: Blob): Promise<Fb2Reading> {
     return fromBytes(head.bytes, head.partial);
   } catch (error) {
     if (error instanceof ZipError) {
-      return { ok: false, failure: FROM_ZIP[error.failure] };
+      return { ok: false, failure: zipFailureAs(error, "not-an-fb2") };
     }
     throw error;
   }

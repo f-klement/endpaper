@@ -52,7 +52,6 @@ The rest of the file tests behaviour.
 
 import ast
 import importlib
-from pathlib import Path
 
 import pytest
 from sqlalchemy import event
@@ -62,7 +61,12 @@ from models import Book, User
 from reading import Reading, discussers, resolve_merge
 from shelf import Shelf
 
-BACKEND = Path(__file__).resolve().parent.parent
+# **Imported, not copied.** What counts as a module of this project is one fact
+# and `_is_vendored` is where it is decided. This walk used to be spelled out
+# here, excluding `{"tests", "migrations", ".venv"}` by name, which is the
+# directory a developer has and not the one the pipeline creates under
+# `backend/` for its uv cache.
+from tests.test_house_rules import _source_modules
 
 #: Where `UserBook` may be imported.
 #:
@@ -117,15 +121,6 @@ def _imported_names(source: str) -> set[str]:
             if alias.asname is not None:
                 names.add(alias.asname)
     return names
-
-
-def _source_modules() -> dict[str, str]:
-    """Every backend module this rule applies to, keyed by relative path."""
-    return {
-        str(path.relative_to(BACKEND)): path.read_text()
-        for path in BACKEND.rglob("*.py")
-        if path.relative_to(BACKEND).parts[0] not in {"tests", "migrations", ".venv"}
-    }
 
 
 @pytest.fixture

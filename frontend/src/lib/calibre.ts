@@ -50,7 +50,8 @@
  * **The exclusion, because a list of three is a list somebody will extend.**
  * `CALIBRE_PLACEHOLDER` is the set and both doors are driven from it, so
  * extending it is one edit and a test that goes red until both doors apply the
- * new member. What is **not** refused: every other value a
+ * new member. The year member is the exception and that paragraph says why.
+ * What is **not** refused: every other value a
  * library carries, however empty it looks. Swept 2026-09-08 over the 897 rows
  * and 244 `metadata.opf` files of the reference library, no fourth value
  * repeats where a blank would be: 0 files carry `dc:language` of `und`,
@@ -59,8 +60,9 @@
  * the set has three members today rather than why it may only ever have three.
  */
 
+import { plausibleYear } from "./bookBounds";
 import { parseIsbn } from "./isbn";
-import type { OpfRecord } from "./opf";
+import type { OpfRecord } from "./fileReaders";
 import type { SqliteDatabase, SqliteRow } from "./sqlite";
 
 /**
@@ -181,12 +183,13 @@ export type CalibreReading =
  * Calibre writes `0101-01-01T00:00:00+00:00` where a date is unknown rather
  * than writing NULL, so a reader that trusts `pubdate` files a library under
  * the second century. `boundNumber` would not catch it: 101 is inside the
- * `year` column's range, which is what makes this a value to refuse by name
- * rather than a value to bound. The plausibility window in `bookBounds.ts` does
- * catch it, and this door applies no window, so the refusal by name is what
- * stands here. The window is named in words rather than by its identifier
- * because that file's caller scan reads the identifier and requires a module
- * naming it to call it; closing the gap is tracked rather than spelled around.
+ * `year` column's range, which is what makes this a value to refuse rather than
+ * a value to bound.
+ *
+ * **One of this module's two doors refuses it by this name, and that door is
+ * the file's.** `readYear` refuses it inside `plausibleYear`'s window instead,
+ * so the member below is this constant's only remaining use.
+ * `CALIBRE_PLACEHOLDER` says what that costs.
  */
 const CALIBRE_UNDEFINED_YEAR = 101;
 
@@ -224,13 +227,23 @@ const CALIBRE_UNKNOWN = "Unknown";
  * refused structurally rather than by value: both doors read a position only
  * where a series is named, so `1.0` on a standalone book is never reached. A
  * predicate on the number would have to refuse a real first volume.
+ *
+ * **The year member is applied at the file door only, and the coupling above
+ * does not hold for it. This is the one home of that exception.** `readYear`
+ * refuses 101 inside `plausibleYear`'s window, a wider rule that already
+ * refuses everything this member does, so the index door needs no predicate for
+ * it and no test at that door can see one removed: the window answers first
+ * however the member is applied. What the mechanism still binds is `title` and
+ * `author`, which are strings no window reaches. Written here rather than left
+ * to be rediscovered by somebody adding a fourth member and trusting the
+ * paragraph above.
  */
 export const CALIBRE_PLACEHOLDER = {
   /** `title` is the literal `Unknown` where nobody typed one. */
   title: (value: string): boolean => value === CALIBRE_UNKNOWN,
   /** An author's `name` is the same literal, at any position in the list. */
   author: (value: string): boolean => value === CALIBRE_UNKNOWN,
-  /** `pubdate` is `0101-01-01`, which reads back as the year 101. */
+  /** `pubdate` is `0101-01-01`, the year 101. The file door applies this one. */
   year: (value: number): boolean => value === CALIBRE_UNDEFINED_YEAR,
 } as const;
 
@@ -553,30 +566,49 @@ function readDescription(html: string | null): string | null {
 }
 
 /**
- * The publication year, or `null` for Calibre's way of saying it has none.
+ * The publication year, or `null` where a book could not have one.
  *
  * `pubdate` is an ISO timestamp as text. Only the leading four digits are read,
  * for `opf.readYear`'s reason: a timezone offset makes the day either side of
  * midnight ambiguous and no book's year turns on it.
+ *
+ * **The window is `bookBounds.plausibleYear`'s, and it replaced a refusal of
+ * `CALIBRE_UNDEFINED_YEAR` by name.** The name refused one value out of a band
+ * this door left open at both ends, so a `pubdate` of `1200-01-01` arrived as
+ * the year 1200. The window refuses that value and 101 with it, so nothing the
+ * name refused is accepted now, and refusing both ways would be one fact
+ * written twice. `CALIBRE_PLACEHOLDER` carries what the dropped arm cost.
+ *
+ * Measured 2026-09-10 over the household's 897 book reference library, every
+ * `books` row: 29 carry the year 101, 0 carry any other year outside the
+ * window, and the remaining 868 fall in 1967 to 2025. So the band this closes
+ * is empty in that library and the window changes no book in it.
  */
 function readYear(value: unknown): number | null {
   const match = /^(\d{4})/.exec(text(value) ?? "");
   if (match === null) return null;
-  const year = Number(match[1]);
-  return CALIBRE_PLACEHOLDER.year(year) ? null : year;
+  return plausibleYear(Number(match[1]));
 }
 
 /**
  * The file's values with Calibre's own placeholders taken back out.
  *
- * `readCalibreLibrary` refuses all three by name on the database's side.
- * `opf.ts` refuses the year one, by the plausibility window rather than by the
- * name, and refuses neither of the other two, correctly: that module reports
- * what an OPF file says, and `Unknown` is Calibre's convention rather than the
- * format's. The year arm here stays because the placeholder set drives both
- * doors and the database door still needs it. A Calibre library's `metadata.opf` is written by Calibre
- * from those same rows, so without this the placeholders arrive back through
- * the gap filling door and land as facts, having been refused at the other one.
+ * `readCalibreLibrary` refuses the two string placeholders by name on the
+ * database's side and the year one inside `plausibleYear`'s window. `opf.ts`
+ * refuses the year one, by that same window, and refuses neither of the other
+ * two, correctly: that module reports what an OPF file says, and `Unknown` is
+ * Calibre's convention rather than the format's. A Calibre library's
+ * `metadata.opf` is written by Calibre from those same rows, so without this
+ * the placeholders arrive back through the gap filling door and land as facts,
+ * having been refused at the other one.
+ *
+ * **The year arm here is the one place the year member is still applied**, and
+ * it is not reachable in production: the only producer of an `OpfRecord` that
+ * reaches this door is `opf.readOpf`, which applies the window before handing
+ * it over. It stays because that window is another module's and is guarded
+ * there rather than here, and because this function's contract is a record's
+ * placeholders out, not a windowed record's. Its test drives `crossCheck`
+ * directly, which is what keeps the arm covered.
  *
  * Measured over the household's 897 book library on 2026-09-08, the 243 books
  * carrying a `metadata.opf`: **57 books take the year 101 from the file**, 28

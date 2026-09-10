@@ -135,7 +135,7 @@ function Badge({ label, value, href }: BadgeProps) {
 const REPOSITORY = "https://github.com/f-klement/endpaper";
 // Names, not phrases, so they are not catalogue entries: a translator has
 // nothing to do with either and both would be byte identical in every language.
-const LICENCE = "Apache 2.0";
+const LICENCE = "MIT";
 const FORGE = "GitHub";
 
 export default function AboutBadges() {

@@ -69,23 +69,34 @@ def _is_vendored(path: Path, root: Path = BACKEND) -> bool:
     )
 
 
-def _python_sources() -> list[Path]:
-    """Every backend module, excluding the tests and the generated migrations."""
+def _python_sources(root: Path = BACKEND) -> list[Path]:
+    """Every backend module, excluding the tests and the generated migrations.
+
+    **`root` for the reason `_is_vendored` takes one**, one rung up: it is what
+    lets `test_every_walk_refuses_a_vendored_path_of_this_kind` drive this walk
+    against a tree it built. A walk asserted against this checkout is vacuous
+    wherever the vendored directory is absent, which is every machine but the
+    pipeline's, and that is the environment difference the comment above
+    records.
+
+    **The two names are matched against the path relative to that root**, not
+    against the whole of it. Asked absolutely, a checkout under a directory
+    called `tests` matched every file it held and the walk returned nothing.
+    """
     return [
         path
-        for path in BACKEND.rglob("*.py")
-        if "tests" not in path.parts
-        and "migrations" not in path.parts
-        and not _is_vendored(path)
+        for path in root.rglob("*.py")
+        if not {"tests", "migrations"} & set(path.relative_to(root).parts)
+        and not _is_vendored(path, root)
     ]
 
 
-def _test_sources() -> list[Path]:
+def _test_sources(root: Path = BACKEND) -> list[Path]:
     """Every file in the test tree. `_python_sources` deliberately excludes it."""
-    return [path for path in (BACKEND / "tests").rglob("*.py") if not _is_vendored(path)]
+    return [path for path in (root / "tests").rglob("*.py") if not _is_vendored(path, root)]
 
 
-def _every_python_file() -> list[Path]:
+def _every_python_file(root: Path = BACKEND) -> list[Path]:
     """Every Python file under `backend/`, wider than both walks above.
 
     The two above drop the tests, and `_python_sources` drops the migrations
@@ -116,10 +127,10 @@ def _every_python_file() -> list[Path]:
     tooling uses "ships" for that opposite sense, which is why the name here says
     `backend/` and the word is left to it.
     """
-    return [path for path in BACKEND.rglob("*.py") if not _is_vendored(path)]
+    return [path for path in root.rglob("*.py") if not _is_vendored(path, root)]
 
 
-def _source_modules() -> dict[str, str]:
+def _source_modules(root: Path = BACKEND) -> dict[str, str]:
     """`_python_sources()` read, keyed by path relative to `backend/`.
 
     **Here rather than in `tests/test_shelf.py`, which is where it used to
@@ -128,17 +139,21 @@ def _source_modules() -> dict[str, str]:
     under `--import-mode=importlib`, since that module is imported for
     `_is_vendored` before it defines anything of its own.
 
-    **Three other test modules still keep a copy of this walk**, each spelling
-    the exclusion as `parts[0] not in {"tests", "migrations", ".venv"}`, which is
-    the enumeration `_is_vendored` exists to replace. Raised rather than taken:
-    they belong to rules this file does not own.
+    **The rules in other test modules that need this corpus import it**, and
+    three of them used to keep a copy, each spelling the exclusion as
+    `parts[0] not in {"tests", "migrations", ".venv"}`. That is the enumeration
+    `_is_vendored` exists to replace, and it held the name of the directory a
+    developer has rather than the one the pipeline creates.
+    `test_no_other_test_module_defines_one_of_these_walks` is what stops the
+    next copy of one of these being free to write, and its docstring says what
+    that does not cover.
     """
     return {
-        str(path.relative_to(BACKEND)): path.read_text() for path in _python_sources()
+        str(path.relative_to(root)): path.read_text() for path in _python_sources(root)
     }
 
 
-def _every_file_a_tool_does_not_own() -> list[Path]:
+def _every_file_a_tool_does_not_own(root: Path = BACKEND) -> list[Path]:
     """Every file under `backend/` that no tool owns, of whatever suffix.
 
     **A second instrument for the walk above, and the only reason it exists.**
@@ -156,11 +171,206 @@ def _every_file_a_tool_does_not_own() -> list[Path]:
     should descend one.
     """
     found: list[Path] = []
-    for root, dirnames, filenames in os.walk(BACKEND):
-        here = Path(root)
-        dirnames[:] = [name for name in dirnames if not _is_vendored(here / name)]
+    for directory, dirnames, filenames in os.walk(root):
+        here = Path(directory)
+        dirnames[:] = [name for name in dirnames if not _is_vendored(here / name, root)]
         found += [here / name for name in filenames]
     return found
+
+
+#: One vendored path of each kind the walks above have to refuse.
+#:
+#: **Planted in two places, and that is what makes the fixture cover every walk.** A
+#: walk that descends `tests/` alone never sees a directory beside it, so a fixture
+#: planting each kind at the root only hands that walk a clean verdict without ever
+#: putting a file in front of it. Measured on the first draft of this fixture: deleting
+#: the exclusion from `_test_sources` was reported by nothing.
+#:
+#: **A `.py` and a second suffix per kind.** The `.py` is all four `rglob` walks can
+#: see at all. The second is not what creates the detection, since the walk that prunes
+#: reaches `mod.py` too: it is there so that walk is put in front of a file its own
+#: suffix rule cannot excuse.
+#:
+#: A virtualenv and the pipeline's cache are both here because the enumeration this
+#: replaced held the first and not the second, and the tree where that mattered is the
+#: pipeline's rather than anybody's checkout. The last is the one no list of names can
+#: hold, and it is what makes the rule structural rather than a longer list.
+VENDORED_KINDS: Final = {
+    "a virtualenv": ".venv/lib/python3.14/site-packages/pydantic",
+    "the cache the pipeline creates under backend": ".uv-cache/cyclonedx/model",
+    "bytecode beside a module of ours": "routers/__pycache__",
+    "a dependency tree": "node_modules/marked/lib",
+    "a tool nobody has written yet": ".some-tool/wheel",
+}
+
+#: What the walks must still reach with all of that planted around them.
+#:
+#: One file per group the walks divide this tree into, so a walk that answered by
+#: returning nothing fails here rather than passing the refusal above.
+FIRST_PARTY: Final = (
+    "shelf.py",
+    "routers/loans.py",
+    "tests/test_shelf.py",
+    "migrations/versions/a1.py",
+    "README.md",
+)
+
+#: What each walk must reach out of that, keyed by the name it is called here.
+#:
+#: **Compared as a whole against the walks this file holds**, so a walk added later
+#: fails this until somebody says what it is for. Listing the walks was the shape the
+#: refusal test was written to avoid, and a vacuity check that quietly skipped the new
+#: walk would leave the refusal above as the only thing driving it, which is the half
+#: that a walk returning nothing passes.
+WHAT_EACH_WALK_REACHES: Final = {
+    "_python_sources": {"shelf.py", "routers/loans.py"},
+    "_source_modules": {"shelf.py", "routers/loans.py"},
+    "_test_sources": {"tests/test_shelf.py"},
+    "_every_python_file": {
+        "shelf.py",
+        "routers/loans.py",
+        "tests/test_shelf.py",
+        "migrations/versions/a1.py",
+    },
+    "_every_file_a_tool_does_not_own": set(FIRST_PARTY),
+}
+
+
+#: Both ways a module defines a function, because a rule reading one of them reads a
+#: subset of its own corpus and says nothing about it.
+#:
+#: Not hypothetical here: this test tree already holds module level `async def`, so a walk
+#: or a copy spelled that way is a shape the corpus contains rather than one nobody would
+#: write, and this file already pairs the two elsewhere. **Both facts, neither counted.**
+#: A count of either moves whenever somebody writes one more, this is a published file,
+#: and nothing here recomputes it. Which sites they are is in the history.
+_A_FUNCTION: Final = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _a_backend_with_vendored_code_in_it(root: Path, vendored: str) -> None:
+    """Write a tree shaped like `backend/`, with one kind of vendored code in it.
+
+    **In the test tree as well as beside it.** Which of the two a walk can reach
+    is the walk's own business and not this function's, and a caller choosing
+    per walk would be the fixture deciding what it is about to test.
+    """
+    for relative in FIRST_PARTY:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x = 1\n")
+    for directory in (root / vendored, root / "tests" / vendored):
+        for name in ("mod.py", "notes.md"):
+            path = directory / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x = 1\n")
+
+
+def _walk_names() -> tuple[set[str], set[str]]:
+    """The names in this module that decide what a walk reaches, as `(walks, all)`.
+
+    **Read off this file rather than listed**, which is the same rule the walks
+    themselves now follow: a list here would be a sixth name somebody has to
+    remember, and the diagonal would report five clean while the new one went
+    unexercised.
+
+    A **walk** is the subset taking nothing but a `root`, which is what makes it
+    drivable against a constructed tree. `_is_vendored` itself takes a path as
+    well and is driven by the two tests above.
+
+    **Every other name has to be a walk, and that is asserted rather than left
+    as the reason for a subtraction.** A function that reaches the predicate and
+    takes a second parameter, or spells its first `base`, would otherwise drop
+    out of both guards while their floors still passed: the matcher would see
+    one spelling and the tests would report on what it saw.
+
+    **Deciding what vendored means and consuming what one of these returns are
+    two different things, and only the first belongs here.** So a name joins on
+    a **call that passes an argument**, which is what forwarding a root looks
+    like, and not on a bare mention. A helper reading `_source_modules()` for
+    the corpus decides nothing, and under the looser rule it failed the
+    assertion above under a message describing a defect it did not have.
+
+    **Taking the tree puts a function in regardless**, which is the half the
+    call rule alone gets wrong: one that takes a root and then calls a walk
+    with no argument ignores it, and dropping it out would leave the diagonal
+    never driving it. In it, that walk reads this checkout instead of the
+    constructed tree and every kind is reported against it.
+
+    **Taking the tree is a parameter called `root` or a default of `BACKEND`,
+    and the second is there because the first is one spelling.** The parameter
+    name is the caller's choice and open, so a helper spelling it `base` and
+    calling a walk with no argument satisfied neither arm and dropped out
+    silently, which is the failure this clause exists to stop, one name over.
+    `BACKEND` is this module's only name for the tree under test: measured on
+    this file, it is the only path constant at module level and exactly the
+    functions here that decide vendored code carry it as a default.
+
+    The cost is stated rather than discovered: a helper taking the tree and only
+    reading a corpus fires too. That is the same side as the rest of this rule,
+    and being told about it is cheaper than the walk nothing drives.
+    """
+    reaches: set[str] = {"_is_vendored"}
+    growing = True
+    while growing:
+        growing = False
+        for node in ast.parse(Path(__file__).read_text()).body:
+            if not isinstance(node, _A_FUNCTION) or node.name in reaches:
+                continue
+            parameters = [
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+            ]
+            takes_the_tree = any(
+                argument.arg == "root" for argument in parameters
+            ) or any(
+                isinstance(default, ast.Name) and default.id == "BACKEND"
+                for default in [
+                    *node.args.defaults,
+                    *(one for one in node.args.kw_defaults if one is not None),
+                ]
+            )
+            if any(
+                (
+                    isinstance(inner, ast.Call)
+                    and isinstance(inner.func, ast.Name)
+                    and inner.func.id in reaches
+                    and inner.args
+                )
+                or (
+                    takes_the_tree
+                    and isinstance(inner, ast.Name)
+                    and inner.id in reaches
+                )
+                for inner in ast.walk(node)
+            ):
+                reaches.add(node.name)
+                growing = True
+    walks = {
+        node.name
+        for node in ast.parse(Path(__file__).read_text()).body
+        if isinstance(node, _A_FUNCTION)
+        and node.name in reaches
+        and [argument.arg for argument in node.args.args] == ["root"]
+    }
+    assert walks | {"_is_vendored"} == reaches, (
+        "these reach the vendored rule and cannot be driven against a tree, so "
+        f"nothing below covers them: {sorted(reaches - walks - {'_is_vendored'})}"
+    )
+    return walks, reaches
+
+
+def _reached(name: str, root: Path) -> set[str]:
+    """One walk's answer over `root`, as paths relative to it.
+
+    `_source_modules` hands back its corpus keyed by that same relative path and
+    the rest hand back paths, so the two shapes are levelled here rather than in
+    the caller, where levelling them would mean naming which walk is which.
+    """
+    found = globals()[name](root)
+    if isinstance(found, dict):
+        return set(found)
+    return {str(path.relative_to(root)) for path in found}
 
 
 def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
@@ -313,6 +523,102 @@ class TestTheSourceWalkSeesOnlyThisProject:
         assert not _is_vendored(repo / "frontend" / "src" / "main.tsx", repo)
         with pytest.raises(ValueError):
             _is_vendored(repo / "frontend" / "src" / "main.tsx")
+
+    @pytest.mark.parametrize("kind", sorted(VENDORED_KINDS))
+    def test_every_walk_refuses_a_vendored_path_of_this_kind(
+        self, kind: str, tmp_path: Path
+    ) -> None:
+        """Each kind against every walk, rather than each walk against its own kind.
+
+        The defect this is for was four walks passing four tests: three test
+        modules each carried a copy of this corpus and each named the vendored
+        directories it had heard of, so every one of them was green on the tree
+        its author ran it against. The kinds are the rows and the walks are the
+        columns, and a walk that refuses `.venv` and reads `.uv-cache` is a
+        cell rather than a file nobody thought to open.
+
+        **Against a tree this builds, not against this checkout.** The
+        directories in question are absent from a developer's `backend/` and
+        present in the pipeline's, so an assertion over the real tree is vacuous
+        in the place it is usually run.
+        """
+        root = tmp_path / "tests" / "backend"
+        _a_backend_with_vendored_code_in_it(root, VENDORED_KINDS[kind])
+        walks, _ = _walk_names()
+        assert len(walks) >= 5, f"the walks went missing from this file: {walks}"
+
+        # Stated as "anything that is not one of ours", so a walk reaching a
+        # second file in that directory, or a directory above it, is reported
+        # too. Matching the planted names would only ever find what was planted.
+        read = sorted(
+            f"{name} read {relative}"
+            for name in walks
+            for relative in _reached(name, root)
+            if relative not in FIRST_PARTY
+        )
+        assert not read, f"{kind} was walked: {read}"
+
+    def test_the_walks_still_reach_this_project_with_that_planted_around_them(
+        self, tmp_path: Path
+    ) -> None:
+        """The other half, without which refusing everything scores five of five.
+
+        Per group rather than in total: the walks divide a backend into the
+        modules, the tests and the migrations, and a total is satisfied by a
+        walk that lost one of them.
+
+        **The whole table at once**, so a walk added to this file has to be
+        given a row here. Named one at a time, the new walk would be driven by
+        the refusal above and by nothing that notices it answering with nothing.
+        """
+        # **Under a directory called `tests`**, which is what says the two names
+        # are matched relative to the root. Asked of the whole path, the filter
+        # matches this ancestor and `_python_sources` returns nothing at all.
+        root = tmp_path / "tests" / "backend"
+        for vendored in VENDORED_KINDS.values():
+            _a_backend_with_vendored_code_in_it(root, vendored)
+        walks, _ = _walk_names()
+
+        assert walks == set(WHAT_EACH_WALK_REACHES), (
+            "a walk was added or renamed and nothing here says what it is for: "
+            f"{sorted(walks ^ set(WHAT_EACH_WALK_REACHES))}"
+        )
+        assert {name: _reached(name, root) for name in walks} == WHAT_EACH_WALK_REACHES
+
+    def test_no_other_test_module_defines_one_of_these_walks(self) -> None:
+        """The next copy of this walk is what the diagonal cannot be run against.
+
+        Three test modules each defined their own `_source_modules`, and each
+        spelled the exclusion as a list of directory names holding `.venv` and
+        not the cache the pipeline creates. They import this one now, and this
+        is what says they still do: the names are read off the functions here
+        that reach `_is_vendored`, so one added later is covered with no edit.
+
+        **It matches by name, and what that leaves out is not hypothetical.**
+        Other test modules walk `backend/` for `*.py` under names of their own
+        and filter it with a directory list of their own, none of which holds
+        the cache the pipeline creates; this reaches none of them. It was
+        written for the shape that produced the defect, where the offending
+        function in all three cases carried the name it was copied from, and it
+        makes that paste expensive rather than free. The rule for the rest is in
+        the tracker, because the walks differ in what else each excludes and one
+        of them wants a directory this predicate does not cover.
+        """
+        _, names = _walk_names()
+        assert len(names) >= 6, f"the walks went missing from this file: {names}"
+        mine = Path(__file__).resolve()
+
+        copies = sorted(
+            f"{path.relative_to(BACKEND)}::{node.name}"
+            for path in _test_sources()
+            if path.resolve() != mine
+            for node in ast.parse(path.read_text()).body
+            if isinstance(node, _A_FUNCTION) and node.name in names
+        )
+        assert not copies, (
+            "these keep their own copy of a walk this file owns, so what counts "
+            f"as vendored is decided twice: {copies}"
+        )
 
 
 class TestEveryNumericQueryParamIsBoundedBothWays:
@@ -2497,7 +2803,12 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
                 if (
                     source is not None
                     and BACKEND in source.parents
-                    and ".venv" not in source.parts
+                    # The rule this file owns, rather than the one name it used
+                    # to spell. The class comes from `__subclasses__` and not
+                    # from a walk, so what reaches it is whatever a dependency
+                    # declared at import: a cache under `backend/` is as much a
+                    # source of those as a virtualenv is.
+                    and not _is_vendored(source)
                 ):
                     found[subclass.__name__] = subclass
                 walk(subclass)

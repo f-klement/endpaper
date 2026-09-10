@@ -287,11 +287,15 @@ function withoutSeparators(text: string): string {
  * real second carrier of the live floor passes unreported: the scan is
  * disarmed rather than weakened. Both measured.
  *
- * Nothing is bought for it here. Closing it takes either a count of the
- * identifier or a match that ignores indentation, and both fail on prose that
- * quotes a declaration, which is this tree's house style and is how the decoy
- * class arrived in the first place. The precondition, a module constant moved
- * into a function body, is what a diff shows plainly.
+ * Nothing is bought for it here, and **the two ways of closing it do not cost
+ * the same**. A count of the identifier fails on prose that quotes a
+ * declaration, which is this tree's house style and is how the decoy class
+ * arrived in the first place: measured over `bookBounds.ts`, 2 in the real tree
+ * and 3 with one JSDoc line quoting the declaration. A match that ignores
+ * indentation, asserting one, pays no such tax: 1 in the real tree, 1 with that
+ * quoting line, and 2 with a decoy beside the declaration, because a comment's
+ * ` * ` prefix never matches it. The precondition, a module constant moved into
+ * a function body, is what a diff shows plainly.
  *
  * A renamed, deleted, inlined or reformatted declaration fails here rather than
  * passing quietly, which is the price of reading the source instead of
@@ -457,9 +461,12 @@ describe("plausibleYear", () => {
     // windows a year and builds no record. Neither is a complement, so neither
     // is here.
     //
-    // The one live exclusion is `calibre.ts::readYear`, which takes a year out
-    // of a `metadata.db` row and refuses the literal 101 by name rather than by
-    // window. `audiobook.ts` reads no year at all.
+    // There is no live exclusion now. `calibre.ts::readYear` was the last one,
+    // refusing the literal 101 by name and leaving the rest of the band open,
+    // and it joined this list on 2026-09-10. `audiobook.ts` reads no year at
+    // all. That the list is complete today is what makes the paragraph above
+    // load bearing rather than academic: nothing else stands between an eighth
+    // reader and an unwindowed year.
     //
     // **What this closes and what it does not.** Any module outside the list
     // that names `plausibleYear` fails here, whether it imports it from
@@ -502,6 +509,7 @@ describe("plausibleYear", () => {
       .filter(([, text]) => /\bplausibleYear\b/.test(text));
 
     const READERS = [
+      "../../src/lib/calibre.ts",
       "../../src/lib/cbz.ts",
       "../../src/lib/fb2.ts",
       "../../src/lib/fileName.ts",

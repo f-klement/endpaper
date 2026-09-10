@@ -40,10 +40,17 @@ import respx
 import fetch
 import sources
 
-# **Imported, not copied.** "What does this statement bind" is one fact, and
-# `test_shelf.py`'s guard already answers it, including the `AnnAssign` half
-# that a second implementation would have got wrong for the reason its
-# docstring measures. Two rules, one resolver.
+# **Imported, not copied.** What counts as a module of this project is one fact
+# and `_is_vendored` is where it is decided. This walk used to be spelled out
+# here, excluding `{"tests", "migrations", ".venv"}` by name, which is the
+# directory a developer has and not the one the pipeline creates under
+# `backend/` for its uv cache.
+from tests.test_house_rules import _source_modules
+
+# **Imported, not copied**, for the same reason one line up. "What does this
+# statement bind" is one fact, and `test_shelf.py`'s guard already answers it,
+# including the `AnnAssign` half that a second implementation would have got
+# wrong for the reason its docstring measures. Two rules, one resolver.
 from tests.test_shelf import _bindings
 
 URL = "https://catalogue.test/sru"
@@ -120,15 +127,6 @@ DOOR_HANDLE_SOURCES = frozenset({"catalogue_client"})
 
 def _client() -> httpx.AsyncClient:
     return fetch.catalogue_client()
-
-
-def _source_modules() -> dict[str, str]:
-    """Every backend module these rules apply to, keyed by relative path."""
-    return {
-        str(path.relative_to(BACKEND)): path.read_text()
-        for path in BACKEND.rglob("*.py")
-        if path.relative_to(BACKEND).parts[0] not in {"tests", "migrations", ".venv"}
-    }
 
 
 def _module_aliases(tree: ast.Module, module: str) -> set[str]:
