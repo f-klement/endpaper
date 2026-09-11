@@ -154,12 +154,12 @@ export default function BookList({
                 )}
                 {/* Plain muted text, not the coloured pill the card uses. One
                     pill among covers is a marker; thirty of them stacked is a
-                    colour field with no signal, and that ramp's own contrast is
-                    recorded as below the 4.5 floor on three palettes. Measured
-                    as drawn here: paper-600 on paper-0 is 5.03:1 at worst
-                    across the seven palettes, and paper-400 on paper-900 is
-                    6.00:1, against the pill's 3.97:1. The word is the
-                    information either way. */}
+                    colour field with no signal, and the pill's ink is below the
+                    4.5 floor as it draws where this pairing clears it on every
+                    palette. Both halves of that are recomputed by
+                    `tests/theme/palettes.test.ts::the status pill's ink, as it
+                    draws`, and the two tiers used here are in that file's
+                    contract. The word is the information either way. */}
                 <span className="shrink-0 text-xs text-paper-600 dark:text-paper-400">
                   {t(STATUS_LABELS[status])}
                 </span>

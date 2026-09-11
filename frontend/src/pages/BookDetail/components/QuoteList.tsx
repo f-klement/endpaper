@@ -213,11 +213,14 @@ export default function QuoteList({
                         )}
                         <button
                           onClick={() => onRemove(quote.id)}
-                          // The same tier and the same reason as NoteList's
-                          // delete: `danger-300` measures 1.89:1 on this card
-                          // in light mode, and `danger-600` on the dark card is
-                          // 1.67 to 2.85 across the seven palettes, so the
-                          // resting and hover states are both stated.
+                          // The same four tiers and the same reason as
+                          // NoteList's delete: `danger-300` is not ink on a
+                          // light card and `danger-600` is nearly the dark card
+                          // itself, so neither the resting state nor the dark
+                          // hover can be inherited. Both rungs are recomputed
+                          // over every palette by
+                          // `tests/theme/palettes.test.ts::the rungs a delete
+                          // control cannot rest on`; no band is quoted here.
                           className="text-xs text-danger-500 hover:text-danger-600 dark:text-danger-300 dark:hover:text-danger-100"
                         >
                           {t("common.delete")}

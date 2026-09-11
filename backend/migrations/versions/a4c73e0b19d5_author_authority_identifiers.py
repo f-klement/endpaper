@@ -70,9 +70,12 @@ def upgrade() -> None:
         sa.Column("created_by_user_id", sa.Integer(), nullable=True),
         # `nullable=False`, matching `Mapped[datetime]` on the model and every
         # other `created_at` in the tree. **This was `nullable=True` and no test
-        # could have caught it**: `conftest.py` builds the schema with
-        # `create_all`, so the suite sees the model and only production sees the
-        # migration. The two have to be read against each other by a person.
+        # caught it**: the suite runs on the schema these revisions build, so
+        # the model's `Mapped[datetime]` described this column rather than
+        # enforcing anything about it, and nothing compared the two. A person
+        # reading the two files against each other found it.
+        # `tests/test_schema.py::TestTheMigrationsAndTheModelsAgree` compares
+        # them now, per column, on nullability and type.
         sa.Column(
             "created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False
         ),

@@ -1179,18 +1179,13 @@ class TestTheAuthorityIdentifierConstraints:
     def test_every_scheme_the_enum_offers_is_accepted(self, db):
         """The other direction, and the one a widened enum breaks.
 
-        **Which schema this runs against is not fixed, and saying otherwise
-        would be the claim rather than the measurement.** `conftest._schema_once`
-        builds with `create_all`, where `models._scheme_check` derives the
-        constraint from `AuthorityScheme` and this passes by construction; but
-        `tests/test_schema.py`'s `restore_schema` fixture replaces the schema
-        with a **migrated** one for the rest of its worker, so on a run where
-        the two files share a worker this is against the migration. Measured
-        2026-08-28: with `'isni'` removed from `d5e1b93a7c62._SCHEMES_AFTER`,
-        this test failed alongside the schema one.
+        **This runs against the migrations' schema**, like every other test
+        taking the `db` fixture, for the reason `tests/conftest.py::_schema_once`
+        gives. Measured 2026-08-28: with `'isni'` removed from
+        `d5e1b93a7c62._SCHEMES_AFTER`, this test failed alongside the schema one.
 
-        So the guard that can be relied on to separate the enum from the
-        migration is
+        It inherits that schema rather than building it, though, so the guard
+        that separates the enum from the migration **by construction** is
         `tests/test_schema.py::TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase
         ::test_every_scheme_the_enum_offers_is_storable`, which rebuilds through
         `upgrade_to_head` itself. This one is here so the refusal above cannot

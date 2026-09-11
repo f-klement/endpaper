@@ -241,13 +241,15 @@ actually address.
    shipped placeholder or shorter than 32 bytes. With the example key every session token is
    forgeable by anyone who has read the repository. The alternative to failing loudly is an
    app that looks healthy while being impersonable.
-2. `ensure_data_dirs()`: create `DATA_DIR/covers` if missing.
-3. `validate_auth_config()`: **refuse to boot** on an auth setup that would silently
+2. `validate_auth_config()`: **refuse to boot** on an auth setup that would silently
    misbehave, mainly an `LDAP_BIND_DN` with no bind password. See [security.md](security.md).
-4. `ensure_schema()`: create or migrate the database with Alembic (see below).
+3. `ensure_data_dirs()`: create `DATA_DIR/covers` if missing.
+4. `upgrade_to_head()`: create or migrate the database with Alembic (see below).
 5. `seed_tags()`: insert any predefined tag that is missing.
+6. `seed_catalogue_targets()`: write the catalogue roster `targets.SEEDED` holds, updating
+   any row whose constants have moved.
 
-Steps 2 to 5 are idempotent, so a restart is always safe and a fresh volume
+Steps 3 to 6 are idempotent, so a restart is always safe and a fresh volume
 self-initialises. There is no bootstrap command.
 
 `assert_unique_operation_ids()` runs immediately after the routers are registered and fails
@@ -257,10 +259,12 @@ and how its first version managed to check nothing.
 ### Migrations
 
 Schema changes go through **Alembic** (`backend/migrations/`), run automatically at startup
-by `backend/schema.py`. `create_all()` adds new *tables* but never new *columns or indexes
-on existing ones*, so anything added after a release needs a migration.
+by `backend/schema.py`. **Nothing in the application calls `create_all()`**, and `main.init_db`
+says why at the call: two things that both create tables is how a database ends up in a shape
+no migration accounts for. So a new table needs a revision exactly as much as a new column
+does.
 
-`ensure_schema()` handles three cases, and the middle one is the awkward part:
+`schema.upgrade_to()` handles three cases, and the middle one is the awkward part:
 
 | The database is | What happens |
 |---|---|

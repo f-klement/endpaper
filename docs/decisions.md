@@ -189,7 +189,9 @@ a book is neither an error nor an achievement, and a rose pill would make the sh
 it was reporting a problem.
 
 `paper-800` on `paper-200` rather than the `paper-600` the `unread` pill uses. Measured across
-all seven light palettes with the same formula `tests/theme/palettes.test.ts` uses:
+every light palette with the same formula `tests/theme/palettes.test.ts` uses, and **the rows
+below are recomputed by `the contrast table in docs/decisions.md` in that file**, worst figure
+and named palette both, so they cannot drift from the tokens:
 
 | Pair | Worst | Where | Best |
 |---|---|---|---|
@@ -211,8 +213,13 @@ them the time to find out why. A row is not finished when the figure is right, o
 figure and the palette it came from are both right.
 
 **The `unread` pill is under the floor and this change did not put it there.** As it actually
-draws, `paper-600` on `paper-200` at 70% over the `paper-0` card, it measures **3.97:1 on
-solarized**, 4.02 on nord and 4.27 on catppuccin. It is left alone deliberately: a status
+draws, `paper-600` on `paper-200` at 70% over the `paper-0` card, it is under 4.5 on seven of
+the ten palettes and worst on solarized. **No ordering is written here, and that is the
+point**: composited in eight bits, which is what reaches the screen, six of the ten move at
+the second decimal against the same blend left in floating point, and none at the first. Any
+ordering to two decimals is a statement about an instrument rather than about the palettes.
+`tests/theme/palettes.test.ts::the status pill's ink, as it draws` composites and recomputes
+it. It is left alone deliberately: a status
 pill's colour is one decision across five values, and a change that owns one of them should
 not quietly restyle the other four. Recorded here so it is a known debt rather than something
 to be rediscovered, and the test added with `did_not_finish` pins that pill only.
@@ -3115,7 +3122,8 @@ covers is a marker; thirty stacked is a colour field with no signal. Measured as
 drawn, with the formula `tests/theme/palettes.test.ts` uses: `paper-600` on the
 card's `paper-0` is **5.03:1** at worst across the ten palettes (rosepine; 5.91 at
 best, on endpaper, where an earlier draft of this line said 5.30, which is nord's), and `paper-400` on `paper-900` in dark is
-**6.00:1** at worst, against the pill's **3.97:1** as drawn. The replacement is
+**6.00:1** at worst, against the pill as drawn, which is under the floor on seven of the ten
+palettes and is recomputed rather than quoted, for the reason recorded where that pill is. The replacement is
 better on contrast as well as quieter, and the word carries the same
 information.
 
@@ -3333,9 +3341,11 @@ ink out of the foliage to pay for it, which is a different pattern rather than a
 ### A dark hover state is stated at every call site, and the rule has no exemptions
 
 Every ramp runs the other way in the dark, so `text-accent-700 hover:text-accent-800`
-written once is legible at rest and illegible while pointed at: measured across the seven
-palettes those pairings land between **1.36 and 2.85** on a dark card, because `accent-800`
-in a dark ramp is nearly the card itself.
+written once is legible at rest and illegible while pointed at, because `accent-800` in a
+dark ramp is nearly the card itself. **No band is quoted here on purpose**:
+`the hover a dark ramp makes illegible` in `tests/theme/palettes.test.ts` recomputes that
+rung, and the band this paragraph used to carry was two pairs spliced together, a lower bound
+from these pairings and an upper bound that belonged to a different pair two files away.
 
 Twelve sites were like that and all twelve were repaired, which is why
 `frontend/tests/houseRules.test.ts` states the rule with **no allowlist**. That is a claim
@@ -13115,3 +13125,118 @@ put the label at the front. Unanchored the rule strips `isbn` from the middle of
 and hands `parseIsbn` a number the file never wrote. `isbn.stripIsbnPrefix` is the one home
 and `tests/lib/isbn.test.ts` has the one arm that fails when the anchor comes off; measured
 on the consolidated tree, that arm is the only one of 182 that does.
+
+## The suite's database is the migrations', and it is asserted rather than stated
+
+`main.init_db` migrates at import and `conftest` imports `main`, so `create_all` finds every
+table present and does nothing. Seven places in the tree stated that and six stated the
+opposite. They now point at `conftest._schema_once`, which carries the mechanism, or state
+only their own local consequence.
+
+**A stamp is not provenance.** `alembic_version` is not in `Base.metadata`, so a schema built
+from the models and stamped at head reads as migrated. Measured 2026-09-11 by two seats with
+two different mutations, against a guard written to close exactly this. The premise now has
+three partial arms and is their conjunction: a table count either side of `create_all`, the
+stamp against the script directory's head, and an `ast` scan for a `create_all` call outside
+the test tree. **A guard asserting one of them under a name that claims all three is the
+failure being recorded here**, and one mutation is caught by none of the three, which is
+written at the arm as its boundary rather than claimed as covered.
+
+**A `CheckConstraint` in `models.py` is a description of a revision, not a second enforcement
+of it.** A guard over constraints that reads the models sits at the weakest rung this file
+names. Measured on `ck_digital_references_bounds`: the expression replaced by a constant
+false one, one term of a two term sum zeroed, and the byte budget shrunk by three each failed
+zero tests. Enum columns are now compared on both copies, both directions.
+
+**`create_all` stays in `_schema_once` although it builds nothing.** Removing it makes a
+broken premise arrive as thousands of `no such table` errors; keeping it makes the same break
+arrive as one named test. Measured 2026-09-11 with `init_db` mutated to `create_all`: the
+named test failed and said which.
+
+## A guard that strips prose with a regex edits the code it was reading
+
+`withoutProse` cut at any `//` and any `/*`. Neither is a comment inside a string literal,
+and an opening block marker inside a string or inside a line comment deletes every line to
+the next closing marker.
+
+**Both arms measured rather than argued**, over the 456 modules under `frontend/src/`: 4,577
+characters removed in 12 modules, 3,223 of them not whitespace, 1,532 inside a string literal
+and 1,691 outside one across 114 lines in 10 modules. `accept="image/*"` in
+`pages/ScanPage/components/LookupResult.tsx` swallowed sixteen lines of JSX; a line comment
+quoting a wildcard media type in `api/mutator.ts` swallowed the `Accept` header that module
+sets. Three of the ten are `lib/goodreads.ts`, `lib/opf.ts` and `lib/pdf.ts`, which are
+subjects of the rule keeping a file reader off the network.
+
+**The fix is the parser that file already runs for two other rules**, and the bound is that
+the parser refuses text a regex returns something for: all 456 modules parse and an arm says
+so by name. **The swap is monotone**: zero characters the regex form kept are now removed,
+and none of the seventeen values the fifteen readers derive moved.
+
+**A line comment ends at LF, CR, U+2028 or U+2029, and the first draft stopped at the
+first.** The regex form did not, because JavaScript's `.` excludes all four, so the fix was
+briefly weaker than what it replaced in a dimension nobody had re-checked: a `fetch` written
+after a U+2028 in `lib/opf.ts` left the no-custody rule green at 97 of 97. The fix for that
+then shipped with three of the four terminators in its fixture. Each is now dropped in turn
+by a named row.
+
+## An instrument that cannot composite measures the one pairing it may not assume about
+
+Every pairing in this app is a pair of tokens except one: the `unread` pill is
+`bg-paper-200/70`, drawn as a tint over the card, and that is the pairing that sits below the
+readable floor. The palette harness now blends, quantised to eight bits because that is what
+reaches the screen.
+
+**No ordering of those figures is written anywhere, and the reason is the instrument.**
+Against the same blend left in floating point, six of the ten palettes move at the second
+decimal and none at the first, so an ordering to two decimals is a statement about where the
+blend was quantised. The property is recomputed by
+`tests/theme/palettes.test.ts::the status pill's ink, as it draws`.
+
+**The stale figures in this file were deleted rather than corrected**, for the reason this
+register already records twice: a number, once written down, stops being re-derived and
+starts being copied. The accent hover band it used to carry was two pairs spliced together, a
+lower bound from the pairing named and an upper bound belonging to a different pair two files
+away.
+
+## Three GLOB rules, three different situations, one arm
+
+`GLOB` and `length()` are both C string operations and stop at the first NUL. That does not
+make three constraints resting on `GLOB` one class, and treating them as one was the failure
+this work was written to avoid.
+
+**A negative charset rule is defeated by it**, because truncation hides the rest of the value
+from the rule. Measured on sqlite 3.46.1 and 3.50.4: `ck_catalogue_targets_indexes` refuses
+`'bath.isbn or 1=1'` and stored the same string behind a NUL at 9 characters and 17 bytes.
+
+**A positive prefix rule is not defeated by it**: truncation can only make a prefix test fail.
+`ck_opds_servers_base_url` still wants `instr(x, char(0)) = 0`, for the opposite reason. The
+clause is what makes a character ceiling exact, and a prefix rule with no ceiling bounds
+nothing after the prefix at all.
+
+**Where a column has no ceiling for the clause to make exact, the clause bounds nothing and is
+not added.** `ck_catalogue_credentials_envelope` is `Text` with no ceiling, so it stays as it
+is, with the reason at its site and a test that has to be deleted to close it.
+
+### A character ceiling bounds no bytes
+
+Found while adding the arm above, and it is the more general fact. `length()` counts a lead
+byte and skips continuation bytes without limit, so `'http://x'` followed by `0xC0` and a
+megabyte satisfied the prefix rule, carried no NUL, and stored 1,000,009 bytes reading as 9
+characters. **A reported cap of 1,495 bytes was not a cap**: re-derived over lead bytes `C0`
+to `FF` with runs of one to eight, it is one character per lead byte regardless, so bytes were
+unbounded and correcting the prose would not have been enough. Hence the byte arm,
+`length(CAST(x AS BLOB)) <= 4 * ceiling`.
+
+### A literal anti vacuity floor is a stated bound wearing a measurement's clothes
+
+`test_the_or_rule_costs_what_it_is_said_to_cost` asserted `len(conditional) >= 9` while
+`_has_a_top_level_or`'s docstring said the count was recomputed by that test. The pair read as
+measured and was stated. Parenthesising `ck_opds_servers_base_url` legitimately took the count
+to eight and the guard failed, which is the good case; **had it gone the other way the guard
+would have passed, because a smaller count is a weaker inequality**.
+
+The floor existed because `assert not both` is empty both when the rule holds and when the
+detector has stopped detecting anything. That is now separated by a fixture over the detector
+itself, four shapes with no number in them, which cannot drift as the schema changes.
+Measured: blinding `_has_a_top_level_or` to return False fails three named tests, that fixture
+among them.

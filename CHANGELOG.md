@@ -53,6 +53,29 @@
   reply nested deeply enough to overflow the parser used to escape as a server error on the
   Open Library, lobid and VIAF paths; it now degrades the way every other unreadable answer
   already did.
+- **The rule requiring a database constraint on every enumerated column now reads the
+  database.** It read the model file, so a constraint declared in the model and installed by
+  no migration satisfied it completely, while the deployment carried nothing. Both drift
+  directions are now covered. Nothing was missing when it was checked: 29 constraints
+  declared, 29 installed, the same set both sides.
+- **The guard that strips comments before reading the source was editing the source.** It cut
+  at any `//` and any `/*`, including inside a string literal, so every rule built on it saw
+  less than it claimed. Measured over the 456 modules in the app, it deleted 4,577 characters
+  in 12 of them, 3,223 of those not whitespace: a third was truncated URLs and the rest was
+  ordinary code, including sixteen lines of markup swallowed by an `image/*` in an attribute
+  and a request header swallowed by a comment quoting a media type. Three of the ten modules
+  affected are the file readers behind the rule that keeps a book file off the network.
+- **The palette contrast figures quoted in the interface's own source are computed rather
+  than written down**, over every palette that exists rather than the seven that existed when
+  they were first measured. The one pairing that draws as a tint over a card had never been
+  measured as it actually draws; it is now, and it sits below the readable floor on seven of
+  the ten palettes.
+- **A catalogue target's index names can no longer hide a search clause behind a NUL byte**,
+  which the database stops reading at. **An OPDS server's address is bounded at 255
+  characters and in bytes as well as required to be `http` or `https`**, so a restored
+  archive cannot park an unbounded payload after the scheme. A character limit alone bounded
+  no bytes at all: a value carrying one malformed byte and a megabyte after it read as nine
+  characters and stored 1,000,009.
 - **A Calibre import keeps the Amazon and Google Books identifiers the library's own table
   carries**, in every marketplace spelling Calibre writes. Types no reader here can produce a
   value for, `goodreads` and `mobi-asin` among them, are declined rather than guessed at, and

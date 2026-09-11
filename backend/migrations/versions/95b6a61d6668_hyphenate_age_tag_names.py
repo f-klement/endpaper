@@ -7,7 +7,7 @@ hyphen.
 The rename has to happen in the database too, and *before* `seed_tags()` runs.
 Seeding matches on name, so an unrenamed row would leave the old tag in place and
 insert a second one beside it, and every book already tagged with the old name
-would keep pointing at the orphan. `ensure_schema()` runs migrations before
+would keep pointing at the orphan. `init_db()` runs migrations before
 seeding, which is what makes that ordering hold.
 
 Data-only: no schema change.

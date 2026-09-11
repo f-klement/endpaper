@@ -2313,8 +2313,11 @@ def _bounds_column(sqltext: str, column_name: str) -> bool:
     )
 
 
-def _has_check(qualified: str) -> bool:
-    """Whether a CHECK on this column's table bounds this column's values."""
+def _declares_check(qualified: str) -> bool:
+    """Whether a CHECK the **models declare** bounds this column's values.
+
+    One of the two copies. `_installs_check` reads the other.
+    """
     from sqlalchemy import Table
 
     from database import Base
@@ -2332,6 +2335,83 @@ def _has_check(qualified: str) -> bool:
     return False
 
 
+def _require_a_migrated_database() -> None:
+    """Refuse to answer off a database the migrations have not been run against.
+
+    **The reader below is worth nothing without this.** The ambient schema is
+    the migrations' for the reason `tests/conftest.py::_schema_once` gives, and
+    were that ever to stop holding it would be `create_all`'s instead:
+    `_installs_check` would then be reading what `_declares_check` reads, and
+    every comparison in this file's enum rule would agree by construction while
+    enforcing nothing.
+
+    **Compared against the head the script directory reports**, not against a
+    written down revision, so a new revision does not need an edit here and a
+    stale literal cannot weaken it.
+
+    **This is one third of that premise and states no more.** A stamp says the
+    revisions ran to head; it does not say the tables came from them, because
+    `alembic_version` is not in `Base.metadata` and a schema dropped and rebuilt
+    from the models keeps the stamp. Two review seats reached that on
+    2026-09-11 independently, by two different mutations, and neither was caught
+    here. What says the tables are the revisions' is the assertion in
+    `_schema_once`; what says nothing in the application would build them any
+    other way is
+    `TestEveryEnumColumnIsConstrainedOrExemptWithAReason::test_the_application_
+    builds_its_schema_only_by_migrating`.
+    """
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+
+    import schema
+    from database import engine
+
+    with engine.connect() as connection:
+        stamped = MigrationContext.configure(connection).get_current_revision()
+    head = ScriptDirectory.from_config(schema._alembic_config()).get_current_head()
+    assert stamped == head, (
+        f"the ambient schema is stamped {stamped!r} against a head of {head!r}, so "
+        "what these rules read is not the schema a deployment carries"
+    )
+
+
+def _installed_checks(table_name: str) -> list[str]:
+    """Every CHECK clause the **migrated database** carries on this table.
+
+    Read back through reflection rather than from `Base.metadata`, because the
+    whole point is to ask an artefact the models cannot describe wrongly.
+
+    **A clause comes back as the DDL text SQLite stored**, so a batch rebuild
+    that re-emitted it quoted would stop matching in `_bounds_column`. That
+    fails a rule rather than passing one: a column whose clause no longer
+    matches reads as unconstrained.
+    """
+    # `inspect` is the standard library's at module level, and this file needs
+    # both.
+    from sqlalchemy import inspect as reflect
+
+    from database import engine
+
+    _require_a_migrated_database()
+    return [
+        constraint["sqltext"]
+        for constraint in reflect(engine).get_check_constraints(table_name)
+    ]
+
+
+def _installs_check(qualified: str) -> bool:
+    """Whether a CHECK the **migrated database carries** bounds this column's values.
+
+    The other copy. This is the one a deployment enforces; `_declares_check`
+    reads the one `--autogenerate` and `create_all` work from.
+    """
+    table_name, column_name = qualified.split(".")
+    return any(
+        _bounds_column(sqltext, column_name)
+        for sqltext in _installed_checks(table_name)
+    )
+
+
 class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
     """A value outside the enum 500s every read of the row that holds it.
 
@@ -2341,21 +2421,183 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
     the table without it and `--autogenerate` would have proposed dropping it.
     Four migrations would have fixed that day and prevented nothing; this is what
     prevents the next one.
+
+    **There are two copies of every constraint and this reads both.** The rule
+    read `models.py` alone until 2026-09-11, which is the artefact that cannot
+    refuse a row: a column declaring a `CheckConstraint` while no revision
+    installs one satisfied it completely, and the deployment then had no
+    constraint at all while the rule reported it protected. What a declaration
+    alone is worth is measured at
+    `tests/test_schema.py::TestTheMigratedDatabaseCarriesTheBoundsItPromises`.
+
+    So coverage is asked of the migrated database, which is the copy that
+    refuses a row, and agreement is asked of the pair, which is the copy
+    `--autogenerate` and `create_all` work from. Both directions of the drift
+    are a failure here: the hole this rule had until 2026-09-11, and
+    `custom_fields.kind`'s, which is the same drift with the two artefacts
+    swapped.
+
+    **Attacked rather than read, 2026-09-11**, five mutations, each on an
+    isolated copy of the tree, and what went red, by name. **The last two were
+    written by the two review seats rather than by this rule's author**, which is
+    the arrangement that found the premise hole: both seats reached it
+    separately, and neither mutation was one the author had thought of.
+
+    - the revision installs no bound for `books.ownership`:
+      `test_every_enum_column_is_constrained_or_named` and
+      `test_the_two_copies_of_every_enum_constraint_agree`.
+    - `models.py` stops declaring that bound and the revision keeps it:
+      `test_the_two_copies_of_every_enum_constraint_agree` alone, which is the
+      arm that inherits what this rule refused before it read a database at all.
+    - `init_db` builds the schema with `create_all` and nothing stamps it:
+      `test_the_rules_above_read_the_database_the_migrations_built`, and the
+      three rules that read installed DDL with it.
+    - `init_db` builds it with `create_all` and stamps head by hand:
+      `test_the_application_builds_its_schema_only_by_migrating`, alone. Every
+      other test in this class passed, the stamp arm included.
+    - `conftest._schema_once` drops every table **before it reads the count it
+      compares against**: the assertion in that fixture, which errors every test
+      depending on it. Move the same drop one line down, between that read and
+      the `create_all`, and nothing goes red: the arm's boundary is that **this
+      call** built nothing, and a mutation sitting inside the fixture below its
+      own read is past it. Measured both placements, opposite verdicts.
+    - `init_db` reaches the schema through `schema.upgrade_to("head")` instead:
+      `test_the_application_builds_its_schema_only_by_migrating` again, on its
+      second assertion. That mutation exists because the mutation above it fires
+      the **first** assertion and stops there, so the second had never been seen
+      to fail and was at the stated rung while reading as tested. **It is also
+      the cost of that arm stated plainly**: a spelling that migrates correctly
+      fails it, and changing it is a test edit with a name on it.
     """
 
     def test_every_enum_column_is_constrained_or_named(self):
+        """Asked of the migrated database, because that is what refuses a row."""
         unaccounted = {
             column: enum
             for column, enum in _enum_columns().items()
-            if not _has_check(column)
+            if not _installs_check(column)
             and column not in GROWING_ENUM_COLUMNS
             and column not in UNDECIDED_ENUM_COLUMNS
         }
         assert not unaccounted, (
-            "These map a StrEnum and carry no CheckConstraint, so a restored row "
-            "outside the enum raises at read time. Add the constraint, or add the "
-            "column to GROWING_ENUM_COLUMNS with the reason it cannot have one: "
-            f"{sorted(unaccounted)}"
+            "These map a StrEnum and the migrated database bounds none of them, so "
+            "a restored row outside the enum raises at read time. Write the "
+            "revision, or add the column to GROWING_ENUM_COLUMNS with the reason "
+            f"it cannot have one: {sorted(unaccounted)}"
+        )
+
+    def test_the_two_copies_of_every_enum_constraint_agree(self):
+        """Neither copy may bound a column the other does not.
+
+        **Exempt columns included**, because an exemption is a decision about
+        the rule above and says nothing about the two copies matching. A column
+        parked in either list could otherwise acquire a constraint on one side
+        only with nothing red.
+
+        The two directions fail differently and both are live history, so they
+        are reported separately rather than as one set of names.
+        """
+        columns = _enum_columns()
+        declared_only = sorted(
+            column
+            for column in columns
+            if _declares_check(column) and not _installs_check(column)
+        )
+        installed_only = sorted(
+            column
+            for column in columns
+            if _installs_check(column) and not _declares_check(column)
+        )
+        assert not declared_only, (
+            "models.py bounds these and no revision installs the bound, so the "
+            "declaration describes a constraint the deployment does not carry: "
+            f"{declared_only}"
+        )
+        assert not installed_only, (
+            "a revision installs a bound these do not declare, so `create_all` "
+            "builds the table without it and `--autogenerate` proposes dropping "
+            f"it. That is the `custom_fields.kind` incident: {installed_only}"
+        )
+
+    def test_the_rules_above_read_the_database_the_migrations_built(self):
+        """The premise `_installs_check` rests on, asserted rather than stated.
+
+        Without it the reader can come to answer off `create_all`'s tables, both
+        copies become one copy, and every comparison in this class passes by
+        construction. A guard whose premise is prose is a guard at the weakest
+        rung this repository has a name for.
+
+        One of three arms, and the one that sees the database at run time. The
+        other two are the assertion in `conftest._schema_once` and the test
+        below.
+        """
+        _require_a_migrated_database()
+
+    def test_the_application_builds_its_schema_only_by_migrating(self):
+        """The half a running database cannot show, read off the source.
+
+        **A stamp can be written by hand.** Replacing `upgrade_to_head()` in
+        `init_db` with `create_all` followed by `command.stamp(config, "head")`
+        leaves a database stamped at head whose tables are the models', and the
+        run time arm above passes on it: measured 2026-09-11 by a review seat
+        that wrote exactly that mutation. It is not a contrived shape, which is
+        what makes it worth a test: `schema.upgrade_to`'s own legacy branch
+        builds tables and then stamps them, so the mutation is a rearrangement
+        of code this repository already ships.
+
+        **Matched on the called name, never on the receiver.** `create_all` is
+        reached through `Base.metadata`, through a `Table`, and through anything
+        else holding one, and a guard keyed on one spelling of the receiver is
+        the enumeration this file has been wrong about before.
+
+        **Stated as an exclusion**: every Python file under `backend/` except
+        the test tree, which is `_every_python_file` less one name. The test tree
+        is out because `conftest._schema_once` calls `create_all` on purpose and
+        asserts that the call builds nothing.
+
+        **The revisions are in, and they are the reason this is not
+        `_python_sources`**, which drops them. A revision is the one module that
+        runs at boot and can build tables from `Base.metadata`, and neither other
+        arm can see it do so: it runs before `_schema_once`, so that fixture's
+        count has nothing left to build, and Alembic stamps head itself, so the
+        stamp arm passes. Measured 2026-09-11 by a review seat, with `drop_all`
+        and `create_all` appended to the head revision's `upgrade()`: the whole
+        class passed, and a probe returned the ambient DDL byte identical to the
+        models' own rendering.
+
+        **The bound**: a module that built the schema by executing DDL of its own
+        rather than through `create_all` passes both arms here, and the count in
+        `_schema_once` sees it only if it runs after that fixture. Three partial
+        arms, and the premise is their conjunction.
+        """
+        offenders = [
+            f"{path.relative_to(BACKEND)}:{node.lineno}"
+            for path in _every_python_file()
+            if "tests" not in path.relative_to(BACKEND).parts
+            for node in ast.walk(ast.parse(path.read_text()))
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "attr", getattr(node.func, "id", None))
+            == "create_all"
+        ]
+        assert not offenders, (
+            "an application module builds tables itself, so a deployment's schema "
+            "is no longer only what the revisions installed and `_installs_check` "
+            f"reads a shape no migration accounts for: {offenders}"
+        )
+
+        init_db = next(
+            node
+            for node in ast.walk(ast.parse((BACKEND / "main.py").read_text()))
+            if isinstance(node, ast.FunctionDef) and node.name == "init_db"
+        )
+        assert any(
+            isinstance(node, ast.Call)
+            and getattr(node.func, "attr", getattr(node.func, "id", None))
+            == "upgrade_to_head"
+            for node in ast.walk(init_db)
+        ), (
+            "`init_db` no longer reaches the schema through `upgrade_to_head`, so "
+            "what a deployment and this suite boot on is not the revisions'"
         )
 
     def test_the_exemption_list_names_only_real_columns(self):
@@ -2380,7 +2622,10 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         """
         assert not _bounds_column("loaned_to_user_id IN ('a', 'b')", "id")
         assert _bounds_column("id IN ('a', 'b')", "id")
-        assert not _has_check("loans.id")
+        assert not _declares_check("loans.id")
+        # Both readers, because `loans` carries that clause in the database as
+        # well and a reader is only as good as the boundary it applies.
+        assert not _installs_check("loans.id")
 
     def test_each_helper_this_file_paid_for_has_one_caller(self):
         """A rule added here calls the helper beside it rather than re-spelling it.
@@ -2466,7 +2711,10 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         assert not _bounds_column(
             "provenance <> 'catalogue' OR created_by_user_id IS NULL", "provenance"
         )
-        assert _has_check("author_identifiers.provenance")
+        assert _declares_check("author_identifiers.provenance")
+        # The migrated database carries both constraints too, so the same
+        # evasion is available there and is pinned there.
+        assert _installs_check("author_identifiers.provenance")
 
     def test_the_growing_list_does_not_grow_without_somebody_saying_so(self):
         """The other half of the exemption, pinned the same way.
@@ -5988,11 +6236,14 @@ class TestEveryTextCeilingBindsOnBytesToo:
         bound in the tree that is right.
 
         **It costs nothing today**, measured over `models.py` rather than
-        assumed: nine constraints carry a depth zero `OR` and not one of them
-        holds a `length(` term. The count is nine rather than the eight a first
-        reading of the same file gave, which is why it is recomputed here by
-        `test_the_or_rule_costs_what_it_is_said_to_cost` instead of being written
-        down once.
+        assumed: the constraints carrying a depth zero `OR` hold no `length(`
+        term between them, which is what
+        `test_the_or_rule_costs_what_it_is_said_to_cost` asserts. **No count is
+        written here or there.** One was, and it went stale the first time a
+        constraint was legitimately parenthesised: the docstring said the number
+        was recomputed by that test while the test compared against a literal,
+        so the pair read as measured and was stated. A smaller count is a weaker
+        inequality, so it would have gone on passing.
         """
         depth = 0
         for position, character in enumerate(declared):
@@ -6264,8 +6515,29 @@ class TestEveryTextCeilingBindsOnBytesToo:
             if self._ceilings(self._canonical(self._declared()[name]))[0]
         }
 
-        assert len(conditional) >= 9, sorted(conditional)
+        # Anti vacuity, and deliberately not a count. `both` is empty both when
+        # the rule holds and when `_has_a_top_level_or` has stopped detecting
+        # anything, so something has to separate the two; a literal floor did
+        # that until a constraint was parenthesised for good reasons and the
+        # floor became wrong in the direction that still passes.
+        assert conditional, "the depth zero OR detector found nothing to report"
         assert not both, sorted(both)
+
+    def test_the_top_level_or_detector_still_tells_the_two_shapes_apart(self) -> None:
+        """What the count above used to stand in for, without a number in it.
+
+        The failure it guards against is `_has_a_top_level_or` answering False
+        for everything, which would empty `both` and make the rule vacuous. A
+        fixture says so directly and cannot drift as the schema changes, which
+        is the whole reason it replaced a floor over the live constraints.
+        """
+        assert self._has_a_top_level_or("a = 1 OR b = 2")
+        assert self._has_a_top_level_or("(a = 1) AND c = 3 OR b = 2")
+
+        # One level in is the case the rule must NOT report: the only correct
+        # conditional ceiling in the tree is shaped this way.
+        assert not self._has_a_top_level_or("(a = 1 OR b = 2) AND c = 3")
+        assert not self._has_a_top_level_or("length(a) <= 60")
 
     def test_every_character_ceiling_carries_a_byte_arm_or_refuses_a_nul(self) -> None:
         offenders: list[str] = []

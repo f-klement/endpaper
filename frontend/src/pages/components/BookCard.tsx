@@ -30,14 +30,16 @@ import CoverImage from "./CoverImage";
 // compile error until it is given a presentation here, which is how the
 // `want_to_read` status was caught rather than rendering as a blank pill.
 const STATUS_STYLES: Record<ReadStatus, string> = {
-  // **Below the floor, and pre-existing.** Measured across all seven palettes
-  // as it actually draws (paper-600 on paper-200 at 70% over the paper-0 card):
-  // worst 3.97:1 on solarized, then 4.02 nord and 4.27 catppuccin, against the
-  // 4.5 every text pair in `tests/theme/palettes.test.ts` is held to. Not
-  // changed here, because a status pill's colour is a design decision across
-  // five values and this change owns one of them; recorded rather than left to
-  // be rediscovered, and `docs/decisions.md` carries the numbers. The test
-  // added with `did_not_finish` pins that pill only.
+  // **Below the floor, and pre-existing.** As it actually draws, the ink on
+  // this tint composited over the paper-0 card, it falls under the 4.5 every
+  // text pair in `tests/theme/palettes.test.ts` is held to, on palettes where
+  // the same ink on the card clears it. That is recomputed there by `the
+  // status pill's ink, as it draws`, over every palette and with the tint
+  // composited; `docs/decisions.md` carries the figures, and its table is held
+  // against the stylesheets by the same file. Not changed here, because a
+  // status pill's colour is a design decision across five values and this
+  // change owns one of them. The test added with `did_not_finish` pins that
+  // pill only.
   [ReadStatus.unread]:
     "bg-paper-200/70 text-paper-600 dark:bg-paper-800 dark:text-paper-300",
   // Bloom, not danger. Wanting to read something is the pleased note, and the
@@ -53,11 +55,12 @@ const STATUS_STYLES: Record<ReadStatus, string> = {
   // look like it was reporting a problem.
   //
   // `paper-800` on `paper-200`, not the `paper-600` the `unread` pill uses.
-  // Measured across all seven palettes, flat: 600 on 200 bottoms out at
-  // **3.55:1 (solarized)**, 700 at 4.19:1 (solarized), and 800 at **4.57:1
-  // (catppuccin)**, which is the only one of the three that clears 4.5
-  // everywhere. The pair is held to that floor by
-  // `tests/theme/palettes.test.ts`, on every palette and both modes.
+  // Flat, because this pill is `bg-paper-200` at full opacity, and it is the
+  // only rung from the `unread` pill's ink up to this one that clears 4.5 on
+  // every palette: recomputed by `tests/theme/palettes.test.ts::the status
+  // pill's ink, as it draws`, which reads both ends off the two class strings
+  // here rather than restating them. The pair itself is in that file's
+  // contract, in both modes.
   [ReadStatus.did_not_finish]:
     "bg-paper-200 text-paper-800 dark:bg-paper-800 dark:text-paper-200",
 };

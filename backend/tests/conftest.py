@@ -180,12 +180,56 @@ def pytest_terminal_summary(terminalreporter: Any) -> None:
 
 @pytest.fixture(scope="session")
 def _schema_once() -> None:
-    """Build the schema once per worker, not once per test.
+    """The backstop under the schema, which builds nothing on a normal run.
 
-    Each xdist worker is a separate process with its own `mkdtemp` directory and
-    its own database file, so this runs once per worker and they cannot collide.
+    **The suite's database is the migrations'.** `main.py` calls `init_db()` at
+    module level and `init_db` calls `upgrade_to_head()`; this file imports
+    `main` above, so Alembic has built every table before any fixture runs and
+    `create_all` finds them all present and does nothing. A `CheckConstraint` in
+    `models.py` is therefore a **description** of the revision that installs it,
+    and not a second enforcement of it.
+
+    **This docstring is where that fact is explained.** It was written backwards
+    here while two test files asserted it correctly, and the contradiction
+    survived because nobody read the two against each other. Elsewhere the fact
+    is pointed at rather than re-explained, except where a class states the
+    consequence for its own cases.
+
+    **It stays because of what it turns a broken premise into**, and the
+    assertion below is what makes that true. Were the import order ever to
+    change, this would build the models' schema instead and the suite would run
+    green against a schema no deployment carries; refusing here says which
+    fixture built what, rather than leaving a thousand `no such table` errors
+    with no diagnosis.
+
+    **Asserted by counting tables either side of the call, not by trusting the
+    stamp.** `alembic_version` is not in `Base.metadata`, so a schema dropped and
+    rebuilt from the models keeps a stamp at head and reads as migrated: found
+    by two review seats independently on 2026-09-11, each with a mutation the
+    other had not written. `tests/test_house_rules.py::TestEveryEnumColumnIs
+    ConstrainedOrExemptWithAReason` holds the other two halves, the stamp and
+    the source shape, and no one of the three is the premise on its own.
+
+    **What this one says is that THIS call built nothing.** It says nothing
+    about a schema rebuilt from the models between the read above and the call
+    below, which is a mutation of this fixture rather than of the suite around
+    it, and nothing about one rebuilt after it: a revision doing so is covered by
+    the source arm instead.
+
+    Session scoped rather than per test: each xdist worker is a separate process
+    with its own `mkdtemp` directory and its own database file, so this runs once
+    per worker and they cannot collide.
     """
+    from sqlalchemy import inspect as reflect
+
+    before = set(reflect(engine).get_table_names())
     Base.metadata.create_all(bind=engine)
+    built = set(reflect(engine).get_table_names()) - before
+    assert not built, (
+        f"`create_all` built {sorted(built)}, so the suite's schema is not the "
+        "migrations'. Every rule comparing what models.py declares against what a "
+        "database installs is then comparing the declaration with itself."
+    )
 
 
 @pytest.fixture(autouse=True)

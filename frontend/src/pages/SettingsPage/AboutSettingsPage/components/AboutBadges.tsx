@@ -8,9 +8,9 @@ import { useTranslation } from "../../../../i18n";
  * `img-src` is derived from `covers.COVER_HOSTS` on the server: a badge from
  * there means widening the image policy for decoration, which this card already
  * refused once over the Ko-fi button. Drawn instead, the row themes with
- * whichever of the seven palettes is in force, renders offline in the installed
- * PWA, and tells nobody that a private server exists. Do not
- * "improve" it back into an `<img>`.
+ * whichever palette is in force, renders offline in the installed PWA, and
+ * tells nobody that a private server exists. Do not "improve" it back into an
+ * `<img>`.
  *
  * **Only what is knowable without a network call.** Version, licence, source.
  * Not Docker pulls and not a latest release: both need a request to a host the

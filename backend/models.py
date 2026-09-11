@@ -2696,9 +2696,31 @@ class CatalogueTarget(Base):
             "transport IN ('sru', 'bespoke')",
             name="ck_catalogue_targets_transport",
         ),
+        # **A negative charset GLOB, and a NUL defeats one.** SQLite's `GLOB`
+        # is a C string operation and stops at the first NUL, so this rule reads
+        # the text up to one and never sees the rest. Measured on sqlite 3.46.1
+        # and 3.50.4: `'bath.isbn or 1=1'` is refused, and
+        # `'bath.isbn' || char(0) || ' or 1=1'` is stored, nine characters by
+        # `length()` and seventeen bytes on disk. `instr(x, char(0)) = 0` closes
+        # it, the clause `ck_catalogue_credentials_source` already carries.
+        #
+        # **Nothing reads these columns yet, which is why the arm is here now
+        # rather than later.** The CQL is built from `targets.SEEDED`, so a
+        # smuggled index reaches no query today. The change that makes a row
+        # editable is the change that makes it reachable, and an arm added then
+        # is an arm added after its writer. See this class's docstring.
+        #
+        # **`main.seed_catalogue_targets` is the only *validating* writer.**
+        # This table is in `backup._TABLES`, so `backup.restore` deletes it and
+        # re-inserts an archive's rows through Core with no validating arm, and
+        # it never overwrites a row naming a source the roster does not carry.
+        # That is the writer a CHECK exists for, and it is the same boundary
+        # `ck_opds_servers_credential_key` below records moving once already.
         CheckConstraint(
             "(isbn_index = '' OR isbn_index NOT GLOB '*[^A-Za-z0-9._]*') "
-            "AND (title_index = '' OR title_index NOT GLOB '*[^A-Za-z0-9._]*')",
+            "AND instr(isbn_index, char(0)) = 0 "
+            "AND (title_index = '' OR title_index NOT GLOB '*[^A-Za-z0-9._]*') "
+            "AND instr(title_index, char(0)) = 0",
             name="ck_catalogue_targets_indexes",
         ),
         CheckConstraint(
@@ -2818,6 +2840,15 @@ class CatalogueCredential(Base):
         # because this module cannot import that one.
         # `tests/test_credentials.py::TestTheEnvelopeRuleAndItsConstraintAgree`
         # walks the two together.
+        # **Neither arm reads past a NUL and neither is given one**, which is
+        # the difference between this and the two GLOB rules that are: both of
+        # those have a ceiling for the clause to make exact, and `envelope` is
+        # `Text` with none. Measured on sqlite 3.46.1 and 3.50.4, a valid shape
+        # followed by a NUL and 50,000 characters is stored whole, 50,048 bytes,
+        # with `length()` reporting 47.
+        # Adding `instr(envelope, char(0)) = 0` alone bounds nothing, so it
+        # arrives with the question of what bounds this column, which is
+        # `credentials.unseal`'s to answer rather than this constraint's.
         CheckConstraint(
             "(envelope GLOB 'v1.*.*.*' OR envelope GLOB 'v2.*.*.*') "
             "AND length(envelope) >= 40",
@@ -2854,6 +2885,20 @@ class CatalogueCredential(Base):
     #: The version is what this build can open rather than what it recognises;
     #: see `credentials.VERSION` and `credentials.KNOWN_VERSIONS`.
     envelope: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+#: The widest address an OPDS server row may hold, in characters.
+#:
+#: **One home, because the number is load bearing in three places**:
+#: `ck_opds_servers_base_url` bounds characters by it and bytes by four times
+#: it, `String()` below declares it, and `schemas.opds.OpdsServerIn` imports it
+#: so the route refuses a longer address with a 422 rather than letting the
+#: constraint answer 500. That last failure is the one `OpdsServerIn.name`'s own
+#: docstring records having been measured through the route.
+#:
+#: A revision installs the literal rather than importing this, for the reason
+#: every revision here gives.
+BASE_URL_MAX = 255
 
 
 #: The prefix every OPDS server's credential key carries.
@@ -2931,9 +2976,12 @@ class OpdsServer(Base):
     __table_args__ = (
         # The byte arm for the reason the two constraints below carry
         # `instr(..., char(0))`: SQLite's `length` stops at the first NUL, and
-        # `backup.restore` writes this column through Core. Those two need no
-        # byte arm because their charset rule already refuses a NUL outright;
-        # a name is free text and cannot.
+        # `backup.restore` writes this column through Core. **It is `instr` that
+        # refuses a NUL there and not the charset rule**, which is a `GLOB` and
+        # stops at one too: measured, `'opds-1' || char(0) || '../../books/5?'`
+        # satisfies `NOT GLOB '*[^a-z0-9_-]*'`. With a NUL refused, that charset
+        # rule leaves only ASCII, so those two need no byte arm. A name is free
+        # text and gets neither.
         CheckConstraint(
             "length(name) BETWEEN 1 AND 100 "
             "AND length(CAST(name AS BLOB)) <= 400",
@@ -2985,8 +3033,51 @@ class OpdsServer(Base):
         # `file://` or a `gopher://` address where a sync will read it.
         # `opds.is_fetchable` is the rule in full and runs before every request;
         # this is the last line for a write that never came through it.
+        #
+        # **A positive prefix GLOB, which a NUL cannot defeat**, so the two arms
+        # beside it are here for a different reason than the one
+        # `ck_opds_servers_credential_key` states above. Measured on sqlite
+        # 3.46.1 and 3.50.4, `'file:///etc/passwd' || char(0) || 'http://x'`,
+        # `'ht' || char(0) || 'tp://x'` and `'http://' || char(0)` are all
+        # refused: truncation can only shorten the text the prefix is matched
+        # against, so it can only make this rule fail.
+        #
+        # **What the prefix leaves open is everything after it**, which had no
+        # rule and no bound: `'http://x' || char(0) || <a megabyte>` stored
+        # 1,000,009 bytes in a column every sync walks, with `length()`
+        # reporting 8. So the NUL clause is not the fix here, a ceiling is, and
+        # the NUL clause is what makes a **character** ceiling readable.
+        #
+        # **A character ceiling bounds no bytes at all, and that is why the byte
+        # arm is not decoration either.** `length()` counts a lead byte and
+        # skips continuation bytes without limit, so the same megabyte parked
+        # behind one `x'C0'` rather than behind a NUL passes both clauses above:
+        # measured on sqlite 3.46.1 and 3.50.4, 1,000,009 bytes stored with
+        # `length()` reporting 9. **Four bytes per character is a property of
+        # valid UTF-8, not of this column.**
+        #
+        # **No writer in this application can reach the arm**, which is the point
+        # rather than an objection: every one of them binds a Python `str`, and
+        # an archive is JSON, so what arrives is valid UTF-8 and the character
+        # ceiling already implies four times itself. The arm is the last line for
+        # a write that never came through this application at all, which is the
+        # reason the scheme rule above gives for existing. 1,020 is four times
+        # the character ceiling and no **valid** value of 255 characters can
+        # exceed it; the widest valid value is 999 bytes, seven of its
+        # characters going on the scheme. The qualifier is the whole of it: an
+        # invalid one of 255 characters runs to 2,478 bytes, measured, and
+        # refusing that is what this arm is.
+        #
+        # Three arms and three reasons, none of them the others: the prefix says
+        # what an address is, `instr` makes the character count exact, and the
+        # cast is the only one that counts what is on the disk. Both ceilings
+        # are read off `BASE_URL_MAX`, which `schemas/opds.py` imports, so no
+        # write through the route can exceed either.
         CheckConstraint(
-            "base_url GLOB 'http://?*' OR base_url GLOB 'https://?*'",
+            "(base_url GLOB 'http://?*' OR base_url GLOB 'https://?*') "
+            "AND instr(base_url, char(0)) = 0 "
+            f"AND length(base_url) <= {BASE_URL_MAX} "
+            f"AND length(CAST(base_url AS BLOB)) <= {4 * BASE_URL_MAX}",
             name="ck_opds_servers_base_url",
         ),
     )
@@ -2997,7 +3088,7 @@ class OpdsServer(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     #: The acquisition feed a sync walks. The origin computed from it is what
     #: every later address in that walk is held to: see `opds._next_page`.
-    base_url: Mapped[str] = mapped_column(String(255), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(BASE_URL_MAX), nullable=False)
     #: This server's key in `catalogue_credentials`. See
     #: `new_opds_credential_key` for why it is random.
     credential_key: Mapped[str] = mapped_column(

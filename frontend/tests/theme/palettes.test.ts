@@ -209,6 +209,33 @@ function separation(a: string, b: string): number {
   return Math.abs(lightness(a) - lightness(b));
 }
 
+/**
+ * One colour painted over another at `alpha`, which is what a `/70` utility
+ * does and what a pair of tokens cannot express.
+ *
+ * Blended in sRGB, the space a compositor works in, and quantised to eight bits
+ * because that is what reaches the screen. Measured against the same blend left
+ * in floating point, the ten palettes move by 0.0011 (everforest) to 0.0112
+ * (ayu) and their order does not change. So the quantising can decide the
+ * second decimal and never the first, which is why no arm below reads a figure
+ * and why a figure taken off this instrument is worth one decimal. It is here
+ * because the only pairing in this app drawn at less than full opacity is the
+ * one pairing that sits below the floor, so an instrument that cannot composite
+ * measures the pill it is least entitled to assume about.
+ */
+function blend(over: string, under: string, alpha: number): string {
+  const parts = (hex: string): number[] =>
+    [0, 2, 4].map((at) => parseInt(hex.replace("#", "").slice(at, at + 2), 16));
+  const [top, bottom] = [parts(over), parts(under)];
+  return `#${top
+    .map((value, at) =>
+      Math.round(value * alpha + bottom[at]! * (1 - alpha))
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}
+
 // ── The contract ─────────────────────────────────────────────────────────────
 
 const PAPER_STEPS = [0, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
@@ -698,6 +725,210 @@ describe("the hover a dark ramp makes illegible", () => {
         expect(tokensFor(palette, mode)["--color-accent-800"]).toMatch(
           /^#[0-9a-f]{6}$/i,
         );
+  });
+});
+
+/**
+ * The two rungs a delete control cannot rest on.
+ *
+ * **The reason `NoteList` and `QuoteList` state four tiers between them for one
+ * button**, computed rather than quoted. Those two spell
+ * `text-danger-500 hover:text-danger-600 dark:text-danger-300
+ * dark:hover:text-danger-100`, which reads as belt and braces until the two
+ * rungs missing from it are measured: `danger-300` is the tint tier and is not
+ * ink on a light card, and `danger-600` is ink on a light card and is nearly
+ * the dark card itself.
+ *
+ * So the resting tier cannot be inherited from the tint and the dark hover
+ * cannot be inherited from the light one, and neither of those is visible in a
+ * diff. The four tiers the two components do use are all in the contract above.
+ *
+ * A band was written into both comments and had drifted in both halves, the
+ * palette count and the number, which is what a figure in prose does. This
+ * states the property and computes it over `PALETTES`, so a palette added
+ * tomorrow is measured rather than assumed. Nothing quotes a range.
+ */
+describe("the rungs a delete control cannot rest on", () => {
+  // The floor every text pair in the contract above is held to.
+  const FLOOR = 4.5;
+
+  it("fails the text floor at danger-300 on every light card", () => {
+    const legible = THEMES.filter((palette) => {
+      const light = tokensFor(palette, "light");
+      return (
+        contrast(light["--color-danger-300"]!, light["--color-paper-0"]!) >=
+        FLOOR
+      );
+    });
+
+    expect(legible).toEqual([]);
+  });
+
+  it("fails it at danger-600 on every dark card, which is why the dark hover is stated", () => {
+    const legible = THEMES.filter((palette) => {
+      const dark = tokensFor(palette, "dark");
+      return (
+        contrast(dark["--color-danger-600"]!, dark["--color-paper-900"]!) >=
+        FLOOR
+      );
+    });
+
+    expect(legible).toEqual([]);
+  });
+
+  it("is reading tokens that exist, in both modes", () => {
+    // A token left unresolved parses to NaN, every comparison against NaN is
+    // false, and both arms above then go green having measured nothing. This is
+    // the half that notices, and it is the same trap the accent arms carry.
+    //
+    // **All four tokens, not the two the arms are named for.** This listed the
+    // two `danger` rungs and left the cards they are measured against out, so
+    // the failure it claims to cover was open on half its own inputs.
+    for (const palette of THEMES)
+      for (const mode of MODES)
+        for (const token of [
+          "danger-300",
+          "danger-600",
+          "paper-0",
+          "paper-900",
+        ])
+          expect(tokensFor(palette, mode)[`--color-${token}`]).toMatch(
+            /^#[0-9a-f]{6}$/i,
+          );
+  });
+});
+
+/**
+ * The status pill's ink, as it actually draws.
+ *
+ * **The one pairing in this app that is below the floor on purpose.** The
+ * `unread` pill is `bg-paper-200/70` with `text-paper-600`, so the ink sits on
+ * a tint composited over the card rather than on either token, and the pairs
+ * above cannot see it. `Home/components/BookList.tsx` takes plain muted text
+ * instead of the pill for the same reason, and `components/BookCard.tsx`
+ * records the pill as pre-existing and unchanged.
+ *
+ * Computed rather than quoted, for the reason the rest of this file is: the
+ * figures were written into three comments and copied forward past the palette
+ * count they were taken over. `docs/decisions.md` carries the numbers, and the
+ * table it carries them in is held against this file by
+ * `the contrast table in docs/decisions.md` above.
+ *
+ * **The pill's shape is read out of the component, not copied from it.** The
+ * two ink rungs, the tint and the opacity all come from `BookCard.tsx`'s own
+ * class strings, so a pill respelled there is measured rather than leaving this
+ * describe's name true of nothing. It was a copy until both critic seats found
+ * it independently: at `/40` instead of `/70` every arm below stayed green.
+ *
+ * **There is deliberately no arm for "the pill reads worse than the ink on the
+ * card".** The tint is a lighter rung of the same ramp, so the blend lands
+ * between the card and the tint and the comparison is settled before it is
+ * measured. `a ramp only ever goes one way` is what holds the ramp descending;
+ * the step from there to a blended luminance is per channel and no rule states
+ * it, which is why this is a note about an arm worth nothing rather than a
+ * claim that another arm already covers it.
+ */
+describe("the status pill's ink, as it draws", () => {
+  const FLOOR = 4.5;
+
+  // Read the same way this file reads the stylesheets, for the same reason.
+  const COMPONENTS = import.meta.glob("../../src/pages/components/*.tsx", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+  const BOOK_CARD = COMPONENTS["../../src/pages/components/BookCard.tsx"] ?? "";
+
+  const UNREAD =
+    /\[ReadStatus\.unread\]:\s*"bg-paper-(\d+)\/(\d+) text-paper-(\d+)\b/.exec(
+      BOOK_CARD,
+    );
+  const FINISHED =
+    /\[ReadStatus\.did_not_finish\]:\s*"bg-paper-(\d+) text-paper-(\d+)\b/.exec(
+      BOOK_CARD,
+    );
+
+  const SURFACE = `--color-paper-${UNREAD?.[1] ?? ""}`;
+  const TINT = Number(UNREAD?.[2] ?? 0) / 100;
+  const INK = `--color-paper-${UNREAD?.[3] ?? ""}`;
+  const CHOSEN = Number(FINISHED?.[2] ?? 0);
+
+  const pillRatio = (palette: PaletteId): number => {
+    const light = tokensFor(palette, "light");
+    return contrast(
+      light[INK]!,
+      blend(light[SURFACE]!, light["--color-paper-0"]!, TINT),
+    );
+  };
+
+  const mutedRatio = (palette: PaletteId): number => {
+    const light = tokensFor(palette, "light");
+    return contrast(light[INK]!, light["--color-paper-0"]!);
+  };
+
+  it("is reading the pill the component draws", () => {
+    // Without this the tokens and the opacity below are a copy of a class
+    // string in another file, and the arms are then measuring a pill nobody
+    // paints. Both halves of the pattern are asserted, because a capture that
+    // stopped matching would leave every arm reading `--color-paper-` and
+    // failing somewhere less legible than here.
+    expect(UNREAD).not.toBeNull();
+    expect(FINISHED).not.toBeNull();
+    expect(TINT).toBeGreaterThan(0);
+    expect(TINT).toBeLessThan(1);
+    expect(PAPER_STEPS).toContain(Number(UNREAD?.[3]));
+    expect(PAPER_STEPS).toContain(CHOSEN);
+  });
+
+  it("falls below the text floor where plain muted text does not", () => {
+    // The comparison, not a count and not a list of which palettes: a palette
+    // added tomorrow joins the measurement instead of aging the sentence. The
+    // muted arm is an equality because that pairing is in the contract above
+    // and must never stop clearing the floor; the pill arm is the existence of
+    // one failure, because the number of them is not what either component
+    // reasons from.
+    const mutedClears = THEMES.filter(
+      (palette) => mutedRatio(palette) >= FLOOR,
+    );
+    const pillFails = THEMES.filter((palette) => pillRatio(palette) < FLOOR);
+
+    expect(mutedClears).toEqual(THEMES);
+    expect(pillFails.length).toBeGreaterThan(0);
+  });
+
+  it("clears the floor only at the rung the finished pill takes", () => {
+    // Flat, because that pill is `bg-paper-200` at full opacity, and over the
+    // rungs from the one the `unread` pill inks with to the one
+    // `did_not_finish` was moved to. Both ends come out of the component, so
+    // this says "the rung it picked is the only one of them that works" rather
+    // than restating three numbers.
+    const tint = `--color-paper-${FINISHED?.[1] ?? ""}`;
+    const rungs = PAPER_STEPS.filter(
+      (step) => step >= Number(UNREAD?.[3] ?? 0) && step <= CHOSEN,
+    );
+    const clearsEverywhere = (step: number): boolean =>
+      THEMES.every((palette) => {
+        const light = tokensFor(palette, "light");
+        return contrast(light[`--color-paper-${step}`]!, light[tint]!) >= FLOOR;
+      });
+
+    expect(rungs.length).toBeGreaterThan(1);
+    expect(rungs.filter(clearsEverywhere)).toEqual([CHOSEN]);
+  });
+
+  it("is compositing, rather than reading one of its two arguments", () => {
+    // A blend that returned either token unchanged would make the arms above
+    // measure a pairing nobody paints, and the first of them would still pass.
+    const light = tokensFor("endpaper", "light");
+    const tint = light["--color-paper-200"]!;
+    const card = light["--color-paper-0"]!;
+    const mixed = blend(tint, card, TINT);
+
+    expect(mixed).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(mixed).not.toBe(tint);
+    expect(mixed).not.toBe(card);
+    expect(blend(tint, card, 1)).toBe(tint);
+    expect(blend(tint, card, 0)).toBe(card);
   });
 });
 

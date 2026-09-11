@@ -8,7 +8,7 @@ then check it is adopted without losing data.
 import random
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Final
 
 import pytest
 from sqlalchemy import CheckConstraint, String, create_engine, inspect, text
@@ -26,6 +26,9 @@ from enums import (
     BookFormat,
     BookIdentifierScheme,
     ClassificationScheme,
+)
+from migrations.versions import (
+    a6d3f92c7b14_a_nul_clause_on_two_glob_rules as a_nul_clause_on_two_glob_rules,
 )
 from migrations.versions import (
     b2e94f7c1a03_where_a_book_file_is_said_to_be as where_a_book_file_is_said_to_be,
@@ -596,10 +599,13 @@ class TestCollectionsAndTheIsbnIndexThatSurvivesThem:
     `d5c31b7a09fe` had to drop and recreate `uq_loans_one_open_per_book` around
     exactly this step because that reflection was lossy. It is not lossy here on
     alembic 1.19.1 with SQLAlchemy 2.0.52, which is why this migration does no
-    such dance, and which is what these tests hold: `conftest.py` builds the
-    schema with `create_all`, so **no other test in the suite puts `books`
-    through this migration at all**, and the dependency bot automerges minor and
-    patch releases of both libraries.
+    such dance, and which is what these tests hold. The suite's schema is the
+    migrations', so this revision does run once per worker at session start, and
+    it runs against an **empty** `books` table: a partial index coming back
+    plain refuses nothing until a second copy of a title is written, so **no
+    other test in the suite puts `books` through this migration carrying the
+    rows the index exists to permit**, and the dependency bot automerges minor
+    and patch releases of both libraries.
     """
 
     PREVIOUS = "b1e7c94a2d05"
@@ -1510,22 +1516,10 @@ class TestTheMigrationsAndTheModelsAgree:
 
     **This class exists because the two diverged and nothing could see it.**
 
-    **The premise in this paragraph was false and cost two review seats three
-    rounds on 2026-09-10.** It said `conftest.py` builds with `create_all`, so
-    every other test sees the models while a deployment sees the migrations. It
-    does call `create_all`, and the call does nothing: `main.py` runs
-    `init_db()` at **import**, `conftest` imports `main`, so every table is
-    already built by Alembic before any fixture runs. **The suite and a
-    deployment both see the migrations.**
-
-    Two files had it right first, and neither was found by the seats that spent
-    those rounds: `tests/test_credentials.py` says it in prose, reached by the
-    same mutation, and `test_models.py::TestTheBorrowerRuleHasOneSpelling`
-    **asserts** it, which is the durable form. Four other sentences in this file
-    and one in a revision still assert the false version. They are
-    named in the tracker issue about the suite's database being the migrations',
-    rather than corrected here: this file is one wave's to edit, and that is a
-    reconciliation across several.
+    **The suite and a deployment both see the migrations**, for the reason
+    `tests/conftest.py::_schema_once` gives. That does not make the two
+    declarations one: `models.py` and the revisions are still two files saying
+    the same thing, and only a comparison holds them together.
 
     What survives that correction is this class's whole reason: the two
     declarations are two copies and only a comparison holds them together.
@@ -1641,8 +1635,12 @@ class TestTheEnvelopeConstraintOnAMigratedDatabase:
     A batch rebuild on SQLite drops the table and recreates it from what
     SQLAlchemy reflected, so a revision that swaps one CHECK can silently take
     the other with it. `TestTheMigrationsAndTheModelsAgree` compares columns and
-    would not see that; `tests/test_credentials.py` asserts the same refusals
-    against `create_all`, which is the schema only the suite ever has.
+    would not see that; `tests/test_credentials.py::TestTheEnvelopeRuleAndIts
+    ConstraintAgree` asserts the same refusals against a table it builds from
+    `Base.metadata` on a throwaway engine, which is the models' declaration and
+    not a database anybody runs. Its docstring says why it goes to that trouble:
+    the `db` fixture is the migrations' schema and cannot answer a question
+    about the declaration. This is the half a deployment carries.
     """
 
     @staticmethod
@@ -1770,15 +1768,18 @@ class TestTheEnvelopeConstraintOnAMigratedDatabase:
 class TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase:
     """The four CHECKs and the unique index, against the schema production runs.
 
-    `tests/test_models.py` asserts the same refusals, and it asserts them
-    against `create_all`, which is the schema **only the suite** ever has:
-    `main.py` boots through `upgrade_to_head()`. The two paths had already
-    drifted on `created_at`, which is the evidence that nothing was comparing
-    them, so the refusals are checked here on the migrated shape as well.
+    `tests/test_models.py` asserts the same refusals against the `db` fixture,
+    whose schema is the migrations' as well, so **this is not the other side of
+    a pair**: both ask one database. What this adds is that it builds that
+    database from nothing inside the test, through every revision in order,
+    rather than inheriting what the import at session start left behind.
 
-    `TestTheMigrationsAndTheModelsAgree` compares the two structurally. This
-    checks the half that a column comparison cannot see: a CHECK is not a
-    column property, and a migration that dropped one would still match.
+    `TestTheMigrationsAndTheModelsAgree` compares the two declarations
+    structurally. This checks the half a column comparison cannot see: a CHECK
+    is not a column property, and a migration that dropped one would still
+    match. What holds a CHECK's two copies together for every enum column is
+    `tests/test_house_rules.py::TestEveryEnumColumnIsConstrainedOrExemptWith
+    AReason`.
     """
 
     @staticmethod
@@ -1919,10 +1920,11 @@ class TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase:
         A list here would be the shape `CLAUDE.md` records as failing twice: a
         guard that enumerates something open.
 
-        **Against the migrated database, never the model's.** `conftest.py`
-        builds with `create_all`, and `models._scheme_check` derives the same
-        constraint from the same enum, so a model built check can only ever
-        agree with itself. Only `schema.upgrade_to_head()` runs the revision.
+        **Against the migrated database, never the models' declaration.**
+        `models._scheme_check` derives its constraint from the same enum this
+        test iterates, so asking the declaration whether it admits every member
+        is asking the enum about itself. The revision writes its list out, and
+        the installed DDL is the only copy that can disagree.
 
         Attacked rather than read, 2026-08-28. With `'isni'` removed from
         `d5e1b93a7c62._SCHEMES_AFTER` the failing test was this one, named:
@@ -2072,10 +2074,11 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
     roster that revision never saw. The cost of that rule is that the literal and
     the constant can disagree today, and this is what stops them.
 
-    **So this compares a migrated database against `targets.SEEDED` and not
-    against `models`**, which is the same reasoning
-    `TestTheMigrationsAndTheModelsAgree` gives one class above: the suite builds
-    with `create_all` and a deployment only ever sees the migrations.
+    **So this compares a migrated database's rows against `targets.SEEDED`**,
+    and there is no third copy to compare against: `models` describes the table
+    and never its contents, and the literals exist nowhere but inside the
+    revision, so reading them back out of a database is the only way to see
+    them at all.
     """
 
     @staticmethod
@@ -2444,11 +2447,11 @@ class TestTheBookFormatColumnOnAMigratedDatabase:
 class TestANoteCarriesItsOwnVisibility:
     """Migration `a3d7f1b09c25`, as schema and as what it did to stored rows.
 
-    The suite builds its tables from `Base.metadata`, so nothing else here runs
-    this revision. What is worth pinning is the half a reader has to take on
-    trust otherwise: that a note written before the column existed still means
-    what it meant, and that the downgrade's loss is the one the docstring
-    admits to.
+    Every revision runs once per worker at session start, so this one's effect
+    on an **empty** `notes` table is exercised whether these tests exist or not.
+    What nothing else reaches is its effect on stored rows: that a note written
+    before the column existed still means what it meant, and that the
+    downgrade's loss is the one the docstring admits to.
     """
 
     PREVIOUS = "d9c1f47b2a06"
@@ -3029,7 +3032,14 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
         a value past the budget. The rule's `instr` branch has no such backstop,
         which is why that one had to be tightened to a top level conjunct instead.
         """
-        probed = set(_CEILING_CONSTRAINTS.values()) | {"ck_digital_references_bounds"}
+        probed = set(_CEILING_CONSTRAINTS.values()) | {
+            "ck_digital_references_bounds",
+            # Probed by `TestTheGlobRulesThatLearnedAboutNul` instead, and named
+            # here because that is where its cases live. It is not in
+            # `_TEXT_CEILINGS` because that table's cases require a column that
+            # **admits** a NUL, and this one refuses one outright.
+            "ck_opds_servers_base_url",
+        }
 
         assert set(_byte_armed_constraints()) == probed, (
             "these carry a byte arm that nothing probes: "
@@ -3408,3 +3418,500 @@ class TestTheIdentifierBoundsSurvivedIntoTheMigration:
         assert "book_identifiers" not in table_names()
         with engine.connect() as connection:
             assert connection.execute(text("SELECT count(*) FROM books")).scalar() == 1
+
+
+class TestTheGlobRulesThatLearnedAboutNul:
+    """`a6d3f92c7b14`, and the distinction it exists to keep.
+
+    SQLite's `GLOB` stops at the first NUL, exactly as `length()` does. Five
+    CHECKs in this schema rest on `GLOB`; **three carried no NUL clause beside
+    them, and only one of those three is defeated by that**. So the cases here
+    are per constraint rather than parametrised over a class: a rule treating the
+    three as one is the failure the revision was written to prevent.
+
+    **`ck_catalogue_targets_indexes` is defeated**, because a negative charset
+    rule reads the text up to the NUL and never sees the rest.
+    **`ck_opds_servers_base_url` is not**, because a positive prefix can only
+    fail under truncation; its defect was that nothing bounded the text after
+    the prefix, and the ceiling is the fix that the NUL clause makes true.
+    **`ck_catalogue_credentials_envelope` is defeated and is untouched**, its
+    column having no ceiling for a clause to make exact.
+
+    **Against the migrated schema, and the model's declaration is held to it** by
+    `test_the_model_is_the_rule_a_migrated_database_carries` rather than probed
+    separately. The migration is the schema everywhere, this suite included:
+    `main.py` calls `init_db()` at import and `conftest` imports `main` first, so
+    the `create_all` after it builds nothing and a `CheckConstraint` in
+    `models.py` is installed by no run at all.
+    """
+
+    PREVIOUS = "c7b0a3e5d281"
+
+    @staticmethod
+    def _migrated() -> None:
+        drop_everything()
+        schema.upgrade_to_head()
+
+    @staticmethod
+    def _at_previous() -> None:
+        drop_everything()
+        schema.upgrade_to(TestTheGlobRulesThatLearnedAboutNul.PREVIOUS)
+
+    @staticmethod
+    def _server(url: str, key: str = "opds-0123456789abcdef") -> tuple[str, dict[str, str]]:
+        return (
+            "INSERT INTO opds_servers (name, base_url, credential_key) "
+            "VALUES ('a server', :url, :key)",
+            {"url": url, "key": key},
+        )
+
+    @pytest.mark.parametrize(
+        ("table_name", "constraint", "before", "after"),
+        a_nul_clause_on_two_glob_rules._GLOB_RULES,
+    )
+    def test_the_revisions_text_is_the_models_text(
+        self, table_name: str, constraint: str, before: str, after: str
+    ) -> None:
+        """The revision writes its SQL out rather than importing from `models`,
+        so the two copies are a fact stored twice and this is what stands
+        between them.
+
+        The `before` half is not compared: it describes the schema the revision
+        found, which by definition is no longer the one `models.py` declares.
+        `test_the_downgrade_puts_each_rule_back` is what holds that half, against
+        a database built by other revisions entirely.
+        """
+        assert " ".join(after.split()) == self._declared(table_name, constraint)
+
+    @staticmethod
+    def _declared(table_name: str, constraint: str) -> str:
+        """One CHECK as `models.py` declares it, whitespace normalised.
+
+        Safe to normalise for these two and not in general: neither holds a
+        string literal with internal whitespace.
+        """
+        return " ".join(
+            str(next(
+                one
+                for one in Base.metadata.tables[table_name].constraints
+                if isinstance(one, CheckConstraint) and one.name == constraint
+            ).sqltext).split()
+        )
+
+    @pytest.mark.parametrize(
+        ("table_name", "constraint", "before", "after"),
+        a_nul_clause_on_two_glob_rules._GLOB_RULES,
+    )
+    def test_the_model_is_the_rule_a_migrated_database_carries(
+        self, table_name: str, constraint: str, before: str, after: str
+    ) -> None:
+        """The model's copy against the DDL, as an equality rather than a
+        containment.
+
+        **The model's declaration is installed by nothing**, so without this it is
+        a comment: see this class's docstring for why `create_all` never runs.
+        `_installed_check` is reused rather than copied because it is the only
+        reading of `sqlite_master` here that is an equality: a containment passes
+        a constraint appending to the model's, and it passed a dropped floor once
+        already. See its own docstring.
+        """
+        self._migrated()
+
+        installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check(
+            constraint
+        )
+
+        assert installed == self._declared(table_name, constraint)
+
+    @pytest.mark.parametrize(
+        ("table_name", "constraint", "before", "after"),
+        a_nul_clause_on_two_glob_rules._GLOB_RULES,
+    )
+    def test_the_downgrade_puts_each_rule_back(
+        self, table_name: str, constraint: str, before: str, after: str
+    ) -> None:
+        """`downgrade()` run rather than read, with `before` checked against a
+        schema this revision did not write.
+
+        **The order of the assertions is the test.** Running the downgrade and
+        comparing the result with `before` is a tautology, since `downgrade()`
+        installs `before`. What breaks the circle is asking the **previous**
+        schema whether `before` is what this revision found. The shape is
+        `TestEveryTextCeilingIsInstalledWithItsByteArm::test_the_downgrade_puts
+        _each_ceiling_back`, which records why it is written this way.
+
+        Per rule rather than in total, so a revision that put one back and lost
+        the other fails here.
+        """
+        from alembic import command
+
+        self._at_previous()
+        installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check
+
+        assert installed(constraint) == " ".join(before.split())
+
+        schema.upgrade_to_head()
+        assert installed(constraint) == " ".join(after.split())
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        assert installed(constraint) == " ".join(before.split())
+
+    #: A NUL's position in the smuggled value, and the bytes that value holds.
+    #:
+    #: **Two positions, because `instr` is one based and `= 0` is what says
+    #: "absent".** With only an embedded NUL in the population, `= 0` and
+    #: `<= 1` are the same rule, and the second admits a value whose **first**
+    #: byte is the NUL. A critic found that by mutation rather than by reading:
+    #: the weakened constraint passed all sixteen cases here.
+    SMUGGLED: Final = (
+        ("embedded", "'bath.isbn' || char(0) || ' or 1=1'", 17),
+        ("leading", "char(0) || 'bath.isbn or 1=1'", 17),
+    )
+
+    @pytest.mark.parametrize("column", ["isbn_index", "title_index"])
+    @pytest.mark.parametrize(("where", "value", "bytes_stored"), SMUGGLED)
+    def test_the_previous_schema_stored_a_smuggled_index_and_this_one_refuses_it(
+        self, column: str, where: str, value: str, bytes_stored: int
+    ) -> None:
+        """The diagonal, and the only case that says the NUL is what was hiding
+        the rest of the value.
+
+        A refusal at head alone would pass on a constraint that refuses the same
+        text without a NUL, which this one already did: `'bath.isbn or 1=1'` is
+        refused by the rule as it stood. So the previous schema is asked the same
+        question first, and it stores the row.
+
+        Both columns and both positions: one spelling is a spelling, two are the
+        rule. The value is a CQL boolean because that is what `sru.py` would
+        build from it the day a row is read.
+        """
+        smuggled = (
+            f"UPDATE catalogue_targets SET {column} = {value} "  # noqa: S608
+            "WHERE source = 'oenb'"
+        )
+
+        self._at_previous()
+        with engine.connect() as connection:
+            connection.execute(text(smuggled))
+            connection.commit()
+            stored = connection.execute(
+                text(f"SELECT length(CAST({column} AS BLOB)) FROM catalogue_targets "  # noqa: S608
+                     "WHERE source = 'oenb'")
+            ).scalar()
+        assert stored == bytes_stored
+
+        self._migrated()
+        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
+            connection.execute(text(smuggled))
+
+        assert "ck_catalogue_targets_indexes" in str(refusal.value)
+
+    def test_a_legitimate_index_and_the_empty_one_are_still_stored(self) -> None:
+        """The other side, without which a constraint refusing everything passes.
+
+        The empty string specifically: `instr('', char(0))` is 0, and a NUL
+        clause written so that it was not would refuse every unused index in the
+        roster.
+        """
+        self._migrated()
+
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "UPDATE catalogue_targets SET isbn_index = 'bath.isbn', "
+                    "title_index = '' WHERE source = 'oenb'"
+                )
+            )
+            connection.commit()
+
+            assert connection.execute(
+                text("SELECT title_index FROM catalogue_targets WHERE source = 'oenb'")
+            ).scalar() == ""
+
+    def test_the_upgrade_refuses_a_row_carrying_a_smuggled_index(self) -> None:
+        """The revision's "nothing, or it refuses to run" claim, run.
+
+        A batch rebuild is `INSERT INTO new SELECT FROM old` with the new CHECK
+        applied to the copy, so a row the previous schema accepted stops the
+        upgrade by name rather than being silently carried or dropped. No seeded
+        row can be this one: `targets._INDEX.fullmatch` validates every value
+        `main.seed_catalogue_targets` writes.
+        """
+        self._at_previous()
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "UPDATE catalogue_targets SET isbn_index = "
+                    "'bath.isbn' || char(0) || ' or 1=1' WHERE source = 'oenb'"
+                )
+            )
+            connection.commit()
+
+        with pytest.raises(IntegrityError) as refusal:
+            schema.upgrade_to_head()
+
+        assert "ck_catalogue_targets_indexes" in str(refusal.value)
+
+        # A failed batch rebuild leaves its scratch table behind, and
+        # `drop_everything` works from `Base.metadata`, which does not carry it.
+        # Without this the next case dies on "table already exists", which reads
+        # like a different fault.
+        with engine.connect() as connection:
+            connection.execute(text("DROP TABLE IF EXISTS _alembic_tmp_catalogue_targets"))
+            connection.commit()
+
+    def test_the_previous_schema_stored_a_megabyte_behind_a_nul(self) -> None:
+        """The defect that is **not** truncation, measured rather than argued.
+
+        A positive prefix GLOB cannot be defeated by a NUL, so this address
+        satisfied the rule as it stood and the rule said nothing at all about the
+        rest of it. `length()` reports 8 for the value stored here, which is why
+        no character ceiling would have caught it either.
+        """
+        self._at_previous()
+        statement, parameters = self._server("http://x\x00" + "y" * 1_000_000)
+
+        with engine.connect() as connection:
+            connection.execute(text(statement), parameters)
+            connection.commit()
+            characters, stored = connection.execute(
+                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) "
+                     "FROM opds_servers")
+            ).one()
+
+        assert (characters, stored) == (8, 1_000_009)
+
+    def test_an_address_hiding_a_payload_behind_a_nul_is_refused(self) -> None:
+        """The same address against the migrated schema."""
+        self._migrated()
+        statement, parameters = self._server("http://x\x00" + "y" * 1_000_000)
+
+        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
+            connection.execute(text(statement), parameters)
+
+        assert "ck_opds_servers_base_url" in str(refusal.value)
+
+    def test_an_address_past_the_column_width_is_refused(self) -> None:
+        """256 characters, one past `models.BASE_URL_MAX`, which is the width
+        `String()` declares and the length the route's own model refuses beyond.
+        A `String(n)` refuses nothing in SQLite, so this bound is the CHECK or it
+        is nothing."""
+        self._migrated()
+        statement, parameters = self._server("http://x" + "y" * 248)
+
+        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
+            connection.execute(text(statement), parameters)
+
+        assert "ck_opds_servers_base_url" in str(refusal.value)
+
+    def test_the_widest_address_the_route_can_send_is_stored(self) -> None:
+        """The other side of the byte arm, without which a constraint refusing
+        everything would pass every case above.
+
+        **Spent on four byte characters**, which is the widest a value of 255
+        characters can be while still being the UTF-8 every writer here produces:
+        999 bytes, under the byte arm rather than on it, because seven of the 255
+        go on the scheme. An address of ASCII would leave three bytes of slack
+        per character for a mutation to shrink the character ceiling into.
+
+        `test_the_shipped_rule_stores_a_value_exactly_on_the_budget` is what sits
+        on the byte arm; no value this column can legitimately hold does.
+        """
+        self._migrated()
+        widest = "http://" + "\U0001f600" * 248
+        statement, parameters = self._server(widest)
+        assert len(widest) == 255
+
+        with engine.connect() as connection:
+            connection.execute(text(statement), parameters)
+            connection.commit()
+            characters, stored = connection.execute(
+                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) "
+                     "FROM opds_servers")
+            ).one()
+
+        assert (characters, stored) == (255, 999)
+
+    @staticmethod
+    def _behind_a_lead_byte(total: int) -> bytes:
+        """An address of exactly `total` bytes that `length()` reads as 9.
+
+        `x'C0'` starts a sequence SQLite counts as one character and then skips
+        every continuation byte after it, however many there are, so the
+        character ceiling and the NUL clause both pass whatever `total` is and
+        the byte arm is the only thing left facing it.
+        """
+        return b"http://x\xc0" + b"\x80" * (total - 9)
+
+    def test_a_character_ceiling_alone_would_store_a_megabyte(self) -> None:
+        """Why the byte arm is here, measured rather than argued.
+
+        **`length()` skips continuation bytes without limit**, so a character
+        ceiling bounds no bytes at all once the text is not valid UTF-8, and four
+        bytes per character is a property of UTF-8 rather than of this column.
+
+        **The instrument is the shipped rule with its byte arm removed, built
+        from the revision's own text rather than typed out**, which is what keeps
+        it the shipped rule: a hand written copy stops being one the day another
+        arm is added, and then this pair goes on passing while saying nothing
+        about the byte arm. Measured by a critic: a fourth arm added to both
+        copies left every case here green.
+        """
+        after = next(
+            after
+            for _, constraint, _, after in a_nul_clause_on_two_glob_rules._GLOB_RULES
+            if constraint == "ck_opds_servers_base_url"
+        )
+        arm = f"AND length(CAST(base_url AS BLOB)) <= {4 * models.BASE_URL_MAX}"
+        assert after.count(arm) == 1, "the byte arm is not the text this removes"
+        without_the_arm = after.replace(" " + arm, "")
+        # Both directions, so the name of this case is true by construction: the
+        # byte arm is gone, and the character ceiling it is about is still here.
+        # Without the second, dropping that ceiling from both copies leaves this
+        # green under a name and a docstring about a rule nothing carries.
+        assert "AS BLOB" not in without_the_arm
+        assert f"length(base_url) <= {models.BASE_URL_MAX}" in without_the_arm
+
+        probe = create_engine("sqlite://")
+        with probe.connect() as connection:
+            connection.execute(
+                text(f"CREATE TABLE probe (base_url TEXT CHECK ({without_the_arm}))")  # noqa: S608
+            )
+            connection.execute(
+                text("INSERT INTO probe VALUES (CAST(:raw AS TEXT))"),
+                {"raw": self._behind_a_lead_byte(1_000_009)},
+            )
+
+            assert connection.execute(
+                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) "
+                     "FROM probe")
+            ).one() == (9, 1_000_009)
+
+    def test_the_shipped_rule_refuses_one_byte_past_the_budget(self) -> None:
+        """The boundary, so the budget is pinned rather than merely exceeded.
+
+        **Sized off `BASE_URL_MAX` rather than written down.** A megabyte here
+        would leave the number free: a critic widened the budget ninety eight
+        fold in both copies and nothing went red, because anything between 1,021
+        and 1,000,008 bytes was untested. This is the first value the arm
+        refuses, and `test_the_widest_address_the_route_can_send_is_stored` is
+        the other side.
+        """
+        self._migrated()
+        statement, parameters = self._server("placeholder")
+
+        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
+            connection.execute(
+                text(statement.replace(":url", "CAST(:url AS TEXT)")),
+                {
+                    **parameters,
+                    "url": self._behind_a_lead_byte(4 * models.BASE_URL_MAX + 1),
+                },
+            )
+
+        assert "ck_opds_servers_base_url" in str(refusal.value)
+
+    def test_the_shipped_rule_stores_a_value_exactly_on_the_budget(self) -> None:
+        """The other half of that boundary, which is what makes it one.
+
+        Exactly `4 * BASE_URL_MAX` bytes and nine characters, so the byte arm is
+        the only clause it is near, and it is **stored**. Without this the arm
+        could be tightened to any number at all and only the case above would
+        have to move.
+        """
+        self._migrated()
+        statement, parameters = self._server("placeholder")
+
+        with engine.connect() as connection:
+            connection.execute(
+                text(statement.replace(":url", "CAST(:url AS TEXT)")),
+                {**parameters, "url": self._behind_a_lead_byte(4 * models.BASE_URL_MAX)},
+            )
+            connection.commit()
+
+            assert connection.execute(
+                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) "
+                     "FROM opds_servers")
+            ).one() == (9, 4 * models.BASE_URL_MAX)
+
+    def test_the_other_rules_on_these_tables_survived_the_rebuild(self) -> None:
+        """The half a batch rebuild loses if reflection missed it.
+
+        Both tables carry rules this revision does not name, and they are only
+        still there because SQLAlchemy read them back out of the DDL: the three
+        siblings on `catalogue_targets`, and on `opds_servers` the credential
+        key's own constraint and the UNIQUE that stops two servers sharing a
+        login.
+
+        **The `opds_servers` pair is what this case is for.** Nothing else probes
+        either against a migrated database, where
+        `TestTheSeededCatalogueTargetsMatchTheCode::test_a_restore_cannot_write
+        _a_row_the_dataclass_would_refuse` already covers the `catalogue_targets`
+        side and fails alongside this one. Measured by a critic: deleting the
+        transport CHECK from its revision reddens both.
+        """
+        self._migrated()
+        statement, parameters = self._server("https://books.example/opds")
+
+        with engine.connect() as connection:
+            connection.execute(text(statement), parameters)
+            connection.commit()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError) as reused:
+            connection.execute(text(statement), parameters)
+        assert "UNIQUE constraint failed" in str(reused.value)
+
+        with engine.connect() as connection, pytest.raises(IntegrityError) as borrowed:
+            connection.execute(
+                text(
+                    "INSERT INTO opds_servers (name, base_url, credential_key) "
+                    "VALUES ('x', 'https://books.example/opds', 'bne')"
+                )
+            )
+        assert "ck_opds_servers_credential_key" in str(borrowed.value)
+
+        with engine.connect() as connection, pytest.raises(IntegrityError) as transport:
+            connection.execute(
+                text(
+                    "UPDATE catalogue_targets SET transport = 'z3950' "
+                    "WHERE source = 'oenb'"
+                )
+            )
+        assert "ck_catalogue_targets_transport" in str(transport.value)
+
+    def test_the_envelope_rule_is_deliberately_untouched(self) -> None:
+        """The third GLOB rule, and the one this revision leaves alone.
+
+        **A NUL clause on it would bound nothing**, because `envelope` is `Text`
+        with no ceiling: the value below goes to disk whole while the constraint
+        reads 47 characters of it, and refusing the NUL is a separate call about
+        what may be in that column at all. Asserting it here is what keeps the
+        exclusion a decision: the day somebody closes it, this case is what has
+        to be deleted, which is where the argument belongs.
+
+        **The byte figure is derived from the value rather than written down**,
+        which is not a tautology: it says SQLite stored every byte of a value it
+        measured as 47 characters. A literal here was wrong on its first
+        writing, at twice the true figure, because the shape it was measured
+        against held 100,000 characters and this one holds 50,000.
+        """
+        self._migrated()
+        envelope = "v2." + "a" * 40 + ".b.c\x00" + "x" * 50_000
+
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO catalogue_credentials (source, envelope) "
+                    "VALUES ('bne', :envelope)"
+                ),
+                {"envelope": envelope},
+            )
+            connection.commit()
+            characters, stored = connection.execute(
+                text("SELECT length(envelope), length(CAST(envelope AS BLOB)) "
+                     "FROM catalogue_credentials")
+            ).one()
+
+        assert (characters, stored) == (47, len(envelope.encode()))
+        assert stored == 50_048

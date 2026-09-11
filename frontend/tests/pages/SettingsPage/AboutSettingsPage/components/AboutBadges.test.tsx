@@ -9,9 +9,8 @@
  * somebody reaches for first.
  *
  * The measured token pairings are asserted too. `tests/theme/palettes.test.ts`
- * holds the ratios and the lightness separations those tokens produce on all
- * seven palettes; nothing else holds that this component is the thing using
- * them.
+ * holds the ratios and the lightness separations those tokens produce on every
+ * palette; nothing else holds that this component is the thing using them.
  */
 
 import { screen } from "@testing-library/react";
@@ -144,10 +143,12 @@ describe("AboutBadges", () => {
   });
 
   it("keeps its ink off the rung the status pill fails on", () => {
-    // The `unread` pill draws `paper-600` on `paper-200` and measures 3.55:1 on
-    // solarized, 3.56 on nord and 3.87 on catppuccin, under the 4.5 floor on
-    // three of seven palettes. The badge takes `paper-800`, the rung of that
-    // pairing that clears it everywhere: 4.57:1 at worst, on catppuccin.
+    // The `unread` pill draws `paper-600` on `paper-200`, and `paper-800` is
+    // the only one of that ramp's three ink rungs that clears the 4.5 floor on
+    // every palette. The badge takes it. Both halves are recomputed by
+    // `tests/theme/palettes.test.ts::the status pill's ink, as it draws`, and
+    // the figures live in the contrast table in `docs/decisions.md`, which the
+    // same file holds against the stylesheets.
     const { container } = renderLocalised(<AboutBadges />);
 
     const label = screen.getByText("Version");

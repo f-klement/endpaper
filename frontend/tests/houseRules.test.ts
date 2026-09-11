@@ -220,7 +220,9 @@ const READS_BYTES =
 function fileReaders(): string[] {
   return entries()
     .filter(([path]) => path.startsWith("lib/") && !path.endsWith(".d.ts"))
-    .filter(([, source]) => READS_BYTES.test(withoutProse(source)))
+    .filter(([path, source]) =>
+      READS_BYTES.test(withoutProse(source, langOf(path))),
+    )
     .map(([path]) => path)
     .sort();
 }
@@ -330,7 +332,7 @@ describe("a member's book file cannot leave the browser", () => {
     const offenders = entries()
       .filter(([path]) => fileReaders().includes(path))
       .filter(([path, source]) => {
-        const code = withoutProse(source);
+        const code = withoutProse(source, langOf(path));
         return REACHES_THE_NETWORK.test(
           path.endsWith(ENGINE_READER) ? code.replace(ENGINE_FETCH, "") : code,
         );
@@ -353,7 +355,7 @@ describe("a member's book file cannot leave the browser", () => {
     // waiting to cover something else. This is the half that notices.
     const engine = entries().find(([path]) => path.endsWith(ENGINE_READER));
     expect(engine).toBeDefined();
-    const code = withoutProse(engine![1]);
+    const code = withoutProse(engine![1], langOf(engine![0]));
     expect(code.match(ENGINE_FETCH)).toHaveLength(1);
     expect(code).toContain(ENGINE_URL_IMPORT);
     // **The count, not a list of the ways a name can be rebound.** The import
@@ -386,8 +388,8 @@ describe("a member's book file cannot leave the browser", () => {
     // that matched nothing, and each of those arrives here as a disagreement
     // rather than as the rule above passing over an empty set.
     const spelled = new Set(
-      entries().flatMap(([, source]) =>
-        [...withoutProse(source).matchAll(/\bdraftFrom\w*/g)].map(
+      entries().flatMap(([path, source]) =>
+        [...withoutProse(source, langOf(path)).matchAll(/\bdraftFrom\w*/g)].map(
           (match) => match[0],
         ),
       ),
@@ -406,7 +408,9 @@ describe("a member's book file cannot leave the browser", () => {
     // file. It exists because it was evaded: the filter narrowed to one module,
     // with a renamed builder written into another, passed every other arm here.
     const annotates = entries()
-      .filter(([, source]) => ANNOTATES_A_DRAFT.test(withoutProse(source)))
+      .filter(([path, source]) =>
+        ANNOTATES_A_DRAFT.test(withoutProse(source, langOf(path))),
+      )
       .map(([path]) => path);
     const visited = new Set(draftBuilders().map((one) => one.path));
 
@@ -580,8 +584,10 @@ describe("a member's book file cannot leave the browser", () => {
    */
   it("sorts every File name the source spells onto one side or the other", () => {
     const names = new Set<string>();
-    for (const [, source] of entries())
-      for (const name of withoutProse(source).match(/\bFile\w*\b/g) ?? [])
+    for (const [path, source] of entries())
+      for (const name of withoutProse(source, langOf(path)).match(
+        /\bFile\w*\b/g,
+      ) ?? [])
         names.add(name);
 
     const sorted = [...names].sort();
@@ -629,8 +635,10 @@ describe("a member's book file cannot leave the browser", () => {
     expect(exemptions.length).toBeGreaterThan(0);
 
     const spelled = new Set<string>();
-    for (const [, source] of entries())
-      for (const name of withoutProse(source).match(/\bFile\w*\b/g) ?? [])
+    for (const [path, source] of entries())
+      for (const name of withoutProse(source, langOf(path)).match(
+        /\bFile\w*\b/g,
+      ) ?? [])
         spelled.add(name);
 
     const dead = exemptions.filter(
@@ -826,10 +834,254 @@ function draftBuilders(): DraftBuilder[] {
     );
 }
 
-/** The source with comments removed, so a rule cannot be satisfied by prose. */
-function withoutProse(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+/**
+ * The node kinds where a comment cannot begin, which is all a stripper needs
+ * from a parser.
+ *
+ * `parseAst` hands back a Program carrying `type`, `body`, `sourceType`,
+ * `hashbang`, `start` and `end`, and no list of comments: measured at vite 8.
+ * So there is no comment range to delete and this takes the complement. Three
+ * kinds are the places where a slash pair is characters rather than prose: a
+ * string literal, one chunk of a template, and the text between two JSX tags.
+ * A regex literal is a `Literal` too, so it needs no arm of its own.
+ *
+ * The walk stops at one of them rather than descending, which is what keeps a
+ * template's interpolated expressions ordinary code: a comment written inside
+ * one is still removed.
+ */
+const NOT_PROSE = new Set(["Literal", "TemplateElement", "JSXText"]);
+
+/** Which offsets of `source` sit inside one of those. */
+function insideALiteral(source: string, lang: "ts" | "tsx"): Uint8Array {
+  const inside = new Uint8Array(source.length);
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value as unknown[]) walk(item);
+      return;
+    }
+    if (!isNode(value)) return;
+    if (NOT_PROSE.has(value.type)) {
+      const { start, end } = value as { start?: unknown; end?: unknown };
+      if (typeof start === "number" && typeof end === "number")
+        inside.fill(1, start, end);
+      return;
+    }
+    for (const key of Object.keys(value)) walk(value[key]);
+  };
+  walk(parseAst(source, { lang }));
+  return inside;
 }
+
+/**
+ * What ends a line comment, which is four characters and not one.
+ *
+ * **The set is closed**, so enumerating it is not the open set enumeration this
+ * file's other guards keep paying for: ECMAScript defines exactly these four as
+ * line terminators. The regex pair this replaced stopped at all four for free,
+ * because JavaScript's `.` excludes them, and a scan that stopped at `\n` alone
+ * deletes whatever follows a comment on a CR, LS or PS line from what all
+ * fifteen readers below see. Measured by the security seat on a copy of the
+ * tree: a `fetch` written after a `//` and a U+2028 in `lib/opf.ts` left
+ * `keeps every reader out of reach of the network` green at 97 of 97 passing,
+ * and the same line written with `\n` failed it.
+ *
+ * `prettier --check` rewrites all three to `\n` and CI runs it, which is a
+ * mitigation and not the guard: it fails the format job, not the rule.
+ *
+ * **All four are in the fixture row, and the fourth is why that is said here.**
+ * The row carried three, and dropping U+2029 from this string left the file
+ * green at 98 of 98. Closed is what makes a set safe to enumerate; it is not
+ * what makes a member tested. Check it by dropping each in turn.
+ */
+const ENDS_A_LINE = "\n\r\u2028\u2029";
+
+/**
+ * One stripped source per language, keyed on the text.
+ *
+ * A pure function of its two arguments, so this is a cache and not state. It
+ * is here because parsing is not free where a regex was: fifteen readers over
+ * the 456 modules under `src/` cost 4,672ms parsed against 91ms matched, and
+ * 337ms parsed once per module. Measured on the control plane, bun 1.4.2; the
+ * ratio is the point rather than the absolute.
+ */
+const STRIPPED: Record<"ts" | "tsx", Map<string, string>> = {
+  ts: new Map(),
+  tsx: new Map(),
+};
+
+/**
+ * The source with comments removed, so a rule cannot be satisfied by prose.
+ *
+ * **Stripped by parsed ranges, because a comment is not a line shape and a
+ * slash pair is not a comment.** This was two regexes, and both of them edited
+ * code. Measured over the 456 modules under `src/`, twice and by two routes:
+ * the regex pair deleted 4,577 characters in 12 of them, of which 3,223 are not
+ * whitespace. 1,532 of those sit inside a string literal, which is a truncated
+ * URL; the other 1,691, on 114 lines in 10 modules, sit outside one, which is
+ * an ordinary statement. Every rule below read the tree with all of it missing,
+ * and three of the twelve modules are `lib/goodreads.ts`, `lib/opf.ts` and
+ * `lib/pdf.ts`, which are subjects of the rule that keeps a file reader out of
+ * reach of the network. The direction is a false negative, which is the one
+ * this repository's guard rules call the dangerous one: a rule looks at less
+ * than it says it does and passes.
+ *
+ * **The two ways it happened, neither of which a further regex closes.** A
+ * `//` inside a string literal cut the line at the scheme, so a URL in an
+ * attribute became `href="https:`. And an opening slash star inside a literal
+ * or inside a line comment opened a block that ran to the next closing one:
+ * `accept="image/*"` in `pages/ScanPage/components/LookupResult.tsx` swallowed
+ * the next sixteen lines of JSX, and a line comment quoting a wildcard media
+ * type in `api/mutator.ts` swallowed the `Accept` header the module sets.
+ *
+ * **What the swap changed, measured rather than argued.** Over `src/` the
+ * parsed form removes nothing the regex form kept, zero characters, so every
+ * reader sees at least as much as it did. Seventeen values derived by the
+ * fifteen readers below were computed under both and none moved, so no rule
+ * changed verdict on this tree; what changed is what they can see on the next.
+ *
+ * **What it newly refuses is a source that does not parse.** A regex returns
+ * something for any text at all. All 456 modules parse, and
+ * `strips every module the rules read` is the arm that keeps that a failure
+ * naming the file rather than a stack inside whichever rule reached it first.
+ */
+function withoutProse(source: string, lang: "ts" | "tsx"): string {
+  const cached = STRIPPED[lang].get(source);
+  if (cached !== undefined) return cached;
+
+  const inside = insideALiteral(source, lang);
+  let code = "";
+  let at = 0;
+  while (at < source.length) {
+    if (!inside[at]) {
+      if (source.startsWith("//", at)) {
+        let end = at + 2;
+        while (end < source.length && !ENDS_A_LINE.includes(source[end]!))
+          end += 1;
+        at = end;
+        continue;
+      }
+      if (source.startsWith("/*", at)) {
+        const close = source.indexOf("*/", at + 2);
+        at = close === -1 ? source.length : close + 2;
+        continue;
+      }
+    }
+    code += source[at];
+    at += 1;
+  }
+
+  STRIPPED[lang].set(source, code);
+  return code;
+}
+
+/**
+ * What the stripper keeps and what it removes.
+ *
+ * **Every row is a source the regex pair this replaced got wrong**, and each
+ * one is a shape rather than an instance: a slash pair in a string, in a
+ * template chunk and in JSX text, and an opening block marker written inside a
+ * string and inside a line comment. The last two are the expensive pair,
+ * because they do not truncate a line, they delete every line up to the next
+ * closing marker.
+ *
+ * The last row is the other direction, prose in every place a module can put
+ * it, and it is the only row carrying a comment inside a template
+ * interpolation and one trailing live code. Every row refuses a stripper that
+ * returned its source unchanged, because every row states what must be cut.
+ */
+const STRIPPING: [string, "ts" | "tsx", string, string[], string[]][] = [
+  [
+    "a slash pair inside a string literal",
+    "ts",
+    'const at = "https://example.com/a"; // the note\n',
+    ["https://example.com/a"],
+    ["the note"],
+  ],
+  [
+    "a slash pair inside a template chunk",
+    "ts",
+    "const at = `https://example.com/a`; // the note\n",
+    ["https://example.com/a"],
+    ["the note"],
+  ],
+  [
+    "a slash pair between two JSX tags",
+    "tsx",
+    "const el = <p>https://example.com/a</p>; // the note\n",
+    ["https://example.com/a"],
+    ["the note"],
+  ],
+  [
+    "an opening block marker inside a string literal",
+    "ts",
+    'const accept = "image/*";\nconst kept = 1;\n/* the note */\n',
+    ["const kept = 1;"],
+    ["the note"],
+  ],
+  [
+    "an opening block marker inside a line comment",
+    "ts",
+    "// a wildcard, */*\nconst kept = 2;\n/* the note */\n",
+    ["const kept = 2;"],
+    ["a wildcard", "the note"],
+  ],
+  [
+    "prose in every place a module can put it",
+    "ts",
+    "/**\n * the header\n */\n// the line\n" +
+      "const kept = `x${/* the interpolated */3}`; // the trailing\n",
+    ["const kept = `x${3}`;"],
+    ["the header", "the line", "the interpolated", "the trailing"],
+  ],
+  [
+    "a line comment ended by a terminator that is not a newline",
+    "ts",
+    // Written as escapes because `prettier --check` rewrites all three to a
+    // newline in source, which would quietly delete this row's subject.
+    "const kept = 1; // the note\u2028const alsoKept = 2;\n" +
+      "const third = 3; // the other note\rconst andFourth = 4;\n" +
+      "const fifth = 5; // a third note\u2029const andSixth = 6;\n",
+    [
+      "const kept = 1;",
+      "const alsoKept = 2;",
+      "const andFourth = 4;",
+      "const andSixth = 6;",
+    ],
+    ["the note", "the other note", "a third note"],
+  ],
+];
+
+describe("prose is stripped by the parser, not by a line shape", () => {
+  it.each(STRIPPING)("%s", (_label, lang, source, kept, cut) => {
+    const code = withoutProse(source, lang);
+
+    for (const survivor of kept) expect(code).toContain(survivor);
+    for (const gone of cut) expect(code).not.toContain(gone);
+  });
+
+  it("strips every module the rules read", () => {
+    // A parser refuses text a regex returns something for, so a module this
+    // throws on takes down whichever of the fifteen readers reached it first.
+    // This is where that arrives naming the file.
+    //
+    // That the glob is not empty is asserted once, in
+    // `the generated client stays behind hooks.ts::reads the source tree at
+    // all`. A second floor here would be a weaker copy of it, and a weaker
+    // inequality is how a bound stops guarding without ever failing.
+    const refused = entries()
+      .filter(([path, source]) => {
+        try {
+          withoutProse(source, langOf(path));
+          return false;
+        } catch {
+          return true;
+        }
+      })
+      .map(([path]) => path);
+
+    expect(refused).toEqual([]);
+  });
+});
 
 function sessionWrites(code: string): number {
   return [...code.matchAll(/\b(set|clear)Session\s*\(/g)].length;
@@ -872,7 +1124,9 @@ describe("an identity change drops the cache with it", () => {
     // concept and the characters it is usually written with.
     const offenders = entries()
       .filter(([path]) => path !== SESSION_DEFINITION && path !== SESSION_OWNER)
-      .map(([path, source]) => [path, withoutProse(source)] as const)
+      .map(
+        ([path, source]) => [path, withoutProse(source, langOf(path))] as const,
+      )
       .filter(([, code]) => sessionWrites(code) > 0)
       .map(([path]) => path);
 
@@ -885,13 +1139,15 @@ describe("an identity change drops the cache with it", () => {
     // that deleting the mechanism outright cannot be a silent diff.
     const owner = entries().find(([path]) => path === SESSION_OWNER);
     expect(owner).toBeDefined();
-    expect(cacheClears(withoutProse(owner![1]))).toBeGreaterThan(0);
+    expect(
+      cacheClears(withoutProse(owner![1], langOf(SESSION_OWNER))),
+    ).toBeGreaterThan(0);
   });
 
   it("is watching something", () => {
     // A rule whose subject has been renamed passes by matching nothing.
     const writers = entries().filter(
-      ([, source]) => sessionWrites(withoutProse(source)) > 0,
+      ([path, source]) => sessionWrites(withoutProse(source, langOf(path))) > 0,
     );
     expect(writers.length).toBeGreaterThan(1);
   });
@@ -920,7 +1176,9 @@ describe("a write names what it made stale", () => {
     // empty filter object, is outside it.
     const offenders = entries()
       .filter(([path]) => path !== INVALIDATION_OWNER)
-      .map(([path, source]) => [path, withoutProse(source)] as const)
+      .map(
+        ([path, source]) => [path, withoutProse(source, langOf(path))] as const,
+      )
       .filter(([, code]) => /invalidateQueries\(\s*\)/.test(code))
       .map(([path]) => path);
 
@@ -941,7 +1199,9 @@ describe("a write names what it made stale", () => {
     // decision somebody has to make, in this file, rather than a line in a
     // diff.
     const callers = entries()
-      .map(([path, source]) => [path, withoutProse(source)] as const)
+      .map(
+        ([path, source]) => [path, withoutProse(source, langOf(path))] as const,
+      )
       .filter(([, code]) => /\.everything\s*\(/.test(code))
       .map(([path]) => path)
       .sort();
@@ -956,7 +1216,9 @@ describe("a write names what it made stale", () => {
     // A rule whose subject has been renamed passes by matching nothing.
     const owner = entries().find(([path]) => path === INVALIDATION_OWNER);
     expect(owner).toBeDefined();
-    expect(withoutProse(owner![1])).toMatch(/invalidateQueries\(\s*\)/);
+    expect(withoutProse(owner![1], langOf(INVALIDATION_OWNER))).toMatch(
+      /invalidateQueries\(\s*\)/,
+    );
   });
 });
 
@@ -1160,7 +1422,9 @@ describe("a tag reaches a reader through tagName", () => {
     // characters it is usually written with.
     const offenders = entries()
       .filter(([path]) => path !== TAG_NAME_OWNER)
-      .map(([path, source]) => [path, withoutProse(source)] as const)
+      .map(
+        ([path, source]) => [path, withoutProse(source, langOf(path))] as const,
+      )
       .flatMap(([path, code]) =>
         [...code.matchAll(/\b\w*[Tt]ags?\.name\b/g)].map(
           (match) => `${path}: ${match[0]}`,
@@ -1176,7 +1440,8 @@ describe("a tag reaches a reader through tagName", () => {
     // goes through the function.
     const callers = entries().filter(
       ([path, source]) =>
-        path !== TAG_NAME_OWNER && /\btagName\(/.test(withoutProse(source)),
+        path !== TAG_NAME_OWNER &&
+        /\btagName\(/.test(withoutProse(source, langOf(path))),
     );
 
     expect(callers.length).toBeGreaterThan(4);
@@ -1310,12 +1575,6 @@ const REPLACES_A_MODULE = /^(?:mock|doMock|importMock)$/;
  * inside a block comment whose own line carries no leading marker, were both
  * reported. `parseAst` is what the decoder rule at the end of this file already
  * reads its sources with.
- *
- * **`withoutProse` further down this file is still a regex stripper**, and this
- * did not remove it: fourteen rules read it, including the census above. So the
- * claim is narrower than "one instrument in the file" and is worth stating
- * exactly, because the broader one is what a reader would assume: what went is
- * `codeOnly`, which had one consumer, this rule.
  *
  * **What the swap gave up, which is the question to ask of a replacement.** The
  * matcher saw a call spelled inside a string literal and this does not, because
