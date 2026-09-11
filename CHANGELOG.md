@@ -23,9 +23,36 @@
   can anything else: calibre does not distinguish them on that firmware either. Nothing on your
   shelf changes, because both count as owned. Named at the point it matters rather than guessed
   at.
-- The scan page still does not record the identifiers a book file labels itself with, and that
-  is now a decision rather than an omission: four of the five file readers can only produce an
-  ISBN or a barcode, neither of which is a kind of reference this app stores.
+- **A book file you import now records what Amazon and Google call it.** An EPUB that labels
+  its own identifier `ASIN`, `AMAZON`, `MOBI-ASIN` or `GOOGLE` has that kept beside the ISBN,
+  the same references a Kindle or Play Books import already writes. **The value decides, not
+  the label**: `MOBI-ASIN` is where Kindle files keep an Amazon code, and it is also where
+  Calibre writes a filler when there is no code, so a value that is not an Amazon code is
+  dropped. Measured over 931 books from one household's library, 16 of its 31 such records
+  are a real code and 15 are filler. **Every other label is refused**, each for its own
+  reason: a uuid and Calibre's own internal id are numbers nothing here reads, an ISBN
+  belongs in the ISBN field, and two of the fifteen labels that library carries are not
+  scheme names at all.
+- **An Adobe Digital Editions import reads the catalogue's own identifier as an ISBN where
+  the value is one.** That catalogue publishes no scheme, so the check digit decides rather
+  than a label, and an identifier that is not an ISBN is left alone. **Every identifier on a
+  record is tested and not only the first**: of the 4 ISBNs found across 79 real EPUBs, all 4
+  were reached only by looking past the first entry.
+- **An ISBN labelled `ISBN:` or `isbn_` is now read the same as one labelled `urn:isbn:`.**
+  Four readers each decided for themselves how a file spells that label and two of them
+  refused the spellings the other two accepted, so the same book imported from two places
+  could keep its ISBN once and lose it once.
+- **Books imported from Google Play Books are looked up by their Google Books volume id**, on
+  the book and across the library, instead of by title and author. Enriching one book asks
+  one service instead of eight, so a 900 book import makes 900 requests rather than 7,200 and
+  spends about three minutes waiting rather than fifteen. **The match is the volume Google
+  filed the book under** rather than the best guess from a title, which is what decides
+  whether you get the right edition. Where the id is stale or unknown the title search still
+  runs, so a wrong id costs a book nothing.
+- **A catalogue answering with a malformed body is an outage rather than an error page.** A
+  reply nested deeply enough to overflow the parser used to escape as a server error on the
+  Open Library, lobid and VIAF paths; it now degrades the way every other unreadable answer
+  already did.
 - **A Calibre import keeps the Amazon and Google Books identifiers the library's own table
   carries**, in every marketplace spelling Calibre writes. Types no reader here can produce a
   value for, `goodreads` and `mobi-asin` among them, are declined rather than guessed at, and

@@ -76,6 +76,18 @@ export default function StoreImport({
         {t("stores.explain")}
       </p>
 
+      {/*
+        Named here because an import is where somebody arrives and this card is
+        further down the page. A store export carries what the store knows,
+        which for Play Books is a title, an author and a volume id, so a library
+        imported from one is complete only after that card has been run. A
+        sentence rather than a button: the lookup is metered and the card is
+        where the run is explained and counted.
+      */}
+      <p className="text-xs text-paper-600 leading-relaxed dark:text-paper-400">
+        {t("stores.thenLookThemUp")}
+      </p>
+
       {STORE_IDS.map((id) => {
         const store = STORES[id];
         const source = sources[id];

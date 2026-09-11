@@ -3134,6 +3134,27 @@ class TestTheFanOutIsBoundedInTimeAsWellAsInCount:
 
         assert route.call_count == 0
 
+    @pytest.mark.asyncio
+    async def test_a_body_nested_too_deeply_is_an_outage_and_not_a_500(self):
+        """The lobid door, which the Google fix did not reach.
+
+        `RecursionError` out of `json.loads` is a `RuntimeError`, so `_lobid`'s
+        `except ValueError` did not see it and it escaped `search` as a 500.
+        `fetch.Fetched.json` converts it, so lobid answering a nested body is
+        the outage every other unreadable answer already is.
+
+        Asserted here as well as in `test_fetch.py` because this is a door the
+        three Google call sites left open: a fix proven only where it was first
+        written is the shape this one was bought by.
+        """
+        body = b'{"a":' * 100_000 + b"1" + b"}" * 100_000
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(
+                return_value=httpx.Response(200, content=body)
+            )
+            with pytest.raises(AuthorityUnavailable):
+                await search("Stevenson")
+
     def test_the_deadline_is_absolute_rather_than_a_duration(self):
         """`fetch.get` compares it against `time.monotonic()`, so a duration
         passed here would be a deadline in 1970 and every lookup would fail."""

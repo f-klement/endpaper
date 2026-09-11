@@ -1352,6 +1352,8 @@ export const de: Messages = {
     "Eine Bibliothek von einem Gerät oder aus einem Shop übernehmen",
   "stores.explain":
     "Die Datei bleibt in diesem Browser. Gelesen wird daraus nur, was die Bücher über sich selbst angeben, und mehr erreicht die Bibliothek nicht. Keine Buchdatei wird hochgeladen. Es lassen sich mehrere Quellen wählen: was sich nicht lesen lässt, kostet diese eine Quelle und sonst nichts.",
+  "stores.thenLookThemUp":
+    'Ein Store übergibt dieser Bibliothek, was der Store weiß, und das ist oft ein Titel und eine Kennung. Bücher, die ohne ISBN ankommen, lassen sich danach unter "Bücher aus einem Store" weiter unten auf dieser Seite ergänzen.',
   "stores.kobo.name": "Kobo",
   "stores.kobo.explain":
     "Ein Kobo legt seine Bibliothek in einer Datei namens KoboReader.sqlite ab, in einem versteckten Ordner namens .kobo im Wurzelverzeichnis des Geräts. Das Gerät anschließen und diese Datei wählen.",
@@ -1457,6 +1459,26 @@ export const de: Messages = {
   "covers.remaining":
     "Noch {remaining} Bücher offen. Noch einmal ausführen, um weiterzumachen.",
   "covers.allDone": "Jedes Buch, das ein Cover haben kann, hat eines.",
+
+  // ── Store-Kennungen ─────────────────────────────────────────────────────
+  "storeIdentifiers.title": "Bücher aus einem Store",
+  "storeIdentifiers.explain":
+    "Ein Google-Play-Books-Export benennt jedes Buch mit seiner Google-Books-Kennung und enthält keine ISBN. Solche Bücher kommen also mit einem Titel und sonst wenig an. Hier wird jedes über diese Kennung nachgeschlagen, und das ist eindeutig, wo ein Abgleich über den Titel geraten ist.",
+  "storeIdentifiers.run": "Bücher anhand der Store-Kennung nachschlagen",
+  "storeIdentifiers.failed":
+    "Diese Bücher konnten nicht nachgeschlagen werden.",
+  "storeIdentifiers.result":
+    "{examined} Bücher geprüft und {enriched} ergänzt.",
+  "storeIdentifiers.notFound":
+    "Zu {count} davon hat Google keinen Eintrag. Diese Kennungen lösen sich auch bei weiteren Durchläufen nicht auf.",
+  "storeIdentifiers.unavailable":
+    "Für {count} davon hat Google nicht geantwortet. In ein paar Minuten noch einmal ausführen.",
+  "storeIdentifiers.unresolvable":
+    "{count} davon tragen etwas, das keine Google-Kennung ist. Danach wurde also gar nicht erst gefragt, und ein weiterer Durchlauf ändert daran nichts.",
+  "storeIdentifiers.remaining":
+    "Noch {remaining} Bücher offen. Noch einmal ausführen, um weiterzumachen.",
+  "storeIdentifiers.allDone":
+    "Jedes Buch, das über eine Google-Kennung ergänzt werden kann, wurde nachgeschlagen.",
 
   // ── Über ────────────────────────────────────────────────────────────────
   "about.title": "Über Endpaper",

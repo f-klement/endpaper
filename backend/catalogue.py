@@ -338,6 +338,45 @@ def _drop_unstorable(record: Record) -> list[str]:
     catalogue, `merge_into` skips it, and the refresh handler's `or book.title`
     keeps what the Book already had.
 
+    **A value of the wrong type is dropped in both loops, and that is a
+    different rule from the one above it.** The paragraph above is about a value
+    the **column** cannot hold; this is about a value that is not of the field's
+    **type** at all. Every name in `_TEXT_CEILINGS` is a text column and every
+    name in `_NUMBER_RANGES` a numeric one, but a `Record` is built from
+    somebody else's JSON and the adapters pass scalars through raw on the stated
+    grounds that this function bounds them. It did not: `len(5)` and
+    `low <= "412"` both raise `TypeError`, which no adapter catches, so the
+    wrong type in one of those fields was a 500 rather than a dropped field.
+    Measured over five text fields and five wrong types, **15 of 25 raised**,
+    the list and the dict passing because they have `len()` and going on to a
+    column that cannot hold one; and over the three numeric fields and four
+    wrong types, **9 of 12**.
+
+    **What that costs, stated because it is a real loss and not only a
+    refusal.** `BookMatch` is a Pydantic model in non strict mode and coerces:
+    `BookMatch(page_count="412").page_count` is `412`. This runs first, in
+    `Record.__post_init__`, so a stringified number is dropped here rather than
+    coerced there, and the member loses that one field on an enrichment where
+    before this arm they got a 500. **Coercion is deliberately not added here**:
+    it is `BookMatch`'s rule and a second home for it is two places to disagree.
+    What a `Record` owes its own consumers is a value of the declared type, and
+    a search candidate carrying a `str` page count is a schema violation on the
+    wire.
+
+    **The wrong type is a shape this function must not raise on, and that is the
+    whole of the claim.** An earlier version of this paragraph said a JSON API
+    answering with a number as a string is an everyday shape. Nobody measured
+    that against Google or Open Library, and it decided nothing: the gate is
+    worth having for a payload seen once.
+
+    **Checked before `_AS_STORED` runs**, because that table's values are typed
+    `Callable[[str], str | None]`: `covers.https_url` would raise on the same
+    input one line earlier, and it returns `b"x"` for `bytes`, which has
+    `.lower()` and slices, so before the gate a bytes `cover_url` passed both
+    the rewrite and the `len()`. One gate here rather than one per adapter is
+    the whole argument for this function existing, which its first paragraph
+    makes.
+
     This mutates through `object.__setattr__` because the class is frozen and
     this is construction rather than mutation, exactly as the fold above it.
     """
@@ -346,6 +385,10 @@ def _drop_unstorable(record: Record) -> list[str]:
         value = getattr(record, name)
         if value is None:
             continue
+        if not isinstance(value, str):
+            object.__setattr__(record, name, None)
+            dropped.append(name)
+            continue
         rewrite = _AS_STORED.get(name)
         stored = rewrite(value) if rewrite is not None else value
         if stored is not None and len(stored) > ceiling:
@@ -353,7 +396,29 @@ def _drop_unstorable(record: Record) -> list[str]:
             dropped.append(name)
     for name, (low, high) in _NUMBER_RANGES.items():
         value = getattr(record, name)
-        if value is not None and not low <= value <= high:
+        if value is None:
+            continue
+        # **The same gate as the loop above, and it was missing here for one
+        # round.** A fix that gated half of this function was the shape this
+        # file's own rules name, better in the dimension it was designed for and
+        # silently weaker in one nobody re-checked. The docstring carries the
+        # measurement for both arms and what the drop costs.
+        #
+        # **Where it is reached from**, which is why the gate is here and not in
+        # one adapter: `google_books._volume_to_fields` passes `pageCount`
+        # through raw, and `_open_library_search` passes `first_publish_year`
+        # into a `Record` built **outside** its own `try`, so a raise there is
+        # a 500 on the title search rather than one source's rows.
+        #
+        # **`bool` is excluded deliberately, and it is a judgement rather than
+        # a type error.** `isinstance(True, int)` is true and `1 <= True` holds,
+        # so a JSON `true` in `pageCount` stored as a page count of 1: a number
+        # this application invented from a value that was not one.
+        if (
+            not isinstance(value, int | float)
+            or isinstance(value, bool)
+            or not low <= value <= high
+        ):
             object.__setattr__(record, name, None)
             dropped.append(name)
     return dropped

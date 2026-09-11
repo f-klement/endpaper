@@ -98,6 +98,7 @@
  */
 
 import { parseIsbn } from "./isbn";
+import { stripIsbnPrefix } from "./isbnLabel";
 import type { SqliteDatabase, SqliteRow } from "./sqlite";
 import { columnsIn, integer, text } from "./sqliteRow";
 import { leadingYear } from "./year";
@@ -307,22 +308,6 @@ const FORMATS = new Map<string, AppleBooksFormat>([
   [".ibooks", "IBOOKS"],
 ]);
 
-/**
- * How the EPUB identifier a store copies verbatim spells that it is an ISBN.
- *
- * `ZEPUBID` is the book's `dc:identifier` as the file wrote it, so the same
- * ISBN arrives under whichever spelling the file used. **Three are in the store
- * measured**, bare, hyphenated and `isbn_` prefixed; `urn:isbn:` is the EPUB 3
- * spelling, taken from `opf.ts::readIsbn` rather than from the store, and it is
- * here because `ZEPUBID` is that same identifier copied across.
- *
- * **Only the letters come off, and that is the whole of it.** `parseIsbn`
- * normalises away everything that is not alphanumeric, so a separator after the
- * word needs no arm here; a class matching one would be dead code that the next
- * reader takes for the thing that makes `isbn_` work.
- */
-const ISBN_PREFIX = /^(?:urn:)?isbn/i;
-
 /** A Core Data boolean, which is an integer column and not always a 0 or a 1. */
 function isSet(value: unknown): boolean {
   const flag = integer(value);
@@ -413,7 +398,7 @@ function readFormat(value: unknown): AppleBooksFormat | null {
 /** The ISBN, where the identifier the file carried was one. */
 function readIsbn(value: unknown): string | null {
   const written = text(value);
-  return written === null ? null : parseIsbn(written.replace(ISBN_PREFIX, ""));
+  return written === null ? null : parseIsbn(stripIsbnPrefix(written));
 }
 
 /**

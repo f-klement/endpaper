@@ -620,6 +620,17 @@ BOOK_OWNED_READERS = {
             "write, and the rows it does not move it deletes.",
         ),
         (
+            "Book.identifiers.any(",
+            "narrows the identifier backfill to Books carrying a store "
+            "identifier, as a correlated EXISTS inside `Shelf.where` rather "
+            "than a query of its own: the FROM is the Shelf's filtered `books` "
+            "and this is a clause on it, so the visibility predicate applies to "
+            "the candidate set by construction. It returns no identifier and "
+            "counts none; what it publishes is a count of the caller's own "
+            "Books, through `Shelf.page`, which is the shelf-wide total every "
+            "paginated route here already answers with.",
+        ),
+        (
             "shelf.select(func.count(DigitalReference.id))",
             "counts the flagged references on the Books the caller may see, for "
             "the shelf-wide listing. Written through `Shelf.select()` and joined "

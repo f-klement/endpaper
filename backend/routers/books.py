@@ -91,7 +91,12 @@ from models import (
     copy_group_token,
     note_visible_to,
 )
-from ratelimit import authority_limiter, cover_backfill_limiter, metadata_limiter
+from ratelimit import (
+    authority_limiter,
+    cover_backfill_limiter,
+    identifier_backfill_limiter,
+    metadata_limiter,
+)
 from reading import Reading, resolve_merge
 from schemas import (
     MAX_CLASSIFICATIONS_PER_BOOK,
@@ -135,6 +140,7 @@ from schemas import (
     DivisionFacetOut,
     DuplicateGroup,
     HeadingFacetOut,
+    IdentifierBackfillOut,
     LocationOut,
     MergeRequest,
     MissingDigitalReferenceOut,
@@ -2807,6 +2813,288 @@ def backfill_covers(
     )
 
 
+# ── Store identifiers ─────────────────────────────────────────────────────────
+
+#: Books one identifier backfill run resolves.
+#:
+#: **Bounded because it holds an HTTP request open while it fetches**, which is
+#: `MAX_BACKFILL_BOOKS`' reason, and sized against the same thing: a reverse
+#: proxy's read timeout, which for the deployments this ships to is a minute.
+#: `IDENTIFIER_BACKFILL_CONCURRENCY` in flight over fifty books is
+#: `ceil(50 / 6)` waves, nine, and one request is bounded by
+#: `fetch.TIMEOUT_SECONDS`, so the worst case is **90s**. That worst case is
+#: every request timing out, which means Google is unreachable and the batch
+#: was going to produce nothing anyway; the case that has to fit inside the
+#: proxy is the ordinary one, which is one wave of latency per nine.
+#:
+#: **Deliberately not compared with the cover backfill's hundred**, and an
+#: earlier version of this paragraph was: "six at a time against a six second
+#: timeout, so a hundred books is at worst 100s". That figure does not exist.
+#: `backfill_covers` passes no budget to `covers.resolve_and_store`, whose own
+#: docstring says nothing then bounds a download in time, and one cover book is
+#: up to three candidate checks plus a download rather than one request. The
+#: two routes differ in the work per book, not in the timeout, so the hundred
+#: is not evidence about this fifty.
+#:
+#: **What it costs a member is presses**, and that is the number to argue with:
+#: a 900 book Play Books import is 18 of them. The response says how many are
+#: left and the screen says so.
+MAX_IDENTIFIER_BACKFILL: Final = 50
+
+#: Volume lookups in flight at once during a backfill.
+#:
+#: **Six, the same as `covers.MAX_CONCURRENT_FETCHES`, and bounded for the same
+#: reason plus one of its own.** A backfill runs over a whole library, so an
+#: unbounded gather would open a socket per book and get this deployment's
+#: address refused. The reason of its own is memory: `fetch.MAX_RESPONSE_BYTES`
+#: prices the pod at sixteen concurrent 2 MiB responses, and `metadata.search`
+#: already spends eight of them, so a backfill that ran ten at a time could put
+#: a search over the ceiling that constant computes.
+IDENTIFIER_BACKFILL_CONCURRENCY: Final = 6
+
+
+def _resolvable_volume_id(book: Book) -> str | None:
+    """This Book's Google volume id, where it carries one that may be asked about.
+
+    **Read off the relationship rather than queried.** `book_identifiers` is a
+    book-owned table with no viewer of its own, so a query over it is the shape
+    `tests/test_shelf.py`'s fourth pass exists to report; a relationship read on
+    a Book that came from a Shelf is scoped by construction, which is that
+    docstring's own distinction. The cost is one statement per Book, and it is
+    paid on a path that is about to make one HTTP request per Book.
+
+    **Compared against the enum member without coercing the stored value.**
+    `identifiers.add_identifiers` coerces both sides because it builds a key that
+    has to be canonical; this is a filter for one known member, and
+    `BookIdentifierScheme` is a `StrEnum`, so the comparison is exact. Coercing
+    here would raise `ValueError` on a scheme this build does not know, on the
+    path that enriches a book, and a row `backup.restore` wrote through Core is
+    where such a value would come from.
+
+    **`is_a_volume_id`, and what it buys is a count rather than a refusal.**
+    `metadata.lookup_volume` refuses the same values, so removing this check
+    would not send one anywhere: a design critic measured that, deleting it and
+    running the whole backend suite green. What it buys is that an unresolvable
+    row is reported as `unresolvable` rather than as Google having no such
+    volume, which is the difference between "this identifier is not one" and
+    "Google says no", and it saves the semaphore slot the refusal would occupy.
+    Both are observable, so `test_an_unresolvable_identifier_is_counted_apart`
+    fails if this goes.
+
+    **It does not keep such a row out of `remaining`**, and a docstring here
+    claimed it did. The candidate query narrows on carrying a `google_books`
+    identifier and cannot narrow on its shape, so the count includes rows this
+    returns None for; the cursor clears them on the pass that examines them.
+    """
+    for row in book.identifiers:
+        if (
+            row.scheme == BookIdentifierScheme.GOOGLE_BOOKS
+            and google_books.is_a_volume_id(row.value)
+        ):
+            return row.value
+    return None
+
+
+def _google_books_in_force(db: Session) -> tuple[str, sources.Plan]:
+    """The key and the plan, resolved once, for a route that asks only Google.
+
+    **Both, because they are two different gates and neither implies the
+    other.** `settings_store.ready_sources` puts Google Books in the plan only
+    when its section is on and a key is in force, and `catalogue_sources` then
+    intersects that with the household's provider list. So the plan answers "may
+    this library ask Google at all" and the key answers "with what", and a route
+    that resolved only the key would ask on behalf of a library that switched
+    Google off.
+    """
+    api_key = (
+        settings_store.google_books_api_key(db)
+        if settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED)
+        else ""
+    )
+    return api_key, settings_store.catalogue_sources(db)
+
+
+@router.post("/identifiers/backfill", response_model=IdentifierBackfillOut)
+async def backfill_from_identifiers(
+    db: DbSession,
+    current_user: CurrentUser,
+    after_id: Annotated[
+        int,
+        Query(
+            ge=0,
+            # Bounded above for `backfill_covers`' reason: a Python int has no
+            # ceiling and SQLite's does, so an unbounded value reaches the
+            # driver and raises `OverflowError` from inside the query.
+            le=2**63 - 1,
+            description="Carry on past this book id. From the previous reply.",
+        ),
+    ] = 0,
+) -> IdentifierBackfillOut:
+    """Fill in books that carry a store's own identifier and no ISBN.
+
+    **This is what a Google Play Books import needs, and nothing else supplies
+    it.** That export carries a Google Books volume id for every book and no
+    ISBN anywhere, so a book arrives with a title, an author and an exact key,
+    and the only enrichment available to it was a search by that title. One
+    volume id resolves to one record, with no ranking and no guess.
+
+    **Amazon is deliberately absent.** Amazon publishes no catalogue API, so
+    there is no request an ASIN could become. A book carrying only an ASIN is
+    not a candidate here and is not reported as one.
+
+    **Candidates are books with no ISBN, no Google volume already recorded, and
+    a Google Books identifier.** No ISBN, because an ISBN
+    is an exact key the free catalogues answer to, and spending a metered
+    request on one would be the bill for nothing that
+    `sources.Plan.lookup_together` refuses. No volume recorded, because that
+    column is what enrichment from Google writes, so a book that has been
+    enriched stops being a candidate and this is safe to run twice.
+
+    **Scoped to the books the caller can see**, like the cover backfill and for
+    that route's stated reason: `visible_to` has no admin bypass, so each member
+    repairs their own shelf rather than the privacy rule being bent to make an
+    operator action work.
+
+    **Refuses with 409 when this library does not ask Google Books**, rather
+    than examining nothing and reporting a clean run. A source with no usable
+    key must say so: the cause is a switch and a key in Settings, and a zero
+    would send somebody hunting through their library instead.
+
+    Batched and resumable. `next_after_id` carries on past what this run tried,
+    and comes back as 0 at the end of the library so pressing again starts over
+    and re-tries whatever has since become resolvable.
+    """
+    identifier_backfill_limiter.check(current_user.username)
+
+    api_key, plan = _google_books_in_force(db)
+    if CatalogueSource.GOOGLE_BOOKS not in plan.asked:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This library does not ask Google Books, so a Google volume id "
+                "cannot be resolved. Switch Google Books on in Settings and add "
+                "an API key."
+            ),
+        )
+
+    # `Book.identifiers.any(...)` is a correlated EXISTS over `books` rather
+    # than a second table in the FROM, which is what `Shelf.where` admits: a
+    # clause naming another table would compile to a cartesian product. It
+    # narrows the candidate set in SQL so `remaining` is a count of books this
+    # route can actually do something with.
+    shelf = Shelf.seen_by(db, current_user.id).where(
+        Book.id > after_id,
+        Book.isbn.is_(None),
+        Book.google_books_id.is_(None),
+        Book.identifiers.any(
+            BookIdentifier.scheme == BookIdentifierScheme.GOOGLE_BOOKS
+        ),
+    )
+    # Paged rather than fetched whole: `total` is every candidate past the
+    # cursor and the page is this batch, from one query each, where reading them
+    # all to slice fifty off the front would load a library to count it.
+    batch, total = shelf.page(0, MAX_IDENTIFIER_BACKFILL, Book.id.asc())
+
+    # The id and the Book, because a Book with no resolvable identifier is
+    # dropped here and the cursor still has to advance past it: it was examined,
+    # it will never resolve, and leaving it out of `next_after_id` would park
+    # the run on it for ever.
+    pairs = [(book, _resolvable_volume_id(book)) for book in batch]
+    askable = [(book, value) for book, value in pairs if value is not None]
+
+    # Bounded rather than gathered whole. See `IDENTIFIER_BACKFILL_CONCURRENCY`.
+    gate = asyncio.Semaphore(IDENTIFIER_BACKFILL_CONCURRENCY)
+
+    async def resolve(volume_id: str) -> metadata.Lookup:
+        async with gate:
+            return await metadata.lookup_volume(volume_id, api_key, plan=plan)
+
+    # `return_exceptions` is not set, for `metadata.lookup`'s reason: every
+    # source turns its own failures into an outcome, so an exception escaping
+    # one is a bug worth seeing rather than a network condition to absorb.
+    results = await asyncio.gather(*(resolve(value) for _, value in askable))
+
+    enriched = 0
+    not_found = 0
+    unavailable = 0
+    for (book, _), result in zip(askable, results, strict=True):
+        if result.outcome is metadata.Outcome.NOT_FOUND:
+            not_found += 1
+            continue
+        if not result.found or result.record is None:
+            unavailable += 1
+            continue
+        # Bounded here rather than trusted, exactly as `enrich_book` does it:
+        # this is whatever Google answered and `merge_into` writes twelve
+        # columns from it.
+        google_books.merge_into(
+            book, _bounded_match(result.record.as_match()), overwrite=False
+        )
+        # **Counted unconditionally, and `IdentifierBackfillOut` carries why.**
+        # A candidate has no `google_books_id`; `google_books.lookup_by_volume_id`
+        # answers only for a payload whose `id` **is a volume id**, so it is
+        # twelve characters and fits `GOOGLE_BOOKS_ID_MAX`; `merge_into` writes
+        # it. An answered book therefore always gains a field.
+        #
+        # **The middle clause is the one that has to be enforced rather than
+        # stated, and it was stated first.** With only a type check on the `id`,
+        # a sixty character one was dropped by `BookMatch` before `merge_into`
+        # saw it: nothing written, the Book still a candidate, `enriched: 1` on
+        # every press for ever. Found by a design critic as the defect the
+        # removal of `unchanged` had moved one layer up.
+        enriched += 1
+
+    if enriched:
+        # **One commit for the batch, in a thread**, which is where this differs
+        # from `enrich_book` and why. That handler is a coroutine too and
+        # commits inline, because it holds one dirty Book; this holds up to
+        # `MAX_IDENTIFIER_BACKFILL` of them, and a flush of fifty rows on the
+        # event loop is the loop stopped for every member at once.
+        # `backfill_covers` gets the same property for nothing by being `def`,
+        # which FastAPI runs in a threadpool; this cannot be, because it awaits.
+        #
+        # `_store_cover` is deliberately not called here: it is a second fetch
+        # per book at the image services, which would double this route's
+        # outbound cost and put it in front of a different supplier's rate
+        # limit. `POST /api/books/covers/backfill` is the route for that, it is
+        # already bounded against those services, and a book this run gave a
+        # `cover_url` to is a candidate for it.
+        await asyncio.to_thread(db.commit)
+
+    # Every book in the batch, not only the ones asked about: an unresolvable
+    # row was still examined, and the cursor has to clear it.
+    examined = len(batch)
+    unresolvable = examined - len(askable)
+    remaining = total - examined
+    logger.info(
+        "Identifier backfill for %s: examined %d, enriched %d, "
+        "no such volume %d, unavailable %d, unresolvable %d, %d left",
+        current_user.username,
+        examined,
+        enriched,
+        not_found,
+        unavailable,
+        unresolvable,
+        remaining,
+    )
+    return IdentifierBackfillOut(
+        examined=examined,
+        enriched=enriched,
+        # **Reported apart from `not_found`, and folding them was a finding.**
+        # Both are permanent, which is the argument for one number; only one of
+        # them is Google's answer, which is the argument against, and the screen
+        # said "Google has no record for these" about rows no request was ever
+        # made for. Separating them also puts `_resolvable_volume_id`'s shape
+        # check on the wire, so deleting it fails a test rather than changing a
+        # log line nothing reads.
+        not_found=not_found,
+        unavailable=unavailable,
+        unresolvable=unresolvable,
+        remaining=remaining,
+        next_after_id=batch[-1].id if remaining > 0 and batch else 0,
+    )
+
+
 # ── Trash ─────────────────────────────────────────────────────────────────────
 #
 # Deleting parks a row rather than dropping it. Three things follow from that,
@@ -4201,8 +4489,13 @@ async def enrich_book(
 ) -> BookEnrichmentOut:
     """Fill in the fields a book is missing, from every catalogue available.
 
-    Matched by ISBN when there is one, which runs the full merged chain, and by
-    title and author otherwise, which runs the ranked search. **Which
+    Matched by ISBN when there is one, which runs the full merged chain; then by
+    the book's own Google Books volume id, where it carries one and the library
+    asks Google Books; and by title and author otherwise, which runs the ranked
+    search. **Exact keys first, and the store identifier is an exact key**: a
+    book imported from Google Play Books carries a volume id and no ISBN, so
+    without that middle step it is matched by its title, which is the weakest
+    instrument here. **Which
     catalogues either of those asks is the library's own provider list**, set
     in Settings: the roster holds nine lookup sources that answer an ISBN and
     eight search sources that answer a title, the leading pair is asked together
@@ -4271,7 +4564,28 @@ async def enrich_book(
             assertions = result.record.author_identifiers
 
     if fields is None:
-        # No ISBN, or no catalogue carries this edition under it.
+        # **Before the title search and after the ISBN, which is the whole
+        # ordering.** A store's own identifier is an exact key, so it outranks
+        # matching by title and author; an ISBN is an exact key the free
+        # catalogues answer to, so it outranks a metered one.
+        #
+        # A Google Play Books Takeout is the case this exists for: it carries a
+        # volume id on every book and no ISBN anywhere, so without this branch
+        # every book of an imported library is matched by its title.
+        volume_id = _resolvable_volume_id(book)
+        if volume_id is not None:
+            volume = await metadata.lookup_volume(volume_id, api_key, plan=plan)
+            if volume.found:
+                assert volume.record is not None
+                # No `assertions`, unlike the ISBN branch above. `Record.
+                # author_identifiers` is empty for every source but the DNB, so
+                # there is nothing here to record even by mistake, and
+                # `as_match()` carries no Classifications by construction.
+                fields = volume.record.as_match()
+
+    if fields is None:
+        # No ISBN, no resolvable store identifier, or nobody carries this
+        # edition under either.
         query = " ".join(part for part in (book.title, book.author) if part)
         matches = await metadata.search(
             query, api_key, limit=1, plan=plan, logins=logins

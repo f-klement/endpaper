@@ -85,16 +85,24 @@ function perBookManifest(elements: string): string {
 }
 
 /**
- * One record carrying every element this reader knows, and one it does not.
+ * One record filling every field this reader produces, and one element it does
+ * not read.
  *
  * `de:thumbnailID` is here and is read by nothing, which is what proves the
  * reader names its elements rather than taking whatever a record holds.
+ *
+ * **The identifier is an ISBN here and a UUID in `WRAPPED`**, so the one
+ * fixture every arm reaches fills `isbn` and the other leaves it null. A
+ * fixture whose identifier never check digits would make
+ * `has nothing missing on a document filling every field` unwritable, and one
+ * where both did would leave nothing asserting that an unparseable identifier
+ * is still kept.
  */
 const FULL = record(`
   <dc:title>A Constructed Title</dc:title>
   <dc:creator>Surname, Given</dc:creator>
   <dc:publisher>A Constructed Publisher</dc:publisher>
-  <dc:identifier>urn:uuid:00000000-0000-4000-8000-000000000001</dc:identifier>
+  <dc:identifier>urn:isbn:9780306406157</dc:identifier>
   <de:thumbnailID>Thumbnails/not-read.jpg</de:thumbnailID>
 `);
 
@@ -114,6 +122,24 @@ const WRAPPED = record(`
     <dc:publisher>A Wrapped Publisher</dc:publisher>
     <dc:identifier>urn:uuid:00000000-0000-4000-8000-000000000002</dc:identifier>
   </de:metadata>
+`);
+
+/**
+ * A record whose first identifier has no text and whose second is the ISBN.
+ *
+ * **`readIsbn` steps over an element with no text rather than ending the walk
+ * there**, and the arms on this fixture are what hold that line: a reader
+ * stopping at the first such element answers nothing for this record.
+ *
+ * **The one fixture where `identifier` is null and `isbn` is not**, which is
+ * the direction `DigitalEditionsField` claims when it says neither member
+ * implies the other. Both the book arms and the `missing` arm take it, so that
+ * claim is asserted per record and per document off one document.
+ */
+const EMPTY_FIRST = record(`
+  <dc:title>A Constructed Title</dc:title>
+  <dc:identifier>   </dc:identifier>
+  <dc:identifier>9780306406157</dc:identifier>
 `);
 
 /** A record carrying a title and nothing else. */
@@ -336,7 +362,8 @@ describe("reading a catalogue", () => {
       title: "A Constructed Title",
       authors: ["Surname, Given"],
       publisher: "A Constructed Publisher",
-      identifier: "urn:uuid:00000000-0000-4000-8000-000000000001",
+      identifier: "urn:isbn:9780306406157",
+      isbn: "9780306406157",
     } satisfies DigitalEditionsBook);
   });
 
@@ -349,6 +376,7 @@ describe("reading a catalogue", () => {
       authors: ["Wrapped, Author"],
       publisher: "A Wrapped Publisher",
       identifier: "urn:uuid:00000000-0000-4000-8000-000000000002",
+      isbn: null,
     } satisfies DigitalEditionsBook);
   });
 
@@ -426,6 +454,7 @@ describe("reading a catalogue", () => {
         authors: [],
         publisher: null,
         identifier: null,
+        isbn: null,
       },
     ]);
   });
@@ -511,13 +540,10 @@ describe("reading a catalogue", () => {
     expect(book!.identifier).toBe("first");
   });
 
-  it("gives back an identifier that looks like an ISBN exactly as written", () => {
-    // **The identifier is opaque and is never parsed.** No source says what
-    // scheme this format writes, so a value shaped like an ISBN is still a
-    // value of unknown scheme, and putting it through `parseIsbn` would file a
-    // right looking number in a field every lookup treats as an ISBN. There is
-    // no `isbn` on this record at all, which is what makes that unavailable
-    // rather than merely undone.
+  it("keeps the identifier as written even where it read one as an ISBN", () => {
+    // The two are different answers: `identifier` is what the document said and
+    // `isbn` is what this reader made of it. Dropping the first would leave the
+    // reading uncheckable against the text it came from.
     const [book] = booksOn(
       record(`
         <dc:title>A Constructed Title</dc:title>
@@ -526,7 +552,41 @@ describe("reading a catalogue", () => {
     );
 
     expect(book!.identifier).toBe("urn:isbn:9780306406157");
-    expect(book).not.toHaveProperty("isbn");
+    expect(book!.isbn).toBe("9780306406157");
+  });
+
+  it("reads the ISBN off a later identifier where the first was not one", () => {
+    // **The measurement this rule is taken from is `opf.ts`'s**: 4 ISBNs over
+    // 79 real EPUBs, reached only by falling through every identifier the file
+    // carried. A record whose UUID comes first is that shape, and a reader
+    // stopping at the first answers nothing for it.
+    const [book] = booksOn(
+      record(`
+        <dc:title>A Constructed Title</dc:title>
+        <dc:identifier>urn:uuid:00000000-0000-4000-8000-000000000003</dc:identifier>
+        <dc:identifier>9780306406157</dc:identifier>
+      `),
+    );
+
+    expect(book!.isbn).toBe("9780306406157");
+  });
+
+  it("still gives back the first identifier where a later one was the ISBN", () => {
+    // The other half of that pair, and the cost of it: `identifier` is what the
+    // document put first, so it does not always spell what `isbn` was read
+    // from. Asserting the two in one arm would leave a mutation to either
+    // reddening a test whose name says nothing about which half broke.
+    const [book] = booksOn(
+      record(`
+        <dc:title>A Constructed Title</dc:title>
+        <dc:identifier>urn:uuid:00000000-0000-4000-8000-000000000003</dc:identifier>
+        <dc:identifier>9780306406157</dc:identifier>
+      `),
+    );
+
+    expect(book!.identifier).toBe(
+      "urn:uuid:00000000-0000-4000-8000-000000000003",
+    );
   });
 
   it("reads a record however deep in the document it sits", () => {
@@ -596,10 +656,154 @@ describe("what the catalogue does not say about who owns these books", () => {
     expect(Object.keys(book!).sort()).toEqual([
       "authors",
       "identifier",
+      "isbn",
       "publisher",
       "record",
       "title",
     ]);
+  });
+});
+
+describe("an identifier is read as an ISBN where the value is one", () => {
+  /**
+   * What the refusal this replaced was worth, restated as cases.
+   *
+   * That refusal was that an unknown scheme put through `parseIsbn` files a
+   * right looking number in the field every lookup treats as an ISBN. What it
+   * missed is that `parseIsbn` is a check digit and not a shape, so the
+   * question is settled per value rather than per scheme: the rows below are
+   * what a `dc:identifier` can hold, and only the ones that are ISBNs come back
+   * as one.
+   *
+   * **Measured over the owner's own library, 2026-09-11**: of 931 EPUBs, 184
+   * carry a check digit valid ISBN and 43 of those are labelled as one, so
+   * deciding on the label rather than the value loses 141 of them.
+   *
+   * **Each row carries its own expected answer.** Asserting only that every
+   * value yields a string or a null would pass with the two halves swapped.
+   */
+  const IDENTIFIERS: readonly {
+    readonly what: string;
+    readonly written: string;
+    readonly isbn: string | null;
+  }[] = [
+    { what: "a bare ISBN-13", written: "9780306406157", isbn: "9780306406157" },
+    {
+      what: "the spelling a publisher prints",
+      written: "978-0-306-40615-7",
+      isbn: "9780306406157",
+    },
+    {
+      what: "the EPUB 3 spelling",
+      written: "urn:isbn:9780306406157",
+      isbn: "9780306406157",
+    },
+    {
+      what: "the same prefix without the urn",
+      written: "ISBN:0-306-40615-2",
+      isbn: "9780306406157",
+    },
+    {
+      what: "an ISBN-10, which arrives canonical",
+      written: "0306406152",
+      isbn: "9780306406157",
+    },
+    {
+      what: "an ISBN-10 whose check digit is X",
+      written: "156389016X",
+      isbn: "9781563890161",
+    },
+    {
+      what: "a value Amazon also issues as an ASIN",
+      // `kindle.ts` refuses this call on a measurement about that format: none
+      // of its 1,032 ASINs is ISBN-10 shaped, so parsing there could only
+      // mislabel. A value that does check digit is an ISBN whatever named it,
+      // and Amazon issues a printed edition's ISBN-10 as its ASIN.
+      written: "162380874X",
+      isbn: "9781623808747",
+    },
+    {
+      what: "a `B` prefixed ASIN, which is what that catalogue holds",
+      written: "B000000001",
+      isbn: null,
+    },
+    {
+      what: "a UUID, which is what an EPUB identifier as often is",
+      written: "urn:uuid:00000000-0000-4000-8000-000000000001",
+      isbn: null,
+    },
+    {
+      what: "thirteen digits whose check digit does not hold",
+      // **The arm that says this is a check digit and not a shape.** One digit
+      // off the first row above, and the only thing that can refuse it is the
+      // arithmetic.
+      written: "9780306406158",
+      isbn: null,
+    },
+    {
+      what: "an EAN-13 that is not a book",
+      // Check digit valid and refused on the prefix, so this arm observes the
+      // bookland gate rather than the modulus.
+      written: "4006381333931",
+      isbn: null,
+    },
+    {
+      what: "a word with the label buried in it",
+      // **The arm that observes the `^` in `ISBN_PREFIX`.** Measured by the
+      // security seat: unanchoring that regex left all 99 arms green, and this
+      // value reads as `9780306406157` under the unanchored one.
+      written: "9780306isbn406157",
+      isbn: null,
+    },
+    { what: "a word", written: "first", isbn: null },
+  ];
+
+  it.each(IDENTIFIERS)("reads $what", ({ written, isbn }) => {
+    const [book] = booksOn(
+      record(`
+        <dc:title>A Constructed Title</dc:title>
+        <dc:identifier>${written}</dc:identifier>
+      `),
+    );
+
+    expect(book!.identifier).toBe(written);
+    expect(book!.isbn).toBe(isbn);
+  });
+
+  it("reads past an identifier with no text to one that is an ISBN", () => {
+    expect(booksOn(EMPTY_FIRST)[0]!.isbn).toBe("9780306406157");
+  });
+
+  it("still takes the first identifier there, which had no text", () => {
+    // One assertion an arm, so `break` and a change to which element
+    // `identifier` comes off redden arms whose names say which broke.
+    expect(booksOn(EMPTY_FIRST)[0]!.identifier).toBeNull();
+  });
+
+  it("reads no ISBN off a record carrying no identifier", () => {
+    expect(booksOn(titled("Bare"))[0]!.isbn).toBeNull();
+  });
+
+  it("tests every value and not only the ones spelled as an ISBN", () => {
+    // **The whole of what changed**, asserted as the pair rather than as one
+    // case: the same number arrives labelled and bare, and the reader answers
+    // the same thing to both. A reader deciding on the label would answer only
+    // the first, which is the 43 of 184 the measurement above counted.
+    const labelled = booksOn(
+      record(`
+        <dc:title>A Constructed Title</dc:title>
+        <dc:identifier>urn:isbn:9780306406157</dc:identifier>
+      `),
+    );
+    const bare = booksOn(
+      record(`
+        <dc:title>A Constructed Title</dc:title>
+        <dc:identifier>9780306406157</dc:identifier>
+      `),
+    );
+
+    expect(labelled[0]!.isbn).toBe("9780306406157");
+    expect(bare[0]!.isbn).toBe(labelled[0]!.isbn);
   });
 });
 
@@ -608,6 +812,7 @@ describe("a document this reader did not get everything out of", () => {
     expect(libraryOn(titled("Bare")).missing).toEqual([
       "authors",
       "identifier",
+      "isbn",
       "publisher",
     ]);
   });
@@ -624,7 +829,7 @@ describe("a document this reader did not get everything out of", () => {
       `),
     );
 
-    expect(library.missing).toEqual(["authors", "identifier"]);
+    expect(library.missing).toEqual(["authors", "identifier", "isbn"]);
   });
 
   it("reads a field off a record it skipped", () => {
@@ -638,7 +843,7 @@ describe("a document this reader did not get everything out of", () => {
     expect(library).toMatchObject({
       books: [],
       skipped: 1,
-      missing: ["authors", "identifier"],
+      missing: ["authors", "identifier", "isbn"],
     });
   });
 
@@ -666,8 +871,36 @@ describe("a document this reader did not get everything out of", () => {
     expect(library.missing).toEqual(sorted);
   });
 
-  it("has nothing missing on a document carrying every element", () => {
+  it("has nothing missing on a document filling every field", () => {
     expect(libraryOn(FULL).missing).toEqual([]);
+  });
+
+  it("names the ISBN missing where every identifier was something else", () => {
+    // **The case the field is a member for.** The document carried identifiers,
+    // so `identifier` is filled and only `isbn` says what this reader could not
+    // take out of them. A vocabulary without it would report the document as
+    // fully read.
+    expect(libraryOn(WRAPPED).missing).toEqual(["isbn"]);
+  });
+
+  it("can name the identifier missing on a document that yielded an ISBN", () => {
+    // **The claim `DigitalEditionsField` makes, at the level it makes it.**
+    // Neither member implies the other: `EMPTY_FIRST`'s first identifier has no
+    // text, so `identifier` is unfilled, and its second is an ISBN, so `isbn`
+    // is filled.
+    expect(libraryOn(EMPTY_FIRST).missing).toEqual([
+      "authors",
+      "identifier",
+      "publisher",
+    ]);
+  });
+
+  it("counts an ISBN off a record it skipped", () => {
+    // The half a caller cannot recompute from `books`: a record with no title
+    // is not shelved and still says the document carried ISBNs.
+    expect(
+      libraryOn(record("<dc:identifier>9780306406157</dc:identifier>")).missing,
+    ).toEqual(["authors", "publisher"]);
   });
 
   it("says this catalogue states no version of itself", () => {

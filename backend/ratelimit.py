@@ -161,6 +161,32 @@ AUTHORITY_LIMIT = RateLimit(max_attempts=10, window_seconds=60)
 # stops a held-down button becoming a fan-out at the image services.
 COVER_BACKFILL_LIMIT = RateLimit(max_attempts=6, window_seconds=60)
 
+# One run of the store identifier backfill resolves up to
+# `routers/books.MAX_IDENTIFIER_BACKFILL` Google volume ids, one metered request
+# each, so this is the only limit here whose ceiling is a **bill** rather than
+# somebody else's patience.
+#
+# **Its own counter rather than `METADATA_LIMIT`, because the two are different
+# units.** One metadata call is one book; one call here is fifty. Sharing the
+# sixty a minute would put this route at 3,000 volume requests a minute against a
+# key whose free daily quota is a four figure number, and would let a backfill
+# exhaust the counter that scanning a barcode depends on.
+#
+# **Its own counter rather than `COVER_BACKFILL_LIMIT`, though the number is the
+# same one.** That one is sized against two free image services and this one
+# against a metered key, so they answer to different suppliers and would move
+# for different reasons; sharing a counter would also make a cover repair and a
+# metadata repair ration each other for no reason a member could see.
+#
+# Six a minute is **300 metered volume requests a minute per member**, five
+# times what `METADATA_LIMIT` can spend at the same supplier, which is the
+# figure to argue with rather than the six. It is a large store import
+# resolved in a few minutes and a rate a person pressing a button cannot
+# exceed by accident, and it is not self limiting: a book Google has no
+# volume for stays a candidate and the cursor returns to 0 at the end of
+# the library, so the run repeats for as long as somebody presses.
+IDENTIFIER_BACKFILL_LIMIT = RateLimit(max_attempts=6, window_seconds=60)
+
 
 # The public catalogue, and it is the only limit here whose caller holds no
 # session at all. Everything else on this list is either a credential endpoint
@@ -370,6 +396,7 @@ import_limiter = SlidingWindowLimiter(IMPORT_LIMIT)
 metadata_limiter = SlidingWindowLimiter(METADATA_LIMIT)
 authority_limiter = SlidingWindowLimiter(AUTHORITY_LIMIT)
 cover_backfill_limiter = SlidingWindowLimiter(COVER_BACKFILL_LIMIT)
+identifier_backfill_limiter = SlidingWindowLimiter(IDENTIFIER_BACKFILL_LIMIT)
 public_catalogue_limiter = SlidingWindowLimiter(PUBLIC_CATALOGUE_LIMIT)
 recovery_request_address_limiter = SlidingWindowLimiter(RECOVERY_REQUEST_LIMIT)
 recovery_request_account_limiter = SlidingWindowLimiter(RECOVERY_REQUEST_LIMIT)

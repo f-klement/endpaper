@@ -1,13 +1,16 @@
 import { BookFormat } from "../../api/generated/model";
 import type {
   BookCreate,
+  BookIdentifierIn,
   BookLookup,
   BookMatch,
   CopyCreate,
 } from "../../api/generated/model";
 import { AUTHOR_SEPARATOR, boundNumber, boundText } from "../../lib/bookBounds";
 import { normaliseLocation } from "../../lib/lastLocation";
-import type { FileMetadata } from "../../lib/fileReaders";
+import type { FileIdentifier, FileMetadata } from "../../lib/fileReaders";
+import type { StoreIdentifier, StoreIdentifierScheme } from "../../lib/stores";
+import { boundIdentifiers } from "../SettingsPage/LibrarySettingsPage/types";
 import type { NameClues } from "../../lib/fileName";
 import type { AudiobookGroup } from "../../lib/audiobookGroups";
 
@@ -21,6 +24,19 @@ import type { AudiobookGroup } from "../../lib/audiobookGroups";
  */
 export interface BookDraft extends BookLookup {
   notFound?: boolean;
+  /**
+   * What the file said this book is called elsewhere, already bounded.
+   *
+   * **Not part of `BookLookup`, because no catalogue answers one.** It is here
+   * rather than beside `coverFile` on the pending book for the opposite reason
+   * to that one: a cover is a second request after the book exists and this is
+   * a field of the same body, so it rides the draft the confirm step edits and
+   * reaches `toScanRequest` with the rest.
+   *
+   * Absent on every draft but a file's, which is what keeps it off the wire for
+   * a barcode: `lib/isbn.ts` and the two catalogues name no store's number.
+   */
+  identifiers?: BookIdentifierIn[];
 }
 
 /**
@@ -174,6 +190,183 @@ export function draftFromMatch(match: BookMatch): BookDraft {
 }
 
 /**
+ * Labels a file may write that name a scheme this app stores.
+ *
+ * **Four spellings, closed, and every other label a real library carries is
+ * refused.** The set is small because it was measured rather than reasoned
+ * about: over 931 EPUBs of the household's own library, none unreadable, the
+ * `opf:scheme` values are `uuid` in either case 79 times, `calibre` 51, the
+ * four ISBN spellings 47 together, `MOBI-ASIN` 31, `ASIN` 4, `AMAZON` 4, `URI`
+ * 4, `BARNESNOBLE` 2, `GOODREADS` 2, and two that are not scheme names at all.
+ * **Three of those fifteen spellings are admitted and twelve are refused.**
+ *
+ * **`GOOGLE` is the fourth and occurs in none of the 931**, which is stated
+ * because it is the one admission no count supports. It is admitted on the
+ * mechanism rather than on a measurement: Calibre writes that type beside a
+ * book, and a conversion carries a type into the package document, which is how
+ * `GOODREADS` and `BARNESNOBLE` reached files whose producer has no such
+ * notion.
+ *
+ * **`MOBI-ASIN` is admitted and judged by its value, which is a departure from
+ * calibre's own default and not a correction of it.** Calibre refuses that type
+ * unless asked, `use_mobi_asin` being `False`, with a help text warning that the
+ * value may be another store's, and as a blanket rule over a whole field that
+ * is right: the type names where a value was found, EXTH record 113, whose own
+ * comment in calibre's reader says `ASIN or other id`. Measured over the same
+ * library, the two halves separate by length: **16 values are a `B` followed by
+ * nine alphanumerics and 15 are a uuid or hex string of 32 to 40 characters**,
+ * which is the filler calibre mints into that record when a file has no ASIN.
+ * A label cannot tell those apart and `PRODUCED_VALUE` can, so the row is kept
+ * on the value and never on the label alone. Owner's decision, 2026-09-11.
+ *
+ * **What that buys and what it does not.** This library's filler is refused on
+ * its length, and `lib/calibre.identifiersWithScheme` records the limit that
+ * leaves: the shape cannot tell a ten character ASIN from a ten character
+ * something else, which is why the decline there is on the type. So a filler
+ * ten characters long would be kept, and that is the risk this admission
+ * accepts rather than one it closes.
+ *
+ * **Why each of the refused spellings is refused**, stated here because a
+ * refusal nobody wrote down is a gap somebody fills back in:
+ *
+ * - `uuid` in either case, `calibre` and `URI`. No reader here produces a value
+ *   anything consumes, which is `BookIdentifierScheme`'s own gate on a member.
+ * - The four ISBN spellings. An ISBN belongs in `books.isbn`, and
+ *   `opf.readIsbn` already puts it there having tested its check digit.
+ * - `GOODREADS` and `BARNESNOBLE`, for the reason `goodreads` was refused a
+ *   scheme member: nothing here reads one.
+ * - `9781641701709` and `URN:ISBN/9781407061597`. **Two of the fifteen
+ *   spellings a real library carries are an identifier in the slot where a
+ *   scheme name goes**, which is the argument for admitting a closed set
+ *   rather than parsing what is found.
+ *
+ * **EPUB 3 says this in a second vocabulary, and none of it lands here.** An
+ * `identifier-type` refinement carries a number from ONIX code list 5, measured
+ * over the same library as `15` 28 times, `22` 4 times and `uuid` 3 times. A
+ * number names no store, so nothing here could tell which one a proprietary
+ * code meant, and `opf.readIdentifiers` puts both spellings in one field, so
+ * the closed set refuses the numbers without an arm of its own.
+ *
+ * **This vocabulary and `lib/calibre.CALIBRE_TYPES` differ in both directions,
+ * deliberately, and the reason is the producer.** That rule admits a
+ * marketplace suffix, `amazon_de` and its family, because the calibre plugin
+ * writing that column was read and every such key holds an ASIN by
+ * construction; no suffixed spelling occurs in the 931, so this one has no
+ * population to admit it on. This rule admits `mobi-asin`, which that one
+ * refuses on the type, because the value rule reaches a distinction a Calibre
+ * type column cannot make on its own.
+ */
+const LABELS_OF_SCHEME: Record<StoreIdentifierScheme, readonly string[]> = {
+  asin: ["asin", "amazon", "mobi-asin"],
+  google_books: ["google"],
+};
+
+/**
+ * The same, keyed the way a file is read: one lower cased label to one scheme.
+ *
+ * A `Map` rather than an object, so a file labelling itself `__proto__` or
+ * `constructor` reaches no inherited member.
+ */
+const SCHEME_OF_LABEL = new Map<string, StoreIdentifierScheme>(
+  Object.entries(LABELS_OF_SCHEME).flatMap(([scheme, labels]) =>
+    labels.map((label) => [label, scheme as StoreIdentifierScheme] as const),
+  ),
+);
+
+/**
+ * What a value has to look like for the scheme's own readers to have made it.
+ *
+ * **The same fact `lib/calibre.PRODUCED_VALUE` holds**, because it is a
+ * property of the scheme rather than of whoever wrote the label: ten characters
+ * of Amazon's alphabet for an ASIN, twelve of the URL safe alphabet for a
+ * volume id. This module's mirrored test reads both out of source and requires
+ * them to be the same text, which is what `takeout.VOLUME_ID` and that table
+ * already do for the Google half. A single home for it beside
+ * `StoreIdentifierScheme` is raised rather than taken here.
+ *
+ * **It is what carries `mobi-asin`**, so the shape is load bearing rather than
+ * a sanity check: the label is admitted and the value decides, 16 of that
+ * library's 31 such rows kept and 15 refused. **The same ten characters as the
+ * other three labels**, and nothing measured supports a narrower rule for this
+ * one: what refuses those 15 is their length.
+ *
+ * **No matcher for the filler, which is the deliberate half.** Recognising a
+ * uuid would be an inclusion list over an open set, and calibre is free to mint
+ * a different filler tomorrow. A rule saying what an Amazon code is refuses
+ * every filler that is not ten characters of this alphabet, which is every
+ * filler that library holds and not every filler there could be.
+ *
+ * **The ASIN alphabet is not narrowed to a `B` prefix.** Amazon issues a
+ * printed edition's ISBN-10 as its ASIN, and in that library **four of the
+ * eight `ASIN` and `AMAZON` values are exactly that**, so a `B` rule would drop
+ * half of what this admits. What it costs is that such a value is also the
+ * book's ISBN.
+ *
+ * **Two columns and two different tokens, which is the answer to that.**
+ * `opf.readIsbn` runs every candidate through `parseIsbn`, which answers the
+ * canonical ISBN-13, so the book carries the thirteen digit form while the
+ * identifier row carries the ten character one Amazon issued. Neither is a copy
+ * of the other, and the row records what Amazon knows the book by rather than
+ * restating the edition's number. **Written without the worked pair**: the
+ * first draft carried one and its ISBN-13 was wrong, which is what a literal
+ * nothing recomputes does.
+ *
+ * **A padded value is refused rather than trimmed.** The shape is anchored and
+ * whitespace is not in either alphabet, and closing one up would send a value
+ * this app invented rather than one the file carried.
+ *
+ * Total over `StoreIdentifierScheme`, `LABELS_OF_SCHEME`' discipline: a scheme
+ * added to that union with no shape here is a compile error rather than a label
+ * admitted on its name alone.
+ */
+const PRODUCED_VALUE: Record<StoreIdentifierScheme, RegExp> = {
+  asin: /^[A-Za-z0-9]{10}$/,
+  google_books: /^[A-Za-z0-9_-]{12}$/,
+};
+
+/**
+ * The identifiers a picked file labelled with a scheme this app stores.
+ *
+ * **A name rule decides the scheme and a value rule decides whether the row is
+ * kept**, which is `lib/calibre.identifiersWithScheme`'s shape and its reason: a
+ * label is a claim a file makes, and a file is untrusted input. Both rules are
+ * above.
+ *
+ * **The label is trimmed and the value is not.** `opf.ts` reads `opf:scheme`
+ * with `getAttribute`, which trims nothing, while its EPUB 3 route and every
+ * other reader in the family hand over a label that is already trimmed; the
+ * value needs no trim because `PRODUCED_VALUE` refuses whitespace outright.
+ * Lower cased for the reason calibre's own readers lower case a type: the
+ * spelling is whatever a producer felt like, and this library holds `ASIN`
+ * beside `isbn`.
+ *
+ * **One entry a matching label, folded and capped nowhere here.**
+ * `LibrarySettingsPage/types.boundIdentifiers` is where a repeat of one scheme
+ * and value becomes one row and where the request's ceiling of eight is, and
+ * the two belong together: the ceiling truncates, so a repeat left standing
+ * would spend a slot. Two labels naming **different** values stay two rows,
+ * which is what `models.BookIdentifier` says two rows are for.
+ *
+ * **A file carrying no label this admits yields an empty list and never a
+ * missing book.** That is `lib/bookBounds.ts`' rule on a field it does not
+ * cover, and it is the ordinary outcome. Across the 931 files measured the
+ * admitted labels occur 39 times, of which the value rule keeps 24.
+ */
+export function identifiersFromFile(
+  identifiers: readonly FileIdentifier[],
+): StoreIdentifier[] {
+  const kept: StoreIdentifier[] = [];
+  for (const identifier of identifiers) {
+    if (identifier.scheme === null) continue;
+    const scheme = SCHEME_OF_LABEL.get(identifier.scheme.trim().toLowerCase());
+    if (scheme === undefined) continue;
+    if (!PRODUCED_VALUE[scheme].test(identifier.value)) continue;
+    kept.push({ scheme, value: identifier.value });
+  }
+  return kept;
+}
+
+/**
  * The confirm step, prefilled from a file the member picked.
  *
  * A sibling of `draftFromLookup` and `draftFromMatch` rather than a branch of
@@ -184,40 +377,23 @@ export function draftFromMatch(match: BookMatch): BookDraft {
  * `lib/bookBounds.ts` carries that rule and the reason for the cut or drop
  * split.
  *
- * **No identifiers, and this one is a decision rather than a field nobody
- * wired.** `BookCreate.identifiers` carries what a store's adapter labelled,
- * because that format names the identifier in a field whose name already says
- * what it is. A file labels its own, and `fileReaders.FileIdentifier` says who
- * labels which.
+ * **The identifiers a file labelled `ASIN`, `AMAZON` or `GOOGLE` are sent, and
+ * every other label is refused.** `identifiersFromFile` is that rule and says
+ * what each refusal was measured against; `boundIdentifiers` is the same door
+ * the store import passes through, so what may cross the wire is one rule
+ * rather than a second copy of four.
  *
- * **Four of the five readers cannot produce a scheme at all.** Three write
- * `ISBN` and `cbz.ts` writes `GTIN`, a barcode that is an ISBN on a collected
- * volume and a product code on an issue; `BookIdentifierScheme` has a member
- * for neither, an ISBN being the thing that enum exists to keep out of itself.
- * So there is nothing there to map, whatever anybody's library holds.
+ * **Four of the five readers can still produce nothing this admits**, and that
+ * is a property of the code rather than of a corpus. Three write `ISBN` and
+ * `cbz.ts` writes `GTIN`, a barcode that is an ISBN on a collected volume and a
+ * product code on an issue; `BookIdentifierScheme` has a member for neither, an
+ * ISBN being the thing that enum exists to keep out of itself. **The fifth is
+ * `opf.ts`, which repeats whatever label the file wrote**, so the whole of this
+ * flow's yield is what an EPUB says about itself.
  *
- * **The fifth is `opf.ts`, which repeats whatever label the file wrote**, and
- * both schemes that exist belong to a store whose own files were measured not
- * to carry one where a reader could take it. The EPUBs of one real Play Books
- * Takeout identify themselves with UUIDs and Project Gutenberg URLs, which
- * `lib/takeout.ts` records without counting them; that export is 24 pairs and
- * walking it gave that module 23 books and 1 refusal, and the volume id is in
- * the sidecar, which the store import already reads. Of the 69 files measured
- * in `lib/mobi.ts`, the 61 carrying the record that format calls the ASIN hold
- * no Amazon identifier at all.
- *
- * **A Calibre type is mapped and an EPUB's label is not, and the difference is
- * the producer rather than the appetite.** `lib/calibre.identifiersWithScheme`
- * maps free text without a corpus because one program writes that column and
- * its source can be read. A `dc:identifier` label is written by every tool that
- * ever produced an EPUB, so there is no source to read, and the population is
- * the only instrument left. **No corpus here measures it**: the 79 files behind
- * `lib/opf.ts` are Project Gutenberg and IDPF samples, which is two producers.
- * So a mapping written today would be a rule over free text nobody has counted.
- *
- * `tests/lib/fileReaders.test.ts` fails if a reader starts labelling an
- * identifier with a scheme this app stores, which is the half of this that
- * could otherwise go stale in silence.
+ * `tests/lib/fileReaders.test.ts` fails if a reader starts writing a scheme
+ * this app stores instead of repeating the file's own label, which is what
+ * stops a reader inventing a row out of a record that names a different fact.
  *
  * `notFound` is set, which is what puts the confirm step into editable fields:
  * no catalogue was asked, so what is on screen is the file's own claim and the
@@ -246,6 +422,10 @@ export function draftFromFile(record: FileMetadata): BookDraft {
     // the batch both already handle.
     classifications: [],
     suggested_tag_ids: [],
+    // **Two rules and not one**, the same pair the Calibre import builds with:
+    // which scheme a label names is this flow's decision and what may cross the
+    // wire is one door both flows pass.
+    identifiers: boundIdentifiers(identifiersFromFile(record.identifiers)),
     notFound: true,
   };
 }

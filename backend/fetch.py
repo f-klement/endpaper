@@ -531,8 +531,32 @@ class Fetched:
             return self.content.decode("utf-8", errors="replace")
 
     def json(self) -> Any:
-        """The body as JSON. Raises `ValueError` on anything else, as httpx does."""
-        return jsonlib.loads(self.content)
+        """The body as JSON. Raises `ValueError` on anything else, as httpx does.
+
+        **A body nested deeply enough raises `RecursionError`, and it is
+        converted here rather than at each caller.** `json.loads` overflows the
+        stack long before the body overflows `MAX_RESPONSE_BYTES`: measured,
+        `'{"a":' * 100000 + "1" + "}" * 100000` is 600,001 bytes, under a third
+        of the cap, and raises `RecursionError: Stack overflow while decoding a
+        JSON object`. `RecursionError` is a `RuntimeError`, so it passes every
+        `except ValueError` a reader has and escapes as a 500.
+
+        **Converted here because the alternative is an enumeration.** Adding
+        `RecursionError` to each caller's except tuple is a list that has to
+        stay complete, and a fix that closed three of seven doors shipped once
+        already. Every caller that already handles a body it cannot parse now
+        handles this one by construction, and a door written tomorrow is
+        covered before it exists. `tests/test_fetch.py` pins the conversion and
+        `tests/test_house_rules.py` pins this being the only place a response
+        body is parsed.
+        """
+        try:
+            return jsonlib.loads(self.content)
+        except RecursionError as failure:
+            # Not `raise ValueError(...) from failure` with the original
+            # message: `json.loads` phrases this as a stack overflow, which
+            # describes this process rather than the body that caused it.
+            raise ValueError("Body is nested too deeply to parse as JSON") from failure
 
 
 #: Who this is, for the services being asked.
@@ -958,8 +982,7 @@ async def _walk_hops(
             # return_exceptions=True)` and drops a `BaseException` result, so
             # one author record failing costs that author's name.
             # `google_books.py`'s single call is caught a frame up, by
-            # `metadata._google_books`'s `except (httpx.HTTPError, ValueError)`
-            # around `lookup_by_isbn`.
+            # `metadata._google_books`'s handler around `lookup_by_isbn`.
             #
             # The pair this replaced said "six of the ten": a pre-change
             # denominator under a post-change numerator, with no unit stated

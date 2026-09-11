@@ -10,6 +10,7 @@ import CoversSection from "./components/CoversSection";
 import CustomFieldsSection from "./components/CustomFieldsSection";
 import LibraryImport from "./components/LibraryImport";
 import MarcImport from "./components/MarcImport";
+import StoreIdentifiersSection from "./components/StoreIdentifiersSection";
 import StoreImport from "./components/StoreImport";
 import {
   useCalibreImport,
@@ -17,6 +18,7 @@ import {
   useCustomFields,
   useLibraryImport,
   useMarcImport,
+  useStoreIdentifierBackfill,
   useStoreImport,
 } from "./hooks";
 
@@ -36,6 +38,11 @@ import {
  *
  * The covers card reads next to the import because it is what an import leaves
  * undone: a CSV carries no cover, so a library that arrived that way has none.
+ * The store identifiers card is the same argument one step earlier: a Google
+ * Play Books export carries a volume id for every book and no ISBN at all, so
+ * that library arrives with an exact key and nothing looked up from it. It sits
+ * above the covers card because it is what fills a `cover_url` in for those
+ * books, and the covers card is what then downloads one.
  *
  * **The Calibre card sits with the other imports and not on the scan page**,
  * which is the other place a file is read in this app. A Calibre library is a
@@ -54,6 +61,7 @@ export default function LibrarySettingsPage() {
   const navigate = useNavigate();
   const libraryImport = useLibraryImport();
   const coverBackfill = useCoverBackfill();
+  const storeIdentifiers = useStoreIdentifierBackfill();
   const customFields = useCustomFields();
   const marcImport = useMarcImport();
   const calibreImport = useCalibreImport();
@@ -132,6 +140,13 @@ export default function LibrarySettingsPage() {
           />
         </SettingsSection>
       )}
+
+      <StoreIdentifiersSection
+        result={storeIdentifiers.result}
+        isRunning={storeIdentifiers.isRunning}
+        error={storeIdentifiers.error}
+        onRun={storeIdentifiers.run}
+      />
 
       <CoversSection
         result={coverBackfill.result}

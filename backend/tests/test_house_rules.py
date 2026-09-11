@@ -1223,7 +1223,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **117** models under `schemas/`, **43** of
+    Measured on the tree as it stands: **118** models under `schemas/`, **43** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -3889,7 +3889,14 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
     #: The entry points as they stand. Named so that a **removed** door fails
     #: this too: a rule that only checks what it finds passes happily on a file
     #: whose subject has been deleted, which has happened twice in this suite.
-    DOORS = {"lookup", "search", "title_search", "editions", "candidates"}
+    DOORS = {
+        "lookup",
+        "lookup_volume",
+        "search",
+        "title_search",
+        "editions",
+        "candidates",
+    }
 
     def _public_coroutines(self) -> dict[str, set[str]]:
         tree = ast.parse((BACKEND / "metadata.py").read_text())
@@ -6432,3 +6439,97 @@ class TestEveryTableIsInTheDataModelDocument:
         )
 
         assert found == {"books", "custom_fields", "custom_field_values"}
+
+
+def _parses_json_itself(tree: ast.Module) -> list[str]:
+    """Every `<something>.loads(...)` call in a module, as `module.loads`.
+
+    Matched on the attribute rather than on the imported name, so `import json`,
+    `import json as jsonlib` and `from json import loads` are one shape to this
+    walk instead of three spellings to enumerate. The bare `loads(...)` form is
+    included for the same reason.
+    """
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func
+        if isinstance(function, ast.Attribute) and function.attr == "loads":
+            owner = function.value
+            found.append(
+                f"{owner.id}.loads" if isinstance(owner, ast.Name) else "?.loads"
+            )
+        elif isinstance(function, ast.Name) and function.id == "loads":
+            found.append("loads")
+    return found
+
+
+def _imports_fetch(tree: ast.Module) -> bool:
+    """Whether a module imports `fetch`, under any spelling of the import."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name == "fetch" for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom) and node.module == "fetch":
+            return True
+    return False
+
+
+class TestOneDoorParsesAResponseBody:
+    """`fetch.Fetched.json` is the only place a response body becomes a value.
+
+    **Bought by a defect that was fixed three times and still had four doors
+    open.** `json.loads` raises `RecursionError` on a deeply nested body, which
+    is a `RuntimeError`: it passes every `except ValueError` a reader has and
+    escapes as a 500. It was closed one call site at a time at
+    `metadata._google_books`, `_google_volume` and `_google_search`, while
+    `metadata._open_library_object`, `_open_library_search`, `authority._lobid`
+    and `authority._viaf_json` still carried it. `fetch.Fetched.json` now
+    converts it to `ValueError`, and that conversion is worth what this rule is
+    worth: it protects nothing a module parses for itself.
+
+    **The population is derived, not listed.** A module that parses a response
+    body is a module that fetched one, so the rule asks which modules import
+    `fetch` rather than naming files, and it covers a source added tomorrow
+    without being edited. `backup.py` reads an archive member and
+    `settings_store.py` reads a database row; both call `json.loads` and neither
+    imports `fetch`, so they are outside the rule by construction rather than by
+    an exemption somebody has to remember to keep true.
+    """
+
+    def test_no_module_that_fetches_parses_a_body_itself(self) -> None:
+        offenders: dict[str, list[str]] = {}
+        for path in _python_sources():
+            if path.name == "fetch.py":
+                continue
+            tree = ast.parse(path.read_text())
+            if not _imports_fetch(tree):
+                continue
+            calls = _parses_json_itself(tree)
+            if calls:
+                offenders[path.name] = calls
+
+        assert offenders == {}, (
+            f"{offenders} parse a body without going through `fetch.Fetched.json`, "
+            "which is the only place `RecursionError` on a deeply nested body is "
+            "turned into the `ValueError` every caller already handles."
+        )
+
+    def test_the_population_this_rule_walks_is_not_empty(self) -> None:
+        """A rule over no files passes for the wrong reason.
+
+        The companion above is an assertion that a set is empty, so it is also
+        green when the walk finds nothing to look at: a renamed module, a
+        changed import spelling, or a `_python_sources` that stopped returning
+        the modules that fetch. This names the four that do.
+        """
+        fetchers = {
+            path.name for path in _python_sources() if _imports_fetch(ast.parse(path.read_text()))
+        }
+
+        assert fetchers == {
+            "metadata.py",
+            "authority.py",
+            "google_books.py",
+            "opds.py",
+        }

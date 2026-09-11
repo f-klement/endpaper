@@ -158,6 +158,10 @@ async def candidates(*args: Any, plan: sources.Plan = ALL_SOURCES, **kwargs: Any
     return await metadata.candidates(*args, plan=plan, **kwargs)
 
 
+async def lookup_volume(*args: Any, plan: sources.Plan = ALL_SOURCES, **kwargs: Any):
+    return await metadata.lookup_volume(*args, plan=plan, **kwargs)
+
+
 OPEN_LIBRARY = "https://openlibrary.org/"
 GOOGLE_BOOKS = "https://www.googleapis.com/books/v1/volumes"
 DNB = "https://services.dnb.de/sru/dnb"
@@ -7935,6 +7939,13 @@ class TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt:
             "Open Library's edition cluster, which is bespoke and free: its "
             "adapter takes no login and there is none to hand it"
         ),
+        "lookup_volume": (
+            "one bespoke target, Google Books, whose secret is an API key in a "
+            "query string rather than a sealed login. `carries_a_credential` "
+            "answers False for every transport but SRU, so a `logins` mapping "
+            "handed here would be dropped without a word, which is the shape "
+            "that makes a caller believe a login was sent"
+        ),
     }
 
     ROUTER = BACKEND / "routers" / "books.py"
@@ -8035,3 +8046,171 @@ class TestTheWalkSeesEveryWayADoorIsReached:
         source = _wrapped("import metadata\nawait metadata.clear_cache()\n")
 
         assert _metadata_calls(source, self.DOORS) == []
+
+
+class TestLookupVolume:
+    """A Google volume id resolved, and the gate in front of it.
+
+    One source and no chain: nothing but Google can resolve one of its own
+    accession numbers, so what there is to pin here is the gate, the outcomes
+    and that the record is built by the same adapter the ISBN path uses.
+    """
+
+    VOLUME_ID = "s7NIrgEACAAJ"
+
+    def _volume(self) -> dict:
+        return {
+            "id": self.VOLUME_ID,
+            "volumeInfo": {
+                "title": "Dune",
+                "authors": ["Frank Herbert"],
+                "pageCount": 412,
+                "industryIdentifiers": [
+                    {"type": "ISBN_13", "identifier": "9780441013593"}
+                ],
+            },
+        }
+
+    async def test_resolves_to_a_record(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(
+                return_value=httpx.Response(200, json=self._volume())
+            )
+            result = await lookup_volume(self.VOLUME_ID, "key")
+
+        assert result.found
+        assert result.record is not None
+        assert result.record.source == "google_books"
+        assert result.record.page_count == 412
+
+    async def test_the_isbn_on_the_record_is_googles_own_parsed(self):
+        """There is no ISBN to fall back on, which is the whole premise here.
+
+        `_google_isbn13` is what stands between `industryIdentifiers` and a
+        `BookLookup`, so the value on the record is one that passed a check
+        digit rather than whatever the payload carried.
+        """
+        volume = self._volume()
+        volume["volumeInfo"]["industryIdentifiers"] = [
+            {"type": "ISBN_13", "identifier": "not an isbn at all"}
+        ]
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(
+                return_value=httpx.Response(200, json=volume)
+            )
+            result = await lookup_volume(self.VOLUME_ID, "key")
+
+        assert result.found
+        assert result.record is not None
+        assert result.record.isbn is None
+
+    async def test_a_library_that_does_not_ask_google_asks_nobody(self):
+        """The gate, and it is a refusal rather than a quiet empty answer.
+
+        `NO_SOURCES` is the outcome for that reason: a provider that cannot
+        answer has to say so, where NOT_FOUND would be a claim about the book.
+        """
+        without_google = sources.Plan(
+            tuple(
+                sources.Preference(source, source is not CatalogueSource.GOOGLE_BOOKS)
+                for source in sources.DEFAULT_ORDER
+            )
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json=self._volume())
+            )
+            result = await lookup_volume(
+                self.VOLUME_ID, "key", plan=without_google
+            )
+
+        assert result.outcome is metadata.Outcome.NO_SOURCES
+        assert route.call_count == 0
+
+    async def test_a_volume_google_does_not_have_is_not_found(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(
+                return_value=httpx.Response(404)
+            )
+            result = await lookup_volume(self.VOLUME_ID, "key")
+
+        assert result.outcome is metadata.Outcome.NOT_FOUND
+
+    async def test_a_rate_limit_is_reported_as_one(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(
+                return_value=httpx.Response(429)
+            )
+            result = await lookup_volume(self.VOLUME_ID, "key")
+
+        assert result.outcome is metadata.Outcome.RATE_LIMITED
+
+    async def test_an_outage_is_reported_as_one(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(
+                return_value=httpx.Response(503)
+            )
+            result = await lookup_volume(self.VOLUME_ID, "key")
+
+        assert result.outcome is metadata.Outcome.UNAVAILABLE
+
+    async def test_a_transport_failure_is_an_outage_rather_than_an_exception(self):
+        """`_google_volume` catches what `_google_books` catches, and no less.
+
+        A `ResponseTooLarge` is an `httpx.HTTPError`, so the cap degrades to
+        "unavailable" here exactly as it does on the ISBN path.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(
+                side_effect=httpx.ConnectError("no route")
+            )
+            result = await lookup_volume(self.VOLUME_ID, "key")
+
+        assert result.outcome is metadata.Outcome.UNAVAILABLE
+
+    async def test_a_body_nested_past_the_recursion_limit_is_an_outage(self):
+        """The absorbing half of `test_google_books.py`'s raising half.
+
+        `RecursionError` is a `RuntimeError`, so it was caught by neither arm of
+        the adapter's `except` and reached the handler as a 500. On the backfill
+        that is a fifty book batch lost to one bad response.
+        """
+        body = b'{"a":' * 100_000 + b"1" + b"}" * 100_000
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(
+                return_value=httpx.Response(200, content=body)
+            )
+            result = await lookup_volume(self.VOLUME_ID, "key")
+
+        assert result.outcome is metadata.Outcome.UNAVAILABLE
+
+    async def test_the_search_door_absorbs_the_nested_body_too(self):
+        """The **third** door into `google_books._object`, and the busiest.
+
+        A fix that closed two of three would leave the hole on the path that
+        serves `GET /api/books/search` and this route's own title branch, where
+        `_within_deadline` re-raises through `task.result()` and one bad
+        response is a 500 for the whole fan out rather than one source's rows.
+        """
+        body = b'{"a":' * 100_000 + b"1" + b"}" * 100_000
+        google_only = sources.Plan(
+            tuple(
+                sources.Preference(source, source is CatalogueSource.GOOGLE_BOOKS)
+                for source in sources.DEFAULT_ORDER
+            )
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, content=body)
+            )
+            assert await search("dune", "key", limit=1, plan=google_only) == []
+
+    async def test_a_value_that_is_not_a_volume_id_is_never_requested(self):
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json=self._volume())
+            )
+            result = await lookup_volume("../../secret", "key")
+
+        assert result.outcome is metadata.Outcome.NOT_FOUND
+        assert route.call_count == 0

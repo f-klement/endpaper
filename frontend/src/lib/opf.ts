@@ -60,6 +60,7 @@ import { leadingYear } from "./year";
 import { type FileIdentifier, type FileMetadata } from "./fileReaders";
 import { declaresEntities } from "./xmlEntities";
 import { parseIsbn } from "./isbn";
+import { stripIsbnPrefix } from "./isbnLabel";
 
 const OPF_NAMESPACE = "http://www.idpf.org/2007/opf";
 
@@ -265,9 +266,10 @@ function readIdentifiers(
 function readIsbn(identifiers: readonly FileIdentifier[]): string | null {
   const declared = identifiers.filter((one) => isIsbnScheme(one.scheme));
   for (const candidate of [...declared, ...identifiers]) {
-    // `urn:isbn:` is the EPUB 3 spelling of the same fact. `parseIsbn` strips
-    // punctuation but not letters, so the prefix has to come off first.
-    const bare = candidate.value.replace(/^urn:isbn:/i, "");
+    // `parseIsbn` strips punctuation but not letters, so an `isbn` label has
+    // to come off first. `stripIsbnPrefix` is the one home for which spellings
+    // count: this reader used to take `urn:isbn:` only and refuse `ISBN:`.
+    const bare = stripIsbnPrefix(candidate.value);
     const isbn = parseIsbn(bare);
     if (isbn !== null) return isbn;
   }

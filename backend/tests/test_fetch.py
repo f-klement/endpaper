@@ -690,6 +690,45 @@ class TestDecodingMatchesWhatHttpxWouldHaveDone:
         with pytest.raises(ValueError):
             answer.json()
 
+    @pytest.mark.asyncio
+    async def test_a_body_nested_too_deeply_is_a_value_error_and_not_a_500(self):
+        """`RecursionError` is a `RuntimeError`, so no reader's except clause sees it.
+
+        The body is built here rather than pinned as a constant so the depth is
+        the thing asserted: at 100,000 levels it is 600,001 bytes, under a third
+        of `MAX_RESPONSE_BYTES`, so the size cap is not what stops this and the
+        conversion in `Fetched.json` is.
+        """
+        nested = b'{"a":' * 100_000 + b"1" + b"}" * 100_000
+        assert len(nested) < fetch.MAX_RESPONSE_BYTES
+
+        with respx.mock:
+            respx.get(URL).mock(return_value=httpx.Response(200, content=nested))
+            answer = await fetch.get_once(URL)
+
+        with pytest.raises(ValueError):
+            answer.json()
+
+    @pytest.mark.asyncio
+    async def test_a_body_nested_deeply_but_not_too_deeply_still_parses(self):
+        """The conversion turns a parse failure into `ValueError`, not every body.
+
+        Without this arm, `Fetched.json` raising `ValueError` unconditionally
+        would pass the one above. 40 levels is well inside the parser's limit.
+        """
+        with respx.mock:
+            respx.get(URL).mock(
+                return_value=httpx.Response(
+                    200, content=b'{"a":' * 40 + b"1" + b"}" * 40
+                )
+            )
+            answer = await fetch.get_once(URL)
+
+        parsed = answer.json()
+        for _ in range(40):
+            parsed = parsed["a"]
+        assert parsed == 1
+
 
 class TestTheRedirectPolicy:
     """Followed on the same host, refused off it.

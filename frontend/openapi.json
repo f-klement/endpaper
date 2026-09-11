@@ -1186,7 +1186,7 @@
         "type": "object"
       },
       "BookIdentifierScheme": {
-        "description": "Who is naming a Book, where that name is not an ISBN.\n\n**Not `books.isbn`, and this enum is what keeps them apart.** That column is\nthe importer's match key and the lookup key, and every path into it check\ndigits its input. An ASIN is ten characters beginning `B` and passes no such\ntest, so a row carrying one in that column matches nothing and takes the\ndedupe surface down with it for the rows that do. See `docs/decisions.md`.\n\n**A member here has to be a value some reader can produce**, which is\n`AuthorityScheme`'s rule and its reason: a scheme nothing reads an\nidentifier out of is a row that lies. Both below are produced today, in the\nbrowser, by the two store readers that measured an identifier and no ISBN,\nand a Calibre library's own `identifiers` table reaches them through\n`frontend/src/lib/calibre.identifiersWithScheme`.\n\n**`goodreads` is the member that rule has refused**, and a Calibre library\ncarries the type: nothing here produces the value. `csv_import.py` reads a\nGoodreads export and names no `Book Id` column, and `lib/goodreads.ts` is a\nsearch link built from a title and an author. `doi`, `issn`, `oclc` and\n`arxiv` are refused for the same reason and would have a second one, being\na record in a bibliographic file rather than what a store calls an edition.\n\n**Not `books.google_books_id`, though `GOOGLE_BOOKS` names the same\ncatalogue.** That column records which Google volume this row's *metadata*\nwas taken from, and `google_books.merge_into` is the only writer that takes\none from a catalogue: `overwrite=True` there retypes it. (Two others carry a\nvalue the library already holds, `_absorb_fields` on a merge and the copy\nroute through `_WORK_FIELDS`, and `backup.restore` reinstates one. None of\nthem is a fresh assertion, which is why the claim is about the catalogue\nrather than about the count.) A row here records which volume a member's own\nexport said they **own**, which is a fact rather than a preference, and\n`models.AuthorIdentifier` already states that asymmetry for a person's\nname. Writing the store's assertion into the enrichment column would also\npre-empt enrichment, because `merge_into` skips a field that is already\nset, so a Play Books import would stop Google recording its own volume.",
+        "description": "Who is naming a Book, where that name is not an ISBN.\n\n**Not `books.isbn`, and this enum is what keeps them apart.** That column is\nthe importer's match key and the lookup key, and every path into it check\ndigits its input. Most ASINs are ten characters beginning `B` and pass no\nsuch test, so a row carrying one in that column matches nothing and takes\nthe dedupe surface down with it for the rows that do.\n\n**The exception is why a token goes here even when it would pass.** For a\nprinted edition Amazon reuses the ISBN-10 as the ASIN, and that does check\ndigit: measured on the scan path, 4 of 8 `ASIN`/`AMAZON` values are one.\nSuch a value is two facts, the number the book carries and the name Amazon\nfiles it under, so `books.isbn` takes the canonical ISBN-13 and the row here\nkeeps the token as issued. An earlier version of this paragraph said an ASIN\npasses no check digit test at all, which was the weaker claim read as the\nstronger one. See `docs/decisions.md`.\n\n**A member here has to be a value some reader can produce**, which is\n`AuthorityScheme`'s rule and its reason: a scheme nothing reads an\nidentifier out of is a row that lies. Both below are produced today, in the\nbrowser, by the two store readers that measured an identifier and no ISBN,\nand a Calibre library's own `identifiers` table reaches them through\n`frontend/src/lib/calibre.identifiersWithScheme`.\n\n**`goodreads` is the member that rule has refused**, and a Calibre library\ncarries the type: nothing here produces the value. `csv_import.py` reads a\nGoodreads export and names no `Book Id` column, and `lib/goodreads.ts` is a\nsearch link built from a title and an author. `doi`, `issn`, `oclc` and\n`arxiv` are refused for the same reason and would have a second one, being\na record in a bibliographic file rather than what a store calls an edition.\n\n**Not `books.google_books_id`, though `GOOGLE_BOOKS` names the same\ncatalogue.** That column records which Google volume this row's *metadata*\nwas taken from, and `google_books.merge_into` is the only writer that takes\none from a catalogue: `overwrite=True` there retypes it. (Two others carry a\nvalue the library already holds, `_absorb_fields` on a merge and the copy\nroute through `_WORK_FIELDS`, and `backup.restore` reinstates one. None of\nthem is a fresh assertion, which is why the claim is about the catalogue\nrather than about the count.) A row here records which volume a member's own\nexport said they **own**, which is a fact rather than a preference, and\n`models.AuthorIdentifier` already states that asymmetry for a person's\nname. Writing the store's assertion into the enrichment column would also\npre-empt enrichment, because `merge_into` skips a field that is already\nset, so a Play Books import would stop Google recording its own volume.",
         "enum": [
           "asin",
           "google_books"
@@ -3152,6 +3152,57 @@
         ],
         "title": "HeadingKind",
         "type": "string"
+      },
+      "IdentifierBackfillOut": {
+        "description": "What one run of the store identifier backfill managed.\n\nThe same shape as `CoverBackfillOut` above, and deliberately so: it is the\nsame job on a different column, so a member who has run one knows how to\nread the other and the screen draws them the same way.\n\n**The four outcomes are four different things to do next**, which is the\nwhole reason this is not one number. `enriched` is books that gained at\nleast one field. `not_found` is Google saying it has no such volume, which\nis permanent and means the identifier is stale or the book was delisted.\n`unavailable` is Google not answering, which is transient and worth pressing\nagain. `unresolvable` is a stored value that is not a volume id and so was\nnever asked about at all: also permanent, and **not** Google's answer, which\nis why it is not folded into `not_found`. `remaining` is how many candidates\nare left beyond this batch.\n\n**There is no `unchanged`, and a design critic is why.** One was declared,\nfor books whose record answered and carried nothing new. It could not\nhappen: a candidate is a Book with no `google_books_id`, every volume\nresource carries one, and `merge_into` writes it, so every answered book\ngains at least that field. The only body that reached it was a 200 with no\n`id`, which `google_books.lookup_by_volume_id` now refuses as not a volume.\nA count that cannot be non zero is a fact about the code stated on the wire.\n\n**`examined` is the sum of the four and not a fifth outcome**, so a client\ncan check the arithmetic rather than trust it.\n\n**`remaining` counts candidates, not books this will fix.** The candidate\nquery narrows on carrying a `google_books` identifier and cannot narrow on\nthe identifier being shaped like one, so a library whose rows are all\nunresolvable reports them here and then reports them as `unresolvable` as\nthe cursor clears them. Honest either way, and worth saying: the number is\nhow much work is left, not how many books will improve.\n\n`next_after_id` is the cursor, and it is here for exactly the reason\n`CoverBackfillOut` carries one: a book that could not be resolved stays a\ncandidate, so without a cursor it sits at the front of every subsequent run\nfor ever. 0 means this run reached the end.",
+        "properties": {
+          "enriched": {
+            "minimum": 0.0,
+            "title": "Enriched",
+            "type": "integer"
+          },
+          "examined": {
+            "minimum": 0.0,
+            "title": "Examined",
+            "type": "integer"
+          },
+          "next_after_id": {
+            "minimum": 0.0,
+            "title": "Next After Id",
+            "type": "integer"
+          },
+          "not_found": {
+            "minimum": 0.0,
+            "title": "Not Found",
+            "type": "integer"
+          },
+          "remaining": {
+            "minimum": 0.0,
+            "title": "Remaining",
+            "type": "integer"
+          },
+          "unavailable": {
+            "minimum": 0.0,
+            "title": "Unavailable",
+            "type": "integer"
+          },
+          "unresolvable": {
+            "minimum": 0.0,
+            "title": "Unresolvable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "examined",
+          "enriched",
+          "not_found",
+          "unavailable",
+          "unresolvable",
+          "remaining",
+          "next_after_id"
+        ],
+        "title": "IdentifierBackfillOut",
+        "type": "object"
       },
       "ImportPreviewOut": {
         "description": "What the file turned out to be, before anything is written.\n\nExists because a column guessed wrong is invisible until after the import,\nand after the import is too late: the fix is deleting a few hundred books.\nThe reader sees which header filled which field, and the first few rows as\nthe parser actually read them.",
@@ -8049,6 +8100,59 @@
         ]
       }
     },
+    "/api/books/identifiers/backfill": {
+      "post": {
+        "description": "Fill in books that carry a store's own identifier and no ISBN.\n\n**This is what a Google Play Books import needs, and nothing else supplies\nit.** That export carries a Google Books volume id for every book and no\nISBN anywhere, so a book arrives with a title, an author and an exact key,\nand the only enrichment available to it was a search by that title. One\nvolume id resolves to one record, with no ranking and no guess.\n\n**Amazon is deliberately absent.** Amazon publishes no catalogue API, so\nthere is no request an ASIN could become. A book carrying only an ASIN is\nnot a candidate here and is not reported as one.\n\n**Candidates are books with no ISBN, no Google volume already recorded, and\na Google Books identifier.** No ISBN, because an ISBN\nis an exact key the free catalogues answer to, and spending a metered\nrequest on one would be the bill for nothing that\n`sources.Plan.lookup_together` refuses. No volume recorded, because that\ncolumn is what enrichment from Google writes, so a book that has been\nenriched stops being a candidate and this is safe to run twice.\n\n**Scoped to the books the caller can see**, like the cover backfill and for\nthat route's stated reason: `visible_to` has no admin bypass, so each member\nrepairs their own shelf rather than the privacy rule being bent to make an\noperator action work.\n\n**Refuses with 409 when this library does not ask Google Books**, rather\nthan examining nothing and reporting a clean run. A source with no usable\nkey must say so: the cause is a switch and a key in Settings, and a zero\nwould send somebody hunting through their library instead.\n\nBatched and resumable. `next_after_id` carries on past what this run tried,\nand comes back as 0 at the end of the library so pressing again starts over\nand re-tries whatever has since become resolvable.",
+        "operationId": "backfill_from_identifiers",
+        "parameters": [
+          {
+            "description": "Carry on past this book id. From the previous reply.",
+            "in": "query",
+            "name": "after_id",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Carry on past this book id. From the previous reply.",
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "title": "After Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentifierBackfillOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Backfill From Identifiers",
+        "tags": [
+          "books"
+        ]
+      }
+    },
     "/api/books/locations": {
       "get": {
         "description": "The distinct shelf locations in use, most-populated first.\n\nDoubles as the autocomplete source for the location field. Free text with\nno suggestions turns into six spellings of \"living room\" within a week.",
@@ -9423,7 +9527,7 @@
     },
     "/api/books/{book_id}/enrich": {
       "post": {
-        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain, and by\ntitle and author otherwise, which runs the ranked search. **Which\ncatalogues either of those asks is the library's own provider list**, set\nin Settings: the roster holds nine lookup sources that answer an ISBN and\neight search sources that answer a title, the leading pair is asked together\nand the rest one at a time, and a source switched off is not asked on either\npath. Google Books answers only when its own section is on and a key is in\nforce, so a library missing either asks one fewer on each path.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\nClassifications need a selected candidate through `enrich/apply`.",
+        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain; then by\nthe book's own Google Books volume id, where it carries one and the library\nasks Google Books; and by title and author otherwise, which runs the ranked\nsearch. **Exact keys first, and the store identifier is an exact key**: a\nbook imported from Google Play Books carries a volume id and no ISBN, so\nwithout that middle step it is matched by its title, which is the weakest\ninstrument here. **Which\ncatalogues either of those asks is the library's own provider list**, set\nin Settings: the roster holds nine lookup sources that answer an ISBN and\neight search sources that answer a title, the leading pair is asked together\nand the rest one at a time, and a source switched off is not asked on either\npath. Google Books answers only when its own section is on and a key is in\nforce, so a library missing either asks one fewer on each path.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\nClassifications need a selected candidate through `enrich/apply`.",
         "operationId": "enrich_book",
         "parameters": [
           {

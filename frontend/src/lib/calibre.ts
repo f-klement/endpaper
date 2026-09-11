@@ -65,6 +65,7 @@
 
 import { leadingYear } from "./year";
 import { parseIsbn } from "./isbn";
+import { stripIsbnPrefix } from "./isbnLabel";
 import type { FileMetadata } from "./fileReaders";
 import type { SqliteDatabase, SqliteRow } from "./sqlite";
 // The vocabulary of schemes a reader in this directory can produce, and the
@@ -331,7 +332,7 @@ function readIsbn(identifiers: readonly CalibreIdentifier[]): string | null {
     (one) => one.type.trim().toLowerCase() === "isbn",
   );
   for (const candidate of [...declared, ...identifiers]) {
-    const isbn = parseIsbn(candidate.value.replace(/^urn:isbn:/i, ""));
+    const isbn = parseIsbn(stripIsbnPrefix(candidate.value));
     if (isbn !== null) return isbn;
   }
   return null;

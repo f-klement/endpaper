@@ -123,6 +123,8 @@
  * fails the same way, into `missing`.
  */
 
+import { parseIsbn } from "./isbn";
+import { stripIsbnPrefix } from "./isbnLabel";
 import { declaresEntities } from "./xmlEntities";
 
 /** One book the catalogue lists, with no claim about who owns it. */
@@ -154,18 +156,65 @@ export interface DigitalEditionsBook {
   /**
    * The record's `dc:identifier`, exactly as written.
    *
-   * **Opaque, and never read as an ISBN.** What scheme this carries is not
-   * published: Dublin Core does not fix one, an EPUB's own identifier is as
-   * often a UUID as anything else, and no source here shows what Adobe writes.
-   * Putting an unknown scheme through `parseIsbn` would put a right looking
-   * number in a field every lookup treats as an ISBN, which is the refusal
-   * `kindle.ts` records for a `B` prefixed ASIN.
+   * **What the document said, where `isbn` below is what this reader could make
+   * of it.** This one stays raw even when that succeeded: a canonical ISBN-13
+   * is not the string the catalogue held, and dropping the text would leave
+   * nothing to check the reading against.
+   *
+   * **The first one, where `isbn` is read off every one of them.** So a record
+   * whose second identifier is the ISBN has an `isbn` this field does not
+   * spell. `readIsbn` carries why that is the right way round.
+   *
+   * **Still opaque as a name.** What scheme this carries is not published:
+   * Dublin Core fixes none, an EPUB's own identifier is as often a UUID as
+   * anything else, and no source here shows what Adobe writes. So nothing reads
+   * it as a label and it travels no further than the read:
+   * `stores.StoreIdentifierScheme` is closed and has no member for a name
+   * nobody can resolve.
    */
   readonly identifier: string | null;
+  /**
+   * The canonical ISBN-13, where the identifier was one.
+   *
+   * **Decided by the value and never by a label**, which is this tree's rule
+   * wherever the label is absent or is not trusted: `pdf.ts` infers a scheme
+   * from the value because XMP names none, and `opf.ts` and `calibre.ts` each
+   * put every identifier through `parseIsbn` whatever spelling declared it.
+   * Measured over the owner's own library, 2026-09-11: of 931 EPUBs, 184 carry
+   * a check digit valid ISBN and 43 of those are labelled as one, so 141 are
+   * reachable only by testing the value.
+   *
+   * **`parseIsbn` validates a check digit, so this is not a shape guess**, which
+   * is what makes reading an unlabelled scheme safe here. A UUID is refused on
+   * length before a modulus runs, and a `B` prefixed ASIN carries a letter in a
+   * position where ISBN-10 admits none. `readIsbn` states what the check digit
+   * does still admit.
+   *
+   * **`kindle.ts` refuses the same call and that refusal still stands**, on a
+   * measurement about that format rather than on a rule about labels: an ASIN
+   * is the only identifier that catalogue carries and none of its 1,032 is
+   * ISBN-10 shaped, so parsing there could only ever mislabel. Where a value
+   * does pass an ISBN-10 check digit it is an ISBN whatever named it, which is
+   * why Amazon issues a printed edition's ISBN-10 as its ASIN.
+   */
+  readonly isbn: string | null;
 }
 
-/** A field no record in this document carried. */
-export type DigitalEditionsField = "authors" | "publisher" | "identifier";
+/**
+ * A field no record in this document filled.
+ *
+ * **`isbn` is read off the `dc:identifier` elements rather than being a second
+ * one**, and the two are still not the same question: `identifier` says the
+ * first of them had text, `isbn` says one of them check digits. So neither
+ * implies the other, and the case the member exists for is a document whose
+ * every record named an identifier and none of them was an ISBN.
+ *
+ * It is a member because it is a value this reader produces, and a produced
+ * field with no way of being reported missing leaves a caller to infer from
+ * `books` what a skipped record also answers.
+ */
+export type DigitalEditionsField =
+  "authors" | "publisher" | "identifier" | "isbn";
 
 /**
  * Every field `missing` can name, so the list is one thing rather than two.
@@ -185,6 +234,7 @@ const FIELDS: readonly DigitalEditionsField[] = [
   "authors",
   "publisher",
   "identifier",
+  "isbn",
 ];
 
 /** Why a document yielded no library. Closed, one sentence each on screen. */
@@ -234,13 +284,23 @@ export interface DigitalEditionsLibrary {
    */
   readonly schemaVersion: null;
   /**
-   * Fields no record in this document carried. Sorted, so it compares.
+   * Fields no record in this document filled. Sorted, so it compares.
    *
    * **Occupancy and not a schema**, `kindle.ts`'s distinction and for its
    * reason: there is no schema here to ask, so what this says is that nothing in
    * the document filled the field. That covers the two elements this reader
    * takes on the weaker evidence, which is what makes being wrong about them
    * cost a field rather than a library.
+   *
+   * **Filled rather than spelled, which is the word `isbn` needs.** Three of
+   * these are elements a record either carries or does not; the fourth is what
+   * `readIsbn` could make of them, so a document whose every record names an
+   * identifier and none of them check digits reports `isbn` and not
+   * `identifier`.
+   *
+   * **Over every record and not only over `books`**, which is the whole reason
+   * a caller cannot recompute this: a record skipped for having no title still
+   * says what the document carried.
    */
   readonly missing: readonly DigitalEditionsField[];
   /**
@@ -460,20 +520,87 @@ function within(record: Element, name: DigitalEditionsElement): Element[] {
   return own.length > 0 ? own : descendantsNamed(record, name);
 }
 
+/** An element's own text, or `null` where there is none worth having. */
+function textOf(element: Element | undefined): string | null {
+  const value = element?.textContent?.trim();
+  return value ? value : null;
+}
+
 /**
  * The first such element's text, or `null` where there is none worth having.
  *
- * **The first and not a join**, which is the same refusal the two identifiers
- * get: a record carrying two is a record this reader has no way to choose
- * between, so it takes the one the document put first rather than a value that
- * is neither.
+ * **The first and not a join**: a record carrying two titles is a record this
+ * reader has no way to choose between, so it takes the one the document put
+ * first rather than a value that is neither.
+ *
+ * **`isbn` is the one field that does not settle it this way, because it is the
+ * one field with a test.** `readIsbn` reads every identifier, since the check
+ * digit says which of them answered. Nothing else here has anything to ask.
  */
 function firstText(
   record: Element,
   name: DigitalEditionsElement,
 ): string | null {
-  const value = within(record, name)[0]?.textContent?.trim();
-  return value ? value : null;
+  return textOf(within(record, name)[0]);
+}
+
+/**
+ * The ISBN out of whichever of a record's identifiers was one.
+ *
+ * **The value decides and there is nothing else to ask.** Dublin Core fixes no
+ * scheme and this catalogue publishes none, so there is no label here to prefer
+ * or to distrust: `pdf.ts` reaches the same rule from the same absence.
+ *
+ * **Every identifier and not only the first, which is a measurement rather than
+ * a preference.** `opf.ts::readIsbn` found 4 ISBNs over 79 real EPUBs and
+ * reached them only by falling through every identifier the file carried, and
+ * `calibre.ts` and `pdf.ts` fall through the same way. This catalogue's own
+ * `dc:` block is the one an EPUB writes, so a reader stopping at the first
+ * would find an ISBN only where the file happened to put it first.
+ *
+ * **So `identifier` above is not always the text this was read from**, and the
+ * pair is the honest way round: that field is what the document put first, this
+ * one is what the document carried.
+ *
+ * **An empty element is stepped over rather than ending the walk**, which is
+ * what the `continue` below is for: a record spelling `<dc:identifier/>` ahead
+ * of its real one would otherwise lose the ISBN.
+ *
+ * ## What reading past the first admits, which taking the first refused
+ *
+ * **An ISBN that is not this file's own.** A print edition's ISBN carried
+ * beside the ebook's own UUID is the ordinary instance, so the match key can be
+ * a different edition's. `opf.ts` and `calibre.ts` already accept that class,
+ * which is what makes this the tree's rule rather than this module's choice.
+ *
+ * **Where two identifiers both check digit, document order decides**, and
+ * nothing pins which. Same as `opf.ts` once its declared spellings are
+ * exhausted.
+ *
+ * **What the check digit admits, stated rather than implied.** It refuses a
+ * UUID and a `B` prefixed ASIN outright, on length and on an alphabetic
+ * character no position admits. It does not make the residual zero: per value,
+ * a ten digit identifier of some other scheme passes the modulus 1 time in 11,
+ * and a thirteen digit one already beginning 978 or 979 passes 1 time in 10.
+ * Measured by the design seat, exactly over all 10^9 nine digit bodies and over
+ * 1e6 samples for the second. That is the trade the owner's 141 of 184 buys.
+ *
+ * **And reading every identifier compounds that per record rather than leaving
+ * it per value.** Over a record carrying `k` identifiers of that ten digit
+ * kind, the chance one of them passes by arithmetic alone is `1 - (10/11)^k`:
+ * 0.174 at k = 2 and 0.249 at k = 3, measured by the design seat over 500,000
+ * records each, against 0.0909 whatever `k` is under the old rule. A record of
+ * k UUIDs is still 0. Nothing here measures `k`, so the exposure is unbounded
+ * rather than large.
+ */
+function readIsbn(identifiers: readonly Element[]): string | null {
+  for (const element of identifiers) {
+    const written = textOf(element);
+    if (written === null) continue;
+    const isbn = parseIsbn(stripIsbnPrefix(written));
+    if (isbn !== null) return isbn;
+  }
+  return null;
 }
 
 /** Every `dc:creator` a record names, in the document's order. */
@@ -534,17 +661,29 @@ export function readDigitalEditionsLibrary(
   records.forEach((record, index) => {
     const authors = readAuthors(record);
     const publisher = firstText(record, "publisher");
-    const identifier = firstText(record, "identifier");
+    // One walk, because both fields below are read off it: `identifier` is the
+    // first element's text, `isbn` is whichever element check digits.
+    const identifiers = within(record, "identifier");
+    const identifier = textOf(identifiers[0]);
+    const isbn = readIsbn(identifiers);
     if (authors.length > 0) filled.add("authors");
     if (publisher !== null) filled.add("publisher");
     if (identifier !== null) filled.add("identifier");
+    if (isbn !== null) filled.add("isbn");
 
     const title = firstText(record, "title");
     if (title === null) {
       skipped += 1;
       return;
     }
-    books.push({ record: index + 1, title, authors, publisher, identifier });
+    books.push({
+      record: index + 1,
+      title,
+      authors,
+      publisher,
+      identifier,
+      isbn,
+    });
   });
 
   return {

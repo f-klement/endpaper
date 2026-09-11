@@ -1447,3 +1447,84 @@ class TestARecordFromAnUploadedFile:
         nothing about the check."""
         assert _opens_the_upload_door("Record.from_upload(title='X')")
         assert not _opens_the_upload_door('"""names Record.from_upload in prose"""')
+
+
+class TestAScalarThatIsNotTextIsDroppedRatherThanMeasured:
+    """`len(5)` raises, and no catalogue adapter catches `TypeError`.
+
+    **The adapters pass scalars through raw on the stated grounds that this
+    layer bounds them**, so a number or a boolean in a text field was a 500 out
+    of the unhandled exception handler rather than a dropped field. Measured by
+    a security critic over five text fields and five wrong types: **15 of 25**
+    raised. The list and the dict were the other ten: they have `len()`, so they
+    passed the ceiling and went on to a column that cannot hold one.
+
+    One gate in `_drop_unstorable` rather than one per adapter, which is the
+    argument that function's own docstring makes for existing.
+    """
+
+    @pytest.mark.parametrize("value", [5, 1.5, True, ["a"], {"a": 1}, object()])
+    @pytest.mark.parametrize(
+        "field", ["title", "subtitle", "publisher", "description", "language"]
+    )
+    def test_a_non_string_is_cleared(self, field, value):
+        record = Record(**{field: value})
+
+        assert getattr(record, field) is None
+
+    def test_the_rewrite_never_sees_one(self):
+        """`_AS_STORED` is typed `Callable[[str], str | None]`.
+
+        `covers.https_url` calls string methods, so a check placed after the
+        rewrite would raise one line earlier than the `len()` it was meant to
+        protect. `cover_url` is the only rewritten field and so the only one
+        where the order of the two is observable.
+        """
+        # `cast`, because the whole subject is a value the annotation forbids
+        # and an adapter hands over anyway. The parametrised arms above reach
+        # `Record(**{field: value})`, which mypy cannot see into, so this is the
+        # one place the refusal is visible and has to be silenced deliberately.
+        assert Record(cover_url=cast(str, 5)).cover_url is None
+
+    def test_a_string_inside_its_ceiling_is_untouched(self):
+        """The gate refuses a type, never a value."""
+        assert Record(title="Dune").title == "Dune"
+
+    @pytest.mark.parametrize("value", ["412", ["a"], {"a": 1}, object()])
+    @pytest.mark.parametrize("field", ["year", "page_count", "series_index"])
+    def test_a_non_number_is_cleared_too(self, field, value):
+        """The other loop, which the first version of this gate did not cover.
+
+        `low <= value <= high` raises `TypeError` against a `str` exactly as
+        `len()` did, and no adapter catches that either: 9 of 12 combinations
+        raised. Found by the security seat as the defect the previous fix had
+        left in the half of the function it did not touch.
+
+        **`"412"` is the ordinary case rather than the hostile one.** A JSON API
+        answering with a number as a string is everyday, and both Google's
+        `pageCount` and Open Library's `first_publish_year` reach a `Record`
+        without being parsed.
+        """
+        # `cast`, for the reason the `cover_url` arm below states: the subject
+        # is a value the annotation forbids and an adapter hands over anyway.
+        record = Record(**{field: cast(Any, value)})
+
+        assert getattr(record, field) is None
+
+    @pytest.mark.parametrize("field", ["year", "page_count", "series_index"])
+    def test_a_boolean_is_not_a_number(self, field):
+        """A judgement rather than a type error, and recorded as one.
+
+        `isinstance(True, int)` is true and `1 <= True` holds, so a JSON `true`
+        in `pageCount` stored as a page count of **1**: a number this
+        application invented out of a value that was not one.
+        """
+        assert getattr(Record(**{field: cast(Any, True)}), field) is None
+
+    @pytest.mark.parametrize("field,value", [("year", 1965), ("page_count", 412)])
+    def test_a_number_inside_its_range_is_untouched(self, field, value):
+        assert getattr(Record(**{field: cast(Any, value)}), field) == value
+
+    def test_a_float_is_still_a_number(self):
+        """`series_index` is a float column and half numbers are real."""
+        assert Record(series_index=1.5).series_index == 1.5

@@ -144,6 +144,7 @@ from models import User  # noqa: E402
 from ratelimit import (  # noqa: E402
     authority_limiter,
     cover_backfill_limiter,
+    identifier_backfill_limiter,
     import_limiter,
     login_limiter,
     metadata_limiter,
@@ -282,6 +283,7 @@ def reset_rate_limits() -> None:
     metadata_limiter.reset()
     authority_limiter.reset()
     cover_backfill_limiter.reset()
+    identifier_backfill_limiter.reset()
     public_catalogue_limiter.reset()
     recovery_request_address_limiter.reset()
     recovery_request_account_limiter.reset()

@@ -598,6 +598,84 @@ async def _google_books(isbn: str, api_key: str) -> Lookup:
     )
 
 
+async def _google_volume(volume_id: str, api_key: str) -> Lookup:
+    """Google's volume record by its own identifier, through the keyed client.
+
+    The same three refusals `_google_books` maps, from the same exception type
+    and read the same way, because they are the same endpoint's: a rejected key
+    and a rate limit are the two a member can act on, and everything else is an
+    outage.
+
+    **A miss here is NOT_FOUND and says nothing about the id.**
+    `google_books.lookup_by_volume_id` answers None both for a value that is not
+    a volume id and for a volume id Google has never heard of, and neither is
+    worth a distinct outcome: the record is not coming either way, and the
+    caller that cares which it was asks `google_books.is_a_volume_id` before it
+    ever gets here. See `routers/books._resolvable_volume_id`.
+    """
+    try:
+        fields = await google_books.lookup_by_volume_id(volume_id, api_key)
+    except google_books.GoogleBooksError as error:
+        outcome = (
+            Outcome.RATE_LIMITED if "rate limiting" in str(error) else Outcome.UNAVAILABLE
+        )
+        logger.info("Google Books declined volume %s: %s", volume_id, error)
+        return Lookup(outcome, source="google_books")
+    except (httpx.HTTPError, ValueError):
+        logger.warning("Google Books volume lookup failed for %s", volume_id, exc_info=True)
+        return Lookup(Outcome.UNAVAILABLE, source="google_books")
+
+    if fields is None:
+        return Lookup(Outcome.NOT_FOUND, source="google_books")
+
+    # No `isbn` argument, unlike `_google_books`. There is no ISBN to fall back
+    # to: the whole reason this path exists is a Book that has none, so the
+    # record's ISBN is whatever Google's own `industryIdentifiers` carried,
+    # parsed by `_google_isbn13` and absent where it was not a real one.
+    return Lookup(Outcome.FOUND, source="google_books", record=_google_record(fields))
+
+
+async def lookup_volume(
+    volume_id: str, api_key: str, *, plan: sources.Plan
+) -> Lookup:
+    """Resolve a Google volume id, if this library asks Google Books at all.
+
+    **One source, and that is the difference from `lookup`.** An ISBN is a name
+    every catalogue in `sources.LOOKUP_SOURCES` answers to, so that function is a
+    roster, a tier and a budget. A volume id is Google's own accession number
+    and nothing else in the world can resolve one, so there is no chain here and
+    no order to decide: the request is made or it is not.
+
+    **Which makes the plan a gate rather than an order**, and it is the gate
+    that matters. `settings_store.ready_sources` puts Google Books in the plan
+    only when its own section is switched on **and** a key is in force, so
+    asking `plan.asked` is asking the three questions at once: does this library
+    use Google, has it a usable key, and is the provider switched on in the
+    list. `Outcome.NO_SOURCES` is the answer when it is not, for that outcome's
+    own reason: a provider that cannot answer has to say so, and a route that
+    reported nothing found would send a member to type in a book over a setting
+    they could change in one click.
+
+    **Spending metered quota here is the point, and `Plan.lookup_together`'s
+    refusal does not apply.** That rule keeps a metered source out of the tier
+    asked on **every** lookup, because a bill for a book another catalogue
+    already answered is a bill for nothing. Nothing else can answer this one.
+
+    **`plan` is keyword only with no default**, the rule every public entry point
+    in this module follows: a caller that forgot it would silently ask Google on
+    behalf of a library that switched Google off.
+
+    **Not cached**, where `lookup` is. The cache is keyed on an ISBN and exists
+    because a scan repeats: the same barcode is read twice while somebody
+    checks the screen. A volume id is resolved once, during an import of a
+    library that holds each book once, so a cache would hold entries nothing
+    reads and evict the ISBNs that are read.
+    """
+    if CatalogueSource.GOOGLE_BOOKS not in plan.asked:
+        return Lookup(Outcome.NO_SOURCES, source="")
+    return await _google_volume(volume_id, api_key)
+
+
 def _google_isbn13(fields: dict[str, Any]) -> str | None:
     """The volume's own ISBN, if it really is one.
 
@@ -616,8 +694,8 @@ def _google_isbn13(fields: dict[str, Any]) -> str | None:
     **`isinstance` and not just a parse, which is the half a one line fix
     misses.** `parse_isbn` calls string methods, so handing it the int that
     causes the second failure raises `TypeError` out of here, where
-    `_google_books`' own `except (httpx.HTTPError, ValueError)` does not catch
-    it: the same 500 wearing a different exception. The type has to be refused
+    `_google_books`' own handler does not catch it: the same 500 wearing a
+    different exception. The type has to be refused
     before the value is parsed.
 
     Returning None puts the caller back on the canonicalised argument

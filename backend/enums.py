@@ -450,9 +450,18 @@ class BookIdentifierScheme(StrEnum):
 
     **Not `books.isbn`, and this enum is what keeps them apart.** That column is
     the importer's match key and the lookup key, and every path into it check
-    digits its input. An ASIN is ten characters beginning `B` and passes no such
-    test, so a row carrying one in that column matches nothing and takes the
-    dedupe surface down with it for the rows that do. See `docs/decisions.md`.
+    digits its input. Most ASINs are ten characters beginning `B` and pass no
+    such test, so a row carrying one in that column matches nothing and takes
+    the dedupe surface down with it for the rows that do.
+
+    **The exception is why a token goes here even when it would pass.** For a
+    printed edition Amazon reuses the ISBN-10 as the ASIN, and that does check
+    digit: measured on the scan path, 4 of 8 `ASIN`/`AMAZON` values are one.
+    Such a value is two facts, the number the book carries and the name Amazon
+    files it under, so `books.isbn` takes the canonical ISBN-13 and the row here
+    keeps the token as issued. An earlier version of this paragraph said an ASIN
+    passes no check digit test at all, which was the weaker claim read as the
+    stronger one. See `docs/decisions.md`.
 
     **A member here has to be a value some reader can produce**, which is
     `AuthorityScheme`'s rule and its reason: a scheme nothing reads an

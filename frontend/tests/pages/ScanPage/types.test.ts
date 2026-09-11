@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   BookFormat,
+  BookIdentifierScheme,
   ClassificationScheme,
 } from "../../../src/api/generated/model";
 import type { AudiobookGroup } from "../../../src/lib/audiobookGroups";
@@ -26,11 +27,13 @@ import {
   blankPending,
   draftFromAudiobook,
   draftFromFile,
+  identifiersFromFile,
   toCopyRequest,
   toScanRequest,
   type BookDraft,
   type PendingBook,
 } from "../../../src/pages/ScanPage/types";
+import { identifiersWithScheme } from "../../../src/lib/calibre";
 import { TEXT_CEILINGS } from "../../../src/lib/bookBounds";
 import type { FileMetadata } from "../../../src/lib/fileReaders";
 import { CARRIES_A_BOOK } from "../../carriesABook";
@@ -59,6 +62,7 @@ const DRAFT: { [K in keyof BookDraft]-?: BookDraft[K] } = {
     { scheme: ClassificationScheme.ddc, number: "813.54", label: "Fiction" },
   ],
   suggested_tag_ids: [7],
+  identifiers: [{ scheme: BookIdentifierScheme.asin, value: "B000R34YKC" }],
   notFound: false,
 };
 
@@ -178,6 +182,18 @@ const SCHEMA = import.meta.glob("../../../openapi.json", {
   eager: true,
 }) as Record<string, string>;
 
+/**
+ * The two modules that spell the value rule, as text.
+ *
+ * Read rather than imported because both tables are private to their module,
+ * which is `tests/lib/calibre.test.ts`' arrangement for the same problem one
+ * module over.
+ */
+const VALUE_RULE_SOURCES = import.meta.glob(
+  ["../../../src/lib/calibre.ts", "../../../src/pages/ScanPage/types.ts"],
+  { query: "?raw", import: "default", eager: true },
+) as Record<string, string>;
+
 interface Operation {
   operationId?: string;
   requestBody?: {
@@ -268,12 +284,6 @@ const NOT_SENT_BY_THE_SCAN_FLOW: Record<string, string> = {
   // Filing happens afterwards from the book's own page. Named here so that
   // stays a decision rather than a discovery.
   collection_id: "the confirm card offers no collection",
-  // Accepted by the endpoint and sent by nothing here, and a decision that was
-  // taken rather than a ticket left open. `ScanPage/types.draftFromFile` is its
-  // one home and carries the measurement; `tests/lib/fileReaders.test.ts`
-  // guards the fact it rests on.
-  identifiers:
-    "a file's labels name no scheme this app stores. See draftFromFile",
   // Accepted by the endpoint and deliberately not sent, because the default is
   // already the true answer for this flow: somebody scanning a barcode is
   // holding the book. `routers/books.py` gives that same reason where a copy is
@@ -591,6 +601,69 @@ describe("draftFromFile", () => {
     expect(draftFromFile(record({ seriesIndex: 1e9 })).series_index).toBeNull();
   });
 
+  it("sends the identifiers the file labelled and this flow admits", () => {
+    expect(
+      draftFromFile(
+        record({
+          identifiers: [
+            { scheme: "ASIN", value: "B000R34YKC" },
+            { scheme: "GOOGLE", value: "s7NIrgEACAAJ" },
+            { scheme: "ISBN", value: "9780441013593" },
+          ],
+        }),
+      ).identifiers,
+    ).toEqual([
+      { scheme: "asin", value: "B000R34YKC" },
+      { scheme: "google_books", value: "s7NIrgEACAAJ" },
+    ]);
+  });
+
+  it("sends an empty list where the file labelled nothing this admits", () => {
+    // The ordinary outcome, and the reason it is a list rather than an absent
+    // field: a book with no store number still has to land.
+    expect(draftFromFile(record()).identifiers).toEqual([]);
+  });
+
+  it("passes the identifiers through the door the store import passes", () => {
+    // **The fold and the ceiling are `boundIdentifiers`' and not this flow's**,
+    // which is only visible from here: a library filing one number under two
+    // labels would otherwise spend two of the eight slots on one fact. The
+    // canonical form is that door's too, so a lower cased ASIN arrives upper
+    // cased.
+    expect(
+      draftFromFile(
+        record({
+          identifiers: [
+            { scheme: "AMAZON", value: "b000r34ykc" },
+            { scheme: "ASIN", value: "B000R34YKC" },
+          ],
+        }),
+      ).identifiers,
+    ).toEqual([{ scheme: "asin", value: "B000R34YKC" }]);
+  });
+
+  it("keeps a file from spending the whole request on its own labels", () => {
+    // `BookCreate.identifiers` declares `maxItems`, and a payload over it is a
+    // 422 for the whole book. **Read back rather than typed**, which is the
+    // discipline `lib/bookBounds.ts` keeps for every number it holds and which
+    // the sibling builder's test already keeps for this one: a literal here
+    // would still pass the day the schema moved, a smaller count being a weaker
+    // claim. Distinct values throughout, so the fold cannot be what shortens
+    // this.
+    const limit = (
+      requestSchema("scan_add", "#/components/schemas/BookCreate", 10)
+        .properties as { identifiers: { maxItems: number } }
+    ).identifiers.maxItems;
+    const identifiers = Array.from({ length: limit + 1 }, (_, index) => ({
+      scheme: "AMAZON",
+      value: `B000R34YK${index}`,
+    }));
+
+    expect(draftFromFile(record({ identifiers })).identifiers).toHaveLength(
+      limit,
+    );
+  });
+
   it("produces a body the scan endpoint accepts", () => {
     // The half a field by field assertion cannot reach: this is what actually
     // goes on the wire.
@@ -598,6 +671,231 @@ describe("draftFromFile", () => {
     const body = toScanRequest({ ...blankPending(""), draft });
     expect(body).toMatchObject({ title: "Dune", is_private: false });
     expect(body).not.toHaveProperty("notFound");
+  });
+});
+
+/**
+ * Which of a file's own labels become an identifier row.
+ *
+ * **The refusals carry the weight, not the three admissions.** A label is free
+ * text a member's file supplies, so what this describes is a closed set and
+ * every spelling a real library was measured to hold beside it.
+ */
+describe("which of a file's labels reach the endpoint", () => {
+  /** One identifier as a reader hands it over. */
+  function labelled(scheme: string | null, value: string) {
+    return identifiersFromFile([{ scheme, value }]);
+  }
+
+  for (const label of ["ASIN", "AMAZON", "amazon", "MOBI-ASIN"]) {
+    it(`reads ${label} as an Amazon reference`, () => {
+      // The three Amazon spellings that library carries, 4, 4 and 31
+      // occurrences, and the lower cased arm because the column holds whatever
+      // a producer felt like.
+      expect(labelled(label, "B000R34YKC")).toEqual([
+        { scheme: "asin", value: "B000R34YKC" },
+      ]);
+    });
+  }
+
+  it("reads GOOGLE as a volume id, on a mechanism and not a count", () => {
+    // The one admission no occurrence supports: it is in none of the 931 and is
+    // in Calibre's sidecars, from where a conversion carries a type into the
+    // package document, which is how `GOODREADS` and `BARNESNOBLE` reached
+    // files whose producer has no such notion.
+    expect(labelled("GOOGLE", "s7NIrgEACAAJ")).toEqual([
+      { scheme: "google_books", value: "s7NIrgEACAAJ" },
+    ]);
+  });
+
+  it("declines the filler calibre mints into the MOBI-ASIN record", () => {
+    // **The arm that carries the label being admitted at all.** Of that
+    // library's 31 such rows, 16 are an ASIN and 15 are this: the uuid or hex
+    // string calibre writes into EXTH 113 when a file has no ASIN, which is why
+    // calibre refuses the whole type by default. **Refused on length**, both of
+    // them being far longer than the shape admits, and there is no uuid matcher
+    // on purpose. What that does not reach is a ten character filler, which
+    // `lib/calibre.ts` states as the reason its own decline is on the type.
+    expect(
+      labelled("MOBI-ASIN", "0e8c1b52-8a4f-4f65-8a6b-7c4b1e0d2f11"),
+    ).toEqual([]);
+    expect(labelled("MOBI-ASIN", "a3f1c0de9b8847a2b6e5d4c3b2a19081")).toEqual(
+      [],
+    );
+  });
+
+  for (const label of ["ISBN", "isbn", "ISBN-10", "ISBN-13"]) {
+    it(`declines ${label}, which belongs in the ISBN column`, () => {
+      // 47 occurrences across the four spellings. `opf.readIsbn` already takes
+      // it, check digit tested, and `BookIdentifierScheme` exists to keep an
+      // ISBN out of itself. The value is one this shape rule would accept as an
+      // ASIN, so the label is what declines it.
+      expect(labelled(label, "043935806X")).toEqual([]);
+    });
+  }
+
+  for (const label of ["uuid", "UUID", "calibre", "URI"]) {
+    it(`declines ${label}, which no reader here produces a value for`, () => {
+      // 134 occurrences together, the largest group in the library and the one
+      // with nothing to be stored as: a member of `BookIdentifierScheme` has to
+      // be a value some reader produces.
+      expect(labelled(label, "B000R34YKC")).toEqual([]);
+    });
+  }
+
+  for (const label of ["GOODREADS", "BARNESNOBLE"]) {
+    it(`declines ${label}, a store with no scheme member`, () => {
+      expect(labelled(label, "B000R34YKC")).toEqual([]);
+    });
+  }
+
+  it("declines a label that is an identifier rather than a scheme name", () => {
+    // Two of the fifteen spellings in that library are this: a bare ISBN and a
+    // URN where a scheme name goes. Malformed input is what a closed set is
+    // for, and a rule that parsed what it found would have to decide about
+    // these.
+    expect(labelled("9781641701709", "B000R34YKC")).toEqual([]);
+    expect(labelled("URN:ISBN/9781407061597", "B000R34YKC")).toEqual([]);
+  });
+
+  for (const code of ["15", "22", "02", "01"]) {
+    it(`declines the ONIX code list 5 value ${code}`, () => {
+      // EPUB 3's second vocabulary, which `opf.readIdentifiers` puts in the
+      // same field: an `identifier-type` refinement carries a number rather
+      // than a name. Measured over the same library at `15` 28 times, `22` 4
+      // and `uuid` 3. That list has no code for a store's own number, so the
+      // closed set refuses every one of them without an arm of its own.
+      expect(labelled(code, "B000R34YKC")).toEqual([]);
+    });
+  }
+
+  it("differs from the Calibre vocabulary in both directions, on purpose", () => {
+    // **Two rules over one word, and the reason is the producer.**
+    // `lib/calibre.identifiersWithScheme` is grounded in the plugin that writes
+    // that column, so every `amazon_<domain>` key holds an ASIN by
+    // construction; no suffixed spelling occurs in the 931 files, so this rule
+    // has no population to admit one on. The other direction is `mobi-asin`,
+    // which that rule refuses on the type and this one admits and judges by the
+    // value. Both arms are asserted here so neither difference can be closed by
+    // accident.
+    expect(labelled("AMAZON_DE", "B000R34YKC")).toEqual([]);
+    expect(
+      identifiersWithScheme([{ type: "amazon_de", value: "B000R34YKC" }]),
+    ).toHaveLength(1);
+    expect(labelled("MOBI-ASIN", "B000R34YKC")).toHaveLength(1);
+    expect(
+      identifiersWithScheme([{ type: "mobi-asin", value: "B000R34YKC" }]),
+    ).toEqual([]);
+  });
+
+  it("declines an identifier the file did not label at all", () => {
+    // The common shape: a bare `dc:identifier` with no `opf:scheme` and no
+    // refinement. `opf.readIsbn` still reads it, which is where 4 of the 79
+    // file corpus's ISBNs come from, and nothing here guesses a store from it.
+    expect(labelled(null, "B000R34YKC")).toEqual([]);
+  });
+
+  it("takes a label the file padded", () => {
+    // `opf.ts` reads `opf:scheme` with `getAttribute`, which trims nothing,
+    // where its EPUB 3 route hands over a trimmed one. A reader that stopped
+    // trimming would lose the row rather than widen anything.
+    expect(labelled("  ASIN  ", "B000R34YKC")).toEqual([
+      { scheme: "asin", value: "B000R34YKC" },
+    ]);
+  });
+
+  it("refuses a value the file padded rather than trimming it", () => {
+    // Whitespace inside an opaque token means the reader picked up something
+    // that is not the identifier, which is the server's own rule. Closing it up
+    // here would send a value this app invented.
+    expect(labelled("ASIN", "  B000R34YKC  ")).toEqual([]);
+  });
+
+  it("keeps a printed edition's ASIN, which is its ISBN-10", () => {
+    // Amazon issues one, so an alphabet narrowed to a `B` prefix would drop a
+    // real row. The same string is also this book's ISBN, and `opf.readIsbn`
+    // files it there: two columns stating one true thing.
+    expect(labelled("AMAZON", "162380874X")).toEqual([
+      { scheme: "asin", value: "162380874X" },
+    ]);
+  });
+
+  it("declines a value the scheme's own readers would not produce", () => {
+    // The direction a label being trusted could be wrong in: a file free to
+    // write `AMAZON` is not free to make a store page URL an ASIN.
+    expect(labelled("AMAZON", "https://www.amazon.de/dp/B000R34YKC")).toEqual(
+      [],
+    );
+    expect(labelled("ASIN", "9780441013593")).toEqual([]);
+    expect(labelled("GOOGLE", "s7NIrgEACAAJXX")).toEqual([]);
+  });
+
+  it("answers one entry a matching label, folding nothing", () => {
+    // **The seam, asserted rather than assumed.** The fold and the ceiling are
+    // `LibrarySettingsPage/types.boundIdentifiers`', because both are
+    // properties of the scheme and every flow goes through that door; the arms
+    // that pin them for this flow are in `draftFromFile` above.
+    expect(
+      identifiersFromFile([
+        { scheme: "AMAZON", value: "b000r34ykc" },
+        { scheme: "ASIN", value: "B000R34YKC" },
+      ]),
+    ).toEqual([
+      { scheme: "asin", value: "b000r34ykc" },
+      { scheme: "asin", value: "B000R34YKC" },
+    ]);
+  });
+
+  it("holds a value to the shape the Calibre reader holds it to", () => {
+    // **The two tables compared as text, not sampled.** This arm was a list of
+    // 15 candidates and the design seat beat it: widening the ASIN class to
+    // `[A-Za-z0-9.]` passed 88 of 88, because no candidate carried a `.` at
+    // length 10. A sample cannot hold a character class, so the rule is that
+    // the two spellings are the same spelling. `tests/lib/calibre.test.ts`
+    // reads `takeout.VOLUME_ID` the same way, which is the third copy of the
+    // Google half; a single home for all of them is raised rather than taken.
+    const declared = (path: string) => {
+      const source = VALUE_RULE_SOURCES[path] ?? "";
+      // A glob that matched nothing would make the comparison below compare two
+      // empty tables and pass for ever.
+      expect(source.length).toBeGreaterThan(1000);
+      const block = /const PRODUCED_VALUE[^=]*=\s*\{([\s\S]*?)\n\};/.exec(
+        source,
+      );
+      expect(block).not.toBeNull();
+      return Object.fromEntries(
+        [...block![1]!.matchAll(/^\s*(\w+):\s*(\/.*\/),\s*$/gm)].map(
+          ([, scheme, pattern]) => [scheme!, pattern!],
+        ),
+      );
+    };
+
+    const mine = declared("../../../src/pages/ScanPage/types.ts");
+    const calibre = declared("../../../src/lib/calibre.ts");
+    // Both schemes on both sides, so an extractor that found one entry cannot
+    // pass by comparing a table of one with a table of one.
+    expect(Object.keys(mine).sort()).toEqual(["asin", "google_books"]);
+    expect(mine).toEqual(calibre);
+
+    // **What the text comparison cannot say: that this is the table that runs.**
+    // A second `PRODUCED_VALUE` elsewhere in the module, or a rule that stopped
+    // consulting it, leaves the comparison green. So each extracted pattern is
+    // asked of the function, on a value it accepts and one it refuses.
+    const probes: [string, string, string][] = [
+      ["asin", "AMAZON", "B000R34YKC"],
+      ["asin", "AMAZON", "B000R34YK."],
+      ["google_books", "GOOGLE", "aB3-dE6_gH9j"],
+      ["google_books", "GOOGLE", "aB3-dE6_gH9."],
+    ];
+    for (const [scheme, label, value] of probes) {
+      const pattern = new RegExp(mine[scheme]!.slice(1, -1));
+      expect(labelled(label, value).length === 1).toBe(pattern.test(value));
+    }
+    // Both answers appear among the probes, so an agreement that held because
+    // nothing passed is not what was measured.
+    expect(
+      new Set(probes.map(([, label, value]) => labelled(label, value).length)),
+    ).toEqual(new Set([0, 1]));
   });
 });
 

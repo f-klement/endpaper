@@ -17,6 +17,7 @@ import { useMemo, useRef, useState } from "react";
 import {
   getListCustomFieldsQueryKey,
   useBackfillCovers,
+  useBackfillFromIdentifiers,
   useDefineCustomField,
   useDeleteCustomField,
   useListCustomFields,
@@ -31,6 +32,7 @@ import {
 } from "../../../api/generated/endpoints/imports/imports";
 import type {
   CoverBackfillOut,
+  IdentifierBackfillOut,
   CustomFieldKind,
   CustomFieldOut,
   ImportPreviewOut,
@@ -161,6 +163,45 @@ export function useCoverBackfill() {
         // A run rewrites `cover_url` on up to a hundred books at once, and
         // every list and detail view renders it. Covers themselves are `<img>`
         // elements rather than queries, so what goes stale is the catalogue.
+        invalidate.catalogue();
+      },
+    },
+  });
+
+  return {
+    result,
+    // `mutate`, not `mutateAsync`: the failure is reported through `error`.
+    run: () => backfill.mutate({ params: { after_id: cursor } }),
+    isRunning: backfill.isPending,
+    error: backfill.error,
+  };
+}
+
+/**
+ * Filling in books a store import left with an identifier and nothing else.
+ *
+ * The same shape as `useCoverBackfill` above, deliberately: batched server
+ * side, resumed by a cursor, pressed again by a person. Read that hook's
+ * comment for why the cursor is load bearing; the reason is identical and the
+ * consequence is sharper here, since a book re-fetched for nothing costs a
+ * metered request rather than a free one.
+ *
+ * **Not looped automatically**, for the same reason and one more: this spends
+ * a Google Books quota this household pays for, so every request has to be one
+ * somebody asked for.
+ */
+export function useStoreIdentifierBackfill() {
+  const invalidate = useInvalidate();
+  const [result, setResult] = useState<IdentifierBackfillOut | null>(null);
+  const [cursor, setCursor] = useState(0);
+
+  const backfill = useBackfillFromIdentifiers({
+    mutation: {
+      onSuccess: (data: IdentifierBackfillOut) => {
+        setResult(data);
+        setCursor(data.next_after_id);
+        // A run rewrites up to fifty books' scalar fields at once, which is
+        // what every list and detail view renders.
         invalidate.catalogue();
       },
     },

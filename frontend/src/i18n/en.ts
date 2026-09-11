@@ -1545,6 +1545,8 @@ export const en = {
   "stores.title": "Bring a library across from a device or a store",
   "stores.explain":
     "The file stays in this browser. What is read out of it is what the books say about themselves, and that is all that reaches the library. No book file is uploaded. Pick as many of these as apply: one that cannot be read costs that source and nothing else.",
+  "stores.thenLookThemUp":
+    "A store tells this library what the store knows, which is often a title and an identifier. Books that arrive without an ISBN can be filled in afterwards under Books from a store, further down this page.",
   "stores.kobo.name": "Kobo",
   "stores.kobo.explain":
     "A Kobo keeps its library in a file called KoboReader.sqlite, in a hidden folder named .kobo at the top of the device. Plug the reader in and pick that file.",
@@ -1662,6 +1664,25 @@ export const en = {
   "covers.remaining":
     "{remaining} books still to go. Run it again to carry on.",
   "covers.allDone": "Every book that could have a cover has one.",
+
+  // ── Store identifiers ───────────────────────────────────────────────────
+  "storeIdentifiers.title": "Books from a store",
+  "storeIdentifiers.explain":
+    "A Google Play Books export names every book by its Google Books id and carries no ISBN, so those books arrive with a title and little else. This looks each one up by that id, which is exact where matching on a title is a guess.",
+  "storeIdentifiers.run": "Look up books by their store id",
+  "storeIdentifiers.failed": "Those books could not be looked up.",
+  "storeIdentifiers.result":
+    "Looked at {examined} books and filled in {enriched}.",
+  "storeIdentifiers.notFound":
+    "Google has no record for {count} of them. Those ids will not resolve however often this is run.",
+  "storeIdentifiers.unavailable":
+    "Google did not answer for {count} of them. Run it again in a few minutes.",
+  "storeIdentifiers.unresolvable":
+    "{count} of them carry something that is not a Google id, so nothing was asked about those. Running it again will not change that.",
+  "storeIdentifiers.remaining":
+    "{remaining} books still to go. Run it again to carry on.",
+  "storeIdentifiers.allDone":
+    "Every book a Google id could fill in has been looked up.",
 
   // ── About ───────────────────────────────────────────────────────────────────
   "about.title": "About Endpaper",

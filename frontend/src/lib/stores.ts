@@ -722,11 +722,17 @@ function fromDigitalEditions(library: DigitalEditionsLibrary): StoreLibrary {
       key: String(book.record),
       title: book.title,
       authors: book.authors,
-      // `dc:identifier` is opaque and its scheme is not published, so it is
-      // never read as an ISBN. It reaches `identifiers` with no scheme to name
-      // it, which is a member `StoreIdentifierScheme` does not have, so it is
-      // carried no further than the read. Ticketed, not dropped silently.
-      isbn: null,
+      // **The ISBN where the record's `dc:identifier` was one**, which
+      // `adobeDigitalEditions.readIsbn` decides on the value because the
+      // catalogue publishes no scheme to decide on.
+      isbn: book.isbn,
+      // **Empty even when that identifier was an ISBN, and that is not a
+      // dropped value.** This field is for a name that is not an ISBN, so the
+      // one above already holds it and a copy here would be the same fact in
+      // two places, one of them the importer's match key. An identifier that
+      // was not an ISBN has no scheme to name it either, which is a member
+      // `StoreIdentifierScheme` does not have, so it is carried no further than
+      // the read. Ticketed, not dropped silently.
       identifiers: [],
       publisher: book.publisher,
       year: null,

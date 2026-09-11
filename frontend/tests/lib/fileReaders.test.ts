@@ -676,36 +676,32 @@ describe("the vocabulary the readers share", () => {
 });
 
 /**
- * What a reader may label an identifier with, and why a page sending none cares.
+ * The names a reader may not use, whatever syntax it would use them in.
  *
- * **The decision this guards is `ScanPage/types.draftFromFile`'s**, which puts
- * ten of `FileMetadata`'s eleven fields into a request and sends no
- * `identifiers`. That docstring is the one home of the decision and of the
- * measurement; what it rests on is a property of this family, and a property is
- * a thing a test can hold. A reader that starts labelling a store's identifier
- * makes that decision wrong, and nothing else in the tree would say so.
+ * **A reader reports what the file said and never what this app stores**, which
+ * is the whole of the rule and is what `ScanPage/types.identifiersFromFile`
+ * rests on: that module maps four labels a file may write onto a scheme, so a
+ * reader that writes one of those schemes itself puts a row on a book out of a
+ * record that asserts a different fact. `lib/mobi.ts` is the measured case, 61
+ * of 69 files carrying the record Amazon's format calls the ASIN and not one
+ * holding an Amazon identifier.
  *
  * **What an author does when this fires** depends on which way it fired. A new
- * member of `BookIdentifierScheme` forbids every reader here from writing that
- * spelling at once, which is right while no reader produces one; a reader that
- * genuinely produces a store's identifier is the case the decision was taken
- * against, so the answer is to reopen it at `draftFromFile` rather than to
- * widen anything here.
+ * member of `BookIdentifierScheme` forbids every reader from spelling it at
+ * once, which is right while no reader produces one; a reader that genuinely
+ * reads a store's identifier is a decision to take at `identifiersFromFile`,
+ * where the closed set and the measurement behind it live, rather than a reason
+ * to widen anything here.
  *
- * **The family is the registry plus whoever names `FileIdentifier`**, so a
- * sixth reader is covered by being registered, by naming the type, or by both.
- * Measured by the design seat against the naming half alone: dropping the
- * import and the return annotation from `mobi.ts` and labelling `"asin"` went
- * green on 19 of 19. The exclusion, stated as what is left out: a module more
- * than one relative import from a registered reader, by either spelling of an
- * import, which nothing is today.
+ * **Read as a word and not as a literal**, which is what the seats measured to
+ * be necessary: a reader holding `new Map([["mobi-asin", "asin"]])` labels a
+ * row `asin` with no literal at a `scheme:` site, and `BookIdentifierScheme.asin`
+ * has no quotes at all. Both spell the name, and this asks only that.
  *
- * **Three costs of reading the source rather than the values**, all loud rather
- * than silent. A `scheme` in a parameter list or a destructuring reads here as
- * a property; a whole line `//` comment is stripped and a trailing one is not,
- * so this rule cannot be documented by writing `{ scheme: "asin" }` after code
- * on one line; and a shorthand is reported as a computed scheme, because what
- * the binding holds is not in this file's reach.
+ * **The cost is the loud direction.** A trailing `//` comment survives the
+ * prose strip, so a reader documenting itself with `// the MOBI-ASIN record`
+ * after code on one line fails this and has to move the words. Measured over
+ * the family on the day this was written: 0 occurrences of either name.
  */
 const STORED_SCHEMES = Object.values(BookIdentifierScheme).map((scheme) =>
   scheme.toLowerCase(),
@@ -725,11 +721,16 @@ const STORED_SCHEMES = Object.values(BookIdentifierScheme).map((scheme) =>
  * two arms, and `pdf.ts` by `tests/lib/pdf.test.ts > labels an identifier that
  * is not an ISBN with no scheme`, 1 of 3667. A sixth reader added here with a
  * sentence and no such test has nothing holding it.
+ *
+ * **Neither row may name a scheme this app stores**, the arm above, so what a
+ * row says a reader computes is always the file's own text. The module that
+ * turns that text into a scheme is outside this family and is held by the arm
+ * after next.
  */
 const COMPUTES_ITS_SCHEME: Record<string, string> = {
   "lib/opf.ts":
-    "the file's own label, `opf:scheme` or an `identifier-type` refinement. " +
-    "This is the free text the scan flow's decision is about.",
+    "the file's own label, `opf:scheme` or an `identifier-type` refinement, " +
+    "repeated and never interpreted. This is the free text the scan flow maps.",
   "lib/pdf.ts":
     "`ISBN` or nothing, decided by parsing the value, because XMP names no " +
     "scheme of its own.",
@@ -801,62 +802,143 @@ function schemeSites(source: string): string[] {
   return sites;
 }
 
-/** The module a relative specifier written inside `lib/` names. */
-function libModule(specifier: string): string {
-  return `lib/${specifier
-    .split("/")
-    .pop()!
-    .replace(/\.tsx?$/, "")}.ts`;
+/**
+ * The module a relative specifier names, resolved against the module writing it.
+ *
+ * **Resolved rather than reduced to a basename**, which is what this replaced.
+ * Taking the last segment and prefixing `lib/` answers `lib/model.ts` for
+ * `../api/generated/model`, a path nothing has, so a specifier leaving `lib/`
+ * used to drop out of the walk in silence. `null` for a specifier naming no
+ * module in this tree, which the caller skips.
+ */
+function resolvedModule(
+  from: string,
+  specifier: string,
+  all: Map<string, string>,
+): string | null {
+  const parts = from.split("/").slice(0, -1);
+  for (const segment of specifier.split("/")) {
+    if (segment === ".") continue;
+    else if (segment === "..") parts.pop();
+    else parts.push(segment);
+  }
+  const base = parts.join("/").replace(/\.tsx?$/, "");
+  return (
+    [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`].find((candidate) =>
+      all.has(candidate),
+    ) ?? null
+  );
 }
 
 /**
- * Every module this rule is about: the readers the registry loads, whatever is
- * one relative import from one, and everything that names `FileIdentifier`.
+ * The generated client, where `BookIdentifierScheme` is declared.
  *
- * **Three routes because each is evadable alone.** Naming the type is a line an
- * author can delete, which is how a reader labelling `"asin"` went green on 19
- * of 19; the registry cannot be left, since a format nobody registers is a
- * format nobody can pick; and the hop is what reaches `opf.ts`, which is
- * registered through `epub.ts` rather than directly.
- *
- * **The two routes are anchored by what they contribute rather than by a module
- * name**, since without an anchor both could be deleted in silence: measured by
- * the design seat, the family reduced to the naming route alone passed 58 of
- * 58. `lib/epub.ts` is what they contribute today, it naming no
- * `FileIdentifier`, and naming it in the assertion is what would go stale.
+ * The walk below stops here and the rule does not read these files, for one
+ * reason stated as the exclusion: this is the **declaration** of the names the
+ * rule forbids, and it is generated rather than written. A reader reaching for
+ * one still fails, because the reader's own source has to spell
+ * `BookIdentifierScheme.asin` to use it, and that spells the name.
  */
-function labellingModules(): [string, string][] {
-  const all = modules();
-  const seam = all.find(([path]) => path === SEAM)![1];
-  const registered = [...seam.matchAll(IMPORT_CALL)].map(([, specifier]) =>
-    libModule(specifier!),
-  );
-  const oneHop = registered.flatMap((path) => {
-    const source = all.find(([other]) => other === path)?.[1] ?? "";
-    // **A hop is either spelling of an import**, and this is the one pattern
-    // the registry is read with, not a second one: two patterns for one
-    // question is how the looser half came to be widened alone. Measured by the
-    // security seat: a labeller reached by
-    // `const { labelFor } = await import("./x")` and writing `"asin"` passed 58
-    // of 58 while the from clause half was already closed.
-    return [
-      ...[...source.matchAll(FROM_CLAUSE)].map(([, , from]) => from!),
-      ...[...source.matchAll(IMPORT_CALL)].map(([, from]) => from!),
-    ]
-      .filter((from) => from.startsWith("."))
-      .map(libModule);
-  });
-  const family = new Set([...registered, ...oneHop]);
-  return all.filter(
-    ([path, source]) =>
-      family.has(path) ||
-      bindings(source).some(
-        ([, clause, from]) => isSeam(from) && names(clause, ["FileIdentifier"]),
-      ),
-  );
+const GENERATED = "api/generated/";
+
+/** Every relative specifier a module imports, in either spelling of an import. */
+function relativeImports(source: string): string[] {
+  // **One pattern per spelling and not a second pattern per question**, which
+  // is how the looser half came to be widened alone. Measured by the security
+  // seat: a labeller reached by `const { labelFor } = await import("./x")` and
+  // writing `"asin"` passed 58 of 58 while the from clause half was closed.
+  return [
+    ...[...source.matchAll(FROM_CLAUSE)].map(([, , from]) => from!),
+    ...[...source.matchAll(IMPORT_CALL)].map(([, from]) => from!),
+  ].filter((from) => from.startsWith("."));
 }
 
-describe("what a reader may label an identifier", () => {
+/**
+ * Every module a picked file's record can be built in, from a source map.
+ *
+ * **The closure of the registry and not one hop from it**, which is the
+ * population that decides the question rather than a proxy for it: the only
+ * route to `ScanPage/types.draftFromFile` is `readerFor`, which answers out of
+ * `READERS`, so what a reader can reach is exactly what can put a value on a
+ * `FileMetadata` a member's pick is drafted from. A module outside it may hold
+ * what it likes about a scheme; it cannot label a file.
+ *
+ * **One hop was the bound until the security seat measured it.** `lib/opf.ts`
+ * is itself only one hop from the registry, through `epub.ts`, so everything
+ * `opf.ts` imports sat outside the rule, and `opf.ts` is the module that
+ * produces the labels this whole decision is about. Measured on that tree:
+ * `import { identifiersWithScheme } from "./calibre"` added to `mobi.ts` fired
+ * the rule, the identical line in `opf.ts` passed 20 of 20.
+ *
+ * **Takes its sources as an argument** so the walk can be asked of literals,
+ * which is the only way to hold a graph walk against rotting: a fixpoint that
+ * silently stopped after one round would still contain every module named in
+ * any real tree assertion.
+ */
+function familyFrom(all: Map<string, string>): Set<string> {
+  const found = new Set<string>();
+  const frontier = [...all.get(SEAM)!.matchAll(IMPORT_CALL)]
+    .map(([, specifier]) => resolvedModule(SEAM, specifier!, all))
+    .filter((path): path is string => path !== null);
+  while (frontier.length > 0) {
+    const path = frontier.pop()!;
+    if (found.has(path) || path.startsWith(GENERATED)) continue;
+    found.add(path);
+    for (const specifier of relativeImports(all.get(path)!)) {
+      const next = resolvedModule(path, specifier, all);
+      if (next !== null) frontier.push(next);
+    }
+  }
+  return found;
+}
+
+/** The same, over this tree. */
+function readerFamily(): Set<string> {
+  return familyFrom(new Map(modules()));
+}
+
+/**
+ * Every name a module a reader reaches may not spell.
+ *
+ * The scheme names, **and the identifier the generated client declares them
+ * under**, which is the route the security seat measured round the first draft:
+ * `Object.entries(BookIdentifierScheme)` yields both strings without spelling
+ * either, so a reader could label a row out of the enum and a rule reading only
+ * the scheme names would see nothing. The walk stops at the generated client,
+ * so that module's own text is never read and this is what stands in for it.
+ *
+ * **Found by content rather than written down**, so a rename of the generated
+ * declaration cannot leave a literal here guarding nothing: the declaring
+ * module is the one under the generated client carrying every stored scheme as
+ * a quoted value, and asserting there is exactly one is what stops a name being
+ * taken off the wrong file.
+ *
+ * **The literal moved into the arm's probe rather than vanishing**, and that is
+ * the loud direction: a rename of the declaration turns
+ * `Object.entries(BookIdentifierScheme)` red there before the offender
+ * assertion runs. Measured by the security seat against a renamed tree, where a
+ * second instrument confirmed this helper follows the rename and only the probe
+ * does not.
+ */
+function forbiddenNames(all: Map<string, string>): string[] {
+  const declaring = [...all].filter(
+    ([path, source]) =>
+      path.startsWith(GENERATED) &&
+      STORED_SCHEMES.every((scheme) => new RegExp(`"${scheme}"`).test(source)),
+  );
+  expect(declaring.map(([path]) => path)).toHaveLength(1);
+  const declared = /export const (\w+) = \{/.exec(declaring[0]![1]);
+  expect(declared).not.toBeNull();
+  return [...STORED_SCHEMES, declared![1]!];
+}
+
+/** Whether a module spells one of those names, in any syntax. */
+function spells(source: string, forbidden: readonly string[]): boolean {
+  const clean = withoutProse(source);
+  return forbidden.some((name) => new RegExp(`\\b${name}\\b`, "i").test(clean));
+}
+
+describe("what may name a scheme this app stores", () => {
   it("scans a property and not a parameter, a comment or a type", () => {
     // Asked of literals, so the instrument is anchored whatever the tree does:
     // a scanner that stopped matching would report no offender below and pass
@@ -882,71 +964,162 @@ describe("what a reader may label an identifier", () => {
     );
   });
 
-  it("labels no identifier with a scheme this app stores", () => {
-    const labelling = labellingModules();
-    // Three anchors, because the two module routes and the scanner rot
-    // separately. `opf.ts` is reached by the hop and by naming the type;
-    // `mobi.ts` is registered under three keys and names it too; and the
-    // scanner is the arm above's subject read against the real tree.
-    expect(labelling.map(([path]) => path)).toContain("lib/opf.ts");
-    expect(labelling.map(([path]) => path)).toContain("lib/mobi.ts");
-    // **The anchor for the registry and the hop, and it names no module.** The
-    // other two are satisfied by the naming route, so neither could hold these:
-    // measured by the design seat, the family reduced to the naming route alone
-    // passed 58 of 58 before this. Asked as "is anything here through a route
-    // other than naming the type", because a module named instead goes stale in
-    // one word: `epub.ts` is that module today and already imports
-    // `FileMetadata` from the seam, so widening that one import line would move
-    // it to the naming route and quietly stop it discriminating.
-    //
-    // **It holds the two routes together and neither half alone.** `oneHop`
-    // derives from `registered`, so emptying the registry extraction empties
-    // the family and this fires at 1 of 19, which measures the pair rather than
-    // the registry: dropping the registry from the family with the hop intact
-    // passes 19 of 19, and so does deleting the hop by itself. What holds each
-    // route is the offender arm below, firing on a labeller that route reaches:
-    // 1 of 19 for a labeller one import away, and 1 of 19 for a registered
-    // module that labels. The middle number is the one a mutation of the
-    // extraction cannot produce, since that mutation moves both.
+  it("walks an import chain to its end and stops at the generated client", () => {
+    // **Asked of literals, because a graph walk cannot be anchored against the
+    // tree it walks.** A fixpoint that stopped after one round still contains
+    // every module a real tree assertion could name, so nothing below would
+    // fail: `lib/opf.ts` is one hop from the registry and would still be there.
+    // Here the third module is reachable only transitively.
+    const all = new Map([
+      [SEAM, 'const R = { ".epub": () => import("./reader") };'],
+      ["lib/reader.ts", 'import { helper } from "./helper";'],
+      ["lib/helper.ts", 'import type { M } from "../api/generated/model";'],
+      ["api/generated/model/index.ts", "export type M = 1;"],
+    ]);
+
+    expect([...familyFrom(all)].sort()).toEqual([
+      "lib/helper.ts",
+      "lib/reader.ts",
+    ]);
+  });
+
+  it("names no scheme this app stores in any module a reader reaches", () => {
+    const all = new Map(modules());
+    const forbidden = forbiddenNames(all);
+    // The enum is read rather than spelled, so a member added to it widens this
+    // without an edit here, and the generated name is derived beside it.
+    expect(forbidden.length).toBeGreaterThan(STORED_SCHEMES.length);
+
+    // The matcher, anchored against literals for `schemeSites`' reason: one
+    // that stopped matching would report no offender and pass for ever. Each
+    // positive is a spelling a seat measured a narrower rule to miss.
+    expect(spells('const a = { scheme: "ASIN", value: v };', forbidden)).toBe(
+      true,
+    );
+    expect(spells("const b = BookIdentifierScheme.asin;", forbidden)).toBe(
+      true,
+    );
     expect(
-      labelling.filter(
-        ([, source]) =>
-          !bindings(source).some(
+      spells('const c = new Map([["mobi-asin", "asin"]]);', forbidden),
+    ).toBe(true);
+    expect(
+      spells("const d = Object.entries(BookIdentifierScheme);", forbidden),
+    ).toBe(true);
+    expect(spells("const e = SCHEMES[k];", forbidden)).toBe(false);
+    // Prose is where a reader is allowed to say the word, and is stripped.
+    expect(spells("/* the ASIN this format calls it */", forbidden)).toBe(
+      false,
+    );
+
+    const family = familyFrom(all);
+    // Two anchors against the real tree, because the walk and the registry
+    // extraction rot separately from the matcher: `mobi.ts` is registered under
+    // three keys and `opf.ts` is reached only through `epub.ts`.
+    expect([...family]).toContain("lib/mobi.ts");
+    expect([...family]).toContain("lib/opf.ts");
+
+    expect(
+      [...family].filter((path) => spells(all.get(path)!, forbidden)),
+    ).toEqual([]);
+
+    // **What this does not reach is obfuscation, and only obfuscation, across
+    // every shape that was tried.** The reason is the closure: a module
+    // carrying the vocabulary joins it the moment a reader imports one, and its
+    // own source then spells either the strings or the generated name. So each
+    // of these is caught and named on the offender assertion above: a table
+    // built inside `opf.ts`, the enum re-exported through a second module as
+    // `export { BookIdentifierScheme as Vendor }`, that second module exporting
+    // the strings under a name nothing here could derive, and `lib/stores.ts`
+    // itself rewritten to name the enum and derive its union from it.
+    //
+    // What passes is a module written so that nothing anywhere spells it:
+    // `String.fromCharCode(97, 115, 105, 110)`, and `import * as model` with a
+    // computed member. **Both 21 of 21 against this file**, which is the whole
+    // of what this arm does not see. The set of spellings is open, so no
+    // enumerating rule closes it.
+    //
+    // **The deleted `lib/stores.ts` import ban has no coverage this arm does
+    // not already have**, which is the reason it went and is not the same as
+    // catching nothing. Reconstructed verbatim from its own helpers and run
+    // against the fourth shape, it reports `lib/opf.ts` and reports nothing on
+    // an unaltered tree: that shape adds an import of `./stores` to `opf.ts`,
+    // which the ban forbade of every module a reader reaches. **Not to a
+    // registered reader**, which `opf.ts` is not: it is reached through
+    // `epub.ts`, and conflating the two is the defect that made this walk
+    // transitive. It catches that one and nothing this arm misses.
+    //
+    // **The fourth shape was run in the spelling that names the enum**, and the
+    // other spelling changes nothing. A union derived as
+    // `BookIdentifierIn["scheme"]` reaches a second generated module
+    // `forbiddenNames` never reads, and is caught anyway, twice over: that
+    // module spells both strings elsewhere in its own code, and a type carries
+    // no runtime value at all, so labelling a row needs the strings whichever
+    // way the union is written. **No count is quoted for it on purpose.** The
+    // one that stood here was taken on a tree where nothing imported that
+    // module, which is not the shape the sentence describes: say the tree, not
+    // only the count.
+    //
+    // **Every way this paragraph has been wrong was found by a seat running
+    // something, never by a re-reading.** It claimed a hole this arm does not
+    // have, twice, a renamed binding and an export under a name the derivation
+    // cannot reach; it denied coverage the deleted ban does have; and it quoted
+    // a count against a tree the sentence beside it did not describe. **The way
+    // it has not been wrong yet is the one to watch**, and the first draft of
+    // this sentence claimed no such way was left: the list above says four
+    // shapes are caught, and a shape wrongly listed as caught is this arm
+    // papering over the hole it exists to find.
+    //
+    // **The count of those corrections is deliberately not written here**: the
+    // version that carried one went stale in the commit that removed a stale
+    // count, which is the shape twice over. The classes are enumerated above
+    // instead, which is the information a total stands in for and the one form
+    // of it that a further correction does not falsify. **A stated
+    // exclusion is worth what somebody measured it against and nothing else**,
+    // which is why the shapes above are listed with what each did rather than
+    // with a total.
+  });
+
+  it("has one module outside that family reading what a file labelled", () => {
+    // **A count and never which module**, the one caller shape: renaming the
+    // mapper leaves this green and a second one turns it red. What it is bought
+    // for is that the arm above deliberately exempts everything a reader cannot
+    // reach, so the mapper is unguarded by it; a second module deciding what a
+    // label means is two rules over one vocabulary, and nothing else in the
+    // tree would say so.
+    //
+    // **It is also the net for a module falling out of the walk**, which is
+    // more than a count of mappers claims: measured by the design seat,
+    // `epub.ts` importing `"./opf.js"` puts `opf.ts` outside the family and
+    // this reports 2. The residual, since a net is not the rule it catches
+    // things for: a module that leaves the walk the same way, names no
+    // `FileIdentifier` and carries no anchor of its own, is silent here.
+    const family = readerFamily();
+    const mappers = modules()
+      .filter(
+        ([path, source]) =>
+          !family.has(path) &&
+          bindings(source).some(
             ([, clause, from]) =>
               isSeam(from) && names(clause, ["FileIdentifier"]),
           ),
-      ).length,
-    ).toBeGreaterThan(0);
-    expect(
-      labelling.flatMap(([, source]) => schemeSites(source)).length,
-    ).toBeGreaterThan(0);
-    // The enum is read rather than spelled, so a member added to it widens this
-    // without an edit here.
-    expect(STORED_SCHEMES.length).toBeGreaterThan(0);
-
-    const offenders = labelling.flatMap(([path, source]) =>
-      schemeSites(source)
-        .filter((site) =>
-          STORED_SCHEMES.some((scheme) =>
-            new RegExp(`["']${scheme}["']`, "i").test(site),
-          ),
-        )
-        .map((site) => `${path}: ${site}`),
-    );
-
-    expect(offenders).toEqual([]);
-  });
-
-  it("computes a scheme only where the reader says what it can compute", () => {
-    // What the arm above cannot reach: a computed scheme is a value this test
-    // never sees, so the reader has to say what it can be. `opf.ts` says the
-    // file, which is the case the scan flow's decision names.
-    const computed = labellingModules()
-      .filter(([, source]) =>
-        schemeSites(source).some((site) => !LITERAL.test(site)),
       )
       .map(([path]) => path);
 
-    expect(computed.sort()).toEqual(Object.keys(COMPUTES_ITS_SCHEME).sort());
+    expect(mappers).toHaveLength(1);
+  });
+
+  it("computes a scheme only where the module says what it can compute", () => {
+    // What the arm above cannot reach: a computed scheme is a value this test
+    // never sees, so the reader has to say what it can be. `opf.ts` says the
+    // file's own label, which is the free text the scan flow maps four
+    // spellings of.
+    const all = new Map(modules());
+    const computed = [...familyFrom(all)]
+      .filter((path) =>
+        schemeSites(all.get(path)!).some((site) => !LITERAL.test(site)),
+      )
+      .sort();
+
+    expect(computed).toEqual(Object.keys(COMPUTES_ITS_SCHEME).sort());
   });
 });

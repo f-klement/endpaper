@@ -469,9 +469,12 @@ a `value`, and the book it hangs off. `asin`, `B00J4YQKHY` is one row; `google_b
 `zyTCAlFPjgYC` is another.
 
 **Not `books.isbn`, and that is the whole reason the table exists.** That column is the
-importer's match key and the lookup key, and every path into it check digits its input. An
-ASIN is ten characters beginning `B` and passes no such test, so a row carrying one there
-matches nothing and corrupts the deduplication for the rows that do. Two of the four wired
+importer's match key and the lookup key, and every path into it check digits its input.
+Most ASINs are ten characters beginning `B` and pass no such test, so a row carrying one
+there matches nothing and corrupts the deduplication for the rows that do. **For a printed
+edition Amazon reuses the ISBN-10**, which does check digit: measured on the scan path, 4 of
+8 `ASIN`/`AMAZON` values are one. That value is two facts, so `books.isbn` takes the
+canonical ISBN-13 and the row here keeps the token Amazon issued. Two of the four wired
 stores are in exactly that position: a Kindle for PC catalogue carries an ASIN on every
 entry and no ISBN, 1,032 of 1,032 over two published captures, and a Play Books Takeout
 carries a Google Books volume id and no ISBN anywhere.

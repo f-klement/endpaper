@@ -12668,9 +12668,13 @@ the import.** `BookCreate` has one identifier field, `isbn`, and `storeToBookCre
 `StoreBook.key`, which is where `stores.ts` puts the ASIN.
 
 **It was not fixed by widening `isbn`**, and that is the decision rather than the omission.
-`books.isbn` is the importer's match key and every ISBN path check digits its input; an ASIN is
-ten characters beginning `B` and passes no such test, so a row carrying one would match nothing
-and would corrupt the dedupe surface for rows that do. A second identifier is a schema question
+`books.isbn` is the importer's match key and every ISBN path check digits its input; a Kindle
+catalogue's ASINs are ten characters beginning `B`, 1,032 of 1,032, and pass no such test, so a
+row carrying one would match nothing and would corrupt the dedupe surface for rows that do.
+**Read as a claim about the scheme rather than about that store, this is false**, and the entry
+177 lines below has said so since it was written: Amazon issues a printed edition's ISBN-10 as
+its ASIN and such a value does check digit. The conclusion stands on the two tokens in two
+columns argument and not on this sentence. A second identifier is a schema question
 about cardinality and lookup, which is a ticket rather than a line in an adapter.
 
 Google Play Books is in the same position with its volume id, so this is two of the four wired
@@ -12987,3 +12991,127 @@ measuring, and working out which numbers still described anything. One seat coul
 copy predated an edit by restoring the file from `git show` and recovering its recorded whole
 tree sha256 exactly. **A commit is cheap and it is the one thing that makes "the working tree
 equals X" checkable rather than a promise.**
+
+## A file's identifier label is mapped now, and the value is what keeps a row
+
+The refusal recorded when `book_identifiers` shipped was that a `dc:identifier` label is
+free text with no single producer and an unmeasured population, where a Calibre type is one
+program's column whose source can be read. **The second half still holds and the first was
+answered**: 931 EPUBs of the owner's own library, none unreadable, every `opf:scheme` in
+them counted. `uuid` in either case 79, `calibre` 51, the four ISBN spellings 47,
+`MOBI-ASIN` 31, `ASIN` 4, `AMAZON` 4, `URI` 4, `BARNESNOBLE` 2, `GOODREADS` 2, and two
+labels that are an ISBN and a URN rather than a scheme name.
+
+**Three of those fifteen spellings are admitted and twelve are refused**, each for a reason
+recorded at the rule: `uuid`, `calibre` and `URI` have no consumer, which is the enum's own
+gate; the ISBN spellings belong in `books.isbn`, where `opf.readIsbn` already puts them
+check digit tested; `GOODREADS` and `BARNESNOBLE` for `goodreads`' reason; and the last two
+are malformed. **Two of fifteen spellings in a real library are malformed, which is the
+argument for a closed set rather than a rule over what is found.** `GOOGLE` is admitted as
+a fourth and occurs in none of the 931: it rests on the mechanism that put `GOODREADS` and
+`BARNESNOBLE` into files whose producer has no such notion, which is a Calibre conversion
+carrying a type into the package document.
+
+### `MOBI-ASIN` is admitted, and calibre's refusal of it is still right
+
+`lib/calibre.identifiersWithScheme` declines that type and says why: it names where a value
+was found, EXTH record 113, whose own comment in calibre's reader reads `ASIN or other id`,
+and calibre refuses it by default with a help text warning the value may be another
+store's. **As a blanket over a whole field that is correct**, and this is not a correction
+of it. What a type column cannot do and a rule at the point of use can is look at the
+value: measured over the same library, **16 of the 31 `MOBI-ASIN` values are `B` plus nine
+alphanumerics and 15 are a uuid or hex string of 32 to 40 characters**, the filler calibre
+mints when a file has no ASIN. The label cannot separate those and the shape can, so the
+row is kept on the value and never on the label. Owner's decision, 2026-09-11.
+
+**No matcher for the filler, which is the deliberate half.** Recognising a uuid is an
+inclusion list over an open set and calibre is free to mint a different one. **What the
+shape actually buys is a length**: those 15 are 32 to 40 characters and the rule admits
+ten, so it refuses every filler that is not ten characters of this alphabet, which is
+every filler that library holds and not every filler there could be.
+`lib/calibre.identifiersWithScheme` already records that limit, the shape being unable to
+tell a ten character ASIN from a ten character something else, which is why its own
+decline is on the type. **That is the risk this admission accepts rather than one it
+closes**, and both critic seats converged on the first draft claiming otherwise.
+
+**The value rule is what carries all of this**, so it is load bearing rather than a sanity
+check: ten characters of Amazon's alphabet, twelve of the URL safe one. **It is not
+narrowed to a `B` prefix**, because Amazon issues a printed edition's ISBN-10 as its ASIN
+and four of that library's eight `ASIN` and `AMAZON` values are exactly that. **Such a
+value is two tokens in two columns and not one fact twice**: `opf.readIsbn` runs every
+candidate through `parseIsbn`, which answers the canonical ISBN-13, while the identifier
+row carries the ten character token Amazon issued.
+
+**This vocabulary and the Calibre one differ in both directions, deliberately.** That rule
+admits a marketplace suffix because the plugin writing the column was read and every
+`amazon_<domain>` key holds an ASIN by construction; no suffixed spelling occurs in the
+931, so this rule has no population to admit one on. This rule admits `mobi-asin`, which
+that one refuses. Both differences are asserted, so neither closes by accident.
+
+**EPUB 3 is a second vocabulary, not more of the same.** `identifier-type` carries a number
+from ONIX code list 5, measured `15` 28 times, `22` 4 and `uuid` 3. A number names no
+store, so nothing here could tell which one a proprietary code meant, and
+`opf.readIdentifiers` puts both spellings in one field, so the closed set refuses the
+numbers without an arm of its own.
+
+### The guard the refusal rested on is narrower and is not gone
+
+It said no module in the reader family labels an identifier with a scheme this app stores,
+over the registry plus one hop, forbidding a **literal** at a `scheme:` site. Both critic
+seats beat it on the same module and neither needed the other's route: `lib/opf.ts` is
+itself one hop from the registry, so everything it imports was outside the rule and an
+import of `lib/calibre.ts` there passed 20 of 20; and no import is needed at all, a module
+scope `new Map([["mobi-asin", "asin"]])` in `opf.ts` passing 407 of 407, because a table
+leaves no literal at a `scheme:` site and `opf.ts` was already declared as computing one.
+
+**The rule now asks for the name as a word, in any syntax, over the transitive closure of
+the registry.** That is what both evasions needed, and `BookIdentifierScheme.asin` carries
+no quotes either. A second arm counts the modules outside that closure which read
+`FileIdentifier` from the seam, and never which: the mapper is one, a second is a second
+rule over one vocabulary. **An arm banning an import of `lib/stores.ts` was written first
+and deleted**, being the narrower half of what the word rule says.
+
+**Stated rather than discovered**: a trailing `//` comment survives the prose strip, so a
+reader documenting itself with `// the MOBI-ASIN record` after code on one line fails this
+and has to move the words. Measured on the day: 0 occurrences of either name in the family.
+
+## A response body is parsed in one place, so the hazard is handled in one place
+
+`json.loads` raises `RecursionError` on a deeply nested body. It is a `RuntimeError`, so it
+passes every `except ValueError` a catalogue reader has and escapes as a 500. Measured,
+`'{"a":' * 100000 + "1" + "}" * 100000` is 600,001 bytes, under a third of
+`fetch.MAX_RESPONSE_BYTES`, so the size cap is not what stops it.
+
+**It was fixed three times at three call sites and four doors stayed open.** The three
+Google adapters in `metadata.py` each grew `RecursionError` in their except tuple, and
+`metadata._open_library_object`, `_open_library_search`, `authority._lobid` and
+`_viaf_json` still carried it. That is the shape this register already records twice: a
+guard that enumerates something open, fixed by a further arm.
+
+**The conversion now lives in `fetch.Fetched.json`** and the three enumerated arms were
+removed with it. Every caller that already handles a body it cannot parse handles this one
+by construction, and a door written tomorrow is covered before it exists.
+
+**The rule that keeps it true derives its own population rather than listing it.** A module
+that parses a response body is a module that fetched one, so
+`test_house_rules.TestOneDoorParsesAResponseBody` asks which modules import `fetch` and
+forbids a `loads` call in those. `backup.py` reads an archive member and `settings_store.py`
+reads a database row; both call `json.loads` and neither imports `fetch`, so they are
+outside the rule by construction rather than by an exemption somebody has to keep true.
+A second arm names the four modules the walk must find, because a rule asserting a set is
+empty is also green when it walks nothing.
+
+## The ISBN label a file puts in front of the number has one home
+
+Four readers each spelled the rule for themselves and in two spellings that disagreed:
+`appleBooks.ts` and `adobeDigitalEditions.ts` took `/^(?:urn:)?isbn/i`, `opf.ts` and
+`calibre.ts` took `/^urn:isbn:/i`, which refuses `ISBN:` and `isbn_` on a value that had
+announced itself as an ISBN. The same book imported from two places could keep its ISBN
+once and lose it once.
+
+**The anchor was the part nothing tested.** Removing the `^` left 57 arms green in
+`appleBooks.ts`, 59 in `opf.ts` and 85 in `calibre.ts`, because every case any of them had
+put the label at the front. Unanchored the rule strips `isbn` from the middle of a value
+and hands `parseIsbn` a number the file never wrote. `isbn.stripIsbnPrefix` is the one home
+and `tests/lib/isbn.test.ts` has the one arm that fails when the anchor comes off; measured
+on the consolidated tree, that arm is the only one of 182 that does.

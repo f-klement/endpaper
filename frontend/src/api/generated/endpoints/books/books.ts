@@ -38,6 +38,7 @@ import type {
   AuthorWikipediaParams,
   AuthorityCandidateOut,
   BackfillCoversParams,
+  BackfillFromIdentifiersParams,
   BodyUploadCover,
   BookCreate,
   BookDetailsUpdate,
@@ -67,6 +68,7 @@ import type {
   EnrichBookParams,
   ExportBooksParams,
   HTTPValidationError,
+  IdentifierBackfillOut,
   ListAuthorSuggestionsParams,
   ListBooksParams,
   ListMissingDigitalReferencesParams,
@@ -3329,6 +3331,148 @@ export function useExportBooks<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
+export const getBackfillFromIdentifiersUrl = (
+  params?: BackfillFromIdentifiersParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/books/identifiers/backfill?${stringifiedParams}`
+    : `/api/books/identifiers/backfill`;
+};
+
+/**
+ * Fill in books that carry a store's own identifier and no ISBN.
+ *
+ * **This is what a Google Play Books import needs, and nothing else supplies
+ * it.** That export carries a Google Books volume id for every book and no
+ * ISBN anywhere, so a book arrives with a title, an author and an exact key,
+ * and the only enrichment available to it was a search by that title. One
+ * volume id resolves to one record, with no ranking and no guess.
+ *
+ * **Amazon is deliberately absent.** Amazon publishes no catalogue API, so
+ * there is no request an ASIN could become. A book carrying only an ASIN is
+ * not a candidate here and is not reported as one.
+ *
+ * **Candidates are books with no ISBN, no Google volume already recorded, and
+ * a Google Books identifier.** No ISBN, because an ISBN
+ * is an exact key the free catalogues answer to, and spending a metered
+ * request on one would be the bill for nothing that
+ * `sources.Plan.lookup_together` refuses. No volume recorded, because that
+ * column is what enrichment from Google writes, so a book that has been
+ * enriched stops being a candidate and this is safe to run twice.
+ *
+ * **Scoped to the books the caller can see**, like the cover backfill and for
+ * that route's stated reason: `visible_to` has no admin bypass, so each member
+ * repairs their own shelf rather than the privacy rule being bent to make an
+ * operator action work.
+ *
+ * **Refuses with 409 when this library does not ask Google Books**, rather
+ * than examining nothing and reporting a clean run. A source with no usable
+ * key must say so: the cause is a switch and a key in Settings, and a zero
+ * would send somebody hunting through their library instead.
+ *
+ * Batched and resumable. `next_after_id` carries on past what this run tried,
+ * and comes back as 0 at the end of the library so pressing again starts over
+ * and re-tries whatever has since become resolvable.
+ * @summary Backfill From Identifiers
+ */
+export const backfillFromIdentifiers = async (
+  params?: BackfillFromIdentifiersParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<IdentifierBackfillOut> => {
+  return customFetch<IdentifierBackfillOut>(
+    getBackfillFromIdentifiersUrl(params),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getBackfillFromIdentifiersMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof backfillFromIdentifiers>>,
+    TError,
+    BackfillFromIdentifiersMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof backfillFromIdentifiers>>,
+  TError,
+  BackfillFromIdentifiersMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["backfillFromIdentifiers"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof backfillFromIdentifiers>>,
+    BackfillFromIdentifiersMutationVariables
+  > = (props) => {
+    const { params } = props ?? {};
+
+    return backfillFromIdentifiers(params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type BackfillFromIdentifiersMutationResult = NonNullable<
+  Awaited<ReturnType<typeof backfillFromIdentifiers>>
+>;
+
+export type BackfillFromIdentifiersMutationError = HTTPValidationError;
+export type BackfillFromIdentifiersMutationVariables = {
+  params?: BackfillFromIdentifiersParams;
+};
+
+/**
+ * @summary Backfill From Identifiers
+ */
+export const useBackfillFromIdentifiers = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof backfillFromIdentifiers>>,
+      TError,
+      BackfillFromIdentifiersMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof backfillFromIdentifiers>>,
+  TError,
+  BackfillFromIdentifiersMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getBackfillFromIdentifiersMutationOptions(options),
+    queryClient,
+  );
+};
 export const getListLocationsUrl = () => {
   return `/api/books/locations`;
 };
@@ -6721,8 +6865,13 @@ export const getEnrichBookUrl = (bookId: number, params?: EnrichBookParams) => {
 /**
  * Fill in the fields a book is missing, from every catalogue available.
  *
- * Matched by ISBN when there is one, which runs the full merged chain, and by
- * title and author otherwise, which runs the ranked search. **Which
+ * Matched by ISBN when there is one, which runs the full merged chain; then by
+ * the book's own Google Books volume id, where it carries one and the library
+ * asks Google Books; and by title and author otherwise, which runs the ranked
+ * search. **Exact keys first, and the store identifier is an exact key**: a
+ * book imported from Google Play Books carries a volume id and no ISBN, so
+ * without that middle step it is matched by its title, which is the weakest
+ * instrument here. **Which
  * catalogues either of those asks is the library's own provider list**, set
  * in Settings: the roster holds nine lookup sources that answer an ISBN and
  * eight search sources that answer a title, the leading pair is asked together

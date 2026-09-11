@@ -374,6 +374,34 @@ const KINDLE_CATALOGUE = `
   </meta_data></add_update_list>
 </response>`;
 
+/**
+ * One Adobe Digital Editions record, in the whole library layout.
+ *
+ * **No XML declaration, which is what lets this file keep the suite's
+ * happy-dom.** That parser reads a declaration written with single quotes as
+ * HTML and hands back a document whose root is `html`, which is why
+ * `adobeDigitalEditions.test.ts` takes jsdom in a docblock and asserts that
+ * case by name. The reader matches every element by local name, so the plainest
+ * document it accepts is enough for the seam, which is all this file tests.
+ */
+function adobeCatalogue(identifier: string): string {
+  return `<manifest><contentRecord>
+    <title>A Constructed Title</title>
+    <creator>Surname, Given</creator>
+    <identifier>${identifier}</identifier>
+  </contentRecord></manifest>`;
+}
+
+async function adobeBook(identifier: string) {
+  const library = libraryIn(
+    await STORES.adobe.open(
+      new File([adobeCatalogue(identifier)], "A Book.epub.xml"),
+    ),
+  );
+  expect(library.books).toHaveLength(1);
+  return library.books[0]!;
+}
+
 describe("what a store calls a book, where that is not an ISBN", () => {
   // **The gap this closed.** Two of the four stores read an identifier and no
   // ISBN, and `BookCreate` had one identifier field and it was `isbn`, so the
@@ -414,6 +442,40 @@ describe("what a store calls a book, where that is not an ISBN", () => {
       { scheme: "asin", value: "B000000001" },
     ]);
     expect(library.books[0]?.isbn).toBeNull();
+  });
+
+  // **One assertion an arm.** A mutation putting the raw identifier in the match
+  // key and one copying the ISBN into `identifiers` are different defects, and
+  // an arm asserting both reddens on either without its name saying which.
+
+  it("takes the ISBN off a Digital Editions record that carried one", async () => {
+    // The catalogue publishes no scheme for `dc:identifier`, so the value
+    // decides: `adobeDigitalEditions.ts` check digits it and this is where the
+    // answer becomes the field the importer matches on.
+    expect((await adobeBook("urn:isbn:9780306406157")).isbn).toBe(
+      "9780306406157",
+    );
+  });
+
+  it("does not also file that ISBN under identifiers", async () => {
+    // That field is for a name that is not an ISBN, and the match key already
+    // holds this one, so a copy here would be one fact in two places.
+    expect((await adobeBook("urn:isbn:9780306406157")).identifiers).toEqual([]);
+  });
+
+  it("leaves the ISBN null where that identifier was not an ISBN", async () => {
+    const uuid = "urn:uuid:00000000-0000-4000-8000-000000000001";
+
+    expect((await adobeBook(uuid)).isbn).toBeNull();
+  });
+
+  it("files nothing under identifiers where it was not an ISBN either", async () => {
+    // The unchanged half: this store's identifier has no scheme to name it, a
+    // member `StoreIdentifierScheme` does not have, so it goes no further than
+    // the read.
+    const uuid = "urn:uuid:00000000-0000-4000-8000-000000000001";
+
+    expect((await adobeBook(uuid)).identifiers).toEqual([]);
   });
 });
 
