@@ -158,6 +158,61 @@ beside this catalogue. Nothing here reads, names or looks for it.
 blobs and dates the module names, and the fixtures are constructed rather than copied: the
 captures are real people's libraries.
 
+## The second store that is not SQLite, and the one that cannot say who owns a book
+
+Adobe Digital Editions, in `frontend/src/lib/adobeDigitalEditions.ts`. The catalogue is XML, so
+it costs a reader and no engine, which is the question this page left open for it. It is two
+layouts, one `manifest.xml` on the 1.x line and one XML file per book under `Manifest` since
+2.0, and one reader answers both because it counts records rather than expecting a list.
+
+**This store's catalogue cannot tell a library loan from a purchase, and that is the finding
+rather than a gap in the reader.** Adobe Digital Editions is a fulfilment client for public
+library loans as much as for bought books, and both land in the same catalogue looking the same.
+The loan is a token that travels with the book file. **That token is the protection on the file,
+so it is the one thing not read.** The reader therefore states no ownership at all, in its type
+rather than in a comment, and the import writes `ownership: unknown`, which is a value
+`books.ownership` has had since the Goodreads import needed it.
+
+**It is not the first store here where a loan can import as owned, only the first that cannot
+answer the question.** `kobo.ts` counts OverDrive, a public library loan, and Kobo Plus, a
+subscription, among the values it calls owned; `kindle.ts` keeps a Kindle Unlimited or Prime
+title because `<origins>`, the only element that separates one from a purchase, is in neither
+capture it was built from. Both say so at the site that decides it. What the two have that Adobe
+does not is a judgement: Kobo refuses the store's own adverts. **Narrowing that is per row rather
+than per store and is a ticket**, because the value Kobo already reads is the value it discards.
+
+**No install was read and no capture of this catalogue exists publicly.** The element vocabulary
+comes from six published sources the module names with the date they were read, four of them a
+support forum, which is weaker than the captures the Kindle reader was built from. What that
+leaves open is which Dublin Core terms a real record carries; a term the document does not spell
+is reported in `missing`, so being wrong about one costs a field and not a library.
+
+## One Android reader of three, and the prevalence that decided it
+
+Moon+ Reader, in `frontend/src/lib/moonReader.ts`, read out of the backup the app itself writes.
+PocketBook's Android app and FBReader were skipped, and the evidence is here so the question is
+not reopened without it.
+
+**Prevalence, measured 2026-09-11.** All three sit in Play's `10M+` bucket, so the bucket
+settles nothing. Lifetime installs put them close: FBReader 29.8M, Moon+ 28.3M, PocketBook 10.7M.
+**Installs per day separate them: FBReader 29, Moon+ 2,609, PocketBook 2,232.** A second route
+computed from archived captures of Play's own field agrees on the ranking within 1.26x. The rate
+is a ranking and not a bound, since the two routes differ by up to 2.1x on one app, and
+**FBReader's lifetime figure is measuring how long it has existed.**
+
+**Skipped on evidence, not on effort.** No published reading of PocketBook's Android database
+exists at all. FBReader's schema is published only for 2.6.15, a 2017 tag, and has been closed
+since release 2.7. These are the least documented stores on this surface, and the rule that
+governs them is the one at the top of this page: **a fixture invented to look real is worse than
+an absent reader.**
+
+**Not one reader for three.** A column name table needs three schemas and there is one, and that
+one refutes the idea anyway: FBReader normalises authors and series into join tables where Kobo,
+Apple Books and Moon+ each keep one string. The difference is the shape of the query.
+
+A **PocketBook device** is a separate store from its Android app and has a published schema. It
+is not built and it has a ticket.
+
 ## Where a member picks one
 
 `frontend/src/lib/stores.ts` is the registry, and a store is a row in it: what it is called, what

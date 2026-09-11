@@ -234,6 +234,7 @@ function fileReaders(): string[] {
  * evasion was measured on this file: removing two names left every test green.
  */
 const FILE_READERS = [
+  "lib/adobeDigitalEditions.ts",
   "lib/audiobook.ts",
   "lib/calibre.ts",
   "lib/cbz.ts",

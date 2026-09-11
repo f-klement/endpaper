@@ -1369,6 +1369,20 @@ export const de: Messages = {
   "stores.failureNotAnAppleBooksLibrary":
     "Diese Datenbank ist keine Apple-Books-Bibliothek.",
   "stores.failureNotAKindleLibrary": "Diese Datei ist kein Kindle-Verzeichnis.",
+  "stores.adobe.name": "Adobe Digital Editions",
+  "stores.adobe.explain":
+    "Adobe Digital Editions legt zu jedem ausgelieferten Buch einen Eintrag als XML an. Ab Version 2 ist das eine Datei je Buch in einem Ordner namens Manifest innerhalb des Digital-Editions-Ordners, bei älteren Versionen eine einzelne manifest.xml.",
+  "stores.adobe.choose": "Eine Katalogdatei wählen",
+  "stores.adobe.oneBook":
+    "Ab Version 2 wird hier ein Buch je gewählter Datei gelesen, weil der Katalog so geschrieben wird. Außerdem erfasst Adobe Digital Editions eine Ausleihe und einen Kauf auf dieselbe Weise, deshalb kommen Bücher von hier mit ungeklärtem Besitz an und nicht als Bücher im eigenen Bestand. Das lässt sich anschließend selbst setzen.",
+  "stores.moonReader.name": "Moon+ Reader",
+  "stores.moonReader.explain":
+    "Moon+ Reader schreibt eine Sicherung der eigenen Bibliothek aus der App heraus, unter Optionen, Sichern und Wiederherstellen. Die erzeugte Sicherungsdatei wählen. Erfasst werden der Dateipfad, der Titel und der Autor; ISBN, Verlag und Jahr führt die App nicht.",
+  "stores.moonReader.choose": "Eine Moon+-Sicherung wählen",
+  "stores.failureNotADigitalEditionsCatalogue":
+    "Diese Datei ist kein Adobe-Digital-Editions-Katalog.",
+  "stores.failureNotAMoonReaderBackup":
+    "Diese Datei ist keine Moon+-Reader-Sicherung.",
   "stores.reading": "{file} wird gelesen...",
   "stores.sourceRead": "{count} Bücher gelesen.",
   "stores.sourceSkipped":

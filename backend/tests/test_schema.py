@@ -21,9 +21,17 @@ import models  # noqa: F401  (registers the tables on Base.metadata)
 import schema
 import targets
 from database import Base, engine
-from enums import AuthorityScheme, BookFormat, ClassificationScheme
+from enums import (
+    AuthorityScheme,
+    BookFormat,
+    BookIdentifierScheme,
+    ClassificationScheme,
+)
 from migrations.versions import (
     b2e94f7c1a03_where_a_book_file_is_said_to_be as where_a_book_file_is_said_to_be,
+)
+from migrations.versions import (
+    c7b0a3e5d281_what_a_store_calls_a_book as what_a_store_calls_a_book,
 )
 from migrations.versions import (
     f1c30ab27d84_store_the_shelf_key_beside_the_number as revision,
@@ -3202,3 +3210,201 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
         )
 
         assert " ".join(after.split()) == declared
+
+
+class TestTheIdentifierBoundsSurvivedIntoTheMigration:
+    """Revision `c7b0a3e5d281`, against the schema production runs.
+
+    **The migration is the schema everywhere, tests included**, which is the
+    fact `TestTheMigratedDatabaseCarriesTheBoundsItPromises` was first written
+    with backwards and states in full. `main.py` calls `init_db()` at import,
+    `conftest` imports `main`, and `create_all` then finds every table already
+    there and does nothing. So the `CheckConstraint` in `models.py` is a
+    **description** of this revision unless something reads the installed DDL,
+    and this is what reads it.
+
+    `TestTheMigrationsAndTheModelsAgree` compares columns, nullability and type.
+    A CHECK is none of those, and neither is a unique index's key, so a
+    revision that dropped either would still match there.
+    """
+
+    @staticmethod
+    def _migrated() -> int:
+        drop_everything()
+        schema.upgrade_to_head()
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO books (title, ownership) VALUES ('A book', 'owned')")
+            )
+            connection.commit()
+            book_id = connection.execute(text("SELECT id FROM books")).scalar()
+        assert isinstance(book_id, int)
+        return book_id
+
+    @staticmethod
+    def _insert(book_id: int, scheme: str, value: str) -> None:
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO book_identifiers (book_id, scheme, value)"
+                    " VALUES (:book, :scheme, :value)"
+                ),
+                {"book": book_id, "scheme": scheme, "value": value},
+            )
+            connection.commit()
+
+    def test_the_table_exists_at_head(self):
+        self._migrated()
+
+        assert "book_identifiers" in table_names()
+
+    def test_the_migration_and_the_model_agree_about_the_width(self):
+        """Two copies of one number, because a revision must not import a
+        constant it would then change meaning with. This is what stands between
+        them."""
+        assert what_a_store_calls_a_book._VALUE_MAX == models.BOOK_IDENTIFIER_MAX
+
+    def test_a_value_past_the_ceiling_is_refused(self):
+        book = self._migrated()
+
+        with pytest.raises(IntegrityError) as refusal:
+            self._insert(book, "asin", "B" * (models.BOOK_IDENTIFIER_MAX + 1))
+
+        assert "ck_book_identifiers_bounds" in str(refusal.value)
+
+    def test_a_null_carrying_value_cannot_walk_past_the_character_bound(self):
+        """The arm the character inequality cannot supply on its own.
+
+        SQLite's `length()` counts characters **up to the first NUL**, so this
+        value reports a length of 1 and carries 10,002 bytes. Pydantic refuses a
+        NUL and Pydantic is exactly what a restore does not run, which is what
+        makes this arm the thing standing between an archive and an unbounded
+        write.
+
+        **Refused outright rather than capped at a byte budget**, which is where
+        this column parts company with `digital_references`: every value here is
+        a token a machine wrote, so a NUL is never legitimate and the tighter
+        arm is available.
+        """
+        book = self._migrated()
+
+        with pytest.raises(IntegrityError) as refusal:
+            self._insert(book, "asin", "a\x00" + "x" * 10000)
+
+        assert "ck_book_identifiers_bounds" in str(refusal.value)
+
+    def test_a_nul_free_value_on_the_boundary_is_taken(self):
+        """The other side, without which the two tests above are satisfied by a
+        constraint that refuses everything.
+
+        **Four byte characters throughout, because the ceiling counts code
+        points and SQLite's `length()` counts them too.** An earlier version of
+        this sentence claimed the value would also have failed a byte budget:
+        60 four byte characters is 240 bytes and `4 * BOOK_IDENTIFIER_MAX` is
+        240, so it would have passed one exactly. The budget arm is not what
+        this column carries anyway; the NUL refusal above is.
+        """
+        book = self._migrated()
+
+        self._insert(book, "asin", "\U0001f4d6" * models.BOOK_IDENTIFIER_MAX)
+
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT count(*) FROM book_identifiers")
+            ).scalar() == 1
+
+    def test_an_empty_value_is_refused(self):
+        book = self._migrated()
+
+        with pytest.raises(IntegrityError) as refusal:
+            self._insert(book, "asin", "")
+
+        assert "ck_book_identifiers_bounds" in str(refusal.value)
+
+    def test_every_scheme_the_enum_offers_is_storable(self):
+        """`BookIdentifierScheme` and `ck_book_identifiers_scheme` cannot
+        separate.
+
+        The drift `TestTheMigrationsAndTheModelsAgree` cannot see, and its
+        counterpart for the authority schemes states the argument in full: a
+        member added without a revision is a value the application accepts and
+        the deployment rejects, surfacing as an `IntegrityError` on somebody's
+        first import rather than as a red pipeline.
+
+        **Driven off the enum rather than a written out list**, so a member
+        added tomorrow is covered without anybody remembering this test exists.
+
+        **Against the migrated database, never the model's.** `models._scheme_
+        check` derives the same constraint from the same enum, so a model built
+        check can only ever agree with itself.
+        """
+        book = self._migrated()
+
+        refused: list[str] = []
+        for scheme in BookIdentifierScheme:
+            try:
+                # A distinct value per scheme, so
+                # `uq_book_identifiers_book_scheme_value` cannot be what refuses
+                # the second row and be read as the CHECK doing it.
+                self._insert(book, scheme.value, f"V{scheme.value}")
+            except IntegrityError:
+                refused.append(scheme.value)
+
+        assert refused == [], (
+            "These members of BookIdentifierScheme are not storable on a "
+            f"migrated database: {refused}. Write the revision that widens "
+            "ck_book_identifiers_scheme."
+        )
+
+    def test_a_scheme_the_enum_does_not_offer_is_refused(self):
+        """The other side of the derivation above, which alone is satisfied by
+        a constraint that admits everything."""
+        book = self._migrated()
+
+        with pytest.raises(IntegrityError) as refusal:
+            self._insert(book, "kobo", "abc")
+
+        assert "ck_book_identifiers_scheme" in str(refusal.value)
+
+    def test_the_unique_key_carries_the_value_and_not_only_the_scheme(self):
+        """The half a column comparison cannot see, and the half a merge
+        depends on: two differing ASINs on one book are what folding two Kindle
+        entries produces, and an index keyed on the scheme alone would answer
+        that with an `IntegrityError`."""
+        book = self._migrated()
+
+        self._insert(book, "asin", "B00J4YQKHY")
+        self._insert(book, "asin", "B00OTHER01")
+
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT count(*) FROM book_identifiers")
+            ).scalar() == 2
+
+    def test_the_same_assertion_twice_is_refused(self):
+        book = self._migrated()
+
+        self._insert(book, "asin", "B00J4YQKHY")
+
+        with pytest.raises(IntegrityError) as refusal:
+            self._insert(book, "asin", "B00J4YQKHY")
+
+        # The columns rather than the index name: SQLite names the key's
+        # columns in a UNIQUE violation and never the index that declared it,
+        # so asserting the name here passes on any `IntegrityError` at all.
+        assert "UNIQUE constraint failed" in str(refusal.value)
+        assert "book_identifiers.value" in str(refusal.value)
+
+    def test_the_downgrade_takes_the_table_and_nothing_else(self):
+        """The table is the only place an identifier lives, so a downgrade can
+        do nothing else. What it must not do is take the books with it."""
+        from alembic import command
+
+        book = self._migrated()
+        self._insert(book, "asin", "B00J4YQKHY")
+
+        command.downgrade(schema._alembic_config(), "f4a1c62d0b97")
+
+        assert "book_identifiers" not in table_names()
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT count(*) FROM books")).scalar() == 1

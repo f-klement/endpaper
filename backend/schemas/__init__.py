@@ -79,6 +79,11 @@ from schemas.digital import (
     DigitalReferenceOut,
     MissingDigitalReferenceOut,
 )
+from schemas.identifier import (
+    MAX_IDENTIFIERS_PER_BOOK,
+    BookIdentifierIn,
+    BookIdentifierOut,
+)
 from schemas.imports import (
     ImportPreviewOut,
     ImportPreviewRow,
@@ -191,6 +196,9 @@ __all__ = [
     "CollectionUpdate",
     "ClassificationFacets",
     "ClassificationIn",
+    "BookIdentifierIn",
+    "BookIdentifierOut",
+    "MAX_IDENTIFIERS_PER_BOOK",
     "DigitalReferenceIn",
     "DigitalReferenceOut",
     "MissingDigitalReferenceOut",

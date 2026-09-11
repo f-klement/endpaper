@@ -464,6 +464,38 @@ unlike reading progress, and it carries no privacy flag of its own: a quote is a
 transcription of the book's words where a note is the member's own. Both choices are argued
 in [decisions.md](decisions.md).
 
+**`book_identifiers`.** What a store calls a book, where that is not an ISBN: a `scheme`,
+a `value`, and the book it hangs off. `asin`, `B00J4YQKHY` is one row; `google_books`,
+`zyTCAlFPjgYC` is another.
+
+**Not `books.isbn`, and that is the whole reason the table exists.** That column is the
+importer's match key and the lookup key, and every path into it check digits its input. An
+ASIN is ten characters beginning `B` and passes no such test, so a row carrying one there
+matches nothing and corrupts the deduplication for the rows that do. Two of the four wired
+stores are in exactly that position: a Kindle for PC catalogue carries an ASIN on every
+entry and no ISBN, 1,032 of 1,032 over two published captures, and a Play Books Takeout
+carries a Google Books volume id and no ISBN anywhere.
+
+**A table rather than a nullable column per scheme**, and the case that decides it is
+`POST /api/books/merge`: it folds up to 20 rows into one and moves their children across,
+so one book really does end up carrying an ASIN and a volume id. The unique key is
+`(book_id, scheme, value)` rather than `(book_id, scheme)` for the same reason. Two Kindle
+entries a member declared the same book are two ASINs, and a key on the scheme alone would
+answer that with an `IntegrityError` instead of keeping the fact.
+
+**Not `books.google_books_id` either**, though that column holds the same kind of value.
+It records which Google volume this row's *metadata* came from, enrichment is the only writer
+that takes one from a catalogue, and a refresh with overwrite on retypes it. A row here
+records which volume a member's own export says they own, which is a claim rather than a
+preference.
+
+**Nothing matches on one and nothing shows one yet, which is stated rather than implied.**
+`BookOut` carries them, the archive holds them and a merge moves them; `books.isbn` stays
+the only match key, `/duplicates` still groups on a normalised title and author, and the
+published catalogue withholds them, because where a household shops is not a fact about the
+work. A row carries no member: its visibility is the book's entirely, which is what puts it
+in `BOOK_OWNED_TABLES`.
+
 **`digital_references`.** Where a member says one of their book files is: a `root_label`,
 a `relative_path` beneath it, and a fingerprint. **Never the file.** Endpaper takes no
 custody of a member's book file, so no bytes reach the server on this path and nothing in

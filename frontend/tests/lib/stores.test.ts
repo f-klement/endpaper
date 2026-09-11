@@ -22,7 +22,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { en } from "../../src/i18n";
 import { STORES, STORE_IDS, type StoreReading } from "../../src/lib/stores";
-import { bookEntries, LIBRARY_FOLDER } from "./takeoutFixtures";
+import { A_VOLUME_ID, bookEntries, LIBRARY_FOLDER } from "./takeoutFixtures";
 import { databaseOf } from "./sqliteFixtures";
 import { buildZip, packageDocument } from "../zipFixtures";
 
@@ -150,6 +150,11 @@ describe("a Kobo becomes the record the import writes from", () => {
       title: "Dune",
       authors: ["Frank Herbert"],
       isbn: "9780441013593",
+      // **Empty, and `ContentID` above is not an identifier.** `kobo.ts` says
+      // that column holds a store UUID for a purchase and a `file:///` URL for
+      // a sideloaded book, with nothing on the row saying which, so it names
+      // the book on that device and is `key`.
+      identifiers: [],
       publisher: "Chilton Books",
       year: 1965,
       language: "en",
@@ -269,6 +274,72 @@ describe("a Play Books export becomes the same record", () => {
 
     expect(library.books).toHaveLength(1);
     expect(library.refused).toBe(1);
+  });
+});
+
+/**
+ * One Kindle for PC catalogue holding one owned book.
+ *
+ * **Constructed, and narrower than `kindle.test.ts`'s.** That file is testing
+ * which elements the reader reads and what it does when one is missing, so its
+ * documents carry elements nothing reads. This one is testing that what the
+ * reader answered arrives in a `StoreBook`, which is `koboRows`' split and its
+ * reason. No XML declaration, because the published capture carries none.
+ */
+const KINDLE_CATALOGUE = `
+<response>
+  <sync_time>2019-01-01T00:00:00+0000;softwareVersion:51068</sync_time>
+  <cache_metadata><version>1</version></cache_metadata>
+  <add_update_list><meta_data>
+    <ASIN>B000000001</ASIN>
+    <title pronunciation="">A Constructed Title</title>
+    <authors><author pronunciation="">Surname, Given</author></authors>
+    <publishers><publisher>A Constructed Publisher</publisher></publishers>
+    <publication_date>1965-08-01T00:00:00+0000</publication_date>
+    <cde_contenttype>EBOK</cde_contenttype>
+  </meta_data></add_update_list>
+</response>`;
+
+describe("what a store calls a book, where that is not an ISBN", () => {
+  // **The gap this closed.** Two of the four stores read an identifier and no
+  // ISBN, and `BookCreate` had one identifier field and it was `isbn`, so the
+  // fact that decided the Kindle route survived the read and not the import.
+
+  it("takes the Google volume id off a Play Books export", async () => {
+    const library = libraryIn(
+      await STORES.playBooks.open(
+        new File([await buildZip({ entries: await bookEntries() })], "t.zip"),
+      ),
+    );
+
+    expect(library.books[0]?.identifiers).toEqual([
+      { scheme: "google_books", value: A_VOLUME_ID },
+    ]);
+  });
+
+  it("does not confuse it with the key, which is the path in the archive", () => {
+    // Two folders may hold two editions of one title, which is what the path
+    // tells apart; the volume id is what Google calls the book. Reading `key`
+    // would have kept a file path under an identifier's name.
+    expect(A_VOLUME_ID).not.toBe(LIBRARY_FOLDER);
+  });
+
+  it("takes the ASIN off a Kindle catalogue and leaves the ISBN alone", async () => {
+    // 1,032 of 1,032 entries carry an ASIN and none carries an ISBN, which is
+    // why this route was preferred over the account export. It goes into
+    // `identifiers` and never into `isbn`: that field check digits its input on
+    // the server, so an ASIN there would match nothing.
+    const library = libraryIn(
+      await STORES.kindle.open(
+        new File([KINDLE_CATALOGUE], "KindleSyncMetadataCache.xml"),
+      ),
+    );
+
+    expect(library.books).toHaveLength(1);
+    expect(library.books[0]?.identifiers).toEqual([
+      { scheme: "asin", value: "B000000001" },
+    ]);
+    expect(library.books[0]?.isbn).toBeNull();
   });
 });
 

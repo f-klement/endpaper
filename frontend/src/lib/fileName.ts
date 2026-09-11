@@ -92,6 +92,14 @@ export type SupportedExtension = (typeof SUPPORTED_EXTENSIONS)[number];
  * A total map, so an extension added above without an answer here is a compile
  * error rather than a row filed as whatever the last arm said.
  *
+ * **`satisfies` and not an annotation, and the difference is load bearing for a
+ * caller.** Both check totality; only `satisfies` leaves the indexed access
+ * saying which values are actually in here. Annotated, `FORMAT_FOR_EXTENSION[e]`
+ * is the whole of `BookFormat`, so a caller narrowing to what a filename can
+ * mean gets `hardcover` in its type and cannot assign the result anywhere that
+ * takes only the three below. `lib/moonReader.ts::MoonReaderFormat` is derived
+ * from this and is what noticed.
+ *
  * **A comic gets `BookFormat.comic`, and it is evidence rather than a guess.**
  * A `.cbz` is a comic the way a `.m4b` is an audiobook: the container is only
  * ever written for one kind of object, so the extension answers this without
@@ -103,19 +111,18 @@ export type SupportedExtension = (typeof SUPPORTED_EXTENSIONS)[number];
  * the enum grew one; the column is nullable precisely so that an extension can
  * answer that rather than be filed as the nearest thing.
  */
-export const FORMAT_FOR_EXTENSION: Record<SupportedExtension, BookFormat | ""> =
-  {
-    ".epub": BookFormat.ebook,
-    ".mobi": BookFormat.ebook,
-    ".azw": BookFormat.ebook,
-    ".azw3": BookFormat.ebook,
-    ".fb2": BookFormat.ebook,
-    ".fb2.zip": BookFormat.ebook,
-    ".pdf": BookFormat.ebook,
-    ".m4b": BookFormat.audiobook,
-    ".mp3": BookFormat.audiobook,
-    ".cbz": BookFormat.comic,
-  };
+export const FORMAT_FOR_EXTENSION = {
+  ".epub": BookFormat.ebook,
+  ".mobi": BookFormat.ebook,
+  ".azw": BookFormat.ebook,
+  ".azw3": BookFormat.ebook,
+  ".fb2": BookFormat.ebook,
+  ".fb2.zip": BookFormat.ebook,
+  ".pdf": BookFormat.ebook,
+  ".m4b": BookFormat.audiobook,
+  ".mp3": BookFormat.audiobook,
+  ".cbz": BookFormat.comic,
+} satisfies Record<SupportedExtension, BookFormat | "">;
 
 /**
  * A name as it may be printed, with what is not text taken out.

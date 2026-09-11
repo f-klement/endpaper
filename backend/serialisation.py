@@ -317,10 +317,10 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     """Serialise a page of books, adding the per-request fields.
 
     **The cost, measured rather than counted off the source.** This function is
-    **7** statements, constant in the size of the page.
+    **8** statements, constant in the size of the page.
 
-    **8 when the page holds a copy**, because the copy count issues its statement
-    only when there is one, and **8 when the page holds a book filed in a
+    **9 when the page holds a copy**, because the copy count issues its statement
+    only when there is one, and **9 when the page holds a book filed in a
     collection**, for the same reason. **Plus one per distinct `added_by` the
     session has not already loaded.**
 
@@ -346,15 +346,23 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     #
     # `classifications` rides along for the same reason and costs one more
     # SELECT for the whole page, not one per book: `selectinload` issues a
-    # statement per relationship, so this option is why the count above is 7
+    # statement per relationship, so this option is why the count above is 8
     # and not 6.
+    #
+    # `identifiers` is the third and the eighth statement. Same shape, same
+    # reason, and the same trade stated plainly: a Book's store identifiers are
+    # on `BookOut`, so without this line `model_validate` reads the collection
+    # lazily and every page costs one SELECT per book. `MAX_IDENTIFIERS_PER_BOOK`
+    # is what bounds the rows this drags onto a listing.
     #
     # **`Loading.SERIALISED` depends on this line and deliberately loads no
     # tags of its own**, so deleting it does not restore a shelf-side eager
     # load: it reinstates the N+1 at every caller at once. `shelf.py`'s
     # `Loading` docstring carries the measurement.
     rereading_filtered_rows(db, book_ids).options(
-        selectinload(Book.tags), selectinload(Book.classifications)
+        selectinload(Book.tags),
+        selectinload(Book.classifications),
+        selectinload(Book.identifiers),
     ).all()
 
     active_loans = {

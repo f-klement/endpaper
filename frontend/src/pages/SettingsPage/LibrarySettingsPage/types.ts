@@ -20,15 +20,27 @@
  * own import of nine hundred books.
  */
 
-import type { BookCreate } from "../../../api/generated/model";
-import { BookFormat } from "../../../api/generated/model";
+import type {
+  BookCreate,
+  BookIdentifierIn,
+} from "../../../api/generated/model";
+import {
+  BookFormat,
+  BookIdentifierScheme,
+  OwnershipStatus,
+} from "../../../api/generated/model";
 import {
   AUTHOR_SEPARATOR,
   boundNumber,
   boundText,
 } from "../../../lib/bookBounds";
 import type { CalibreBook } from "../../../lib/calibre";
-import type { StoreBook, StoreFormat } from "../../../lib/stores";
+import type {
+  StoreBook,
+  StoreFormat,
+  StoreIdentifier,
+  StoreIdentifierScheme,
+} from "../../../lib/stores";
 
 /**
  * Calibre formats that mean a recording rather than a book to read.
@@ -110,9 +122,13 @@ export function toBookCreate(book: CalibreBook): BookCreate | null {
     // value the column has for "not said" rather than one invented here.
     location: null,
     is_private: false,
-    // The library names neither, and an empty list is what the endpoint
-    // already takes.
+    // The library names none of the three, and an empty list is what the
+    // endpoint already takes. **Calibre's `identifiers` table is a real one and
+    // this is not it**: `lib/calibre.ts` reads the ISBN out of it and nothing
+    // else, so what a row here could carry is a decision about that reader
+    // rather than a line in this builder.
     classifications: [],
+    identifiers: [],
   };
 }
 
@@ -136,6 +152,114 @@ const STORE_FORMATS: Record<StoreFormat, BookFormat> = {
 };
 
 /**
+ * What a store's name for a book is called on the wire.
+ *
+ * **A total `Record` rather than a cast**, `STORE_FORMATS`' rule and its
+ * reason: the two vocabularies spell their members identically today, and a
+ * scheme added to `StoreIdentifierScheme` with no home here is a compile error
+ * where a cast would send the endpoint a value its enum does not have and get a
+ * 422 in the middle of somebody's device.
+ *
+ * It sits here for `STORE_FORMATS`' other reason too: `lib/stores.ts` may not
+ * name the API at all.
+ */
+const STORE_SCHEMES: Record<StoreIdentifierScheme, BookIdentifierScheme> = {
+  asin: BookIdentifierScheme.asin,
+  google_books: BookIdentifierScheme.google_books,
+};
+
+/**
+ * How wide an identifier the column takes.
+ *
+ * **Not in `lib/bookBounds.ts`**, and the split is where that module's own rule
+ * puts it: it holds `BookCreate`'s scalar `maxLength`s, keyed by field name, and
+ * this bound is on the `value` inside a list rather than on a field. Recomputed
+ * from `openapi.json` by this page's tests rather than restated, which is the
+ * discipline `bookBounds.ts` keeps for every number in it.
+ */
+const IDENTIFIER_VALUE_MAX = 60;
+
+/**
+ * How many identifiers one request may carry.
+ *
+ * `BookCreate.identifiers` declares `maxItems`, and a payload over it is a 422
+ * for the **whole book** rather than for the extra entry, which is the outcome
+ * `storeIdentifiers` exists to prevent. No store produces more than one today;
+ * this binds the case where one grows to.
+ *
+ * Recomputed from `openapi.json` beside the width above, for its reason.
+ */
+const IDENTIFIER_LIMIT = 8;
+
+/**
+ * Every character the endpoint refuses inside an identifier.
+ *
+ * **The families, not a list of spellings**, which is what lets this be checked
+ * against the server's rule rather than against a set of examples somebody
+ * thought of. `BookIdentifierIn.an_opaque_token` refuses whitespace and every
+ * character in the Unicode categories `Cc` and `Cf`; this is that same rule in
+ * the one notation JavaScript has for it.
+ *
+ * **It has to be the same rule, and a narrower one here costs the book.** This
+ * filter used to be `/\s/u` alone. Measured over all 1,112,064 non surrogate
+ * code points by both critic seats independently: **229 passed this filter and
+ * were refused by the server**, among them SOFT HYPHEN, ZERO WIDTH SPACE, NUL
+ * and U+0085, and none went the other way. `importing.writeBooks` files the 422
+ * under `failures`, so each one lost a book. With the categories added the two
+ * rules are equal sets, 0 code points in either direction.
+ *
+ * Wider than the server's would be safe and is not free either: it would drop
+ * an identifier the endpoint would have taken, silently.
+ */
+const REFUSED_INSIDE_AN_IDENTIFIER = /[\s\p{Cc}\p{Cf}]/u;
+
+/**
+ * The identifiers the endpoint will take, out of what a store gave.
+ *
+ * **A value the endpoint would refuse loses that identifier, never the book**,
+ * which is `lib/bookBounds.ts`' rule applied to a field it does not cover: an
+ * import of nine hundred books must not turn into a 422 over one row whose
+ * catalogue held something odd. The Kindle catalogue is where that can happen:
+ * `kindle.ts` takes the `ASIN` element's text as written, so the value is
+ * whatever that file said.
+ *
+ * **So this has to refuse everything the endpoint refuses**, which is four
+ * rules and not three: empty, too wide, anything invisible inside, and more
+ * entries than one request may carry. A rule missing here does not fail
+ * anywhere; it turns into a lost book on somebody's own import.
+ *
+ * **Trimmed first, and the server does not**: `max_length` is a field
+ * constraint and runs before `BookIdentifierIn`'s validator, so the server
+ * measures what arrived and this measures what it is about to send. Trimming
+ * here is therefore the thing that makes a padded value survive at all, rather
+ * than a copy of the server's order. The two agree on every value inside the
+ * budget, which is every value any reader here produces: the widest is 12
+ * characters.
+ *
+ * **Whitespace inside is dropped rather than removed**, which is the server's
+ * rule and the reason for it: an identifier is an opaque token, so whitespace
+ * in the middle means the reader picked up something that is not the
+ * identifier, and closing it up here would send a value this app invented.
+ */
+export function storeIdentifiers(
+  identifiers: readonly StoreIdentifier[],
+): BookIdentifierIn[] {
+  const kept: BookIdentifierIn[] = [];
+  for (const identifier of identifiers) {
+    if (kept.length >= IDENTIFIER_LIMIT) break;
+    const value = identifier.value.trim();
+    // Code points, never UTF-16 units, `bookBounds.boundText`'s measurement:
+    // the ceiling belongs to a Python `str` and to a SQLite column and both
+    // count code points.
+    if (value.length === 0 || [...value].length > IDENTIFIER_VALUE_MAX)
+      continue;
+    if (REFUSED_INSIDE_AN_IDENTIFIER.test(value)) continue;
+    kept.push({ scheme: STORE_SCHEMES[identifier.scheme], value });
+  }
+  return kept;
+}
+
+/**
  * One book off a store as `POST /api/books/scan` takes it, or `null`.
  *
  * `null` for a book with no title, `toBookCreate`'s rule and its reason: the
@@ -150,8 +274,27 @@ const STORE_FORMATS: Record<StoreFormat, BookFormat> = {
  * **`is_private` is `false` and `location` is `null`** for `toBookCreate`'s
  * reason: no store here carries a shelf or a notion of a private book, so both
  * take the value the column has for "not said" rather than one invented here.
+ *
+ * **`identifiers` is the one field that is not one line**, because a list needs
+ * a per entry rule rather than a per field one: see `storeIdentifiers`. It is
+ * also the one field a Calibre library has no counterpart for, which is why
+ * `toBookCreate` above sends none.
  */
-export function storeToBookCreate(book: StoreBook): BookCreate | null {
+/** One book a store read, paired with what that store could say about owning it. */
+export interface StoreBookFromSource {
+  readonly book: StoreBook;
+  readonly ownershipStated: boolean;
+}
+
+/**
+ * @param ownershipStated Whether the store established that the member owns
+ * what it listed. `false` sends `unknown`, which is what stops a three week
+ * Adobe Digital Editions loan being written as a book somebody owns.
+ */
+export function storeToBookCreate(
+  book: StoreBook,
+  ownershipStated: boolean,
+): BookCreate | null {
   const title = boundText("title", book.title);
   if (title === null) return null;
 
@@ -166,8 +309,15 @@ export function storeToBookCreate(book: StoreBook): BookCreate | null {
     series_name: boundText("series_name", book.seriesName),
     series_index: boundNumber("series_index", book.seriesIndex),
     format: book.format === null ? null : STORE_FORMATS[book.format],
+    identifiers: storeIdentifiers(book.identifiers),
     location: null,
     is_private: false,
     classifications: [],
+    // **`unknown` rather than omitting the field**, because omitting it is what
+    // the default means and the default is `owned`. A store that could not say
+    // has to say so.
+    ownership: ownershipStated
+      ? OwnershipStatus.owned
+      : OwnershipStatus.unknown,
   };
 }

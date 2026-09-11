@@ -127,6 +127,15 @@ WITHHELD: dict[str, str] = {
         "public reader has none. A count over the public shelf would be a "
         "different number wearing the same name"
     ),
+    "identifiers": (
+        "what a store calls this copy, which is a fact about where the "
+        "household shops rather than about the work. An ASIN and a Google "
+        "volume id both name a vendor's edition record and neither is an "
+        "access point another institution can resolve, so a published "
+        "catalogue gains nothing by carrying them and a published shelf that "
+        "did would announce which stores this house buys from. The ISBN is the "
+        "identifier that is published"
+    ),
     "google_books_id": (
         "a lookup key for this app's own enrichment rather than a catalogue "
         "identifier a reader has any use for. The ISBN is the identifier that is "

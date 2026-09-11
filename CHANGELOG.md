@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.15.0
+
+_2026-09-11_
+
+- **Two more libraries import: Adobe Digital Editions, and Moon+ Reader on Android.** Six stores
+  now, from Settings, Your library. Adobe's catalogue is XML rather than a database, and Moon+ is
+  read out of the backup the app itself writes.
+- **A book from a store that cannot say whether you own it now arrives unconfirmed rather than
+  owned.** Adobe Digital Editions is a fulfilment client for public library loans as much as for
+  books you bought, and its catalogue records both identically: the loan lives in the protection
+  on the book file, which Endpaper does not open. So those books arrive with ownership unknown,
+  and you can set it yourself. **Every store import before this wrote "owned"** whether or not
+  its store had established one.
+- **What a store knows a book by is now kept.** A Kindle library carries an Amazon reference on
+  every entry and a Google Play Books export carries a volume id, and both were read and thrown
+  away, because a book had one identifier field and it was the ISBN. They are stored beside it
+  now rather than in it: an ISBN lookup check digits what it is given, so an Amazon reference put
+  there would have matched nothing and spoiled duplicate detection for the books that do carry
+  one. Nothing searches on them yet.
+- **A Kobo import still calls an OverDrive loan and a Kobo Plus title owned**, and a Kindle
+  import still keeps a Kindle Unlimited title. Both readers said so already; this is the release
+  where the distinction became visible, and narrowing it is tracked.
+- PocketBook's Android app and FBReader were looked at and not built, and the reasons are
+  written down: no published reading of PocketBook's database exists, and FBReader's is published
+  only for a version closed since 2017.
+
 ## v0.14.1
 
 _2026-09-11_

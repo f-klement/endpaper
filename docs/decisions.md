@@ -12668,3 +12668,124 @@ about cardinality and lookup, which is a ticket rather than a line in an adapter
 Google Play Books is in the same position with its volume id, so this is two of the four wired
 stores. What a Kindle import keeps today is the title, the authors, the publisher and the year,
 which is still four fields against the refused export's one of thirteen.
+
+
+## A store's identifier is a table of its own, not a second guess at `isbn`
+
+Two of the four wired stores read an identifier and kept none. The Kindle for PC catalogue
+carries an ASIN on 1,032 of 1,032 entries and no ISBN, and a Play Books Takeout carries a
+Google Books volume id and no ISBN anywhere. `BookCreate` had one identifier field and it
+was `isbn`, so both survived the read and not the import.
+
+**Not a wider `isbn`**, which the preceding entry settled: `books.isbn` is the importer's
+match key and every path into it check digits its input, so an ASIN there matches nothing
+and corrupts the deduplication for the rows that do. What was open was cardinality, lookup,
+and where the scheme lives.
+
+**A table, `book_identifiers`, keyed `(book_id, scheme, value)`.** The case that decides
+it against a nullable column is already in the tree: `POST /api/books/merge` folds up to 20
+rows into one and `_repoint_relations` moves their children across, so one book really does
+end up carrying an ASIN and a volume id, and two rows for one book are commonly two imports
+of two stores. A column would have cost nothing today and a migration per store afterwards,
+with four stores wired and two more readers in flight. `DigitalReference` made the same
+trade for the same reason and states it: it is a table now instead of a migration later.
+
+**The value is in the unique key and `author_identifiers`' is not**, which is the one place
+the two identifier stores in this schema deliberately disagree. There a second differing
+assertion about one name is a conflict somebody has to adjudicate, so the index refuses it.
+Here it is what a merge produces: two Kindle entries a member declared the same book are two
+ASINs, and a key on `(book_id, scheme)` would answer that with an `IntegrityError` rather
+than with a fact. The cost is that this store cannot refuse a retype, because a retype and a
+second edition look the same; what it buys is a merge that cannot 500.
+
+**`google_books` is a member of the enum and does not go to `books.google_books_id`.** That
+column records which Google volume this row's *metadata* was taken from: `merge_into` is its
+only writer and `overwrite=True` retypes it. A row here records which volume a member's own
+export says they own, which is a claim rather than a preference, and `AuthorIdentifier`
+already draws that asymmetry for a person's name. Writing the store's assertion into the
+enrichment column would also have changed enrichment's behaviour: `merge_into` skips a field
+that is already set, so a Play Books import would have stopped Google recording its own
+volume. The two can legitimately differ, being the edition sold and the edition matched.
+
+**Nothing matches on one and nothing shows one, and that is stated rather than implied.**
+`BookOut` carries them, the archive holds them, a merge moves them. `books.isbn` stays the
+only match key: making an identifier answer 409 would need a partial unique index over the
+whole table and would turn a second import of one library into a refusal, where today it is
+a row `/duplicates` offers. Showing one is a page folder this work does not own and a
+product decision about what a member does with an ASIN; it is a ticket.
+
+**Withheld from `PublicBookOut`.** An ASIN and a volume id name a vendor's edition record,
+not an access point another institution resolves, so a published catalogue gains nothing by
+carrying them and a published shelf that did would announce which stores the house buys from.
+
+**The scheme's vocabulary is the file readers', narrowed.** `fileReaders.FileIdentifier` is
+the same two fields with `scheme` typed `string | null`, because an EPUB labels its own and
+`opf.ts` reads what the file said. A store's format carries the identifier in a field whose
+name already says what it is, so the adapter labels it and the union can be closed.
+`lib/stores.ts` may not name the generated client, so `LibrarySettingsPage/types.ts` holds a
+total `Record` onto the endpoint's enum, which is `STORE_FORMATS`' arrangement.
+
+**`books.identifiers` is loaded on every listing**, which is the standing cost and is why
+`MAX_IDENTIFIERS_PER_BOOK` exists. `books_to_out` is 7 statements no longer; it is 8.
+
+**The refusal to retype was borrowed and the escape that makes it safe was not.**
+`AuthorIdentifier` refuses a second, differing assertion and says a fact that cannot be
+corrected is a trap rather than an invariant, which is why a member may delete one of those
+rows. Nothing deletes one here: no request body names the field and no route removes one, so
+a misread ASIN survives until the Book is purged. Both critic seats reviewed this and the
+design seat found it; it is recorded at the column and it is a ticket rather than a fix,
+because nothing matches on the value and nothing displays it, so a wrong row today is untidy
+rather than wrong about a Book. Both of those change the day either lands.
+
+**The client filter and the server validator are one rule and have to be checked against
+each other, not against examples.** `storeIdentifiers` shipped refusing `/\s/u` where
+`BookIdentifierIn` refuses whitespace and both invisible Unicode categories. Measured
+independently by both critic seats over all 1,112,064 non surrogate code points: **229
+passed the client and were refused by the server**, and `importing.writeBooks` files that
+422 under `failures`, so each one cost a **book** rather than an identifier, which is the
+outcome the bounding exists to prevent. `/[\s\p{Cc}\p{Cf}]/u` makes the two equal sets, 0
+in either direction, and the frontend test now carries one arm per case the backend test
+names.
+
+## A store that cannot say who owns a book says so, and the default meant it never could
+
+`BookCreate` had no `ownership` field, so every store import wrote the column default, `owned`.
+That default is correct for the two routes the endpoint was built for: somebody scanning a
+barcode is holding the book, and somebody adding one by hand is cataloguing theirs.
+`routers/books.py` gives that reason where a copy is created.
+
+**The store import is the third route and it is the one that cannot always say.** An Adobe
+Digital Editions catalogue records a three week library loan and a purchase identically, and no
+reading of it recovers the difference: the loan is a token travelling with the book file, which
+is the protection on it and is not something this app opens. So the field exists now and that
+store's import sends `unknown`, a value `books.ownership` has carried since the Goodreads import
+needed it. Absence still means `owned`, so every client that predates the field is unchanged.
+
+**The flag is per library and the fact is per row, which is the honest limit of what shipped.**
+`StoreLibrary.ownershipStated` separates a store that answers the ownership question imprecisely
+from one that cannot answer it at all, and only the second case was blocking. It does not make
+the first case right: `kobo.ts` puts OverDrive, a public library loan, and Kobo Plus, a
+subscription, in `OWNED_ACCESSIBILITY`, and `kindle.ts` keeps a Kindle Unlimited title because
+`<origins>` is in neither capture it was built from. **Kobo reads the value that would settle it
+and discards it**, because `KoboBook` has no field for it. Narrowing that is per row, costs one
+field in one reader, and is a ticket.
+
+Both readers stated what they keep at the site that keeps it, which is how this was found at
+merge rather than after it shipped.
+
+## Prevalence is a rate, and a lifetime count is a measure of age
+
+Three Android readers were grouped as one ticket on a survey's prevalence column, which the
+survey itself called its least reliable. All three sit in Google Play's `10M+` bucket, so the
+bucket settles nothing, and lifetime installs put them close: FBReader 29.8M, Moon+ Reader 28.3M,
+PocketBook 10.7M.
+
+**Installs per day separate them: FBReader 29, Moon+ 2,609, PocketBook 2,232.** FBReader's
+lifetime figure is measuring how long it has existed. A second route computed from archived
+captures of Play's own field agrees on the ranking within 1.26x; the two routes differ by up to
+2.1x on one app, so **the rate is a ranking and not a bound**, and it is quoted as one.
+
+The general form, which is why this is here rather than only in the ticket: **a cumulative
+counter and a rate answer different questions, and the cumulative one flatters whatever is
+oldest.** Where a decision turns on how many people use something now, a lifetime total is the
+wrong instrument even when it is the only one published.

@@ -445,6 +445,46 @@ class HeadingKind(StrEnum):
     CARRIER = "carrier"
 
 
+class BookIdentifierScheme(StrEnum):
+    """Who is naming a Book, where that name is not an ISBN.
+
+    **Not `books.isbn`, and this enum is what keeps them apart.** That column is
+    the importer's match key and the lookup key, and every path into it check
+    digits its input. An ASIN is ten characters beginning `B` and passes no such
+    test, so a row carrying one in that column matches nothing and takes the
+    dedupe surface down with it for the rows that do. See `docs/decisions.md`.
+
+    **A member here has to be a value some reader can produce**, which is
+    `AuthorityScheme`'s rule and its reason: a scheme nothing reads an
+    identifier out of is a row that lies. Both below are produced today, in the
+    browser, by the two store readers that measured an identifier and no ISBN.
+
+    **Not `books.google_books_id`, though `GOOGLE_BOOKS` names the same
+    catalogue.** That column records which Google volume this row's *metadata*
+    was taken from, and `google_books.merge_into` is the only writer that takes
+    one from a catalogue: `overwrite=True` there retypes it. (Two others carry a
+    value the library already holds, `_absorb_fields` on a merge and the copy
+    route through `_WORK_FIELDS`, and `backup.restore` reinstates one. None of
+    them is a fresh assertion, which is why the claim is about the catalogue
+    rather than about the count.) A row here records which volume a member's own
+    export said they **own**, which is a fact rather than a preference, and
+    `models.AuthorIdentifier` already states that asymmetry for a person's
+    name. Writing the store's assertion into the enrichment column would also
+    pre-empt enrichment, because `merge_into` skips a field that is already
+    set, so a Play Books import would stop Google recording its own volume.
+    """
+
+    #: Amazon's own number for an edition, off the Kindle for PC catalogue.
+    #: 1,032 of 1,032 entries carry one and none carries an ISBN, measured over
+    #: two published captures by the trio that wrote `frontend/src/lib/kindle.ts`.
+    ASIN = "asin"
+    #: A Google Books volume id, off a Play Books Takeout sidecar. Twelve
+    #: characters of the URL safe alphabet, 24 of 24 measured, and the only
+    #: identifier that archive carries: `frontend/src/lib/takeout.ts` says the
+    #: EPUB identifiers beside it are UUIDs and Project Gutenberg URLs.
+    GOOGLE_BOOKS = "google_books"
+
+
 class AuthorityScheme(StrEnum):
     """Authority files a person's identifier may come from.
 

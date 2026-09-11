@@ -24,10 +24,14 @@
  * Stated as an exclusion rather than left to be discovered:
  *
  * - **Identifiers other than the ISBN.** `identifiers` holds `amazon`,
- *   `google`, `goodreads`, `doi` and whatever a plugin invented; `BookCreate`
- *   has one identifier column and it is the ISBN. Of the 897 book reference
- *   library that is 568 books served and 244 more carrying only an identifier
- *   with no home here.
+ *   `google`, `goodreads`, `doi` and whatever a plugin invented. Of the 897
+ *   book reference library that is 568 books served and 244 more carrying only
+ *   an identifier this reader passes over. **`BookCreate` now has somewhere to
+ *   put two of those types**, `amazon` and `google`, and this import still
+ *   sends none: which of a plugin's type strings is which scheme is a decision
+ *   about this reader rather than a line in a request builder, and it is a
+ *   ticket. `LibrarySettingsPage/types.toBookCreate` says the same at the site
+ *   that would carry them.
  * - **Tags, ratings and the book files themselves.** Each is a second request a
  *   book, and whether an import should make one is a decision about the import
  *   flow rather than about this reader. The `data` table is still read, for the

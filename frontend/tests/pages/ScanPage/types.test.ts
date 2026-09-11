@@ -244,6 +244,21 @@ const NOT_SENT_BY_THE_SCAN_FLOW: Record<string, string> = {
   // Filing happens afterwards from the book's own page. Named here so that
   // stays a decision rather than a discovery.
   collection_id: "the confirm card offers no collection",
+  // Accepted by the endpoint and sent by nothing here, and this one is a
+  // decision rather than a screen that does not offer it. `FileMetadata`
+  // carries an `identifiers` list and `readIsbn` is the only thing that reads
+  // it: the schemes a book file labels its own identifiers with are free text
+  // and mostly absent, so mapping one onto `BookIdentifierScheme` is a change
+  // to the readers rather than a line here. The store import writes the field,
+  // where the adapter chose the label. It is a ticket.
+  identifiers: "a file's own identifier labels are free text, unlike a store's",
+  // Accepted by the endpoint and deliberately not sent, because the default is
+  // already the true answer for this flow: somebody scanning a barcode is
+  // holding the book. `routers/books.py` gives that same reason where a copy is
+  // created, and `schemas/book.py` gives it on the field. The flow that has to
+  // send it is the store import, where a catalogue may be recording a library
+  // loan, and `LibrarySettingsPage/types.ts` sends `unknown` there.
+  ownership: "scanning a barcode means holding the book, which is the default",
 };
 
 /**

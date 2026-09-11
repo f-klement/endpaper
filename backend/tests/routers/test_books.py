@@ -1136,6 +1136,46 @@ class TestOwnership:
         # its back cover, which means they were holding it.
         assert make_book(admin["headers"])["ownership"] == "owned"
 
+    def test_a_client_that_cannot_establish_ownership_says_so(self, client, admin):
+        # **The store import is the route this exists for.** An Adobe Digital
+        # Editions catalogue records a three week library loan and a purchase
+        # identically, and the loan lives in the fulfilment token beside the
+        # book file, which this app does not open. So a client reading one
+        # cannot claim ownership and now has a way to say that.
+        res = client.post(
+            "/api/books",
+            json={"title": "Borrowed Or Bought", "ownership": "unknown"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 201
+        assert res.json()["ownership"] == "unknown"
+
+    def test_omitting_it_still_means_owned(self, client, admin):
+        # The bound on the arm above, and the reason it is a bound rather than
+        # a restatement: every client that predates the field sends nothing,
+        # and the default has to keep meaning what it meant. A change that made
+        # absence mean `unknown` would silently unclaim every scanned book.
+        res = client.post(
+            "/api/books",
+            json={"title": "Sent By An Older Client"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 201
+        assert res.json()["ownership"] == "owned"
+
+    def test_it_refuses_a_status_that_is_not_one(self, client, admin):
+        # The column carries a CHECK constraint, so a value past it would be a
+        # 500 rather than a refusal. Asserted at the door.
+        res = client.post(
+            "/api/books",
+            json={"title": "Nonsense Status", "ownership": "borrowed"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422
+
     def test_the_owner_can_mark_it_not_owned(self, client, admin, make_book):
         book = make_book(admin["headers"])
 
@@ -1375,7 +1415,7 @@ class TestTheCostOfAListing:
             f"{short_cost} selects for 5 books and {long_cost} for 25: "
             "the cost moves with the page, which is the N+1 this exists to catch"
         )
-        assert long_cost == 11, f"{long_cost} selects for 25 books"
+        assert long_cost == 12, f"{long_cost} selects for 25 books"
 
 
 class TestACatalogueLoginLeavesTheDeploymentWithItsRequest:

@@ -458,9 +458,9 @@ class TestTheNestedBook:
 
         **Two lengths, not a ceiling.** This asserted `<= 12` and a smaller
         count is a weaker inequality, so it went on passing with an option
-        deleted and the count down at 11. What is claimed is that the cost is
-        constant in the number of loans, which two measurements decide and one
-        cannot.
+        deleted and the count one below the ceiling. What is claimed is that
+        the cost is constant in the number of loans, which two measurements
+        decide and one cannot.
 
         The equality on the number is exact for the same reason: a constant
         statement added **or removed** is then noticed rather than absorbed.
@@ -494,7 +494,7 @@ class TestTheNestedBook:
         # `serialisation.books_to_out`, and deliberately not enumerated here:
         # this repository has restated that breakdown wrongly twice, both times
         # by editing prose rather than measuring.
-        assert long_cost == 11, f"{long_cost} selects for 10 loans"
+        assert long_cost == 12, f"{long_cost} selects for 10 loans"
 
     def test_a_page_of_returned_loans_costs_the_same_whatever_its_length(
         self, client, admin, make_book, _password_hash
@@ -525,7 +525,7 @@ class TestTheNestedBook:
             f"{short_cost} selects for 3 returned loans and {long_cost} for 10: "
             "the cost moves with the page, which is the N+1 this exists to catch"
         )
-        assert long_cost == 11, f"{long_cost} selects for 10 returned loans"
+        assert long_cost == 12, f"{long_cost} selects for 10 returned loans"
 
 
 class TestOneOpenLoanPerBook:
@@ -1019,12 +1019,14 @@ class TestListOverdue:
             f"{short_cost} selects for 3 loans and {long_cost} for 10: "
             "the cost moves with the page, which is the N+1 this exists to catch"
         )
-        # 13 rather than `list_loans`'s 11, and the two are named. This route
+        # 14 rather than `list_loans`'s 12, and the two are named. This route
         # reads the in app channel's switch before it queries anything, and
-        # `sees_every_loan` reads the library mode row. It was 12 until the
-        # mode gained its clause; the number moved in the commit that moved
-        # the code, which is the only way a stated cost stays a measurement.
-        assert long_cost == 13, f"{long_cost} selects for 10 overdue loans"
+        # `sees_every_loan` reads the library mode row. The difference between
+        # the two is what this comment is for, and the pair moves together: the
+        # base moved to 12 when `books_to_out` gained the identifier load, and
+        # the number moved in the commit that moved the code, which is the only
+        # way a stated cost stays a measurement.
+        assert long_cost == 14, f"{long_cost} selects for 10 overdue loans"
 
 
 class TestLibraryModeAndWhoReadsWhichLoan:

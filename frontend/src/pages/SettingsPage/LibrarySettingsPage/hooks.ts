@@ -43,7 +43,6 @@ import type { SqliteFailure } from "../../../lib/sqlite";
 import {
   STORE_IDS,
   STORES,
-  type StoreBook,
   type StoreFailure,
   type StoreId,
   type StoreLibrary,
@@ -54,7 +53,11 @@ import {
   type ImportOutcome,
   type ImportProgress,
 } from "./importing";
-import { storeToBookCreate, toBookCreate } from "./types";
+import {
+  storeToBookCreate,
+  toBookCreate,
+  type StoreBookFromSource,
+} from "./types";
 
 /**
  * Bringing a library across from another service.
@@ -728,10 +731,16 @@ export function useStoreImport() {
   }
 
   /** Every book that read, in the order the stores are offered. */
-  function readBooks(): readonly StoreBook[] {
+  function readBooks(): readonly StoreBookFromSource[] {
     return STORE_IDS.flatMap((id) => {
       const source = sources[id];
-      return source?.status === "read" ? [...source.library.books] : [];
+      if (source?.status !== "read") return [];
+      // **Paired with its source's ownership claim rather than flattened away.**
+      // Whether a store established ownership is a fact about the read, and this
+      // is the one place several reads become one list: dropping it here is what
+      // made every store import write `owned`, a library loan included.
+      const { ownershipStated } = source.library;
+      return source.library.books.map((book) => ({ book, ownershipStated }));
     });
   }
 
@@ -753,7 +762,9 @@ export function useStoreImport() {
     const books = read.flatMap((source) => [...source.library.books]);
     return {
       total: books.length,
-      importable: books.filter((book) => storeToBookCreate(book) !== null)
+      // The ownership flag does not change whether a book is importable, which
+      // turns on a title, so the cheaper call is right here.
+      importable: books.filter((book) => storeToBookCreate(book, true) !== null)
         .length,
     };
   }, [sources]);
@@ -766,7 +777,9 @@ export function useStoreImport() {
     setResult(null);
 
     const bodies = readBooks()
-      .map((book) => storeToBookCreate(book))
+      .map(({ book, ownershipStated }) =>
+        storeToBookCreate(book, ownershipStated),
+      )
       .filter((body): body is NonNullable<typeof body> => body !== null);
 
     const outcome = await writeBooks(bodies, {

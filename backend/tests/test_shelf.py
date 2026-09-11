@@ -324,6 +324,7 @@ def _children_of_books(metadata: MetaData) -> set[str]:
 #: derivation that could have produced it.
 BOOK_CHILDREN = frozenset(
     {
+        "book_identifiers",
         "book_tags",
         "classifications",
         "custom_field_values",
@@ -364,8 +365,18 @@ BOOK_CHILDREN = frozenset(
 #: is exactly the counter-example above, so a reference that is a claim about a
 #: household's shelf would have looked, to a computed rule, like a row scoped to
 #: the Member who filed it. Its privacy is the Book's entirely.
+#: `book_identifiers` is the fifth and was classified by hand like the rest. A
+#: row says what a store calls a Book and carries no member: which store the
+#: file came from is not stored, and `models.BookIdentifier` says why. So there
+#: is nothing on a row to scope it by and its privacy is the Book's entirely.
 BOOK_OWNED_TABLES = frozenset(
-    {"book_tags", "classifications", "custom_field_values", "digital_references"}
+    {
+        "book_identifiers",
+        "book_tags",
+        "classifications",
+        "custom_field_values",
+        "digital_references",
+    }
 )
 
 
@@ -599,6 +610,12 @@ BOOK_OWNED_READERS = {
         (
             "DigitalReference.book_id.in_(loser_ids)",
             "moves the losing Books' file references onto the keeper in the "
+            "same merge, keyed on the same ids the same route resolved. A "
+            "write, and the rows it does not move it deletes.",
+        ),
+        (
+            "BookIdentifier.book_id.in_(loser_ids)",
+            "moves the losing Books' store identifiers onto the keeper in the "
             "same merge, keyed on the same ids the same route resolved. A "
             "write, and the rows it does not move it deletes.",
         ),
@@ -2212,6 +2229,7 @@ class TestTheShelfIsTheOnlyWayIn:
         """The entities the docstrings name, measured rather than asserted in
         prose."""
         assert set(BOOK_OWNED) == {
+            "BookIdentifier",
             "Classification",
             "CustomFieldValue",
             "DigitalReference",

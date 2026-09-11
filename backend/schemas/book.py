@@ -30,6 +30,11 @@ from schemas.classification import (
     ClassificationOut,
 )
 from schemas.common import RowIdField
+from schemas.identifier import (
+    MAX_IDENTIFIERS_PER_BOOK,
+    BookIdentifierIn,
+    BookIdentifierOut,
+)
 from schemas.tag import TagOut
 from schemas.user import UserOut
 
@@ -170,6 +175,41 @@ class BookCreate(BaseModel):
     classifications: list[ClassificationIn] = Field(
         default=[], max_length=MAX_CLASSIFICATIONS_PER_BOOK
     )
+    #: What a store calls this Book, where that is not an ISBN.
+    #:
+    #: **A second identifier field rather than a wider `isbn`**, and that is the
+    #: decision this field exists to record: `books.isbn` is the importer's
+    #: match key and every path into it check digits its input, so an ASIN
+    #: stored there matches nothing and takes the dedupe surface down with it.
+    #: `enums.BookIdentifierScheme` carries the argument in full.
+    #:
+    #: Bounded: every entry becomes a row. Duplicates within one payload are
+    #: dropped by `identifiers.add_identifiers` rather than refused, because a
+    #: client reading two of its own files may find one book in both.
+    identifiers: list[BookIdentifierIn] = Field(
+        default=[], max_length=MAX_IDENTIFIERS_PER_BOOK
+    )
+
+    #: What this book's arrival establishes about ownership.
+    #:
+    #: **Owned is the default because that is what the two original routes into
+    #: this endpoint mean**: somebody scanning a barcode is holding the book,
+    #: and somebody adding one by hand is cataloguing theirs. `routers/books.py`
+    #: states the same reason where a copy is created.
+    #:
+    #: **A store import is the third route and it is the one that cannot always
+    #: say.** An Adobe Digital Editions catalogue records a three week library
+    #: loan and a purchase identically, and no amount of reading it recovers the
+    #: difference: the loan lives in the fulfilment token beside the book, which
+    #: is the protection on the file and is not something this app opens. A
+    #: client reading such a store sends `unknown` rather than letting this
+    #: default make a claim about what somebody owns.
+    #:
+    #: Not a new idea and not a new value: `importing.py` already writes
+    #: `unknown` on the two server side import routes, for this reason. What was
+    #: missing was any way for a client to say it, so every store import wrote
+    #: `owned` whether or not its store had established one.
+    ownership: OwnershipStatus = OwnershipStatus.OWNED
 
     @field_validator("cover_url")
     @classmethod
@@ -312,6 +352,18 @@ class BookOut(BaseModel):
     #: outside this house. Batched with the tags in `books_to_out`, so it costs
     #: no statement per book.
     classifications: list[ClassificationOut] = []
+
+    #: What a store calls this Book, in insertion order. Batched with the tags
+    #: and the headings in `books_to_out`, so it costs no statement per book.
+    #:
+    #: **This is the whole of what reads the table today**, which
+    #: `models.BookIdentifier` states rather than leaves to be discovered: no
+    #: query matches on an identifier and nothing renders one yet. It is here so
+    #: that the fact a member's own import wrote is readable back through the
+    #: API rather than only through the archive.
+    #:
+    #: Withheld from `PublicBookOut`: see `tests/schemas/test_public.py`.
+    identifiers: list[BookIdentifierOut] = []
 
     series_name: str | None = None
     series_index: float | None = None

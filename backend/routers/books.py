@@ -56,6 +56,7 @@ from dependencies import headings as parse_headings
 from enums import (
     AuthorityScheme,
     BookFormat,
+    BookIdentifierScheme,
     BookSort,
     BulkAction,
     CatalogueSource,
@@ -68,12 +69,14 @@ from enums import (
     SettingKey,
     TagCategory,
 )
+from identifiers import add_identifiers
 from importing import identity_key
 from models import (
     AUTHOR_KEY_MAX,
     MAX_SERIES_INDEX,
     AuthorIdentifier,
     Book,
+    BookIdentifier,
     Classification,
     Collection,
     CustomField,
@@ -93,6 +96,7 @@ from reading import Reading, resolve_merge
 from schemas import (
     MAX_CLASSIFICATIONS_PER_BOOK,
     MAX_DIGITAL_REFERENCES_PER_BOOK,
+    MAX_IDENTIFIERS_PER_BOOK,
     MAX_ROW_ID,
     AuthorBatchMergeOut,
     AuthorIdentifierOut,
@@ -1185,13 +1189,20 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # Popped before the constructor: `Book.classifications` is a relationship,
     # so handing it a list of plain dicts raises rather than building rows.
     # The validated models on `payload` are what the rows are written from.
+    # `identifiers` is the same shape and is popped for the same reason.
     fields.pop("classifications", None)
+    fields.pop("identifiers", None)
     book = Book(**fields, added_by_user_id=current_user.id)
     db.add(book)
     # Before the commit, so a book and the headings it was added with land in
     # one transaction: a failure here must not leave a book claiming a
     # provenance no row records.
     add_headings(book, payload.classifications, db)
+    # In the same transaction and for the same reason. This is the route a store
+    # import writes an ASIN or a Google volume id through, and a Book that
+    # arrived without the identifier its import read cannot be told apart
+    # afterwards from one whose store carried none.
+    add_identifiers(book, payload.identifiers, db)
     db.commit()
     db.refresh(book)
 
@@ -2570,6 +2581,47 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
             continue
         reference.book_id = keeper.id
         kept_files[location] = reference
+
+    # Identifiers move with the file references, deduplicated on the way for the
+    # reason they are: `uq_book_identifiers_book_scheme_value` would refuse the
+    # flush where the keeper and a loser were imported from the same store, and
+    # two rows for one book commonly are two imports of one library.
+    #
+    # **Only an exact repeat is a duplicate here**, which is the difference from
+    # the headings above and is the whole reason the unique index carries the
+    # value. Two Kindle entries a member declared the same book carry two
+    # ASINs, and both survive: that is the merge saying which editions were
+    # folded together, and keying on the scheme alone would have made it an
+    # `IntegrityError` instead of a fact.
+    #
+    # **`MAX_IDENTIFIERS_PER_BOOK` binds here too**, on the rule the two blocks
+    # above record: a merge takes up to 20 books in one unlimited request, so an
+    # uncapped move is a stored write nobody bounded. The drop is a **loss** and
+    # is logged for that reason: an identifier came out of a member's own export
+    # and no catalogue holds it, so nothing regenerates it.
+    kept_identifiers = {
+        (BookIdentifierScheme(row.scheme), row.value) for row in keeper.identifiers
+    }
+    for identifier in (
+        db.query(BookIdentifier)
+        .filter(BookIdentifier.book_id.in_(loser_ids))
+        .order_by(BookIdentifier.id)
+        .all()
+    ):
+        assertion = (BookIdentifierScheme(identifier.scheme), identifier.value)
+        if assertion in kept_identifiers:
+            db.delete(identifier)
+            continue
+        if len(kept_identifiers) >= MAX_IDENTIFIERS_PER_BOOK:
+            logger.info(
+                "Book %s is at the identifier ceiling; merge drops %r",
+                keeper.id,
+                identifier.value,
+            )
+            db.delete(identifier)
+            continue
+        identifier.book_id = keeper.id
+        kept_identifiers.add(assertion)
 
     moved = db.query(Loan).filter(Loan.book_id.in_(loser_ids)).all()
     for loan in moved:

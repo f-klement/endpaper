@@ -7,6 +7,7 @@
  */
 import type { BookCondition } from "./bookCondition.ts";
 import type { BookFormat } from "./bookFormat.ts";
+import type { BookIdentifierOut } from "./bookIdentifierOut.ts";
 import type { ClassificationOut } from "./classificationOut.ts";
 import type { LendingWillingness } from "./lendingWillingness.ts";
 import type { LoanOut } from "./loanOut.ts";
@@ -35,6 +36,7 @@ export interface BookOut {
   format?: BookFormat | null;
   google_books_id?: string | null;
   id: number;
+  identifiers?: BookIdentifierOut[];
   is_private?: boolean;
   isbn: string | null;
   language?: string | null;

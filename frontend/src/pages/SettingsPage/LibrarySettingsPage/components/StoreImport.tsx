@@ -282,6 +282,9 @@ const STORE_FAILURES: Record<StoreFailure, MessageKey> = {
   "not-a-takeout": "stores.failureNotATakeout",
   "not-an-apple-books-library": "stores.failureNotAnAppleBooksLibrary",
   "not-a-kindle-library": "stores.failureNotAKindleLibrary",
+  "not-a-digital-editions-catalogue":
+    "stores.failureNotADigitalEditionsCatalogue",
+  "not-a-moon-reader-backup": "stores.failureNotAMoonReaderBackup",
   damaged: "stores.failureDamaged",
   "too-large": "stores.failureTooLarge",
   "no-engine": "stores.failureNoEngine",

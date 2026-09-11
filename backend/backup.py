@@ -47,6 +47,7 @@ from models import (
     AuthorAlias,
     AuthorIdentifier,
     Book,
+    BookIdentifier,
     CatalogueCredential,
     CatalogueTarget,
     Classification,
@@ -146,6 +147,28 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # taken before this table existed restores with no references, which is
         # the state it was written in.
         ("digital_references", DigitalReference),
+        # Beside the file references, which it hangs off the same parent as and
+        # sits in the same position relative to: `books` is long since inserted
+        # by here. A different claim about the same Book: a reference says where
+        # a file is and this says what a store calls the edition.
+        #
+        # **Here on the day the table was created**, because the identical
+        # omission for `author_aliases` was silent for months and cost a restore
+        # that produced perfectly intact books with every merge undone.
+        # `test_holds_every_table` reads the manifest against the metadata, so a
+        # table left out of this tuple now fails rather than waiting to be
+        # noticed after a restore.
+        #
+        # **Uncapped on restore, like every other table here.**
+        # `MAX_IDENTIFIERS_PER_BOOK` binds the two writers that add to a
+        # library; this one reinstates a whole database rather than adding to
+        # one, and refusing rows would produce a restore that silently differs
+        # from the archive.
+        #
+        # Absent from `_REQUIRED_TABLES` for the reason `digital_references` is:
+        # an archive taken before this table existed restores with none, which
+        # is the state it was written in.
+        ("book_identifiers", BookIdentifier),
         # The author merge decisions. Its only foreign key is `users`, which is
         # first in this tuple, so it could sit anywhere after that; it is here
         # beside the other tables that hold what members decided rather than

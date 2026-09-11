@@ -1,6 +1,7 @@
 import logging
 import secrets
 from datetime import date, datetime
+from enum import StrEnum
 from typing import TypeGuard
 
 from sqlalchemy import (
@@ -34,6 +35,7 @@ from enums import (
     AuthorityScheme,
     BookCondition,
     BookFormat,
+    BookIdentifierScheme,
     ClassificationScheme,
     CustomFieldKind,
     HeadingKind,
@@ -310,8 +312,12 @@ class AuthorAlias(Base):
 AUTHORITY_IDENTIFIER_MAX = 60
 
 
-def _scheme_check(members: type[AuthorityScheme]) -> str:
+def _scheme_check(members: type[StrEnum]) -> str:
     """A SQL `IN` list holding every member of an enum, in declaration order.
+
+    **Any `StrEnum`, not `AuthorityScheme`'s alone**, because two tables derive
+    a scheme constraint from an enum now and a signature naming one of them
+    would have the second author copy the body instead of calling it.
 
     **Not sorted, and the order is a readability property rather than a
     correctness one.** `StrEnum` iterates in declaration order, so the text this
@@ -994,6 +1000,15 @@ class Book(Base):
         back_populates="book",
         cascade="all, delete-orphan",
         order_by="CustomFieldValue.field_id",
+    )
+    # Cascaded like the notes and the quotes: a purged book's identifiers name
+    # a book nobody holds. Ordered by id, which is insertion order, so a book
+    # imported from two stores reads the same way twice.
+    identifiers: Mapped[list[BookIdentifier]] = relationship(
+        "BookIdentifier",
+        back_populates="book",
+        cascade="all, delete-orphan",
+        order_by="BookIdentifier.id",
     )
     # Cascaded like the notes and the quotes: a purged book's file references
     # point at a book nobody holds. Ordered by id, which is insertion order, so
@@ -2017,6 +2032,150 @@ class Classification(Base):
         if number is not None:
             self.sort_key = filing.sort_key_for(scheme, number)
         return value
+
+
+#: The longest identifier a store gives one Book.
+#:
+#: An ASIN is 10 characters and a Google Books volume id is 12, so every value
+#: this table holds today spends a fifth of it. The number is not a guess about
+#: either format: it is a **stored denial of service bound**, the job
+#: `AUTHORITY_IDENTIFIER_MAX` does, and it is that constant's number on purpose.
+#: Two identifier stores in one schema answering the same question with two
+#: numbers is a difference somebody would later have to explain, and there is
+#: nothing to explain: neither column knows what the next scheme's identifier
+#: looks like, and both are bounding a value read out of somebody else's file.
+#:
+#: **The headroom is where the next scheme lands**, which is what the number
+#: has to be chosen for rather than the two in hand: a UUID is 36 characters and
+#: `urn:uuid:` before it makes 45, which is the widest shape a reader of a book
+#: file or a device database plausibly hands over.
+BOOK_IDENTIFIER_MAX = 60
+
+
+class BookIdentifier(Base):
+    """What a store calls one Book, where that name is not an ISBN.
+
+    `asin`, `B00J4YQKHY`: a scheme and the store's own number for the edition a
+    member has. **Never an ISBN**, which has a column of its own and a check
+    digit behind every path into it. `enums.BookIdentifierScheme` carries why
+    widening that column was refused and is not repeated here.
+
+    **A table rather than a column per scheme, and the case that decides it is
+    already in the tree.** `POST /api/books/merge` folds up to 20 rows into one
+    and `_repoint_relations` moves their children across, so one Book really
+    can end up carrying an ASIN and a Google volume id: two rows for one book
+    are commonly two imports of two stores, which is the same argument
+    `DigitalReference` makes about two machines. A nullable column would have
+    cost nothing today and a migration per store afterwards, and four stores are
+    wired.
+
+    **Unique per Book, scheme and value, not per Book and scheme.** The stricter
+    key is what `author_identifiers` carries, because there a second differing
+    assertion about one name is a conflict somebody has to look at. Here it is
+    the ordinary outcome of a merge, and a unique index that refuses it turns a
+    merge into an `IntegrityError` rather than into a question. Two ASINs on one
+    Book say two Kindle entries were declared the same book, which is true and
+    is worth keeping.
+
+    **Book owned, with no Member of its own**, which is `DigitalReference`'s
+    rule and its reason: an identifier is an ordinary field on a Book and its
+    visibility is the Book's entirely, so a `added_by_user_id` here would be
+    provenance no query consults, and `tests/test_shelf.py` records that a
+    column of exactly that shape has dropped a table out of the privacy guard
+    before. This table is named in `BOOK_OWNED_TABLES` there.
+
+    **Which store said so is deliberately not stored.** It is derivable for
+    `asin` and it is not the fact: `google_books` reaches this table from a Play
+    Books export today and would reach it from any reader that finds a volume
+    id. A column naming the reader would be provenance nothing reads, and the
+    one thing provenance buys on `author_identifiers`, telling a machine's
+    assertion from a member's, does not arise: every row here came out of a file
+    the member picked themselves.
+
+    **There is no operation that corrects one, and that is a gap rather than a
+    rule.** `identifiers.add_identifiers` takes `AuthorIdentifier`'s refusal to
+    retype an identifier in place, and that class is safe only because a member
+    may **delete** a row: "a fact that cannot be corrected is a trap rather than
+    an invariant". Nothing deletes one here. No request body names the field, no
+    route removes one, and the only `db.delete` on this table is the merge
+    dropping an exact repeat, so a misread ASIN survives until the Book is
+    purged. Found by the design seat, 2026-09-11; the route is a ticket, and
+    what makes the gap affordable meanwhile is that no query matches on the
+    value, so a wrong row is untidy rather than wrong about a Book.
+
+    **Nothing matches on it and nothing shows it yet**, stated because an
+    identifier no query reads is a column that goes stale in silence. What reads
+    it today is `BookOut`, which carries it on every Book a member fetches, the
+    archive, which holds it, and the merge, which moves it. What deliberately
+    does not: `books.isbn` stays the importer's only match key, `/duplicates`
+    still groups on a normalised title and author, and `PublicBookOut` withholds
+    it. See `docs/decisions.md` for what each of those would have cost.
+    """
+
+    __tablename__ = "book_identifiers"
+
+    __table_args__ = (
+        # The identity is the assertion, not a row id, so re-importing a library
+        # somebody imported last month finds the row instead of doubling it.
+        # `book_id` therefore carries no `index=True` of its own, the reason
+        # `quotes.book_id` does not: a composite leading with the same column
+        # serves every lookup a standalone one would.
+        #
+        # **The value is in the key**, and `AuthorIdentifier`'s index is not.
+        # See the class docstring: there a second differing assertion is a
+        # conflict, here it is what a merge produces.
+        Index(
+            "uq_book_identifiers_book_scheme_value",
+            "book_id",
+            "scheme",
+            "value",
+            unique=True,
+        ),
+        # Built from the enum rather than written out, `ck_author_identifiers_
+        # scheme`'s rule: the literal list left a value the application accepts
+        # and the database rejects every time the enum grew, and the failure
+        # landed as an `IntegrityError` at the first write. The migration still
+        # spells the list out, because a revision has to say what it did on the
+        # day it ran, and `tests/test_schema.py` asks the **migrated** database
+        # whether each member is storable, which a model built one cannot.
+        CheckConstraint(
+            _scheme_check(BookIdentifierScheme),
+            name="ck_book_identifiers_scheme",
+        ),
+        # **The NUL arm rather than a byte budget**, and both are accepted by
+        # `TestEveryTextCeilingBindsOnBytesToo`. SQLite's `length()` counts
+        # characters up to the first NUL, so the character ceiling alone admits
+        # a value nothing bounded on a Core insert, which is `backup.restore`.
+        # A budget at four times the ceiling caps such a value; refusing the NUL
+        # makes the ceiling exact, and that is available here where it is not on
+        # a member's own prose: every value in this column is a token a machine
+        # wrote, so a NUL is never a legitimate one. The two credential columns
+        # carry the same arm for the same reason.
+        CheckConstraint(
+            f"length(value) > 0 AND length(value) <= {BOOK_IDENTIFIER_MAX}"
+            " AND instr(value, char(0)) = 0",
+            name="ck_book_identifiers_bounds",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # No `index=True`: `uq_book_identifiers_book_scheme_value` leads with it.
+    book_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
+    scheme: Mapped[BookIdentifierScheme] = mapped_column(String(20), nullable=False)
+    # Stored as the store wrote it, case included. **Not folded**, unlike
+    # `authors.author_key`: a name is a spelling somebody typed and this is an
+    # opaque token, so `zyTCAlFPjgYC` and `ZYTCALFPJGYC` are two different
+    # volumes rather than two spellings of one. Folding would collapse them.
+    #
+    # **Deliberately not indexed on its own.** Nothing looks a Book up by this,
+    # which the class docstring states rather than leaves to be discovered, and
+    # an index with no reader is a second B-tree written on every insert.
+    value: Mapped[str] = mapped_column(String(BOOK_IDENTIFIER_MAX), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    book: Mapped[Book] = relationship("Book", back_populates="identifiers")
 
 
 #: The longest name a Library may give one of its own fields.

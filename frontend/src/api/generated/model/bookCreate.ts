@@ -6,7 +6,9 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { BookFormat } from "./bookFormat.ts";
+import type { BookIdentifierIn } from "./bookIdentifierIn.ts";
 import type { ClassificationIn } from "./classificationIn.ts";
+import type { OwnershipStatus } from "./ownershipStatus.ts";
 
 export interface BookCreate {
   author?: string | null;
@@ -16,10 +18,13 @@ export interface BookCreate {
   cover_url?: string | null;
   description?: string | null;
   format?: BookFormat | null;
+  /** @maxItems 8 */
+  identifiers?: BookIdentifierIn[];
   is_private?: boolean;
   isbn?: string | null;
   language?: string | null;
   location?: string | null;
+  ownership?: OwnershipStatus;
   page_count?: number | null;
   publisher?: string | null;
   series_index?: number | null;

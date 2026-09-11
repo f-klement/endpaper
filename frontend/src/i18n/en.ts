@@ -1535,6 +1535,23 @@ export const en = {
   "stores.failureNotAnAppleBooksLibrary":
     "That database is not an Apple Books library.",
   "stores.failureNotAKindleLibrary": "That file is not a Kindle catalogue.",
+  "stores.adobe.name": "Adobe Digital Editions",
+  "stores.adobe.explain":
+    "Adobe Digital Editions keeps a record for each book it has fulfilled, as XML. On version 2 and later that is one file per book, under a Manifest folder in the Digital Editions folder; on older versions it is a single manifest.xml.",
+  "stores.adobe.choose": "Choose a catalogue file",
+  // Two bounds, and a member meets the first one immediately: since version 2
+  // the catalogue is one file per book and this picker takes one file. The
+  // second is why everything from this store arrives unconfirmed.
+  "stores.adobe.oneBook":
+    "On version 2 and later this reads one book per file you pick, because that is how the catalogue is written. And Adobe Digital Editions records a library loan and a purchase the same way, so books from here arrive with ownership unconfirmed rather than as books you own. You can set that yourself afterwards.",
+  "stores.moonReader.name": "Moon+ Reader",
+  "stores.moonReader.explain":
+    "Moon+ Reader writes a backup of its library from inside the app, under Options, Backup and restore. Pick the backup file it made. What it records is the file, its title and its author; it keeps no ISBN, publisher or year.",
+  "stores.moonReader.choose": "Choose a Moon+ backup",
+  "stores.failureNotADigitalEditionsCatalogue":
+    "That file is not an Adobe Digital Editions catalogue.",
+  "stores.failureNotAMoonReaderBackup":
+    "That file is not a Moon+ Reader backup.",
   "stores.reading": "Reading {file}...",
   "stores.sourceRead": "{count} books read.",
   "stores.sourceSkipped":

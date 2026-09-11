@@ -25,7 +25,11 @@ import { renderLocalised } from "../../../../utils";
 
 function library(
   books: number,
-  overrides: { skipped?: number; refused?: number } = {},
+  overrides: {
+    skipped?: number;
+    refused?: number;
+    ownershipStated?: boolean;
+  } = {},
 ) {
   return {
     books: Array.from({ length: books }, (_, index) => ({
@@ -33,6 +37,7 @@ function library(
       title: `Book ${index}`,
       authors: [],
       isbn: null,
+      identifiers: [],
       publisher: null,
       year: null,
       language: null,
@@ -41,6 +46,10 @@ function library(
       seriesIndex: null,
       format: null,
     })),
+    // Defaulted to true, which is what four of the six stores say. A test
+    // wanting the other answer asks for it, so nothing here quietly decides
+    // what a store established about ownership.
+    ownershipStated: overrides.ownershipStated ?? true,
     skipped: overrides.skipped ?? 0,
     refused: overrides.refused ?? 0,
   };

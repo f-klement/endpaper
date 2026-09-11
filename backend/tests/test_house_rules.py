@@ -1223,7 +1223,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **115** models under `schemas/`, **42** of
+    Measured on the tree as it stands: **117** models under `schemas/`, **43** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -1280,6 +1280,13 @@ class TestEveryRequestBodyRowIdIsBounded:
     recomputed: what the entry above should have said is whatever the command
     below reported at the time. **The last word before a commit belongs to that
     command**, and this is the second wave in which the prose lost to it.
+
+    Both numbers moved together when `BookIdentifierIn` and `BookIdentifierOut`
+    arrived, which is the case the pair exists to make visible: one of the two
+    is accepted on `POST /api/books` and the other is served, so a drift of one
+    and not the other would have been the tell that something was misclassified.
+    The figures above are whatever the command below reports; this entry names
+    the models and deliberately not a count.
     """
 
     def _model_bases(self, node: ast.ClassDef) -> set[str]:
@@ -5458,6 +5465,336 @@ class TestOneInstanceIssuesALoan:
             f"{sorted(declaring)} declare who issued a loan. `LoanOut` is a "
             "response and may say so; a model a caller can send is a way to "
             "claim another instance's authority for a row this one writes."
+        )
+
+
+class TestEverySchemeCheckListsItsOwnEnum:
+    """A `ck_*_scheme` constraint names exactly the enum its column is typed as.
+
+    **Written because widening `models._scheme_check` took the last thing that
+    checked its argument, and nothing replaced it.** That helper used to be
+    annotated `type[AuthorityScheme]`, so handing it the wrong enum was a mypy
+    error; a second table needed it and the signature became `type[StrEnum]`,
+    which accepts every enum in the tree. Measured by the design seat on
+    2026-09-11: calling it with `AuthorityScheme` from `BookIdentifier`'s own
+    `__table_args__` left mypy green and `tests/test_schema.py`,
+    `tests/test_identifiers.py` and `tests/routers/test_books_identifiers.py`
+    at **210 passed**.
+
+    **The model's constraint is inert and that is exactly why this is needed.**
+    `main.py` boots through `upgrade_to_head()` and the suite inherits that
+    schema, so a `CheckConstraint` in `models.py` is a description of a
+    revision rather than a second enforcement of it. The migration is what
+    installs the DDL and `test_schema.py` is what asks the migrated database
+    whether each member is storable, so nothing at all was reading the model
+    side. A wrong enum here therefore fails no test and misleads every reader.
+
+    **Both halves are derived, and the first version only got one of them
+    right.** The enum is read off `Mapped[...]` on the mapped class, so a third
+    table with a scheme constraint is paired without anybody remembering this
+    test. Which constraints are read was a **naming convention** until the
+    security seat renamed one and watched it leave the rule in silence, so it is
+    now `_bounds_column` on the constraint's own text. Stating only the first
+    half was this file's own recorded failure, a comment defending the part that
+    is fine while the part that is not sits beside it.
+
+    **What this does not cover, and what does.** A constraint **deleted** rather
+    than given the wrong enum is not this rule's business and is already caught:
+    `TestEveryEnumColumnIsConstrainedOrExemptWithAReason` is the half that asks
+    whether a constraint exists, and this is the half that asks whether the one
+    that exists says the right thing. Verified by the design seat, 2026-09-11,
+    by deleting the constraint outright.
+
+    **The exclusion, stated rather than left to be discovered**: a table whose
+    `scheme` column carries no `ck_*_scheme` constraint is outside this rule and
+    not a violation of it. `classifications` is that case deliberately, and
+    `enums.ClassificationScheme` carries the reason: a CHECK costs a batch table
+    rebuild every time the enum grows, which is a fair price for a closed enum
+    and a recurring tax on one that is not.
+    """
+
+    #: The value list out of `scheme IN ('a', 'b')`, in the order written.
+    #:
+    #: **Extraction only. `_bounds_column` decides what is collected**, and the
+    #: two have to agree about **which clause**, which is why this carries that
+    #: helper's `(?<![A-Za-z0-9_])` rather than a looser spelling of it.
+    #:
+    #: **Without the lookbehind the pair fails silently**, and that is measured
+    #: rather than argued. `_bounds_column` collects on the real clause and this
+    #: extracts the **first** `scheme IN (` in the text, so they select
+    #: different clauses whenever an earlier one ends in `scheme`. Measured in
+    #: process by the design seat, 2026-09-11, against
+    #: `"xscheme IN ('asin', 'google_books') AND scheme IN ('gnd')"`: the rule
+    #: read `'asin', 'google_books'`, matched the enum and reported **clean**
+    #: while the constraint permitted only `'gnd'`. That is this class's own
+    #: defect restored, one spelling further out from the rename the security
+    #: seat found, and the direction is a pass rather than a failure.
+    #:
+    #: No live instance either way: the only column whose name ends in `scheme`
+    #: is `scheme`, over `Base.metadata`. The lookbehind changes nothing that
+    #: exists, a clause at position 0 included, because a lookbehind there
+    #: succeeds.
+    AN_IN_LIST = re.compile(
+        r"(?<![A-Za-z0-9_])scheme\s+IN\s*\(([^)]*)\)", re.IGNORECASE
+    )
+
+    @staticmethod
+    def _enum_on(table_name: str, column_name: str = "scheme") -> type[StrEnum] | None:
+        """The enum a table's column is annotated with, or `None`.
+
+        Read through `inspect.get_annotations(eval_str=True)` rather than off
+        the column, because SQLAlchemy stores `String(20)` and the enum lives
+        only in the `Mapped[...]` annotation. Under PEP 649 that annotation is
+        lazy, so it has to be evaluated rather than read as a string.
+
+        **Through `_enum_types`, which already recurses.** This walked
+        `get_args` at one fixed depth, which is the miss that helper was written
+        to fix and its docstring records: `Mapped[E]` resolved and
+        `Mapped[E | None]` answered `None`. `_enum_columns` measured that exact
+        shape at 7 found against 11, the four missed being every nullable
+        column, and **4 of the 12 mapped `StrEnum` columns in this tree are
+        nullable today** (`books.condition`, `books.format`, `books.lending`,
+        `classifications.kind`), so it is ordinary rather than hypothetical; it
+        had simply not reached a `scheme` column yet.
+
+        **The direction was loud and the explanation was false**, which is why
+        it was worth deleting rather than correcting: a nullable scheme column
+        made `_disagreement` take its `expected is None` arm, so
+        `test_each_one_lists_exactly_its_own_enum` failed saying the constraint
+        was "unguarded and silent" about a column that was correctly guarded.
+        Found by the design seat, 2026-09-11, one round after the same shape in
+        the regex.
+
+        **`column_name` is a parameter so that this is testable, and that is
+        the whole reason it is not hardcoded.** No `scheme` column in this
+        schema is nullable, so a rule that could only be asked about one had
+        nothing to discriminate the two walks with, and re-inlining the shallow
+        one left the file green at 13 passed. It does not have to be asked
+        about a `scheme` column: `books.format` is a live nullable `StrEnum`
+        column and the two walks answer differently on it, as they do on
+        `books.condition`, `books.lending` and `classifications.kind`.
+        `test_it_reads_a_nullable_column_off_a_real_table` is that assertion,
+        so the delegation is **tested** rather than stated. Raised by the design
+        seat on 2026-09-11 against a docstring that had settled for stated one
+        step early.
+        """
+        for mapper in Base.registry.mappers:
+            if getattr(mapper.local_table, "name", None) != table_name:
+                continue
+            declared = inspect.get_annotations(mapper.class_, eval_str=True)
+            return next(iter(_enum_types(declared.get(column_name))), None)
+        return None
+
+    @classmethod
+    def _scheme_checks(cls) -> list[tuple[str, CheckConstraint]]:
+        found = []
+        for table in Base.metadata.tables.values():
+            for constraint in table.constraints:
+                if not isinstance(constraint, CheckConstraint):
+                    continue
+                # **On the shape, never on the name**, which is a correction
+                # rather than a convenience: this collected on
+                # `^ck_\w+_scheme$` against `constraint.name`, the one
+                # attribute of a scheme constraint that says nothing about
+                # whether it lists the right enum. Measured by the security
+                # seat, 2026-09-11: renaming `ck_book_identifiers_scheme` to
+                # `..._scheme_list` **and** passing the wrong enum gave 665
+                # passed with nothing red, the exact defect this class exists
+                # for, restored. A constraint cannot leave this rule by being
+                # relabelled.
+                #
+                # **Through `_bounds_column`, which is the same question the
+                # class next door asks**, rather than through a second pattern
+                # of this class's own. That makes the two rules' agreement a
+                # call instead of a coincidence: a CHECK this cannot see reads
+                # as **no** constraint to `TestEveryEnumColumnIsConstrainedOr
+                # ExemptWithAReason`, which is what closes the spelling one
+                # further out from the rename. Raised by the design seat after
+                # it went looking for exactly that hole and found the coupling
+                # holding it shut by accident.
+                #
+                # **Deliberately not pre-filtered on whether the enum can be
+                # read.** A table this rule cannot pair with an enum has to
+                # reach `_disagreement` and be **reported**, because unguarded
+                # and silent is the one outcome not available, which is what
+                # `test_the_guard_would_notice_a_column_it_cannot_read_an_enum_
+                # off` pins. Filtering here would make that test vacuous.
+                if _bounds_column(str(constraint.sqltext), "scheme"):
+                    found.append((table.name, constraint))
+        return found
+
+    def test_there_is_something_to_check(self):
+        """A rule that found nothing would pass forever. Two tables carry one
+        today, and the number is derived rather than stated: what this asserts
+        is that the pattern still matches something.
+
+        **It is not what catches a constraint leaving the rule**, and saying so
+        is the point: it passed through the rename that hid one, because the
+        other was still there. `_bounds_column` on the constraint's own text is
+        what closes that; this only closes the whole set going empty.
+        """
+        assert self._scheme_checks()
+
+    @classmethod
+    def _disagreement(cls, table_name: str, sqltext: str, name: str) -> str | None:
+        """What is wrong with one constraint, or `None` where nothing is.
+
+        **One comparison, used by the rule and by the probe below**, which is
+        the arrangement this class did not have on its first attempt: the probe
+        compared two enums to each other and so passed on a tree where
+        `_scheme_checks` found nothing and where `_enum_on` answered `None`. It
+        was named for a mutation it could not observe, which is the shape
+        `CLAUDE.md` records as recurring, and the design seat caught it.
+        """
+        expected = cls._enum_on(table_name)
+        if expected is None:
+            return (
+                f"{name} sits on a table whose `scheme` column this rule could "
+                "not read an enum off, so the constraint is unguarded and "
+                "silent, which is the one outcome not available."
+            )
+        listed = cls.AN_IN_LIST.search(sqltext)
+        if listed is None:
+            return f"{name} is not a `scheme IN (...)` list, so this rule cannot read it."
+        values = {value.strip().strip("'") for value in listed.group(1).split(",")}
+        if values == {member.value for member in expected}:
+            return None
+        return (
+            f"{name}: permits {sorted(values)}, "
+            f"{expected.__name__} offers {sorted(m.value for m in expected)}"
+        )
+
+    def test_each_one_lists_exactly_its_own_enum(self):
+        wrong = [
+            found
+            for table_name, constraint in self._scheme_checks()
+            if (
+                found := self._disagreement(
+                    table_name, str(constraint.sqltext), str(constraint.name)
+                )
+            )
+            is not None
+        ]
+
+        assert not wrong, (
+            "A scheme constraint does not list the enum its own column is typed "
+            "as. A value the application accepts and the database rejects "
+            "arrives as an IntegrityError on somebody's first write:\n  "
+            + "\n  ".join(wrong)
+        )
+
+    def test_the_guard_would_notice_the_wrong_enum(self):
+        """A guard that cannot fail is not a guard, and this is the exact
+        mutation that got past mypy and the suite: the right helper called with
+        the neighbouring enum.
+
+        **Through `_disagreement`, which is what the rule itself calls**, so
+        this cannot pass on a tree where the enum could not be read or where
+        the constraint list came back empty. Those were live holes in the first
+        version, which compared `AuthorityScheme` and `BookIdentifierScheme` to
+        each other and would have reported a difference on any tree at all.
+        """
+        from enums import AuthorityScheme
+
+        reported = self._disagreement(
+            "book_identifiers",
+            orm._scheme_check(AuthorityScheme),
+            "ck_book_identifiers_scheme",
+        )
+
+        # **The mismatch arm specifically, not merely "something was wrong".**
+        # `_disagreement` has three ways to answer, and two of them mean this
+        # rule's own machinery is broken rather than that the constraint is.
+        # Without this line the probe passes on a tree where `_enum_on` or
+        # `AN_IN_LIST` has stopped working, which is the overclaim it was
+        # rewritten to close. Those two are loud anyway, in
+        # `test_each_one_lists_exactly_its_own_enum`, which is what makes the
+        # pair sound rather than this assertion alone.
+        assert reported is not None and "permits" in reported
+
+    def test_it_reads_the_clause_that_bounds_the_column(self):
+        """Collection and extraction have to select the **same** clause.
+
+        **The one arm of this class whose failure was a silent pass.** With the
+        lookbehind on `_bounds_column` and not on `AN_IN_LIST`, the two selected
+        different clauses whenever an earlier one ended in `scheme`: the
+        constraint below was collected on its real clause and read off its
+        decoy, so the rule matched `'asin', 'google_books'` against the enum and
+        answered clean while the constraint permitted only `'gnd'`. Found by the
+        design seat, 2026-09-11, in the round that introduced it.
+
+        No table in this schema is shaped like this, and that is why the hole
+        was invisible rather than why it was harmless: the other arms all fail
+        loudly and this one did not fail at all.
+        """
+        decoy = "xscheme IN ('asin', 'google_books') AND scheme IN ('gnd')"
+
+        reported = self._disagreement("book_identifiers", decoy, "ck")
+
+        assert reported is not None and "permits" in reported
+        # The clause that bounds the column, not the one that merely ends in
+        # its name. Asserting the **values** rather than only that something
+        # was reported: reading the decoy also reports, for the wrong reason,
+        # and that arm keeps catching if the enum grows a third member and the
+        # decoy stops equalling it.
+        assert "gnd" in reported
+
+    def test_it_reads_a_nullable_column_off_a_real_table(self):
+        """`_enum_on` resolves `Mapped[E | None]`, asked about a live column.
+
+        **Against the function rather than against the helper**, which is what
+        moves this from stated to tested: a one level `get_args` walk answers
+        `None` here and the delegation answers `BookFormat`. Four mapped columns
+        discriminate the two today, `books.format`, `books.condition`,
+        `books.lending` and `classifications.kind`, and none of them is a
+        `scheme` column, which is why this rule takes a column name.
+
+        `books.format` rather than a synthetic table, because a rule that reads
+        annotations off real mappers has to be asked about a real mapper: a
+        synthetic one would be testing the walk and not the lookup.
+        """
+        from enums import BookFormat
+
+        assert self._enum_on("books", "format") is BookFormat
+
+    def test_the_helper_this_rule_resolves_through_reads_both_spellings(self):
+        """`_enum_types` answers for `Mapped[E]` and `Mapped[E | None]` alike.
+
+        **This pins the helper, not `_enum_on`, and the difference is the whole
+        honesty of the test.** `_enum_on` re-spelled a one-level walk past this
+        helper until 2026-09-11, so a nullable `scheme` column would have been
+        reported as "unguarded and silent" while being correctly guarded. The
+        fix deletes that walk and delegates here.
+
+        **Re-inlining the walk is caught by
+        `test_it_reads_a_nullable_column_off_a_real_table`**, which asks
+        `_enum_on` itself about `books.format`. This arm is the other half: it
+        stops the helper regressing, where that one stops the rule walking past
+        it. Both are needed and neither is the other.
+
+        Named for what it does rather than for what the fix was about, because
+        a fixture named for what it tests is not evidence that it tests it.
+        """
+        from sqlalchemy.orm import Mapped
+
+        from enums import BookIdentifierScheme
+
+        # Both spellings, because the rule has to be one rule: the shallow walk
+        # resolved the first and answered `None` for the second.
+        assert _enum_types(Mapped[BookIdentifierScheme]) == [BookIdentifierScheme]
+        assert _enum_types(Mapped[BookIdentifierScheme | None]) == [
+            BookIdentifierScheme
+        ]
+
+    def test_the_guard_would_notice_a_column_it_cannot_read_an_enum_off(self):
+        """The other hole the first version had: a table this rule cannot pair
+        with an enum has to be **reported**, never passed over, because
+        unguarded and silent is the failure the whole file exists to prevent."""
+        assert (
+            self._disagreement(
+                "books", "scheme IN ('asin')", "ck_books_scheme"
+            )
+            is not None
         )
 
 

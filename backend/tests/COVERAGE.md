@@ -1,9 +1,9 @@
 # Backend test coverage
 
-**6675 tests**, in 99 files, recounted with `--collect-only` on 2026-09-10.
+**6739 tests**, in 102 files, recounted with `--collect-only` on 2026-09-11.
 
 **The headline equals the passed count today, and that is a fact about the tree rather than
-a simplification.** The gate reports `6675 passed`, with no skip and no `xfail`: the strict
+a simplification.** The gate reports `6739 passed`, with no skip and no `xfail`: the strict
 `xfail` that recorded a defect in the CSV importer is gone, because the work that closed the
 defect closed it.
 
@@ -15,7 +15,7 @@ the skip once made the check undoable, and a rule rewritten as `collected == pas
 the tree happens to have neither is one that fails for the wrong reason the day somebody adds
 either.
 
-**The rows below sum to 6626, forty nine short, and the shortfall is deliberate.** Those
+**The rows below sum to 6690, forty nine short, and the shortfall is deliberate.** Those
 tests live in six files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -101,13 +101,13 @@ why the helper uses regexes.
 | `test_uploads.py` | 33 | Content-sniffed image validation and the size cap |
 | `test_middleware.py` | 27 | Security headers, CSP contents, HSTS conditions |
 | `test_main.py` | 59 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan, what the built files say about being reused, the shell that has to answer a client route |
-| `test_house_rules.py` | 271 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter. Also the one decision of what vendored code is: each of the five walks over this tree driven against a constructed tree with each kind of vendored path planted in front of it, and no other test module allowed to define a walk of its own |
+| `test_house_rules.py`                      |   278 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter. Also the one decision of what vendored code is: each of the five walks over this tree driven against a constructed tree with each kind of vendored path planted in front of it, and no other test module allowed to define a walk of its own |
 | `test_scratch_report.py` | 4 | **The scratch report names the filesystem the databases landed on.** `conftest._fastest_scratch()` falls back from `/dev/shm` to disk silently |
 | `test_roster_counts.py` | 78 | **A number spelled in prose, recomputed.** Every number written beside a roster noun is found by a census and must carry a verdict naming a cardinality computed from `sources.py`. The census walks the tree minus what a tool owns, so a new file is covered without anybody remembering, and it reads this register. |
 | `schemas/test_book.py` | 39 | **Two request bodies writing one column must agree about it.** `BookMatch` bounded four of its seventeen fields while `merge_into` wrote them all |
 | `schemas/test_settings.py` | 2 | **A row the router builds must carry every field the source describes.** The settings row is built by splatting the description into the response model |
 | `test_serialisation.py` | 47 | Assembling `BookOut`: the per-request fields, the tag suggestion by caption and by DDC number, that a tag name inside a longer word is not a caption match |
-| `test_schema.py` | 173 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial |
+| `test_schema.py`                           |   184 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial |
 | `schemas/test_digital.py` | 31 | What a client may say about a file it holds, bounded at the schema: the root, the path beneath it and the fingerprint, each refused at its ceiling rather than trusted for its width |
 | `test_env_example.py` | 4 | **Operator documentation that goes stale silently.** That every environment name `config.py` reads appears in `.env.example` and nothing appears there that the code ignores |
 | `test_database.py` | 27 | Engine setup and the session dependency |
@@ -142,7 +142,10 @@ why the helper uses regexes.
 | `routers/test_books_reading.py` | 31 | Ratings, and the rules for stamping reading dates |
 | `routers/test_books_series.py` | 30 | Series gaps, shelf locations, partial detail edits, and that the gap range is truncated at `MAX_SERIES_INDEX`, pinned from both edges so neither a smaller ceiling nor a missing one passes |
 | `routers/test_books_authors.py` | 110 | The author index and its privacy, the `?author=` filter, merging and reversing one, the library wide mapping against the filtered shelf, the flat map, and undoing a merge. |
-| `routers/test_books.py` | 124 | Listing, search, sorting, tagging, covers, notes, export, ownership, and that a login this deployment holds leaves with the request that needs it |
+| `routers/test_books.py`                    |   127 | Listing, search, sorting, tagging, covers, notes, export, ownership, and that a login this deployment holds leaves with the request that needs it |
+| `routers/test_books_identifiers.py`        |    16 | The identifier a store knows a book by, over the API: written with the book, read back on it, refused where the scheme is not one this app names, and bounded so a payload cannot carry an unbounded list |
+| `schemas/test_identifier.py`               |    17 | What a store identifier may contain, at the door: the character classes refused, which are whitespace and both invisible Unicode categories, checked as the same set the client filter refuses rather than against examples |
+| `test_identifiers.py`                      |    10 | Writing identifiers onto a book: duplicates within one payload dropped rather than refused, because a client reading two of its own files may find one book in both, and the repoint a merge performs |
 | `routers/test_books_google.py` | 44 | Enrichment, the chosen-edition apply and that its body cannot overflow the database |
 | `routers/test_books_search.py` | 55 | **Free-text search.** That it works with no API key, that the six catalogues a reader would doubt answer do, how they merge |
 | `routers/test_books_trash.py` | 43 | **Undoing a delete.** That a trashed book leaves every view, comes back whole, and frees its ISBN again |
