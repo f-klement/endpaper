@@ -23,15 +23,14 @@
  *
  * Stated as an exclusion rather than left to be discovered:
  *
- * - **Identifiers other than the ISBN.** `identifiers` holds `amazon`,
- *   `google`, `goodreads`, `doi` and whatever a plugin invented. Of the 897
- *   book reference library that is 568 books served and 244 more carrying only
- *   an identifier this reader passes over. **`BookCreate` now has somewhere to
- *   put two of those types**, `amazon` and `google`, and this import still
- *   sends none: which of a plugin's type strings is which scheme is a decision
- *   about this reader rather than a line in a request builder, and it is a
- *   ticket. `LibrarySettingsPage/types.toBookCreate` says the same at the site
- *   that would carry them.
+ * - **Every identifier but the ISBN and the two a scheme exists for.**
+ *   `identifiers` holds `goodreads`, `doi`, `oclc`, `issn`, `arxiv`, `uri`,
+ *   `mobi-asin` and whatever a plugin invented. The exclusion is one rule
+ *   rather than a list: `enums.BookIdentifierScheme` carries a member only
+ *   where some reader here produces that value, so a type with no member has
+ *   nothing to be stored as and a row claiming one would lie.
+ *   `identifiersWithScheme` is where a type becomes a scheme, and it states
+ *   what each decline was measured against.
  * - **Tags, ratings and the book files themselves.** Each is a second request a
  *   book, and whether an import should make one is a decision about the import
  *   flow rather than about this reader. The `data` table is still read, for the
@@ -68,6 +67,13 @@ import { leadingYear } from "./year";
 import { parseIsbn } from "./isbn";
 import type { FileMetadata } from "./fileReaders";
 import type { SqliteDatabase, SqliteRow } from "./sqlite";
+// The vocabulary of schemes a reader in this directory can produce, and the
+// record a request builder takes. Borrowed rather than restated: it is the
+// one list `LibrarySettingsPage/types.ts` holds a total `Record` over, so a
+// second spelling of it here would be a scheme this reader could name and
+// that builder could not send. Types only, so nothing in `stores.ts` is
+// linked in.
+import type { StoreIdentifier, StoreIdentifierScheme } from "./stores";
 import { columnsIn, decimal, integer, text } from "./sqliteRow";
 
 /**
@@ -133,7 +139,14 @@ export function indexOpfFiles(files: readonly File[]): Map<string, File> {
   return index;
 }
 
-/** One row of Calibre's `identifiers` table, as the file spelled it. */
+/**
+ * One row of Calibre's `identifiers` table, as the file spelled it.
+ *
+ * Both fields arrive trimmed and never empty, `sqliteRow.text` having refused
+ * the rest: a row where either was blank is not here at all. That is a
+ * precondition rather than a nicety, because `identifiersWithScheme` matches
+ * lengths exactly, so a value carrying its own padding would be dropped.
+ */
 export interface CalibreIdentifier {
   readonly type: string;
   readonly value: string;
@@ -322,6 +335,182 @@ function readIsbn(identifiers: readonly CalibreIdentifier[]): string | null {
     if (isbn !== null) return isbn;
   }
   return null;
+}
+
+/**
+ * What Calibre's `identifiers.type` calls each scheme this app stores.
+ *
+ * **Total over the schemes a reader here can produce**, which is
+ * `LibrarySettingsPage/types.STORE_SCHEMES`' discipline and its reason: a
+ * scheme added with nothing written here is a compile error, so what Calibre
+ * calls it is answered when the scheme is added rather than by a library that
+ * turns out to carry it. An empty list is a real answer and says Calibre has no
+ * type for that scheme.
+ *
+ * Both entries were read off calibre master on 2026-09-11, from the plugin that
+ * writes the type rather than from a library that carries one:
+ * `sources/amazon.py:get_domain_and_asin` reads `amazon` and `asin` as the US
+ * marketplace, and `sources/google.py` writes `google` and resolves it at
+ * `books.google.com/books?id=`.
+ */
+const CALIBRE_TYPES: Record<StoreIdentifierScheme, readonly string[]> = {
+  asin: ["amazon", "asin"],
+  google_books: ["google"],
+};
+
+/** Every Calibre type that names a scheme, without its marketplace suffix. */
+const SCHEME_OF_TYPE = new Map<string, StoreIdentifierScheme>(
+  Object.entries(CALIBRE_TYPES).flatMap(([scheme, types]) =>
+    types.map((type) => [type, scheme as StoreIdentifierScheme] as const),
+  ),
+);
+
+/**
+ * The marketplace suffix Calibre's Amazon plugin puts on a type.
+ *
+ * **The shape of a suffix, not the list of marketplaces**, which is the whole
+ * difference between a rule and a table somebody has to extend. `amazon.py`
+ * builds the type as `'amazon' if domain == 'com' else 'amazon_' + domain`, and
+ * its `AMAZON_DOMAINS` is 14 entries, thirteen of two letters and `com` of
+ * three (calibre master, read 2026-09-11). Matching the shape keeps a
+ * marketplace Amazon opened after that list was written, where copying the list
+ * would file `amazon_pl` as nothing at all.
+ *
+ * **Every marketplace's value is an ASIN, and that is measured rather than
+ * assumed.** It is the question the ticket left open, in the form "is a German
+ * store page id one". `id_from_url` takes the segment after `/dp/` off any
+ * `amazon.*` host and `:503` writes it under the suffixed type, from the
+ * variable the plugin itself calls `asin`. So the marketplace is not a
+ * different kind of value; it is the same kind, issued by a different store.
+ * **Which store issued it is what is lost**, and `models.BookIdentifier`
+ * refuses to record that on purpose: two marketplaces disagreeing leave two
+ * rows, and nothing matches on either.
+ *
+ * **What the open family costs is a plugin's invented key**, `amazon_zz` and
+ * whatever else somebody writes; `PRODUCED_VALUE` is the bound on that, and it
+ * refuses a value that is not ASIN shaped rather than a marketplace. The suffix
+ * is stripped from every type rather than from the Amazon ones alone, because a
+ * per family arm is the enumeration this rule exists to avoid; no reader writes
+ * `google_de`, and one that did would still be writing a volume id.
+ */
+const MARKETPLACE_SUFFIX = /_[a-z]{2,3}$/;
+
+/**
+ * What each scheme's own producers write, as the shape of a value.
+ *
+ * **What it refuses is a value that is not the scheme's shape**, which is
+ * narrower than it sounds and is worth saying plainly: it does not adjudicate
+ * between marketplaces, because every marketplace's value is an ASIN. What it
+ * is for is the key a plugin invented, since the name rule cannot tell
+ * `amazon_zz` from `amazon_de`. It is this app's own bound rather than the
+ * endpoint's, which takes any opaque token: a scheme is a claim about what the
+ * value is, and `enums.BookIdentifierScheme` states the rule this applies per
+ * row, that a scheme nothing reads an identifier out of is a row that lies.
+ *
+ * **The two are not grounded the same way, which is worth knowing before
+ * either is widened.** `takeout.ts` enforces a volume id shape of its own, so
+ * that one is the same rule twice and `tests/lib/calibre.test.ts` reads that
+ * module's source and sweeps the two against each other rather than restating
+ * it. `kindle.ts` enforces nothing: it takes the `ASIN` element's text as
+ * written, so the ASIN bound rests on that module's measurement over 1,032
+ * catalogue entries and on calibre's own regression fixtures, and a test can
+ * only pin the corpus rather than another rule.
+ *
+ * Wider files a wrong row; narrower drops an identifier the endpoint would have
+ * taken, silently. Neither is free.
+ */
+const PRODUCED_VALUE: Record<StoreIdentifierScheme, RegExp> = {
+  // Ten characters of Amazon's alphabet. `kindle.ts` measured every one of
+  // 1,032 catalogue entries at ten characters. **Not narrowed to a `B`
+  // prefix**, which is the shape a Kindle catalogue can only hold: Amazon
+  // issues a printed edition's ISBN-10 as its ASIN, and calibre's own
+  // regression fixture carries `amazon_ca` of `162380874X`. **Either case is
+  // accepted and neither is folded here**: a scheme's canonical form belongs to
+  // the scheme rather than to one reader, and
+  // `LibrarySettingsPage/types.CANONICAL_VALUE` is the one door both readers
+  // pass a value through.
+  asin: /^[A-Za-z0-9]{10}$/,
+  // Twelve characters of the URL safe alphabet, `takeout.ts`'s `VOLUME_ID` and
+  // its measurement over 24 sidecars. Calibre's own `google` fixture,
+  // `s7NIrgEACAAJ`, is one.
+  google_books: /^[A-Za-z0-9_-]{12}$/,
+};
+
+/**
+ * The identifiers whose type names a scheme this app has, out of a book's rows.
+ *
+ * **A type is a name and an optional marketplace**, and the name decides the
+ * scheme: `CALIBRE_TYPES` holds the three names, `MARKETPLACE_SUFFIX` holds the
+ * suffix as a shape, and `PRODUCED_VALUE` decides whether the value is one the
+ * scheme's readers produce. What that replaces is a list of spellings:
+ * `amazon_de`, `amazon_uk` and eleven more are one rule here, and a marketplace
+ * Amazon opens tomorrow needs no edit.
+ *
+ * **What it declines, and what each decline was measured against:**
+ *
+ * - `goodreads`. No reader here produces one: `backend/csv_import.py` takes a
+ *   Goodreads export and names no `Book Id` column, and `lib/goodreads.ts` is a
+ *   search link built from the title and the author. A member of
+ *   `BookIdentifierScheme` has to be a value some reader can produce.
+ * - `mobi-asin`, though the word is in the name. **It names where a value was
+ *   found rather than what the value is**: `mobi/reader/headers.py` sets it
+ *   from EXTH 113, whose own comment there reads `ASIN or other id`, and what a
+ *   producer puts in that record is a real ASIN, a uuid calibre mints when
+ *   there is none (`metadata/mobi.py`) or a content hash. Calibre refuses it by
+ *   default for the same reason, `use_mobi_asin` being `False` with a help text
+ *   warning that the value may be another store's. `PRODUCED_VALUE` would
+ *   refuse the uuid on its length; what it cannot do is tell a ten character
+ *   ASIN from a ten character something else, which is why the decline is on
+ *   the type.
+ * - `doi`, `issn`, `oclc`, `arxiv`, `lccn`, `uri`. Each names a record in
+ *   somebody's file and none has a scheme, for `goodreads`' reason: no reader.
+ * - Everything a plugin invented, by the same rule and without naming any.
+ *
+ * **A value the scheme's readers would not produce is dropped and the book is
+ * not**, `LibrarySettingsPage/types.boundIdentifiers`' rule: an import of nine
+ * hundred books must not turn on one library's odd row.
+ *
+ * **One entry a matching row, and nothing here is folded or capped.** Two
+ * marketplaces naming one book both arrive, and so does a library that put one
+ * ASIN under fifteen of them: `LibrarySettingsPage/types.boundIdentifiers` is
+ * where a repeat is folded and where the request's ceiling is, and the two
+ * belong together, because what the fold buys is a slot the ceiling would
+ * otherwise have spent on a spelling. Measured by the security seat,
+ * 2026-09-11: 15 spellings of one ASIN plus one `google` row sent 8 entries,
+ * all `asin`, before the fold existed.
+ *
+ * Two marketplaces carrying **different** ASINs stay two entries, which is what
+ * `models.BookIdentifier` says two rows are for; which marketplace said so is
+ * not kept, that class's own exclusion.
+ *
+ * Exported where `readIsbn` is not, and deliberately not a field on
+ * `CalibreBook`: the ISBN is a field because every consumer of a book wants it,
+ * and this is what one request builder asks for, so carrying it on the record
+ * as well would state the same rows twice.
+ *
+ * **How much of a library this reaches is not the 244 figure.** Of the 897 book
+ * reference library, 244 carry only an identifier that is not an ISBN, and
+ * `docs/decisions.md` records that the largest group of those is Calibre's own
+ * internal id, which is a type this still declines. How many are `amazon` or
+ * `google` rows was never counted and no copy of that library is in this tree,
+ * so 244 bounds the yield above rather than describing it.
+ */
+export function identifiersWithScheme(
+  identifiers: readonly CalibreIdentifier[],
+): StoreIdentifier[] {
+  const kept: StoreIdentifier[] = [];
+  for (const identifier of identifiers) {
+    // Lower cased and nothing else: `CalibreIdentifier` says why no trim is
+    // needed. The case is not something the column guarantees, and lower casing
+    // is what Calibre's own readers do with a type: `get_domain_and_asin` and
+    // `urls_from_identifiers` both start by lower casing the keys.
+    const type = identifier.type.toLowerCase();
+    const scheme = SCHEME_OF_TYPE.get(type.replace(MARKETPLACE_SUFFIX, ""));
+    if (scheme === undefined) continue;
+    if (!PRODUCED_VALUE[scheme].test(identifier.value)) continue;
+    kept.push({ scheme, value: identifier.value });
+  }
+  return kept;
 }
 
 /**

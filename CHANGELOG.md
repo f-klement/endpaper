@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- **A Kobo import no longer says you own a book you borrowed.** A Kobo records how each book
+  arrived, and Endpaper was reading that and throwing it away. An OverDrive library loan and a
+  Kobo Plus subscription title now arrive with ownership unknown; a book you bought or put on
+  the device yourself still arrives as owned. **A Kindle Unlimited title still arrives as
+  owned**, because the one element that separates a subscription borrow from a purchase is in
+  neither published example the reader was built from, and an arm that cannot be shown to fire
+  is not worth writing.
+- **The book page shows what a store calls a book, beside the ISBN**: an Amazon reference off a
+  Kindle catalogue, a Google Books reference off a Play Books export. **Text rather than a
+  link**, because an Amazon reference names an edition on the marketplace that issued it, which
+  is not recorded and cannot be guessed, and sending you to a storefront from inside your own
+  catalogue is a thing to ask for rather than to assume.
+- **A Calibre import keeps the Amazon and Google Books identifiers the library's own table
+  carries**, in every marketplace spelling Calibre writes. Types no reader here can produce a
+  value for, `goodreads` and `mobi-asin` among them, are declined rather than guessed at, and
+  the reason each was declined is written down.
+
 ## v0.15.0
 
 _2026-09-11_

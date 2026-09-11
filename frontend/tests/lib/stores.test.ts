@@ -164,7 +164,81 @@ describe("a Kobo becomes the record the import writes from", () => {
       seriesName: "Dune Chronicles",
       seriesIndex: 1,
       format: "ebook",
+      ownership: "owned",
     });
+  });
+
+  /**
+   * What each thing a Kobo records is worth as a claim on a book.
+   *
+   * **The row is where this is decided and this is where that is held.** A Kobo
+   * keeps a purchase, a Kobo Plus title and an OverDrive loan in one table, so
+   * a reader answering one value for the whole device can only be wrong about
+   * some of them, and the way it was wrong was to call a three week public
+   * library book something the member owns.
+   *
+   * `8` and `9` are the two that matter and the other three are here so that a
+   * mapping answering `unknown` for everything fails rather than passing the
+   * two cases somebody thought to write.
+   */
+  it.each([
+    [-1, "owned"],
+    [1, "owned"],
+    [2, "owned"],
+    [8, "unknown"],
+    [9, "unknown"],
+  ])("imports accessibility %i as %s", async (accessibility, ownership) => {
+    const row = `INSERT INTO content
+      (ContentID, MimeType, BookID, Title, Accessibility, IsDownloaded)
+      VALUES ('1', 'application/epub+zip', NULL, 'Dune', ${accessibility},
+              'true')`;
+    const library = libraryIn(await STORES.kobo.open(await koboFile(row)));
+
+    expect(library.books[0]?.ownership).toBe(ownership);
+  });
+
+  it("says nothing about a device too old to have recorded it", async () => {
+    // No `Accessibility` column at all, so the row is kept and what it was
+    // cannot be recovered. `unknown` is this app's word for exactly that, and
+    // answering `owned` would be reading a purchase out of a firmware that had
+    // nowhere to write one.
+    const older = [
+      `CREATE TABLE content (
+         ContentID TEXT NOT NULL PRIMARY KEY,
+         BookID TEXT,
+         Title TEXT
+       )`,
+      `INSERT INTO content (ContentID, BookID, Title)
+         VALUES ('1', NULL, 'Dune')`,
+    ];
+    const file = new File([await databaseOf(...older)], "whatever.bin");
+    const library = libraryIn(await STORES.kobo.open(file));
+
+    expect(library.books).toHaveLength(1);
+    expect(library.books[0]?.ownership).toBe("unknown");
+  });
+
+  it("answers per row rather than leaving it to the read", async () => {
+    // The flag on the read is the fallback for a store that draws no line
+    // through its rows, and a Kobo does draw one. What is asserted is the
+    // record, not the import: `stores.ts::ownershipStated` says the import
+    // still takes every book on the flag, so the loan below reaches a member's
+    // shelf as owned and this test is what will stop that being silent.
+    const loan = `INSERT INTO content
+      (ContentID, MimeType, BookID, Title, Accessibility, IsDownloaded)
+      VALUES ('loan-1', 'application/epub+zip', NULL, 'Borrowed', 9, 'true')`;
+    const library = libraryIn(
+      await STORES.kobo.open(await koboFile(PURCHASED, loan)),
+    );
+
+    // Keyed rather than positional: the reader sends no `ORDER BY`, so the
+    // order rows come back in is the engine's business.
+    const owned = (key: string) =>
+      library.books.find((book) => book.key === key)?.ownership;
+
+    expect(library.ownershipStated).toBe(true);
+    expect(owned("a1b2c3d4-0000-4000-8000-000000000001")).toBe("owned");
+    expect(owned("loan-1")).toBe("unknown");
   });
 
   it("keeps the count of rows that were not this member's books", async () => {

@@ -147,6 +147,26 @@ export const en = {
   "book.addTag": "+ Add",
   "book.removeTag": "Remove {tag}",
 
+  // ── What a store calls a book ─────────────────────────────────────────────
+  //
+  // Whole phrases carrying the value, because these sit in the same row as
+  // `book.isbn` and have to read the way it does rather than as a bare code.
+  //
+  // "Reference" rather than the scheme's own acronym, and the word is borrowed
+  // rather than invented: `enrich.field.google_books_id` already spells a
+  // Google volume id that way. "ASIN" names nothing to somebody who has not
+  // met Amazon's catalogue, while the store's name and what the number is for
+  // between them say the whole of it. `classification.scheme.lcsh` makes the
+  // same trade for the same reason.
+  //
+  // `identifier.other` is for a scheme this catalogue has no name for. The
+  // generated enum is a snapshot of a committed schema, so a scheme the server
+  // knows and this build does not is reachable, and a chip that said nothing
+  // would hide the value it is there to show.
+  "identifier.asin": "Amazon reference: {value}",
+  "identifier.google_books": "Google Books reference: {value}",
+  "identifier.other": "{scheme} reference: {value}",
+
   // ── Book detail sections ────────────────────────────────────────────────
   // Names for the collapsible groups. Two rules held while naming them.
   //

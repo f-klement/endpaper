@@ -182,6 +182,11 @@ export const de: Messages = {
   "book.addTag": "+ Hinzufügen",
   "book.removeTag": "{tag} entfernen",
 
+  // ── Wie ein Shop ein Buch nennt ───────────────────────────────────────────
+  "identifier.asin": "Amazon-Referenz: {value}",
+  "identifier.google_books": "Google-Books-Referenz: {value}",
+  "identifier.other": "{scheme}-Referenz: {value}",
+
   // ── Abschnitte der Buchdetails ──────────────────────────────────────────
   "section.reading": "Eigene Lektüre",
   "section.filing": "Dieses Exemplar einordnen",

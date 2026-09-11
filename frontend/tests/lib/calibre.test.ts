@@ -14,6 +14,7 @@ import {
   CALIBRE_PLACEHOLDER,
   crossCheck,
   indexOpfFiles,
+  identifiersWithScheme,
   libraryPathOf,
   plainText,
   readCalibreLibrary,
@@ -22,6 +23,11 @@ import {
 import type { FileMetadata } from "../../src/lib/fileReaders";
 import { openSqlite } from "../../src/lib/sqlite";
 import { CALIBRE_SCHEMA, databaseOf, engine } from "./sqliteFixtures";
+
+// The Takeout reader's own volume id rule, for the sweep that holds the two
+// to one shape. A `?raw` specifier is a different module id, so this is a
+// string rather than a second evaluation of that reader, which needs jsdom.
+import takeoutSource from "../../src/lib/takeout.ts?raw";
 
 /** A library holding whatever these rows put in it. */
 async function library(...rows: string[]) {
@@ -791,6 +797,214 @@ describe("the placeholder set, refused at both of a library's doors", () => {
     // which is a predicate no door above is driven to apply.
     expect(placeholders.map((placeholder) => placeholder.key).sort()).toEqual(
       Object.keys(CALIBRE_PLACEHOLDER).sort(),
+    );
+  });
+});
+
+/**
+ * The mapping from a Calibre type string to a scheme this app stores.
+ *
+ * Read out of a real `metadata.db` like everything else here, because the type
+ * column is somebody else's data and a fixture that handed the function an
+ * array would not be reading a library at all.
+ */
+describe("which of a library's identifiers reach the endpoint", () => {
+  /** What one book's `identifiers` rows become, as a request would take them. */
+  async function schemed(...rows: string[]) {
+    const [book] = await booksIn(...ONE_BOOK, ...rows);
+    return identifiersWithScheme(book!.identifiers);
+  }
+
+  /** One `identifiers` row. */
+  function row(type: string, value: string) {
+    return `INSERT INTO identifiers (book, type, val) VALUES (1, '${type}', '${value}')`;
+  }
+
+  it("keeps the two schemes this app has and passes the rest over", async () => {
+    expect(
+      await schemed(
+        row("isbn", "9780441013593"),
+        row("amazon", "B000R34YKC"),
+        row("google", "s7NIrgEACAAJ"),
+        row("goodreads", "234225"),
+      ),
+    ).toEqual([
+      { scheme: "asin", value: "B000R34YKC" },
+      { scheme: "google_books", value: "s7NIrgEACAAJ" },
+    ]);
+  });
+
+  // Calibre's `AMAZON_DOMAINS`, read off calibre master on 2026-09-11, with the
+  // `com` entry spelled both ways that plugin can produce: `amazon` is what it
+  // writes for that store and `amazon_com` is what `get_domain_and_asin` reads.
+  // Enumerated **here** and nowhere in the source: the rule under test is a
+  // shape, and this is the corpus that says the shape covers what exists.
+  const MARKETPLACES = [
+    "amazon",
+    "amazon_com",
+    "amazon_fr",
+    "amazon_de",
+    "amazon_uk",
+    "amazon_au",
+    "amazon_it",
+    "amazon_jp",
+    "amazon_es",
+    "amazon_br",
+    "amazon_in",
+    "amazon_nl",
+    "amazon_cn",
+    "amazon_ca",
+    "amazon_se",
+  ];
+
+  for (const type of MARKETPLACES) {
+    it(`reads ${type} as an ASIN`, async () => {
+      expect(await schemed(row(type, "B000R34YKC"))).toEqual([
+        { scheme: "asin", value: "B000R34YKC" },
+      ]);
+    });
+  }
+
+  it("reads the bare `asin` spelling Calibre's own reader accepts", async () => {
+    // The second name in the Amazon family, and the arm that makes it load
+    // bearing: `get_domain_and_asin` reads `key in ('amazon', 'asin')` as the
+    // US marketplace, so a library that filed one under it filed an ASIN.
+    expect(await schemed(row("asin", "B000R34YKC"))).toEqual([
+      { scheme: "asin", value: "B000R34YKC" },
+    ]);
+  });
+
+  it("reads a marketplace Calibre's own list has never carried", async () => {
+    // The point of the suffix being a shape. Amazon opened .pl after the list
+    // above was written, and a reader built from that list files it as nothing.
+    expect(await schemed(row("amazon_pl", "B000R34YKC"))).toEqual([
+      { scheme: "asin", value: "B000R34YKC" },
+    ]);
+  });
+
+  it("declines an amazon type whose suffix is not a marketplace", async () => {
+    // **One underscore and a word after it**, which is the arm that separates a
+    // suffix shaped like a marketplace from any suffix at all: widening the
+    // rule to `_[a-z]+$` files both of these under `asin`, and the second alone
+    // would not notice, its root being `amazon_kindle` either way.
+    expect(await schemed(row("amazon_author", "B000R34YKC"))).toEqual([]);
+    expect(await schemed(row("amazon_kindle_notes", "B000R34YKC"))).toEqual([]);
+    // Four letters, which pins the other end of the bound: every arm above
+    // refuses five letters and more, so `{2,4}` passes without this one.
+    expect(await schemed(row("amazon_kids", "B000R34YKC"))).toEqual([]);
+  });
+
+  it("declines `asin` in a name that is not the Amazon family", async () => {
+    // `mobi-asin` is the tempting one and it is the type that names a place
+    // rather than a scheme: calibre's MOBI reader sets it from EXTH 113, whose
+    // own comment there reads `ASIN or other id`, and calibre refuses it by
+    // default. The value here is the uuid calibre mints into that record when a
+    // file has no ASIN; the second arm is a value the shape rule would accept,
+    // so what refuses this row is the type and the arm says so.
+    expect(
+      await schemed(row("mobi-asin", "0e8c1b52-8a4f-4f65-8a6b-7c4b1e0d2f11")),
+    ).toEqual([]);
+    expect(await schemed(row("mobi-asin", "B000R34YKC"))).toEqual([]);
+  });
+
+  for (const type of ["goodreads", "doi", "issn", "oclc", "arxiv", "uri"]) {
+    it(`declines ${type}, which no reader here produces`, async () => {
+      // A value shaped like the scheme it would have been filed under, so what
+      // refuses the row is the type rather than the value.
+      expect(await schemed(row(type, "B000R34YKC"))).toEqual([]);
+    });
+  }
+
+  it("declines a value the scheme's own readers would not produce", async () => {
+    // The direction the suffix being open could be wrong in: a plugin free to
+    // invent `amazon_zz` is not free to make a store page reference an ASIN.
+    expect(
+      await schemed(
+        row("amazon_de", "https://www.amazon.de/dp/B000R34YKC"),
+        row("amazon_zz", "9780441013593"),
+        row("google", "s7NIrgEACAAJXX"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps a printed edition's ASIN, which is its ISBN-10", async () => {
+    // Amazon issues one, so an ASIN alphabet narrowed to a `B` prefix would
+    // drop a real row. Calibre's own regression fixture carries this value
+    // under `amazon_ca`.
+    expect(await schemed(row("amazon_ca", "162380874X"))).toEqual([
+      { scheme: "asin", value: "162380874X" },
+    ]);
+  });
+
+  it("takes a type as Calibre's own readers take one", async () => {
+    // Both `get_domain_and_asin` and `urls_from_identifiers` start by lower
+    // casing the keys, because the column holds whatever was typed into it.
+    expect(await schemed(row("  AMAZON_DE  ", "B000R34YKC"))).toEqual([
+      { scheme: "asin", value: "B000R34YKC" },
+    ]);
+  });
+
+  it("keeps a row a library padded, which arrives trimmed", async () => {
+    // **Named for the composition and not for this function**, which does no
+    // trimming: `sqliteRow.text` does it before the row is built. The arm is
+    // still worth its line, because the shape rule is length exact, so a reader
+    // that stopped trimming would drop the row rather than widen anything.
+    expect(await schemed(row("amazon", "  B000R34YKC  "))).toEqual([
+      { scheme: "asin", value: "B000R34YKC" },
+    ]);
+  });
+
+  it("carries a repeat and either case through, folding neither", async () => {
+    // **The seam, asserted rather than assumed.** A scheme's canonical form and
+    // the fold of a repeat are `LibrarySettingsPage/types`', because both are
+    // properties of the scheme and both readers go through that door; this one
+    // answers one entry a matching row. The arms that pin the fold itself are
+    // in that module's mirrored test.
+    expect(
+      await schemed(
+        row("amazon", "b000r34ykc"),
+        row("amazon_de", "B000R34YKC"),
+      ),
+    ).toEqual([
+      { scheme: "asin", value: "b000r34ykc" },
+      { scheme: "asin", value: "B000R34YKC" },
+    ]);
+  });
+
+  it("holds the volume id to the shape the Takeout reader holds it to", async () => {
+    // **Swept against that module's own rule, not against examples.** The two
+    // readers produce one scheme's values and a difference between them is a
+    // row one would send and the other would not. Read out of the source
+    // because the constant is private to it, which is `kindle.test.ts`'s
+    // arrangement for the same problem.
+    const declared = /const VOLUME_ID = (\/\S+\/);/.exec(takeoutSource);
+    expect(declared).not.toBeNull();
+    const volumeId = new RegExp(declared![1]!.slice(1, -1));
+
+    const candidates = [
+      "aB3-dE6_gH9j",
+      "s7NIrgEACAAJ",
+      "aB3-dE6_gH9",
+      "aB3-dE6_gH9jk",
+      "aB3-dE6_gH9.",
+      "aB3-dE6_gH9+",
+      "____________",
+      "------------",
+      "000000000000",
+    ];
+    const agreed = await Promise.all(
+      candidates.map(async (candidate) => ({
+        candidate,
+        kept: (await schemed(row("google", candidate))).length === 1,
+        produced: volumeId.test(candidate),
+      })),
+    );
+
+    expect(agreed.filter((one) => one.kept !== one.produced)).toEqual([]);
+    // Both answers appear, so an equality that held because nothing passed is
+    // not what was measured.
+    expect(new Set(agreed.map((one) => one.kept))).toEqual(
+      new Set([true, false]),
     );
   });
 });

@@ -61,7 +61,7 @@
  * **The two places a difference would surface**, stated so that a report from
  * an owner is legible rather than a mystery:
  *
- * - **The schema 188 boolean.** `isOwned` asks `IsDownloaded` about a
+ * - **The schema 188 boolean.** `acquisitionOf` asks `IsDownloaded` about a
  *   sideloaded row and about no other, so a firmware writing it in a spelling
  *   neither arm of `isTrue` matches loses the books the member put on the
  *   device themselves and keeps the ones they bought. **A library short of its
@@ -69,8 +69,9 @@
  *   would think to report.
  * - **Adobe fulfilled shop titles.** A tolino shop book is fulfilled through
  *   Adobe, so a borrowed title may sit in `content` looking like an owned one.
- *   `OWNED_ACCESSIBILITY` is Kobo's vocabulary and nothing here has been shown
- *   a tolino's, so a loan arriving as an owned book is the shape to expect.
+ *   `ACCESSIBILITY` is Kobo's vocabulary and nothing here has been shown a
+ *   tolino's, so a loan arriving as an owned book is the shape to expect, by
+ *   whichever of these names the row carries.
  *
  * ## What a Kobo cannot supply, stated rather than discovered
  *
@@ -96,7 +97,37 @@ import { columnsIn, decimal, integer, text } from "./sqliteRow";
 /** What `MimeType` settles. Everything else is left unsaid. */
 export type KoboFormat = "EPUB" | "KEPUB" | "PDF";
 
-/** One book the device says this member owns. */
+/**
+ * How a book got onto the device, as `Accessibility` records it.
+ *
+ * **Four names for the five `Accessibility` values this reader keeps, `1` and
+ * `2` being one thing, and a fifth for the device that recorded none of it**.
+ * The names are Kobo's facts rather than a verdict: a
+ * `subscription` is a Kobo Plus title, which the member reads while they pay
+ * and loses when they stop, and a `loan` is an OverDrive title, which is a
+ * public library's book for three weeks. Both are on the device and neither is
+ * theirs, and nothing else on the row says so.
+ *
+ * `unrecorded` is a device older than schema version 16, which has no
+ * `Accessibility` column at all: the row is kept, because there was nowhere to
+ * record that it was an advert, and what it was cannot be recovered either.
+ */
+export type KoboAcquisition =
+  /** Bought from the Kobo store. */
+  | "purchase"
+  /** A Kobo Plus title, which is read for as long as the member subscribes. */
+  | "subscription"
+  /** An OverDrive title, which is a public library's book on loan. */
+  | "loan"
+  /** A file the member put on the device themselves. */
+  | "sideloaded"
+  /** A device with no `Accessibility` column, which cannot say which. */
+  | "unrecorded";
+
+/**
+ * One book the device holds for this member, which is not the same as one they
+ * own: `acquisition` below is where that is said.
+ */
 export interface KoboBook {
   /**
    * The device's own reference for this book, and the stable one.
@@ -117,10 +148,20 @@ export interface KoboBook {
   readonly seriesIndex: number | null;
   readonly format: KoboFormat | null;
   /**
-   * A book the member put on the device themselves rather than bought, or
-   * `null` on a device too old to have recorded which it was.
+   * How the member came by this book, as far as the device recorded it.
+   *
+   * **The value `Accessibility` was read as, kept rather than collapsed to a
+   * boolean.** Kobo separates a purchase from a Kobo Plus title and from an
+   * OverDrive loan and this reader has to read that column anyway to tell a
+   * book from an advert, so throwing the distinction away here is what made a
+   * three week public library loan import as a book somebody owns.
+   *
+   * **Kobo's own vocabulary and not this app's**, `kindle.ts::personal`'s rule:
+   * what a store recorded is the reader's to state and what that means for a
+   * shelf is the adapter's to decide. `lib/stores.ts` holds the one map from
+   * these five to what an import claims.
    */
-  readonly sideloaded: boolean | null;
+  readonly acquisition: KoboAcquisition;
 }
 
 /** A field this device's schema could not fill. */
@@ -153,7 +194,7 @@ export interface KoboLibrary {
    */
   readonly books: readonly KoboBook[];
   /**
-   * Rows under `content` that were not a book this member owns.
+   * Rows under `content` that were not a book on this member's shelf at all.
    *
    * Store recommendations, previews, the expired row a firmware bug leaves
    * behind for a deleted book, a sideloaded book that has been removed, a row
@@ -216,23 +257,54 @@ const WANTED = [
 const SIGNATURE = ["ContentID", "BookID"] as const;
 
 /**
- * `Accessibility` values that mean the member has the book.
+ * Every `Accessibility` value this reader keeps, and what each one is.
  *
- * From calibre's own query: `1` and `2` are a Kobo store purchase, `8` is Kobo
- * Plus and `9` is OverDrive. `4` and `6` are a recommendation and a
- * preview, which are books the store is advertising rather than books anybody
- * owns, and importing one would tell a member they own something they do not.
+ * From calibre's own query: `-1` is a file the member loaded themselves, `1`
+ * and `2` are a Kobo store purchase, `8` is Kobo Plus and `9` is OverDrive.
+ * `4` and `6` are a recommendation and a preview, which are books the store is
+ * advertising rather than books anybody owns, and importing one would tell a
+ * member they own something they do not.
  *
- * **An unrecognised value is skipped rather than kept**, and that direction is
- * the decision. This is an inclusion list, which is the shape that goes stale,
- * and the alternative goes stale in the direction where a future firmware's new
- * advert becomes a book on somebody's shelf. Losing a real book is visible in
- * `skipped`; gaining a book nobody bought is not visible at all.
+ * **One map rather than a set beside a second table**, `kindle.ts::OWNED`'s
+ * shape and its reason: which values are kept and what each one means are read
+ * off the same rows, so they cannot drift apart. The first draft of this reader
+ * had the set here and `-1` spelled again in its own constant.
+ *
+ * **`1` is a purchase at `DBVersion` 56 and above, and not below it, and this
+ * does not ask.** calibre's comment at the same site reads "FW2.0.0, DBVersion
+ * 53,55 accessibility == 1" against "FW2.1.2 beta, DBVersion == 56,
+ * accessibility == -1", and its live test for a deleted book is
+ * `(dbversion < 56 and accessibility <= 1) or (dbversion >= 56 and
+ * accessibility == -1)`. So a firmware below 56 writes a sideload as `1` and
+ * this names it `purchase`, on devices inside the range the five gates above
+ * admit.
+ *
+ * **The name is what this reader got wrong and not what it costs.** Both names
+ * map to owned in `lib/stores.ts`, so the rename moves nothing; what such a
+ * device costs is the arm below, which never fires there. That arm refuses a
+ * book the member deleted, which Kobo marks by keeping the row and clearing
+ * `IsDownloaded`, so below 56 a deleted book is kept, named `purchase` and
+ * imported as the member's property. **As true of the boolean this replaced**,
+ * which is why it is a bound stated here rather than a regression: gating it
+ * means reading `DBVersion` and acting on it, which `schemaVersionOf` says this
+ * module does not do, so the read is an issue rather than an arm.
+ *
+ * **Still one inclusion list, and membership still decides.** A value not
+ * spelled here is skipped exactly as before: what the values add is the name,
+ * and a name is only ever asked for a row this already keeps. So an
+ * unrecognised value has the default it always had, and that direction is the
+ * decision. An inclusion list is the shape that goes stale, and the alternative
+ * goes stale in the direction where a future firmware's new advert becomes a
+ * book on somebody's shelf. Losing a real book is visible in `skipped`; gaining
+ * a book nobody bought is not visible at all.
  */
-const OWNED_ACCESSIBILITY = new Set([1, 2, 8, 9]);
-
-/** A book the member loaded themselves, which is owned when it is still there. */
-const SIDELOADED_ACCESSIBILITY = -1;
+const ACCESSIBILITY = new Map<number, KoboAcquisition>([
+  [-1, "sideloaded"],
+  [1, "purchase"],
+  [2, "purchase"],
+  [8, "subscription"],
+  [9, "loan"],
+]);
 
 /** The expired row a firmware bug leaves behind for a book that was deleted. */
 const EXPIRED = 3;
@@ -259,10 +331,10 @@ const FORMATS = new Map<string, KoboFormat>([
  * for `in ('true', 1)`.
  *
  * **What an unmatched spelling costs is bounded by where it is asked.**
- * `isOwned` asks it of a sideloaded row alone, so an unmatched spelling loses
- * the books the member put on the device themselves and leaves the bought ones
- * standing. Stated because that is the narrower claim, and the narrower claim is
- * the one an owner could recognise and report.
+ * `acquisitionOf` asks it of a sideloaded row alone, so an unmatched spelling
+ * loses the books the member put on the device themselves and leaves the bought
+ * ones standing. Stated because that is the narrower claim, and the narrower
+ * claim is the one an owner could recognise and report.
  *
  * **`'1'` is read as well, and it is not a fourth spelling.** SQLite gives a
  * column with text affinity to a value written as `1`, so the same firmware
@@ -308,27 +380,40 @@ function missingFields(present: Set<string>): KoboField[] {
 }
 
 /**
- * Whether a row is a book this member owns, or one of the things a Kobo keeps
- * beside one.
+ * How the member came by this row's book, or `null` where the row is one of the
+ * things a Kobo keeps beside a book.
+ *
+ * **One pass rather than a predicate and a second read of the same column.**
+ * Whether the row is kept and what it turned out to be are the same question
+ * asked of `Accessibility` once, so a row can never be kept as one thing and
+ * described as another.
  *
  * **A column this device does not have costs a distinction, never the book.**
  * `Accessibility` arrived at schema version 16 and `IsDownloaded` at 33, so on
  * a device older than either the row cannot be an advert: there was nowhere to
  * record that it was one. calibre substitutes exactly these defaults for the
- * same reason.
+ * same reason. What such a device also cannot record is which of the other four
+ * it was, which is what `unrecorded` says rather than guessing at `purchase`.
  */
-function isOwned(row: SqliteRow, present: Set<string>): boolean {
+function acquisitionOf(
+  row: SqliteRow,
+  present: Set<string>,
+): KoboAcquisition | null {
   if (present.has("___ExpirationStatus")) {
-    if (integer(row["___ExpirationStatus"]) === EXPIRED) return false;
+    if (integer(row["___ExpirationStatus"]) === EXPIRED) return null;
   }
-  if (!present.has("Accessibility")) return true;
+  if (!present.has("Accessibility")) return "unrecorded";
   const accessibility = integer(row["Accessibility"]);
-  if (accessibility === SIDELOADED_ACCESSIBILITY) {
+  if (accessibility === null) return null;
+  const acquisition = ACCESSIBILITY.get(accessibility);
+  if (acquisition === undefined) return null;
+  if (acquisition === "sideloaded") {
     // A sideloaded book that is no longer downloaded is one the member deleted:
     // Kobo keeps the row and clears the flag rather than removing it.
-    return !present.has("IsDownloaded") || isTrue(row["IsDownloaded"]);
+    if (present.has("IsDownloaded") && !isTrue(row["IsDownloaded"]))
+      return null;
   }
-  return accessibility !== null && OWNED_ACCESSIBILITY.has(accessibility);
+  return acquisition;
 }
 
 /**
@@ -389,7 +474,8 @@ export function readKoboLibrary(db: SqliteDatabase): KoboReading {
   const books: KoboBook[] = [];
   for (const row of rows) {
     const contentId = text(row["ContentID"]);
-    if (contentId === null || !isOwned(row, present)) {
+    const acquisition = acquisitionOf(row, present);
+    if (contentId === null || acquisition === null) {
       skipped += 1;
       continue;
     }
@@ -406,9 +492,7 @@ export function readKoboLibrary(db: SqliteDatabase): KoboReading {
       seriesName,
       seriesIndex: seriesName === null ? null : readSeriesIndex(row, present),
       format: FORMATS.get(text(row["MimeType"]) ?? "") ?? null,
-      sideloaded: present.has("Accessibility")
-        ? integer(row["Accessibility"]) === SIDELOADED_ACCESSIBILITY
-        : null,
+      acquisition,
     });
   }
 

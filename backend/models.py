@@ -2103,13 +2103,20 @@ class BookIdentifier(Base):
     what makes the gap affordable meanwhile is that no query matches on the
     value, so a wrong row is untidy rather than wrong about a Book.
 
-    **Nothing matches on it and nothing shows it yet**, stated because an
-    identifier no query reads is a column that goes stale in silence. What reads
-    it today is `BookOut`, which carries it on every Book a member fetches, the
-    archive, which holds it, and the merge, which moves it. What deliberately
-    does not: `books.isbn` stays the importer's only match key, `/duplicates`
-    still groups on a normalised title and author, and `PublicBookOut` withholds
-    it. See `docs/decisions.md` for what each of those would have cost.
+    **Nothing matches on it**, stated because an identifier no query reads is a
+    column that goes stale in silence. What reads it today is `BookOut`, which
+    carries it on every Book a member fetches, the book detail page, which
+    renders it as text beside the ISBN, the archive, which holds it, and the
+    merge, which moves it. What deliberately does not: `books.isbn` stays the
+    importer's only match key, `/duplicates` still groups on a normalised title
+    and author, and `PublicBookOut` withholds it, so a public shelf does not
+    announce which stores the house buys from. See `docs/decisions.md` for what
+    each of those would have cost.
+
+    **Rendered as text and never as a link**, which is a decision about this
+    column rather than about that page: an ASIN names an edition on the
+    marketplace that issued it, and which store said so is deliberately not
+    stored here, so a host in a URL would be a guess.
     """
 
     __tablename__ = "book_identifiers"

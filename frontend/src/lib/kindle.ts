@@ -84,9 +84,30 @@
  *   `Purchase`, `KindleUnlimited`, `Prime`, `Sample` or `KindleDictionary`. It
  *   is the only element in this format that could tell a subscription borrow or
  *   a bundled dictionary from a purchase, **and this reader keeps all three**.
- *   `kobo.ts` keeps Kobo Plus on the same terms, so the family is consistent
- *   rather than this one being lax. It is not read because no capture here
- *   carries one, so an arm reading it could not be shown to fire.
+ *   It is not read because no capture here carries one, so an arm reading it
+ *   could not be shown to fire.
+ *
+ *   Three readings of that absence, because one of them is a search for a
+ *   word and the other two are not:
+ *
+ *   - **Enumerated rather than searched for.** Every element name in each
+ *     capture was listed, 17 distinct in each, and `origins`, `origin` and
+ *     `type` are none of them. A grep would have given the same answer and
+ *     would have been answering about a string.
+ *   - **No published parser of this file reads one.** Two of them take `ASIN`,
+ *     `title`, `authors`, `publishers` and the dates and look for no origin,
+ *     and one strips an `is_multimedia_enabled` that is in neither capture: so
+ *     the format is wider than these 17 and still shows nobody reading this.
+ *   - **The one published table naming an `originType` is about a different
+ *     source**, so it is not evidence about this element. It sits in the
+ *     second capture's own repository listing the query parameters of Amazon's
+ *     web catalogue, that repository names this file's fields separately with
+ *     no origin among them, and its vocabulary is another one again,
+ *     `PublicLibraryLending` and `KOLL` included.
+ *
+ *   `kobo.ts` does read its own equivalent and reports it per book, so what
+ *   this is is one store's format lacking the element rather than the pair
+ *   agreeing to ignore the question.
  * - **What that costs, measured**: 12 of the 279 entries in the 2018 capture
  *   are bundled dictionaries, carrying a title of hyphens and an empty
  *   purchase date, and they import as books. The other capture is not counted

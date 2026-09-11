@@ -45,8 +45,12 @@ function library(
       seriesName: null,
       seriesIndex: null,
       format: null,
+      // `null`, which is every store but Kobo: this card counts books and shows
+      // sentences about a read, and what one row said about owning it is the
+      // import's business rather than this component's.
+      ownership: null,
     })),
-    // Defaulted to true, which is what four of the six stores say. A test
+    // Defaulted to true, which is what five of the six stores say. A test
     // wanting the other answer asks for it, so nothing here quietly decides
     // what a store established about ownership.
     ownershipStated: overrides.ownershipStated ?? true,

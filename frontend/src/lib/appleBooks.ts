@@ -380,12 +380,12 @@ function missingFields(present: Set<string>): AppleBooksField[] {
  * beside one.
  *
  * **A column this store does not have costs a distinction, never the book**,
- * which is the same reading `kobo.ts::isOwned` gives an old device: a flag that
- * is not there is not a flag that is set. **`isSet` is the whole of that**, and
- * there is deliberately no second test against the columns the store has: a
- * name outside the statement is `undefined` in the row, which `isSet` already
- * answers false for. A `present.has` term beside it reads like the guard and is
- * unobservable, since no file can make the two disagree.
+ * which is the same reading `kobo.ts::acquisitionOf` gives an old device: a
+ * flag that is not there is not a flag that is set. **`isSet` is the whole of
+ * that**, and there is deliberately no second test against the columns the
+ * store has: a name outside the statement is `undefined` in the row, which
+ * `isSet` already answers false for. A `present.has` term beside it reads like
+ * the guard and is unobservable, since no file can make the two disagree.
  */
 function isTheirs(row: SqliteRow): boolean {
   return !REFUSING_FLAGS.some((flag) => isSet(row[flag]));

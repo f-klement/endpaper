@@ -133,7 +133,7 @@ describe("reading a device", () => {
       seriesName: "Dune Chronicles",
       seriesIndex: 1,
       format: "KEPUB",
-      sideloaded: false,
+      acquisition: "purchase",
     } satisfies KoboBook);
   });
 
@@ -169,7 +169,7 @@ describe("reading a device", () => {
                  'application/epub+zip', 'Dune', 'Frank Herbert', -1, 'true')`,
     );
 
-    expect(book).toMatchObject({ sideloaded: true, format: "EPUB" });
+    expect(book).toMatchObject({ acquisition: "sideloaded", format: "EPUB" });
   });
 
   it("reads an ISBN only where the value is one", async () => {
@@ -207,12 +207,10 @@ describe("what the member owns", () => {
       VALUES ('${id}', 'A Book', ${accessibility}, ${downloaded})`;
   }
 
-  it("keeps a purchase from every store arm calibre names", async () => {
-    // **Which arm each number is belongs to `kobo.ts` and is not restated
-    // here.** It was, in the ids, and the two homes disagreed inside one commit
-    // with the disagreement baked into a `toEqual`. Naming the arms again to
-    // say which way round that went would be the same second home wearing an
-    // apology. What this test is for is that all four are kept.
+  it("keeps a book from every store arm calibre names", async () => {
+    // What this test is for is that all four are kept. Which arm each number is
+    // is asserted below, separately, because keeping a row and naming it are
+    // two things and a reader can get the second wrong while passing this.
     expect(
       await keptOn(
         row("arm-1", 1, "'true'"),
@@ -221,6 +219,32 @@ describe("what the member owns", () => {
         row("arm-9", 9, "'true'"),
       ),
     ).toEqual(["arm-1", "arm-2", "arm-8", "arm-9"]);
+  });
+
+  /**
+   * Which arm each number is, one row per value.
+   *
+   * **This restates `kobo.ts`'s table and that is now the point rather than a
+   * second home.** Until a row could say how the member came by it, the arms
+   * were interchangeable and naming them in a test bought a drift; now `8` and
+   * `9` decide whether a Kobo Plus title and a public library loan import as
+   * something the member owns, so which number is which is behaviour and a test
+   * that does not pin it leaves the whole distinction unenforced.
+   *
+   * **One case each rather than one database of five**, so a reader that
+   * answered the same name for every row fails four of these instead of
+   * passing a single `toEqual` that happened to be sorted the same way.
+   */
+  it.each([
+    [-1, "sideloaded"],
+    [1, "purchase"],
+    [2, "purchase"],
+    [8, "subscription"],
+    [9, "loan"],
+  ])("reads accessibility %i as %s", async (accessibility, acquisition) => {
+    const [book] = await booksOn(row("1", accessibility, "'true'"));
+
+    expect(book?.acquisition).toBe(acquisition);
   });
 
   it("keeps a purchase the member has archived rather than downloaded", async () => {
@@ -373,15 +397,17 @@ describe("a schema this reader does not have all of", () => {
     });
   });
 
-  it("cannot say whether an old device's book was bought", async () => {
+  it("cannot say how an old device's book got there", async () => {
     // There was nowhere on that firmware to record it, so the honest answer is
-    // that there is no answer rather than a default that reads as one.
+    // that there is no answer rather than a default that reads as one. The
+    // book is still kept: a missing column costs the distinction and not the
+    // row, which is what separates this from a refusal.
     const read = await device(
       OLD_KOBO_SCHEMA,
       `INSERT INTO content (ContentID, Title) VALUES ('1', 'Dune')`,
     );
 
-    expect(read.ok && read.library.books[0]?.sideloaded).toBeNull();
+    expect(read.ok && read.library.books[0]?.acquisition).toBe("unrecorded");
   });
 
   it("names the fields no column on this device could fill", async () => {

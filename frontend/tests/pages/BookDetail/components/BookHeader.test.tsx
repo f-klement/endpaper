@@ -3,7 +3,10 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { Locale } from "../../../../src/api/generated/model";
+import {
+  BookIdentifierScheme,
+  Locale,
+} from "../../../../src/api/generated/model";
 import BookHeader from "../../../../src/pages/BookDetail/components/BookHeader";
 import { makeBook } from "../../../factories";
 import { renderLocalised } from "../../../utils";
@@ -70,5 +73,31 @@ describe("the credit line", () => {
     renderHeader(makeBook({ author: null }));
 
     expect(screen.queryByRole("link", { name: /Herbert/ })).toBeNull();
+  });
+});
+
+describe("the chip row", () => {
+  it("puts what a store calls the book after the ISBN, never before it", () => {
+    // Order is the whole of this test. The reason is at the call site.
+    const { container } = renderHeader(
+      makeBook({
+        isbn: "9780441013593",
+        identifiers: [
+          { scheme: BookIdentifierScheme.asin, value: "B00J4YQKHY" },
+        ],
+      }),
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("ISBN: 9780441013593");
+    expect(text.indexOf("ISBN: 9780441013593")).toBeLessThan(
+      text.indexOf("Amazon reference: B00J4YQKHY"),
+    );
+  });
+
+  it("says nothing about stores for a book no import named", () => {
+    const { container } = renderHeader(makeBook({ identifiers: [] }));
+
+    expect(container.textContent).not.toContain("reference:");
   });
 });

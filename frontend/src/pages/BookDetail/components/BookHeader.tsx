@@ -6,6 +6,7 @@ import { errorText } from "../../../components/ErrorState";
 import { useTranslation } from "../../../i18n";
 import { searchUrl } from "../../../lib/goodreads";
 import { CoverImage } from "../../components";
+import IdentifierChips from "./IdentifierChips";
 import { Button, Icon } from "../../../components";
 
 interface BookHeaderProps {
@@ -183,6 +184,12 @@ export default function BookHeader({
               {t("book.isbn", { isbn: book.isbn })}
             </span>
           )}
+          {/* After the ISBN and never before it. The ISBN is the edition's own
+              number and everything here is a store's number for it, so a row
+              that led with a vendor would put the borrowed name first. Absent
+              on the great majority of books, which is why the ISBN keeps the
+              position a reader looks in. */}
+          <IdentifierChips identifiers={book.identifiers ?? []} />
         </div>
 
         {/* The page's actions, together and labelled.

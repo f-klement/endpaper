@@ -18,7 +18,16 @@
  * **A member here has to be a value some reader can produce**, which is
  * `AuthorityScheme`'s rule and its reason: a scheme nothing reads an
  * identifier out of is a row that lies. Both below are produced today, in the
- * browser, by the two store readers that measured an identifier and no ISBN.
+ * browser, by the two store readers that measured an identifier and no ISBN,
+ * and a Calibre library's own `identifiers` table reaches them through
+ * `frontend/src/lib/calibre.identifiersWithScheme`.
+ *
+ * **`goodreads` is the member that rule has refused**, and a Calibre library
+ * carries the type: nothing here produces the value. `csv_import.py` reads a
+ * Goodreads export and names no `Book Id` column, and `lib/goodreads.ts` is a
+ * search link built from a title and an author. `doi`, `issn`, `oclc` and
+ * `arxiv` are refused for the same reason and would have a second one, being
+ * a record in a bibliographic file rather than what a store calls an edition.
  *
  * **Not `books.google_books_id`, though `GOOGLE_BOOKS` names the same
  * catalogue.** That column records which Google volume this row's *metadata*

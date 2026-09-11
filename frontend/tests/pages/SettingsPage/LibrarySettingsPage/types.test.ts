@@ -28,7 +28,7 @@ import type {
 } from "../../../../src/lib/stores";
 import {
   formatOf,
-  storeIdentifiers,
+  boundIdentifiers,
   storeToBookCreate,
   toBookCreate,
 } from "../../../../src/pages/SettingsPage/LibrarySettingsPage/types";
@@ -60,7 +60,7 @@ const IDENTIFIER_CEILING =
  * How many the endpoint will take in one request, read back the same way.
  *
  * A payload over this is a 422 for the whole book rather than for the extra
- * entry, so it is the fourth rule `storeIdentifiers` has to keep.
+ * entry, so it is the fourth rule `boundIdentifiers` has to keep.
  */
 const IDENTIFIER_LIMIT = (
   SCHEMA.components.schemas.BookCreate.properties as {
@@ -108,6 +108,85 @@ describe("one Calibre record as a request", () => {
       series_name: "Dune Chronicles",
       series_index: 1,
     });
+  });
+
+  it("carries what the library's own identifiers table named", () => {
+    // The two schemes this app has, out of a row set holding a type for each
+    // and two it declines. Which type is which scheme is the reader's rule and
+    // is tested against a real database in `tests/lib/calibre.test.ts`; what is
+    // tested here is that the builder sends the answer at all.
+    expect(
+      toBookCreate(
+        book({
+          identifiers: [
+            { type: "isbn", value: "9780441013593" },
+            { type: "amazon_de", value: "B000R34YKC" },
+            { type: "google", value: "s7NIrgEACAAJ" },
+            { type: "goodreads", value: "234225" },
+          ],
+        }),
+      )!.identifiers,
+    ).toEqual([
+      { scheme: BookIdentifierScheme.asin, value: "B000R34YKC" },
+      { scheme: BookIdentifierScheme.google_books, value: "s7NIrgEACAAJ" },
+    ]);
+  });
+
+  it("sends no identifier for a library that named none", () => {
+    expect(toBookCreate(book())!.identifiers).toEqual([]);
+  });
+
+  it("folds the marketplaces a library spelled one ASIN under", () => {
+    // **What the fold buys is the row that is not an ASIN.** Eight entries is
+    // all one request may carry and the ceiling truncates, so a library filing
+    // one ASIN under enough marketplaces spends every slot on one fact. The arm
+    // asserts the volume id still arrives, which is what truncation was taking.
+    const marketplaces = [
+      "amazon",
+      "amazon_com",
+      "amazon_de",
+      "amazon_uk",
+      "amazon_fr",
+      "amazon_it",
+      "amazon_es",
+      "amazon_jp",
+      "amazon_ca",
+    ].map((type) => ({ type, value: "B000R34YKC" }));
+
+    expect(
+      toBookCreate(
+        book({
+          identifiers: [
+            ...marketplaces,
+            // Lower cased by whoever typed it, which is one identifier and not
+            // a second: Amazon issues a token with no lower case in it, so the
+            // canonical form recovers the issued value rather than inventing
+            // one.
+            { type: "amazon_pl", value: "b000r34ykc" },
+            { type: "google", value: "s7NIrgEACAAJ" },
+          ],
+        }),
+      )!.identifiers,
+    ).toEqual([
+      { scheme: BookIdentifierScheme.asin, value: "B000R34YKC" },
+      { scheme: BookIdentifierScheme.google_books, value: "s7NIrgEACAAJ" },
+    ]);
+  });
+
+  it("bounds a Calibre book's identifiers by what one request may carry", () => {
+    // **The one bound of the four that binds on this path**, and the reason
+    // this builder goes through `boundIdentifiers` at all: the reader answers
+    // one entry a matching row and is unbounded in entries, where `BookCreate`
+    // declares `maxItems`, so a payload over it is a 422 for the whole book.
+    // Distinct values, because identical ones are folded by the reader.
+    const many = Array.from({ length: IDENTIFIER_LIMIT + 3 }, (_, index) => ({
+      type: "amazon",
+      value: `B${String(index).padStart(9, "0")}`,
+    }));
+
+    expect(toBookCreate(book({ identifiers: many }))!.identifiers).toHaveLength(
+      IDENTIFIER_LIMIT,
+    );
   });
 
   it("joins authors with the separator the server splits on", () => {
@@ -204,6 +283,9 @@ function storeBook(overrides: Partial<StoreBook> = {}): StoreBook {
     seriesName: "Dune Chronicles",
     seriesIndex: 1,
     format: "ebook",
+    // **Stated rather than left to the cast**: a store with nothing per row to
+    // say is the common case and it is what the fallback arms below exercise.
+    ownership: null,
     ...overrides,
   } as StoreBook;
 }
@@ -301,21 +383,44 @@ describe("one store record as a request", () => {
     expect(storeToBookCreate(storeBook(), false)!.ownership).toBe("unknown");
   });
 
-  it("decides ownership on the flag alone, not on anything in the book", () => {
-    // The flag is a fact about the read and every book in one read shares it.
+  it("takes the row's own answer over the library's", () => {
+    // **This arm replaced one asserting the opposite**, which was true when the
+    // flag was the only input and became false the moment a reader could answer
+    // per row. `kobo.ts` reads `Accessibility` and knows a Kobo Plus title from
+    // a purchase, so a library wide `true` overwriting that would put a guess
+    // where a measurement was.
+    expect(
+      storeToBookCreate(storeBook({ ownership: "unknown" }), true)!.ownership,
+    ).toBe("unknown");
+    expect(
+      storeToBookCreate(storeBook({ ownership: "owned" }), false)!.ownership,
+    ).toBe("owned");
+  });
+
+  it("falls back to the library where the row says nothing", () => {
+    // The other half, and the half Adobe Digital Editions relies on: that
+    // reader answers `null` per row because its catalogue records a three week
+    // loan and a purchase identically, so the library's answer is all there is.
+    expect(
+      storeToBookCreate(storeBook({ ownership: null }), false)!.ownership,
+    ).toBe("unknown");
+    expect(
+      storeToBookCreate(storeBook({ ownership: null }), true)!.ownership,
+    ).toBe("owned");
+  });
+
+  it("decides ownership on those two inputs and nothing else in the book", () => {
     // Asserted against a book carrying an identifier, a title and a format,
-    // because a later reader looking for something to key this on is the way
-    // it acquires a second input.
+    // because a later reader looking for something else to key this on is the
+    // way it acquires a third input.
     const rich = storeBook({
       title: "Small Gods",
       format: "ebook",
       identifiers: [{ scheme: "asin", value: "B00J4YQKHY" }],
+      ownership: null,
     });
 
     expect(storeToBookCreate(rich, false)!.ownership).toBe("unknown");
-    expect(storeToBookCreate(storeBook({ title: "x" }), true)!.ownership).toBe(
-      "owned",
-    );
   });
 
   it("never puts one in the field the ISBN lookup reads", () => {
@@ -344,16 +449,78 @@ describe("the identifiers a store gave, bounded for the wire", () => {
     const schemes: StoreIdentifierScheme[] = ["asin", "google_books"];
     for (const scheme of schemes) {
       expect(known).toContain(
-        storeIdentifiers([{ scheme, value: "x" }])[0]!.scheme,
+        boundIdentifiers([{ scheme, value: "x" }])[0]!.scheme,
       );
     }
+  });
+
+  it("writes an ASIN in the form Amazon issues one", () => {
+    // A canonicalisation and not an invention: Amazon's token has no lower case
+    // in it, so the fold recovers the issued value. `parseIsbn` is the
+    // precedent, putting every spelling of an ISBN into one.
+    expect(boundIdentifiers([{ scheme: "asin", value: "b00j4yqkhy" }])).toEqual(
+      [{ scheme: "asin", value: "B00J4YQKHY" }],
+    );
+  });
+
+  it("folds every letter of the alphabet it reaches, not most of them", () => {
+    // **The whole alphabet in one line, because a handful of literals leaves a
+    // letter riding free.** Found by the security seat: with the arms below
+    // alone, narrowing the fold to `[a-y]` left both mirrored files green, and
+    // a store sending an ASIN with a lower case `z` then earned the duplicate
+    // row this table exists to prevent.
+    // Written out on both sides rather than computed with `toUpperCase`, which
+    // is the builtin the fold is defined not to use: an oracle sharing a
+    // dependency with the thing under test is one that agrees with it.
+    expect(
+      boundIdentifiers([
+        { scheme: "asin", value: "abcdefghijklmnopqrstuvwxyz" },
+      ]),
+    ).toEqual([{ scheme: "asin", value: "ABCDEFGHIJKLMNOPQRSTUVWXYZ" }]);
+  });
+
+  it("folds nothing outside the alphabet the scheme is written in", () => {
+    // **The door cannot assume its input was vetted**: a store adapter sends
+    // what the file said. Measured over all 1,112,064 non surrogate code
+    // points, 1,552 change under `toUpperCase` and 1,526 of those are outside
+    // `[a-z]`, so a fold spelled that way would send a value this app invented,
+    // and 102 of them would change its length as well. `SS` here is what a
+    // `toUpperCase` gives and is the failure this arm names.
+    expect(boundIdentifiers([{ scheme: "asin", value: "straße" }])).toEqual([
+      { scheme: "asin", value: "STRAßE" },
+    ]);
+  });
+
+  it("leaves a volume id's case alone, its alphabet having both", () => {
+    // The other arm of the same table, and the one that says it is a rule
+    // rather than a fold somebody applied to everything: `aB3` and `AB3` are
+    // two volume ids, and either spelling names a book Google does not.
+    expect(
+      boundIdentifiers([{ scheme: "google_books", value: "aB3-dE6_gH9j" }]),
+    ).toEqual([{ scheme: "google_books", value: "aB3-dE6_gH9j" }]);
+  });
+
+  it("folds a repeat of one identifier, whichever reader sent it", () => {
+    // Two readers can name one edition, and the ceiling below truncates before
+    // the server's own deduplication ever sees the payload, so a repeat left
+    // standing costs the book a different identifier.
+    expect(
+      boundIdentifiers([
+        { scheme: "asin", value: "B00J4YQKHY" },
+        { scheme: "asin", value: "b00j4yqkhy" },
+        { scheme: "google_books", value: "aB3-dE6_gH9j" },
+      ]),
+    ).toEqual([
+      { scheme: "asin", value: "B00J4YQKHY" },
+      { scheme: "google_books", value: "aB3-dE6_gH9j" },
+    ]);
   });
 
   it("trims a reader's own padding off a value", () => {
     // A store's XML indents its elements, and the unique index is on the exact
     // characters, so padding would earn a second row for one identifier.
     expect(
-      storeIdentifiers([{ scheme: "asin", value: "\n  B00J4YQKHY\n" }]),
+      boundIdentifiers([{ scheme: "asin", value: "\n  B00J4YQKHY\n" }]),
     ).toEqual([{ scheme: "asin", value: "B00J4YQKHY" }]);
   });
 
@@ -361,7 +528,7 @@ describe("the identifiers a store gave, bounded for the wire", () => {
     // `lib/bookBounds.ts`' rule applied to a field it does not cover: an import
     // of nine hundred books must not turn into a 422 over one odd row.
     expect(
-      storeIdentifiers([
+      boundIdentifiers([
         { scheme: "asin", value: "B".repeat(IDENTIFIER_CEILING + 1) },
         { scheme: "asin", value: "B00J4YQKHY" },
       ]),
@@ -372,7 +539,7 @@ describe("the identifiers a store gave, bounded for the wire", () => {
     // The other side, without which the drop above is satisfied by a rule that
     // drops everything. Exactly on the boundary the schema declares.
     expect(
-      storeIdentifiers([
+      boundIdentifiers([
         { scheme: "asin", value: "B".repeat(IDENTIFIER_CEILING) },
       ]),
     ).toHaveLength(1);
@@ -383,7 +550,7 @@ describe("the identifiers a store gave, bounded for the wire", () => {
     // count code points, so measuring in units refuses half of what the server
     // would take. `lib/bookBounds.ts` records the same fault costing a 422.
     expect(
-      storeIdentifiers([
+      boundIdentifiers([
         { scheme: "asin", value: "\u{1f4d6}".repeat(IDENTIFIER_CEILING) },
       ]),
     ).toHaveLength(1);
@@ -405,7 +572,7 @@ describe("the identifiers a store gave, bounded for the wire", () => {
     ["a NUL, which is Cc", "B00J4\u0000YQKHY"],
     ["a left-to-right mark, Cf", "B00J4\u200eYQKHY"],
   ])("drops a value carrying %s", (_name, value) => {
-    expect(storeIdentifiers([{ scheme: "asin", value }])).toEqual([]);
+    expect(boundIdentifiers([{ scheme: "asin", value }])).toEqual([]);
   });
 
   it("keeps the two real shapes, which the same rule must not refuse", () => {
@@ -415,7 +582,7 @@ describe("the identifiers a store gave, bounded for the wire", () => {
     // alphabet, which includes the two characters a charset rule would have
     // been tempted to exclude.
     expect(
-      storeIdentifiers([
+      boundIdentifiers([
         { scheme: "asin", value: "B00J4YQKHY" },
         { scheme: "google_books", value: "zy-CAlFP_gYC" },
       ]),
@@ -432,10 +599,10 @@ describe("the identifiers a store gave, bounded for the wire", () => {
       value: `B${String(index).padStart(9, "0")}`,
     }));
 
-    expect(storeIdentifiers(many)).toHaveLength(IDENTIFIER_LIMIT);
+    expect(boundIdentifiers(many)).toHaveLength(IDENTIFIER_LIMIT);
   });
 
   it("drops an empty value", () => {
-    expect(storeIdentifiers([{ scheme: "asin", value: "   " }])).toEqual([]);
+    expect(boundIdentifiers([{ scheme: "asin", value: "   " }])).toEqual([]);
   });
 });

@@ -11366,12 +11366,20 @@ and the author arm matches one book in twenty two.
 **The year 101 placeholder is real and rare**: 29 of 897. Worth keeping precisely because the
 bounds would not catch it, 101 being inside the column's range.
 
-## Identifiers other than the ISBN have nowhere to go
+## Identifiers other than the ISBN had nowhere to go, and the count is what justified the table
 
-`BookCreate` has one identifier column. On the reference library that is 568 books served and
-244 more carrying only an identifier this schema cannot hold, of which the largest group is
-Calibre's own internal id. Recorded rather than fixed: a second identifier column is a schema
-change nobody has asked for, and the count is what would justify it.
+`BookCreate` had one identifier column. On the reference library that was 568 books served and
+244 more carrying only an identifier the schema could not hold, of which the largest group is
+Calibre's own internal id. Recorded rather than fixed at the time: a second identifier column
+was a schema change nobody had asked for, and the count is what would justify it.
+
+**It did.** `book_identifiers` holds them now, and the entries below carry why it is a table
+rather than a column and which of Calibre's type strings reach it.
+
+**The 244 is a bound above the yield rather than a description of it**, and that was true when
+it was written here too. The largest group in it is Calibre's own internal id, which the
+mapping declines: no reader produces one, which is `BookIdentifierScheme`'s own gate. No copy
+of that library is in this tree, so nobody has measured what the yield actually is.
 
 ## Which sibling audio files are one book
 
@@ -12738,7 +12746,8 @@ because nothing matches on the value and nothing displays it, so a wrong row tod
 rather than wrong about a Book. Both of those change the day either lands.
 
 **The client filter and the server validator are one rule and have to be checked against
-each other, not against examples.** `storeIdentifiers` shipped refusing `/\s/u` where
+each other, not against examples.** `boundIdentifiers`, then called `storeIdentifiers`,
+shipped refusing `/\s/u` where
 `BookIdentifierIn` refuses whitespace and both invisible Unicode categories. Measured
 independently by both critic seats over all 1,112,064 non surrogate code points: **229
 passed the client and were refused by the server**, and `importing.writeBooks` files that
@@ -12761,14 +12770,31 @@ is the protection on it and is not something this app opens. So the field exists
 store's import sends `unknown`, a value `books.ownership` has carried since the Goodreads import
 needed it. Absence still means `owned`, so every client that predates the field is unchanged.
 
-**The flag is per library and the fact is per row, which is the honest limit of what shipped.**
-`StoreLibrary.ownershipStated` separates a store that answers the ownership question imprecisely
-from one that cannot answer it at all, and only the second case was blocking. It does not make
-the first case right: `kobo.ts` puts OverDrive, a public library loan, and Kobo Plus, a
-subscription, in `OWNED_ACCESSIBILITY`, and `kindle.ts` keeps a Kindle Unlimited title because
-`<origins>` is in neither capture it was built from. **Kobo reads the value that would settle it
-and discards it**, because `KoboBook` has no field for it. Narrowing that is per row, costs one
-field in one reader, and is a ticket.
+**The flag shipped per library while the fact was per row, and that was the honest limit of the
+first version.** `StoreLibrary.ownershipStated` separates a store that answers the ownership
+question imprecisely from one that cannot answer it at all, and only the second case was
+blocking. It did not make the first case right: `kobo.ts` put OverDrive, a public library loan,
+and Kobo Plus, a subscription, in `OWNED_ACCESSIBILITY`, and read the value that would have
+settled it and discarded it, because `KoboBook` had no field for it.
+
+**It answers per row now.** `KoboAcquisition` names every row it keeps, and a Kobo Plus title
+and an OverDrive loan import as `unknown` where a purchase and a sideload import as `owned`.
+`StoreBook.ownership` carries it and the adapter takes the row's answer over the library's,
+because the row's is the narrower claim: a library wide `true` over a measured `unknown` puts a
+guess where a measurement was. `ownershipStated` stayed as the fallback for a store with nothing
+per row to say, which is what Adobe Digital Editions is.
+
+**The inclusion list did not get worse in the process**, which was the question worth asking of
+a change that splits one set into two. The two sets became one `Map`: membership still decides
+what is kept and the values only add a name, so an unrecognised `Accessibility` is skipped
+exactly as before.
+
+**Kindle still keeps a Kindle Unlimited title and the reason is now stated where the wiring
+reads it.** `<origins>` is the only element separating a subscription borrow from a purchase and
+it is in neither published capture the reader was built from: 17 distinct element names in each
+of the two, none of them that one, derived by two independent instruments, and six published
+parsers of the format read no such element. An arm that could not be shown to fire is not a
+guard, so none was written and no fixture was invented to justify one.
 
 Both readers stated what they keep at the site that keeps it, which is how this was found at
 merge rather than after it shipped.
@@ -12789,3 +12815,112 @@ The general form, which is why this is here rather than only in the ticket: **a 
 counter and a rate answer different questions, and the cumulative one flatters whatever is
 oldest.** Where a decision turns on how many people use something now, a lifetime total is the
 wrong instrument even when it is the only one published.
+
+## A Calibre type string is a name and a marketplace, and the value is what decides
+
+`book_identifiers` had two writers, both store adapters labelling a field whose
+name already said what it was. Calibre is the third source and its `identifiers`
+table is free text: a household's own type strings, plus whatever a plugin
+invented.
+
+**The open question was never `amazon` and `google`.** It was `amazon_de`. A
+prefix rule is right for the whole family or wrong in the direction that files a
+German store page id under `asin`, and nobody here had measured which.
+
+**Measured off calibre master, 2026-09-11, from the plugin rather than from a
+library.** `sources/amazon.py` sets the identifier as `'amazon' if domain ==
+'com' else 'amazon_' + domain` with the value taken from the variable it calls
+`asin`, and its own reader, `get_domain_and_asin`, accepts `amazon`, `asin` and
+`amazon_<domain>` for a domain in a list of 14. So the family claim holds: every
+one of those types holds an ASIN, by construction in the plugin that writes it.
+
+**The list is not copied, the shape is.** Thirteen of the 14 domains are two
+letters and `com` is three, so `/_[a-z]{2,3}$/` covers all of them and covers a
+marketplace opened after that list was written. What it costs is that the family
+is open, and the payment is a rule on the value: ten characters of Amazon's
+alphabet for an ASIN, twelve of the URL safe alphabet for a volume id. **That
+payment is for the key a plugin invented and not for a marketplace**, since the
+name rule cannot tell `amazon_zz` from `amazon_de` and a marketplace's value is
+an ASIN either way.
+
+**The ASIN alphabet is not narrowed to a `B` prefix.** Amazon issues a printed
+edition's ISBN-10 as its ASIN and calibre's own regression fixture carries
+`amazon_ca` of `162380874X`. `kindle.ts` measured 1,032 catalogue entries all
+beginning `B` because a Kindle catalogue can hold nothing else, which is a fact
+about that store and not about the scheme.
+
+**The two value rules are not grounded the same way and the code says so.**
+`takeout.ts` enforces a volume id shape, so `google_books` is one rule in two
+places and a test sweeps them against each other by reading that module's
+source. `kindle.ts` enforces nothing, taking the `ASIN` element's text as
+written, so the ASIN rule rests on a measurement rather than on another rule.
+
+**`goodreads` was refused a member**, which is the enum's own gate rather than a
+preference: a member has to be a value some reader here can produce, and nothing
+does. The Goodreads CSV importer names no `Book Id` column and `lib/goodreads.ts`
+is a search link. `mobi-asin` was refused although the word is in its name,
+because it names a place rather than a scheme: calibre sets it from EXTH 113,
+whose own comment in that reader reads `ASIN or other id`, and calibre refuses
+the type by default with a help text warning the value may be another store's.
+
+**Two spellings of one ASIN are folded, at the door and not in the reader.**
+The server deduplicates a payload against itself and against the Book, and says
+so; what it cannot do is run before the client's own ceiling of eight entries,
+which truncates. A library filing one ASIN under nine marketplaces spent every
+slot on one fact and its Google volume id never crossed the wire. Measured: 15
+marketplace spellings plus a `google` row sent 8 entries, all `asin`.
+
+**The canonical form is a property of the scheme, so it sits where both readers
+pass**, which is `boundIdentifiers` rather than either reader: a fold in one of
+them leaves a Kindle catalogue's lower cased ASIN and a Calibre library's upper
+cased one as two rows on one Book, which is exactly the row it was bought to
+prevent. The alphabet decides what a fold is: Amazon issues a token with no
+lower case in it, so upper casing recovers the issued value and `parseIsbn` is
+the precedent; a Google Books volume id's alphabet has both cases, so its entry
+is the identity and says why.
+
+**The bound stayed one door.** `storeIdentifiers` is now `boundIdentifiers`:
+what may cross the wire is one rule both builders go through, and which scheme a
+row belongs to is its reader's decision. **Of its four bounds the entry count is
+the one that binds on the Calibre path**, the reader answering one entry a
+matching row and being unbounded in entries where the shape rule already puts
+every value inside the other three. The door is also where the scheme becomes
+the endpoint's own name for one, and where a value is put in the form its issuer
+writes.
+
+## An identifier is shown as text, and the link that was not built
+
+`book_identifiers` reaches a member now, as chips on the book detail page after the ISBN. The
+position is deliberate: the edition's own number leads, and a vendor's name for it never takes
+the place a reader looks first.
+
+**It is not a link, and three separate arguments were needed because no one of them covers both
+schemes.**
+
+**The URL cannot be built correctly for an ASIN.** An ASIN names an edition on the marketplace
+that issued it, and `models.BookIdentifier` declines to record which store said so. `kindle.ts`
+reads the element out of a local catalogue carrying no marketplace, domain or region. A host
+would be a guess, and a wrong guess sends a member to the wrong edition rather than to none.
+That settles the ASIN and says nothing about a Google volume id, which has one global resolver.
+
+**The value's shape is unchecked.** `BookIdentifierIn` bounds length and refuses whitespace and
+both invisible Unicode categories; it never asks whether an ASIN is an ASIN, and
+`backup.restore` writes through Core past the model. Any 1 to 60 characters except NUL can reach
+the browser, which is a different proposition from building a URL out of them.
+
+**Sending a member to a storefront is a deployment's call.** The one outbound vendor link here,
+the Goodreads lookup, is gated by a setting. A second with no gate is less consent than the
+first, and `PublicBookOut` withholds these rows precisely so a public shelf does not announce
+which stores the house buys from.
+
+**Called a reference, not an ASIN.** `enrich.field.google_books_id` already spells the same idea
+that way, and a second word for one idea is how a vocabulary drifts. "ASIN" appears nowhere on
+screen and a test asserts it.
+
+**The guard that holds asks what the document did.** Two earlier versions enumerated: a list of
+element spellings was walked past by a `role="link"` span with an `onClick`, and a list of
+elements plus role plus one API was walked past by a span assigning `window.location.href`. Both
+evasions were written by the seat that did not write the guard. The version that survived catches
+`location.assign`, `location.replace` and a bare assignment without having been designed against
+any of them, which is the difference between asking what something is made of and asking what it
+does.

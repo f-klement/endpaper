@@ -70,10 +70,15 @@
  * failure name widens `StoreFailure` and the card's total `Record` fails to
  * compile until it has a sentence for a member.
  *
- * **Its adapter answers `identifiers` too**, and `[]` is a real answer rather
- * than a gap: it says the store's rows carry the store's own device reference
- * and nothing another system could resolve, which is what two of the four below
- * say and why. A store whose identifier has no scheme yet needs one added to
+ * **Its adapter answers `ownership` too**, and `null` is a real answer rather
+ * than a gap: it says the store draws no line between its rows, so the read's
+ * own `ownershipStated` speaks for all of them. Answer it per row only where
+ * the store records the difference, which of the six below is Kobo alone.
+ *
+ * **And it answers `identifiers`**, where `[]` is a real answer for the same
+ * reason: it says the store's rows carry the store's own device reference and
+ * nothing another system could resolve, which is what four of the six below say
+ * and why. A store whose identifier has no scheme yet needs one added to
  * `StoreIdentifierScheme`, to `enums.BookIdentifierScheme` and to a migration,
  * because the endpoint refuses a scheme it does not know.
  */
@@ -86,7 +91,7 @@ import type {
 } from "./adobeDigitalEditions";
 import type { MoonReaderFailure, MoonReaderLibrary } from "./moonReader";
 import type { KindleFailure, KindleLibrary } from "./kindle";
-import type { KoboFailure, KoboLibrary } from "./kobo";
+import type { KoboAcquisition, KoboFailure, KoboLibrary } from "./kobo";
 import type { SqliteFailure } from "./sqlite";
 import type { TakeoutFailure, TakeoutLibrary } from "./takeout";
 
@@ -100,6 +105,17 @@ import type { TakeoutFailure, TakeoutLibrary } from "./takeout";
  * compile error rather than a book filed as nothing.
  */
 export type StoreFormat = "ebook" | "audiobook" | "comic";
+
+/**
+ * What a store said about this member's claim on one book.
+ *
+ * **Two of `books.ownership`'s three members and not the third.** A store lists
+ * what the account holds, so `not_owned` is a thing a member says about a book
+ * and never a thing a catalogue says: the wishlist is the route that writes it.
+ * `unknown` is the endpoint's word for a source that could not answer, which is
+ * what a subscription title and a public library loan both are.
+ */
+export type StoreOwnership = "owned" | "unknown";
 
 /**
  * Who is naming a book, where that name is not an ISBN.
@@ -184,6 +200,28 @@ export interface StoreBook {
   readonly seriesIndex: number | null;
   /** What kind of copy this is, or `null` where the store does not say. */
   readonly format: StoreFormat | null;
+  /**
+   * What the store said about this row, or `null` where it said nothing per
+   * row and `StoreLibrary.ownershipStated` is the answer for all of them.
+   *
+   * **A row and not a library, because that is where the fact is.** A Kobo
+   * holds a purchase, a Kobo Plus title and an OverDrive loan in one `content`
+   * table and records which on every row, so one boolean for the read can only
+   * be wrong about some of them: it said owned, and a three week public library
+   * book went onto a shelf as something the member has.
+   *
+   * **`null` is a real answer and not a gap**, `identifiers`' empty list rule.
+   * It says this store's catalogue draws no distinction between its rows, which
+   * is true of every store here but Kobo, so the one thing the read can say
+   * about ownership is the thing it says about all of them at once.
+   *
+   * **This is what the import reads first.** `LibrarySettingsPage/types.ts`
+   * takes the row's answer where there is one and falls back to
+   * `ownershipStated` below where there is not, because the row's answer is the
+   * narrower claim: a library wide `true` over a measured `unknown` would put a
+   * guess where a measurement was.
+   */
+  readonly ownership: StoreOwnership | null;
 }
 
 /**
@@ -198,35 +236,40 @@ export interface StoreBook {
 export interface StoreLibrary {
   readonly books: readonly StoreBook[];
   /**
-   * Whether this store established that the member owns what it listed.
+   * What this store said about owning the books it listed, for the rows that
+   * said nothing themselves.
    *
-   * **A property of the read, not of a book**, because it is a fact about what
-   * the catalogue records rather than about any row in it. Every store here
-   * says `true` except Adobe Digital Editions, which is a fulfilment client for
-   * public library loans as much as for purchases and **records a three week
-   * loan and a purchase identically**: the loan is a token travelling with the
-   * book file, which is the protection on it and is not something this app
-   * opens. `adobeDigitalEditions.ts` carries the sources.
+   * **Written as the fallback under `StoreBook.ownership`, and still the only
+   * thing the import reads.** `LibrarySettingsPage/types.ts::storeToBookCreate`
+   * takes this flag and every book of the read on it, and consults no per row
+   * answer, so a Kobo OverDrive loan arrives as a book the member owns. That is
+   * the defect `StoreBook.ownership` was added to settle and the half of it
+   * this module could reach: the wiring is one expression in a file this work
+   * did not own, and the issue carries it.
+   *
+   * A store whose catalogue records nothing per row has one answer for the
+   * whole read and this is it. Kobo is the only store here that records it per
+   * row.
    *
    * **`false` means the import sends `ownership: unknown`**, which is a value
    * `books.ownership` has had since the Goodreads import needed it. Without
    * this flag every store import wrote `owned`, so wiring that store would have
    * told a member they own a book they have for three weeks.
    *
-   * **`true` means the store judged ownership, not that every row is a
-   * purchase**, and two stores are documented to be generous about it. `kobo.ts`
-   * puts `9`, OverDrive, and `8`, Kobo Plus, in `OWNED_ACCESSIBILITY`, so a
-   * public library loan and a subscription title both import as owned; it does
-   * refuse `4` and `6`, the store's own adverts, which is what makes its answer
-   * a judgement at all. `kindle.ts` keeps a Kindle Unlimited or Prime title for
-   * a stated reason: `<origins>` is the only element that could tell one from a
-   * purchase and it is in neither capture the reader was built from, so an arm
-   * reading it could not be shown to fire.
+   * Every store here says `true` except Adobe Digital Editions, which is a
+   * fulfilment client for public library loans as much as for purchases and
+   * **records a three week loan and a purchase identically**: the loan is a
+   * token travelling with the book file, which is the protection on it and is
+   * not something this app opens. `adobeDigitalEditions.ts` carries the sources.
    *
-   * **So the line this flag draws is between a store that answers the question
-   * imprecisely and one that cannot answer it at all.** Adobe Digital Editions
-   * is the second. Narrowing the first case is per row rather than per store,
-   * needs each reader to carry which value it matched, and is a ticket.
+   * **`true` still means the store judged ownership rather than that every row
+   * is a purchase**, and `kindle.ts` is the case left. It keeps a Kindle
+   * Unlimited or Prime title for a stated reason: `<origins><origin><type>` is
+   * the only element in that format that could tell one from a purchase, and it
+   * is in neither published capture the reader was built from, so an arm
+   * reading it could not be shown to fire. So `fromKindle` leaves
+   * `StoreBook.ownership` unset and this flag is what its books are imported
+   * on, which is the same imprecision stated where somebody wiring it reads it.
    */
   readonly ownershipStated: boolean;
   /** Rows the store held that were not a book this member has. */
@@ -428,17 +471,70 @@ function fromKobo(library: KoboLibrary): StoreLibrary {
       // read, so the mapping itself is not the question; asserting a kind for
       // a row that named none would be answering for the device.
       format: book.format === null ? null : "ebook",
+      ownership: KOBO_OWNERSHIP[book.acquisition],
     })),
     skipped: library.skipped,
     // A Kobo row is read or it is not one. Nothing is named and unopenable.
     refused: 0,
-    // **A judgement, and a generous one**: `OWNED_ACCESSIBILITY` refuses the
-    // store's adverts and keeps OverDrive, which is a library loan, and Kobo
-    // Plus, which is a subscription. Narrowing it needs `KoboBook` to carry
-    // which value it matched, which is a change to that reader.
+    // Every row above answered for itself, and this is nonetheless what the
+    // import takes all of them on: see `ownershipStated`. `true` is what keeps
+    // a purchase importing as owned until that is wired.
     ownershipStated: true,
   };
 }
+
+/**
+ * What each thing a Kobo records amounts to on a shelf.
+ *
+ * **The judgement is here and the fact is in the reader**, which is the seam
+ * `StoreBook.ownership` describes: `kobo.ts` says a row is a Kobo Plus title
+ * and this says what a Kobo Plus title is worth as a claim on a book. A member
+ * reads for as long as they subscribe and loses it when they stop, and an
+ * OverDrive title is a public library's book for three weeks, so neither is
+ * theirs and `unknown` is the whole of what a catalogue establishes.
+ *
+ * **A total `Record` and not a lookup with a default.** A value added to
+ * `KoboAcquisition` and not given a home here is a compile error, where a
+ * default would silently file Kobo's next arrangement as a purchase, which is
+ * the direction that puts a book nobody bought on somebody's shelf.
+ *
+ * **`unrecorded` is `unknown`**, because it is a device older than schema
+ * version 16, which has no `Accessibility` column: it cannot say that a row is
+ * an advert and cannot say that it is a purchase either. Reading the second out
+ * of the first is the guess this app has a word for not making.
+ *
+ * **`sideloaded` is `owned` and that is the entry that concedes something.** It
+ * is a file the member put on the device, which is usually theirs and is also
+ * where a public library loan lands when it arrives as a file.
+ *
+ * **The route decides that and not the lender.** `9` is what Kobo records for
+ * a title borrowed through the integration on the device; a loan fulfilled
+ * through Adobe and transferred to the device is a file the member copied, and
+ * lands here. That is how a library outside the integration works, and it is
+ * how OverDrive itself works when the member transfers the title with Adobe
+ * Digital Editions, so the same lender reaches this reader by both routes.
+ * `adobeDigitalEditions.ts` is why the second cannot be separated from a
+ * purchase, and that is a fact about its catalogue rather than about this one:
+ * it records a three week loan and a purchase identically.
+ *
+ * The concession is deliberate, because answering `unknown` sends every
+ * sideloaded book on every device to be reviewed to catch the ones that are
+ * loans, and nothing on the row separates them.
+ *
+ * **`unrecorded` costs the same and more of it**, every book on such a device
+ * rather than some of them, and is answered the other way because the two are
+ * different kinds of thing: `sideloaded` is something the device recorded and
+ * `unrecorded` is the absence of any record at all. Declining to read a fact
+ * that is there is a judgement about the fact; declining to invent one that is
+ * not there is the only thing available.
+ */
+const KOBO_OWNERSHIP: Record<KoboAcquisition, StoreOwnership> = {
+  purchase: "owned",
+  sideloaded: "owned",
+  subscription: "unknown",
+  loan: "unknown",
+  unrecorded: "unknown",
+};
 
 /** The Play Books library inside a Google Takeout archive. */
 async function openPlayBooks(file: File): Promise<StoreReading> {
@@ -490,6 +586,9 @@ function fromTakeout(library: TakeoutLibrary): StoreLibrary {
       // Every pair that got this far is one whose sibling read as an EPUB, so
       // this is what the archive held rather than what its folder is called.
       format: "ebook",
+      // The archive is a list of what the account holds and draws no line
+      // through it, so the answer is the read's and not this row's.
+      ownership: null,
     })),
     skipped: library.skipped,
     refused: library.refused.length,
@@ -542,6 +641,9 @@ function fromAppleBooks(library: AppleBooksLibrary): StoreLibrary {
       seriesIndex: null,
       // Every format this store settles is a book to read, `fromKobo`'s rule.
       format: book.format === null ? null : "ebook",
+      // `appleBooks.ts` reads no column separating a purchase from anything
+      // else, so the answer is the read's and not this row's.
+      ownership: null,
     })),
     skipped: library.skipped,
     // A row is read or it is not one. Nothing is named and unopenable.
@@ -589,6 +691,10 @@ function fromKindle(library: KindleLibrary): StoreLibrary {
       seriesIndex: null,
       // Every row this reader keeps is a book. `kindle.ts` skips the rest.
       format: "ebook",
+      // **The one store that could answer here and does not.** `<origins>` is
+      // the element that would, and `StoreLibrary.ownershipStated` carries why
+      // `kindle.ts` does not read it and what that costs.
+      ownership: null,
     })),
     skipped: library.skipped,
     refused: 0,
@@ -628,6 +734,9 @@ function fromDigitalEditions(library: DigitalEditionsLibrary): StoreLibrary {
       seriesName: null,
       seriesIndex: null,
       format: "ebook",
+      // Nothing on a record tells one from another, which is the finding this
+      // reader exists to state, so the answer is the read's for all of them.
+      ownership: null,
     })),
     skipped: library.skipped,
     refused: 0,
@@ -710,6 +819,9 @@ function fromMoonReader(library: MoonReaderLibrary): StoreLibrary {
       // `fileName.FORMAT_FOR_EXTENSION` treats it, and the reader has already
       // narrowed it to what a filename can mean.
       format: book.format,
+      // A backup lists files and says nothing about any of them, so the answer
+      // is the read's and not this row's.
+      ownership: null,
     })),
     skipped: library.skipped,
     refused: 0,
