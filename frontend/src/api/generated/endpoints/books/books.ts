@@ -7136,6 +7136,129 @@ export function useEnrichmentCandidates<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
+export const getForgetBookIdentifierUrl = (
+  bookId: number,
+  identifierId: number,
+) => {
+  return `/api/books/${bookId}/identifiers/${identifierId}`;
+};
+
+/**
+ * Remove a wrong identifier. Importing again does not put it back.
+ *
+ * **The only correction there is**, and it is deliberately destructive rather
+ * than an edit. `models.BookIdentifier` carries the reasoning and
+ * `forget_author_identifier` is where this app first made the trade: a store
+ * or a reader can be wrong, a fact that cannot be corrected is a trap rather
+ * than an invariant, and what stays refused is retyping a row to a different
+ * value, because that is the operation that turns a guess into something
+ * reading as a catalogue's assertion.
+ *
+ * **Unlike the author route, nothing re-asserts this one**, and the summary
+ * line says exactly that much because a client generates its own prose from
+ * it. An author's identifier is written again by the next catalogue record
+ * the server fetches. `add_identifiers` is reached only from `_create_book`,
+ * which both adding routes share and which always builds a new Book, so what
+ * re-importing the store file could offer is a Book rather than the row.
+ *
+ * **Whether it offers one at all is conditional, and `models.BookIdentifier`
+ * is where the condition lives.** Not restated here: a second copy of the
+ * condition is a second thing to keep true.
+ *
+ * **Whoever may write the book**, which is the rule for its tags, its cover
+ * and its digital references and is not a softer one here: the row carries no
+ * Member of its own, so its permission is the book's entirely. A book the
+ * caller cannot see is **404**, identical to one that is not there, and so is
+ * an identifier belonging to a different book.
+ * @summary Forget Book Identifier
+ */
+export const forgetBookIdentifier = async (
+  bookId: number,
+  identifierId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getForgetBookIdentifierUrl(bookId, identifierId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getForgetBookIdentifierMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof forgetBookIdentifier>>,
+    TError,
+    ForgetBookIdentifierMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof forgetBookIdentifier>>,
+  TError,
+  ForgetBookIdentifierMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["forgetBookIdentifier"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof forgetBookIdentifier>>,
+    ForgetBookIdentifierMutationVariables
+  > = (props) => {
+    const { bookId, identifierId } = props ?? {};
+
+    return forgetBookIdentifier(bookId, identifierId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ForgetBookIdentifierMutationResult = NonNullable<
+  Awaited<ReturnType<typeof forgetBookIdentifier>>
+>;
+
+export type ForgetBookIdentifierMutationError = HTTPValidationError;
+export type ForgetBookIdentifierMutationVariables = {
+  bookId: number;
+  identifierId: number;
+};
+
+/**
+ * @summary Forget Book Identifier
+ */
+export const useForgetBookIdentifier = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof forgetBookIdentifier>>,
+      TError,
+      ForgetBookIdentifierMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof forgetBookIdentifier>>,
+  TError,
+  ForgetBookIdentifierMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getForgetBookIdentifierMutationOptions(options),
+    queryClient,
+  );
+};
 export const getGetNotesUrl = (bookId: number) => {
   return `/api/books/${bookId}/notes`;
 };

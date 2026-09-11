@@ -37,6 +37,7 @@ import {
   useAddQuote,
   useApplyEnrichment,
   useDeleteBook,
+  useForgetBookIdentifier,
   useDeleteNote,
   useDeleteQuote,
   useEditNote,
@@ -82,6 +83,7 @@ import { tagName, useSortedByName, useTranslation } from "../../i18n";
 import type {
   BookMatch,
   BookDetailsUpdate,
+  BookIdentifierOut,
   CollectionOut,
   CustomFieldOut,
   CustomFieldValueOut,
@@ -149,6 +151,8 @@ export interface UseBookActionsResult {
   /** Delete a curated tag everywhere, after confirming. */
   deleteTag: (tag: TagOut) => void;
   removeTag: (tagId: number) => void;
+  /** Take one store identifier off the book, after confirming. */
+  removeIdentifier: (identifier: BookIdentifierOut) => void;
   uploadCover: (file: File) => void;
   refreshMetadata: () => void;
   setOwnership: (ownership: OwnershipStatus) => void;
@@ -208,6 +212,10 @@ export function useBookActions(
     },
   });
   const removeTag = useRemoveBookTag({ mutation });
+  // `mutation`, so the book and the listings both drop it: `books_to_out`
+  // carries these onto every row of every page, so a page cached before the
+  // removal still holds the row.
+  const removeIdentifier = useForgetBookIdentifier({ mutation });
   const cover = useUploadCover({ mutation });
   // Not `mutation`: a metadata refresh rewrites the title, the author and the
   // series, which the author index, the series index and the shelf list are
@@ -295,6 +303,15 @@ export function useBookActions(
         deleteTag.mutate({ tagId: tag.id });
     },
     removeTag: (tagId) => removeTag.mutate({ bookId, tagId }),
+    removeIdentifier: (identifier) => {
+      // Asked about, where removing a tag is not, and the difference is that
+      // nothing here adds one back rather than that this is graver. A tag goes
+      // back on from the picker beside it. The message says that much and no
+      // more: the question of whether any road exists has a condition in it,
+      // and a confirm cannot carry one. `models.BookIdentifier` holds it.
+      if (confirm(t("identifier.removeConfirm", { value: identifier.value })))
+        removeIdentifier.mutate({ bookId, identifierId: identifier.id });
+    },
     uploadCover: (file) => cover.mutate({ bookId, data: { file } }),
     refreshMetadata: () => refresh.mutate({ bookId }),
     setRating: (value) => rating.mutate({ bookId, data: { rating: value } }),
@@ -321,6 +338,7 @@ export function useBookActions(
       privacy.error ??
       addTag.error ??
       removeTag.error ??
+      removeIdentifier.error ??
       cover.error ??
       ownership.error ??
       collection.error ??

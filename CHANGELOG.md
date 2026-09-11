@@ -14,6 +14,18 @@
   link**, because an Amazon reference names an edition on the marketplace that issued it, which
   is not recorded and cannot be guessed, and sending you to a storefront from inside your own
   catalogue is a thing to ask for rather than to assume.
+- **A wrong identifier can be removed.** Each reference on the book page carries a control that
+  deletes it, and any member who can edit the book can use it: the row carries no member of its
+  own, so its permission is the book's. Removing one is not quite undoable, and the app says so
+  where you do it: re-importing the file usually writes it back, but not when the book already
+  holds the ISBN that file carries, which is the ordinary case for a Play Books export.
+- **A Kobo bought before 2012 cannot tell a sideloaded book from a purchased one**, and neither
+  can anything else: calibre does not distinguish them on that firmware either. Nothing on your
+  shelf changes, because both count as owned. Named at the point it matters rather than guessed
+  at.
+- The scan page still does not record the identifiers a book file labels itself with, and that
+  is now a decision rather than an omission: four of the five file readers can only produce an
+  ISBN or a barcode, neither of which is a kind of reference this app stores.
 - **A Calibre import keeps the Amazon and Google Books identifiers the library's own table
   carries**, in every marketplace spelling Calibre writes. Types no reader here can produce a
   value for, `goodreads` and `mobi-asin` among them, are declined rather than guessed at, and

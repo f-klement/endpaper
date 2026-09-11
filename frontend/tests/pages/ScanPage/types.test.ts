@@ -226,9 +226,33 @@ function requestSchema(
   return body;
 }
 
-/** Every field name the scan flow can put in a scan request. */
+/**
+ * Every field name the scan flow can put in a scan request.
+ *
+ * **Over more than one pending book, because a conditional send is invisible to
+ * one.** Both halves were measured green against a single fixture, each by the
+ * seat that did not write the arm reading this: `...(draft.notFound ? {
+ * identifiers: [] } : {})` in `toScanRequest` sends identifiers on every file
+ * import, 39 of 39, and `...(pending.isPrivate ? {} : { identifiers: [] })`
+ * sends them on every scan nobody ticked, 58 of 58.
+ *
+ * **Two drafts, one per side of `notFound`, and two pending books, one with
+ * every field set and one with none.** Not one per producer: `draftFromLookup`,
+ * `draftFromName` and `draftFromAudiobook` are producers too, and they sit on
+ * the `notFound` side `draftFromFile` already covers.
+ *
+ * The exclusion: a send conditioned on a **value** rather than on a field being
+ * set or blank, `year > 2000` and the like, which no fixture set covers and
+ * which the schema arms do not see either.
+ */
 function sentNames(): string[] {
-  return Object.keys(toScanRequest(pending()));
+  const drafts: BookDraft[] = [DRAFT, draftFromFile(record())];
+  const books: (PendingBook & { draft: BookDraft })[] = drafts.flatMap(
+    (draft) => [pending({ draft }), { ...blankPending(""), draft }],
+  );
+  return [
+    ...new Set(books.flatMap((book) => Object.keys(toScanRequest(book)))),
+  ];
 }
 
 /**
@@ -244,14 +268,12 @@ const NOT_SENT_BY_THE_SCAN_FLOW: Record<string, string> = {
   // Filing happens afterwards from the book's own page. Named here so that
   // stays a decision rather than a discovery.
   collection_id: "the confirm card offers no collection",
-  // Accepted by the endpoint and sent by nothing here, and this one is a
-  // decision rather than a screen that does not offer it. `FileMetadata`
-  // carries an `identifiers` list and `readIsbn` is the only thing that reads
-  // it: the schemes a book file labels its own identifiers with are free text
-  // and mostly absent, so mapping one onto `BookIdentifierScheme` is a change
-  // to the readers rather than a line here. The store import writes the field,
-  // where the adapter chose the label. It is a ticket.
-  identifiers: "a file's own identifier labels are free text, unlike a store's",
+  // Accepted by the endpoint and sent by nothing here, and a decision that was
+  // taken rather than a ticket left open. `ScanPage/types.draftFromFile` is its
+  // one home and carries the measurement; `tests/lib/fileReaders.test.ts`
+  // guards the fact it rests on.
+  identifiers:
+    "a file's labels name no scheme this app stores. See draftFromFile",
   // Accepted by the endpoint and deliberately not sent, because the default is
   // already the true answer for this flow: somebody scanning a barcode is
   // holding the book. `routers/books.py` gives that same reason where a copy is
@@ -298,6 +320,37 @@ describe("the scan request agrees with the API", () => {
     ).filter((name) => !sent.has(name) && !(name in NOT_SENT_BY_THE_SCAN_FLOW));
 
     expect(missing).toEqual([]);
+  });
+
+  it("keeps no excuse for a field it sends, or the endpoint does not accept", () => {
+    // The direction both arms above are blind to, and the one this table rots
+    // in. Each of them only ever **subtracts** these names from the endpoint's,
+    // so a row that stopped being true costs nothing: an author who wires
+    // `identifiers` into `draftFromFile` leaves the sentence denying it
+    // standing, and a column renamed on the server leaves an excuse about a
+    // field nothing has. Both are a decision recorded here that the code no
+    // longer takes, which is the one thing this table exists to prevent.
+    const accepted = new Set(
+      Object.keys(
+        requestSchema("scan_add", "#/components/schemas/BookCreate", 10)
+          .properties ?? {},
+      ),
+    );
+    const sent = new Set(sentNames());
+
+    expect(
+      Object.keys(NOT_SENT_BY_THE_SCAN_FLOW).filter(
+        (name) => sent.has(name) || !accepted.has(name),
+      ),
+    ).toEqual([]);
+    // The same question of the app side table, which is not keyed on the
+    // endpoint at all: a field named here has to be one the pending book
+    // actually holds, or the arm that reads it passes over a name nothing has.
+    expect(
+      Object.keys(NOT_IN_THE_BODY).filter(
+        (field) => !(field in PENDING) || sent.has(field),
+      ),
+    ).toEqual([]);
   });
 
   it("sends every field the endpoint requires", () => {
@@ -421,6 +474,30 @@ describe("the copy request agrees with the API", () => {
     );
 
     expect(unaccounted).toEqual([]);
+  });
+
+  it("keeps no excuse for a field it sends, or the endpoint does not accept", () => {
+    // Both of this endpoint's tables, asked the question its own arms cannot:
+    // they subtract these names and never check that the name still describes
+    // something. Same rot and the same cost as the scan request's.
+    const accepted = new Set(
+      Object.keys(
+        requestSchema("add_copy", "#/components/schemas/CopyCreate", 5)
+          .properties ?? {},
+      ),
+    );
+    const sent = new Set(Object.keys(toCopyRequest(pending())));
+
+    expect(
+      Object.keys(NOT_SENT_WHEN_COPYING).filter(
+        (name) => sent.has(name) || !accepted.has(name),
+      ),
+    ).toEqual([]);
+    expect(
+      Object.keys(NOT_ON_THE_COPY).filter(
+        (field) => !(field in PENDING) || sent.has(field),
+      ),
+    ).toEqual([]);
   });
 
   it("sends every field the endpoint requires", () => {

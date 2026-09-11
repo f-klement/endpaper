@@ -184,6 +184,41 @@ export function draftFromMatch(match: BookMatch): BookDraft {
  * `lib/bookBounds.ts` carries that rule and the reason for the cut or drop
  * split.
  *
+ * **No identifiers, and this one is a decision rather than a field nobody
+ * wired.** `BookCreate.identifiers` carries what a store's adapter labelled,
+ * because that format names the identifier in a field whose name already says
+ * what it is. A file labels its own, and `fileReaders.FileIdentifier` says who
+ * labels which.
+ *
+ * **Four of the five readers cannot produce a scheme at all.** Three write
+ * `ISBN` and `cbz.ts` writes `GTIN`, a barcode that is an ISBN on a collected
+ * volume and a product code on an issue; `BookIdentifierScheme` has a member
+ * for neither, an ISBN being the thing that enum exists to keep out of itself.
+ * So there is nothing there to map, whatever anybody's library holds.
+ *
+ * **The fifth is `opf.ts`, which repeats whatever label the file wrote**, and
+ * both schemes that exist belong to a store whose own files were measured not
+ * to carry one where a reader could take it. The EPUBs of one real Play Books
+ * Takeout identify themselves with UUIDs and Project Gutenberg URLs, which
+ * `lib/takeout.ts` records without counting them; that export is 24 pairs and
+ * walking it gave that module 23 books and 1 refusal, and the volume id is in
+ * the sidecar, which the store import already reads. Of the 69 files measured
+ * in `lib/mobi.ts`, the 61 carrying the record that format calls the ASIN hold
+ * no Amazon identifier at all.
+ *
+ * **A Calibre type is mapped and an EPUB's label is not, and the difference is
+ * the producer rather than the appetite.** `lib/calibre.identifiersWithScheme`
+ * maps free text without a corpus because one program writes that column and
+ * its source can be read. A `dc:identifier` label is written by every tool that
+ * ever produced an EPUB, so there is no source to read, and the population is
+ * the only instrument left. **No corpus here measures it**: the 79 files behind
+ * `lib/opf.ts` are Project Gutenberg and IDPF samples, which is two producers.
+ * So a mapping written today would be a rule over free text nobody has counted.
+ *
+ * `tests/lib/fileReaders.test.ts` fails if a reader starts labelling an
+ * identifier with a scheme this app stores, which is the half of this that
+ * could otherwise go stale in silence.
+ *
  * `notFound` is set, which is what puts the confirm step into editable fields:
  * no catalogue was asked, so what is on screen is the file's own claim and the
  * member is the one who can correct it.

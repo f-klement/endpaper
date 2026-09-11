@@ -670,6 +670,15 @@ BOOK_OWNED_READERS = {
             "Publishes no rows and no values, only how many that Book holds, "
             "and the Book is one the dependency resolved.",
         ),
+        (
+            "BookIdentifier.id == identifier_id",
+            "reads one store identifier so the route can remove it. Narrowed "
+            "to a `Book` the dependency resolved **as well as** to the id, for "
+            "the reason the digital reference entry above gives: without the "
+            "pairing, an identifier id belonging to another Book would be "
+            "reachable through a Book the caller does hold. The row it feeds "
+            "is deleted and never serialised.",
+        ),
     ],
     "routers/stats.py": [
         (

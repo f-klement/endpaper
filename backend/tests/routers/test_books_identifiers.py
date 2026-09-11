@@ -45,8 +45,35 @@ class TestAddingABookWithIdentifiers:
         )
 
         assert res.status_code == 201
-        assert res.json()["identifiers"] == [{"scheme": "asin", "value": ASIN}]
-        assert len(identifiers(res.json()["id"], db)) == 1
+        [served] = res.json()["identifiers"]
+        assert (served["scheme"], served["value"]) == ("asin", ASIN)
+        [stored] = identifiers(res.json()["id"], db)
+        # The row id is served because it is what the delete route is addressed
+        # by, and asserting it against the row is what says the client is given
+        # this row's address rather than a number.
+        assert served["id"] == stored.id
+
+    def test_the_scan_route_stores_them_too(self, client, admin, db):
+        """Both adding routes, because they share `_create_book` and the prose
+        kept saying one.
+
+        `POST /api/books/scan` is the route the store import actually posts to,
+        and three files plus a published OpenAPI description said identifiers
+        were written only by `POST /api/books`. A count of routes stated in
+        prose is a count nobody was checking, so it is a test now. Found by the
+        security seat.
+        """
+        res = client.post(
+            "/api/books/scan",
+            json={
+                "title": "Praxiswissen Docker",
+                "identifiers": [{"scheme": "asin", "value": ASIN}],
+            },
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 201
+        assert [row.value for row in identifiers(res.json()["id"], db)] == [ASIN]
 
     def test_a_book_added_without_one_carries_none(self, client, admin, make_book):
         book = make_book(admin["headers"])
@@ -384,3 +411,263 @@ class TestTheyAreTheBooksVisibilityAndNothingElse:
         assert res.status_code == 200
         assert res.json()["title"] == "Docker"
         assert "identifiers" not in res.json()
+
+
+class TestRemovingOne:
+    """The correction the refusal to retype one depends on.
+
+    `models.BookIdentifier` refuses to retype a row because an identifier is a
+    claim about somebody else's file rather than a preference, and that refusal
+    is only sound while a member may delete the row instead. These pin the
+    delete, and the three that answer 404 pin what it refuses, across the four
+    refusals they ask for: the pair comparing an invisible Book against an
+    absent one issues two. **Tests, not responses**, stated because the two
+    counts differ here and the sentence is the only thing that says which.
+
+    The last three pin the way back, which is a detour, is not an undo, and is
+    not always open. **The condition is not restated here**, because this
+    docstring carried a copy of it without one and was the fifth site to do so:
+    `models.BookIdentifier` is where it lives.
+    """
+
+    def a_book_with_one(self, client, headers, value=ASIN):
+        return client.post(
+            "/api/books",
+            json={"title": "Docker", "identifiers": [{"scheme": "asin", "value": value}]},
+            headers=headers,
+        ).json()
+
+    def test_the_member_who_added_the_book_removes_one(self, client, admin, db):
+        book = self.a_book_with_one(client, admin["headers"])
+        [row] = identifiers(book["id"], db)
+
+        res = client.delete(
+            f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"]
+        )
+
+        assert res.status_code == 204
+        assert identifiers(book["id"], db) == []
+
+    def test_the_book_stops_serving_it(self, client, admin, db):
+        book = self.a_book_with_one(client, admin["headers"])
+        [row] = identifiers(book["id"], db)
+
+        client.delete(
+            f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"]
+        )
+
+        res = client.get(f"/api/books/{book['id']}", headers=admin["headers"])
+        assert res.json()["identifiers"] == []
+
+    def test_another_member_removes_one_from_a_public_book(
+        self, client, admin, member, db
+    ):
+        """A public Book is a shared shelf, which is what `BookForWrite` means.
+
+        The same member may already retag it, re-cover it and refresh it, so an
+        identifier being the one field they could not touch would be an
+        exception with no reason behind it.
+        """
+        book = self.a_book_with_one(client, admin["headers"])
+        [row] = identifiers(book["id"], db)
+
+        res = client.delete(
+            f"/api/books/{book['id']}/identifiers/{row.id}", headers=member["headers"]
+        )
+
+        assert res.status_code == 204
+        assert identifiers(book["id"], db) == []
+
+    def test_the_books_other_identifiers_stay(self, client, admin, db):
+        book = client.post(
+            "/api/books",
+            json={
+                "title": "Docker",
+                "identifiers": [
+                    {"scheme": "asin", "value": ASIN},
+                    {"scheme": "google_books", "value": VOLUME_ID},
+                ],
+            },
+            headers=admin["headers"],
+        ).json()
+        asin = next(row for row in identifiers(book["id"], db) if row.scheme == "asin")
+
+        client.delete(
+            f"/api/books/{book['id']}/identifiers/{asin.id}", headers=admin["headers"]
+        )
+
+        assert [row.value for row in identifiers(book["id"], db)] == [VOLUME_ID]
+
+    def test_a_row_belonging_to_another_book_is_404_and_survives(
+        self, client, admin, db
+    ):
+        """The pairing is in the query, not only in the path.
+
+        Both Books here are the caller's own, so nothing about visibility
+        refuses this: what refuses it is that the row is not on the Book named
+        in the path.
+        """
+        mine = self.a_book_with_one(client, admin["headers"])
+        theirs = self.a_book_with_one(client, admin["headers"], value="B00OTHER01")
+        [row] = identifiers(theirs["id"], db)
+
+        res = client.delete(
+            f"/api/books/{mine['id']}/identifiers/{row.id}", headers=admin["headers"]
+        )
+
+        assert res.status_code == 404
+        assert [stored.id for stored in identifiers(theirs["id"], db)] == [row.id]
+
+    def test_a_row_id_naming_nothing_is_404(self, client, admin, db):
+        book = self.a_book_with_one(client, admin["headers"])
+        [row] = identifiers(book["id"], db)
+
+        res = client.delete(
+            f"/api/books/{book['id']}/identifiers/{row.id + 1000}",
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 404
+
+    def test_another_members_private_book_answers_exactly_what_an_absent_one_does(
+        self, client, admin, member, db
+    ):
+        """404 and never 403, and identical to the body for a Book id nobody has.
+
+        A 403 confirms the id exists, and so does a 404 phrased differently.
+        Asserted against the other response rather than against a literal,
+        because the two are the pair that has to agree: a later edit to one
+        message is what this catches.
+        """
+        private = client.post(
+            "/api/books",
+            json={
+                "title": "Docker",
+                "is_private": True,
+                "identifiers": [{"scheme": "asin", "value": ASIN}],
+            },
+            headers=admin["headers"],
+        ).json()
+        [row] = identifiers(private["id"], db)
+
+        refused = client.delete(
+            f"/api/books/{private['id']}/identifiers/{row.id}",
+            headers=member["headers"],
+        )
+        absent = client.delete(
+            f"/api/books/{private['id'] + 5000}/identifiers/{row.id}",
+            headers=member["headers"],
+        )
+
+        assert refused.status_code == absent.status_code == 404
+        assert refused.json() == absent.json()
+        assert [stored.id for stored in identifiers(private["id"], db)] == [row.id]
+
+    def test_it_takes_a_session(self, client, admin, db):
+        book = self.a_book_with_one(client, admin["headers"])
+        [row] = identifiers(book["id"], db)
+
+        res = client.delete(f"/api/books/{book['id']}/identifiers/{row.id}")
+
+        assert res.status_code == 401
+        assert identifiers(book["id"], db) != []
+
+    def test_importing_the_file_again_offers_the_book_and_not_the_row(
+        self, client, admin, db
+    ):
+        """Half of the route's own claim, and the half a client repeats.
+
+        `add_identifiers` is reached only from `_create_book`, which always
+        builds a new Book, so the Book that lost a row does not get it back by
+        importing the store file again: what that offers is the Book a second
+        time.
+
+        **This Book carries no ISBN**, which is the condition the next test is
+        about and is stated here because a fixture named for what it tests is
+        not evidence that it tests it.
+        """
+        book = self.a_book_with_one(client, admin["headers"])
+        [row] = identifiers(book["id"], db)
+        client.delete(
+            f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"]
+        )
+
+        again = self.a_book_with_one(client, admin["headers"])
+
+        assert again["id"] != book["id"]
+        assert identifiers(book["id"], db) == []
+
+    def test_merging_that_second_book_in_carries_the_row_across(
+        self, client, admin, db
+    ):
+        """The other half, and the reason the client does not promise finality.
+
+        **The prose said the removal could not be undone and that was wrong.**
+        `_repoint_relations` moves a merged Book's identifiers onto the
+        survivor rather than re-asserting them, so import-then-merge puts the
+        value back on the Book it came off. Both critic seats arrived at this
+        from different directions, one from the writer register in
+        `schemas/identifier.py` and one by executing the merge, which is what
+        two seats are for.
+
+        **Only where this Book carries no ISBN**, which the test below is for
+        and which is why no client promises this road.
+        """
+        book = self.a_book_with_one(client, admin["headers"])
+        [row] = identifiers(book["id"], db)
+        client.delete(
+            f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"]
+        )
+        again = self.a_book_with_one(client, admin["headers"])
+
+        res = client.post(
+            "/api/books/merge",
+            json={"book_ids": [book["id"], again["id"]], "keep_id": book["id"]},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        assert [stored.value for stored in identifiers(book["id"], db)] == [ASIN]
+
+    def test_a_book_holding_an_isbn_has_no_second_book_to_merge(
+        self, client, admin, db
+    ):
+        """The condition that closes the road, and the common half rather than
+        the corner.
+
+        A store export carrying both an ISBN and an identifier is what a Play
+        Books Takeout is, and `_create_book` answers 409 on an ISBN the
+        catalogue already holds rather than making a second Book. So there is
+        nothing to merge, and the removal really is final for that Book.
+
+        **The test above was the whole evidence for a claim four files made,
+        and its fixture posts no ISBN**, which is this repository's note about
+        a guard whose own author picked the covered case. Found by the design
+        seat, which read the importer rather than the test.
+        """
+        book = client.post(
+            "/api/books",
+            json={
+                "title": "Docker",
+                "isbn": "9783446470941",
+                "identifiers": [{"scheme": "asin", "value": ASIN}],
+            },
+            headers=admin["headers"],
+        ).json()
+        [row] = identifiers(book["id"], db)
+        client.delete(
+            f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"]
+        )
+
+        again = client.post(
+            "/api/books",
+            json={
+                "title": "Docker",
+                "isbn": "9783446470941",
+                "identifiers": [{"scheme": "asin", "value": ASIN}],
+            },
+            headers=admin["headers"],
+        )
+
+        assert again.status_code == 409
+        assert identifiers(book["id"], db) == []

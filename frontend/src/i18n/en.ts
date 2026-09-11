@@ -166,6 +166,30 @@ export const en = {
   "identifier.asin": "Amazon reference: {value}",
   "identifier.google_books": "Google Books reference: {value}",
   "identifier.other": "{scheme} reference: {value}",
+  // The chip's own sentence goes in the placeholder, and what that buys is a
+  // control a reader can place: "Remove B00J4YQKHY" says nothing about which
+  // of the page's controls it is or which store the number came from, where
+  // "Remove Amazon reference: B00J4YQKHY" says both. **It is not what tells
+  // two chips apart**, which is worth saying because it reads as though it
+  // were: a book carrying two ASINs is what merging two Kindle entries
+  // produces, and those two are separated by the value in either spelling. So
+  // what the bare value costs is the naming, not the distinguishing.
+  "identifier.remove": "Remove {identifier}",
+  // **Scoped to this page, because that is the largest claim this string can
+  // carry and be true.** A tag goes back on from the picker beside it, so
+  // removing one asks nothing; nothing here adds an identifier, which is the
+  // fact a member needs before pressing.
+  //
+  // **Three wordings, and the two that failed both described the world rather
+  // than the page.** "Nothing can put it back" was false: a merge moves the
+  // row. "Only importing again and merging brings it back" was false the
+  // other way, and worse, because a member presses on a promise: where the
+  // book already holds the ISBN its store file carries, the re-import is a
+  // 409 and there is no second book to merge.
+  // `models.BookIdentifier` carries when that road is open. A confirm has no
+  // room for a condition, so it makes no claim about roads at all.
+  "identifier.removeConfirm":
+    "Remove {value}? Nothing on this page puts it back.",
 
   // ── Book detail sections ────────────────────────────────────────────────
   // Names for the collapsible groups. Two rules held while naming them.

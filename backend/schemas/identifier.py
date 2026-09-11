@@ -124,13 +124,28 @@ class BookIdentifierIn(BaseModel):
 class BookIdentifierOut(BaseModel):
     """One identifier a Book carries, as a response gives it.
 
-    The scheme and the value and nothing else. `created_at` is on the row and is
+    **The row id, the scheme and the value.** `created_at` is on the row and is
     deliberately not here: it says when this library was told, never when the
     store issued the number, which is the distinction
     `models.DigitalReference.confirmed_at` draws at length, and a client showing
     it would be showing an import's timestamp under an identifier's name.
+
+    **`id` is first because it is what the delete route is addressed by**, which
+    is `DigitalReferenceOut`'s reason for the same field in the same place. The
+    scheme and the value are unique per Book and would address a row too, and
+    they are not what addresses it: a value is opaque text of up to 60
+    characters with no shape anything checks, so putting one in a path segment
+    would make every reader of that URL responsible for encoding it. A row id is
+    a number.
+
+    **No `book_id`, where `DigitalReferenceOut` carries one.** That field earns
+    its place there because a cross shelf listing serves rows apart from their
+    Book. These are served only inside `BookOut`, so the Book is already on
+    screen, and a field naming it would be the Book saying its own id back.
     """
 
+    model_config = {"from_attributes": True}
+
+    id: int
     scheme: BookIdentifierScheme
     value: str
-    model_config = {"from_attributes": True}

@@ -52,6 +52,12 @@ function chipText(t: Translate, identifier: BookIdentifierOut): string {
 
 interface IdentifierChipsProps {
   identifiers: BookIdentifierOut[];
+  /**
+   * Take this identifier off the book. The whole row rather than its id,
+   * because the caller asks before removing one and the question names the
+   * value: `TagEditor.onDelete` passes a whole tag for the same reason.
+   */
+  onRemove: (identifier: BookIdentifierOut) => void;
 }
 
 /**
@@ -94,19 +100,45 @@ interface IdentifierChipsProps {
  * other chip in that row does, so no empty state is needed or wanted. Why it
  * follows the ISBN rather than leading is stated where the ordering is, at the
  * call site in `BookHeader`.
+ *
+ * **Each chip carries the one control that removes it**, which is the whole of
+ * the correction there is: `models.BookIdentifier` refuses to retype a row,
+ * because an identifier is a claim about a record in somebody else's file
+ * rather than a preference, and that refusal is only sound while the row can
+ * be deleted instead. So no chip is editable and every chip is removable.
+ *
+ * **On the chip rather than in a mode the row enters**, because a row of two
+ * is not a list worth a mode: `TagEditor` puts an `×` on each pill for the
+ * same reason, and the label names the identifier rather than saying "remove",
+ * so the control is distinguishable from its neighbour by screen reader. What
+ * is **not** borrowed from that pill is its `inline-flex`, and the comment at
+ * the chip says why a tag can afford one and a value of up to 60 unbroken
+ * characters cannot.
+ *
+ * **The asking is the caller's**, in `hooks.ts` beside every other mutation on
+ * this page. What is asked is not obvious and is the reason the question
+ * exists: unlike a tag, which goes back on from the picker beside it, nothing
+ * on this page adds an identifier. Whether anything anywhere can is a longer
+ * answer with a condition in it, and `models.BookIdentifier` is where it
+ * lives; three files restated it and all three got it wrong.
  */
-export default function IdentifierChips({ identifiers }: IdentifierChipsProps) {
+export default function IdentifierChips({
+  identifiers,
+  onRemove,
+}: IdentifierChipsProps) {
   const { t } = useTranslation();
 
   return (
     <>
       {identifiers.map((identifier) => (
-        // Scheme and value, which is the pair `uq_book_identifiers_book_scheme
-        // _value` makes unique for one book. Two ASINs on one row is what a
-        // merge of two Kindle entries produces, so the scheme alone is not a
-        // key here.
+        // The row id, which is what the delete route is addressed by and is
+        // therefore the one thing on screen that is certainly this row. The
+        // pair below it, scheme and value, is unique for one book too, by
+        // `uq_book_identifiers_book_scheme_value`: two ASINs on one book is
+        // what a merge of two Kindle entries produces, so the scheme alone
+        // would not have been a key either.
         <span
-          key={`${identifier.scheme}:${identifier.value}`}
+          key={identifier.id}
           // **`min-w-0` and the wrap together, because the wrap alone does
           // nothing here.** The value is up to 60 characters with no space in
           // it, and a flex item's automatic minimum size is its min-content
@@ -119,9 +151,33 @@ export default function IdentifierChips({ identifiers }: IdentifierChipsProps) {
           // because there is no browser on this node; what is measured is the
           // rule, and both values a reader here produces today are 10 and 12
           // characters long.
+          //
+          // **And this box is deliberately not a flex container, which is the
+          // half that a tidy-up removes.** Giving it `inline-flex` to space
+          // the button puts the label in an anonymous flex item of its own,
+          // and that item takes `min-width: auto` and the same content floor
+          // the paragraph above is about. `min-w-0` here cannot reach it, so
+          // the token sets the width again through a child nobody can select.
+          // The button is an ordinary inline box with a margin instead: it
+          // wraps onto its own line on a narrow screen, which is the cost, and
+          // the token still breaks. `leaves the chip a plain box, so the value
+          // still breaks` is what fails if this is tidied into a gap.
           className="min-w-0 text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded break-words dark:text-paper-400 dark:bg-paper-800"
         >
           {chipText(t, identifier)}
+          <button
+            type="button"
+            onClick={() => onRemove(identifier)}
+            // The whole sentence, so the accessible name tells two chips
+            // apart: "Remove" alone repeats on every one of them, and a book
+            // that carries two ASINs is the ordinary output of a merge.
+            aria-label={t("identifier.remove", {
+              identifier: chipText(t, identifier),
+            })}
+            className="ml-1 opacity-60 hover:opacity-100 leading-none"
+          >
+            ×
+          </button>
         </span>
       ))}
     </>

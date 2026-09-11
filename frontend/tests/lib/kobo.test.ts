@@ -43,29 +43,59 @@ import { databaseOf, engine } from "./sqliteFixtures";
  * such a column, and the reader is asserted against both. Which affinity a
  * given firmware uses is not documented anywhere and is not what these tests
  * are about.
+ *
+ * **The stated version is a parameter and the columns do not move with it.**
+ * That is what a device does: `dbversion` is a number the file writes about
+ * itself, and no firmware removes a column to match a lower one. `null` builds
+ * the table away entirely, which is the only thing this reader treats as the
+ * absence of a version.
  */
-const KOBO_SCHEMA = [
-  `CREATE TABLE content (
-     ContentID TEXT NOT NULL PRIMARY KEY,
-     ContentType TEXT,
-     MimeType TEXT,
-     BookID TEXT,
-     Title TEXT,
-     Attribution TEXT,
-     Publisher TEXT,
-     Language TEXT,
-     ISBN TEXT,
-     Series TEXT,
-     SeriesNumber TEXT,
-     SeriesNumberFloat REAL,
-     DateCreated TEXT,
-     Accessibility INTEGER,
-     IsDownloaded BOOL,
-     ___ExpirationStatus INTEGER
-   )`,
-  `CREATE TABLE dbversion (version INTEGER NOT NULL)`,
-  `INSERT INTO dbversion (version) VALUES (170)`,
-];
+function schemaAt(version: number | null): string[] {
+  const stated =
+    version === null
+      ? []
+      : [
+          `CREATE TABLE dbversion (version INTEGER NOT NULL)`,
+          `INSERT INTO dbversion (version) VALUES (${version})`,
+        ];
+  return [
+    `CREATE TABLE content (
+       ContentID TEXT NOT NULL PRIMARY KEY,
+       ContentType TEXT,
+       MimeType TEXT,
+       BookID TEXT,
+       Title TEXT,
+       Attribution TEXT,
+       Publisher TEXT,
+       Language TEXT,
+       ISBN TEXT,
+       Series TEXT,
+       SeriesNumber TEXT,
+       SeriesNumberFloat REAL,
+       DateCreated TEXT,
+       Accessibility INTEGER,
+       IsDownloaded BOOL,
+       ___ExpirationStatus INTEGER
+     )`,
+    ...stated,
+  ];
+}
+
+/** A current device, which is the one every test below asks for by default. */
+const KOBO_SCHEMA = schemaAt(170);
+
+/**
+ * A row at one accessibility, downloaded or not.
+ *
+ * At module scope because two describes need it: what a value is named, and
+ * that neither the name nor the refusal moves with the version the device
+ * states about itself.
+ */
+function row(id: string, accessibility: number, downloaded: string): string {
+  return `INSERT INTO content
+      (ContentID, Title, Accessibility, IsDownloaded)
+      VALUES ('${id}', 'A Book', ${accessibility}, ${downloaded})`;
+}
 
 /**
  * A device from before `Accessibility`, `ISBN` and the series columns existed.
@@ -118,23 +148,32 @@ const PURCHASED = `INSERT INTO content
           'Chilton Books', 'en', '9780441013593', 'Dune Chronicles', '1', 1.0,
           '1965-08-01T00:00:00.000', 1, 'true', 0)`;
 
+/**
+ * What `PURCHASED` reads back as.
+ *
+ * At module scope because the version arms assert it too: a gate on any column
+ * calibre gates is a change to one of these fields, and a list of names alone
+ * would not see it.
+ */
+const DUNE = {
+  contentId: "a1b2c3d4-0000-4000-8000-000000000001",
+  title: "Dune",
+  authors: ["Frank Herbert"],
+  isbn: "9780441013593",
+  publisher: "Chilton Books",
+  year: 1965,
+  language: "en",
+  seriesName: "Dune Chronicles",
+  seriesIndex: 1,
+  format: "KEPUB",
+  acquisition: "purchase",
+} satisfies KoboBook;
+
 describe("reading a device", () => {
   it("gives back a book with every field the columns carry", async () => {
     const [book] = await booksOn(PURCHASED);
 
-    expect(book).toEqual({
-      contentId: "a1b2c3d4-0000-4000-8000-000000000001",
-      title: "Dune",
-      authors: ["Frank Herbert"],
-      isbn: "9780441013593",
-      publisher: "Chilton Books",
-      year: 1965,
-      language: "en",
-      seriesName: "Dune Chronicles",
-      seriesIndex: 1,
-      format: "KEPUB",
-      acquisition: "purchase",
-    } satisfies KoboBook);
+    expect(book).toEqual(DUNE);
   });
 
   it("reports the device's own schema version", async () => {
@@ -198,13 +237,6 @@ describe("what the member owns", () => {
     // that, and four tests passed on the failure branch.
     if (!read.ok) throw new Error(`expected a library: ${read.failure}`);
     return read.library.books.map((book) => book.contentId).sort();
-  }
-
-  /** A row at one accessibility, downloaded or not. */
-  function row(id: string, accessibility: number, downloaded: string): string {
-    return `INSERT INTO content
-      (ContentID, Title, Accessibility, IsDownloaded)
-      VALUES ('${id}', 'A Book', ${accessibility}, ${downloaded})`;
   }
 
   it("keeps a book from every store arm calibre names", async () => {
@@ -312,6 +344,150 @@ describe("what the member owns", () => {
 
     expect(library.skipped).toBe(2);
   });
+});
+
+describe("the version the device states about itself", () => {
+  /**
+   * A row whose two series columns disagree, so that the later of them is
+   * visible.
+   *
+   * `SeriesNumberFloat` arrived at schema version 136 and `SeriesNumber` at 65.
+   * With both columns saying `1`, a gate on either reads the same number and
+   * nothing goes red, which is how the first draft of this describe left one of
+   * calibre's five gates unguarded while asserting it covered them.
+   */
+  const DISAGREEING_SERIES = `INSERT INTO content
+    (ContentID, Title, Accessibility, IsDownloaded, Series, SeriesNumber,
+     SeriesNumberFloat)
+    VALUES ('series-float', 'A Book', 1, 'true', 'A Sequence', '7', 7.5)`;
+
+  /**
+   * One whole library, read off devices differing only in what they state.
+   *
+   * **This is the enforcement for `schemaVersionOf`'s claim that the number is
+   * read and never acted on**, which was a sentence in a docstring and nothing
+   * else until this test.
+   *
+   * **Every `dbversion` threshold in calibre's driver has an arm below it and
+   * an arm at or above it**, which is the bound rather than a round set.
+   * Counted at commit `71a1997`: sixteen thresholds, the lowest 8 and the
+   * highest `dbversion >= 191`, and the top arm is calibre's own
+   * `supported_dbversion` of 220, the newest schema it claims to read.
+   * **Recount from the driver rather than from this paragraph**, and note what
+   * it does not cover: a gate above 220, and a path this library does not
+   * walk.
+   *
+   * Three arms are there because a mutation ran green without them. `188` is
+   * the version `isTrue` names, and a boolean gated there was invisible while
+   * the list stopped at 170. `55` against `56` are the two calibre's own
+   * firmware comment separates. And no version table at all is what this reader
+   * answers `null` for where calibre substitutes `0`, so a gate spelled against
+   * a missing version lands on that arm and nowhere else.
+   *
+   * **A whole library and not a list of names**, because a gate can move a
+   * column rather than a value: the header's list of five is the one to recount
+   * from, and the warning on it is there too. So every field of a filled book
+   * is asserted, with `missing` and the refused count beside it. A draft
+   * asserting the names alone was green against a reader that dropped the
+   * series on a device stating less than 65.
+   *
+   * **And every refusal this reader makes, because whole in its fields is not
+   * whole in its paths.** A library asserting each field of each book it kept
+   * was green against a gate on `___ExpirationStatus`, which is a column this
+   * reader gates by presence and which no other row here carried. The three
+   * refused rows added for that are each refused by one path and no other, so
+   * a count of five says which five.
+   *
+   * **The empty `ContentID` was guarded by nothing in this repository**, which
+   * is what pulling that thread found rather than what it was pulled for:
+   * dropping that arm of the refusal passed the whole frontend suite. Neither
+   * hostile case that looks like it covers it can reach it, one writing an
+   * integer into a column with text affinity and the other being refused by
+   * the accessibility path first.
+   *
+   * **The chapter row is excluded rather than refused**, so it moves neither
+   * list nor count and is here for the one thing a refusal row cannot cover:
+   * `WHERE BookID IS NULL` is gateable too, and a version gate on it was green
+   * across all eight arms without it.
+   *
+   * The version is asserted back as well: read and reported is the whole of
+   * what this module does with it, and a reader that stopped reading it would
+   * satisfy the first half of that alone.
+   */
+  it.each([
+    { states: "no version at all", version: null },
+    { states: "0", version: 0 },
+    { states: "53", version: 53 },
+    { states: "55", version: 55 },
+    { states: "56", version: 56 },
+    { states: "170", version: 170 },
+    { states: "188", version: 188 },
+    { states: "220", version: 220 },
+  ])(
+    "reads the same library on a device stating $states",
+    async ({ version }) => {
+      const read = await device(
+        schemaAt(version),
+        PURCHASED,
+        DISAGREEING_SERIES,
+        row("bought-and-removed", 1, "'false'"),
+        row("sideloaded", -1, "'true'"),
+        row("sideloaded-and-deleted", -1, "'false'"),
+        row("kobo-plus", 8, "'true'"),
+        row("overdrive", 9, "'true'"),
+        row("preview", 6, "'true'"),
+        // Each of the three below is downloaded and otherwise unremarkable, so
+        // that exactly one refusal can account for it: the expired row, then a
+        // `ContentID` this reader cannot use, then an `Accessibility` that is
+        // there as a column and empty on the row.
+        `INSERT INTO content
+           (ContentID, Title, Accessibility, IsDownloaded, ___ExpirationStatus)
+           VALUES ('expired', 'A Book', 1, 'true', 3)`,
+        `INSERT INTO content (ContentID, Title, Accessibility, IsDownloaded)
+           VALUES ('', 'A Book', 1, 'true')`,
+        `INSERT INTO content (ContentID, Title, IsDownloaded)
+           VALUES ('no-accessibility', 'A Book', 'true')`,
+        // Excluded by the statement's own clause rather than refused, so it
+        // moves neither `kept` nor `skipped`. It is here because that clause is
+        // gateable too, and a version gate on it was green without this row.
+        `INSERT INTO content (ContentID, BookID, Title, Accessibility)
+           VALUES ('chapter-1', 'a1b2c3d4-0000-4000-8000-000000000001',
+                   'Chapter One', 1)`,
+      );
+      if (!read.ok) throw new Error(`expected a library: ${read.failure}`);
+      const books = read.library.books;
+
+      expect({
+        schemaVersion: read.library.schemaVersion,
+        missing: read.library.missing,
+        skipped: read.library.skipped,
+        // Name and id together: a version gate that renamed a row without
+        // dropping it is the outcome this ticket was about, and a list of ids
+        // alone is green for it.
+        kept: books
+          .map((book) => `${book.contentId} ${book.acquisition}`)
+          .sort(),
+        filled: books.find((book) => book.contentId === DUNE.contentId) ?? null,
+        fromTheFloatColumn:
+          books.find((book) => book.contentId === "series-float")
+            ?.seriesIndex ?? null,
+      }).toEqual({
+        schemaVersion: version,
+        missing: [],
+        skipped: 5,
+        kept: [
+          "a1b2c3d4-0000-4000-8000-000000000001 purchase",
+          "bought-and-removed purchase",
+          "kobo-plus subscription",
+          "overdrive loan",
+          "series-float purchase",
+          "sideloaded sideloaded",
+        ],
+        filled: DUNE,
+        fromTheFloatColumn: 7.5,
+      });
+    },
+  );
 });
 
 describe("a series position", () => {

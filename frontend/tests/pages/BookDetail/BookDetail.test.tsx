@@ -6,6 +6,7 @@ import { Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  BookIdentifierScheme,
   OwnershipStatus,
   ReadStatus,
   type UserOut,
@@ -788,6 +789,82 @@ describe("BookDetail", () => {
         expect(api.lastCall(/\/api\/books\/1$/, "DELETE")).toBeDefined(),
       );
       expect(confirmSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("removing a store identifier", () => {
+    const anAsin = {
+      id: 7,
+      scheme: BookIdentifierScheme.asin,
+      value: "B00J4YQKHY",
+    };
+
+    function stubBookWithAnAsin() {
+      stubLoad({
+        book: makeBook({ id: 1, added_by: OWNER, identifiers: [anAsin] }),
+      });
+      api.on(/\/api\/books\/1\/identifiers\//, { status: 204 }, "DELETE");
+    }
+
+    it("removes the row the chip names", async () => {
+      stubBookWithAnAsin();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderDetail();
+
+      await userEvent.setup().click(
+        await screen.findByRole("button", {
+          name: "Remove Amazon reference: B00J4YQKHY",
+        }),
+      );
+
+      // The row id, which is what the route is addressed by. A chip carrying
+      // the wrong one removes somebody else's identifier or nothing at all.
+      await waitFor(() =>
+        expect(
+          api.lastCall("/api/books/1/identifiers/7", "DELETE"),
+        ).toBeDefined(),
+      );
+    });
+
+    it("asks first, and claims nothing it cannot keep", async () => {
+      // The opposite trade from the delete above, and for the stated reason
+      // rather than for gravity: a trashed book comes back from its own toast,
+      // and nothing on this page adds an identifier.
+      //
+      // **Scoped to the page on purpose.** Two earlier wordings described the
+      // world instead and both were false, one in each direction; the road
+      // that exists has a condition on it that a confirm cannot carry.
+      // `test_a_book_holding_an_isbn_has_no_second_book_to_merge` is the
+      // condition, and `models.BookIdentifier` is where it is written down.
+      stubBookWithAnAsin();
+      const asked = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderDetail();
+
+      await userEvent.setup().click(
+        await screen.findByRole("button", {
+          name: "Remove Amazon reference: B00J4YQKHY",
+        }),
+      );
+
+      expect(asked).toHaveBeenCalledWith(
+        "Remove B00J4YQKHY? Nothing on this page puts it back.",
+      );
+    });
+
+    it("removes nothing when the question is declined", async () => {
+      stubBookWithAnAsin();
+      vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderDetail();
+
+      await userEvent.setup().click(
+        await screen.findByRole("button", {
+          name: "Remove Amazon reference: B00J4YQKHY",
+        }),
+      );
+
+      expect(
+        api.lastCall(/\/api\/books\/1\/identifiers\//, "DELETE"),
+      ).toBeUndefined();
     });
   });
 

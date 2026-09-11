@@ -1163,8 +1163,12 @@
         "type": "object"
       },
       "BookIdentifierOut": {
-        "description": "One identifier a Book carries, as a response gives it.\n\nThe scheme and the value and nothing else. `created_at` is on the row and is\ndeliberately not here: it says when this library was told, never when the\nstore issued the number, which is the distinction\n`models.DigitalReference.confirmed_at` draws at length, and a client showing\nit would be showing an import's timestamp under an identifier's name.",
+        "description": "One identifier a Book carries, as a response gives it.\n\n**The row id, the scheme and the value.** `created_at` is on the row and is\ndeliberately not here: it says when this library was told, never when the\nstore issued the number, which is the distinction\n`models.DigitalReference.confirmed_at` draws at length, and a client showing\nit would be showing an import's timestamp under an identifier's name.\n\n**`id` is first because it is what the delete route is addressed by**, which\nis `DigitalReferenceOut`'s reason for the same field in the same place. The\nscheme and the value are unique per Book and would address a row too, and\nthey are not what addresses it: a value is opaque text of up to 60\ncharacters with no shape anything checks, so putting one in a path segment\nwould make every reader of that URL responsible for encoding it. A row id is\na number.\n\n**No `book_id`, where `DigitalReferenceOut` carries one.** That field earns\nits place there because a cross shelf listing serves rows apart from their\nBook. These are served only inside `BookOut`, so the Book is already on\nscreen, and a field naming it would be the Book saying its own id back.",
         "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
           "scheme": {
             "$ref": "#/components/schemas/BookIdentifierScheme"
           },
@@ -1174,6 +1178,7 @@
           }
         },
         "required": [
+          "id",
           "scheme",
           "value"
         ],
@@ -9599,6 +9604,60 @@
           }
         ],
         "summary": "Enrichment Candidates",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/identifiers/{identifier_id}": {
+      "delete": {
+        "description": "Remove a wrong identifier. Importing again does not put it back.\n\n**The only correction there is**, and it is deliberately destructive rather\nthan an edit. `models.BookIdentifier` carries the reasoning and\n`forget_author_identifier` is where this app first made the trade: a store\nor a reader can be wrong, a fact that cannot be corrected is a trap rather\nthan an invariant, and what stays refused is retyping a row to a different\nvalue, because that is the operation that turns a guess into something\nreading as a catalogue's assertion.\n\n**Unlike the author route, nothing re-asserts this one**, and the summary\nline says exactly that much because a client generates its own prose from\nit. An author's identifier is written again by the next catalogue record\nthe server fetches. `add_identifiers` is reached only from `_create_book`,\nwhich both adding routes share and which always builds a new Book, so what\nre-importing the store file could offer is a Book rather than the row.\n\n**Whether it offers one at all is conditional, and `models.BookIdentifier`\nis where the condition lives.** Not restated here: a second copy of the\ncondition is a second thing to keep true.\n\n**Whoever may write the book**, which is the rule for its tags, its cover\nand its digital references and is not a softer one here: the row carries no\nMember of its own, so its permission is the book's entirely. A book the\ncaller cannot see is **404**, identical to one that is not there, and so is\nan identifier belonging to a different book.",
+        "operationId": "forget_book_identifier",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identifier_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Identifier Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Forget Book Identifier",
         "tags": [
           "books"
         ]

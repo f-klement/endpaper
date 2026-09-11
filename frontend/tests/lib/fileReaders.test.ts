@@ -5,7 +5,10 @@ import {
   FORMAT_FOR_EXTENSION,
   SUPPORTED_EXTENSIONS,
 } from "../../src/lib/fileName";
-import { BookFormat } from "../../src/api/generated/model";
+import {
+  BookFormat,
+  BookIdentifierScheme,
+} from "../../src/api/generated/model";
 
 /**
  * Every registered extension and the export its module answers with.
@@ -669,5 +672,281 @@ describe("the vocabulary the readers share", () => {
     // Prettier splits that line and `format:check` runs in CI, so what closes
     // it is a different tool holding a rule this arm claims, and the honest
     // reading is that these three matchers cover what an author writes.
+  });
+});
+
+/**
+ * What a reader may label an identifier with, and why a page sending none cares.
+ *
+ * **The decision this guards is `ScanPage/types.draftFromFile`'s**, which puts
+ * ten of `FileMetadata`'s eleven fields into a request and sends no
+ * `identifiers`. That docstring is the one home of the decision and of the
+ * measurement; what it rests on is a property of this family, and a property is
+ * a thing a test can hold. A reader that starts labelling a store's identifier
+ * makes that decision wrong, and nothing else in the tree would say so.
+ *
+ * **What an author does when this fires** depends on which way it fired. A new
+ * member of `BookIdentifierScheme` forbids every reader here from writing that
+ * spelling at once, which is right while no reader produces one; a reader that
+ * genuinely produces a store's identifier is the case the decision was taken
+ * against, so the answer is to reopen it at `draftFromFile` rather than to
+ * widen anything here.
+ *
+ * **The family is the registry plus whoever names `FileIdentifier`**, so a
+ * sixth reader is covered by being registered, by naming the type, or by both.
+ * Measured by the design seat against the naming half alone: dropping the
+ * import and the return annotation from `mobi.ts` and labelling `"asin"` went
+ * green on 19 of 19. The exclusion, stated as what is left out: a module more
+ * than one relative import from a registered reader, by either spelling of an
+ * import, which nothing is today.
+ *
+ * **Three costs of reading the source rather than the values**, all loud rather
+ * than silent. A `scheme` in a parameter list or a destructuring reads here as
+ * a property; a whole line `//` comment is stripped and a trailing one is not,
+ * so this rule cannot be documented by writing `{ scheme: "asin" }` after code
+ * on one line; and a shorthand is reported as a computed scheme, because what
+ * the binding holds is not in this file's reach.
+ */
+const STORED_SCHEMES = Object.values(BookIdentifierScheme).map((scheme) =>
+  scheme.toLowerCase(),
+);
+
+/**
+ * Readers whose scheme is an expression, and what each one can produce.
+ *
+ * Required to be exactly the set of readers that compute one, in both
+ * directions: a new computed scheme is a decision somebody states here, and a
+ * row for a reader that stopped computing one is a claim about code that no
+ * longer exists.
+ *
+ * **What holds a row's words is that reader's own tests and not this table**,
+ * whose values are free text nothing reads. Measured by the design seat:
+ * `opf.ts` labelling through a constant is caught by `tests/lib/opf.test.ts`,
+ * two arms, and `pdf.ts` by `tests/lib/pdf.test.ts > labels an identifier that
+ * is not an ISBN with no scheme`, 1 of 3667. A sixth reader added here with a
+ * sentence and no such test has nothing holding it.
+ */
+const COMPUTES_ITS_SCHEME: Record<string, string> = {
+  "lib/opf.ts":
+    "the file's own label, `opf:scheme` or an `identifier-type` refinement. " +
+    "This is the free text the scan flow's decision is about.",
+  "lib/pdf.ts":
+    "`ISBN` or nothing, decided by parsing the value, because XMP names no " +
+    "scheme of its own.",
+};
+
+/** Block comments and whole line `//` comments removed. */
+function withoutProse(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}
+
+/**
+ * A dynamic import's specifier, in either spelling of a string.
+ *
+ * One pattern for the registry and for a hop, because they are one question.
+ * Quoting is settled by prettier and prettier is a formatter rather than a
+ * guard, the same reason the site pattern reads a quoted key.
+ */
+const IMPORT_CALL = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+
+/** A string literal and nothing else. */
+const LITERAL = /^"[^"]*"$|^'[^']*'$/;
+
+/**
+ * The text of every `scheme` property value in a module, as it is written.
+ *
+ * Scanned to the comma that ends the property rather than matched, because the
+ * value may be a call, a ternary or two lines of `??`, and a pattern for each
+ * is the enumeration this file keeps correcting.
+ *
+ * **Four spellings of the key and not one**, two of which both critic seats
+ * found independently and by the same mutation: `{ scheme, value }`,
+ * `{ "scheme": label }` and `{ ["scheme"]: label }` label an identifier exactly
+ * as `scheme:` does, and against the first draft a sixth reader writing
+ * `const scheme = "asin"` one line above the shorthand passed 58 of 58. A
+ * shorthand has no text to read, so it is reported as a computed scheme and
+ * falls to the table below.
+ *
+ * **The quoted key is here because prettier is not a guard.** `quoteProps` is
+ * unset in this repository, so the default `as-needed` rewrites that spelling
+ * and `format:check` fails it; `preserve` would reopen the hole in a config
+ * change nobody would read as one.
+ */
+function schemeSites(source: string): string[] {
+  const clean = withoutProse(source);
+  const sites: string[] = [];
+  for (const match of clean.matchAll(
+    /[{,]\s*(?:scheme\b|["']scheme["']|\[\s*["']scheme["']\s*\])\s*(?=[:,}])/g,
+  )) {
+    if (clean[match.index! + match[0].length] !== ":") {
+      // A shorthand, `{ scheme, value }`: the label is a binding and what it
+      // holds is somewhere else, so it is reported as computed rather than as
+      // the empty text it looks like here.
+      sites.push("scheme");
+      continue;
+    }
+    const start = match.index! + match[0].length + 1;
+    let depth = 0;
+    let end = start;
+    for (; end < clean.length; end++) {
+      const character = clean[end]!;
+      if ("([{".includes(character)) depth += 1;
+      else if (")]}".includes(character)) {
+        if (depth === 0) break;
+        depth -= 1;
+      } else if (character === "," && depth === 0) break;
+    }
+    sites.push(clean.slice(start, end).trim());
+  }
+  return sites;
+}
+
+/** The module a relative specifier written inside `lib/` names. */
+function libModule(specifier: string): string {
+  return `lib/${specifier
+    .split("/")
+    .pop()!
+    .replace(/\.tsx?$/, "")}.ts`;
+}
+
+/**
+ * Every module this rule is about: the readers the registry loads, whatever is
+ * one relative import from one, and everything that names `FileIdentifier`.
+ *
+ * **Three routes because each is evadable alone.** Naming the type is a line an
+ * author can delete, which is how a reader labelling `"asin"` went green on 19
+ * of 19; the registry cannot be left, since a format nobody registers is a
+ * format nobody can pick; and the hop is what reaches `opf.ts`, which is
+ * registered through `epub.ts` rather than directly.
+ *
+ * **The two routes are anchored by what they contribute rather than by a module
+ * name**, since without an anchor both could be deleted in silence: measured by
+ * the design seat, the family reduced to the naming route alone passed 58 of
+ * 58. `lib/epub.ts` is what they contribute today, it naming no
+ * `FileIdentifier`, and naming it in the assertion is what would go stale.
+ */
+function labellingModules(): [string, string][] {
+  const all = modules();
+  const seam = all.find(([path]) => path === SEAM)![1];
+  const registered = [...seam.matchAll(IMPORT_CALL)].map(([, specifier]) =>
+    libModule(specifier!),
+  );
+  const oneHop = registered.flatMap((path) => {
+    const source = all.find(([other]) => other === path)?.[1] ?? "";
+    // **A hop is either spelling of an import**, and this is the one pattern
+    // the registry is read with, not a second one: two patterns for one
+    // question is how the looser half came to be widened alone. Measured by the
+    // security seat: a labeller reached by
+    // `const { labelFor } = await import("./x")` and writing `"asin"` passed 58
+    // of 58 while the from clause half was already closed.
+    return [
+      ...[...source.matchAll(FROM_CLAUSE)].map(([, , from]) => from!),
+      ...[...source.matchAll(IMPORT_CALL)].map(([, from]) => from!),
+    ]
+      .filter((from) => from.startsWith("."))
+      .map(libModule);
+  });
+  const family = new Set([...registered, ...oneHop]);
+  return all.filter(
+    ([path, source]) =>
+      family.has(path) ||
+      bindings(source).some(
+        ([, clause, from]) => isSeam(from) && names(clause, ["FileIdentifier"]),
+      ),
+  );
+}
+
+describe("what a reader may label an identifier", () => {
+  it("scans a property and not a parameter, a comment or a type", () => {
+    // Asked of literals, so the instrument is anchored whatever the tree does:
+    // a scanner that stopped matching would report no offender below and pass
+    // for ever.
+    expect(schemeSites('const one = { scheme: "asin", value: v };')).toEqual([
+      '"asin"',
+    ]);
+    expect(schemeSites("const two = { value: v, scheme: pick(v) };")).toEqual([
+      "pick(v)",
+    ]);
+    expect(schemeSites("const three = { scheme, value };")).toEqual(["scheme"]);
+    expect(
+      schemeSites('const four = { ["scheme"]: "asin", value: v };'),
+    ).toEqual(['"asin"']);
+    // The spelling prettier rewrites, held here rather than by a formatter.
+    expect(schemeSites('const five = { "scheme": "asin", value: v };')).toEqual(
+      ['"asin"'],
+    );
+    expect(schemeSites("function f(scheme: string | null) {}")).toEqual([]);
+    expect(schemeSites('/* scheme: "asin" */')).toEqual([]);
+    expect(schemeSites("interface I {\n  readonly scheme: string;\n}")).toEqual(
+      [],
+    );
+  });
+
+  it("labels no identifier with a scheme this app stores", () => {
+    const labelling = labellingModules();
+    // Three anchors, because the two module routes and the scanner rot
+    // separately. `opf.ts` is reached by the hop and by naming the type;
+    // `mobi.ts` is registered under three keys and names it too; and the
+    // scanner is the arm above's subject read against the real tree.
+    expect(labelling.map(([path]) => path)).toContain("lib/opf.ts");
+    expect(labelling.map(([path]) => path)).toContain("lib/mobi.ts");
+    // **The anchor for the registry and the hop, and it names no module.** The
+    // other two are satisfied by the naming route, so neither could hold these:
+    // measured by the design seat, the family reduced to the naming route alone
+    // passed 58 of 58 before this. Asked as "is anything here through a route
+    // other than naming the type", because a module named instead goes stale in
+    // one word: `epub.ts` is that module today and already imports
+    // `FileMetadata` from the seam, so widening that one import line would move
+    // it to the naming route and quietly stop it discriminating.
+    //
+    // **It holds the two routes together and neither half alone.** `oneHop`
+    // derives from `registered`, so emptying the registry extraction empties
+    // the family and this fires at 1 of 19, which measures the pair rather than
+    // the registry: dropping the registry from the family with the hop intact
+    // passes 19 of 19, and so does deleting the hop by itself. What holds each
+    // route is the offender arm below, firing on a labeller that route reaches:
+    // 1 of 19 for a labeller one import away, and 1 of 19 for a registered
+    // module that labels. The middle number is the one a mutation of the
+    // extraction cannot produce, since that mutation moves both.
+    expect(
+      labelling.filter(
+        ([, source]) =>
+          !bindings(source).some(
+            ([, clause, from]) =>
+              isSeam(from) && names(clause, ["FileIdentifier"]),
+          ),
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      labelling.flatMap(([, source]) => schemeSites(source)).length,
+    ).toBeGreaterThan(0);
+    // The enum is read rather than spelled, so a member added to it widens this
+    // without an edit here.
+    expect(STORED_SCHEMES.length).toBeGreaterThan(0);
+
+    const offenders = labelling.flatMap(([path, source]) =>
+      schemeSites(source)
+        .filter((site) =>
+          STORED_SCHEMES.some((scheme) =>
+            new RegExp(`["']${scheme}["']`, "i").test(site),
+          ),
+        )
+        .map((site) => `${path}: ${site}`),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("computes a scheme only where the reader says what it can compute", () => {
+    // What the arm above cannot reach: a computed scheme is a value this test
+    // never sees, so the reader has to say what it can be. `opf.ts` says the
+    // file, which is the case the scan flow's decision names.
+    const computed = labellingModules()
+      .filter(([, source]) =>
+        schemeSites(source).some((site) => !LITERAL.test(site)),
+      )
+      .map(([path]) => path);
+
+    expect(computed.sort()).toEqual(Object.keys(COMPUTES_ITS_SCHEME).sort());
   });
 });

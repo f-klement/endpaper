@@ -1462,6 +1462,40 @@ One book holds at most 16 references, counted **per book rather than per request
 ceiling is a 409. It binds a new location only, so a book already at the ceiling can still
 re-confirm what it holds.
 
+### Store identifiers
+
+What a store calls a book, where that is not an ISBN. **Asserted only when a book is
+added**, by `POST /api/books` and `POST /api/books/scan`, which share one handler and are
+how an import carries one in, and read back on every book a member fetches. Two other
+routes write the table without asserting anything new: `POST /api/books/merge` carries the
+rows of the books it folds in onto the survivor and drops what will not fit, and
+`POST /api/backup/restore` reinstates this table with the rest of the database.
+
+| Method | Path | Access | Notes |
+|---|---|---|---|
+| DELETE | `/api/books/{id}/identifiers/{identifier_id}` | write | 204 |
+
+The shared shelf rule again: an identifier is visible to exactly whoever can see the book,
+and whoever may write the book may write its identifiers, because the row carries no member
+of its own. A row on a book the caller cannot see is a **404 on the book**, never a row, and
+an `identifier_id` belonging to a different book is 404, exactly as a `reference_id` is.
+
+**There is no route that changes one, and that is the design rather than an omission.** An
+identifier is a claim about which record in somebody else's catalogue this book is, so it is
+a fact rather than a preference: it is removed, never edited, which is the rule
+`DELETE /api/books/authors/identifiers/{id}` states for a person's.
+
+**Unlike that one, nothing re-asserts a book's identifier, and the way back is a detour
+that is not always open.** An author's identifier is written again by the next catalogue
+record the server fetches, so deleting one there is nearly free. Nothing asserts a book's
+onto a book that already exists: re-reading the store's file offers the book a second time,
+and merging that second book in is what carries the row across.
+
+**Where the book already holds the ISBN that file carries, there is no second book**: the
+add answers **409** on the duplicate ISBN, so nothing exists to merge. An export carrying
+both an ISBN and a store identifier is the ordinary case, so this is the common half rather
+than the corner. A client should ask before removing one and should not promise a way back.
+
 ### Settings, stats, users
 
 | Method | Path | Access | Notes |

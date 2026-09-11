@@ -186,6 +186,9 @@ export const de: Messages = {
   "identifier.asin": "Amazon-Referenz: {value}",
   "identifier.google_books": "Google-Books-Referenz: {value}",
   "identifier.other": "{scheme}-Referenz: {value}",
+  "identifier.remove": "{identifier} entfernen",
+  "identifier.removeConfirm":
+    "{value} entfernen? Auf dieser Seite lässt sich die Angabe nicht wieder hinzufügen.",
 
   // ── Abschnitte der Buchdetails ──────────────────────────────────────────
   "section.reading": "Eigene Lektüre",

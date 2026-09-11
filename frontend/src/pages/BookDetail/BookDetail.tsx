@@ -137,6 +137,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
         onBack={goBack}
         onUploadCover={actions.uploadCover}
         onRefreshMetadata={actions.refreshMetadata}
+        onRemoveIdentifier={actions.removeIdentifier}
       />
 
       <div className="px-4 py-5 space-y-4">

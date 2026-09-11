@@ -1,7 +1,7 @@
 import { useRef, type ChangeEvent } from "react";
 import { Link } from "react-router-dom";
 
-import type { BookOut } from "../../../api/generated/model";
+import type { BookIdentifierOut, BookOut } from "../../../api/generated/model";
 import { errorText } from "../../../components/ErrorState";
 import { useTranslation } from "../../../i18n";
 import { searchUrl } from "../../../lib/goodreads";
@@ -18,6 +18,8 @@ interface BookHeaderProps {
   onBack: () => void;
   onUploadCover: (file: File) => void;
   onRefreshMetadata: () => void;
+  /** Take one store identifier off the book. Asked about first, by the caller. */
+  onRemoveIdentifier: (identifier: BookIdentifierOut) => void;
 }
 
 /** Cover, title, metadata chips and the refresh control. */
@@ -29,6 +31,7 @@ export default function BookHeader({
   onBack,
   onUploadCover,
   onRefreshMetadata,
+  onRemoveIdentifier,
 }: BookHeaderProps) {
   const { t } = useTranslation();
 
@@ -189,7 +192,10 @@ export default function BookHeader({
               that led with a vendor would put the borrowed name first. Absent
               on the great majority of books, which is why the ISBN keeps the
               position a reader looks in. */}
-          <IdentifierChips identifiers={book.identifiers ?? []} />
+          <IdentifierChips
+            identifiers={book.identifiers ?? []}
+            onRemove={onRemoveIdentifier}
+          />
         </div>
 
         {/* The page's actions, together and labelled.

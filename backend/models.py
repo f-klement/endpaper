@@ -2092,16 +2092,43 @@ class BookIdentifier(Base):
     assertion from a member's, does not arise: every row here came out of a file
     the member picked themselves.
 
-    **There is no operation that corrects one, and that is a gap rather than a
-    rule.** `identifiers.add_identifiers` takes `AuthorIdentifier`'s refusal to
-    retype an identifier in place, and that class is safe only because a member
-    may **delete** a row: "a fact that cannot be corrected is a trap rather than
-    an invariant". Nothing deletes one here. No request body names the field, no
-    route removes one, and the only `db.delete` on this table is the merge
-    dropping an exact repeat, so a misread ASIN survives until the Book is
-    purged. Found by the design seat, 2026-09-11; the route is a ticket, and
-    what makes the gap affordable meanwhile is that no query matches on the
-    value, so a wrong row is untidy rather than wrong about a Book.
+    **Removable and never retyped**, which is `AuthorIdentifier`'s pair of rules
+    and is only sound as a pair. `identifiers.add_identifiers` takes the
+    refusal to retype one in place, and that refusal is safe only because a
+    member may **delete** a row: "a fact that cannot be corrected is a trap
+    rather than an invariant". So `DELETE /api/books/{book_id}/identifiers/
+    {identifier_id}` removes one, and what stays refused is retyping a row to a
+    different value, which is the operation that launders a guess into a fact.
+    Whoever may write the Book may remove one, which is the **Book owned**
+    paragraph above turned into a route: the row carries no Member of its own,
+    so its permission is the Book's entirely.
+
+    **Nothing re-asserts one on a Book that already exists, where
+    `AuthorIdentifier` is re-asserted constantly**, and the difference is the
+    number of writers rather than a second rule. That table is written from
+    every catalogue record this app fetches, so a deleted row comes back by
+    itself. Here `identifiers.add_identifiers` is reached only from
+    `_create_book`, which `POST /api/books` and `POST /api/books/scan` share
+    and which always builds a new Book.
+
+    **So the road back is a merge, and this is the one place that says when it
+    is open.** Some files must state the road, so the rule is not that nothing
+    restates it: **no file states the road without the condition beside it.** A
+    reader who meets the road alone believes a promise. Importing the store
+    file again offers a second Book, and `_repoint_relations` moves that Book's
+    rows onto this one. It offers nothing when this Book already holds the ISBN
+    the file carries: `_create_book` answers **409** rather than making a
+    second Book, and an export carrying both an ISBN and a store identifier is
+    the ordinary case rather than a corner, which is what a Play Books Takeout
+    is. `backup.restore` reinstates this table with the rest of a database and
+    is not a road anybody takes for one row. `schemas/identifier.py` is the
+    register of the three writers.
+
+    **What the client may therefore say is nothing about roads**: it asks
+    before removing one and says only that the page it is on has no way back.
+    The writer that would make this an ordinary refresh, a store import that
+    updates a Book it already added, is named in `identifiers.py` and is not
+    written.
 
     **Nothing matches on it**, stated because an identifier no query reads is a
     column that goes stale in silence. What reads it today is `BookOut`, which

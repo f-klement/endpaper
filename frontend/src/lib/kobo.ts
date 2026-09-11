@@ -132,9 +132,16 @@ export interface KoboBook {
   /**
    * The device's own reference for this book, and the stable one.
    *
-   * A purchased book carries a store UUID and a sideloaded book carries a
-   * `file:///mnt/onboard/...` URL, so this is unique on the device either way
-   * and survives a title being edited.
+   * A purchased book carries a store UUID and a file the member loaded carries
+   * a path. **Only one arm of calibre's `contentid_from_path` puts a `file://`
+   * scheme on that path**, and which arm a row took was decided by its
+   * `ContentType` and its file extension rather than by where the book came
+   * from. Unique on the device either way, and it survives a title being
+   * edited.
+   *
+   * **So nothing reads this column for how the book got there.** A scheme test
+   * misfiles every row the schemeless arms wrote. `ACCESSIBILITY` is where that
+   * question is asked.
    */
   readonly contentId: string;
   readonly title: string | null;
@@ -270,24 +277,28 @@ const SIGNATURE = ["ContentID", "BookID"] as const;
  * off the same rows, so they cannot drift apart. The first draft of this reader
  * had the set here and `-1` spelled again in its own constant.
  *
- * **`1` is a purchase at `DBVersion` 56 and above, and not below it, and this
- * does not ask.** calibre's comment at the same site reads "FW2.0.0, DBVersion
- * 53,55 accessibility == 1" against "FW2.1.2 beta, DBVersion == 56,
- * accessibility == -1", and its live test for a deleted book is
+ * **Below `DBVersion` 56 this column does not separate a purchase from a file
+ * the member loaded, and such a row is named `purchase` here anyway.** That is
+ * a decision and `docs/decisions.md` carries it. calibre's comment at the one
+ * site that cares reads "FW2.0.0, DBVersion 53,55 accessibility == 1" against
+ * "FW2.1.2 beta, DBVersion == 56, accessibility == -1", over
  * `(dbversion < 56 and accessibility <= 1) or (dbversion >= 56 and
- * accessibility == -1)`. So a firmware below 56 writes a sideload as `1` and
- * this names it `purchase`, on devices inside the range the five gates above
- * admit.
+ * accessibility == -1)`. **That test is reached only for a row whose
+ * `IsDownloaded` is false**, and it chooses between the two labels calibre puts
+ * on such a row: deleted, or archived where the device is new enough to archive
+ * at all, which is `DBVersion` 71. So it does not say that `1` is a sideload
+ * below 56. It says the two cannot be told apart there.
  *
- * **The name is what this reader got wrong and not what it costs.** Both names
- * map to owned in `lib/stores.ts`, so the rename moves nothing; what such a
- * device costs is the arm below, which never fires there. That arm refuses a
- * book the member deleted, which Kobo marks by keeping the row and clearing
- * `IsDownloaded`, so below 56 a deleted book is kept, named `purchase` and
- * imported as the member's property. **As true of the boolean this replaced**,
- * which is why it is a bound stated here rather than a regression: gating it
- * means reading `DBVersion` and acting on it, which `schemaVersionOf` says this
- * module does not do, so the read is an issue rather than an arm.
+ * **A version can only pick a side, which is why this does not ask it.** Naming
+ * those rows `sideloaded` would put the arm below on every row a firmware wrote
+ * as `1`, and refuse the ones the member bought and removed from the device.
+ * The row itself settles nothing either, and `contentId` above says why.
+ *
+ * **What it costs on such a device, stated so that a report is legible**: a
+ * sideloaded book the member deleted is kept, named `purchase`, and imported as
+ * theirs, because the arm below is reached through the other name. **As true of
+ * the boolean this replaced.** `lib/stores.ts` maps both names to owned, so no
+ * shelf moves either way and the name is the whole of the error.
  *
  * **Still one inclusion list, and membership still decides.** A value not
  * spelled here is skipped exactly as before: what the values add is the name,
@@ -353,9 +364,18 @@ function isTrue(value: unknown): boolean {
  *
  * Informational, and read rather than acted on: every decision below is taken
  * from the columns that are actually there, which is the same question asked of
- * the file rather than of a number the file states about itself. calibre reads
- * this table too and falls back to 0 when it is absent, so an absent one is an
- * old device rather than a broken file.
+ * the file rather than of a number the file states about itself.
+ *
+ * **One value's meaning does move with this number, and the answer is still not
+ * to read it**: `ACCESSIBILITY` states which and why. `tests/lib/kobo.test.ts`
+ * reads one device at seven stated versions and at none, and asserts one whole
+ * library from all eight: every field of a book, the name every row was given,
+ * every refusal this reader makes, and the fields reported missing. **Every
+ * `dbversion` threshold in calibre's driver has an arm either side of it**, and
+ * that test's own docstring carries what it still leaves uncovered, which is
+ * the one home for it. calibre reads this table too and falls back to 0 when
+ * it is absent, so an absent one is an old device rather than a broken file,
+ * which is why no table at all is an arm of its own.
  */
 function schemaVersionOf(db: SqliteDatabase): number | null {
   return integer(db.query("SELECT version FROM dbversion")[0]?.["version"]);

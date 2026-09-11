@@ -452,9 +452,10 @@ function fromKobo(library: KoboLibrary): StoreLibrary {
       title: book.title,
       authors: book.authors,
       isbn: book.isbn,
-      // **None, and `contentId` is not one.** `kobo.ts` says that column holds
-      // a store UUID for a purchase and a `file:///mnt/onboard/...` URL for a
-      // sideloaded file, and nothing on the row says which. So it identifies
+      // **None, and `contentId` is not one.** `kobo.ts::KoboBook.contentId`
+      // says what that column can hold, and nothing on the row says which it
+      // is: restating the shapes here was a second home for that fact and the
+      // copy went false the first time the reader learned more. So it identifies
       // the book on **that device**, which is what `key` above is for, and
       // labelling it with a scheme would assert a store where half the rows
       // have none.

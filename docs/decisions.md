@@ -12924,3 +12924,66 @@ evasions were written by the seat that did not write the guard. The version that
 `location.assign`, `location.replace` and a bare assignment without having been designed against
 any of them, which is the difference between asking what something is made of and asking what it
 does.
+
+## A new rule in the house rules calls the helpers already there rather than re-spelling them
+
+**Six review rounds went into a 130 line guard beside a feature that took one**, and five of the
+six defects were not in the rule at all. They were one defect wearing five hats: **a new guard
+re-spelled a helper that already existed thirty lines up in the same file.** The probe, the
+collector, the `IN` matcher, the collect and extract disagreement and the annotation walk are
+all that one thing.
+
+`_enum_types` is the only annotation walk in `backend/tests/test_house_rules.py` and
+`_bounds_column` the only `<col> IN (` matcher. **Each was written to fix a miss this file had
+already paid for, and each was re-spelled, worse, by a rule added beside it.**
+
+**Owner's decision, 2026-09-11: a rule, not a sentence.** The session recommended the sentence
+and was overruled, and the reason for the recommendation is worth keeping because it shaped
+what was built: a rule that recognises a re-spelling has to enumerate what one looks like, and
+an enumerating guard over an open set is the family this tree keeps paying for.
+
+**So it is a one caller rule and enumerates nothing.** `test_each_helper_this_file_paid_for_
+has_one_caller` asserts that the primitive has exactly one calling function, never which
+function that is: renaming a helper leaves it green and adding a second caller turns it red,
+and the owner's name is derived and reported only in the failure. **The primitive is the thing
+a re-spelling cannot avoid using**, which is what makes it structural: an annotation cannot be
+walked without `get_args`, and a `<col> IN (` match cannot be written without spelling `IN`
+beside a paren.
+
+**Attacked before it was believed.** A second function calling `get_args` and a second `IN (`
+matcher written without a word boundary, applied one at a time to the tree and inverted with
+the reverse replace, the file's sha256 recovered exactly both times. Each went red on its own
+arm and named the offending function; the diagonal holds.
+
+**The bound, stated rather than discovered later**: a re-spelling that avoids the primitive
+escapes it. Reaching into `__args__` by hand walks an annotation without `get_args`. Neither
+has happened, and closing it means comparing helper bodies for equivalence, which is a much
+larger instrument.
+
+**The sizing figure, because it inverts what anybody would estimate.** The feature was 2,546
+insertions across 34 files and took **one** round. The guard beside it took six. `CLAUDE.md`
+already says sizing is systematically low and that it is the review that is underestimated;
+this is a number for that sentence.
+
+**What this is not is an argument for fewer guards.** Each round cost one mutation and a
+targeted run of seconds, and each found something real. The expensive outcome was available in
+round one and was not taken: a probe that could not fail, beside a collector a rename walked
+past, both green. **The stopping rule is what the findings are about rather than the round
+count**: they converged monotonically, from a silent pass, to a loud failure carrying a false
+explanation, to a mislabelled rung, to whether a sentence could be made false. That last one is
+the boundary.
+
+## Commit before asking for a sign off, and never ask while the tree is dirty
+
+The implementer's half of a rule whose reviewer's half `CLAUDE.md` already carries: sign off is
+on the working tree, and a seat asks again when the tip moves. **They are complements rather
+than duplicates.** The existing rule prevents a false sign off; only this one prevents the
+wasted read. A reader of either alone will think the other is covered, so they are written as a
+pair.
+
+Measured over one wave: three times the tip moved under a reviewing seat, twice the seat found
+out by checking rather than by being told, and each time it cost a round of re-copying, re-
+measuring, and working out which numbers still described anything. One seat could only prove its
+copy predated an edit by restoring the file from `git show` and recovering its recorded whole
+tree sha256 exactly. **A commit is cheap and it is the one thing that makes "the working tree
+equals X" checkable rather than a promise.**

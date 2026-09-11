@@ -2382,6 +2382,79 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         assert _bounds_column("id IN ('a', 'b')", "id")
         assert not _has_check("loans.id")
 
+    def test_each_helper_this_file_paid_for_has_one_caller(self):
+        """A rule added here calls the helper beside it rather than re-spelling it.
+
+        **Bought by a wave, not by a preference.** Six review rounds went into a
+        130 line guard next to a feature that took one, and five of the six
+        defects were the same defect: a new rule re-spelled a helper that
+        already existed thirty lines up, and that helper existed because this
+        file had already paid for exactly that miss. `docs/decisions.md` carries
+        the rounds and the sizing figure.
+
+        **A one caller rule rather than a table of owners.** It asserts that the
+        primitive has exactly one calling function, never which function that
+        is, so renaming a helper leaves this green and adding a second caller
+        turns it red. The owner is derived and reported when it fails, which is
+        the only place a reader needs the name.
+
+        **The primitive is the thing a re-spelling cannot avoid using**, which
+        is what makes this structural rather than a list of spellings: an
+        annotation cannot be walked without `get_args`, and a `<col> IN (` match
+        cannot be written without spelling `IN` beside a paren.
+
+        **The bound, and it is real**: a re-spelling that avoids the primitive
+        entirely escapes this. Reaching into `__args__` by hand walks an
+        annotation without `get_args`, and a hand written scanner matches an
+        `IN` list without the pattern. Neither has happened; both would be
+        caught by the review this exists to shorten rather than by this test.
+        Closing that means comparing helper bodies for equivalence, which is a
+        different and much larger instrument.
+        """
+        tree = ast.parse(Path(__file__).read_text())
+        parents = {
+            child: node
+            for node in ast.walk(tree)
+            for child in ast.walk(node)
+            if isinstance(node, ast.FunctionDef)
+        }
+
+        def callers_of(predicate) -> set[str]:
+            """Every function containing a node the predicate accepts."""
+            return {
+                parents[node].name
+                for node in ast.walk(tree)
+                if predicate(node) and node in parents
+            }
+
+        walks = callers_of(
+            lambda node: isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "get_args"
+        )
+        # The pattern rather than the helper's name: a second `IN (` matcher is
+        # a second spelling of `_bounds_column` whatever it ends up called.
+        matchers = callers_of(
+            lambda node: isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and re.search(r"IN\\s\*\\\(", node.value) is not None
+        )
+
+        assert len(walks) == 1, (
+            f"An annotation walk belongs in one helper and {sorted(walks)} each "
+            "call `get_args`. The one that was here first is the only one that "
+            "recurses; a second walk added beside it read at a fixed depth and "
+            "let every nullable column through, which is the miss `_enum_types` "
+            "was written to fix. Call it instead of re-spelling it."
+        )
+        assert len(matchers) == 1, (
+            f"A `<col> IN (` match belongs in one helper and {sorted(matchers)} "
+            "each spell the pattern. The one that was here first tests a word "
+            "boundary; a second written without one reports a column bounded "
+            "off another whose name contains it. Call `_bounds_column` instead "
+            "of re-spelling it."
+        )
+
     def test_a_check_that_only_mentions_a_column_does_not_count(self):
         """The two live constraints on `author_identifiers.provenance`.
 

@@ -5,10 +5,11 @@ without ever exceeding `MAX_IDENTIFIERS_PER_BOOK` or depositing one twice.
 
 **A module rather than a private function in `routers/books.py`**, which is
 where `classifications.add_headings` was until MARC import gave it a second
-caller. The same is coming here: `POST /api/books` is the only route that writes
-this table today, and a store import that learns to refresh a Book it already
-added is the second, so the ceiling and the deduplication have one home before
-there are two callers rather than after.
+caller. The same is coming here: `_create_book` is the only caller that writes
+this table today, shared by `POST /api/books` and `POST /api/books/scan`, and a
+store import that learns to refresh a Book it already added is the second, so
+the ceiling and the deduplication have one home before there are two callers
+rather than after.
 
 **Nothing here queries.** It takes a Book somebody else resolved and adds rows
 to it. The privacy rule is `shelf.py`'s and is applied before a Book reaches

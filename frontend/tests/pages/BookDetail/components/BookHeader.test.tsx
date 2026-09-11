@@ -21,6 +21,7 @@ function renderHeader(book = makeBook(), locale: Locale = Locale.en) {
       onBack={vi.fn()}
       onUploadCover={vi.fn()}
       onRefreshMetadata={vi.fn()}
+      onRemoveIdentifier={vi.fn()}
     />,
     { locale },
   );
@@ -83,7 +84,7 @@ describe("the chip row", () => {
       makeBook({
         isbn: "9780441013593",
         identifiers: [
-          { scheme: BookIdentifierScheme.asin, value: "B00J4YQKHY" },
+          { id: 1, scheme: BookIdentifierScheme.asin, value: "B00J4YQKHY" },
         ],
       }),
     );
