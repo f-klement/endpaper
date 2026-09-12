@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.16.0
+
+_2026-09-12_
 
 - **A Kobo import no longer says you own a book you borrowed.** A Kobo records how each book
   arrived, and Endpaper was reading that and throwing it away. An OverDrive library loan and a
