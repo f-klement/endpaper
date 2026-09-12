@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.16.1
+
+_2026-09-12_
 
 - **The Z39.50 client library is YAZ 5.38.0**, from 5.37.3. Upstream tightened the decoding
   of incoming packages and HTTP chunked messages, fixed integer overflow in its number
