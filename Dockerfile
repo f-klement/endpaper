@@ -18,8 +18,8 @@ ARG BASE=python:3.14.7-alpine@sha256:c6ead215bfd31f1e433d968853b7a769989117115b7
 #
 # **The hash is trust on first use.** IndexData publish no signature and no checksum file
 # alongside the release, so nothing corroborates it. See docker/build-yaz.sh.
-ARG YAZ_VERSION=5.37.3
-ARG YAZ_SHA256=975d7878b272cc999e5acbd02dc272a46607f95e6ee4f35ac655e8e4d333bf2b
+ARG YAZ_VERSION=5.38.0
+ARG YAZ_SHA256=c35f3994d382b42c43954253c1f24d1c0f93f0cb960532b69efa399b31b39b10
 
 # ── Stage 1: YAZ, the Z39.50 client library ────────────────────────────────
 #
@@ -166,13 +166,12 @@ RUN apk upgrade --no-cache
 # line, and an earlier version of this comment claimed there was "nothing else to
 # remember", which was wrong about the larger half.
 #
-# **What gnutls buys is transport encryption and NOT peer authentication.** YAZ performs
-# no certificate verification in any released version: `verify_peers`,
-# `set_x509_system_trust`, `session_set_verify_cert`, `set_x509_trust_file` and
-# `GNUTLS_CERT` appear nowhere in src/ or client/, on 5.35.1 or on 5.37.3.
-# src/tcpip.c allocates certificate credentials and calls gnutls_init(GNUTLS_CLIENT)
-# without ever loading a trust store. So an `ssl:` target is encrypted against a passive
-# listener and not against anyone who can answer for the address.
+# **What gnutls buys is transport encryption and NOT peer authentication.** Up to 5.37.3
+# YAZ performed no certificate verification at all; 5.38.0 added it as an opt in, the ZOOM
+# option `check_cert`, default 0, and nothing in this application sets it. So an `ssl:`
+# target is encrypted against a passive listener and not against anyone who can answer
+# for the address. The reasoning is in docs/decisions.md, "YAZ encrypts a TLS connection
+# and does not authenticate it".
 RUN apk add --no-cache libxml2 libxslt gnutls
 
 # ── And now make it actually link ──────────────────────────────────────────

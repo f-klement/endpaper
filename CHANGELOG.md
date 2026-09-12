@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **The Z39.50 client library is YAZ 5.38.0**, from 5.37.3. Upstream tightened the decoding
+  of incoming packages and HTTP chunked messages, fixed integer overflow in its number
+  parsers, and lowered the largest message it will accept from 128 MB to 16 MB, which is
+  still above anything this application asks a catalogue for. It also gained certificate
+  verification for `ssl:` targets as an opt in; this release does not turn it on, and no
+  catalogue Endpaper reaches uses TLS.
+
 ## v0.16.0
 
 _2026-09-12_

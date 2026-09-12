@@ -4878,14 +4878,18 @@ supplies it, and that failure is the design rather than a defect.
 ### YAZ encrypts a TLS connection and does not authenticate it
 
 
-YAZ performs no certificate verification in any released version. `verify_peers`,
+Up to 5.37.3 YAZ performed no certificate verification: `verify_peers`,
 `set_x509_system_trust`, `session_set_verify_cert`, `set_x509_trust_file` and
-`GNUTLS_CERT` appear nowhere in `src/` or `client/`, checked on 5.35.1 and 5.37.3;
-`src/tcpip.c` allocates certificate credentials and calls `gnutls_init(GNUTLS_CLIENT)`
-without ever loading a trust store. So an `ssl:` target is protected against a passive
-listener and not against anyone who can answer for the address. Recorded rather than
-acted on: no target this application reaches uses TLS, and whether to keep gnutls at all
-is the owner's call.
+`GNUTLS_CERT` appeared nowhere in `src/` or `client/`, checked on 5.35.1 and 5.37.3, and
+`src/tcpip.c` allocated certificate credentials without ever loading a trust store.
+5.38.0 added it as an opt in, checked with the same grep: `gnutls_certificate_verify_peers3`
+against the system trust, behind the ZOOM option `check_cert`, which defaults to 0. This
+application does not set it (the options it does set are `_options()` in
+`backend/z3950_provisional.py`), so the position is unchanged by the upgrade: an `ssl:`
+target is protected against a passive listener and not against anyone who can answer for
+the address. Recorded rather than acted on: no target this application reaches uses TLS.
+Turning `check_cert` on is an issue in the tracker, not done here, because the first
+`ssl:` target added would then need its certificate to verify.
 
 ### A suite pod must not outlive the run that made it
 

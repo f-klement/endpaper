@@ -157,12 +157,10 @@ from a tarball appears in neither. A YAZ advisory reaches this repository only t
 dependency bot watching upstream's release tags, and the version and its hash are then
 bumped by hand together.
 
-**What that TLS is worth is worth knowing.** YAZ performs no certificate verification in
-any released version: `verify_peers`, `set_x509_system_trust`, `session_set_verify_cert`,
-`set_x509_trust_file` and `GNUTLS_CERT` appear nowhere in its `src/` or `client/`, on
-5.35.1 or on 5.37.3. It allocates certificate credentials and initialises a client session
-without ever loading a trust store. An `ssl:` target is therefore encrypted against a
-passive listener and not authenticated against anyone able to answer for the address.
+**What that TLS is worth is worth knowing.** YAZ verifies the peer's certificate only
+when asked: the ZOOM option `check_cert` arrived in 5.38.0, defaults to off, and this
+application does not set it. An `ssl:` target is therefore encrypted against a passive
+listener and not authenticated against anyone able to answer for the address.
 
 **The install prefix is load bearing.** libtool records `/opt/yaz/lib` as `yaz-client`'s
 RUNPATH, which is why the binary resolves its library with no `LD_LIBRARY_PATH` and no
