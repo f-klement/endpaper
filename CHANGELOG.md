@@ -8,6 +8,11 @@
   still above anything this application asks a catalogue for. It also gained certificate
   verification for `ssl:` targets as an opt in; this release does not turn it on, and no
   catalogue Endpaper reaches uses TLS.
+- **The frontend suite runs on vitest 5**, from 4. Nothing a member sees changes. Two of its
+  new defaults are worth knowing when writing a test here: mocks are cleared before every
+  test, and an asynchronous assertion that is not awaited fails the test on its own, where 4
+  printed a warning and settled it at the end of the test. The suite passed both without an
+  edit: 189 files, 3,777 tests.
 
 ## v0.16.0
 
