@@ -39,8 +39,13 @@ import { invalidateWith, isCatalogueQuery } from "../../src/api/invalidate";
  *
  * The named imports above stay, because building `KEYS` needs the getters
  * themselves and a glob gives back `unknown`.
+ *
+ * One directory level, not `**`: orval writes every tag module at
+ * `endpoints/<tag>/<tag>.ts`, and since 8.31.0 also a barrel at
+ * `endpoints/index.ts` that re-exports all of them. A recursive glob picked the
+ * barrel up too and the inventory below counted every getter twice.
  */
-const MODULES = import.meta.glob("../../src/api/generated/endpoints/**/*.ts", {
+const MODULES = import.meta.glob("../../src/api/generated/endpoints/*/*.ts", {
   eager: true,
 }) as Record<string, Record<string, unknown>>;
 

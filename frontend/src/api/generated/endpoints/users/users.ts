@@ -521,8 +521,21 @@ export const setMyAppearance = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<AppearanceOut>(getSetMyAppearanceUrl(), {
     ...options,
@@ -534,6 +547,8 @@ export const setMyAppearance = async (
     body: JSON.stringify(appearanceUpdate),
   });
 };
+
+export const getSetMyAppearanceMutationKey = () => ["setMyAppearance"] as const;
 
 export const getSetMyAppearanceMutationOptions = <
   TError = HTTPValidationError,
@@ -552,7 +567,7 @@ export const getSetMyAppearanceMutationOptions = <
   SetMyAppearanceMutationVariables,
   TContext
 > => {
-  const mutationKey = ["setMyAppearance"];
+  const mutationKey = getSetMyAppearanceMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -762,8 +777,21 @@ export const setMyEmail = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<MemberEmailOut>(getSetMyEmailUrl(), {
     ...options,
@@ -775,6 +803,8 @@ export const setMyEmail = async (
     body: JSON.stringify(emailUpdate),
   });
 };
+
+export const getSetMyEmailMutationKey = () => ["setMyEmail"] as const;
 
 export const getSetMyEmailMutationOptions = <
   TError = HTTPValidationError,
@@ -793,7 +823,7 @@ export const getSetMyEmailMutationOptions = <
   SetMyEmailMutationVariables,
   TContext
 > => {
-  const mutationKey = ["setMyEmail"];
+  const mutationKey = getSetMyEmailMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1168,6 +1198,9 @@ export const declinePasswordReset = async (
   });
 };
 
+export const getDeclinePasswordResetMutationKey = () =>
+  ["declinePasswordReset"] as const;
+
 export const getDeclinePasswordResetMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -1185,7 +1218,7 @@ export const getDeclinePasswordResetMutationOptions = <
   DeclinePasswordResetMutationVariables,
   TContext
 > => {
-  const mutationKey = ["declinePasswordReset"];
+  const mutationKey = getDeclinePasswordResetMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1273,6 +1306,9 @@ export const approvePasswordReset = async (
   });
 };
 
+export const getApprovePasswordResetMutationKey = () =>
+  ["approvePasswordReset"] as const;
+
 export const getApprovePasswordResetMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -1290,7 +1326,7 @@ export const getApprovePasswordResetMutationOptions = <
   ApprovePasswordResetMutationVariables,
   TContext
 > => {
-  const mutationKey = ["approvePasswordReset"];
+  const mutationKey = getApprovePasswordResetMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1535,8 +1571,21 @@ export const createTestAccount = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<UserOut>(getCreateTestAccountUrl(), {
     ...options,
@@ -1548,6 +1597,9 @@ export const createTestAccount = async (
     body: JSON.stringify(userCreate),
   });
 };
+
+export const getCreateTestAccountMutationKey = () =>
+  ["createTestAccount"] as const;
 
 export const getCreateTestAccountMutationOptions = <
   TError = HTTPValidationError,
@@ -1566,7 +1618,7 @@ export const getCreateTestAccountMutationOptions = <
   CreateTestAccountMutationVariables,
   TContext
 > => {
-  const mutationKey = ["createTestAccount"];
+  const mutationKey = getCreateTestAccountMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1795,8 +1847,21 @@ export const setMemberEmail = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<MemberEmailOut>(getSetMemberEmailUrl(userId), {
     ...options,
@@ -1808,6 +1873,8 @@ export const setMemberEmail = async (
     body: JSON.stringify(emailUpdate),
   });
 };
+
+export const getSetMemberEmailMutationKey = () => ["setMemberEmail"] as const;
 
 export const getSetMemberEmailMutationOptions = <
   TError = HTTPValidationError,
@@ -1826,7 +1893,7 @@ export const getSetMemberEmailMutationOptions = <
   SetMemberEmailMutationVariables,
   TContext
 > => {
-  const mutationKey = ["setMemberEmail"];
+  const mutationKey = getSetMemberEmailMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1917,6 +1984,8 @@ export const verifyMember = async (
   });
 };
 
+export const getVerifyMemberMutationKey = () => ["verifyMember"] as const;
+
 export const getVerifyMemberMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -1934,7 +2003,7 @@ export const getVerifyMemberMutationOptions = <
   VerifyMemberMutationVariables,
   TContext
 > => {
-  const mutationKey = ["verifyMember"];
+  const mutationKey = getVerifyMemberMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&

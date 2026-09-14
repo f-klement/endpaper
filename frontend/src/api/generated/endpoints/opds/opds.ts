@@ -211,8 +211,21 @@ export const addServer = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<OpdsServerOut>(getAddServerUrl(), {
     ...options,
@@ -224,6 +237,8 @@ export const addServer = async (
     body: JSON.stringify(opdsServerIn),
   });
 };
+
+export const getAddServerMutationKey = () => ["addServer"] as const;
 
 export const getAddServerMutationOptions = <
   TError = HTTPValidationError,
@@ -242,7 +257,7 @@ export const getAddServerMutationOptions = <
   AddServerMutationVariables,
   TContext
 > => {
-  const mutationKey = ["addServer"];
+  const mutationKey = getAddServerMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -483,6 +498,8 @@ export const removeServer = async (
   });
 };
 
+export const getRemoveServerMutationKey = () => ["removeServer"] as const;
+
 export const getRemoveServerMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -500,7 +517,7 @@ export const getRemoveServerMutationOptions = <
   RemoveServerMutationVariables,
   TContext
 > => {
-  const mutationKey = ["removeServer"];
+  const mutationKey = getRemoveServerMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -587,8 +604,21 @@ export const editServer = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<OpdsServerOut>(getEditServerUrl(serverId), {
     ...options,
@@ -600,6 +630,8 @@ export const editServer = async (
     body: JSON.stringify(opdsServerIn),
   });
 };
+
+export const getEditServerMutationKey = () => ["editServer"] as const;
 
 export const getEditServerMutationOptions = <
   TError = HTTPValidationError,
@@ -618,7 +650,7 @@ export const getEditServerMutationOptions = <
   EditServerMutationVariables,
   TContext
 > => {
-  const mutationKey = ["editServer"];
+  const mutationKey = getEditServerMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -694,6 +726,9 @@ export const forgetServerCredential = async (
   });
 };
 
+export const getForgetServerCredentialMutationKey = () =>
+  ["forgetServerCredential"] as const;
+
 export const getForgetServerCredentialMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -711,7 +746,7 @@ export const getForgetServerCredentialMutationOptions = <
   ForgetServerCredentialMutationVariables,
   TContext
 > => {
-  const mutationKey = ["forgetServerCredential"];
+  const mutationKey = getForgetServerCredentialMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -794,8 +829,21 @@ export const setServerCredential = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<OpdsServerOut>(getSetServerCredentialUrl(serverId), {
     ...options,
@@ -807,6 +855,9 @@ export const setServerCredential = async (
     body: JSON.stringify(opdsCredentialIn),
   });
 };
+
+export const getSetServerCredentialMutationKey = () =>
+  ["setServerCredential"] as const;
 
 export const getSetServerCredentialMutationOptions = <
   TError = HTTPValidationError,
@@ -825,7 +876,7 @@ export const getSetServerCredentialMutationOptions = <
   SetServerCredentialMutationVariables,
   TContext
 > => {
-  const mutationKey = ["setServerCredential"];
+  const mutationKey = getSetServerCredentialMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -957,6 +1008,8 @@ export const syncServer = async (
   });
 };
 
+export const getSyncServerMutationKey = () => ["syncServer"] as const;
+
 export const getSyncServerMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -974,7 +1027,7 @@ export const getSyncServerMutationOptions = <
   SyncServerMutationVariables,
   TContext
 > => {
-  const mutationKey = ["syncServer"];
+  const mutationKey = getSyncServerMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&

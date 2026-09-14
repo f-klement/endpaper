@@ -212,8 +212,21 @@ export const login = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<Token>(getLoginUrl(), {
     ...options,
@@ -225,6 +238,8 @@ export const login = async (
     body: JSON.stringify(loginRequest),
   });
 };
+
+export const getLoginMutationKey = () => ["login"] as const;
 
 export const getLoginMutationOptions = <
   TError = HTTPValidationError,
@@ -243,7 +258,7 @@ export const getLoginMutationOptions = <
   LoginMutationVariables,
   TContext
 > => {
-  const mutationKey = ["login"];
+  const mutationKey = getLoginMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -319,6 +334,8 @@ export const logout = async (
   });
 };
 
+export const getLogoutMutationKey = () => ["logout"] as const;
+
 export const getLogoutMutationOptions = <
   TError = unknown,
   TContext = unknown,
@@ -336,7 +353,7 @@ export const getLogoutMutationOptions = <
   void,
   TContext
 > => {
-  const mutationKey = ["logout"];
+  const mutationKey = getLogoutMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -519,8 +536,21 @@ export const register = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<RegistrationOut>(getRegisterUrl(), {
     ...options,
@@ -532,6 +562,8 @@ export const register = async (
     body: JSON.stringify(userCreate),
   });
 };
+
+export const getRegisterMutationKey = () => ["register"] as const;
 
 export const getRegisterMutationOptions = <
   TError = HTTPValidationError,
@@ -550,7 +582,7 @@ export const getRegisterMutationOptions = <
   RegisterMutationVariables,
   TContext
 > => {
-  const mutationKey = ["register"];
+  const mutationKey = getRegisterMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -625,8 +657,21 @@ export const redeemPasswordReset = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<void>(getRedeemPasswordResetUrl(), {
     ...options,
@@ -638,6 +683,9 @@ export const redeemPasswordReset = async (
     body: JSON.stringify(resetRedeem),
   });
 };
+
+export const getRedeemPasswordResetMutationKey = () =>
+  ["redeemPasswordReset"] as const;
 
 export const getRedeemPasswordResetMutationOptions = <
   TError = HTTPValidationError,
@@ -656,7 +704,7 @@ export const getRedeemPasswordResetMutationOptions = <
   RedeemPasswordResetMutationVariables,
   TContext
 > => {
-  const mutationKey = ["redeemPasswordReset"];
+  const mutationKey = getRedeemPasswordResetMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -744,8 +792,21 @@ export const requestPasswordReset = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<unknown>(getRequestPasswordResetUrl(), {
     ...options,
@@ -757,6 +818,9 @@ export const requestPasswordReset = async (
     body: JSON.stringify(resetRequest),
   });
 };
+
+export const getRequestPasswordResetMutationKey = () =>
+  ["requestPasswordReset"] as const;
 
 export const getRequestPasswordResetMutationOptions = <
   TError = HTTPValidationError,
@@ -775,7 +839,7 @@ export const getRequestPasswordResetMutationOptions = <
   RequestPasswordResetMutationVariables,
   TContext
 > => {
-  const mutationKey = ["requestPasswordReset"];
+  const mutationKey = getRequestPasswordResetMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -869,8 +933,21 @@ export const switchAccount = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<Token>(getSwitchAccountUrl(), {
     ...options,
@@ -882,6 +959,8 @@ export const switchAccount = async (
     body: JSON.stringify(loginRequest),
   });
 };
+
+export const getSwitchAccountMutationKey = () => ["switchAccount"] as const;
 
 export const getSwitchAccountMutationOptions = <
   TError = HTTPValidationError,
@@ -900,7 +979,7 @@ export const getSwitchAccountMutationOptions = <
   SwitchAccountMutationVariables,
   TContext
 > => {
-  const mutationKey = ["switchAccount"];
+  const mutationKey = getSwitchAccountMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -974,8 +1053,21 @@ export const confirmAddress = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<void>(getConfirmAddressUrl(), {
     ...options,
@@ -987,6 +1079,8 @@ export const confirmAddress = async (
     body: JSON.stringify(verificationRedeem),
   });
 };
+
+export const getConfirmAddressMutationKey = () => ["confirmAddress"] as const;
 
 export const getConfirmAddressMutationOptions = <
   TError = HTTPValidationError,
@@ -1005,7 +1099,7 @@ export const getConfirmAddressMutationOptions = <
   ConfirmAddressMutationVariables,
   TContext
 > => {
-  const mutationKey = ["confirmAddress"];
+  const mutationKey = getConfirmAddressMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1087,8 +1181,21 @@ export const requestVerification = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<unknown>(getRequestVerificationUrl(), {
     ...options,
@@ -1100,6 +1207,9 @@ export const requestVerification = async (
     body: JSON.stringify(verificationRequest),
   });
 };
+
+export const getRequestVerificationMutationKey = () =>
+  ["requestVerification"] as const;
 
 export const getRequestVerificationMutationOptions = <
   TError = HTTPValidationError,
@@ -1118,7 +1228,7 @@ export const getRequestVerificationMutationOptions = <
   RequestVerificationMutationVariables,
   TContext
 > => {
-  const mutationKey = ["requestVerification"];
+  const mutationKey = getRequestVerificationMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&

@@ -242,8 +242,21 @@ export const createLoan = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<LoanOut>(getCreateLoanUrl(), {
     ...options,
@@ -255,6 +268,8 @@ export const createLoan = async (
     body: JSON.stringify(loanCreate),
   });
 };
+
+export const getCreateLoanMutationKey = () => ["createLoan"] as const;
 
 export const getCreateLoanMutationOptions = <
   TError = HTTPValidationError,
@@ -273,7 +288,7 @@ export const getCreateLoanMutationOptions = <
   CreateLoanMutationVariables,
   TContext
 > => {
-  const mutationKey = ["createLoan"];
+  const mutationKey = getCreateLoanMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -707,6 +722,8 @@ export const notifyOverdue = async (
   });
 };
 
+export const getNotifyOverdueMutationKey = () => ["notifyOverdue"] as const;
+
 export const getNotifyOverdueMutationOptions = <
   TError = unknown,
   TContext = unknown,
@@ -724,7 +741,7 @@ export const getNotifyOverdueMutationOptions = <
   void,
   TContext
 > => {
-  const mutationKey = ["notifyOverdue"];
+  const mutationKey = getNotifyOverdueMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -790,6 +807,8 @@ export const returnLoan = async (
   });
 };
 
+export const getReturnLoanMutationKey = () => ["returnLoan"] as const;
+
 export const getReturnLoanMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -807,7 +826,7 @@ export const getReturnLoanMutationOptions = <
   ReturnLoanMutationVariables,
   TContext
 > => {
-  const mutationKey = ["returnLoan"];
+  const mutationKey = getReturnLoanMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&

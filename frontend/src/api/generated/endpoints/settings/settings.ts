@@ -213,8 +213,21 @@ export const updateSettings = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<SettingsOut>(getUpdateSettingsUrl(), {
     ...options,
@@ -226,6 +239,8 @@ export const updateSettings = async (
     body: JSON.stringify(settingsUpdate),
   });
 };
+
+export const getUpdateSettingsMutationKey = () => ["updateSettings"] as const;
 
 export const getUpdateSettingsMutationOptions = <
   TError = HTTPValidationError,
@@ -244,7 +259,7 @@ export const getUpdateSettingsMutationOptions = <
   UpdateSettingsMutationVariables,
   TContext
 > => {
-  const mutationKey = ["updateSettings"];
+  const mutationKey = getUpdateSettingsMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -343,6 +358,9 @@ export const forgetSourceCredential = async (
   });
 };
 
+export const getForgetSourceCredentialMutationKey = () =>
+  ["forgetSourceCredential"] as const;
+
 export const getForgetSourceCredentialMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -360,7 +378,7 @@ export const getForgetSourceCredentialMutationOptions = <
   ForgetSourceCredentialMutationVariables,
   TContext
 > => {
-  const mutationKey = ["forgetSourceCredential"];
+  const mutationKey = getForgetSourceCredentialMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -444,8 +462,21 @@ export const setSourceCredential = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<SettingsOut>(getSetSourceCredentialUrl(source), {
     ...options,
@@ -457,6 +488,9 @@ export const setSourceCredential = async (
     body: JSON.stringify(sourceCredentialIn),
   });
 };
+
+export const getSetSourceCredentialMutationKey = () =>
+  ["setSourceCredential"] as const;
 
 export const getSetSourceCredentialMutationOptions = <
   TError = HTTPValidationError,
@@ -475,7 +509,7 @@ export const getSetSourceCredentialMutationOptions = <
   SetSourceCredentialMutationVariables,
   TContext
 > => {
-  const mutationKey = ["setSourceCredential"];
+  const mutationKey = getSetSourceCredentialMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -565,6 +599,9 @@ export const forgetCredentialKey = async (
   });
 };
 
+export const getForgetCredentialKeyMutationKey = () =>
+  ["forgetCredentialKey"] as const;
+
 export const getForgetCredentialKeyMutationOptions = <
   TError = unknown,
   TContext = unknown,
@@ -582,7 +619,7 @@ export const getForgetCredentialKeyMutationOptions = <
   void,
   TContext
 > => {
-  const mutationKey = ["forgetCredentialKey"];
+  const mutationKey = getForgetCredentialKeyMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -814,6 +851,9 @@ export const createCredentialKey = async (
   });
 };
 
+export const getCreateCredentialKeyMutationKey = () =>
+  ["createCredentialKey"] as const;
+
 export const getCreateCredentialKeyMutationOptions = <
   TError = unknown,
   TContext = unknown,
@@ -831,7 +871,7 @@ export const getCreateCredentialKeyMutationOptions = <
   void,
   TContext
 > => {
-  const mutationKey = ["createCredentialKey"];
+  const mutationKey = getCreateCredentialKeyMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -908,8 +948,21 @@ export const restoreCredentialKey = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<CredentialKeyOut>(getRestoreCredentialKeyUrl(), {
     ...options,
@@ -921,6 +974,9 @@ export const restoreCredentialKey = async (
     body: JSON.stringify(recoveryPhraseIn),
   });
 };
+
+export const getRestoreCredentialKeyMutationKey = () =>
+  ["restoreCredentialKey"] as const;
 
 export const getRestoreCredentialKeyMutationOptions = <
   TError = HTTPValidationError,
@@ -939,7 +995,7 @@ export const getRestoreCredentialKeyMutationOptions = <
   RestoreCredentialKeyMutationVariables,
   TContext
 > => {
-  const mutationKey = ["restoreCredentialKey"];
+  const mutationKey = getRestoreCredentialKeyMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1307,6 +1363,8 @@ export const setLoginImage = async (
   });
 };
 
+export const getSetLoginImageMutationKey = () => ["setLoginImage"] as const;
+
 export const getSetLoginImageMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -1324,7 +1382,7 @@ export const getSetLoginImageMutationOptions = <
   SetLoginImageMutationVariables,
   TContext
 > => {
-  const mutationKey = ["setLoginImage"];
+  const mutationKey = getSetLoginImageMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&

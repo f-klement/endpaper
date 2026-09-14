@@ -102,6 +102,8 @@ export const importCsv = async (
   });
 };
 
+export const getImportCsvMutationKey = () => ["importCsv"] as const;
+
 export const getImportCsvMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -119,7 +121,7 @@ export const getImportCsvMutationOptions = <
   ImportCsvMutationVariables,
   TContext
 > => {
-  const mutationKey = ["importCsv"];
+  const mutationKey = getImportCsvMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -230,6 +232,8 @@ export const importMarc = async (
   });
 };
 
+export const getImportMarcMutationKey = () => ["importMarc"] as const;
+
 export const getImportMarcMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -247,7 +251,7 @@ export const getImportMarcMutationOptions = <
   ImportMarcMutationVariables,
   TContext
 > => {
-  const mutationKey = ["importMarc"];
+  const mutationKey = getImportMarcMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -354,6 +358,8 @@ export const previewMarc = async (
   });
 };
 
+export const getPreviewMarcMutationKey = () => ["previewMarc"] as const;
+
 export const getPreviewMarcMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -371,7 +377,7 @@ export const getPreviewMarcMutationOptions = <
   PreviewMarcMutationVariables,
   TContext
 > => {
-  const mutationKey = ["previewMarc"];
+  const mutationKey = getPreviewMarcMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -478,6 +484,8 @@ export const previewImport = async (
   });
 };
 
+export const getPreviewImportMutationKey = () => ["previewImport"] as const;
+
 export const getPreviewImportMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -495,7 +503,7 @@ export const getPreviewImportMutationOptions = <
   PreviewImportMutationVariables,
   TContext
 > => {
-  const mutationKey = ["previewImport"];
+  const mutationKey = getPreviewImportMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&

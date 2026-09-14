@@ -234,6 +234,8 @@ export const restoreBackup = async (
   });
 };
 
+export const getRestoreBackupMutationKey = () => ["restoreBackup"] as const;
+
 export const getRestoreBackupMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -251,7 +253,7 @@ export const getRestoreBackupMutationOptions = <
   RestoreBackupMutationVariables,
   TContext
 > => {
-  const mutationKey = ["restoreBackup"];
+  const mutationKey = getRestoreBackupMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&

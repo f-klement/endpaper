@@ -239,8 +239,21 @@ export const createCollection = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<CollectionOut>(getCreateCollectionUrl(), {
     ...options,
@@ -252,6 +265,9 @@ export const createCollection = async (
     body: JSON.stringify(collectionCreate),
   });
 };
+
+export const getCreateCollectionMutationKey = () =>
+  ["createCollection"] as const;
 
 export const getCreateCollectionMutationOptions = <
   TError = HTTPValidationError,
@@ -270,7 +286,7 @@ export const getCreateCollectionMutationOptions = <
   CreateCollectionMutationVariables,
   TContext
 > => {
-  const mutationKey = ["createCollection"];
+  const mutationKey = getCreateCollectionMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -355,6 +371,9 @@ export const deleteCollection = async (
   });
 };
 
+export const getDeleteCollectionMutationKey = () =>
+  ["deleteCollection"] as const;
+
 export const getDeleteCollectionMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -372,7 +391,7 @@ export const getDeleteCollectionMutationOptions = <
   DeleteCollectionMutationVariables,
   TContext
 > => {
-  const mutationKey = ["deleteCollection"];
+  const mutationKey = getDeleteCollectionMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -455,8 +474,21 @@ export const renameCollection = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<CollectionOut>(getRenameCollectionUrl(collectionId), {
     ...options,
@@ -468,6 +500,9 @@ export const renameCollection = async (
     body: JSON.stringify(collectionUpdate),
   });
 };
+
+export const getRenameCollectionMutationKey = () =>
+  ["renameCollection"] as const;
 
 export const getRenameCollectionMutationOptions = <
   TError = HTTPValidationError,
@@ -486,7 +521,7 @@ export const getRenameCollectionMutationOptions = <
   RenameCollectionMutationVariables,
   TContext
 > => {
-  const mutationKey = ["renameCollection"];
+  const mutationKey = getRenameCollectionMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&

@@ -481,8 +481,21 @@ export const addBook = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<BookOut>(getAddBookUrl(), {
     ...options,
@@ -494,6 +507,8 @@ export const addBook = async (
     body: JSON.stringify(bookCreate),
   });
 };
+
+export const getAddBookMutationKey = () => ["addBook"] as const;
 
 export const getAddBookMutationOptions = <
   TError = HTTPValidationError,
@@ -512,7 +527,7 @@ export const getAddBookMutationOptions = <
   AddBookMutationVariables,
   TContext
 > => {
-  const mutationKey = ["addBook"];
+  const mutationKey = getAddBookMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -740,6 +755,8 @@ export const unmergeAuthor = async (
   });
 };
 
+export const getUnmergeAuthorMutationKey = () => ["unmergeAuthor"] as const;
+
 export const getUnmergeAuthorMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -757,7 +774,7 @@ export const getUnmergeAuthorMutationOptions = <
   UnmergeAuthorMutationVariables,
   TContext
 > => {
-  const mutationKey = ["unmergeAuthor"];
+  const mutationKey = getUnmergeAuthorMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1052,8 +1069,21 @@ export const confirmAuthorIdentifier = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<ConfirmedIdentifierOut>(getConfirmAuthorIdentifierUrl(), {
     ...options,
@@ -1065,6 +1095,9 @@ export const confirmAuthorIdentifier = async (
     body: JSON.stringify(authorIdentifierRequest),
   });
 };
+
+export const getConfirmAuthorIdentifierMutationKey = () =>
+  ["confirmAuthorIdentifier"] as const;
 
 export const getConfirmAuthorIdentifierMutationOptions = <
   TError = HTTPValidationError,
@@ -1083,7 +1116,7 @@ export const getConfirmAuthorIdentifierMutationOptions = <
   ConfirmAuthorIdentifierMutationVariables,
   TContext
 > => {
-  const mutationKey = ["confirmAuthorIdentifier"];
+  const mutationKey = getConfirmAuthorIdentifierMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1170,6 +1203,9 @@ export const forgetAuthorIdentifier = async (
   });
 };
 
+export const getForgetAuthorIdentifierMutationKey = () =>
+  ["forgetAuthorIdentifier"] as const;
+
 export const getForgetAuthorIdentifierMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -1187,7 +1223,7 @@ export const getForgetAuthorIdentifierMutationOptions = <
   ForgetAuthorIdentifierMutationVariables,
   TContext
 > => {
-  const mutationKey = ["forgetAuthorIdentifier"];
+  const mutationKey = getForgetAuthorIdentifierMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1280,8 +1316,21 @@ export const mergeAuthors = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<AuthorOut>(getMergeAuthorsUrl(), {
     ...options,
@@ -1293,6 +1342,8 @@ export const mergeAuthors = async (
     body: JSON.stringify(authorMergeRequest),
   });
 };
+
+export const getMergeAuthorsMutationKey = () => ["mergeAuthors"] as const;
 
 export const getMergeAuthorsMutationOptions = <
   TError = HTTPValidationError,
@@ -1311,7 +1362,7 @@ export const getMergeAuthorsMutationOptions = <
   MergeAuthorsMutationVariables,
   TContext
 > => {
-  const mutationKey = ["mergeAuthors"];
+  const mutationKey = getMergeAuthorsMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1398,8 +1449,21 @@ export const mergeAuthorsBatch = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<AuthorBatchMergeOut>(getMergeAuthorsBatchUrl(), {
     ...options,
@@ -1411,6 +1475,9 @@ export const mergeAuthorsBatch = async (
     body: JSON.stringify(authorMergeBatchRequest),
   });
 };
+
+export const getMergeAuthorsBatchMutationKey = () =>
+  ["mergeAuthorsBatch"] as const;
 
 export const getMergeAuthorsBatchMutationOptions = <
   TError = HTTPValidationError,
@@ -1429,7 +1496,7 @@ export const getMergeAuthorsBatchMutationOptions = <
   MergeAuthorsBatchMutationVariables,
   TContext
 > => {
-  const mutationKey = ["mergeAuthorsBatch"];
+  const mutationKey = getMergeAuthorsBatchMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1903,8 +1970,21 @@ export const bulkAction = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<BulkResult>(getBulkActionUrl(), {
     ...options,
@@ -1916,6 +1996,8 @@ export const bulkAction = async (
     body: JSON.stringify(bulkRequest),
   });
 };
+
+export const getBulkActionMutationKey = () => ["bulkAction"] as const;
 
 export const getBulkActionMutationOptions = <
   TError = HTTPValidationError,
@@ -1934,7 +2016,7 @@ export const getBulkActionMutationOptions = <
   BulkActionMutationVariables,
   TContext
 > => {
-  const mutationKey = ["bulkAction"];
+  const mutationKey = getBulkActionMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -2216,6 +2298,8 @@ export const backfillCovers = async (
   });
 };
 
+export const getBackfillCoversMutationKey = () => ["backfillCovers"] as const;
+
 export const getBackfillCoversMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -2233,7 +2317,7 @@ export const getBackfillCoversMutationOptions = <
   BackfillCoversMutationVariables,
   TContext
 > => {
-  const mutationKey = ["backfillCovers"];
+  const mutationKey = getBackfillCoversMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -2471,8 +2555,21 @@ export const defineCustomField = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<CustomFieldOut>(getDefineCustomFieldUrl(), {
     ...options,
@@ -2484,6 +2581,9 @@ export const defineCustomField = async (
     body: JSON.stringify(customFieldCreate),
   });
 };
+
+export const getDefineCustomFieldMutationKey = () =>
+  ["defineCustomField"] as const;
 
 export const getDefineCustomFieldMutationOptions = <
   TError = HTTPValidationError,
@@ -2502,7 +2602,7 @@ export const getDefineCustomFieldMutationOptions = <
   DefineCustomFieldMutationVariables,
   TContext
 > => {
-  const mutationKey = ["defineCustomField"];
+  const mutationKey = getDefineCustomFieldMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -2587,6 +2687,9 @@ export const deleteCustomField = async (
   });
 };
 
+export const getDeleteCustomFieldMutationKey = () =>
+  ["deleteCustomField"] as const;
+
 export const getDeleteCustomFieldMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -2604,7 +2707,7 @@ export const getDeleteCustomFieldMutationOptions = <
   DeleteCustomFieldMutationVariables,
   TContext
 > => {
-  const mutationKey = ["deleteCustomField"];
+  const mutationKey = getDeleteCustomFieldMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -2679,8 +2782,21 @@ export const renameCustomField = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<CustomFieldOut>(getRenameCustomFieldUrl(fieldId), {
     ...options,
@@ -2692,6 +2808,9 @@ export const renameCustomField = async (
     body: JSON.stringify(customFieldRename),
   });
 };
+
+export const getRenameCustomFieldMutationKey = () =>
+  ["renameCustomField"] as const;
 
 export const getRenameCustomFieldMutationOptions = <
   TError = HTTPValidationError,
@@ -2710,7 +2829,7 @@ export const getRenameCustomFieldMutationOptions = <
   RenameCustomFieldMutationVariables,
   TContext
 > => {
-  const mutationKey = ["renameCustomField"];
+  const mutationKey = getRenameCustomFieldMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -3398,6 +3517,9 @@ export const backfillFromIdentifiers = async (
   );
 };
 
+export const getBackfillFromIdentifiersMutationKey = () =>
+  ["backfillFromIdentifiers"] as const;
+
 export const getBackfillFromIdentifiersMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -3415,7 +3537,7 @@ export const getBackfillFromIdentifiersMutationOptions = <
   BackfillFromIdentifiersMutationVariables,
   TContext
 > => {
-  const mutationKey = ["backfillFromIdentifiers"];
+  const mutationKey = getBackfillFromIdentifiersMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -3793,8 +3915,21 @@ export const mergeBooks = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<BookOut>(getMergeBooksUrl(), {
     ...options,
@@ -3806,6 +3941,8 @@ export const mergeBooks = async (
     body: JSON.stringify(mergeRequest),
   });
 };
+
+export const getMergeBooksMutationKey = () => ["mergeBooks"] as const;
 
 export const getMergeBooksMutationOptions = <
   TError = HTTPValidationError,
@@ -3824,7 +3961,7 @@ export const getMergeBooksMutationOptions = <
   MergeBooksMutationVariables,
   TContext
 > => {
-  const mutationKey = ["mergeBooks"];
+  const mutationKey = getMergeBooksMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -4073,8 +4210,21 @@ export const scanAdd = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<BookOut>(getScanAddUrl(), {
     ...options,
@@ -4086,6 +4236,8 @@ export const scanAdd = async (
     body: JSON.stringify(bookCreate),
   });
 };
+
+export const getScanAddMutationKey = () => ["scanAdd"] as const;
 
 export const getScanAddMutationOptions = <
   TError = HTTPValidationError,
@@ -4104,7 +4256,7 @@ export const getScanAddMutationOptions = <
   ScanAddMutationVariables,
   TContext
 > => {
-  const mutationKey = ["scanAdd"];
+  const mutationKey = getScanAddMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -4646,8 +4798,21 @@ export const createTag = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<TagOut>(getCreateTagUrl(), {
     ...options,
@@ -4659,6 +4824,8 @@ export const createTag = async (
     body: JSON.stringify(tagCreate),
   });
 };
+
+export const getCreateTagMutationKey = () => ["createTag"] as const;
 
 export const getCreateTagMutationOptions = <
   TError = HTTPValidationError,
@@ -4677,7 +4844,7 @@ export const getCreateTagMutationOptions = <
   CreateTagMutationVariables,
   TContext
 > => {
-  const mutationKey = ["createTag"];
+  const mutationKey = getCreateTagMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -4759,6 +4926,8 @@ export const deleteTag = async (
   });
 };
 
+export const getDeleteTagMutationKey = () => ["deleteTag"] as const;
+
 export const getDeleteTagMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -4776,7 +4945,7 @@ export const getDeleteTagMutationOptions = <
   DeleteTagMutationVariables,
   TContext
 > => {
-  const mutationKey = ["deleteTag"];
+  const mutationKey = getDeleteTagMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -4848,6 +5017,8 @@ export const emptyTrash = async (
   });
 };
 
+export const getEmptyTrashMutationKey = () => ["emptyTrash"] as const;
+
 export const getEmptyTrashMutationOptions = <
   TError = unknown,
   TContext = unknown,
@@ -4865,7 +5036,7 @@ export const getEmptyTrashMutationOptions = <
   void,
   TContext
 > => {
-  const mutationKey = ["emptyTrash"];
+  const mutationKey = getEmptyTrashMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -5101,6 +5272,8 @@ export const deleteBook = async (
   });
 };
 
+export const getDeleteBookMutationKey = () => ["deleteBook"] as const;
+
 export const getDeleteBookMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -5118,7 +5291,7 @@ export const getDeleteBookMutationOptions = <
   DeleteBookMutationVariables,
   TContext
 > => {
-  const mutationKey = ["deleteBook"];
+  const mutationKey = getDeleteBookMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -5336,8 +5509,21 @@ export const updateBookDetails = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<BookOut>(getUpdateBookDetailsUrl(bookId), {
     ...options,
@@ -5349,6 +5535,9 @@ export const updateBookDetails = async (
     body: JSON.stringify(bookDetailsUpdate),
   });
 };
+
+export const getUpdateBookDetailsMutationKey = () =>
+  ["updateBookDetails"] as const;
 
 export const getUpdateBookDetailsMutationOptions = <
   TError = HTTPValidationError,
@@ -5367,7 +5556,7 @@ export const getUpdateBookDetailsMutationOptions = <
   UpdateBookDetailsMutationVariables,
   TContext
 > => {
-  const mutationKey = ["updateBookDetails"];
+  const mutationKey = getUpdateBookDetailsMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -5450,8 +5639,21 @@ export const setCollection = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<BookOut>(getSetCollectionUrl(bookId), {
     ...options,
@@ -5463,6 +5665,8 @@ export const setCollection = async (
     body: JSON.stringify(collectionAssign),
   });
 };
+
+export const getSetCollectionMutationKey = () => ["setCollection"] as const;
 
 export const getSetCollectionMutationOptions = <
   TError = HTTPValidationError,
@@ -5481,7 +5685,7 @@ export const getSetCollectionMutationOptions = <
   SetCollectionMutationVariables,
   TContext
 > => {
-  const mutationKey = ["setCollection"];
+  const mutationKey = getSetCollectionMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -5728,8 +5932,21 @@ export const addCopy = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<BookOut>(getAddCopyUrl(bookId), {
     ...options,
@@ -5741,6 +5958,8 @@ export const addCopy = async (
     body: JSON.stringify(copyCreate),
   });
 };
+
+export const getAddCopyMutationKey = () => ["addCopy"] as const;
 
 export const getAddCopyMutationOptions = <
   TError = HTTPValidationError,
@@ -5759,7 +5978,7 @@ export const getAddCopyMutationOptions = <
   AddCopyMutationVariables,
   TContext
 > => {
-  const mutationKey = ["addCopy"];
+  const mutationKey = getAddCopyMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -5831,6 +6050,8 @@ export const uploadCover = async (
   });
 };
 
+export const getUploadCoverMutationKey = () => ["uploadCover"] as const;
+
 export const getUploadCoverMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -5848,7 +6069,7 @@ export const getUploadCoverMutationOptions = <
   UploadCoverMutationVariables,
   TContext
 > => {
-  const mutationKey = ["uploadCover"];
+  const mutationKey = getUploadCoverMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -6108,8 +6329,21 @@ export const setCustomField = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<CustomFieldValueOut[]>(
     getSetCustomFieldUrl(bookId, fieldId),
@@ -6124,6 +6358,8 @@ export const setCustomField = async (
     },
   );
 };
+
+export const getSetCustomFieldMutationKey = () => ["setCustomField"] as const;
 
 export const getSetCustomFieldMutationOptions = <
   TError = HTTPValidationError,
@@ -6142,7 +6378,7 @@ export const getSetCustomFieldMutationOptions = <
   SetCustomFieldMutationVariables,
   TContext
 > => {
-  const mutationKey = ["setCustomField"];
+  const mutationKey = getSetCustomFieldMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -6424,8 +6660,21 @@ export const reportDigitalReference = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<DigitalReferenceOut>(
     getReportDigitalReferenceUrl(bookId),
@@ -6440,6 +6689,9 @@ export const reportDigitalReference = async (
     },
   );
 };
+
+export const getReportDigitalReferenceMutationKey = () =>
+  ["reportDigitalReference"] as const;
 
 export const getReportDigitalReferenceMutationOptions = <
   TError = HTTPValidationError,
@@ -6458,7 +6710,7 @@ export const getReportDigitalReferenceMutationOptions = <
   ReportDigitalReferenceMutationVariables,
   TContext
 > => {
-  const mutationKey = ["reportDigitalReference"];
+  const mutationKey = getReportDigitalReferenceMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -6544,6 +6796,9 @@ export const forgetDigitalReference = async (
   });
 };
 
+export const getForgetDigitalReferenceMutationKey = () =>
+  ["forgetDigitalReference"] as const;
+
 export const getForgetDigitalReferenceMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -6561,7 +6816,7 @@ export const getForgetDigitalReferenceMutationOptions = <
   ForgetDigitalReferenceMutationVariables,
   TContext
 > => {
-  const mutationKey = ["forgetDigitalReference"];
+  const mutationKey = getForgetDigitalReferenceMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -6657,6 +6912,9 @@ export const reportDigitalReferenceMissing = async (
   );
 };
 
+export const getReportDigitalReferenceMissingMutationKey = () =>
+  ["reportDigitalReferenceMissing"] as const;
+
 export const getReportDigitalReferenceMissingMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -6674,7 +6932,7 @@ export const getReportDigitalReferenceMissingMutationOptions = <
   ReportDigitalReferenceMissingMutationVariables,
   TContext
 > => {
-  const mutationKey = ["reportDigitalReferenceMissing"];
+  const mutationKey = getReportDigitalReferenceMissingMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -6762,8 +7020,21 @@ export const setDiscuss = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<BookOut>(getSetDiscussUrl(bookId), {
     ...options,
@@ -6775,6 +7046,8 @@ export const setDiscuss = async (
     body: JSON.stringify(bookDiscussUpdate),
   });
 };
+
+export const getSetDiscussMutationKey = () => ["setDiscuss"] as const;
 
 export const getSetDiscussMutationOptions = <
   TError = HTTPValidationError,
@@ -6793,7 +7066,7 @@ export const getSetDiscussMutationOptions = <
   SetDiscussMutationVariables,
   TContext
 > => {
-  const mutationKey = ["setDiscuss"];
+  const mutationKey = getSetDiscussMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -6900,6 +7173,8 @@ export const enrichBook = async (
   });
 };
 
+export const getEnrichBookMutationKey = () => ["enrichBook"] as const;
+
 export const getEnrichBookMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -6917,7 +7192,7 @@ export const getEnrichBookMutationOptions = <
   EnrichBookMutationVariables,
   TContext
 > => {
-  const mutationKey = ["enrichBook"];
+  const mutationKey = getEnrichBookMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -7017,8 +7292,21 @@ export const applyEnrichment = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<BookEnrichmentOut>(getApplyEnrichmentUrl(bookId, params), {
     ...options,
@@ -7030,6 +7318,8 @@ export const applyEnrichment = async (
     body: JSON.stringify(bookMatch),
   });
 };
+
+export const getApplyEnrichmentMutationKey = () => ["applyEnrichment"] as const;
 
 export const getApplyEnrichmentMutationOptions = <
   TError = HTTPValidationError,
@@ -7048,7 +7338,7 @@ export const getApplyEnrichmentMutationOptions = <
   ApplyEnrichmentMutationVariables,
   TContext
 > => {
-  const mutationKey = ["applyEnrichment"];
+  const mutationKey = getApplyEnrichmentMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -7332,6 +7622,9 @@ export const forgetBookIdentifier = async (
   });
 };
 
+export const getForgetBookIdentifierMutationKey = () =>
+  ["forgetBookIdentifier"] as const;
+
 export const getForgetBookIdentifierMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -7349,7 +7642,7 @@ export const getForgetBookIdentifierMutationOptions = <
   ForgetBookIdentifierMutationVariables,
   TContext
 > => {
-  const mutationKey = ["forgetBookIdentifier"];
+  const mutationKey = getForgetBookIdentifierMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -7579,8 +7872,21 @@ export const addNote = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<NoteOut>(getAddNoteUrl(bookId), {
     ...options,
@@ -7592,6 +7898,8 @@ export const addNote = async (
     body: JSON.stringify(noteCreate),
   });
 };
+
+export const getAddNoteMutationKey = () => ["addNote"] as const;
 
 export const getAddNoteMutationOptions = <
   TError = HTTPValidationError,
@@ -7610,7 +7918,7 @@ export const getAddNoteMutationOptions = <
   AddNoteMutationVariables,
   TContext
 > => {
-  const mutationKey = ["addNote"];
+  const mutationKey = getAddNoteMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -7678,6 +7986,8 @@ export const deleteNote = async (
   });
 };
 
+export const getDeleteNoteMutationKey = () => ["deleteNote"] as const;
+
 export const getDeleteNoteMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -7695,7 +8005,7 @@ export const getDeleteNoteMutationOptions = <
   DeleteNoteMutationVariables,
   TContext
 > => {
-  const mutationKey = ["deleteNote"];
+  const mutationKey = getDeleteNoteMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -7763,8 +8073,21 @@ export const editNote = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<NoteOut>(getEditNoteUrl(bookId, noteId), {
     ...options,
@@ -7776,6 +8099,8 @@ export const editNote = async (
     body: JSON.stringify(noteCreate),
   });
 };
+
+export const getEditNoteMutationKey = () => ["editNote"] as const;
 
 export const getEditNoteMutationOptions = <
   TError = HTTPValidationError,
@@ -7794,7 +8119,7 @@ export const getEditNoteMutationOptions = <
   EditNoteMutationVariables,
   TContext
 > => {
-  const mutationKey = ["editNote"];
+  const mutationKey = getEditNoteMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -7865,8 +8190,21 @@ export const setOwnership = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<BookOut>(getSetOwnershipUrl(bookId), {
     ...options,
@@ -7878,6 +8216,8 @@ export const setOwnership = async (
     body: JSON.stringify(ownershipUpdate),
   });
 };
+
+export const getSetOwnershipMutationKey = () => ["setOwnership"] as const;
 
 export const getSetOwnershipMutationOptions = <
   TError = HTTPValidationError,
@@ -7896,7 +8236,7 @@ export const getSetOwnershipMutationOptions = <
   SetOwnershipMutationVariables,
   TContext
 > => {
-  const mutationKey = ["setOwnership"];
+  const mutationKey = getSetOwnershipMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -7970,6 +8310,8 @@ export const purgeBook = async (
   });
 };
 
+export const getPurgeBookMutationKey = () => ["purgeBook"] as const;
+
 export const getPurgeBookMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -7987,7 +8329,7 @@ export const getPurgeBookMutationOptions = <
   PurgeBookMutationVariables,
   TContext
 > => {
-  const mutationKey = ["purgeBook"];
+  const mutationKey = getPurgeBookMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -8054,8 +8396,21 @@ export const setPrivacy = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<BookOut>(getSetPrivacyUrl(bookId), {
     ...options,
@@ -8067,6 +8422,8 @@ export const setPrivacy = async (
     body: JSON.stringify(privacyUpdate),
   });
 };
+
+export const getSetPrivacyMutationKey = () => ["setPrivacy"] as const;
 
 export const getSetPrivacyMutationOptions = <
   TError = HTTPValidationError,
@@ -8085,7 +8442,7 @@ export const getSetPrivacyMutationOptions = <
   SetPrivacyMutationVariables,
   TContext
 > => {
-  const mutationKey = ["setPrivacy"];
+  const mutationKey = getSetPrivacyMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -8320,8 +8677,21 @@ export const addProgress = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<ProgressOut>(getAddProgressUrl(bookId), {
     ...options,
@@ -8333,6 +8703,8 @@ export const addProgress = async (
     body: JSON.stringify(progressCreate),
   });
 };
+
+export const getAddProgressMutationKey = () => ["addProgress"] as const;
 
 export const getAddProgressMutationOptions = <
   TError = HTTPValidationError,
@@ -8351,7 +8723,7 @@ export const getAddProgressMutationOptions = <
   AddProgressMutationVariables,
   TContext
 > => {
-  const mutationKey = ["addProgress"];
+  const mutationKey = getAddProgressMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -8436,6 +8808,8 @@ export const deleteProgress = async (
   });
 };
 
+export const getDeleteProgressMutationKey = () => ["deleteProgress"] as const;
+
 export const getDeleteProgressMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -8453,7 +8827,7 @@ export const getDeleteProgressMutationOptions = <
   DeleteProgressMutationVariables,
   TContext
 > => {
-  const mutationKey = ["deleteProgress"];
+  const mutationKey = getDeleteProgressMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -8678,8 +9052,21 @@ export const addQuote = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<QuoteOut>(getAddQuoteUrl(bookId), {
     ...options,
@@ -8691,6 +9078,8 @@ export const addQuote = async (
     body: JSON.stringify(quoteCreate),
   });
 };
+
+export const getAddQuoteMutationKey = () => ["addQuote"] as const;
 
 export const getAddQuoteMutationOptions = <
   TError = HTTPValidationError,
@@ -8709,7 +9098,7 @@ export const getAddQuoteMutationOptions = <
   AddQuoteMutationVariables,
   TContext
 > => {
-  const mutationKey = ["addQuote"];
+  const mutationKey = getAddQuoteMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -8777,6 +9166,8 @@ export const deleteQuote = async (
   });
 };
 
+export const getDeleteQuoteMutationKey = () => ["deleteQuote"] as const;
+
 export const getDeleteQuoteMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -8794,7 +9185,7 @@ export const getDeleteQuoteMutationOptions = <
   DeleteQuoteMutationVariables,
   TContext
 > => {
-  const mutationKey = ["deleteQuote"];
+  const mutationKey = getDeleteQuoteMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -8865,8 +9256,21 @@ export const editQuote = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<QuoteOut>(getEditQuoteUrl(bookId, quoteId), {
     ...options,
@@ -8878,6 +9282,8 @@ export const editQuote = async (
     body: JSON.stringify(quoteCreate),
   });
 };
+
+export const getEditQuoteMutationKey = () => ["editQuote"] as const;
 
 export const getEditQuoteMutationOptions = <
   TError = HTTPValidationError,
@@ -8896,7 +9302,7 @@ export const getEditQuoteMutationOptions = <
   EditQuoteMutationVariables,
   TContext
 > => {
-  const mutationKey = ["editQuote"];
+  const mutationKey = getEditQuoteMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -8973,8 +9379,21 @@ export const setRating = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<BookOut>(getSetRatingUrl(bookId), {
     ...options,
@@ -8986,6 +9405,8 @@ export const setRating = async (
     body: JSON.stringify(bookRatingUpdate),
   });
 };
+
+export const getSetRatingMutationKey = () => ["setRating"] as const;
 
 export const getSetRatingMutationOptions = <
   TError = HTTPValidationError,
@@ -9004,7 +9425,7 @@ export const getSetRatingMutationOptions = <
   SetRatingMutationVariables,
   TContext
 > => {
-  const mutationKey = ["setRating"];
+  const mutationKey = getSetRatingMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -9074,6 +9495,8 @@ export const refreshMetadata = async (
   });
 };
 
+export const getRefreshMetadataMutationKey = () => ["refreshMetadata"] as const;
+
 export const getRefreshMetadataMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -9091,7 +9514,7 @@ export const getRefreshMetadataMutationOptions = <
   RefreshMetadataMutationVariables,
   TContext
 > => {
-  const mutationKey = ["refreshMetadata"];
+  const mutationKey = getRefreshMetadataMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -9167,6 +9590,8 @@ export const restoreBook = async (
   });
 };
 
+export const getRestoreBookMutationKey = () => ["restoreBook"] as const;
+
 export const getRestoreBookMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -9184,7 +9609,7 @@ export const getRestoreBookMutationOptions = <
   RestoreBookMutationVariables,
   TContext
 > => {
-  const mutationKey = ["restoreBook"];
+  const mutationKey = getRestoreBookMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -9256,8 +9681,21 @@ export const updateStatus = async (
   ): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
   return customFetch<BookOut>(getUpdateStatusUrl(bookId), {
     ...options,
@@ -9269,6 +9707,8 @@ export const updateStatus = async (
     body: JSON.stringify(bookStatusUpdate),
   });
 };
+
+export const getUpdateStatusMutationKey = () => ["updateStatus"] as const;
 
 export const getUpdateStatusMutationOptions = <
   TError = HTTPValidationError,
@@ -9287,7 +9727,7 @@ export const getUpdateStatusMutationOptions = <
   UpdateStatusMutationVariables,
   TContext
 > => {
-  const mutationKey = ["updateStatus"];
+  const mutationKey = getUpdateStatusMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -9361,6 +9801,8 @@ export const removeBookTag = async (
   });
 };
 
+export const getRemoveBookTagMutationKey = () => ["removeBookTag"] as const;
+
 export const getRemoveBookTagMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -9378,7 +9820,7 @@ export const getRemoveBookTagMutationOptions = <
   RemoveBookTagMutationVariables,
   TContext
 > => {
-  const mutationKey = ["removeBookTag"];
+  const mutationKey = getRemoveBookTagMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -9449,6 +9891,8 @@ export const addBookTag = async (
   });
 };
 
+export const getAddBookTagMutationKey = () => ["addBookTag"] as const;
+
 export const getAddBookTagMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
@@ -9466,7 +9910,7 @@ export const getAddBookTagMutationOptions = <
   AddBookTagMutationVariables,
   TContext
 > => {
-  const mutationKey = ["addBookTag"];
+  const mutationKey = getAddBookTagMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
