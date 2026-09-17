@@ -715,7 +715,7 @@ class TestOneBadRecordCostsOneResult:
     record used to cost the whole result, and almost nothing does any more.
 
     **Two bounds moved below this guard, a week apart, and each took a field
-    out of reach of it.** `_pages_from_extent` was range checked on
+    out of reach of it.** `bibliographic.pages_from_extent` was range checked on
     2026-08-27, so an out of range extent costs the page count. Every scalar a
     `catalogue.Record` carries was bounded at construction on 2026-09-03, so a
     `9999` year, an over-wide title or an over-wide publisher costs that field.
@@ -854,7 +854,7 @@ class TestOneBadRecordCostsOneResult:
 
         **On the categories, and this is the third field it has sat on.** It
         poisoned the record with `999999 Seiten` until 2026-08-27, when
-        `_pages_from_extent` began range checking what it parses; then with a
+        `bibliographic.pages_from_extent` began range checking what it parses; then with a
         `9999` year, until 2026-09-03, when `catalogue.Record` began clearing
         every scalar its column cannot hold at construction. Both moves cost
         the field rather than the row, which is what this test then has to stop

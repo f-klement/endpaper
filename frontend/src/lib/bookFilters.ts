@@ -18,6 +18,10 @@
  * client-only allowlist is empty, so nothing in `BookFilters` is view state and
  * it is not a view model. `lib/libraryView.ts` already holds `LibraryView` by
  * the same logic. `pages/Home/types.ts` re-exports both, so no consumer moved.
+ *
+ * `toggledFilter` is here for that reason and not as a convenience: which
+ * fields hold a list, and what picking one of their values a second time means,
+ * are facts about the filter set rather than about whichever control offers it.
  */
 
 import {
@@ -103,6 +107,49 @@ export const DEFAULT_FILTERS: BookFilters = {
   headings: [],
   ddcDivisions: [],
 };
+
+/**
+ * A filter whose value is a list.
+ *
+ * Read off the shape rather than written out, so a fourth list filter is
+ * covered by existing. A named list is what goes stale beside the type it
+ * claims to describe.
+ */
+export type ListFilterKey = {
+  [K in keyof BookFilters]: BookFilters[K] extends unknown[] ? K : never;
+}[keyof BookFilters];
+
+/**
+ * The patch that puts one value into a list filter, or takes it back out.
+ *
+ * A patch rather than a new filter set, because the library hook takes patches
+ * through one door.
+ *
+ * **The filters handed in must be the ones currently rendered**, since the
+ * patch is computed here rather than inside the state update: two toggles
+ * landing in one React batch keep the last only, so a control that fires two
+ * folds them into one patch.
+ *
+ * Which fields are lists is this module's business rather than a caller's, so
+ * naming a field that is not one is a compile error rather than a filter that
+ * quietly stops narrowing. Whether a list is ANDed or ORed does not reach here:
+ * that is the server's, and it is recorded on the fields above.
+ */
+export function toggledFilter<K extends ListFilterKey>(
+  filters: BookFilters,
+  field: K,
+  value: BookFilters[K][number],
+): Pick<BookFilters, K> {
+  const current: BookFilters[K][number][] = filters[field];
+  const next = current.includes(value)
+    ? current.filter((entry) => entry !== value)
+    : [...current, value];
+  // The cast is the computed key alone: TypeScript types `{ [field]: next }` as
+  // a partial record whatever `field` is, and the element type is already
+  // checked by the signature. Widening the return instead would let a caller
+  // spread a patch that names no field at all.
+  return { [field]: next } as Pick<BookFilters, K>;
+}
 
 function isStatus(value: string | null): value is ReadStatus {
   return (

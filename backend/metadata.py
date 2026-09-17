@@ -55,6 +55,16 @@ import google_books
 import sources
 import targets
 import z3950
+from bibliographic import (
+    LANGUAGES,
+    flip_catalogue_name,
+    is_a_disc,
+    is_physical_book,
+    is_placeholder_title,
+    pages_from_extent,
+    split_title_statement,
+    strip_isbd_punctuation,
+)
 from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
 from enums import (
     AuthorityScheme,
@@ -353,7 +363,7 @@ def _open_library_language(raw: object) -> str | None:
     key = first.get("key") if isinstance(first, dict) else None
     if not isinstance(key, str):
         return None
-    return _LANGUAGES.get(key.rsplit("/", 1)[-1].lower())
+    return LANGUAGES.get(key.rsplit("/", 1)[-1].lower())
 
 
 def _open_library_pages(raw: object) -> int | None:
@@ -374,7 +384,7 @@ def _open_library_pages(raw: object) -> int | None:
     which is the argument for deleting the one check that stands between a wiki
     field and the row.
 
-    The unbounded writer is pre-existing (`_pages_from_extent` and
+    The unbounded writer is pre-existing (`pages_from_extent` and
     `google_books` pass their values through raw). What is new is the supplier:
     Open Library is a wiki and this field is editable by any account, with no
     MARC extent string in between, which is a weaker boundary than either of the
@@ -1093,7 +1103,7 @@ def _subject_identifier(entry: _Subfields) -> str | None:
 # split (`245 $a` and `$b`) rather than one statement of responsibility to take
 # apart by hand, and an extent on 85 of 85 records where `dc:format` was
 # present on 51 of 74. That last one matters more than it sounds: the old
-# parser did run `_is_physical_book`, on `dc:format`, and an online record has
+# parser did run `is_physical_book`, on `dc:format`, and an online record has
 # no `dc:format`, so the one thing it could never reject was the one thing that
 # field exists to reject. `300 $a` says "Online-Ressource" on all 28 of the 85
 # records that are one.
@@ -1103,130 +1113,6 @@ def _subject_identifier(entry: _Subfields) -> str | None:
 
 #: Kept because the BnF parser reads Dublin Core. The DNB no longer does.
 _DC: Final = "{http://purl.org/dc/elements/1.1/}"
-
-# ISO 639-2/B, which is what every MARC-derived source emits, to the 639-1
-# codes stored elsewhere. Shared by the DNB and K10plus parsers.
-_LANGUAGES: Final[dict[str, str]] = {
-    "ger": "de",
-    "deu": "de",
-    "eng": "en",
-    "fre": "fr",
-    "fra": "fr",
-    "ita": "it",
-    "spa": "es",
-    "dut": "nl",
-    "nld": "nl",
-    "pol": "pl",
-    "rus": "ru",
-    "por": "pt",
-    "swe": "sv",
-    "dan": "da",
-    "nor": "no",
-    "fin": "fi",
-    "cze": "cs",
-    "gre": "el",
-    "tur": "tr",
-    "jpn": "ja",
-    "chi": "zh",
-    "ukr": "uk",
-    "lat": "la",
-}
-
-
-def _dc_title_statement(raw: str) -> tuple[str, str | None]:
-    """Pull a title and subtitle out of a whole Dublin Core title statement.
-
-    **The BnF is the only caller.** This was the DNB parser until the DNB moved
-    to MARC21, where `245 $a` and `$b` arrive already separated and none of
-    this guessing is needed; the BnF still writes the statement of
-    responsibility into `dc:title` the same way, so the parser moved rather
-    than being deleted. The example below is the DNB record it was written
-    against.
-
-    A record carries one string holding as much as:
-
-        [Docker: up & running] ; Praxiswissen Docker : Grundlagen und Best
-        Practices ... / Sean P. Kane mit Karl Matthias ; deutsche Übersetzung
-        von Thomas Demmig
-
-    which is, in order: the original title of a translation in brackets, the
-    German title, a colon and the subtitle, then a slash and the statement of
-    responsibility. Everything after the slash duplicates `dc:creator`, and the
-    bracketed part is a different book's title, so both are dropped.
-    """
-    title = raw.strip()
-
-    # The statement of responsibility. Split on the first " / " only: a title
-    # may legitimately contain a slash later on.
-    title = title.split(" / ", 1)[0].strip()
-
-    # A leading "[original title] ; " on a translation.
-    title = re.sub(r"^\[[^\]]*\]\s*;\s*", "", title).strip()
-
-    # Anything still separated by " ; " is a second work in the same volume.
-    title = title.split(" ; ", 1)[0].strip()
-
-    if " : " in title:
-        main, subtitle = title.split(" : ", 1)
-        return main.strip(), subtitle.strip() or None
-    return title, None
-
-
-def _pages_from_extent(raw: str | None) -> int | None:
-    r"""`390 Seiten`, `348 S.` and `528 p.` all become a number.
-
-    Shared by every MARC derived source. **The unit is required rather than
-    optional**, because an extent statement also carries plate counts and
-    dimensions, so a bare number would sometimes be the wrong one.
-
-    **The digit run is bounded, and that is a fix for a 500.** CPython refuses an
-    int conversion of more than `sys.get_int_max_str_digits()` digits and raises
-    **`ValueError`**, which is neither `httpx.HTTPError` nor
-    `ElementTree.ParseError`, so no SRU handler caught it: one record carrying
-    4,301 digits in its `300 $a` turned search and lookup into a 500 for every
-    MARC source at once.
-
-    **`fetch.MAX_RESPONSE_BYTES` cannot reach it**, because the poisoned envelope
-    is smaller than the smallest honest response that source sends.
-
-    **The lookbehind makes it a refusal rather than a guess**: a bare digit run
-    matches across a separator and invents a page count. The range is
-    `MAX_PAGE_NUMBER_IN_A_BOOK`.
-
-    This **extracts**, where `_NOT_A_BOOK` **refuses**, which is why a per source
-    phrasing belongs there and not here. Only spellings actually measured are
-    listed.
-    """
-    if not raw:
-        return None
-    match = re.search(
-        r"(?<!\d)(\d{1,6})\s*(?:Seiten|Bl\.|S\.|pages|p\.|pp\.|stran)", raw
-    )
-    if not match:
-        return None
-    pages = int(match.group(1))
-    return pages if 0 < pages <= MAX_PAGE_NUMBER_IN_A_BOOK else None
-
-
-#: Titles that are a position in a multi-volume set rather than a book.
-#:
-#: The DNB's `num=` index matches any identifier anywhere in a record,
-#: including the "also published as" cross references a collected edition
-#: carries for its parts. Searching a French ISBN therefore returned a German
-#: multi-volume record whose whole title was `[Hauptbd.].`, and the chain
-#: accepted it, because it had a title and a date and looked like a hit.
-#:
-#: Measured: `9782070360024` (Gallimard, L'Étranger) returns exactly that.
-_PLACEHOLDER_TITLES: Final = re.compile(
-    r"^\[?\s*(Hauptbd|Haupt-Bd|Bd|Band|Teil|Vol|Volume|Reg|Register)\b", re.IGNORECASE
-)
-
-
-def _is_placeholder_title(title: str) -> bool:
-    """Whether a title names a volume slot rather than a work."""
-    stripped = title.strip().strip("[].").strip()
-    return not stripped or bool(_PLACEHOLDER_TITLES.match(title.strip()))
-
 
 #: Subject fields whose headings are authority controlled, in the order they
 #: are read.
@@ -1308,7 +1194,7 @@ def _dnb_subjects(
     headings: list[Heading] = []
     for tag in _DNB_SUBJECT_TAGS:
         for entry in fields.get(tag, []):
-            heading = _strip_marc_punctuation(entry.get("a", ""))
+            heading = strip_isbd_punctuation(entry.get("a", ""))
             if not heading:
                 continue
             vocabulary = _subject_vocabulary(tag, entry)
@@ -1359,21 +1245,21 @@ def _dnb_record(
     # A cross-referenced ISBN matched a volume slot, not this book. Reporting a
     # miss is right: some other catalogue may hold the real record, and putting
     # `[Hauptbd.].` in as a title poisons the entry for good.
-    if _is_placeholder_title(title):
+    if is_placeholder_title(title):
         return None
 
     # **The one refusal here still decided by prose, and it decides almost
     # nothing.** Measured over 510 live DNB search records on 2026-09-03, 91 are
-    # discs by their own codes and `_IS_A_DISC` names **0** of them: the German
+    # discs by their own codes and `is_a_disc` names **0** of them: the German
     # for what this catalogue holds is `2 CDs`, `15 CDs`, `1 Schallplatte` and
-    # `1 Track`, and `_DISC_FORMS` spells none of those. 84 of the 91 are refused
-    # anyway by the **online** half of `_NOT_A_BOOK`, because a DNB audiobook is
+    # `1 Track`, and `bibliographic._DISC_FORMS` spells none of those. 84 of the 91 are refused
+    # anyway by the **online** half of `bibliographic._NOT_A_BOOK`, because a DNB audiobook is
     # usually a download, so the disc half has been carrying none of them and
     # **7 escape both halves**: `1 Track` twice, `2 CDs` twice, `1 CD`,
     # `1 Schallplatte`, `15 CDs`. An earlier draft of this sentence credited the
     # disc half with those 7, which inverts what they are and would send anyone
-    # deleting `_IS_A_DISC` looking for seven regressions that do not exist.
-    # Both critics caught it separately. Separately again, `_IS_A_DISC` names 7
+    # deleting `is_a_disc` looking for seven regressions that do not exist.
+    # Both critics caught it separately. Separately again, `is_a_disc` names 7
     # records across all 2,605, and that coincidence is where the wrong 7 came
     # from.
     #
@@ -1385,7 +1271,7 @@ def _dnb_record(
     # ranked down at a lookup where one it names is a miss. Closing that means
     # giving this function the record node, a four call site signature change,
     # and it changes an answer rather than correcting one.
-    if _IS_A_DISC.search(_marc_extent(fields) or ""):
+    if is_a_disc(_marc_extent(fields)):
         return None
 
     isbn = isbn or _marc_isbn(fields)
@@ -1406,7 +1292,7 @@ def _dnb_record(
         # special case that has to be remembered.
         description=_marc_description(fields),
         language=_marc_language(fields),
-        page_count=_pages_from_extent(_marc_extent(fields)),
+        page_count=pages_from_extent(_marc_extent(fields)),
         # No cover in a MARC record. Open Library serves one by ISBN for a good
         # number of German books even where it has no edition record, so it is
         # worth the guess. Built by covers.py, which is the only module allowed
@@ -1436,7 +1322,7 @@ def _dnb_record(
 # as" cross reference an ebook record carries for its print edition, so the
 # catalogue's first answer for a printed book's ISBN is sometimes the ebook.
 # Under Dublin Core there was no way to tell: `dc:format` is absent on an
-# online record, so `_is_physical_book` had nothing to test and the ebook was
+# online record, so `is_physical_book` had nothing to test and the ebook was
 # taken. Measured over 74 live lookups on 2026-08-24: 8 answers held more than
 # one record, and asking for five rather than one puts a printed edition in
 # front of an online one twice and changes no other pick.
@@ -1545,17 +1431,6 @@ def _marc_claims_isbn(fields: dict[str, list[_Subfields]], isbn: str) -> bool:
     )
 
 
-#: What a catalogue hangs off a person's name. The BnF writes
-#: `Zafón, Carlos (1964-2020). Auteur du texte`; MARC and MODS write
-#: `Melville, Herman, 1819-1891`. None of it is part of the name.
-_PERSON_NOISE: Final = re.compile(
-    r"\s*\(\s*\d{3,4}\s*[-–]?\s*\d{0,4}\s*\)"  # (1964-2020)
-    r"|\s*\.\s*(Auteur|Autrice|Éditeur|Editeur|Traducteur|Traductrice|"
-    r"Illustrateur|Illustratrice|Préfacier|Compilateur)[^.]*\.?\s*$"
-    r"|,\s*\d{4}\s*[-–]\s*\d{0,4}\s*$",  # , 1819-1891
-    re.IGNORECASE,
-)
-
 #: BnF role markers for somebody who wrote the thing. A record with no marker
 #: at all is the main entry and is kept.
 _BNF_AUTHOR_ROLES: Final = ("auteur", "autrice", "author")
@@ -1567,39 +1442,6 @@ _BNF_ANY_ROLE: Final = re.compile(
     r"Illustratrice|Préfacier|Compilateur|Author|Editor|Translator)",
     re.IGNORECASE,
 )
-
-
-#: A trailing initial, which is the one full stop in a name that is part of it.
-#: `Pohl, Robert O.` loses its meaning as `Robert O`, and the ISBD full stop
-#: this strips off `Melville, Herman.` looks exactly the same to a regex.
-#: Measured: 2 of 53 live DNB records credit an author with a trailing initial.
-_TRAILING_INITIAL: Final = re.compile(r"(?:^|[\s.])[A-Za-z]\.$")
-
-
-def _strip_person_noise(raw: str) -> str:
-    """Drop life dates and role words from a catalogue person string."""
-    cleaned = raw
-    for _ in range(3):  # A name can carry both, in either order.
-        stripped = _PERSON_NOISE.sub("", cleaned).strip().rstrip(",;")
-        if stripped.endswith(".") and not _TRAILING_INITIAL.search(stripped):
-            stripped = stripped[:-1].strip()
-        if stripped == cleaned:
-            break
-        cleaned = stripped
-    return cleaned
-
-
-def _flip_catalogue_name(raw: str) -> str:
-    """`Williams, John` becomes `John Williams`.
-
-    One comma means a person in catalogue order. None, or more than one, means
-    something else (a corporate body, a compound credit) and is left alone.
-    """
-    name = _strip_person_noise(raw.strip()).rstrip(",")
-    if name.count(",") != 1:
-        return name
-    surname, forenames = (part.strip() for part in name.split(","))
-    return f"{forenames} {surname}" if surname and forenames else name
 
 
 def _marc_author_entries(
@@ -1626,7 +1468,7 @@ def _marc_author_entries(
     entries: list[tuple[str, _Subfields]] = []
     for entry in fields.get("100", []):
         if entry.get("a"):
-            entries.append((_flip_catalogue_name(entry["a"]), entry))
+            entries.append((flip_catalogue_name(entry["a"]), entry))
     for entry in fields.get("700", []):
         # `t` marks an added entry for a *work*, not a person: the row exists
         # to link the original title, and its name is the original author's.
@@ -1635,7 +1477,7 @@ def _marc_author_entries(
             and "t" not in entry
             and any(code in _AUTHOR_RELATORS for code in _relator_codes(entry))
         ):
-            entries.append((_flip_catalogue_name(entry["a"]), entry))
+            entries.append((flip_catalogue_name(entry["a"]), entry))
     seen: dict[str, _Subfields] = {}
     for name, entry in entries:
         seen.setdefault(name, entry)
@@ -1695,7 +1537,7 @@ def _marc_credited_names(fields: dict[str, list[_Subfields]]) -> str | None:
             # `$t` marks an added entry for a *work* rather than a person: the
             # row links the original title and carries its author's name.
             if entry.get("a") and "t" not in entry:
-                names.setdefault(_flip_catalogue_name(entry["a"]), None)
+                names.setdefault(flip_catalogue_name(entry["a"]), None)
     return ", ".join(names) or None
 
 
@@ -1719,9 +1561,9 @@ def _marc_title(entry: _Subfields) -> tuple[str, str | None, str | None, float |
     that did subfield itself has already answered this question, and a title
     with a colon in it is then the title.
     """
-    main = _strip_marc_punctuation(entry.get("a", ""))
-    part_title = _strip_marc_punctuation(entry.get("p", ""))
-    subtitle = _strip_marc_punctuation(entry.get("b", "")) or None
+    main = strip_isbd_punctuation(entry.get("a", ""))
+    part_title = strip_isbd_punctuation(entry.get("p", ""))
+    subtitle = strip_isbd_punctuation(entry.get("b", "")) or None
 
     series_name: str | None = None
     series_index: float | None = None
@@ -1734,19 +1576,9 @@ def _marc_title(entry: _Subfields) -> tuple[str, str | None, str | None, float |
         title = main
 
     if subtitle is None:
-        title, subtitle = _dc_title_statement(title)
+        title, subtitle = split_title_statement(title)
 
     return _fix_non_filing_space(title), subtitle, series_name, series_index
-
-
-def _strip_marc_punctuation(raw: str) -> str:
-    """Drop the ISBD punctuation that introduces the *next* subfield.
-
-    Catalogue records end a subfield with the separator for the one after it,
-    so `$a` reads `Stoner :` when a subtitle follows. Leaving it in puts a
-    stray colon at the end of half the titles in the library.
-    """
-    return raw.strip().rstrip("/:;,=").strip()
 
 
 def _fix_non_filing_space(title: str) -> str:
@@ -1788,7 +1620,7 @@ def _marc_publisher(fields: dict[str, list[_Subfields]]) -> str | None:
 def _marc_language(fields: dict[str, list[_Subfields]]) -> str | None:
     """The first 041 code this app has a two letter equivalent for."""
     for entry in fields.get("041", []):
-        language = _LANGUAGES.get(entry.get("a", "").lower())
+        language = LANGUAGES.get(entry.get("a", "").lower())
         if language:
             return language
     return None
@@ -1797,8 +1629,8 @@ def _marc_language(fields: dict[str, list[_Subfields]]) -> str | None:
 def _marc_extent(fields: dict[str, list[_Subfields]]) -> str | None:
     """300 `$a`: the page count, and whether this is a book at all.
 
-    Two readers, and they are not the same question: `_pages_from_extent`
-    wants the number, `_is_physical_book` wants to know whether the string
+    Two readers, and they are not the same question: `pages_from_extent`
+    wants the number, `is_physical_book` wants to know whether the string
     says "Online-Ressource".
     """
     return next((entry.get("a") for entry in fields.get("300", [])), None)
@@ -1921,7 +1753,7 @@ def _k10plus_record(
         year=_marc_year(fields),
         description=_marc_description(fields),
         language=_marc_language(fields),
-        page_count=_pages_from_extent(_marc_extent(fields)),
+        page_count=pages_from_extent(_marc_extent(fields)),
         series_name=series_name,
         series_index=series_index,
         # No cover in a MARC record. The Open Library cover service answers by
@@ -2043,7 +1875,7 @@ def _k10plus_record(
 #: nothing already here catches them. Measured over 8 title searches on
 #: 2026-08-27, 280 records: 155 (55.4%) are level `a`, journal articles and
 #: book chapters with a 773 host item entry and usually no 300 extent at all.
-#: `_is_physical_book` tests the extent for an online form and the title for a
+#: `is_physical_book` tests the extent for an online form and the title for a
 #: volume slot, and an absent extent passes both, so every one of the 155 would
 #: have reached the picker as a book.
 #:
@@ -2304,14 +2136,14 @@ def _nkp_claims_isbn(record: ElementTree.Element, isbn: str) -> bool:
 
 #: What this catalogue calls an online resource.
 #:
-#: **`_NOT_A_BOOK` is written in German and English and does not reach Czech.**
+#: **`bibliographic._NOT_A_BOOK` is written in German and English and does not reach Czech.**
 #: `online[- ]?(?:ressource|resource)` and `elektronische ressource` match
 #: nothing in `1 online zdroj (106 pages) :`, which is what this catalogue writes
 #: and which appeared in the first record ever probed from it. So the refusal
 #: that keeps a digitised copy off a shelf was language scoped, and silently, for
 #: every catalogue that is not German or English.
 #:
-#: **Added here rather than to `_ONLINE_FORMS`, deliberately.** Widening the
+#: **Added here rather than to `bibliographic._ONLINE_FORMS`, deliberately.** Widening the
 #: shared pattern is the tempting move and it changes what every other source
 #: refuses, on a phrase measured in one catalogue. This source states its own
 #: and `test_metadata.py` pins that the shared rule is unchanged.
@@ -2364,7 +2196,7 @@ def _nkp_record(
     **Nothing was observed with the firm first**, so nothing tests it, and
     positional selection is not the same rule as filtering firms. Recorded rather
     than guarded because a filter guessed from one example is the shape this
-    repository keeps paying for: `_NOT_A_BOOK` widened on an unmeasured phrase is
+    repository keeps paying for: `bibliographic._NOT_A_BOOK` widened on an unmeasured phrase is
     the same mistake with a different constant. A real contributor role reader
     belongs to whichever ticket gives this source a second measurement.
     """
@@ -2380,10 +2212,10 @@ def _nkp_record(
 
     # `Ostře sledované vlaky /` is how this catalogue writes it: the ISBD slash
     # introduces a statement of responsibility that is not in this record at
-    # all, so `_dc_title_statement` has nothing to split off and leaves it.
-    title, subtitle = _dc_title_statement(titles[0])
-    title = _strip_marc_punctuation(title)
-    # **Both halves, and the subtitle half was missing.** `_dc_title_statement`
+    # all, so `split_title_statement` has nothing to split off and leaves it.
+    title, subtitle = split_title_statement(titles[0])
+    title = strip_isbd_punctuation(title)
+    # **Both halves, and the subtitle half was missing.** `split_title_statement`
     # drops a statement of responsibility only where the slash has a space after
     # it, and both catalogues in this dialect write `main : sub /` with nothing
     # following, so the slash survives into the subtitle. The title beside it
@@ -2391,16 +2223,16 @@ def _nkp_record(
     # back with `del juego al reclutamiento /` under it, measured over 10 live
     # Argentine records on 2026-09-07, 3 of which carry a subtitle and all 3 of
     # those ended in a slash. Stripped here rather than inside
-    # `_dc_title_statement`, which the BnF and the DNB also call.
-    subtitle = _strip_marc_punctuation(subtitle) if subtitle else None
-    if _is_placeholder_title(title):
+    # `split_title_statement`, which the BnF and the DNB also call.
+    subtitle = strip_isbd_punctuation(subtitle) if subtitle else None
+    if is_placeholder_title(title):
         return None
 
     extent = next(iter(_nkp_text(record, "format")), None)
     # Two refusals rather than one: the shared rule for the forms every source
     # writes, and this catalogue's own Czech phrasing, which the shared one
     # cannot see. See `_NKP_ONLINE`.
-    if not _is_physical_book(extent, title) or (
+    if not is_physical_book(extent, title) or (
         extent is not None and _NKP_ONLINE.search(extent)
     ):
         return None
@@ -2414,11 +2246,11 @@ def _nkp_record(
         isbn=isbn,
         title=title,
         subtitle=subtitle,
-        author=_flip_catalogue_name(contributors[0]) if contributors else None,
-        publisher=_strip_marc_punctuation(publisher) if publisher else None,
+        author=flip_catalogue_name(contributors[0]) if contributors else None,
+        publisher=strip_isbd_punctuation(publisher) if publisher else None,
         year=int(year_match.group()) if year_match else None,
-        language=_LANGUAGES.get((_nkp_text(record, "language") or [""])[0].lower()),
-        page_count=_pages_from_extent(extent),
+        language=LANGUAGES.get((_nkp_text(record, "language") or [""])[0].lower()),
+        page_count=pages_from_extent(extent),
         cover_url=covers.open_library_url(isbn),
         # The un-namespaced dialect, and it has no more room for a stamp than
         # the namespaced one: see `catalogue.uncontrolled`.
@@ -2654,7 +2486,7 @@ def _nkp_record(
 # and it would not clear `sources.SLOT_MUST_EARN` for a tier slot.
 #
 # **The Spanish for an online resource is not refused**, and that is recorded
-# rather than guarded. `_NKP_ONLINE` is Czech and `_NOT_A_BOOK` is German and
+# rather than guarded. `_NKP_ONLINE` is Czech and `bibliographic._NOT_A_BOOK` is German and
 # English, so `1 recurso electrónico` would reach a shelf here. None of the ten
 # records measured is one, so there is nothing measured to write a pattern
 # against, and a refusal guessed from no example is the mistake `_NKP_ONLINE`'s
@@ -2771,7 +2603,7 @@ _GERMAN_PREFIX: Final = "9783"
 #: For a German ISBN the legal deposit library is the authority on its own
 #: publishing. For anything else K10plus is preferred: it holds foreign books
 #: as first-class records, where the DNB holds them mostly as cross references,
-#: which is the failure `_is_placeholder_title` exists to catch.
+#: which is the failure `is_placeholder_title` exists to catch.
 def _preferred_source(isbn: str) -> str:
     return "dnb" if isbn.startswith(_GERMAN_PREFIX) else "k10plus"
 
@@ -2890,7 +2722,7 @@ async def _open_library_search(query: str, limit: int) -> list[Record]:
                 year=doc.get("first_publish_year"),
                 # The search index carries no blurb. Enrichment fills it in.
                 page_count=doc.get("number_of_pages_median"),
-                language=_LANGUAGES.get((doc.get("language") or [""])[0].lower()),
+                language=LANGUAGES.get((doc.get("language") or [""])[0].lower()),
                 # By Open Library's own cover id, which the search index
                 # carries and which resolves where an ISBN lookup does not.
                 cover_url=(
@@ -2954,72 +2786,20 @@ def _search_terms(query: str) -> list[str]:
     return terms
 
 
-#: Extents that mean the record is not a physical book. A digitised copy of a
-#: novel is a real catalogue record and a wrong answer to "which book am I
-#: holding", and it is the single largest source of noise in the SRU sources.
-#: It said "both" when there were two; there are seven now, so it names none.
-#:
-#: **Written as two halves on 2026-08-24, because the DNB lookup treats them
-#: differently.** An online resource is this book in another form, and the DNB
-#: answers with one for an ISBN whose printed record it also holds, so the DNB lookup
-#: ranks it below a physical record and takes it rather than reporting a miss.
-#: A disc is a different object, so `_dnb_record` refuses it outright. Both
-#: halves are still one refusal everywhere else, `_is_physical_book` being what
-#: the search paths and K10plus ask.
-#:
-#: **This is the fallback now, and a code test stands in front of it.**
-#: `_is_physical_book` is reached from eight sources: the DNB, the OENB, the
-#: BNE, the NLG, the NKP, K10plus, the BnF and the Library of Congress. Six of
-#: them state the carrier in codes and are asked those first, the five MARC ones
-#: through `_marc_is_physical_book` and the Library of Congress through
-#: `_loc_carrier_is_book`. Only the two Dublin Core sources decide it from prose
-#: alone, and each states its own: `_NKP_ONLINE` and `_BNF_ONLINE`.
-#:
-#: **So a reader who has met a new wording should not lengthen this.** Widening
-#: it still changes what all eight refuse, and #124 is the record of what that
-#: buys: the wording is a property of the language, the language list is open,
-#: and six of the eight never needed the wording at all.
-_ONLINE_FORMS: Final = (
-    r"online[- ]?(?:ressource|resource)|elektronische ressource|streaming"
-)
-_DISC_FORMS: Final = r"audio disc|sound (?:disc|recording)|videodisc|dvd|blu-?ray"
-
-_NOT_A_BOOK: Final = re.compile(f"{_ONLINE_FORMS}|{_DISC_FORMS}", re.IGNORECASE)
-
-_IS_A_DISC: Final = re.compile(_DISC_FORMS, re.IGNORECASE)
-
-
-def _is_physical_book(extent: str | None, title: str | None) -> bool:
-    """Whether a record's prose describes something that can sit on a shelf.
-
-    Both arguments are optional because a `Record`'s are: an untitled record is
-    one a catalogue answered thinly, not one naming a volume slot, so it fails
-    the placeholder test rather than passing it.
-
-    **This is the fallback and no longer the whole rule.** A MARC record states
-    its carrier in codes, so the four MARC sources ask `_marc_is_physical_book`
-    and reach this through it, and the Library of Congress reads the MODS
-    spelling of the same codes. What is left here is the two schemas that carry
-    no such vocabulary at all. `_marc_carrier_is_book` says why.
-    """
-    if extent and _NOT_A_BOOK.search(extent):
-        return False
-    return not _is_placeholder_title(title or "")
-
-
-#: MARC's own codes for the two things `_NOT_A_BOOK` refuses in prose, so that
-#: the four MARC sources need no prose in any language.
+#: MARC's own codes for the two things `bibliographic._NOT_A_BOOK` refuses in prose, so that
+#: no MARC source needs prose in any language.
 #:
 #: **The languages are an open set and the schemas are not**, which is the whole
-#: argument. `_NOT_A_BOOK` is written in German and English, so a Czech online
+#: argument. `bibliographic._NOT_A_BOOK` is written in German and English, so a Czech online
 #: resource reached a shelf (#124) and a French one would have. Lengthening the
 #: alternation buys one language at a time forever; these three sets are closed,
 #: published, and say the same two things the alternation says.
 #:
 #: Measured over 2,605 live MARC records on 2026-09-03, from ISBN lookups and
-#: title searches across all four MARC sources: **65 describe something that is
-#: not a physical book and `_NOT_A_BOOK` passes every one**, and **0** are
-#: refused by `_NOT_A_BOOK` and passed here, so nothing the prose caught is
+#: title searches across the four MARC sources `targets.SEEDED` held that day,
+#: which is five now: **65 describe something that is
+#: not a physical book and `bibliographic._NOT_A_BOOK` passes every one**, and **0** are
+#: refused by `bibliographic._NOT_A_BOOK` and passed here, so nothing the prose caught is
 #: given up.
 #:
 #: **The language framing predicts 20 of that 65 and no more.** 43 carry no
@@ -3030,16 +2810,16 @@ def _is_physical_book(extent: str | None, title: str | None) -> bool:
 #: without refusing books. The remaining **20** are the ones a longer alternation
 #: could have caught, and catching them would have needed `CD-ROM`, `Track`,
 #: `Schallplatte`, `Tonie-Figur` and `E-BOOK`, none of which is a language this
-#: rule was missing: `CD-ROM` is absent from `_DISC_FORMS` in English too.
+#: rule was missing: `CD-ROM` is absent from `bibliographic._DISC_FORMS` in English too.
 #:
 #: Each code is one of the two halves rather than a widening:
 #:
 #: | set | codes | what it is the code for |
 #: |---|---|---|
-#: | 007/00 | `c` | an electronic resource, `_ONLINE_FORMS` |
-#: | 007/00 | `s`, `v` | a sound recording and a videorecording, `_DISC_FORMS` |
-#: | leader/06 | `m` | a computer file, `_ONLINE_FORMS` |
-#: | leader/06 | `i`, `j`, `g` | sound recordings and projected media, `_DISC_FORMS` |
+#: | 007/00 | `c` | an electronic resource, `bibliographic._ONLINE_FORMS` |
+#: | 007/00 | `s`, `v` | a sound recording and a videorecording, `bibliographic._DISC_FORMS` |
+#: | leader/06 | `m` | a computer file, `bibliographic._ONLINE_FORMS` |
+#: | leader/06 | `i`, `j`, `g` | sound recordings and projected media, `bibliographic._DISC_FORMS` |
 #: | 008/23 | `o`, `q`, `s` | online, direct electronic and electronic |
 #:
 #: **The 008/23 row is not load bearing today and is kept anyway**, which is the
@@ -3170,7 +2950,7 @@ def _marc_is_physical_book(
     """The whole refusal for a MARC source: the codes, then the prose.
 
     **The one door.** Every MARC parse path asks this and none asks
-    `_is_physical_book` directly, so a source added later gets the carrier test
+    `is_physical_book` directly, so a source added later gets the carrier test
     by construction rather than by remembering to add it.
     `test_metadata.py::TestTheCarrierTestIsTheOnlyWayIn` is what keeps that true.
 
@@ -3179,7 +2959,7 @@ def _marc_is_physical_book(
     coded it wrongly, which the DNB does, writing `338 $a Band` on three records
     whose 007, 008 and extent all say online.
     """
-    return _marc_carrier_is_book(record) and _is_physical_book(
+    return _marc_carrier_is_book(record) and is_physical_book(
         _marc_extent(fields), title
     )
 
@@ -3290,7 +3070,7 @@ _BNF_NOT_PRINTED: Final = "electronic resource"
 _BNF_ONLINE: Final = re.compile(r"ressources?\s+d[eé]mat[eé]rialis", re.IGNORECASE)
 
 
-def _bnf_record(record: ElementTree.Element) -> Record | None:
+def _bnf_record(record: ElementTree.Element, *, source: str) -> Record | None:
     def texts(tag: str) -> list[str]:
         return [
             element.text.strip()
@@ -3313,15 +3093,15 @@ def _bnf_record(record: ElementTree.Element) -> Record | None:
 
     # The BnF writes the statement of responsibility into the title, the same
     # way the DNB does, so the same parser applies.
-    title, subtitle = _dc_title_statement(titles[0])
-    if _is_placeholder_title(title):
+    title, subtitle = split_title_statement(titles[0])
+    if is_placeholder_title(title):
         return None
 
     extent = next((value for value in texts("format")), None)
     # Two refusals, the same pair `_nkp_record` makes: the shared rule for the
     # forms every source writes, and this catalogue's own French, which the
     # shared one cannot see. See `_BNF_ONLINE`.
-    if not _is_physical_book(extent, title) or (
+    if not is_physical_book(extent, title) or (
         extent is not None and _BNF_ONLINE.search(extent)
     ):
         return None
@@ -3345,15 +3125,15 @@ def _bnf_record(record: ElementTree.Element) -> Record | None:
     year_match = re.search(r"\d{4}", " ".join(texts("date")))
 
     return Record(
-        source="bnf",
+        source=source,
         isbn=isbn,
         title=title,
         subtitle=subtitle,
         author=_bnf_authors(texts("creator")),
         publisher=publisher,
         year=int(year_match.group()) if year_match else None,
-        language=_LANGUAGES.get((texts("language") or [""])[0].lower()),
-        page_count=_pages_from_extent(extent),
+        language=LANGUAGES.get((texts("language") or [""])[0].lower()),
+        page_count=pages_from_extent(extent),
         cover_url=covers.open_library_url(isbn) if isbn else None,
         # Dublin Core names no vocabulary and carries no identifier, in either
         # dialect: see `catalogue.uncontrolled`.
@@ -3370,7 +3150,7 @@ def _bnf_authors(creators: list[str]) -> str | None:
     no author at all.
     """
     authors = [
-        _flip_catalogue_name(creator)
+        flip_catalogue_name(creator)
         for creator in creators
         if not _BNF_ANY_ROLE.search(creator)
         or any(role in creator.casefold() for role in _BNF_AUTHOR_ROLES)
@@ -3388,7 +3168,7 @@ def _bnf_authors(creators: list[str]) -> str | None:
 #:
 #: **`typeOfResource` does not cover this**, which is the point: it is `text` on
 #: 322 of 391 live records measured on 2026-09-03, and **30 of those 322** carry
-#: a form saying electronic. `_NOT_A_BOOK` refuses **5** of the 30, on
+#: a form saying electronic. `bibliographic._NOT_A_BOOK` refuses **5** of the 30, on
 #: `1 online resource` and `1 electronic resource (255 pages )`; 6 more read
 #: `1 CD-ROM : sd., col. ; 4 3/4 in.`, which no alternative in that pattern
 #: matches in any language.
@@ -3423,7 +3203,7 @@ def _loc_carrier_is_book(record: ElementTree.Element) -> bool:
     return True
 
 
-def _loc_record(record: ElementTree.Element) -> Record | None:
+def _loc_record(record: ElementTree.Element, *, source: str) -> Record | None:
     kind = record.find(f"{_MODS}typeOfResource")
     if kind is None or (kind.text or "").strip() != "text":
         return None
@@ -3447,7 +3227,7 @@ def _loc_record(record: ElementTree.Element) -> Record | None:
         prefix = non_sort.text.strip()
         # An elided article joins the word; a whole one takes a space.
         title = prefix + ("" if prefix.endswith("'") else " ") + title
-    if _is_placeholder_title(title):
+    if is_placeholder_title(title):
         return None
 
     subtitle_element = title_info.find(f"{_MODS}subTitle")
@@ -3469,11 +3249,11 @@ def _loc_record(record: ElementTree.Element) -> Record | None:
             continue
         part = name.find(f"{_MODS}namePart")
         if part is not None and part.text:
-            authors.append(_flip_catalogue_name(part.text.strip().rstrip(",.")))
+            authors.append(flip_catalogue_name(part.text.strip().rstrip(",.")))
 
     extent_element = record.find(f"{_MODS}physicalDescription/{_MODS}extent")
     extent = extent_element.text.strip() if extent_element is not None and extent_element.text else None
-    if not _is_physical_book(extent, title):
+    if not is_physical_book(extent, title):
         return None
 
     isbn = next(
@@ -3509,13 +3289,13 @@ def _loc_record(record: ElementTree.Element) -> Record | None:
         f"{_MODS}language/{_MODS}languageTerm"
     )
     language = (
-        _LANGUAGES.get((language_element.text or "").strip().lower())
+        LANGUAGES.get((language_element.text or "").strip().lower())
         if language_element is not None
         else None
     )
 
     return Record(
-        source="loc",
+        source=source,
         isbn=isbn,
         title=title,
         subtitle=subtitle,
@@ -3523,7 +3303,7 @@ def _loc_record(record: ElementTree.Element) -> Record | None:
         publisher=publisher,
         year=int(year_match.group()) if year_match else None,
         language=language,
-        page_count=_pages_from_extent(extent),
+        page_count=pages_from_extent(extent),
         cover_url=covers.open_library_url(isbn) if isbn else None,
         subjects=_loc_subjects(record),
         # The shelf classifications first and the subject headings after,
@@ -3746,8 +3526,8 @@ def _loc_subject_headings(record: ElementTree.Element) -> list[Heading]:
 #
 # **What did not move.** The parsers, and every refusal in them. A row picks a
 # reader; it cannot say what a reader accepts. That is the line the ticket drew
-# against Koha's `add_xslt`, and `_marc_claims_isbn`, `_is_placeholder_title`,
-# `_is_physical_book` and `_isbn_entries` are what sit on our side of it.
+# against Koha's `add_xslt`, and `_marc_claims_isbn`, `is_placeholder_title`,
+# `is_physical_book` and `_isbn_entries` are what sit on our side of it.
 
 
 def _marc_nodes(
@@ -3883,51 +3663,134 @@ def _dublin_core_bare_lookup(
     )
 
 
-def _marc_search(
-    root: ElementTree.Element, decoding: decoders.Decoding
-) -> list[Record]:
-    """Every book in a MARC response, non-books refused.
+def _marc_record(
+    record: ElementTree.Element, decoding: decoders.Decoding
+) -> Record | None:
+    """One MARC record as a `catalogue.Record`, or None for what is not a book.
+
+    **The refusals are here and not in the caller**, which is what makes this a
+    decoder rather than a step of one: a file has no caller to add them.
+    `_marc_is_physical_book` is the carrier door and `record.title` is the
+    thinness test.
 
     **An online resource is refused here and only ranked down at a lookup**, and
     the asymmetry is deliberate rather than an oversight: a search has no ISBN to
-    tell an edition of this book from a digitisation of another one.
+    tell an edition of this book from a digitisation of another one, and neither
+    has a file. `_marc_lookup` therefore does not build on this.
     """
-    results: list[Record] = []
-    for node in _marc_nodes(root, decoding):
-        fields = _marc_fields(node)
-        record = _marc_build(decoding, fields, None)
-        if record is None or not record.title:
-            continue
-        if not _marc_is_physical_book(node, fields, record.title):
-            continue
-        results.append(record)
-    return results
+    fields = _marc_fields(record)
+    built = _marc_build(decoding, fields, None)
+    if built is None or not built.title:
+        return None
+    if not _marc_is_physical_book(record, fields, built.title):
+        return None
+    return built
+
+
+def _dublin_core_record(
+    record: ElementTree.Element, decoding: decoders.Decoding
+) -> Record | None:
+    """One namespaced Dublin Core record. The BnF's shape."""
+    return _bnf_record(record, source=decoding.source)
+
+
+def _mods_record(
+    record: ElementTree.Element, decoding: decoders.Decoding
+) -> Record | None:
+    """One MODS record. The Library of Congress's shape."""
+    return _loc_record(record, source=decoding.source)
+
+
+#: Which decoder reads ONE catalogue record, by `decoders.Reader`. The catalogue
+#: family's half of the contract `decoders.py` states, and `opds.READERS` is the
+#: import family's.
+#:
+#: **The value type is the contract**, and mypy is what holds it: a decoder is
+#: handed a parsed record and a `decoders.Decoding`, answers with a
+#: `catalogue.Record` or `None`, and is told nothing about how the bytes
+#: arrived. No URL, no status, no handle, no `targets.Target`.
+#:
+#: **Three catalogue readers are deliberately absent, and each exclusion is a
+#: measurement rather than an oversight.** The rule is that these four plus the
+#: three below partition `decoders.CATALOGUE_READERS`, asserted by
+#: `tests/test_decoders.py::TestEveryCatalogueReaderIsPlacedOrExcluded`, so a
+#: new reader fails that test until somebody places it. An inclusion list is
+#: what goes stale when the registry grows.
+#:
+#: * `OPEN_LIBRARY` and `GOOGLE_BOOKS` answer in JSON, so their records are not
+#:   `ElementTree.Element` and cannot be values of this type. They are also the
+#:   two that still weld fetching to decoding, which is a separate seam.
+#: * `DUBLIN_CORE_BARE` **is** XML and is still not a decoder, which is the one
+#:   worth reading twice. `_nkp_record` stamps the ISBN that was **asked** onto
+#:   the record it returns and builds its cover URL from it. The dialect does
+#:   carry the ISBN: `_nkp_claims_isbn` runs `isbn.parse` over every
+#:   `identifier` element to test one. What is missing is a reader that picks
+#:   one out and writes it to the record, so a file, which asks no ISBN, would
+#:   decode to `isbn=""` and a cover URL built from it. Writing that reader is
+#:   what admits this one.
+READERS: Final[
+    dict[
+        decoders.Reader,
+        Callable[[ElementTree.Element, decoders.Decoding], Record | None],
+    ]
+] = {
+    decoders.Reader.MARC_GND: _marc_record,
+    decoders.Reader.MARC_PLAIN: _marc_record,
+    decoders.Reader.DUBLIN_CORE: _dublin_core_record,
+    decoders.Reader.MODS: _mods_record,
+}
+
+#: The catalogue readers `READERS` cannot hold, and why, in one place a test can
+#: read. See `READERS`.
+NOT_DECODERS: Final[dict[decoders.Reader, str]] = {
+    decoders.Reader.OPEN_LIBRARY: "answers in JSON, not in XML elements",
+    decoders.Reader.GOOGLE_BOOKS: "answers in JSON, not in XML elements",
+    decoders.Reader.DUBLIN_CORE_BARE: (
+        "stamps the ISBN that was asked, which a file has not asked"
+    ),
+}
+
+
+def _records(
+    nodes: Iterable[ElementTree.Element], decoding: decoders.Decoding
+) -> list[Record]:
+    """Every node a decoder accepted, through `READERS` and never by name.
+
+    One dispatch for all three search shapes, so a reader reachable from a
+    search is a reader in the published table by construction.
+    """
+    reader = READERS[decoding.reader]
+    return [
+        record
+        for node in nodes
+        for record in [reader(node, decoding)]
+        if record is not None
+    ]
+
+
+def _marc_search(
+    root: ElementTree.Element, decoding: decoders.Decoding
+) -> list[Record]:
+    """Every book in a MARC response. `_marc_record` is what refuses."""
+    return _records(_marc_nodes(root, decoding), decoding)
 
 
 def _dublin_core_search(
     root: ElementTree.Element, decoding: decoders.Decoding
 ) -> list[Record]:
-    """Every book in a namespaced Dublin Core response. The BnF's shape."""
-    del decoding  # The selector is the format's, not the row's.
-    return [
-        record
-        for node in root.findall(f".//{_DC}title/..")
-        for record in [_bnf_record(node)]
-        if record is not None
-    ]
+    """Every book in a namespaced Dublin Core response. The BnF's shape.
+
+    The selector is the format's and not the row's; the decoder the row names
+    is what reads what it finds.
+    """
+    return _records(root.findall(f".//{_DC}title/.."), decoding)
 
 
 def _mods_search(
     root: ElementTree.Element, decoding: decoders.Decoding
 ) -> list[Record]:
     """Every book in a MODS response. The Library of Congress's shape."""
-    del decoding
-    return [
-        record
-        for node in root.iter(f"{_MODS}mods")
-        for record in [_loc_record(node)]
-        if record is not None
-    ]
+    return _records(root.iter(f"{_MODS}mods"), decoding)
 
 
 #: Which decoder reads a lookup response, by `decoders.Reader`.

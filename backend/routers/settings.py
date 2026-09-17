@@ -1,11 +1,10 @@
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 import config
-import covers
+import cover_store
 import credentials
 import metadata
 import notifications
@@ -13,7 +12,6 @@ import settings_store
 import sources
 import targets
 from auth import require_admin
-from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from dependencies import DbSession
 from enums import CatalogueSource, SettingKey
 from models import User
@@ -29,13 +27,7 @@ from schemas import (
     SettingsUpdate,
     SourceCredentialIn,
 )
-from uploads import read_image_upload, replace_image
-
-#: One definition, in the module that owns what the covers directory is called.
-#: It used to be spelled out here and again in `routers/covers.py`, justified by
-#: a circular import that does not exist: `covers.py` imports `config`, `isbn`
-#: and `uploads` and no router.
-LOGIN_BG_BASE = covers.LOGIN_BG_BASE
+from uploads import read_image_upload
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -151,25 +143,10 @@ def _refuse_if_pinned(key: SettingKey) -> None:
         )
 
 
-def _find_login_bg() -> Path | None:
-    """The login background on disk, or None.
-
-    `sorted` for `covers.stored_path`'s reason, which is that a frozenset does
-    not iterate in a stable order between processes and a restore can leave two
-    formats of this base on disk. Unordered, the public login page serves a
-    different image after a pod restart with nothing having changed.
-    """
-    for extension in sorted(ALLOWED_IMAGE_EXTENSIONS):
-        candidate = COVERS_DIR / f"{LOGIN_BG_BASE}.{extension}"
-        if candidate.exists():
-            return candidate
-    return None
-
-
 @router.get("/login-image", response_model=LoginImageOut)
 async def get_login_image() -> LoginImageOut:
     """Public: the login page renders before anyone holds a token."""
-    path = _find_login_bg()
+    path = cover_store.login_background_path()
     if path is None:
         raise HTTPException(status_code=404, detail="No login background set")
     return LoginImageOut(url=f"/covers/{path.name}")
@@ -180,13 +157,12 @@ async def set_login_image(
     file: Annotated[UploadFile, File()],
     current_user: Annotated[User, Depends(require_admin)],
 ) -> LoginImageOut:
-    # Identified by content, not by the caller-supplied filename.
-    data, extension = await read_image_upload(file)
-
-    # Into place first, stale formats after: _find_login_bg picks whichever it
-    # sees first, and deleting before writing meant a failure left no
-    # background at all. See uploads.replace_image.
-    destination = replace_image(COVERS_DIR, LOGIN_BG_BASE, extension, data)
+    # Read against the size cap and refused here if it is not an image, so the
+    # caller gets a 413 or a 400 rather than a 500 out of the store's own
+    # refusal. What it is called, and that the other formats of it go, are
+    # `cover_store`'s.
+    data = await read_image_upload(file)
+    destination = cover_store.save_login_background(data)
     return LoginImageOut(url=f"/covers/{destination.name}")
 
 
@@ -332,9 +308,9 @@ def get_feature_flags(db: DbSession) -> FeatureFlagsOut:
             db, SettingKey.GOODREADS_LOOKUP_ENABLED
         ),
         default_locale=settings_store.get_locale(db, SettingKey.DEFAULT_LOCALE),
-        # The raw row here, because the two MARC routes gate on the raw row and
-        # a client reading this has to get the answer they give. The field
-        # below is a conjunction for the opposite reason.
+        # The raw row here, because every MARC route gates on the raw row and a
+        # client reading this has to get the answer they give. The field below
+        # is a conjunction for the opposite reason.
         library_mode=settings_store.library_mode(db),
         # The conjunction, never the raw row: this is the flag a browser with
         # no token reads to decide whether there is a public catalogue to

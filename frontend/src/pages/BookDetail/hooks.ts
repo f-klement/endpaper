@@ -71,12 +71,12 @@ import {
   useCreateCollection,
   useListCollections,
 } from "../../api/generated/endpoints/collections/collections";
-import { useGetFeatureFlags } from "../../api/generated/endpoints/settings/settings";
 import {
   useCreateLoan,
   useReturnLoan,
 } from "../../api/generated/endpoints/loans/loans";
 import { useListUsers } from "../../api/generated/endpoints/users/users";
+import { useGoogleBooksReady } from "../../app/hooks";
 import { useToast } from "../../app/toast";
 import type { Borrower } from "./components/LoanPanel";
 import { tagName, useSortedByName, useTranslation } from "../../i18n";
@@ -633,7 +633,7 @@ export function useBookEnrichment(bookId: number): UseBookEnrichmentResult {
   // the author, the publisher and the year, so the author and series indexes
   // move with it.
   const invalidate = useInvalidate();
-  const flags = useGetFeatureFlags({ query: { staleTime: 60_000 } });
+  const isConfigured = useGoogleBooksReady();
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
   const candidates = useEnrichmentCandidates(bookId, {
@@ -660,7 +660,7 @@ export function useBookEnrichment(bookId: number): UseBookEnrichmentResult {
     // answer without one. The flag now only decides the note about what a key
     // would add.
     isEnabled: true,
-    isConfigured: flags.data?.google_books_ready ?? false,
+    isConfigured,
 
     browse: () => {
       apply.reset();
@@ -681,12 +681,6 @@ export function useBookEnrichment(bookId: number): UseBookEnrichmentResult {
     error: apply.error ?? candidates.error,
     dismiss: () => apply.reset(),
   };
-}
-
-/** Whether Goodreads lookup links should be rendered. */
-export function useGoodreadsLookup(): boolean {
-  const flags = useGetFeatureFlags({ query: { staleTime: 60_000 } });
-  return flags.data?.goodreads_lookup_enabled ?? false;
 }
 
 export interface UseBookProgressResult {

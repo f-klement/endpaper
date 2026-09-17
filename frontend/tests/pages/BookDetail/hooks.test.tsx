@@ -10,6 +10,7 @@
 import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { BookOut } from "../../../src/api/generated/model";
 import {
   hasAbout,
   sectionDefaults,
@@ -57,8 +58,16 @@ describe("sectionDefaults", () => {
   });
 
   it("treats a book with no copy count as a single copy", () => {
+    // **Cast, because the API can no longer send this.** `copy_count` is on
+    // `BookOut`'s per viewer half, which carries no defaults, so a response
+    // omitting it is one that violates the schema. The fallback it exercises is
+    // still worth keeping and still worth a test: a type is a claim about the
+    // server, and this is what the page does when the claim is false.
     expect(
-      sectionDefaults({ ...makeBook(), copy_count: undefined }).copies,
+      sectionDefaults({
+        ...makeBook(),
+        copy_count: undefined,
+      } as unknown as BookOut).copies,
     ).toBe(false);
   });
 

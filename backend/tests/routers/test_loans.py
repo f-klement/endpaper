@@ -412,15 +412,29 @@ class TestDueDates:
 
 
 class TestTheNestedBook:
-    """`LoanOut.book` is a `BookOut`, and it was built without its context.
+    """`LoanOut.book` carries no field that depends on who is asking.
 
-    A bare `model_validate` filled the two fields that are computed per
-    request, `my_status` and `active_loan`, with their defaults, so every book
-    on the loans page reported itself unread and not lent out, on a page whose
-    entire subject is books that are lent out.
+    **It used to, and two routes of three answered them wrongly.** The nested
+    book was a `BookOut`, whose per request half a bare `model_validate` cannot
+    fill, so the two single loan routes served `my_status: "unread"` and
+    `active_loan: null` whatever the reader had done with the book. The list
+    route escaped it by running every book through `books_to_out` a second
+    time, eight statements to fill twelve fields the only client does not read.
+
+    The type is `BookColumns` now, so the wrong answer is not representable and
+    the second pass is gone. These tests pin the absence rather than the values,
+    because the values were never the point: a loan is not a reading record.
     """
 
-    def test_the_reader_s_own_status_is_reported(
+    #: Everything `ViewerFields` declares, read off the model rather than
+    #: listed, so a thirteenth per viewer field is covered by the commit that
+    #: adds it rather than by somebody remembering this test.
+    def _viewer_fields(self) -> set[str]:
+        from schemas.book import ViewerFields
+
+        return set(ViewerFields.model_fields)
+
+    def test_the_nested_book_carries_none_of_them(
         self, client, admin, member, make_book
     ):
         book = make_book(admin["headers"], title="Dune")
@@ -437,10 +451,32 @@ class TestTheNestedBook:
 
         [loan] = client.get("/api/loans", headers=admin["headers"]).json()["items"]
 
-        assert loan["book"]["my_status"] == "read"
+        assert set(loan["book"]) & self._viewer_fields() == set()
 
-    def test_the_book_knows_it_is_lent_out(self, client, admin, member, make_book):
-        book = make_book(admin["headers"])
+    def test_the_single_loan_routes_agree_with_the_listing(
+        self, client, admin, member, make_book
+    ):
+        """The two that carried the defect, and the reason this asserts they
+        match rather than asserting a value on each: one type serves all three,
+        so the shapes agreeing is the whole claim."""
+        book = make_book(admin["headers"], title="Dune")
+        created = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
+            headers=admin["headers"],
+        ).json()
+
+        [listed] = client.get("/api/loans", headers=admin["headers"]).json()["items"]
+
+        assert set(created["book"]) == set(listed["book"])
+        assert created["book"]["title"] == "Dune"
+
+    def test_it_still_carries_what_the_row_reading_it_needs(
+        self, client, admin, member, make_book
+    ):
+        """`LoanRow` renders the title, the author and the cover. Pinned so the
+        narrowing above cannot quietly take one of them."""
+        book = make_book(admin["headers"], title="Dune", author="Frank Herbert")
         client.post(
             "/api/loans",
             json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
@@ -449,7 +485,9 @@ class TestTheNestedBook:
 
         [loan] = client.get("/api/loans", headers=admin["headers"]).json()["items"]
 
-        assert loan["book"]["active_loan"] is not None
+        assert loan["book"]["title"] == "Dune"
+        assert loan["book"]["author"] == "Frank Herbert"
+        assert "cover_url" in loan["book"]
 
     def test_a_page_of_loans_costs_the_same_whatever_its_length(
         self, client, admin, make_book, _password_hash
@@ -490,11 +528,15 @@ class TestTheNestedBook:
             f"{short_cost} selects for 3 loans and {long_cost} for 10: "
             "the cost moves with the page, which is the N+1 this exists to catch"
         )
-        # What makes up the constant is stated once, in
-        # `serialisation.books_to_out`, and deliberately not enumerated here:
-        # this repository has restated that breakdown wrongly twice, both times
-        # by editing prose rather than measuring.
-        assert long_cost == 12, f"{long_cost} selects for 10 loans"
+        # What makes up the constant is deliberately not enumerated here: this
+        # repository has restated that breakdown wrongly twice, both times by
+        # editing prose rather than measuring.
+        #
+        # **12 until 2026-09-16, when the nested book became a `BookColumns`.**
+        # The route stopped running every book on the page through
+        # `books_to_out` a second time, eight statements, and took three
+        # `selectinload`s of its own instead. Measured at both lengths.
+        assert long_cost == 7, f"{long_cost} selects for 10 loans"
 
     def test_a_page_of_returned_loans_costs_the_same_whatever_its_length(
         self, client, admin, make_book, _password_hash
@@ -525,7 +567,7 @@ class TestTheNestedBook:
             f"{short_cost} selects for 3 returned loans and {long_cost} for 10: "
             "the cost moves with the page, which is the N+1 this exists to catch"
         )
-        assert long_cost == 12, f"{long_cost} selects for 10 returned loans"
+        assert long_cost == 7, f"{long_cost} selects for 10 returned loans"
 
 
 class TestOneOpenLoanPerBook:
@@ -1026,7 +1068,7 @@ class TestListOverdue:
         # base moved to 12 when `books_to_out` gained the identifier load, and
         # the number moved in the commit that moved the code, which is the only
         # way a stated cost stays a measurement.
-        assert long_cost == 14, f"{long_cost} selects for 10 overdue loans"
+        assert long_cost == 9, f"{long_cost} selects for 10 overdue loans"
 
 
 class TestLibraryModeAndWhoReadsWhichLoan:

@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 
-import { useFeatureFlags } from "../../../app/hooks";
+import { useLibraryMode } from "../../../app/hooks";
 import { useTranslation } from "../../../i18n";
 import { SettingsSection } from "../../components";
 import SettingsSubPage from "../components/SettingsSubPage";
@@ -70,7 +70,7 @@ export default function LibrarySettingsPage() {
   // in any case.** Hiding a control is advice to one client; the 403 is the
   // guarantee. What this decides is whether a household is shown an exchange
   // format nobody in it can use.
-  const flags = useFeatureFlags();
+  const libraryMode = useLibraryMode();
   // `settings` answering at all is what says this account is an admin: the
   // endpoint is admin only and a 403 is reported as `isForbidden`. Nothing on
   // this page is refused to a member, so the record is read for that one fact
@@ -125,7 +125,7 @@ export default function LibrarySettingsPage() {
         />
       </SettingsSection>
 
-      {flags?.library_mode && (
+      {libraryMode && (
         <SettingsSection title={t("marc.title")} icon="book">
           <MarcImport
             isPreviewing={marcImport.isPreviewing}

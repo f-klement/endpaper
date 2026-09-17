@@ -23,7 +23,12 @@ import {
   OwnershipStatus,
   ReadStatus,
 } from "../../src/api/generated/model";
-import { readFilters, toParams } from "../../src/lib/bookFilters";
+import {
+  readFilters,
+  toParams,
+  toggledFilter,
+  type ListFilterKey,
+} from "../../src/lib/bookFilters";
 import { DEFAULT_FILTERS, type BookFilters } from "../../src/pages/Home/types";
 
 function read(search: string): BookFilters {
@@ -328,6 +333,75 @@ const SAMPLES: { [K in keyof BookFilters]-?: BookFilters[K] } = {
   headings: ["lcsh:Mental health", "ddc:004"],
   ddcDivisions: ["150", "330"],
 };
+
+/**
+ * Every filter holding a list, read off the defaults rather than named.
+ *
+ * So a fourth list filter is covered the day it is added. `SAMPLES` is a total
+ * mapping of the shape and fails to compile when a field is missing from it,
+ * which is where each field's value to toggle comes from.
+ */
+const LIST_FILTERS = Object.keys(DEFAULT_FILTERS).filter((field) =>
+  Array.isArray(DEFAULT_FILTERS[field as keyof BookFilters]),
+) as ListFilterKey[];
+
+describe("toggledFilter", () => {
+  it("covers a list filter at all", () => {
+    // A derivation that found none would make the table below assert nothing.
+    expect(LIST_FILTERS.length).toBeGreaterThan(0);
+  });
+
+  it("puts in a value the filter does not carry", () => {
+    expect(toggledFilter(DEFAULT_FILTERS, "tagIds", 4)).toEqual({
+      tagIds: [4],
+    });
+  });
+
+  it("takes out one it does", () => {
+    const filters = { ...DEFAULT_FILTERS, tagIds: [4, 7] };
+
+    expect(toggledFilter(filters, "tagIds", 4)).toEqual({ tagIds: [7] });
+  });
+
+  it("keeps the order values were picked in", () => {
+    // The listing endpoint does not care, but the query string is the cache
+    // key: a set that reordered itself would be a second request for the same
+    // filters.
+    const filters = { ...DEFAULT_FILTERS, headings: ["ddc:004"] };
+
+    expect(
+      toggledFilter(filters, "headings", "lcsh:Mental health").headings,
+    ).toEqual(["ddc:004", "lcsh:Mental health"]);
+  });
+
+  it("names the field it was given and no other", () => {
+    // It is a patch for `update`, so a second key would write a filter nobody
+    // touched.
+    expect(
+      Object.keys(toggledFilter(DEFAULT_FILTERS, "ddcDivisions", "150")),
+    ).toEqual(["ddcDivisions"]);
+  });
+
+  it("leaves the filters it was handed alone", () => {
+    const filters = { ...DEFAULT_FILTERS, tagIds: [4] };
+
+    toggledFilter(filters, "tagIds", 7);
+
+    expect(filters.tagIds).toEqual([4]);
+  });
+
+  it.each(LIST_FILTERS)("toggles %s in and back out again", (field) => {
+    const value = (SAMPLES[field] as (string | number)[])[0]!;
+
+    const added = {
+      ...DEFAULT_FILTERS,
+      ...toggledFilter(DEFAULT_FILTERS, field, value),
+    };
+    expect(added[field]).toEqual([value]);
+
+    expect(toggledFilter(added, field, value)[field]).toEqual([]);
+  });
+});
 
 const SCHEMA = import.meta.glob("../../openapi.json", {
   query: "?raw",

@@ -79,6 +79,9 @@ export interface UseLibraryResult {
    * before a field existed is the one case where the two would differ, and
    * merging is the safer of the two answers there: the missing field keeps a
    * real value rather than becoming undefined.
+   *
+   * A control that picks one value out of a list filter comes through here too,
+   * with the patch `lib/bookFilters.ts` builds for it.
    */
   update: (patch: Partial<BookFilters>) => void;
 
@@ -89,13 +92,6 @@ export interface UseLibraryResult {
   locations: LocationOut[];
   /** Every collection in the library, for the filter. */
   collections: CollectionOut[];
-  toggleTag: (tagId: number) => void;
-  clearTags: () => void;
-  /** One heading, as `scheme:number`. ANDed with the others, like a tag. */
-  toggleHeading: (heading: string) => void;
-  /** One Dewey division. ORed with the others: see `docs/decisions.md`. */
-  toggleDivision: (division: string) => void;
-  clearClassifications: () => void;
   classifications: ClassificationFacets | undefined;
 
   /**
@@ -277,30 +273,6 @@ export function useLibrary(): UseLibraryResult {
     deleteSavedSearch: (id) => setSavedSearches(deleteSearch(id)),
     locations: locations.data ?? [],
     collections: filed,
-    toggleTag: (tagId) =>
-      setFilters((current) => ({
-        ...current,
-        tagIds: current.tagIds.includes(tagId)
-          ? current.tagIds.filter((id) => id !== tagId)
-          : [...current.tagIds, tagId],
-      })),
-    clearTags: () => setFilters((current) => ({ ...current, tagIds: [] })),
-    toggleHeading: (headingKey) =>
-      setFilters((current) => ({
-        ...current,
-        headings: current.headings.includes(headingKey)
-          ? current.headings.filter((entry) => entry !== headingKey)
-          : [...current.headings, headingKey],
-      })),
-    toggleDivision: (division) =>
-      setFilters((current) => ({
-        ...current,
-        ddcDivisions: current.ddcDivisions.includes(division)
-          ? current.ddcDivisions.filter((entry) => entry !== division)
-          : [...current.ddcDivisions, division],
-      })),
-    clearClassifications: () =>
-      setFilters((current) => ({ ...current, headings: [], ddcDivisions: [] })),
     classifications: classifications.data,
 
     view,

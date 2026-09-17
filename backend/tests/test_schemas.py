@@ -8,6 +8,7 @@ from pydantic import BaseModel, BeforeValidator, ValidationError
 
 from enums import ReadStatus, TagCategory, TagKey
 from schemas import (
+    BookColumns,
     BookCreate,
     BookOut,
     BookStatusUpdate,
@@ -18,6 +19,7 @@ from schemas import (
     TagOut,
     TagStat,
     UserCreate,
+    ViewerFields,
     known_key,
 )
 
@@ -107,8 +109,15 @@ class TestBookStatusUpdate:
 
 
 class TestBookOut:
-    def test_defaults_leave_the_optional_relations_empty(self):
-        book = BookOut(
+    """The columns still default; the per viewer half cannot.
+
+    `BookOut` was one class where every per request field carried a plausible
+    default, so a field declared and never written produced a well formed 200.
+    It is two classes now and the twelve are required, which is what these pin.
+    """
+
+    def _columns(self) -> BookColumns:
+        return BookColumns(
             id=1,
             isbn=None,
             title="t",
@@ -120,19 +129,80 @@ class TestBookOut:
             cover_url=None,
             added_at="2026-01-01T00:00:00",
         )
-        assert book.tags == []
-        assert book.active_loan is None
-        # A book nobody has touched has no user_books row, and absence means
-        # unread, so the default is the value, not None.
-        assert book.my_status is ReadStatus.UNREAD
+
+    def test_a_column_only_book_still_defaults_its_relations(self):
+        assert self._columns().tags == []
+
+    def test_the_per_viewer_half_cannot_be_left_out(self):
+        """The whole of the split, as one assertion: `BookOut` refuses to be
+        built from a Book's columns alone, where it used to fill twelve fields
+        with answers nobody had computed."""
+        with pytest.raises(ValidationError) as raised:
+            BookOut(**self._columns().__dict__)
+
+        missing = {error["loc"][0] for error in raised.value.errors()}
+        assert missing == set(ViewerFields.model_fields)
+
+    def test_seen_by_is_how_one_is_built(self):
+        viewer = ViewerFields(
+            active_loan=None,
+            collection_name=None,
+            copy_count=1,
+            discuss_with=[],
+            my_status=ReadStatus.READ,
+            my_rating=None,
+            my_started_at=None,
+            my_finished_at=None,
+            my_wants_to_discuss=False,
+            my_progress_page=None,
+            my_progress_percent=None,
+            my_progress_recorded_at=None,
+        )
+
+        book = BookOut.seen_by(self._columns(), viewer)
+
+        assert book.title == "t"
+        assert book.my_status is ReadStatus.READ
+
+    def test_bookout_declares_nothing_of_its_own_but_the_refusals(self):
+        """The split moves the defect rather than closing it, unless this holds.
+
+        A thirteenth per request field added to `BookOut` itself, instead of to
+        `ViewerFields`, carries a default again and is written nowhere again.
+        Measured on an isolated copy by a review seat: a `my_shelf_note` added
+        to `BookOut` with a classification entry in
+        `tests/schemas/test_public.py` and no writer anywhere left about 620
+        tests green. That is the original defect exactly, one class up.
+
+        **Pinned as a set with a reason, so adding a name here is a two place
+        edit**, which is the shape `GROWING_ENUM_COLUMNS` uses next door.
+        `refused_identifiers` is the one, and its default is the right answer
+        for the eighteen callers that have nothing to report rather than a
+        placeholder for one: it is written by `routers.books._with_refusals`,
+        which copies rather than assigning into the serialiser's loop.
+        """
+        own = (
+            set(BookOut.model_fields)
+            - set(ViewerFields.model_fields)
+            - set(BookColumns.model_fields)
+        )
+
+        assert own == {"refused_identifiers"}
 
     def test_the_forward_reference_to_loanout_is_resolved(self):
-        """BookOut references LoanOut before it is defined; model_rebuild() at
-        the bottom of schemas.py is what makes that work. Without it, building
-        the schema raises PydanticUndefinedAnnotation."""
-        schema = BookOut.model_json_schema()
-        assert "LoanOut" in schema["$defs"]
-        assert "active_loan" in schema["$defs"]["BookOut"]["properties"]
+        """`ViewerFields` references `LoanOut` before it is defined;
+        `model_rebuild()` at the bottom of `schemas/__init__.py` is what makes
+        that work. Without it, building the schema raises
+        `PydanticUndefinedAnnotation`.
+
+        **Both classes, because both declare it now.** Rebuilding `BookOut`
+        alone left `ViewerFields(...)` raising from `books_to_out`, which is
+        every listing in the application, and no schema test saw it.
+        """
+        for model in (BookOut, ViewerFields):
+            schema = model.model_json_schema()
+            assert "LoanOut" in schema["$defs"]
+            assert "active_loan" in schema["properties"]
 
 
 def _unguarded(models: Iterable[Any]) -> list[str]:

@@ -266,7 +266,8 @@ class TestWhatTheRoundTripCannotCarry:
         """**The one entry here that is a rewrite rather than a loss**, and the
         worst of them.
 
-        `metadata._marc_title` falls back to `_dc_title_statement` whenever
+        `metadata._marc_title` falls back to
+        `bibliographic.split_title_statement` whenever
         `245` carries no `$b`, because a record that did not subfield itself
         puts the whole statement in `$a`. A record this app wrote always did
         subfield itself, and there is no way to say so: an empty `$b` is
@@ -280,7 +281,7 @@ class TestWhatTheRoundTripCannotCarry:
         assert round_trip(title="Dune: Book One").title == "Dune: Book One"
 
     def test_a_title_ending_in_isbd_punctuation_loses_it(self):
-        """`metadata._strip_marc_punctuation` drops a trailing `/:;,=` because a
+        """`bibliographic.strip_isbd_punctuation` drops a trailing `/:;,=` because a
         catalogue ends a subfield with the separator for the next one."""
         assert round_trip(title="Trilogy;").title == "Trilogy"
         assert round_trip(title="Why:").title == "Why"
@@ -347,20 +348,6 @@ class TestTheWriter:
         bibliographic one. Both read back as `de`, so the round trip cannot see
         this and a receiving system can."""
         assert '<subfield code="a">ger</subfield>' in marc.write([a_book(language="de")])
-
-    def test_every_language_the_reader_knows_can_be_written(self):
-        """Otherwise a book stored in a language the lookup path understands
-        exports with no `041` at all, silently."""
-        missing = sorted(
-            set(metadata._LANGUAGES.values()) - set(marc._BIBLIOGRAPHIC_CODES)
-        )
-        assert missing == []
-
-    def test_every_code_written_reads_back_as_the_code_it_came_from(self):
-        """The inversion is not one to one, so this is the property that
-        matters rather than the table's size."""
-        for stored, written in marc._BIBLIOGRAPHIC_CODES.items():
-            assert metadata._LANGUAGES[written] == stored
 
     def test_an_added_author_is_marked_as_one_or_the_reader_drops_it(self):
         """`700` without `$4` is a translator or an editor as far as
@@ -657,31 +644,23 @@ class TestReadingRealCatalogueShapes:
 class TestTheSeamIntoMetadataIsPinned:
     """`marc.py` is the one module here that reads another's private names.
 
-    **Derived with `ast`, never listed.** A test naming the nineteen names would
-    be the shape this repository records as wrong on every first attempt, a
-    guard that enumerates something open: it goes stale the first time the seam
-    gains a name, and it passes while doing so. Both tests below read the source
-    and find out.
+    **Derived with `ast`, never listed, and never counted here either.** A test
+    naming the names would be the shape this repository records as wrong on
+    every first attempt, a guard that enumerates something open. So would a
+    number in this docstring: the set shrinks as rules leave `metadata.py` for
+    `bibliographic.py`, and a count written down is a count nobody re-derives.
+    `_private_reads` below is the instrument; run it for the set.
 
-    **What a rename actually breaks, corrected.** The first draft of this said
-    "a rename breaks MARC at runtime, not at import", and that is wrong for
-    three of the nineteen: `_MARC`, `_GND_PREFIX` and `_LANGUAGES` are read at
-    module scope, so renaming one stops the application importing and every
-    router test catches it. The other sixteen are read inside a function body,
-    where nothing catches it until a request arrives, and those are what this
-    guard is for.
+    **What a rename actually breaks depends on where the name is read.**
+    `_MARC` and `_GND_PREFIX` are read at module scope, so renaming one stops
+    the application importing and every router test catches it. The rest are
+    read inside a function body, where nothing catches it until a request
+    arrives, and those are what this guard is for.
 
-    **The count moved because a name left the seam rather than joined it.** It
-    was twenty, and `_DOCTYPE` became `metadata.DOCTYPE` when `opds.py` became
-    the third module refusing that construct: a name three modules read is
-    public by behaviour, and leaving it private would have meant admitting a
-    second module to this guard's exemption.
-
-    **`mypy` reports all nineteen statically and the CI pipeline does not run it.**
-    The build runs `ruff check`, the OpenAPI diff and `pytest`, and its only
-    mention of the type checker is a comment. Running it there would pin these
-    and `_Subfields`, which is annotation only and which no runtime guard can
-    reach. That is a pipeline change and is raised rather than made here.
+    **`mypy` reports all of them statically and the CI pipeline does not run
+    it.** The build runs `ruff check`, the OpenAPI diff and `pytest`, and its
+    only mention of the type checker is a comment. That is a pipeline change and
+    is raised rather than made here.
 
     The pipeline definition is deliberately not named: it is stripped from the
     published tree, and a published file pointing at a stripped path is what the

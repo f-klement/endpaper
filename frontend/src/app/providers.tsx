@@ -2,7 +2,7 @@ import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 
 import { createQueryClient } from "../api/query-client";
-import { useFeatureFlags } from "./hooks";
+import { useServerDefaultLocale } from "./hooks";
 import { LocaleProvider } from "../i18n";
 import { ThemeProvider } from "../theme";
 import { ErrorBoundary } from "../pages/errors";
@@ -50,11 +50,9 @@ export default function Providers({ children, queryClient }: ProvidersProps) {
  * this app does not speak.
  */
 function LocaleGate({ children }: { children: ReactNode }) {
-  const flags = useFeatureFlags();
+  const serverDefault = useServerDefaultLocale();
 
   return (
-    <LocaleProvider serverDefault={flags?.default_locale}>
-      {children}
-    </LocaleProvider>
+    <LocaleProvider serverDefault={serverDefault}>{children}</LocaleProvider>
   );
 }

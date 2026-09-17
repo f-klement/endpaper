@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased
+
+Eight refactors from an architecture review, and **nothing a member sees changes** except
+where this says so. They are here rather than left out because two of them fixed answers that
+were wrong on screen, and because a changelog that records only features is one nobody trusts
+about the rest.
+
+- **A book on the loans page no longer reports itself unread.** Every loan carried a copy of
+  the book, and on two of the three loan routes that copy said the reading status was unread,
+  the copy count was one and nobody wanted to discuss it, whoever was asking and whatever the
+  truth was. It said so because those fields were filled in with defaults by a type that could
+  not compute them, and a default validates, so nothing anywhere went wrong. A loan now carries
+  the book's own facts and none that depend on who is looking. The loans page also got faster:
+  a page of ten costs seven database statements where it cost twelve.
+- **A restored archive can no longer take a page down.** A book's format, condition and
+  lending willingness are stored as plain text, so an archive written by an older version could
+  hold a value this one does not know. Reading one used to fail the whole listing rather than
+  the one book; it now reads as blank and says so in the log. **The archive keeps the original
+  value either way**, so nothing is lost by backing up and restoring.
+- **The login background image is checked the way a book cover already was.** A file that is a
+  link pointing out of the covers directory is no longer served.
+- **Cover files have one owner.** `backend/cover_store.py` is now the only module that knows
+  where covers live, what they are called, and which of two writers applies: one sweeps the
+  other formats of a book and one must not, and picking the wrong one used to be a one word
+  edit at any of five call sites.
+- **The rules about what a bibliographic value means live in one module.**
+  `backend/bibliographic.py` holds what every catalogue decoder reads whatever serialisation
+  answered: the language table, the extent to page count reader, the punctuation strip, the
+  not a book test. They were private to the catalogue chain, which meant the MARC file reader
+  had to reach past its wall.
+- **The catalogue sources publish their decoders.** A record can be decoded from a file with
+  no catalogue asked, which is what a test needs and what an import path may want later. A
+  Library of Congress or BnF record now carries the label the caller asked for rather than one
+  the reader spelled itself.
+- **The library page's filter hook is one door again.** Five writers had grown back around it,
+  one per filter facet. Picking a tag, a heading or a Dewey division now builds its change the
+  same way, through a pure function tested without a browser.
+- **The feature flags the interface reads have one owner.** Five call sites configured the
+  same request and three of them disagreed about whether to retry it, so a failure was retried
+  on two pages and not on the rest, and which page you opened first decided it for the others.
+
 ## v0.16.1
 
 _2026-09-12_

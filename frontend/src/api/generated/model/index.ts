@@ -36,6 +36,7 @@ export * from "./bodyPreviewMarc.ts";
 export * from "./bodyRestoreBackup.ts";
 export * from "./bodySetLoginImage.ts";
 export * from "./bodyUploadCover.ts";
+export * from "./bookColumns.ts";
 export * from "./bookCondition.ts";
 export * from "./bookCreate.ts";
 export * from "./bookDetailsUpdate.ts";

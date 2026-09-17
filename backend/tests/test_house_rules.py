@@ -1223,8 +1223,10 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **118** models under `schemas/`, **43** of
-    them reachable from a request.
+    Measured on the tree as it stands: **120** models under `schemas/`, **43** of
+    them reachable from a request. The two added are `BookColumns` and
+    `ViewerFields`, which are the halves `BookOut` was split into and neither is
+    a request body.
 
     **What those two numbers count, because a bare number is what rots.** The
     first is `_schema_models`: every class under `schemas/` that reaches
@@ -2166,17 +2168,41 @@ class TestOnlyOneHelperTurnsForeignKeysOff:
 #: migration every time the enum grows. That is a fair price for an enum that is
 #: closed and a recurring tax on one that is not.
 #:
-#: **Each of these is meant to degrade at the read end instead**, in the shape
-#: `custom_fields._kind_of` uses: an unrecognised value becomes a safe default
-#: and is logged. That is quieter than a 500 on every read of the row, and it is
+#: **Each of these is meant to degrade at the read end instead**, which is what
+#: `models.DegradingEnum` does: an unrecognised value becomes a safe default and
+#: is logged. That is quieter than a 500 on every read of the row, and it is
 #: still data loss nobody can see, which is why the degrade logs rather than
 #: passing silently.
 #:
-#: **Meant to, and three of these six do not**, which is stated here rather than
+#: **Meant to, and none of these three does**, which is stated here rather than
 #: left as a promise the list makes and the code does not keep. Measured
 #: 2026-09-06: a restored `classifications.scheme` of `udc`, which
 #: `test_backup.py` restores and asserts a 200 on, makes `PublicBookOut` raise,
 #: so it 500s the unauthenticated public catalogue. Nothing here degrades that.
+#:
+#: **So this list is the whole of what is still owed**, where until 2026-09-16 it
+#: was half of it: `books.format`, `books.condition` and `books.lending` were
+#: parked in a second list with no decision at all, and they are behind
+#: `DegradingEnum` now. What keeps these three honest is that the rule below
+#: reads for the type rather than for a name.
+#:
+#: **What each of them needs before it can move is not the same thing**, and a
+#: single reason given for three entries is this file's own named tell:
+#:
+#: - All three columns are `nullable=False`, and the three above are nullable.
+#:   `DegradingEnum` takes a `default`, so the move is available, but it is a
+#:   column declaration plus a default rather than a one line change, and the
+#:   rule below refuses a non-nullable column with no default for exactly this
+#:   reason: `None` on a non-optional attribute is the 500 the rule exists to
+#:   stop, wearing the rule's own approval.
+#: - `user_books.status` and `tags.category` have an obvious default each,
+#:   `UNREAD` and `CUSTOM`, and `models.py` already declares the first of them
+#:   on the column.
+#: - `classifications.scheme` has none, and that is a fact about the domain
+#:   rather than an omission: a scheme is what gives a number its reading, so
+#:   relabelling one is worse than dropping it. Degrading that column means
+#:   leaving the row out of the answer, which is a different shape from a
+#:   default and is not what `DegradingEnum` does.
 GROWING_ENUM_COLUMNS: dict[str, str] = {
     "user_books.status": (
         "ReadStatus has already grown once: WANT_TO_READ was added later and "
@@ -2192,37 +2218,6 @@ GROWING_ENUM_COLUMNS: dict[str, str] = {
         "work touches it."
     ),
 }
-
-#: Enum columns nobody has decided about, as opposed to the ones above.
-#:
-#: **A separate constant because it holds a different thing.** An entry above is
-#: a decision with a reason: this enum grows, so it pays at the read end
-#: instead. An entry here is the absence of one. Both keep the rule green, and
-#: merging them would let the second be mistaken for the first, which is exactly
-#: what a list named "with a reason" invites.
-#:
-#: These three became visible on 2026-09-06, when the walk above was fixed to
-#: descend into `Mapped[Enum | None]` and went from seeing 7 enum columns to
-#: seeing 11. Neither half of the bargain above holds for any of them: none
-#: carries a CHECK, and none degrades at the read end, so a restored value
-#: outside the enum raises inside `BookOut` and 500s the listing. The same is
-#: true of `classifications.scheme` above, where it is measured: a restored
-#: `udc`, which `test_backup.py` restores and asserts a 200 on, makes
-#: `PublicBookOut` raise.
-#:
-#: **Membership is pinned below**, so a fourth column cannot be parked here by a
-#: later wave without editing a test and saying why.
-#:
-#: **Names only, where `GROWING_ENUM_COLUMNS` above maps to reasons.** The first
-#: version mapped each to its enum's name, which `_enum_columns` already
-#: derives, and that redundancy made the pin untestable: a mutation replacing
-#: the walk's answer with this constant's own values could not be caught,
-#: because the two agree on any tree where the constant is right. A pin holding
-#: no derived data has nothing to quote itself from.
-UNDECIDED_ENUM_COLUMNS: frozenset[str] = frozenset(
-    {"books.format", "books.condition", "books.lending"}
-)
-
 
 def _enum_types(annotation: object) -> list[type[StrEnum]]:
     """Every `StrEnum` anywhere inside an annotation, at any depth.
@@ -2332,6 +2327,56 @@ def _declares_check(qualified: str) -> bool:
                 str(constraint.sqltext), column_name
             ):
                 return True
+    return False
+
+
+def _degrades_at_the_read(qualified: str) -> bool:
+    """Whether this column's **type** turns a stray value into a default.
+
+    The other half of the bargain the class below enforces, and the half a
+    database cannot be asked about: a degrade is not in the DDL. `VARCHAR(20)`
+    is what a deployment carries either way, which is the whole reason the
+    degrade costs no revision and is available to an enum that grows.
+
+    **Read off the column type by class, never off the source text or a name.**
+    A rule matching `DegradingEnum(` in `models.py` would pass on a column that
+    imports the name and never reaches the mapper, and a rule holding a list of
+    column names is the inclusion list this file has been wrong about before.
+    `isinstance` asks the artefact the readers actually go through.
+
+    **And it has to be the column's own enum, not any enum.** `isinstance`
+    alone answers "this column degrades" for a column degrading to somebody
+    else's set: measured 2026-09-16 by a review seat, `books.condition` given
+    `DegradingEnum(BookFormat, 20)` with its annotation untouched reads every
+    stored `good` and `poor` as `None`, one warning per row, and the whole
+    suite stayed green. The annotation is what `_enum_columns` already knows, so
+    comparing the two costs nothing and closes it. The mutation the rule's own
+    author would have picked is `books.format`, which a round trip test covers;
+    `condition` was the column with no good data arm, which is the shape this
+    file records as a fixture agreeing with the case it covers.
+
+    **Nullable, or carrying a default**, because the degrade has to have
+    somewhere to land. A non-nullable column behind this type answers `None` on
+    a stray value, which the annotation forbids and Pydantic then 500s on:
+    exactly the failure the rule exists to prevent, with the rule reporting the
+    column accounted for.
+    """
+    from sqlalchemy import Table
+
+    from database import Base
+    from models import DegradingEnum
+
+    table_name, column_name = qualified.split(".")
+    for mapper in Base.registry.mappers:
+        table = mapper.local_table
+        if not isinstance(table, Table) or table.name != table_name:
+            continue
+        column = table.c[column_name]
+        return (
+            isinstance(column.type, DegradingEnum)
+            and column.type.enum.__name__ == _enum_columns()[qualified]
+            and (column.nullable or column.type.default is not None)
+        )
     return False
 
 
@@ -2476,14 +2521,15 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
             column: enum
             for column, enum in _enum_columns().items()
             if not _installs_check(column)
+            and not _degrades_at_the_read(column)
             and column not in GROWING_ENUM_COLUMNS
-            and column not in UNDECIDED_ENUM_COLUMNS
         }
         assert not unaccounted, (
-            "These map a StrEnum and the migrated database bounds none of them, so "
-            "a restored row outside the enum raises at read time. Write the "
-            "revision, or add the column to GROWING_ENUM_COLUMNS with the reason "
-            f"it cannot have one: {sorted(unaccounted)}"
+            "These map a StrEnum, the migrated database bounds none of them and "
+            "none reads through `models.DegradingEnum`, so a restored row outside "
+            "the enum raises at read time. Write the revision, put the column "
+            "behind `DegradingEnum`, or add it to GROWING_ENUM_COLUMNS with the "
+            f"reason it can have neither: {sorted(unaccounted)}"
         )
 
     def test_the_two_copies_of_every_enum_constraint_agree(self):
@@ -2603,8 +2649,7 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
     def test_the_exemption_list_names_only_real_columns(self):
         """An exemption for a column that no longer exists is an exemption
         nobody notices is doing nothing."""
-        exempted = set(GROWING_ENUM_COLUMNS) | set(UNDECIDED_ENUM_COLUMNS)
-        stale = exempted - set(_enum_columns())
+        stale = set(GROWING_ENUM_COLUMNS) - set(_enum_columns())
         assert not stale, f"exempted columns that do not exist: {sorted(stale)}"
 
     def test_a_column_is_not_bounded_by_another_columns_name(self):
@@ -2719,12 +2764,17 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
     def test_the_growing_list_does_not_grow_without_somebody_saying_so(self):
         """The other half of the exemption, pinned the same way.
 
-        **Splitting the list moved the escape hatch rather than closing it.**
-        Pinning only the undecided half left this one open, and nothing tests
-        that a reason string is true: measured 2026-09-06, moving `books.format`
-        here with the invented reason "looks like it grows to me" leaves the
-        whole suite green. A future wave wanting green reaches for the list with
-        no pin, so both lists have one and every exemption is a two place edit.
+        **Nothing tests that a reason string is true**, which is what makes the
+        pin the enforcement: measured 2026-09-06, moving `books.format` here
+        with the invented reason "looks like it grows to me" left the whole
+        suite green. So an exemption is a two place edit, and the second place
+        has a name on it.
+
+        This is the only list left. The second one, which held columns with no
+        decision at all, is closed: its three are behind `models.DegradingEnum`
+        and the rule reads the type rather than a name. An entry here is a
+        column that can have neither half yet, and `ClassificationScheme` is why
+        that is not an empty category.
         """
         assert set(GROWING_ENUM_COLUMNS) == {
             "user_books.status",
@@ -2732,31 +2782,40 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
             "tags.category",
         }
 
-    def test_the_undecided_list_does_not_grow_without_somebody_saying_so(self):
-        """The exemption above catches a stale entry and never a new one.
+    def test_the_degrade_reader_answers_both_ways(self):
+        """A diagonal, because a reader that answers False to everything
+        exempts nothing and passes the rule above by refusing to find anything.
 
-        Without this, a later wave adds a fourth column with no reason and the
-        rule stays green for good, which is how a list of three exceptions
-        becomes the rule. Pinned to the exact set, so growing it is a test edit
-        with a name on it. Shrinking it is the same edit, and that is the
-        direction somebody should want.
+        **The second list this class carried is gone rather than empty**, and
+        that is what this replaces. `books.format`, `books.condition` and
+        `books.lending` sat in it with no decision attached: they now read
+        through `models.DegradingEnum`, so the rule above accounts for them by
+        reading the artefact instead of by consulting a list of names.
 
-        **A set of names and nothing derived**, which is what makes this
-        testable. Two earlier versions carried each column's enum name beside
-        it, once behind a helper that read it back through `_enum_columns` so
-        the pin could not quote itself. Both were mutated to quote the constant
-        instead, and **neither mutation was caught**, because a duplicated fact
-        and the thing it duplicates agree on every tree where the duplicate is
-        correct. The redundancy was the defect; the indirection only hid it.
-
-        That the three columns still exist is `test_the_exemption_list_names_
-        only_real_columns` above, which walks the same union.
+        Both directions, and the negative is a column with the **other** half of
+        the bargain: `books.ownership` is constrained and does not degrade, so
+        it distinguishes this reader from "is an enum column at all".
         """
-        assert set(UNDECIDED_ENUM_COLUMNS) == {
-            "books.format",
-            "books.condition",
-            "books.lending",
-        }
+        assert _degrades_at_the_read("books.format")
+        assert _degrades_at_the_read("books.condition")
+        assert _degrades_at_the_read("books.lending")
+        assert not _degrades_at_the_read("books.ownership")
+        assert not _degrades_at_the_read("user_books.status")
+
+    def test_no_column_answers_to_both_halves_of_the_bargain(self):
+        """Or: the two readers are asking different questions.
+
+        Not a rule against belt and braces, which would be harmless. It is a
+        tripwire on the readers: were `_degrades_at_the_read` ever to answer off
+        the same thing `_installs_check` reads, the rule above would still pass
+        on every tree and would be one reader wearing two names.
+        """
+        both = sorted(
+            column
+            for column in _enum_columns()
+            if _installs_check(column) and _degrades_at_the_read(column)
+        )
+        assert both == []
 
     def test_the_reader_finds_the_columns_it_is_meant_to(self):
         """A tripwire. An empty or half built mapping makes both tests above
@@ -6805,3 +6864,408 @@ class TestOneDoorParsesAResponseBody:
             "google_books.py",
             "opds.py",
         }
+
+
+class TestEveryTextCeilingComesFromTheColumn:
+    """A Pydantic `max_length` on a field named after a Book column is that
+    column's width, taken from the column's own constant.
+
+    **Agreement is not the rule, derivation is**, and this class exists because
+    the two are indistinguishable by test. `tests/test_catalogue.py` diagnosed
+    it on the neighbouring seam: "a ceiling written `20` beside a column
+    declared `String(ISBN_MAX)` passes here, because 20 is what `ISBN_MAX` is:
+    measured, the whole file stayed green." Every one of the thirty literals in
+    `schemas/book.py` agreed with its column on 2026-09-16, and widening a
+    column would have left twenty of them behind with nothing red.
+
+    The per field HTTP round trip this replaces had the same hole from the other
+    end: `tests/routers/test_books.py` sends `"T" * (TITLE_MAX + 1)` and passes
+    whether the schema says 500 or 5000, because the router refuses the value
+    either way.
+
+    **Read off the mapper and off `model_fields`**, never off the source text, so
+    a literal reintroduced in any spelling fails.
+    """
+
+    #: Fields whose name matches a Book column and whose ceiling is deliberately
+    #: not that column's width, with the reason. Empty, and the rule is that an
+    #: entry here is a decision somebody wrote down rather than a number nobody
+    #: recomputed.
+    #:
+    #: **Read by the width rule alone**, not by the bare literal rule below it.
+    #: That one is satisfied by naming any constant, so a field whose bound is
+    #: genuinely not the column's has nothing to be exempted from: it names its
+    #: own constant and passes.
+    DELIBERATELY_DIFFERENT: dict[str, str] = {}
+
+    def _book_widths(self) -> dict[str, int]:
+        """Every Book column that bounds a length, and what it bounds it at.
+
+        **Asked for a `length`, not for a `String`.** `isinstance(type, String)`
+        is False for a `TypeDecorator` over one, so the three columns behind
+        `models.DegradingEnum` dropped silently out of this map the day that
+        type arrived. Nothing was uncovered, because all three are enums and no
+        schema field of those names carries a `max_length`, which is what a
+        silent drop looks like until it is not.
+        """
+        from models import Book
+
+        return {
+            column.name: length
+            for column in Book.__table__.columns
+            if (length := getattr(column.type, "length", None))
+        }
+
+    def _ceilings(self) -> list[tuple[str, str, int]]:
+        """Every `(model, field, max_length)` under `schemas/`.
+
+        Walked over the package rather than over `schemas/book.py`, because a
+        model bounding a Book column can be declared anywhere and an inclusion
+        list of one file is what goes stale.
+        """
+        import importlib
+        import inspect
+        import pkgutil
+
+        from pydantic import BaseModel
+
+        import schemas
+
+        for info in pkgutil.iter_modules(schemas.__path__):
+            importlib.import_module(f"schemas.{info.name}")
+
+        found: list[tuple[str, str, int]] = []
+        seen: set[type] = set()
+        for info in pkgutil.iter_modules(schemas.__path__):
+            module = importlib.import_module(f"schemas.{info.name}")
+            for _name, obj in vars(module).items():
+                if not (inspect.isclass(obj) and issubclass(obj, BaseModel)):
+                    continue
+                if obj in seen:
+                    continue
+                seen.add(obj)
+                for field, field_info in obj.model_fields.items():
+                    for meta in field_info.metadata:
+                        ceiling = getattr(meta, "max_length", None)
+                        if ceiling is not None:
+                            found.append((obj.__name__, field, ceiling))
+        return found
+
+    def test_every_ceiling_on_a_book_column_is_that_columns_width(self) -> None:
+        widths = self._book_widths()
+
+        wrong = [
+            f"{model}.{field} bounds {ceiling} where the column is {widths[field]}"
+            for model, field, ceiling in self._ceilings()
+            if field in widths
+            and ceiling != widths[field]
+            and f"{model}.{field}" not in self.DELIBERATELY_DIFFERENT
+        ]
+
+        assert wrong == [], (
+            "these bound a Book column at something other than its width, so "
+            "the API and the schema disagree about what fits: " + str(wrong)
+        )
+
+    def test_the_widths_are_the_columns_named_constants(self) -> None:
+        """The other half of the pair's tripwire, and it had none.
+
+        **Both rules go vacuous together if this map empties**: the width rule
+        is keyed `if field in widths` and the literal rule on
+        `name not in widths`, so an empty map reports nothing from either and
+        the three diagonals above never touch it, because they build their own.
+        It shrank by a fifth without a word when `DegradingEnum` arrived, which
+        is what that looks like from here.
+
+        **Against the constants rather than against a count.** A count fails
+        when the map empties and passes when a column and its constant part
+        company, which is the drift this whole class is about.
+        """
+        from models import LOCATION_MAX, PURCHASE_SOURCE_MAX, TITLE_MAX
+
+        widths = self._book_widths()
+
+        assert widths["title"] == TITLE_MAX
+        assert widths["location"] == LOCATION_MAX
+        assert widths["purchase_source"] == PURCHASE_SOURCE_MAX
+        # The three the `isinstance(type, String)` test used to drop, named so
+        # the fix does not quietly come undone.
+        assert {"format", "condition", "lending"} <= set(widths)
+
+    def test_every_deliberately_different_field_carries_a_reason(self) -> None:
+        """Empty today. An exemption with an empty string beside it is an
+        exemption nobody argued for, and `tests/schemas/test_public.py` pays a
+        review round for this each time it is missing."""
+        assert [
+            field for field, reason in self.DELIBERATELY_DIFFERENT.items() if not reason
+        ] == []
+
+    def test_the_walk_finds_the_fields_it_is_meant_to(self) -> None:
+        """A tripwire. A walk that imported nothing, or read `metadata` on a
+        field type that carries its ceiling elsewhere, would make the rule above
+        pass on any tree.
+
+        Named rather than counted, and named across two models so that a walk
+        reaching only the first module it imports is caught.
+        """
+        found = {(model, field) for model, field, _ in self._ceilings()}
+
+        assert ("BookCreate", "title") in found
+        assert ("BookDetailsUpdate", "purchase_source") in found
+        assert ("OpdsCredentialIn", "username") in found
+
+    @staticmethod
+    def _bare_ceilings(source: str, widths: dict[str, int]) -> list[str]:
+        """Every `max_length=<number>` beside a name a Book column also has.
+
+        **A function over a string rather than a loop over the tree**, because a
+        rule that only ever runs on this checkout is a rule whose arms cannot be
+        driven. The parameter arm below was written and measured at zero
+        offenders, which is what a correct arm and a deleted arm both look like
+        from here.
+
+        Three spellings this tree uses: an annotated assignment, which is a
+        schema field; a function parameter's annotation, which is a `Query` or a
+        `Path`; and an `Annotated` **type alias**, which this tree uses at
+        `schemas/author.py`, `schemas/common.py`, `schemas/user.py` and six
+        times in `dependencies.py`. The ticket that produced this class had
+        measured a drift site of each of the first two.
+
+        **Three is what it reads, not what exists, and a fourth arm is not the
+        answer.** Driven against this function: an alias imported from another
+        module is not reached, and `schemas/book.py`'s own `RowIdField` is that
+        kind; neither is `type X = ...`, which `sru.py` uses; neither is
+        `TypeAlias`, which nothing here uses. A guard enumerating something open
+        wants a structural fix rather than a further arm, and the structural fix
+        here would be resolving names across modules, which is an import graph.
+        What bounds the gap is the width rule beside this one: it compares the
+        value, so an unreached spelling is caught on the commit that widens the
+        column. This half exists to catch it earlier than that, not instead.
+
+        **The alias is resolved rather than reported.** A bare `max_length` in
+        an alias is not itself the defect: `dependencies.py`'s list caps are the
+        `book_ids` row cap case again, and reporting an alias where it is
+        declared would refuse them. So an alias holding a bare bound is
+        remembered, and reported only where a name a Book column has is
+        annotated with it, in the same module. That keeps the rule keyed on the
+        name, which is what makes every arm of it safe.
+        """
+        import ast
+
+        tree = ast.parse(source)
+
+        # Aliases declared in this module whose value carries a bare ceiling,
+        # mapped to the number, so an annotation naming one is read as if the
+        # bound had been written there.
+        bare_aliases: dict[str, object] = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            for call in ast.walk(node.value):
+                if not isinstance(call, ast.Call):
+                    continue
+                for keyword in call.keywords:
+                    if keyword.arg == "max_length" and isinstance(
+                        keyword.value, ast.Constant
+                    ):
+                        bare_aliases[target.id] = keyword.value.value
+
+        found: list[str] = []
+        annotated: list[tuple[str, ast.expr]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                # **Both sides, and the default is optional.** The bound can sit
+                # in either: `Field(max_length=...)` is an assignment and
+                # `Annotated[str, Field(max_length=...)]` is an annotation. The
+                # second spelling is live in `schemas/author.py` and
+                # `schemas/opds.py`, which carry ten of it between them and two
+                # bare literals under it; `routers/books.py:977` is the same
+                # idea as a function parameter and is read by the arm below, not
+                # by this one. An early return on a missing default skipped a
+                # field declared without one, which is the same hole once more.
+                annotated.append((node.target.id, node.annotation))
+                if node.value is not None:
+                    annotated.append((node.target.id, node.value))
+            elif isinstance(node, ast.arg) and node.annotation is not None:
+                annotated.append((node.arg, node.annotation))
+
+        for name, expression in annotated:
+            if name not in widths:
+                continue
+            for node in ast.walk(expression):
+                if isinstance(node, ast.Name) and node.id in bare_aliases:
+                    found.append(
+                        f"{name} bounds a bare {bare_aliases[node.id]!r} "
+                        f"through {node.id}"
+                    )
+                if not isinstance(node, ast.Call):
+                    continue
+                for keyword in node.keywords:
+                    if keyword.arg == "max_length" and isinstance(
+                        keyword.value, ast.Constant
+                    ):
+                        found.append(f"{name} bounds a bare {keyword.value.value!r}")
+        return found
+
+    def test_the_ceilings_are_the_named_constants_and_not_their_values(
+        self,
+    ) -> None:
+        """The other half, and the one the rule above cannot see.
+
+        A literal equal to the constant passes every assertion here, which is
+        the whole defect: it is only wrong on the commit that widens the column.
+        So this reads the source and refuses a bare number beside a name that is
+        a Book column's.
+
+        **Refused on the name, not on the number**, because the numbers collide:
+        `max_length=500` is `TITLE_MAX` on `title` and a bulk request's row cap
+        on `book_ids`, and a rule keyed on the value would have to exempt the
+        second by hand.
+
+        **Stated as an exclusion: every backend module but the tests and the
+        migrations.** The first version read `schemas/book.py` alone, which is
+        the inclusion list of one file the sibling rule's own docstring argues
+        against, and the ticket that produced this class had measured two of its
+        drift sites in `routers/books.py`.
+
+        **A name is not always the column's fact, and the message says so**, in
+        the one place a reader acts on. `isbn` at twenty sites in `metadata.py`
+        and `title` in `z3950.py` are search terms, whose bound belongs to the
+        request budget those modules own rather than to `books.isbn`. What this
+        rule refuses of them is a bare number, and what it asks for is a name,
+        which for a search term is the budget's name. `DELIBERATELY_DIFFERENT`
+        is the width rule's escape hatch and is not consulted here: a ceiling
+        this rule reports is satisfied by naming any constant, so there is
+        nothing for an exemption to carry.
+        """
+        widths = self._book_widths()
+
+        offenders = sorted(
+            f"{path.name}: {offender}"
+            for path in _python_sources()
+            for offender in self._bare_ceilings(path.read_text(), widths)
+        )
+
+        assert offenders == [], (
+            "these write a bound as a number beside a name a Book column also "
+            "has. Name the column's constant where it is that column's fact, "
+            "and the bound's own constant where it is not: a literal is only "
+            "wrong on the commit that moves what it copied, and nothing goes "
+            "red then. " + str(offenders)
+        )
+
+    def test_the_rule_reports_both_shapes_it_claims_to_read(self) -> None:
+        """The diagonal, because the tree reports zero either way.
+
+        Measured over all 84 modules `_python_sources()` returns: the rule
+        answers `[]` with the parameter arm and `[]` without it, since every
+        site already names a constant. A correct arm and a deleted arm are
+        indistinguishable from this checkout, which is the rung this rule sat on
+        until the two sources below existed.
+
+        Each shape is dropped in turn and each is reported for its own, so one
+        arm cannot be covering for the other.
+        """
+        widths = {"location": 120, "title": 500}
+
+        field = "location: str | None = Field(default=None, max_length=120)\n"
+        parameter = (
+            "def search(\n"
+            "    title: Annotated[str | None, Query(max_length=500)] = None,\n"
+            ") -> None: ...\n"
+        )
+
+        annotated = (
+            "location: Annotated[str | None, Field(max_length=120)] = None\n"
+        )
+        no_default = "location: Annotated[str, Field(max_length=120)]\n"
+
+        assert self._bare_ceilings(field, widths) == ["location bounds a bare 120"]
+        assert self._bare_ceilings(parameter, widths) == ["title bounds a bare 500"]
+        # The two the first version walked past. `Annotated[...]` on an
+        # assignment puts the bound in the annotation rather than the default,
+        # which is the spelling `routers/books.py` already uses, and a field
+        # with no default was skipped before its annotation was read at all.
+        assert self._bare_ceilings(annotated, widths) == [
+            "location bounds a bare 120"
+        ]
+        assert self._bare_ceilings(no_default, widths) == [
+            "location bounds a bare 120"
+        ]
+
+        # The third shape, and the one two rounds of review walked past: the
+        # bound is in an alias and the field names the alias.
+        alias = (
+            "LocationField = Annotated[str | None, Field(max_length=120)]\n"
+            "location: LocationField = None\n"
+        )
+        assert self._bare_ceilings(alias, widths) == [
+            "location bounds a bare 120 through LocationField"
+        ]
+
+    def test_an_alias_is_reported_where_it_is_used_and_not_where_it_is_declared(
+        self,
+    ) -> None:
+        """A bare bound in an alias is not itself the defect.
+
+        `dependencies.py` declares six aliases and `schemas/common.py` one, and
+        the list caps among them are the `book_ids` row cap case: a number that
+        is not a column's width and has no constant to name. Reporting an alias
+        where it is declared refuses those. The rule stays keyed on the name a
+        Book column has, which is the property every other arm rests on too.
+        """
+        widths = {"location": 120}
+        declared_only = "RowIds = Annotated[list[int], Field(max_length=500)]\n"
+        used_by_another_name = (
+            "RowIds = Annotated[list[int], Field(max_length=500)]\n"
+            "book_ids: RowIds = []\n"
+        )
+
+        assert self._bare_ceilings(declared_only, widths) == []
+        assert self._bare_ceilings(used_by_another_name, widths) == []
+
+    def test_a_named_constant_in_an_alias_is_not_reported(self) -> None:
+        """The other half of the alias diagonal, so the arm cannot be satisfied
+        by refusing every alias."""
+        widths = {"location": 120}
+        named = (
+            "LocationField = Annotated[str | None, Field(max_length=LOCATION_MAX)]\n"
+            "location: LocationField = None\n"
+        )
+
+        assert self._bare_ceilings(named, widths) == []
+
+    def test_it_reports_neither_shape_once_the_constant_is_named(self) -> None:
+        """The other half of the diagonal: a rule refusing everything would pass
+        the two arms above and fail the tree for the wrong reason."""
+        widths = {"location": 120, "title": 500}
+
+        field = "location: str | None = Field(default=None, max_length=LOCATION_MAX)\n"
+        parameter = (
+            "def search(\n"
+            "    title: Annotated[str | None, Query(max_length=TITLE_MAX)] = None,\n"
+            ") -> None: ...\n"
+        )
+
+        assert self._bare_ceilings(field, widths) == []
+        assert self._bare_ceilings(parameter, widths) == []
+
+    def test_it_ignores_a_name_no_book_column_has(self) -> None:
+        """`book_ids` carries `max_length=500`, which is a row cap rather than
+        `TITLE_MAX` wearing its value. A rule keyed on the number would have to
+        exempt it by hand."""
+        widths = {"title": 500}
+
+        assert self._bare_ceilings(
+            "book_ids: list[int] = Field(min_length=2, max_length=500)\n", widths
+        ) == []
+
+    def test_the_bare_literal_rule_reads_more_than_one_file(self) -> None:
+        """A tripwire on the walk, because a walk that returned one module would
+        pass the rule for the same reason the narrow version did."""
+        names = {path.name for path in _python_sources()}
+
+        assert {"book.py", "books.py", "public.py"} <= names

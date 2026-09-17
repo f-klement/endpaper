@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 from xml.etree import ElementTree
 
+import bibliographic
 import metadata
 from catalogue import Heading, Record
 from enums import ClassificationScheme
@@ -114,35 +115,6 @@ _SUBJECT_SOURCE: Final[dict[ClassificationScheme, str]] = {
 }
 
 
-#: The two letter code this app stores, as the three letter code MARC writes.
-#:
-#: `metadata._LANGUAGES` inverted rather than retyped, so the reader and the
-#: writer cannot disagree about which languages exist. Two tables would drift
-#: the first time one of them gained a language, and the only thing that would
-#: notice is a round trip nobody ran.
-#:
-#: **The inversion is not one to one, and the three collisions are the whole
-#: reason this constant is not a one liner.** ISO 639-2 has two codes for some
-#: languages: a bibliographic one and a terminological one. `_LANGUAGES` holds
-#: both, because a catalogue may send either. MARC `041` takes the
-#: **bibliographic** code, per the MARC Code List for Languages, so `de` must
-#: write `ger` and never `deu`, `fr` must write `fre` and never `fra`, and `nl`
-#: must write `dut` and never `nld`.
-#:
-#: Pinned here rather than taken from the order `_LANGUAGES` happens to be
-#: written in. Both orderings round trip, since either code reads back as the
-#: same two letter one, so a reordering in that module would silently start
-#: writing a code MARC does not use and every test would stay green.
-_BIBLIOGRAPHIC_PREFERRED: Final[dict[str, str]] = {"de": "ger", "fr": "fre", "nl": "dut"}
-
-_BIBLIOGRAPHIC_CODES: Final[dict[str, str]] = {
-    **{
-        code_639_1: code_639_2
-        for code_639_2, code_639_1 in metadata._LANGUAGES.items()
-    },
-    **_BIBLIOGRAPHIC_PREFERRED,
-}
-
 #: Characters XML 1.0 cannot carry, whatever the encoding.
 #:
 #: **A guard on the writer rather than on the column, and it is the file's
@@ -208,7 +180,7 @@ def _credited_names(author: str | None) -> list[str]:
     The ambiguity this cannot resolve is worth stating rather than hiding: the
     column is one free text field, so `"Williams, John"` is either one person
     typed in catalogue order or two people called Williams and John.
-    `metadata._flip_catalogue_name` has already turned every name **this app
+    `bibliographic.flip_catalogue_name` has already turned every name **this app
     parsed** into direct order, so a comma in a stored value is the multiple
     author case for everything the app itself wrote. A member who typed a name
     in catalogue order is split, and that is the cost of the column being one
@@ -234,14 +206,14 @@ def _record_element(book: Book) -> ElementTree.Element:
     | `100 0# $a` | the first credited name | `metadata._marc_authors` |
     | `245 10 $a $b $n $p` | `title`, `subtitle`, `series_index`, `series_name` | `metadata._marc_title` |
     | `264 #1 $b $c` | `publisher`, `year` | `metadata._marc_publisher`, `_marc_year` |
-    | `300 ## $a` | `page_count` | `metadata._pages_from_extent` |
+    | `300 ## $a` | `page_count` | `bibliographic.pages_from_extent` |
     | `520 ## $a` | `description` | `metadata._marc_description` |
     | `650 #7 $a $0 $2` | a `gnd` or `lcsh` classification | `metadata._dnb_subjects`, this module |
     | `700 0# $a $4` | every credited name after the first | `metadata._marc_authors` |
 
     **`100` and `700` carry first indicator `0`, "forename".** That is the
     specification's name for a personal name in direct order, which is what
-    `books.author` holds: `metadata._flip_catalogue_name` turns
+    `books.author` holds: `bibliographic.flip_catalogue_name` turns
     `Williams, John` into `John Williams` on the way in, and nothing here can
     turn it back without guessing which word is the surname. Coding it `1`,
     "surname", would tell a receiving cataloguer the name is inverted when it
@@ -271,7 +243,7 @@ def _record_element(book: Book) -> ElementTree.Element:
     ElementTree.SubElement(record, "controlfield", {"tag": "001"}).text = str(book.id)
 
     names = _credited_names(book.author)
-    language = _BIBLIOGRAPHIC_CODES.get((book.language or "").lower())
+    language = bibliographic.BIBLIOGRAPHIC_CODES.get((book.language or "").lower())
 
     fields = [
         _datafield("020", " ", " ", [("a", book.isbn)]),
@@ -328,7 +300,7 @@ def _series_number(index: float | None) -> str | None:
 def _extent(page_count: int | None) -> str | None:
     """A page count as `300 $a` writes it.
 
-    `metadata._pages_from_extent` requires the unit and takes the digit run
+    `bibliographic.pages_from_extent` requires the unit and takes the digit run
     before it, so the string has to name pages rather than being a bare number:
     a bare number reads back as nothing at all.
     """
@@ -575,7 +547,7 @@ def _extra_headings(fields: dict[str, list[metadata._Subfields]]) -> list[Headin
         for entry in fields.get("650", [])
         if metadata._subject_vocabulary("650", entry) == "lcsh"
         and metadata._gnd_identifier(entry) is None
-        for heading in [metadata._strip_marc_punctuation(entry.get("a", ""))]
+        for heading in [bibliographic.strip_isbd_punctuation(entry.get("a", ""))]
         if heading
     ]
     return headings
@@ -643,7 +615,7 @@ def _record(fields: dict[str, list[metadata._Subfields]]) -> Record | None:
         year=metadata._marc_year(fields),
         description=metadata._marc_description(fields),
         language=metadata._marc_language(fields),
-        page_count=metadata._pages_from_extent(metadata._marc_extent(fields)),
+        page_count=bibliographic.pages_from_extent(metadata._marc_extent(fields)),
         series_name=series_name,
         series_index=series_index,
         subjects=tuple(subjects),

@@ -19,6 +19,7 @@ import httpx
 import pytest
 import respx
 
+import cover_store
 import covers
 from config import COVERS_DIR
 from tests.helpers import JPEG_BYTES
@@ -270,14 +271,14 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
         store_locally(monkeypatch)
         book = make_book(admin["headers"], title="A")
         client.post("/api/books/covers/backfill", headers=admin["headers"])
-        assert covers.stored_ids() == {book["id"]}
+        assert cover_store.book_ids() == {book["id"]}
 
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
         client.delete(
             f"/api/books/{book['id']}/permanent", headers=admin["headers"]
         )
 
-        assert covers.stored_ids() == set()
+        assert cover_store.book_ids() == set()
 
     def test_emptying_the_trash_deletes_them_too(
         self, client, admin, make_book, covers_dir, monkeypatch
@@ -289,7 +290,7 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
 
         client.delete("/api/books/trash", headers=admin["headers"])
 
-        assert covers.stored_ids() == set()
+        assert cover_store.book_ids() == set()
 
     def test_trashing_a_book_keeps_its_cover(
         self, client, admin, make_book, covers_dir, monkeypatch
@@ -302,7 +303,7 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
 
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
 
-        assert covers.stored_ids() == {book["id"]}
+        assert cover_store.book_ids() == {book["id"]}
 
     def test_merging_moves_the_cover_it_kept(
         self, client, admin, make_book, covers_dir, db
@@ -320,7 +321,7 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
         )
 
         assert res.status_code == 200, res.text
-        assert covers.stored_ids() == {keeper["id"]}
+        assert cover_store.book_ids() == {keeper["id"]}
         assert res.json()["cover_url"] == f"/covers/{keeper['id']}.jpg"
 
     def test_a_failed_adoption_keeps_the_bytes_and_the_row_honest(
@@ -329,11 +330,13 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
         """A merge moves the kept cover after it commits, so the move can fail
         on its own with the row already saved.
 
-        `replace_image` is atomic and re-raises having removed only its own
-        temporary file, so the loser's cover is still there. Sweeping the
+        `uploads.replace_image` is atomic and re-raises having removed only its
+        own temporary file, so the loser's cover is still there. Sweeping the
         loser's id anyway destroys the only copy: a hand-uploaded cover has no
         remote source, so the backfill cannot put it back. And the row must not
         be left claiming a cover the move never produced.
+
+        Patched on `cover_store`, which is the one module that calls it.
         """
         keeper = make_book(admin["headers"], title="Dune")
         loser = make_book(admin["headers"], title="Dune")
@@ -342,7 +345,7 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
         def full_disk(directory, base, extension, data):
             raise OSError(28, "No space left on device")
 
-        monkeypatch.setattr(covers, "replace_image", full_disk)
+        monkeypatch.setattr(cover_store, "replace_image", full_disk)
 
         res = client.post(
             "/api/books/merge",
@@ -351,7 +354,7 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
         )
 
         assert res.status_code == 200, res.text
-        assert covers.stored_ids() == {loser["id"]}
+        assert cover_store.book_ids() == {loser["id"]}
         assert res.json()["cover_url"] is None
 
     def test_merging_deletes_a_cover_it_did_not_keep(
@@ -368,7 +371,7 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
             headers=admin["headers"],
         )
 
-        assert covers.stored_ids() == {keeper["id"]}
+        assert cover_store.book_ids() == {keeper["id"]}
 
     def test_the_backfill_re_fetches_a_cover_url_with_no_file_behind_it(
         self, client, admin, make_book, covers_dir, monkeypatch
@@ -386,7 +389,7 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
 
         assert body["examined"] == 1
         assert body["stored"] == 1
-        assert covers.stored_ids() == {book["id"]}
+        assert cover_store.book_ids() == {book["id"]}
 
 
 class TestAMemberCannotChooseWhereTheServerConnects:
@@ -422,7 +425,7 @@ class TestAMemberCannotChooseWhereTheServerConnects:
         # the fallback when a download fails. What it must not do is make this
         # server connect to it.
         assert res.json()["cover_url"] == "https://evil.test/x.jpg"
-        assert covers.stored_ids() == set()
+        assert cover_store.book_ids() == set()
 
     def test_a_redirect_into_private_space_is_refused_rather_than_followed(
         self, client, admin, covers_dir
@@ -446,7 +449,7 @@ class TestAMemberCannotChooseWhereTheServerConnects:
             )
 
         assert res.status_code == 201
-        assert covers.stored_ids() == set()
+        assert cover_store.book_ids() == set()
 
 
 class TestACoverFailureNeverFailsTheRequest:

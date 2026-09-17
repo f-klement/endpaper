@@ -30,14 +30,13 @@ two: a table wide question cannot be scoped to a viewer without leaving rows
 nobody can reach.
 """
 
-import logging
 from collections.abc import Collection
 from typing import NamedTuple
 from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy.orm import Session
 
-from enums import CustomFieldKind
+from enums import CustomFieldKind, member_or
 from models import (
     MAX_CUSTOM_FIELDS,
     Book,
@@ -50,7 +49,6 @@ from models import (
 #: Everything else is text, including the ones that are the reason this tuple
 #: exists: `javascript`, `data` and `vbscript`. A scheme relative `//host`
 #: carries no scheme at all and is refused by the same test.
-logger = logging.getLogger("endpaper.custom_fields")
 
 _LINKABLE_SCHEMES = ("http", "https")
 
@@ -113,32 +111,31 @@ class Filled(NamedTuple):
 def _kind_of(field: CustomField) -> CustomFieldKind:
     """What this definition holds, degrading to TEXT rather than raising.
 
-    The column is a plain VARCHAR, and `CustomFieldKind(...)` on a value that
-    is not one of the two **raises `ValueError`**. That is the poisoned row
-    shape `link_target` is written against, and it would be a worse one: a
-    single bad `kind` would 500 every read of every Book with a value in that
-    field, not one Book.
+    `enums.member_or` is the rule, which this was the first and for a while the
+    only instance of; the trap it avoids is written there. What is particular
+    here is the direction the default degrades in: a TEXT field never links
+    whatever it holds, so an unreadable kind cannot turn a stored value into a
+    destination.
 
     `ck_custom_fields_kind` in the schema is what stops such a row arriving,
     including through `backup.restore`, which inserts through Core and sees no
     Pydantic model. This is the second half, for a database restored from an
-    archive older than that constraint, and it degrades in the safe direction:
-    an unrecognised kind is TEXT, and a TEXT field never links whatever it
-    holds.
+    archive older than that constraint.
+
+    **The field id is in the log**, which is why this passes a context and a
+    column behind `models.DegradingEnum` cannot: a type reading a value does
+    not know which row it came out of.
 
     **The definitions route is guarded by the constraint alone**, not by this:
     `CustomFieldOut.kind` is typed, so Pydantic would refuse a bad row there
     with a 500. Stated rather than left to be discovered.
     """
-    try:
-        return CustomFieldKind(field.kind)
-    except ValueError:
-        logger.warning(
-            "Custom field %s has an unrecognised kind %r; reading it as text",
-            field.id,
-            field.kind,
-        )
-        return CustomFieldKind.TEXT
+    return member_or(
+        CustomFieldKind,
+        field.kind,
+        CustomFieldKind.TEXT,
+        context=f"custom_fields.kind on field {field.id}",
+    )
 
 
 def link_target(kind: CustomFieldKind, value: str) -> str | None:

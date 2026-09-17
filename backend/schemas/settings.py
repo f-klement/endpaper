@@ -241,8 +241,10 @@ class FeatureFlagsOut(BaseModel):
     #: to read `GET /api/settings` from still has to be told.
     #:
     #: **The raw switch, not a conjunction**, unlike the field below it. There
-    #: is nothing to conjoin: the server gates both MARC routes on this row
+    #: is nothing to conjoin: the server gates every MARC route on this row
     #: alone, so a client reading it gets exactly the answer the routes give.
+    #: Three of them: the MARCXML arm of `GET /api/books/export` is one, and it
+    #: is the route the client reading this field is deciding a menu item for.
     #:
     #: What it discloses to a caller with no token is one boolean of deployment
     #: posture: this instance is run as a library. It says nothing about the

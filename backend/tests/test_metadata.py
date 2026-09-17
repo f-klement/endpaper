@@ -42,6 +42,7 @@ import httpx
 import pytest
 import respx
 
+import bibliographic
 import covers
 import credentials
 import fetch
@@ -60,16 +61,12 @@ from enums import (
 from isbn import registration_group
 from metadata import (
     Outcome,
-    _dc_title_statement,
     _dnb_subjects,
-    _flip_catalogue_name,
-    _is_placeholder_title,
     _loc_record,
     _loc_subjects,
     _marc_author_identifiers,
     _marc_authors,
     _marc_fields,
-    _pages_from_extent,
     _parsed,
     _subject_identifier,
     _subject_kind,
@@ -128,7 +125,6 @@ def patch_lookup_adapters(
     monkeypatch.setattr(metadata, "_lookup_one", door)
 
 
-
 def _nlg_search(query: str, limit: int):
     """The NLG's title search, which is now the shared SRU door plus a row."""
     return metadata._search_one(
@@ -139,7 +135,6 @@ def _nlg_search(query: str, limit: int):
 def _nkp_query(value: str) -> str:
     """The NKP's PQF lookup query, built from its row's use attribute."""
     return targets.SEEDED[CatalogueSource.NKP].isbn_query(value)
-
 
 
 async def lookup(*args: Any, plan: sources.Plan = ALL_SOURCES, **kwargs: Any):
@@ -483,7 +478,7 @@ BNA = "http://200.123.191.9:9991/BNA01"
 #: point:
 #:
 #: * the title carries a subtitle **and** a trailing ISBD slash with nothing
-#:   after it, `main : sub /`, which is the form `_dc_title_statement` does not
+#:   after it, `main : sub /`, which is the form `bibliographic.split_title_statement` does not
 #:   split. 3 of the 10 live records measured that day carry a subtitle and all
 #:   3 end this way.
 #: * the people are `contributor` and there is no `creator`, the NKP's habit at
@@ -616,7 +611,7 @@ OENB_AUSTRIAN_ONLY = _oenb_envelope(
 #: of five records is articles like this one.
 #:
 #: **It has a title, an author and a year, and no 300 at all**, which is exactly
-#: why the leader has to be read: `_is_physical_book` tests the extent for an
+#: why the leader has to be read: `bibliographic.is_physical_book` tests the extent for an
 #: online form and the title for a volume slot, and an absent extent passes
 #: both. Measured over 8 live title searches, 155 of 280 records are this shape.
 OENB_ARTICLE = (
@@ -669,7 +664,7 @@ OENB_SEARCH = _oenb_envelope(OENB_ARTICLE, OENB_MONOGRAPH)
 
 #: A whole publication by its leader, and an **online resource** by its extent.
 #:
-#: The leader test passes it, so this is the record that shows `_is_physical_book`
+#: The leader test passes it, so this is the record that shows `bibliographic.is_physical_book`
 #: is doing separate work from `_is_component_part`. Deleting either refusal
 #: leaves the other in place and this row reaching the picker.
 OENB_ONLINE = (
@@ -1412,37 +1407,6 @@ class TestDnbRecord:
         assert result.outcome is Outcome.NOT_FOUND
 
 
-class TestTitleStatement:
-    """The BnF still writes a whole statement into `dc:title`, and so does a
-    MARC record old enough not to have subfielded itself."""
-
-    def test_drops_the_statement_of_responsibility(self):
-        assert _dc_title_statement("Dune / Frank Herbert") == ("Dune", None)
-
-    def test_splits_the_subtitle_off_the_colon(self):
-        assert _dc_title_statement("Docker : eine Einfuehrung") == (
-            "Docker",
-            "eine Einfuehrung",
-        )
-
-    def test_drops_the_bracketed_original_title_of_a_translation(self):
-        """The brackets hold a different book's title, in another language."""
-        assert _dc_title_statement("[Docker: up and running] ; Praxiswissen Docker") == (
-            "Praxiswissen Docker",
-            None,
-        )
-
-    def test_keeps_a_colon_that_is_part_of_the_title(self):
-        """Only " : " separates a subtitle. A bare colon is punctuation."""
-        assert _dc_title_statement("Docker: up and running") == (
-            "Docker: up and running",
-            None,
-        )
-
-    def test_drops_a_second_work_bound_into_the_same_volume(self):
-        assert _dc_title_statement("Erstes Werk ; Zweites Werk") == ("Erstes Werk", None)
-
-
 class TestSearchMatches:
     """`Record.match_headings` is what bounds a row before the picker sees it."""
 
@@ -1745,7 +1709,6 @@ class TestTheResponseSizeCap:
             result = await lookup(ENGLISH_ISBN)
 
         assert result.source == "k10plus"
-
 
 
 class TestMarcSubfields:
@@ -2292,49 +2255,6 @@ class TestWhichAddedEntryWroteTheBook:
         assert _marc_authors(fields) == "Elena Ferrante"
 
 
-class TestPersonName:
-    def test_turns_catalogue_order_into_a_readable_name(self):
-        assert _flip_catalogue_name("Kane, Sean P.") == "Sean P. Kane"
-
-    def test_keeps_the_full_stop_that_belongs_to_an_initial(self):
-        """`Pohl, Robert O.` means nothing as `Robert O`, and the ISBD full stop
-        stripped off `Melville, Herman.` looks the same to a regex."""
-        assert _flip_catalogue_name("Pohl, Robert O.") == "Robert O. Pohl"
-
-    def test_drops_the_life_dates_a_catalogue_hangs_off_a_name(self):
-        assert _flip_catalogue_name("Melville, Herman, 1819-1891") == "Herman Melville"
-
-    def test_leaves_a_corporate_name_alone(self):
-        """Two commas is not "Surname, Forenames" and reordering would mangle it."""
-        assert (
-            _flip_catalogue_name("Springer Verlag, Berlin, Heidelberg")
-            == "Springer Verlag, Berlin, Heidelberg"
-        )
-
-
-class TestPageCount:
-    """Shared by the DNB and K10plus parsers, which spell the extent differently."""
-
-    def test_reads_the_german_form(self):
-        assert _pages_from_extent("390 Seiten") == 390
-
-    def test_reads_the_english_form(self):
-        assert _pages_from_extent("412 pages") == 412
-
-    def test_returns_nothing_for_an_extent_it_cannot_parse(self):
-        assert _pages_from_extent("1 Online-Ressource") is None
-
-    def test_reads_the_abbreviated_form_k10plus_uses(self):
-        assert _pages_from_extent("348 S.") == 348
-
-    def test_ignores_the_dimensions_that_follow_the_extent(self):
-        """A bare first number picks up "23 cm" as a page count."""
-        assert _pages_from_extent("528 p. : ill. ; 23 cm") == 528
-
-    def test_returns_nothing_for_an_absent_field(self):
-        assert _pages_from_extent(None) is None
-
-
 class TestK10plusIdentity:
     """Matching an ISBN is not the same as being the book it belongs to."""
 
@@ -2668,17 +2588,6 @@ class TestK10plusRecord:
 class TestCrossReferenceGuard:
     """The DNB's identifier index matches a mention, not an identity."""
 
-    def test_a_volume_slot_is_not_a_title(self):
-        assert _is_placeholder_title("[Hauptbd.].")
-        assert _is_placeholder_title("Bd. 3")
-        assert _is_placeholder_title("Volume 2")
-        assert _is_placeholder_title("")
-
-    def test_a_real_title_is_kept(self):
-        assert not _is_placeholder_title("Stoner")
-        # "Band" is a prefix of this and must not match it.
-        assert not _is_placeholder_title("Banditen")
-
     @pytest.mark.asyncio
     async def test_a_placeholder_record_is_a_miss_so_another_source_can_answer(self):
         """Observed live: a French ISBN returned a German set titled `[Hauptbd.].`
@@ -2926,56 +2835,6 @@ class TestSearchTerms:
         assert metadata._search_terms("   ") == []
 
 
-class TestDenoising:
-    """What the catalogues return that is not a book on a shelf."""
-
-    @pytest.mark.parametrize(
-        "extent",
-        [
-            "1 Online-Ressource (100 Seiten)",
-            "1 online resource",
-            "1 audio disc",
-            "1 sound recording",
-        ],
-    )
-    def test_a_digitised_or_recorded_copy_is_not_a_book(self, extent):
-        assert not metadata._is_physical_book(extent, "Der Zauberberg")
-
-    def test_a_printed_extent_is_a_book(self):
-        assert metadata._is_physical_book("992 Seiten", "Der Zauberberg")
-
-    def test_a_record_with_no_extent_is_allowed(self):
-        """Plenty of good records omit it, and refusing them loses real books."""
-        assert metadata._is_physical_book(None, "Der Zauberberg")
-
-    def test_a_volume_slot_is_still_rejected(self):
-        assert not metadata._is_physical_book("992 Seiten", "[Hauptbd.].")
-
-
-class TestPersonNames:
-    """Catalogues hang life dates and roles off a name. None of it is the name."""
-
-    def test_strips_bnf_life_dates_and_role(self):
-        assert (
-            metadata._flip_catalogue_name("Zafón, Carlos (1964-2020). Auteur du texte")
-            == "Carlos Zafón"
-        )
-
-    def test_strips_marc_life_dates(self):
-        assert metadata._flip_catalogue_name("Melville, Herman, 1819-1891") == (
-            "Herman Melville"
-        )
-
-    def test_leaves_an_ordinary_name_alone(self):
-        assert metadata._flip_catalogue_name("Mann, Thomas") == "Thomas Mann"
-
-    def test_leaves_a_corporate_name_in_catalogue_order(self):
-        assert (
-            metadata._flip_catalogue_name("Springer, Berlin, Heidelberg")
-            == "Springer, Berlin, Heidelberg"
-        )
-
-
 class TestAccentsAndNearSpellings:
     """Half the shelf is not English and phone keyboards have no umlauts."""
 
@@ -3120,7 +2979,7 @@ class TestAHostileSourceCostsItsOwnRows:
     #: `int()` refuses a string of more than `sys.get_int_max_str_digits()`
     #: digits, 4,300 by default, and raises **`ValueError`**, which is neither
     #: `httpx.HTTPError` nor `ElementTree.ParseError`. Every MARC source runs its
-    #: `300 $a` through `_pages_from_extent`, so one poisoned record 500s the
+    #: `300 $a` through `bibliographic.pages_from_extent`, so one poisoned record 500s the
     #: whole request for all of them.
     #:
     #: **The response cap cannot reach this.** The poisoned envelope is 4,870
@@ -3213,37 +3072,6 @@ class TestAHostileSourceCostsItsOwnRows:
         assert result.outcome is Outcome.FOUND
         assert result.record is not None
         assert result.record.page_count is None
-
-    @pytest.mark.parametrize(
-        "extent, expected",
-        [
-            ("390 Seiten", 390),
-            ("348 S.", 348),
-            ("528 p.", 528),
-            ("III, 272 S.", 272),
-            # The bound `_open_library_pages` has always applied, now applied
-            # here too: a page count out of range is no page count.
-            ("999999 Seiten", None),
-            ("0 Seiten", None),
-            # The digit run is refused whole rather than having its tail read
-            # as a page count, which is what a bare `\d{1,6}` would have done.
-            ("9" * 4301 + " Seiten", None),
-            ("9" * 12 + " Seiten", None),
-            # **This is the case that actually pins the lookbehind**, and the
-            # two above are not: with `\d{1,6}` and no lookbehind they match
-            # the last six digits, `999999`, which the range check rejects
-            # anyway, so both still answer None with the guard removed. Here
-            # the tail is a plausible page count, so dropping the lookbehind
-            # invents 350 out of the end of an attack. Measured: the mutation
-            # survived the whole file until this row existed.
-            ("1" * 20 + "000350 Seiten", None),
-            # Still not a page count.
-            ("23 cm", None),
-            (None, None),
-        ],
-    )
-    def test_a_page_count_is_bounded_at_both_ends(self, extent, expected):
-        assert metadata._pages_from_extent(extent) == expected
 
     @pytest.mark.asyncio
     async def test_a_redirect_naming_an_unusable_host_is_not_a_500(self):
@@ -3355,7 +3183,7 @@ class TestLibraryOfCongressClassifications:
     )
 
     def _classifications(self) -> tuple[Heading, ...]:
-        parsed = _loc_record(ElementTree.fromstring(self.MODS))
+        parsed = _loc_record(ElementTree.fromstring(self.MODS), source="loc")
         assert parsed is not None
         return parsed.headings
 
@@ -3372,7 +3200,7 @@ class TestLibraryOfCongressClassifications:
             '<classification authority="ddc" edition="23">005.133</classification>',
             '<classification authority="ddc" edition="23">005.13/3</classification>',
         )
-        parsed = _loc_record(ElementTree.fromstring(mods))
+        parsed = _loc_record(ElementTree.fromstring(mods), source="loc")
         assert parsed is not None
         numbers = [
             entry.number
@@ -3415,7 +3243,9 @@ class TestLibraryOfCongressSubjectHeadings:
     )
 
     def _classifications(self, mods: str | None = None) -> tuple[Heading, ...]:
-        parsed = _loc_record(ElementTree.fromstring(mods or self.MODS))
+        parsed = _loc_record(
+            ElementTree.fromstring(mods or self.MODS), source="loc"
+        )
         assert parsed is not None
         return parsed.headings
 
@@ -3663,8 +3493,10 @@ class TestWhatEachReaderCanSupply:
                 "<dc:format>200 p.</dc:format>"
                 '<dc:subject xml:lang="fre">Roman francais</dc:subject>'
                 "</record>"
-            )
+            ),
+            source="bnf",
         )
+
         nkp = metadata._nkp_record(
             ElementTree.fromstring(
                 "<dc-record><title>Kniha</title><type>text</type>"
@@ -4885,7 +4717,7 @@ class TestTheAustrianNationalLibrarySearch:
 
     @pytest.mark.asyncio
     async def test_an_online_resource_is_not_offered_as_a_book(self):
-        """`_is_physical_book` is a second refusal, not a spare one.
+        """`bibliographic.is_physical_book` is a second refusal, not a spare one.
 
         This record's leader says monograph, so `_is_component_part` passes it,
         and it carries no control field at all, so `_marc_carrier_is_book` passes
@@ -4893,7 +4725,7 @@ class TestTheAustrianNationalLibrarySearch:
 
         That makes it the row proving the **prose half is not dead code at a MARC
         source** now that the carrier codes stand in front of it. It was written
-        to show `_is_physical_book` doing separate work from `_is_component_part`
+        to show `bibliographic.is_physical_book` doing separate work from `_is_component_part`
         and it is a third refusal in that path rather than a second, so the job it
         is named for is the one it still does and the ordinal was the stale part.
         """
@@ -5392,7 +5224,7 @@ class TestTheCzechNationalLibrary:
             )
 
         assert result.record is not None
-        # `_flip_catalogue_name` puts the forename first and `_PERSON_NOISE`
+        # `bibliographic.flip_catalogue_name` puts the forename first and `bibliographic._PERSON_NOISE`
         # takes the life dates off, which is what every other source here gets.
         assert result.record.author == "Bohumil Hrabal"
 
@@ -5449,7 +5281,7 @@ class TestTheCzechNationalLibrary:
 
     @pytest.mark.asyncio
     async def test_an_online_resource_is_refused_in_this_catalogues_own_words(self):
-        """`_NOT_A_BOOK` is German and English and cannot see `online zdroj`."""
+        """`bibliographic._NOT_A_BOOK` is German and English and cannot see `online zdroj`."""
         online = NKP_RECORD.replace(
             "<format>96 stran ;</format>",
             "<format>1 online zdroj (106 pages) :</format>",
@@ -5467,10 +5299,10 @@ class TestTheCzechNationalLibrary:
 
     def test_the_shared_online_rule_is_left_alone(self):
         """The Czech phrasing is this source's constant and not a widening of
-        `_NOT_A_BOOK`, which every other source is filtered by. Widening that on
+        `bibliographic._NOT_A_BOOK`, which every other source is filtered by. Widening that on
         a phrase measured in one catalogue would change what seven other sources
         refuse."""
-        assert not metadata._NOT_A_BOOK.search("1 online zdroj (106 pages) :")
+        assert bibliographic.is_physical_book("1 online zdroj (106 pages) :", "Kniha")
         assert metadata._NKP_ONLINE.search("1 online zdroj (106 pages) :")
 
     def test_it_answers_no_title_search(self):
@@ -5537,7 +5369,7 @@ class TestTheBibliotecaNacionalArgentina:
     async def test_a_subtitle_keeps_none_of_the_isbd_punctuation(self):
         """`main : sub /` with nothing after the slash.
 
-        `_dc_title_statement` splits a statement of responsibility on `" / "`
+        `bibliographic.split_title_statement` splits a statement of responsibility on `" / "`
         with the space, so a trailing slash survives into the subtitle where the
         title beside it was already stripped. 3 of the 10 live records measured
         on 2026-09-07 carry a subtitle and all 3 end this way.
@@ -5872,18 +5704,25 @@ class TestTheCarrierDecides:
 class TestTheCarrierTestIsTheOnlyWayIn:
     """One door in front of every MARC parse path, enforced rather than asked.
 
-    `_NOT_A_BOOK` was the whole rule and it is written in German and English, so
+    `bibliographic._NOT_A_BOOK` was the whole rule and it is written in German and English, so
     it silently passed a Czech online resource (#124). The codes answer that, and
     the way a code test stops being applied is that somebody adds a source and
     parses it the way the neighbours do, minus one line. So the shape of the
     guard is the shape `TestTheShelfIsTheOnlyWayIn` uses for the privacy rule:
     the correct number of exceptions is a named few, so `ast` can count them.
 
+    **The prose rule's own door count moved rather than went away.**
+    `bibliographic.is_physical_book` is public in another module now, so a check
+    reading `metadata.py` alone cannot see a second module reaching it, and
+    `tests/test_bibliographic.py::TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor`
+    asks the same question of every module of ours and of both call spellings.
+
     **What it cannot see**, listed here rather than left to be discovered. Both
     checks read plain `Name` calls, so an aliased call (`fields = _marc_fields`
     then `fields(node)`) and an attribute call (`metadata._marc_fields(node)`)
-    are invisible to them; neither is a spelling this module uses anywhere, and
-    the second is not a spelling a module uses on itself. `_fullest_physical`
+    are invisible to them; `_marc_fields` is private, so the second spelling is
+    refused outside `marc.py` by `tests/test_marc.py` rather than seen here.
+    `_fullest_physical`
     satisfies the first check for the three lookups that name it, and it only
     **ranks**, so a search path that ranked where it should refuse would pass
     while refusing nothing; that is not true of any path today. A path that calls
@@ -5954,25 +5793,6 @@ class TestTheCarrierTestIsTheOnlyWayIn:
             or not calls & {"_marc_is_physical_book", "_fullest_physical"}
         ]
 
-    def test_the_prose_rule_is_reached_only_through_a_carrier_aware_door(self):
-        """`_is_physical_book` has four callers and each is a door of its own.
-
-        One for MARC and one for each serialisation that carries no codes. A
-        fifth is a MARC path that has skipped the carrier test, or a new source
-        whose serialisation nobody classified.
-        """
-        callers = {
-            name
-            for name, calls in self._functions().items()
-            if "_is_physical_book" in calls
-        }
-        assert callers == {
-            "_marc_is_physical_book",
-            "_bnf_record",
-            "_loc_record",
-            "_nkp_record",
-        }
-
     def test_the_lookup_ranking_helper_is_itself_inside_the_door(self):
         """The check above is satisfied one hop early by the filtering arm.
 
@@ -6017,7 +5837,7 @@ class TestTheLookupsRankAPhysicalRecordFirst:
 
         **The page counts differ on purpose.** The first draft of this test gave
         both `992 Seiten`, because an online extent reads `1 Online-Ressource
-        (992 Seiten)` and `_pages_from_extent` reads the same number out of both.
+        (992 Seiten)` and `bibliographic.pages_from_extent` reads the same number out of both.
         Deleting the ranking term left the assertion passing, and a mutation run
         is what said so: the fixture was named for the ranking and pinned the
         page parser.
@@ -6077,7 +5897,8 @@ class TestTheDublinCoreAndModsSourcesRefuseInTheirOwnTerms:
                 "<dc:title>Un livre</dc:title>"
                 f"<dc:type>{kind}</dc:type>"
                 f"<dc:format>{extent}</dc:format></record>"
-            )
+            ),
+            source="bnf",
         )
 
     def test_an_ordinary_printed_bnf_record_is_still_a_book(self):
@@ -6097,7 +5918,7 @@ class TestTheDublinCoreAndModsSourcesRefuseInTheirOwnTerms:
             self._bnf("texte imprime | printed text | text", "1 ressource dematerialisee")
             is None
         )
-        assert not metadata._NOT_A_BOOK.search("1 ressource dematerialisee")
+        assert bibliographic.is_physical_book("1 ressource dematerialisee", "Clean Code")
 
     @pytest.mark.parametrize(
         "form, expected",
@@ -6127,13 +5948,13 @@ class TestTheDublinCoreAndModsSourcesRefuseInTheirOwnTerms:
     def test_a_cd_rom_reaches_the_member_without_the_form_test(self):
         """10 of the 30 records this refuses name a CD-ROM, 6 of them in one
         spelling, `1 CD-ROM : sd., col. ; 4 3/4 in. + 1 guide (14 p. : ill. ; 12
-        cm.)`. No alternative in `_DISC_FORMS` matches any of the 10 in any
+        cm.)`. No alternative in `bibliographic._DISC_FORMS` matches any of the 10 in any
         language: `CD-ROM` is missing from it in English too.
 
         The extent below is a third live spelling, which occurs once.
         """
         extent = "1 CD-ROM : sd., col. ; 4 3/4 in. + 1 guide (14 p.)"
-        assert metadata._is_physical_book(extent, "Clean Code")
+        assert bibliographic.is_physical_book(extent, "Clean Code")
 
         mods = ElementTree.fromstring(
             '<mods xmlns="http://www.loc.gov/mods/v3">'
@@ -6143,7 +5964,7 @@ class TestTheDublinCoreAndModsSourcesRefuseInTheirOwnTerms:
             f"<extent>{extent}</extent></physicalDescription></mods>"
         )
 
-        assert _loc_record(mods) is None
+        assert _loc_record(mods, source="loc") is None
 
 
 class TestEverySourceSetsTheIsbnItWasAskedFor:
@@ -7852,7 +7673,6 @@ def _wrapped(body: str) -> str:
     """An evasion as a module the parser accepts: `await` needs a coroutine."""
     imports, _, call = body.partition("\n")
     return f"{imports}\n\n\nasync def route(i, k, p, g):\n    {call.strip()}\n"
-
 
 
 class TestWhichDoorCarriesALogin:

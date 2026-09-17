@@ -960,8 +960,8 @@ The bytes are untrusted input from a third party, and are treated as such:
   an upload goes through. Never from the URL, which has no extension in the DNB's case anyway.
 - Capped at `MAX_UPLOAD_BYTES` and read in chunks, so a service answering with an endless body
   is refused at the cap rather than filling the container's memory.
-- Written through `uploads.replace_image`, so a failure mid-write cannot leave a book pointing
-  at a file that is no longer there.
+- Written through `cover_store.save`, so a failure mid-write cannot leave a book pointing
+  at a file that is no longer there, and so the other formats of the same book go with it.
 - Served by the authenticated cover route, which applies `visible_to()`. Storing covers does
   not widen who can see one.
 - Deleted when a book is purged and when a merge discards the loser's, because a cover file
@@ -1004,21 +1004,28 @@ therefore never repair another member's private books. It is rate limited instea
 ### Only an image reaches the covers directory
 
 The cover route reads a file's `Content-Type` off its **filename** and never off
-the file (`routers/covers.py:_MEDIA_TYPES`, indexed by the path parameter). What makes
+the file (`routers/covers.py:_MEDIA_TYPES`, indexed by the stored file's extension). What makes
 that safe is the extension allowlist rather than the accuracy of the name: every type it
 can produce is a raster format a browser decodes and cannot execute, and `image/svg+xml`
 is absent from both the allowlist and the served types, because an SVG is a document with
 script in it running under this app's own origin.
 
-So the property each writer into the covers directory has to hold is that the bytes are
-one of those formats:
+So the property that has to hold is that every byte in that directory is one of those
+formats, and it is a property of **one module**: `cover_store` is the only writer, it
+sniffs everything arriving from outside the directory, and
+`tests/test_cover_store.py::TestTheDirectoryHasOneOwner` fails the build if a second module
+addresses the directory or reaches a writer under it.
 
-| writer | how the bytes are checked |
+That replaced a table of four call sites each checked by hand, which is what it was while
+every caller composed the filename itself and chose between two writers. The paths are
+still four, and what they bring is now bytes rather than a decision:
+
+| path in | what it brings |
 |---|---|
-| the cover upload and the login background | `uploads.read_image_upload` sniffs the magic bytes |
-| a cover downloaded from an image service | `uploads.sniff_image_extension` on the body, above |
-| a merge or a copy (`covers.adopt`, `covers.duplicate`) | moves bytes one of the above already sniffed |
-| a restore (`backup._cover_bytes`) | the same sniff the upload path applies, and no stricter |
+| the cover upload and the login background | bytes, size capped, refused as a 400 if not an image |
+| a cover downloaded from an image service | bytes, capped and refused if the body is not an image |
+| a merge or a copy (`covers.adopt`, `covers.duplicate`) | bytes already in that directory |
+| a restore (`backup._cover_bytes`) | bytes read from the archive, header sniffed while streaming |
 
 **Restore was the exception and is not any more.** It took the archive entry's suffix and
 wrote the bytes unread, so an archive could put anything at all under a cover name. An
@@ -1192,7 +1199,7 @@ thirteen `try` blocks around a `fetch` call use, and took a whole search down wi
 instead of dropping one source. It is converted to `RedirectedOffHost` at the boundary.
 
 **A second `ValueError` reached the same gap from inside the parser**, and the cap could
-not help with it. `_pages_from_extent` matched an unbounded digit run and called `int()`
+not help with it. `bibliographic.pages_from_extent` matched an unbounded digit run and called `int()`
 on it; CPython refuses a conversion over 4,300 digits and raises `ValueError`, so a single
 MARC record with 4,301 digits in its `300 $a` turned both `GET /api/books/search` and
 `GET /api/books/lookup` into a 500 for **every** MARC source at once. The poisoned envelope

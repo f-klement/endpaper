@@ -1177,13 +1177,18 @@ where it lives rather than here.
 
 ## Reading it from the API
 
-`BookOut` is assembled per-request in `_book_to_out()`, which adds two fields that are not
-columns:
+`BookOut` is two types. `BookColumns` is what a Book row answers for itself; `ViewerFields`
+is the twelve that depend on who is asking, and **none of them carries a default**, so a
+field computed for eleven and forgotten for the twelfth is a failure at the one construction
+site rather than a well formed 200 carrying a plausible wrong answer. `serialisation.books_to_out`
+builds both halves and `BookOut.seen_by` assembles them. The wire shape is flat and unchanged.
+
+The twelve:
 
 - `active_loan`: the open `Loan`, or null.
 - `my_status`, `my_rating`, `my_started_at`, `my_finished_at`, `my_wants_to_discuss`: the
-  caller's row from `user_books`, with the status defaulting to `"unread"`. Read through
-  `Reading.of`, one statement for the page.
+  caller's row from `user_books`. Absence of a row means unread, which `Reading.status_of` is
+  the one place to say. Read through `Reading.of`, one statement for the page.
 - `discuss_with`: every member who has offered to talk about this book, the caller
   included. **Not scoped to the caller**, unlike everything else in this list, which is the
   point of the flag rather than an oversight. See *What `user_books` carries* above.
@@ -1200,8 +1205,16 @@ All of them are filled in one query each for the whole page, not one per book.
 `serialisation.books_to_out` carries the measured statement counts; they are not repeated
 here, because a number restated in three places is a number that is wrong in two of them.
 
-Both depend on *who is asking*, so the same book row serialises differently for different
-accounts. Do not cache `BookOut` across users.
+Eleven of the twelve depend on *who is asking*, so the same book row serialises differently
+for different accounts. Do not cache `BookOut` across users. `collection_name` is the
+exception and is on that side anyway, because it has the same failure mode rather than the
+same audience: it is computed by the same loop from the same page of queries.
+
+**A payload with no viewer gets `BookColumns`.** `LoanOut.book` is one: a loan is not a
+reading record, and while that field was a `BookOut` it was built straight off the ORM
+relationship, so two of the three loan routes served `my_status: "unread"` and an empty
+`discuss_with` whoever asked. The public catalogue's `PublicBookOut` is the same idea from
+the other end, and its reasoning is in [security.md](security.md).
 
 ## Connection settings
 

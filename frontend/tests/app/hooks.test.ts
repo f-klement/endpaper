@@ -71,7 +71,7 @@ describe("useExportLibrary", () => {
 });
 
 /**
- * `isResolved`, which is the half `useFeatureFlags` cannot express.
+ * `isResolved`, which is the half `useFeatureFlagsState`'s readers cannot express.
  *
  * `flags === undefined` is the same value before the request has answered and
  * after it has failed, and the two want opposite treatment: one is not an

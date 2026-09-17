@@ -25,10 +25,10 @@ is fixed: by asking for the book, and letting `book_for_read` decide. A missing
 file and an invisible book are both 404, which is the house rule (a 403 would
 confirm the id exists).
 
-Cover files are still files, named `<book_id>.<ext>` under `COVERS_DIR`; the
-decision and what it costs are in `docs/decisions.md`. The guard is the
-dependency, not the sink, which is why moving the bytes around changes nothing
-here.
+Cover files are still files, named by book id; the decision and what it costs
+are in `docs/decisions.md`, and `cover_store` is what knows the name. The guard
+is the dependency, not the sink, which is why moving the bytes around changes
+nothing here.
 
 ## How an image tag proves who it is
 
@@ -44,15 +44,13 @@ reasoning for why that is not CSRF, and why it must not be generalised to any
 other route, is at `auth.COVER_COOKIE_NAME`.
 """
 
-from pathlib import Path
 from typing import Annotated, Final
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi import Path as PathParam
 from fastapi.responses import FileResponse
 
-import covers
-from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
+import cover_store
 from dependencies import BookForCover
 
 router = APIRouter(prefix="/covers", tags=["covers"])
@@ -80,12 +78,10 @@ _CACHE_CONTROL: Final = "private, max-age=604800"
 #: holds both halves: these keys equal that allowlist, and no value is a
 #: scriptable type.
 #:
-#: What every writer into `COVERS_DIR` does guarantee is that the bytes are one
-#: of these formats: both upload routes through `uploads.read_image_upload`,
-#: the remote fetch through `covers.download`, `covers.adopt` and
-#: `covers.duplicate` by moving bytes one of those already sniffed, and
-#: `backup.restore` through `backup._cover_bytes`. Restore was the exception
-#: until then and would store anything at all under a cover name.
+#: What the files themselves do guarantee is that the bytes are one of these
+#: formats: every write goes through `cover_store`, which sniffs them on the way
+#: past. That is a property of one module rather than of each caller, which is
+#: what it was when restore could store anything at all under a cover name.
 _MEDIA_TYPES: Final[dict[str, str]] = {
     "jpg": "image/jpeg",
     "jpeg": "image/jpeg",
@@ -116,17 +112,18 @@ def _not_found() -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover not found")
 
 
-#: The same constant `routers/settings.py` writes the file under, from the module
-#: that owns what the covers directory is called. It used to be a third copy,
-#: justified by a circular import between the two routers that does not exist:
-#: `covers.py` imports `config`, `isbn` and `uploads`, and no router at all.
-_LOGIN_BG_BASE: Final = covers.LOGIN_BG_BASE
-
-
 # Declared BEFORE the book route. `book_id` is typed `int`, so "login_bg" would
 # not match it anyway, but relying on that is relying on a coincidence of
 # parsing: if the book route ever took a string id this would silently start
 # resolving as a book and 401 the login page.
+#
+# **The name in this path is the one `cover_store` writes**, and this decorator
+# is the only place it is spelled twice, because a route path is a literal.
+# Drifting apart is a 404 on the public login page with the file sitting on disk
+# and nothing else looking wrong.
+# `TestTheLoginBackground::test_the_route_spells_the_name_the_store_writes` is
+# what keeps the two the same fact. Here rather than in the docstring below,
+# which FastAPI publishes as this route's OpenAPI description.
 @router.get("/login_bg.{extension}")
 def get_login_background(
     extension: Annotated[str, PathParam(pattern=r"^[A-Za-z]{3,4}$")],
@@ -143,17 +140,13 @@ def get_login_background(
     is by name rather than by directory because that is where `settings.py`
     already writes it.
     """
-    normalised = extension.lower()
-    if normalised not in ALLOWED_IMAGE_EXTENSIONS:
-        raise _not_found()
-
-    path = (COVERS_DIR / f"{_LOGIN_BG_BASE}.{normalised}").resolve()
-    if not path.is_file():
+    path = cover_store.login_background_to_serve(extension)
+    if path is None:
         raise _not_found()
 
     return FileResponse(
         path,
-        media_type=_MEDIA_TYPES[normalised],
+        media_type=_MEDIA_TYPES[path.suffix.lstrip(".")],
         # `public`, unlike the book covers below: this one is the same bytes for
         # everybody, so a shared cache serving it to another visitor is correct.
         headers={"Cache-Control": "public, max-age=3600"},
@@ -177,27 +170,23 @@ def get_cover(
     column would pull every image through the Python heap of a pod limited to
     512Mi.
     """
-    normalised = extension.lower()
-    if normalised not in ALLOWED_IMAGE_EXTENSIONS:
-        raise _not_found()
-
-    # Built from the book id the router already parsed as an int, and an
-    # extension constrained to letters by the route pattern, so neither half
-    # can carry a separator. `resolve()` plus the containment check is belt and
-    # braces against that reasoning being wrong: it is not the primary defence,
-    # it is the one that still holds if the primary one is changed by somebody
-    # who has not read this comment.
-    path = (COVERS_DIR / f"{book.id}.{normalised}").resolve()
-    try:
-        path.relative_to(Path(COVERS_DIR).resolve())
-    except ValueError:  # pragma: no cover
-        raise _not_found() from None
-
-    if not path.is_file():
+    # One question, one answer: `cover_store` refuses an extension outside the
+    # allowlist, refuses a path that leaves its directory, and returns None when
+    # there is simply no file. This route answers 404 to all three, and a 403 to
+    # none of them.
+    #
+    # The media type is read off the file that is about to be served. That name
+    # came from the request, lowercased and checked against the allowlist, so
+    # this is not independent evidence about the bytes: what makes it safe is
+    # that no type in the table is one a browser executes.
+    # `TestTheMediaTypesAreNotDocuments` is what makes the lookup total: its keys
+    # are exactly the extensions `cover_store` will hand back.
+    path = cover_store.cover_to_serve(book.id, extension)
+    if path is None:
         raise _not_found()
 
     return FileResponse(
         path,
-        media_type=_MEDIA_TYPES[normalised],
+        media_type=_MEDIA_TYPES[path.suffix.lstrip(".")],
         headers={"Cache-Control": _CACHE_CONTROL},
     )

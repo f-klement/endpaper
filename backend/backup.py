@@ -32,14 +32,24 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Date, DateTime, Table, delete, update
+from sqlalchemy import (
+    Date,
+    DateTime,
+    String,
+    Table,
+    delete,
+    select,
+    type_coerce,
+    update,
+)
 from sqlalchemy.orm import Session
 
+import cover_store
 import covers
 import credentials
 import filing
 import settings_store
-from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
+from config import ALLOWED_IMAGE_EXTENSIONS
 from database import Base
 from enums import VerificationProvenance
 from models import (
@@ -54,6 +64,7 @@ from models import (
     Collection,
     CustomField,
     CustomFieldValue,
+    DegradingEnum,
     DigitalReference,
     Loan,
     Note,
@@ -68,7 +79,7 @@ from models import (
     book_tags,
     fold_collection_name,
 )
-from uploads import SNIFF_BYTES, sniff_image_extension, write_image
+from uploads import SNIFF_BYTES, sniff_image_extension
 
 logger = logging.getLogger("endpaper.backup")
 
@@ -520,7 +531,7 @@ def _parse_row(
         # anything would be wrong. The cost is real and small: an archive
         # carrying `{"scheme": "gnd", "number": 100}` restored before this
         # column existed and is a 400 now. Only a hand-edited archive reaches
-        # it, since `_row_to_dict` over a `String` column cannot write a
+        # it, since `_stored_values` over a `String` column cannot write a
         # non-string.
         #
         # The slice is on the repr, because everything reaching this line is by
@@ -571,10 +582,35 @@ def _parse_row(
     return parsed
 
 
-def _row_to_dict(row: Any, table: Table) -> dict[str, Any]:
-    return {
-        column.name: _serialise(getattr(row, column.name)) for column in table.columns
-    }
+def _stored_values(db: Session, table: Table) -> list[dict[str, Any]]:
+    """Every row of one table, as the database holds it rather than as a reader
+    would take it.
+
+    **An archive carries what is stored, and a `DegradingEnum` column reads as
+    something else.** That type answers the default for a value outside its
+    enum, which is what stops one poisoned row 500ing a page. Reading the
+    archive through it would write the default into the file, and `restore`
+    would then put the default back into the database: backup and restore would
+    quietly destroy the one value somebody opened the archive to look at.
+
+    `type_coerce(column, String)` is what reads past it. Nothing else in this
+    function is affected, because no other column type rewrites what it reads.
+
+    This module's own docstring is the requirement: an archive "can be
+    inspected, diffed and repaired with a text editor when something has gone
+    wrong, which is exactly the moment a backup is opened". A value this build's
+    enum does not know may be one the next build adds.
+    """
+    columns = [
+        type_coerce(column, String).label(column.name)
+        if isinstance(column.type, DegradingEnum)
+        else column
+        for column in table.columns
+    ]
+    return [
+        {name: _serialise(value) for name, value in row._mapping.items()}
+        for row in db.execute(select(*columns))
+    ]
 
 
 def build_archive(db: Session) -> bytes:
@@ -591,9 +627,8 @@ def build_archive(db: Session) -> bytes:
         "tables": {},
     }
 
-    for name, model, table in _TABLES:
-        rows = db.query(model).all()
-        manifest["tables"][name] = [_row_to_dict(row, table) for row in rows]
+    for name, _model, table in _TABLES:
+        manifest["tables"][name] = _stored_values(db, table)
 
     # The tag association carries no model of its own, so it is read straight
     # from the table. Forgetting it loses every book's tags while looking like
@@ -605,9 +640,8 @@ def build_archive(db: Session) -> bytes:
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(MANIFEST_NAME, json.dumps(manifest, indent=1))
-        for cover in sorted(COVERS_DIR.glob("*")):
-            if cover.is_file() and cover.suffix.lower() in _COVER_SUFFIXES:
-                archive.write(cover, f"{COVERS_PREFIX}{cover.name}")
+        for cover in cover_store.files():
+            archive.write(cover, f"{COVERS_PREFIX}{cover.name}")
 
     return buffer.getvalue()
 
@@ -709,14 +743,12 @@ def _safe_cover_name(name: str) -> str | None:
 def _cover_bytes(archive: zipfile.ZipFile, entry: str) -> bytes | None:
     """This entry's bytes, if they are an image this app serves. Else None.
 
-    **Why the restore checks content at all**, given that an archive is written
-    by this app and restored by the person who owns the instance. Every other
-    writer into `COVERS_DIR` stores only bytes it has sniffed: both upload
-    routes through `uploads.read_image_upload`, the remote fetch through
-    `covers.download`, and `covers.adopt` / `covers.duplicate` by moving bytes
-    one of those already checked. Restore took the entry's suffix and wrote the
-    bytes unread, so it was the one way a file in that directory could be
-    something other than an image.
+    **Why the restore reads the bytes at all**, given that `cover_store` sniffs
+    every write and would refuse this entry anyway. Because refusing there is a
+    raise, and this loop runs after `db.commit()`: an entry that is not an image
+    has to become one declined name in a log rather than a 500 on a library
+    whose rows are already restored. It is also what keeps the streaming read
+    below worth having, since the store decides on bytes already in memory.
 
     **The same test the upload path applies, and no stricter.** Deliberately
     `uploads.sniff_image_extension` rather than a fuller decode: a restore that
@@ -807,7 +839,7 @@ def _archive_knows_about_confirmation(rows: list[dict[str, Any]]) -> bool:
     """Whether this archive's `users` rows were written after `a7c41d9e6b28`.
 
     **The key's presence, not its value**, and that distinction is the whole of
-    the rule below. `_row_to_dict` emits every column, so a modern archive
+    the rule below. `_stored_values` emits every column, so a modern archive
     carries `email_verified_at: null` for exactly the accounts the policy
     refuses: the ones that registered while `accounts_open_to_outsiders` was on
     and never confirmed. Reading the value would restore those as confirmed,
@@ -944,10 +976,7 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
     # describing the library that was restored rather than that library plus
     # whatever the previous one had. Files are the one thing a row does not
     # carry with it, which is the standing cost of covers living on disk.
-    COVERS_DIR.mkdir(parents=True, exist_ok=True)
-    for existing in COVERS_DIR.glob("*"):
-        if existing.is_file() and existing.suffix.lower() in _COVER_SUFFIXES:
-            existing.unlink()
+    cover_store.clear()
 
     declined: list[str] = []
     for entry in archive.namelist():
@@ -958,39 +987,14 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
         if body is None:
             declined.append(filename)
             continue
-        # Not `name`: this function already binds that to a table name, a
-        # `str`, in the insert loop above.
-        stored = Path(filename)
         try:
-            # `write_image`, **not** `replace_image`, and the difference is a
-            # cover somebody can see. `replace_image` sweeps the other formats of
-            # a base, which is right for an upload and wrong here: the directory
-            # was emptied above, so the only file a sweep could reach is a
-            # sibling this same archive just wrote. An archive holding `1.jpg`
-            # and `1.png` describes a library that held both, and
-            # `routers/covers.get_cover` answers from the extension in the row's
-            # `cover_url`, so deleting the loser 404s that row, silently, with
-            # the count still reporting it restored. Leaving both is safe rather
-            # than merely easier: `covers.stored_path` and
-            # `routers/settings._find_login_bg` are the two lookups that resolve
-            # on disk and both are ordered, so a base with two files resolves the
-            # same way in every process. `write_image` still writes beside the
-            # destination and moves it into place, which is the half a bare
-            # `write_bytes` lacked.
-            #
-            # **Lowercased**, which a bare write did not do: `_safe_cover_name`
-            # accepts `1.JPG`, and the cover route builds its path from a
-            # lowercased extension, so on a case sensitive filesystem that file
-            # restored to a name nothing could ever serve. The **stem** is left
-            # alone: a book's is its id and the login background's is one fixed
-            # constant, so nothing legitimate needs folding, and folding it would
-            # merge two entries an archive deliberately spelled apart.
-            write_image(
-                COVERS_DIR,
-                stored.stem,
-                stored.suffix.lower().removeprefix("."),
-                body,
-            )
+            # `cover_store.restore`, which is the one writer that does not sweep
+            # the other formats of a base, and the difference is a cover
+            # somebody can see. It is picked here by handing over a filename
+            # rather than a book id, so a caller cannot reach the sweeping
+            # writer from this loop by a one word edit; that function carries
+            # the whole reasoning, the lowercasing included.
+            cover_store.restore(filename, body)
         except (OSError, ValueError):
             # **Declined, never raised.** This loop runs after `db.commit()` and
             # after the directory was emptied, so anything escaping here is a
@@ -1012,11 +1016,8 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
     # Counted off the directory rather than off the loop, so the number is what
     # is actually there rather than what this function believes it put there.
     # The two agree while nothing removes a file behind the count, which is the
-    # property `write_image` above exists to keep and which `replace_image`
-    # would have broken.
-    restored["covers"] = sum(
-        1 for path in COVERS_DIR.glob("*") if path.suffix.lower() in _COVER_SUFFIXES
-    )
+    # property the no sweep writer above exists to keep.
+    restored["covers"] = len(cover_store.files())
 
     _repair_seeded_tags(db)
 

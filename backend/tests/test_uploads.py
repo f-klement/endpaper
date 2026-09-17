@@ -69,15 +69,17 @@ class TestSniffImageExtension:
 
 
 class TestReadImageUpload:
-    async def test_returns_the_bytes_and_the_extension(self):
-        data, extension = await read_image_upload(upload(PNG_BYTES))
-        assert data == PNG_BYTES
-        assert extension == "png"
+    async def test_returns_the_bytes(self):
+        assert await read_image_upload(upload(PNG_BYTES)) == PNG_BYTES
 
-    async def test_the_filename_does_not_decide(self):
-        """A JPEG named .png is stored as a .jpg."""
-        _, extension = await read_image_upload(upload(JPEG_BYTES, filename="cover.png"))
-        assert extension == "jpg"
+    async def test_the_filename_does_not_decide_anything(self):
+        """A JPEG named .png passes, unchanged and unnamed.
+
+        What it is then stored as is `cover_store`'s, and
+        `tests/test_cover_store.py` is where that is asserted. Here the point is
+        that the name did not make it a 400 either.
+        """
+        assert await read_image_upload(upload(JPEG_BYTES, filename="cover.png")) == JPEG_BYTES
 
     async def test_an_svg_named_png_is_rejected(self):
         # SVG can carry script and would be served from our own origin.
@@ -98,9 +100,7 @@ class TestReadImageUpload:
 
     async def test_a_file_at_the_cap_is_accepted(self):
         at_limit = PNG_BYTES + b"\x00" * (MAX_UPLOAD_BYTES - len(PNG_BYTES))
-        data, extension = await read_image_upload(upload(at_limit))
-        assert len(data) == MAX_UPLOAD_BYTES
-        assert extension == "png"
+        assert len(await read_image_upload(upload(at_limit))) == MAX_UPLOAD_BYTES
 
     async def test_reads_no_more_than_the_cap_plus_one(self):
         """The cap also bounds memory: the body is read into memory before it
@@ -237,10 +237,10 @@ class TestTheSnifferAnswersOnlyWhatTheAppServes:
     def test_every_extension_the_sniffer_can_return_is_one_the_app_serves(self):
         """Read off the source, not off a list kept beside it.
 
-        `read_image_upload` stores whatever this returns without checking it
-        against the allowlist, and the cover route refuses any extension outside
-        that allowlist, so an arm added here for a format the app does not serve
-        stores a file nothing can ever fetch. An `ast` pass rather than calling
+        `cover_store` names every file it writes from whatever this returns,
+        without checking it against the allowlist, and the cover route refuses
+        any extension outside that allowlist, so an arm added here for a format
+        the app does not serve stores a file nothing can ever fetch. An `ast` pass rather than calling
         it with samples, because a sample list cannot see an arm nobody wrote a
         sample for.
         """

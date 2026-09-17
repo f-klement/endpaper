@@ -51,6 +51,13 @@ beforeEach(() => {
   });
 });
 
+const HOOKS_PATH = "../../../src/pages/Home/hooks.ts";
+const HOOKS_SOURCE = import.meta.glob("../../../src/pages/Home/hooks.ts", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
 /** The query string of the most recent books listing request. */
 function lastQuery(): URLSearchParams {
   const call = api.lastCall(/\/api\/books\?/) ?? api.lastCall("/api/books");
@@ -131,35 +138,65 @@ describe("useLibrary", () => {
     });
 
     it("joins several tag ids with commas", async () => {
+      // Which ids a click puts in the list is `toggledFilter`'s, tested
+      // without a query client in `tests/lib/bookFilters.test.ts`. What this
+      // covers is the rest of the pipe: state, parameters, request.
       const { result } = renderLibrary();
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-      act(() => result.current.toggleTag(1));
-      act(() => result.current.toggleTag(2));
+      act(() => result.current.update({ tagIds: [1, 2] }));
 
       await waitFor(() => expect(lastQuery().get("tags")).toBe("1,2"));
     });
+  });
 
-    it("toggles a tag off when selected twice", async () => {
-      const { result } = renderLibrary();
-      await waitFor(() => expect(result.current.isLoading).toBe(false));
+  /**
+   * The filter set has one writer, and the door is offered rather than used.
+   *
+   * Five writers once grew back around `update`, one per facet: 32 members
+   * against the 27 here without them. Every one of them worked, so no test saw
+   * them. A second door is a spelling rather than a behaviour, which is why
+   * this reads the source.
+   *
+   * **Two assertions on the writing, because a member that writes through
+   * `update` regrows
+   * this interface exactly as those five did** and leaves the setter count at
+   * one. What such a member cannot do is write without naming the door.
+   *
+   * Its blind spots, stated rather than left to be discovered: three spellings
+   * in one file. A second filter set is caught where it is written
+   * `useState<BookFilters>` and not where the annotation is left off, and a
+   * setter or a door passed on under another name is caught by none of them:
+   * measured, `const door = update;` behind a member passes all three.
+   *
+   * **All three read the raw source, comments included**, so a docstring in
+   * that file may not spell `setFilters(` or `update(`, which is the spelling
+   * its own door goes by elsewhere. Stripping comments first was refused: a
+   * stripper that took code for a comment would drop a real call and weaken a
+   * count in silence, where this fails loudly and says which arm.
+   */
+  describe("the filter set has one writer", () => {
+    function source(): string {
+      const raw = HOOKS_SOURCE[HOOKS_PATH] ?? "";
+      // A glob that matched nothing would make both assertions pass forever.
+      expect(raw.length).toBeGreaterThan(1000);
+      return raw;
+    }
 
-      act(() => result.current.toggleTag(1));
-      await waitFor(() => expect(result.current.filters.tagIds).toEqual([1]));
-      act(() => result.current.toggleTag(1));
-
-      await waitFor(() => expect(result.current.filters.tagIds).toEqual([]));
+    it("holds the filters in one piece of state", () => {
+      expect(source().split("useState<BookFilters>").length - 1).toBe(1);
     });
 
-    it("clears every tag at once", async () => {
-      const { result } = renderLibrary();
-      await waitFor(() => expect(result.current.isLoading).toBe(false));
+    it("writes them in one place, which is update", () => {
+      expect(source().split("setFilters(").length - 1).toBe(1);
+    });
 
-      act(() => result.current.toggleTag(1));
-      act(() => result.current.toggleTag(2));
-      act(() => result.current.clearTags());
-
-      await waitFor(() => expect(result.current.filters.tagIds).toEqual([]));
+    it("offers that door rather than calling it from inside", () => {
+      // `result.updated` in the bulk verbs is the only other `update` in the
+      // file, and the `(` excludes it. A member spelled
+      // `clearTags: () => update({ tagIds: [] })` is what this catches and the
+      // assertion above does not.
+      expect(source().split(/\bupdate\(/).length - 1).toBe(0);
     });
   });
 
@@ -485,7 +522,7 @@ describe("useLibrary, the column set", () => {
   });
 
   it("falls back to the household set when the flags never answer", async () => {
-    // `useFeatureFlags` is `retry: false` and the shell renders regardless, so
+    // The flags query is `retry: false` and the shell renders regardless, so
     // a failure here has to mean the table every existing library already has.
     api.on("/api/settings/features", { status: 500, body: {} });
     const { result } = renderLibrary();
@@ -626,7 +663,7 @@ describe("useLibrary, the view", () => {
   });
 
   it("falls back to the household's view when the flags never answer", async () => {
-    // `useFeatureFlags` is `retry: false` and the shell renders regardless, so
+    // The flags query is `retry: false` and the shell renders regardless, so
     // a failure has to mean the view every existing library already has.
     localStorage.setItem("libraryView", "table");
     api.on("/api/settings/features", { status: 500, body: {} });

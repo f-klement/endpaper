@@ -2,9 +2,28 @@
 
 A **decoder** turns one record of one serialisation into this application's
 model. `Reader` is the closed set of them and `Decoding` is the whole of what
-one is told. The implementations are in `metadata.py` for the catalogue family
-and in `opds.py` for the import family; this module is the contract both are
-held to.
+one is told. Each family publishes its own table of them, `metadata.READERS`
+and `opds.READERS`, keyed on `Reader` and valued on this contract; this module
+is the contract both are held to. What a value **means** once a decoder has it
+out of the serialisation is `bibliographic.py`, which both families read and
+neither owns.
+
+**A table rather than a name per caller.** A caller that wants a decoded record
+asks the family for the reader its `Decoding` names rather than naming a
+decoder, which is what lets a decoder written for a catalogue be handed a file.
+
+**It is not yet true of every caller, and the exception is measured rather than
+hidden.** `marc.py` composes `metadata.py`'s MARC parser by name: counted with
+`ast` as attribute loads of a private name on that module, **21 sites over 17
+names**. Twelve of the seventeen are spelled `_marc_` or `_dnb_` and five are
+not, and the split is given by spelling because "field reader" is not a category
+two readers agree on.
+
+It composes rather than asks because an uploaded file is a third MARC profile,
+refusing only a record with no title where a catalogue decoder also refuses a
+volume slot and a disc. Closing that means moving MARC field reading, not
+publishing a table. `metadata.NOT_DECODERS` names every catalogue reader the
+table cannot hold, and why.
 
 ## The contract, and both families are held to it
 
@@ -57,8 +76,9 @@ with no namespace at all and the BnF's selector returns zero against it.
 Koha makes this half data, with `add_xslt`, and this project deliberately does
 not: a stylesheet cannot refuse a digitisation that shares an ISBN with the
 book. The refusals a row could not express are the decoder's whole reason to be
-code: `_marc_claims_isbn`, `_is_placeholder_title`, `_is_physical_book`, the non
-sorting bracket conventions, `_isbn_entries`.
+code: `metadata._marc_claims_isbn`, `bibliographic.is_placeholder_title`,
+`bibliographic.is_physical_book`, the non sorting bracket conventions,
+`metadata._isbn_entries`.
 """
 
 from dataclasses import dataclass

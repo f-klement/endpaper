@@ -106,6 +106,19 @@ export function makeBook(overrides: Partial<BookOut> = {}): BookOut {
     my_wants_to_discuss: false,
     discuss_with: [],
     tags: [],
+    // **The per-viewer half, in full.** `BookOut` is `BookColumns` plus
+    // `ViewerFields`, and the twelve on that side carry no defaults: a server
+    // that computed eleven of them and forgot the twelfth used to answer 200
+    // with a plausible wrong value, so the type refuses one now. A fixture
+    // omitting one is the same omission, and the same refusal catches it.
+    collection_name: null,
+    copy_count: 1,
+    my_rating: null,
+    my_started_at: null,
+    my_finished_at: null,
+    my_progress_page: null,
+    my_progress_percent: null,
+    my_progress_recorded_at: null,
     ...overrides,
   };
   return {

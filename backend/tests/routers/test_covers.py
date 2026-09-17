@@ -12,6 +12,7 @@ and `test_an_invisible_cover_is_404_not_403`. Everything else is scaffolding.
 
 import pytest
 
+import cover_store
 import routers.covers as covers_router
 from auth import COVER_COOKIE_NAME
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
@@ -409,11 +410,23 @@ class TestTheLoginBackground:
         assert "public" in client.get(url).headers["cache-control"]
 
     def test_it_is_written_where_the_route_looks_for_it(self, client, admin, covers_dir):
-        """Two modules agree on this name by writing it twice, so a test holds
-        them together."""
+        """The upload and the route reach the same file, end to end."""
         self._set(client, admin)
 
         assert list(COVERS_DIR.glob("login_bg.*")) != []
+
+    def test_the_route_spells_the_name_the_store_writes(self):
+        """The one place that name is written twice, because a route path is a
+        literal and `cover_store` is what decides the filename.
+
+        Drifting apart is a 404 on the public login page with the file sitting
+        on disk and everything else looking correct.
+        """
+        paths = {getattr(route, "path", None) for route in covers_router.router.routes}
+
+        assert (
+            f"{covers_router.router.prefix}/{cover_store.LOGIN_BG_BASE}.{{extension}}" in paths
+        )
 
     def test_an_unset_background_is_404_not_a_page(self, client, covers_dir):
         """Falling through to the SPA would answer an <img> with index.html and

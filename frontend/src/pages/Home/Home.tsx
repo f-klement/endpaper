@@ -108,14 +108,9 @@ export default function Home() {
         onToggleClassificationPanel={() =>
           setShowClassificationPanel((open) => !open)
         }
-        onToggleHeading={library.toggleHeading}
-        onToggleDivision={library.toggleDivision}
-        onClearClassifications={library.clearClassifications}
         onFilterChange={library.update}
         locations={library.locations}
         collections={library.collections}
-        onToggleTag={library.toggleTag}
-        onClearTags={library.clearTags}
         view={library.view}
         onViewChange={library.setView}
         canChangeView={library.modeIsKnown}

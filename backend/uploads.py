@@ -1,4 +1,4 @@
-"""Validation for uploaded images.
+"""Validation for uploaded images, and the two ways bytes reach a file.
 
 Both upload endpoints (book covers and the login background) previously trusted
 the filename extension alone. A filename is caller-controlled, so that decided
@@ -9,23 +9,22 @@ What actually determines the format is the file's leading bytes, so that is
 what is checked here. The extension is derived from the content, not from the
 name the caller sent.
 
-**One writer into that directory does not derive the name, and a reader of this
-file needs to know it.** `backup.restore` keeps the name the archive gave an
-entry and checks only that the bytes are one of these formats, so a cover
-restored from a legacy archive may be a PNG called `1.jpg`. It is kept rather
-than renamed because an `<img>` decodes by magic number, so it displays, and
-because `create` does not sniff either: requiring the two to agree would leave
-this app unable to restore its own backup. `backup._cover_bytes` carries the
-reasoning.
+**This module knows what an image is and how to write one. It does not know
+where covers live or what they are called**, which is `cover_store`, and every
+writer below has exactly that one caller. The directory used to be addressed by
+five modules and the choice between the two writers below made at each of them,
+where a wrong choice was a one word edit; naming the importers that were allowed
+to make it was weighed and refused, on the grounds that such a list fails when
+the set grows without ever checking the thing it names, which is what reaches
+the disk. A single door checks that instead: `cover_store` sniffs on the way
+through, so "every file in that directory is one of these formats" is a property
+of one module rather than of four call sites checked by hand.
 
-**Every writer that exists today sniffs, and that is four call sites checked by
-hand rather than a rule anything enforces.** Said plainly because the sentence
-that used to sit here claimed no path into the directory allows bytes that are
-not an image, which is a bound on the future that nothing holds up: a new caller
-may pass unchecked bytes to either helper below, or skip both and write to the
-directory itself. An allowlist of importing modules was weighed and refused, on
-the grounds that it would fail when the set grew without ever checking the thing
-it names, which is what reaches the disk.
+**A name and its bytes need not agree, and a reader of this file needs to know
+it.** `backup.restore` keeps the name the archive gave an entry, so a cover
+restored from a legacy archive may be a PNG called `1.jpg`. It is kept rather
+than renamed because an `<img>` decodes by magic number, so it displays.
+`backup._cover_bytes` carries the reasoning.
 """
 
 import os
@@ -77,11 +76,13 @@ def sniff_image_extension(data: bytes) -> str | None:
     return None
 
 
-async def read_image_upload(file: UploadFile) -> tuple[bytes, str]:
-    """Read an upload, enforce the size cap, and identify it by content.
+async def read_image_upload(file: UploadFile) -> bytes:
+    """Read an upload, enforce the size cap, and refuse what is not an image.
 
-    Returns the bytes and the extension to store them under. Raises 413 if the
-    file is too large and 400 if it is not an image format we serve.
+    Returns the bytes. Raises 413 if the file is too large and 400 if it is not
+    an image format we serve. **The bytes are handed on unnamed**: what an
+    upload is stored as is `cover_store`'s, and this exists so that a caller's
+    mistake is a 400 rather than the store's refusal arriving as a 500.
     """
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
@@ -92,13 +93,12 @@ async def read_image_upload(file: UploadFile) -> tuple[bytes, str]:
     if not data:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
-    extension = sniff_image_extension(data)
-    if extension is None:
+    if sniff_image_extension(data) is None:
         raise HTTPException(
             status_code=400,
             detail="File must be a JPEG, PNG or WebP image",
         )
-    return data, extension
+    return data
 
 
 def replace_image(directory: Path, base: str, extension: str, data: bytes) -> Path:
@@ -112,11 +112,12 @@ def replace_image(directory: Path, base: str, extension: str, data: bytes) -> Pa
 
     The leftovers in other formats are removed only once the write has
     succeeded, because two formats of the same base both existing means the
-    lookups that resolve a cover by looking on disk, `covers.stored_path` and
-    `routers/settings._find_login_bg`, have two files to choose between.
+    lookup that resolves a cover by looking on disk, `cover_store._first_on_disk`,
+    has two files to choose between.
 
-    **Not for a restore.** `write_image` says why, and picking the wrong one of
-    these two at a new call site is a one word edit.
+    **Not for a restore.** `write_image` says why. Which of the two applies is
+    `cover_store`'s to decide and it decides it by the argument it was handed,
+    so this is not a choice a new call site makes.
     """
     destination = write_image(directory, base, extension, data)
 
@@ -131,21 +132,14 @@ def write_image(directory: Path, base: str, extension: str, data: bytes) -> Path
     """Write `data` as `base.extension`, atomically, touching nothing else.
 
     `replace_image` without the sweep, and the split is not tidying: **a restore
-    must not sweep.** The sweep exists so an upload replacing a book's JPEG with
-    a PNG does not leave two files whose lookup order decides which is used.
-    `backup.restore` empties the directory before it writes, so the only thing a
-    sweep could reach there is a sibling the same archive just wrote. An archive
-    holding both `1.jpg` and `1.png` describes a library that held both, and
-    `routers/covers.get_cover` answers from the extension in the row's
-    `cover_url`, so deleting the loser is deleting the cover a row names,
-    silently, with the count still reporting it. Reproducing the directory the
-    archive describes is the restore's job; correcting a library that holds two
-    is not.
+    must not sweep.** `cover_store.restore` carries that reasoning, because it
+    is the one caller and the one place the choice is made.
 
     **Two files of a base is a stable state, not a coin flip**, which is what
     makes leaving them the safe answer rather than the lazy one: the two lookups
-    that resolve on disk, named above, are both ordered, so the pair resolves the
-    same way in every process.
+    that resolve on disk, `cover_store.path_of` and
+    `cover_store.login_background_path`, are the same ordered function, so the
+    pair resolves the same way in every process.
     """
     destination = directory / f"{base}.{extension}"
     # A leading dot so a leftover is recognisable, and the pid **and thread id**
@@ -160,7 +154,7 @@ def write_image(directory: Path, base: str, extension: str, data: bytes) -> Path
     # other failed with ENOENT and was counted as a failed download.
     #
     # The failure that is not merely untidy: a body large enough to need more
-    # than one write could be promoted half written, and `covers.stored_ids`
+    # than one write could be promoted half written, and `cover_store.book_ids`
     # would then never revisit that book, because a file is there.
     temporary = directory / f".{base}.{os.getpid()}.{threading.get_ident()}.tmp"
     try:

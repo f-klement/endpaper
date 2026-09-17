@@ -6,22 +6,24 @@ behaviour under test belongs to the schema.
 
 import ast
 import itertools
+import logging
 import os
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import CheckConstraint, String, delete, text
+from sqlalchemy import CheckConstraint, String, delete, select, text
 from sqlalchemy.exc import IntegrityError
 
 import credentials
 import filing
 import models
-from database import Base
+from database import Base, engine
 from enums import (
     AuthorityProvenance,
     AuthorityScheme,
+    BookFormat,
     CatalogueSource,
     ClassificationScheme,
 )
@@ -2045,3 +2047,102 @@ class TestTheColumnRefusesWhatTheSchemaWouldHaveRefused:
         self._insert(db, first)
         self._insert(db, second)
         assert db.query(models.DigitalReference).count() == 2
+
+
+class TestADegradingEnumColumnReadsAStrayValue:
+    """`books.format`, `books.condition` and `books.lending` hold an enum in a
+    plain VARCHAR with no CHECK, so what keeps the set is what happens at the
+    read. Before this, nothing did.
+
+    **Poisoned through Core**, which is the door the hazard actually comes
+    through: `backup.restore` inserts that way, so no Pydantic model and no
+    `@validates` hook fires and an archive older than an enum member decides the
+    value. A test writing through the ORM would be testing the binder.
+    """
+
+    def _poison(self, db, column: str, value: str) -> int:
+        book = Book(title="Poisoned")
+        db.add(book)
+        db.commit()
+        book_id = book.id
+        db.execute(
+            text(f"UPDATE books SET {column} = :value WHERE id = :id"),
+            {"value": value, "id": book_id},
+        )
+        db.commit()
+        db.expunge_all()
+        return book_id
+
+    @pytest.mark.parametrize(
+        "column", ["format", "condition", "lending"]
+    )
+    def test_a_value_outside_the_enum_reads_as_null_rather_than_raising(
+        self, db, column: str
+    ) -> None:
+        book_id = self._poison(db, column, "vinyl")
+
+        book = db.get(Book, book_id)
+
+        assert getattr(book, column) is None
+
+    @pytest.mark.parametrize(
+        "column", ["format", "condition", "lending"]
+    )
+    def test_it_says_which_value_it_could_not_read(
+        self, db, column: str, caplog
+    ) -> None:
+        """The degrade is data loss nobody can see. A restore goes quiet, and
+        without this nothing afterwards says which rows changed their reading.
+        """
+        book_id = self._poison(db, column, "vinyl")
+
+        with caplog.at_level(logging.WARNING, logger="endpaper.enums"):
+            db.get(Book, book_id)
+
+        assert any("vinyl" in record.getMessage() for record in caplog.records)
+
+    def test_a_good_value_is_read_as_its_member_and_not_touched(self, db) -> None:
+        """A degrade that also rewrote valid values would be invisible in the
+        same way and worse. Every member, derived from the enum, so a new one is
+        covered by the commit that adds it."""
+        for member in BookFormat:
+            book_id = self._poison(db, "format", member.value)
+
+            assert db.get(Book, book_id).format is member
+
+    def test_it_round_trips_a_member_written_through_the_orm(self, db) -> None:
+        """The bind half. A type that read correctly and stored the repr of an
+        enum would pass every test above and break every query filtering on the
+        column."""
+        book = Book(title="Sound", format=BookFormat.AUDIOBOOK)
+        db.add(book)
+        db.commit()
+
+        stored = db.execute(
+            text("SELECT format FROM books WHERE id = :id"), {"id": book.id}
+        ).scalar_one()
+
+        assert stored == "audiobook"
+
+    def test_a_query_on_the_column_still_matches(self, db) -> None:
+        """What a wrong bind would break, asserted rather than assumed: every
+        format filter in the app is this comparison."""
+        db.add(Book(title="Sound", format=BookFormat.AUDIOBOOK))
+        db.add(Book(title="Paper", format=BookFormat.PAPERBACK))
+        db.commit()
+
+        found = db.scalars(
+            select(Book).where(Book.format == BookFormat.AUDIOBOOK)
+        ).all()
+
+        assert [book.title for book in found] == ["Sound"]
+
+    def test_the_column_is_still_a_plain_varchar(self, db) -> None:
+        """**The degrade costs no revision**, which is the whole reason it is
+        available to an enum that grows. A type that changed the DDL would need
+        one, and `--autogenerate` would propose it on the next unrelated
+        migration.
+        """
+        column = Book.__table__.c.format
+        assert isinstance(column.type, models.DegradingEnum)
+        assert column.type.compile(engine.dialect) == "VARCHAR(20)"

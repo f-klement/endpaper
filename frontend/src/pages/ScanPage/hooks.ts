@@ -30,8 +30,8 @@ import {
   useSearchBooks,
   useUploadCover,
 } from "../../api/generated/endpoints/books/books";
-import { useGetFeatureFlags } from "../../api/generated/endpoints/settings/settings";
 import { BookFormat } from "../../api/generated/model";
+import { useGoogleBooksReady } from "../../app/hooks";
 import type {
   BookMatch,
   BookSearchOut,
@@ -521,7 +521,7 @@ export function useBookSearch(): UseBookSearchResult {
   const [harder, setHarder] = useState(false);
   const { locale } = useTranslation();
 
-  const flags = useGetFeatureFlags({ query: { staleTime: 60_000 } });
+  const isConfigured = useGoogleBooksReady();
 
   const search = useSearchBooks(
     // The reader's own language breaks ties towards the printing they are
@@ -559,7 +559,7 @@ export function useBookSearch(): UseBookSearchResult {
   const answered = !search.isFetching && search.data !== undefined;
 
   return {
-    isConfigured: flags.data?.google_books_ready ?? false,
+    isConfigured,
     query,
     setQuery,
     submit: () => {

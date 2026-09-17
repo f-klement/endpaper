@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, joinedload
 
 import authority
 import catalogue
+import cover_store
 import covers
 import credentials
 import custom_fields
@@ -35,8 +36,7 @@ from authorship import (
     IdentifierConflict,
     RecordedAssertions,
 )
-from classifications import add_headings, bounded_headings, clipped
-from config import COVERS_DIR
+from classifications import add_headings, bounded_headings
 from dependencies import (
     BookForOwner,
     BookForRead,
@@ -71,9 +71,13 @@ from enums import (
 )
 from identifiers import add_identifiers
 from importing import identity_key
+from logvalues import clipped
 from models import (
     AUTHOR_KEY_MAX,
+    ISBN_MAX,
+    LOCATION_MAX,
     MAX_SERIES_INDEX,
+    SERIES_NAME_MAX,
     AuthorIdentifier,
     Book,
     BookIdentifier,
@@ -168,7 +172,7 @@ from shelf import (
     order_for,
     whole_table_for_uniqueness,
 )
-from uploads import read_image_upload, replace_image
+from uploads import read_image_upload
 
 logger = logging.getLogger("endpaper.books")
 
@@ -486,7 +490,7 @@ def _catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credenti
 async def lookup_isbn(
     db: DbSession,
     current_user: CurrentUser,
-    isbn: Annotated[str, Query(min_length=10, max_length=20)],
+    isbn: Annotated[str, Query(min_length=10, max_length=ISBN_MAX)],
 ) -> BookLookup:
     # Validated before either upstream is called: a misread barcode would
     # otherwise cost two network round trips to learn nothing.
@@ -962,7 +966,7 @@ def list_books(
     ownership: Annotated[OwnershipStatus | None, Query()] = None,
     format: Annotated[BookFormat | None, Query()] = None,
     lending: Annotated[LendingWillingness | None, Query()] = None,
-    series: Annotated[str | None, Query(max_length=255)] = None,
+    series: Annotated[str | None, Query(max_length=SERIES_NAME_MAX)] = None,
     author: Annotated[
         str | None,
         Query(
@@ -970,7 +974,7 @@ def list_books(
             description="Only books credited to this author, by key or by any spelling",
         ),
     ] = None,
-    location: Annotated[str | None, Query(max_length=120)] = None,
+    location: Annotated[str | None, Query(max_length=LOCATION_MAX)] = None,
     collection_id: Annotated[
         int | None,
         Query(
@@ -1080,7 +1084,7 @@ def _store_cover(book: Book) -> bool:
     # Already held here: the URL points at this app and there is a file behind
     # it. The file test is not paranoia, it is what stops the column and the
     # directory drifting apart without anybody noticing.
-    if covers.is_local(book.cover_url) and covers.stored_path(book.id) is not None:
+    if covers.is_local(book.cover_url) and cover_store.path_of(book.id) is not None:
         return False
 
     # Budgeted, because every caller of this is a request with a person waiting
@@ -1217,7 +1221,7 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # taken one of these: forgetting here is what stops it inheriting somebody
     # else's cover, and doing it after `_store_cover` would delete its own.
     for book_id in freed:
-        covers.forget(book_id)
+        cover_store.remove(book_id)
 
     # After the commit, because the cover is stored under the book's id and the
     # id does not exist until the row does. A failed fetch is not a failed add:
@@ -1414,7 +1418,7 @@ def _bulk_set_location(
 ) -> tuple[int, int]:
     # An empty string clears the location, which is how a box gets unpacked.
     location = str(value).strip() if value is not None else ""
-    if len(location) > 120:
+    if len(location) > LOCATION_MAX:
         raise HTTPException(status_code=422, detail="Location is too long")
     new_location = location or None
 
@@ -2383,7 +2387,7 @@ def merge_books(
     # round on purpose, everywhere in this module; see docs/decisions.md.
     #
     # Adoptions first, and **their outcome decides the sweep**. `adopt` answers
-    # None when the move failed, and `uploads.replace_image` is atomic and
+    # None when the move failed, and `cover_store.move` is atomic and
     # re-raises having removed only its own temporary file, so on that answer
     # the loser's cover is still sitting under the loser's id. Sweeping it
     # anyway destroys the only copy there is, which for a hand-uploaded cover
@@ -2396,7 +2400,7 @@ def merge_books(
     }
     for book_id in orphaned_covers:
         if book_id not in kept:
-            covers.forget(book_id)
+            cover_store.remove(book_id)
 
     # The row promised a cover the move did not produce, so it is corrected
     # rather than left naming a file nobody wrote. This is what the old
@@ -2746,7 +2750,7 @@ def backfill_covers(
     # `cover_url` says so: trusting the column is what would let the database
     # and the directory drift apart quietly, and it is also what would stop this
     # being safe to run twice.
-    on_disk = covers.stored_ids()
+    on_disk = cover_store.book_ids()
     catalogue = (
         Shelf.seen_by(db, current_user.id).where(Book.id > after_id).all(Book.id.asc())
     )
@@ -3285,7 +3289,7 @@ def empty_trash(db: DbSession, current_user: CurrentUser) -> PurgeResult:
     # After the commit. See `_purge`: an unlink before it is a file loss no
     # rollback undoes.
     for book_id in purged:
-        covers.forget(book_id)
+        cover_store.remove(book_id)
     return PurgeResult(purged=len(purged))
 
 
@@ -3507,7 +3511,7 @@ def add_copy(
 
     # After the insert, because a stored cover is a file named by the book's
     # id and the id does not exist until the row does. The file is **copied,
-    # not shared**: `covers.forget` deletes by id, so two rows pointing at one
+    # not shared**: `cover_store.remove` deletes by id, so two rows pointing at one
     # file would mean purging either copy blanks the other's cover.
     if covers.is_local(book.cover_url):
         copied = covers.duplicate(copy.id, book.id)
@@ -3645,7 +3649,7 @@ def purge_book(book: BookInTrash, db: DbSession) -> None:
     purged = _purge(book, db)
     db.commit()
     # After the commit. See `_purge`.
-    covers.forget(purged)
+    cover_store.remove(purged)
 
 
 @router.put("/{book_id}/status", response_model=BookOut)
@@ -3901,14 +3905,13 @@ async def upload_cover(
     current_user: CurrentUser,
     file: Annotated[UploadFile, File()],
 ) -> BookOut:
-    # The extension comes from the file's magic bytes, never from its name.
-    data, extension = await read_image_upload(file)
-
-    # Written into place, then the other formats of the same book removed. The
-    # old order deleted first, so a failed write left the book with no cover at
-    # all. See uploads.replace_image.
-    replace_image(COVERS_DIR, str(book.id), extension, data)
-    book.cover_url = covers.local_url(book.id, extension)
+    # Read against the size cap and refused here if it is not an image, so the
+    # caller gets a 413 or a 400 rather than a 500 out of the store's own
+    # refusal. What the file is called, and that the other formats of this book
+    # go with it, are `cover_store`'s.
+    data = await read_image_upload(file)
+    destination = cover_store.save(book.id, data)
+    book.cover_url = covers.local_url(book.id, destination.suffix.lstrip("."))
     db.commit()
     db.refresh(book)
     return book_to_out(book, current_user, db)

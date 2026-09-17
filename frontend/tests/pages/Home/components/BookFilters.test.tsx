@@ -4,12 +4,28 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  ClassificationScheme,
+  type ClassificationFacets,
+} from "../../../../src/api/generated/model";
 import { DEFAULT_FILTERS } from "../../../../src/pages/Home/types";
 import BookFilters from "../../../../src/pages/Home/components/BookFilters";
-import { makeCollection, resetIds } from "../../../factories";
+import { makeCollection, makeTag, resetIds } from "../../../factories";
 import { renderLocalised } from "../../../utils";
 
 beforeEach(resetIds);
+
+const FACETS: ClassificationFacets = {
+  divisions: [{ division: "150", label: "Psychology", book_count: 3 }],
+  headings: [
+    {
+      scheme: ClassificationScheme.lcsh,
+      number: "Stress management",
+      label: null,
+      book_count: 2,
+    },
+  ],
+};
 
 function renderFilters(overrides: Record<string, unknown> = {}) {
   const props = {
@@ -20,14 +36,9 @@ function renderFilters(overrides: Record<string, unknown> = {}) {
     onFilterChange: vi.fn(),
     locations: [],
     collections: [],
-    onToggleTag: vi.fn(),
-    onClearTags: vi.fn(),
     classifications: undefined,
     showClassificationPanel: false,
     onToggleClassificationPanel: vi.fn(),
-    onToggleHeading: vi.fn(),
-    onToggleDivision: vi.fn(),
-    onClearClassifications: vi.fn(),
     view: "grid" as const,
     onViewChange: vi.fn(),
     canChangeView: true,
@@ -134,6 +145,87 @@ describe("the author chip", () => {
     await userEvent.setup().click(screen.getByLabelText("Clear selection"));
 
     expect(props.onFilterChange).toHaveBeenCalledWith({ author: null });
+  });
+});
+
+describe("the tag panel", () => {
+  it("reports a picked tag as a patch on the tag list", async () => {
+    // Selected rather than clicked open: a category holding a selection opens
+    // itself, which is how `TagPicker`'s own tests reach a chip. So the click
+    // here is the one that takes a tag off again.
+    const tag = makeTag({ name: "Fantasy" });
+    const props = renderFilters({
+      tags: [tag],
+      showTagPanel: true,
+      filters: { ...DEFAULT_FILTERS, tagIds: [tag.id] },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Fantasy" }));
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ tagIds: [] });
+  });
+
+  it("clears every tag through the same one callback", async () => {
+    const tag = makeTag({ name: "Fantasy" });
+    const props = renderFilters({
+      tags: [tag],
+      filters: { ...DEFAULT_FILTERS, tagIds: [tag.id] },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ tagIds: [] });
+  });
+});
+
+describe("the classification panel", () => {
+  it("puts a division in the divisions", async () => {
+    const props = renderFilters({
+      classifications: FACETS,
+      showClassificationPanel: true,
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /150/ }));
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({
+      ddcDivisions: ["150"],
+    });
+  });
+
+  it("puts a heading in the headings, as the wire spelling", async () => {
+    // The two facets take different operators and are two fields, so a patch
+    // naming the other one is a filter that narrows the wrong way and still
+    // answers 200.
+    const props = renderFilters({
+      classifications: FACETS,
+      showClassificationPanel: true,
+    });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /Stress management/ }),
+    );
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({
+      headings: ["lcsh:Stress management"],
+    });
+  });
+
+  it("clears both facets at once, because the badge counts both", async () => {
+    const props = renderFilters({
+      classifications: FACETS,
+      filters: {
+        ...DEFAULT_FILTERS,
+        headings: ["lcsh:Stress management"],
+        ddcDivisions: ["150"],
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({
+      headings: [],
+      ddcDivisions: [],
+    });
   });
 });
 

@@ -368,16 +368,19 @@ not repeat them: the count has been restated wrongly here twice, both times by s
 editing the sentence rather than measuring. The short version is that `GET /api/books` is
 flat at 5 and at 25 books, and that a caller which fetches books *without*
 `joinedload(Book.added_by)` pays one extra statement per distinct author, because
-`BookOut` reads that relationship.
+`BookColumns` reads that relationship.
 
 `_latest_progress` is the one to copy if a new field needs the *newest* row per book rather
 than one row per book. It ranks with a window function in a single statement rather than
 fetching every row and picking in Python, so a member with a long reading history costs the
 same as one with none.
 
-If you add another per-request field to `BookOut`, batch it the same way in `books_to_out()`
-rather than reaching for it inside the loop. `tests/routers/test_loans.py` holds a bound on
-the count, which is the thing that catches a regression here.
+If you add another per-request field it goes on `schemas.book.ViewerFields`, **not on
+`BookOut`**, and it is batched the same way in `books_to_out()` rather than reached for
+inside the loop. The two are one rule: a field on `ViewerFields` carries no default, so
+declaring it and forgetting to write it fails to construct instead of answering 200 with a
+plausible wrong value. `tests/routers/test_loans.py` holds exact counts, which is what
+catches the batching half.
 
 ## Error responses
 

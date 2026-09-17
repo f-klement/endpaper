@@ -21,10 +21,10 @@ import httpx
 import pytest
 import respx
 
+import cover_store
 import covers
-from config import COVERS_DIR
 from tests.conftest import REAL_RESOLVE_AND_STORE
-from tests.helpers import JPEG_BYTES, PNG_BYTES, WEBP_BYTES
+from tests.helpers import JPEG_BYTES, NOT_AN_IMAGE, PNG_BYTES, WEBP_BYTES
 from tests.test_house_rules import _is_vendored
 
 OPEN_LIBRARY = "https://covers.openlibrary.org/"
@@ -503,24 +503,21 @@ class TestDownloading:
     pod's egress, every reader's browser and the CSP. Four of the five are
     outside this app, so the bytes are fetched once and served from here."""
 
-    def test_it_returns_the_bytes_and_the_sniffed_extension(self):
+    def test_it_returns_the_bytes(self):
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
             fetched = covers.download(covers.open_library_url(ENGLISH))
         assert fetched is not None
-        assert fetched[1] == "jpg"
+        assert fetched.startswith(b"\xff\xd8\xff")
 
-    def test_the_extension_comes_from_the_bytes_not_the_url(self):
-        """The URL is a third party's. `portal.dnb.de/opac/mvb/cover?isbn=` has
-        no extension in it at all, and a `.jpg` in a path is not evidence."""
-        png = httpx.Response(
-            200, content=PNG_BYTES, headers={"content-type": "image/jpeg"}
-        )
+    def test_a_200_that_is_not_an_image_is_refused(self):
+        """Both services report "no cover" on a bad day with an error page and
+        a 200, and the bytes are the only thing that says so."""
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=png)
-            fetched = covers.download(covers.open_library_url(ENGLISH))
-        assert fetched is not None
-        assert fetched[1] == "png"
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(200, content=NOT_AN_IMAGE)
+            )
+            assert covers.download(covers.open_library_url(ENGLISH)) is None
 
     def test_a_body_over_the_cap_is_refused(self):
         oversized = httpx.Response(
@@ -625,7 +622,7 @@ class TestDownloading:
             fetched = covers.download(covers.open_library_url(ENGLISH))
 
         assert fetched is not None
-        assert fetched[1] == "jpg"
+        assert fetched.startswith(b"\xff\xd8\xff")
 
     def test_a_trickled_body_stops_at_the_budget(self):
         """httpx's timeout is per read, so it does not bound a download at all.
@@ -671,9 +668,24 @@ class TestStoring:
         assert list(covers_dir.iterdir()) == []
         assert covers.outcome_counts()[covers.CoverOutcome.DOWNLOAD_FAILED.value] == 1
 
+    def test_the_name_comes_from_the_bytes_not_the_url(self, covers_dir):
+        """The URL is a third party's. `portal.dnb.de/opac/mvb/cover?isbn=` has
+        no extension in it at all, and a `.jpg` in a path is not evidence.
+
+        Asserted through the whole store path rather than off `download`, which
+        hands the bytes on unnamed: `cover_store` is what names the file.
+        """
+        png = httpx.Response(200, content=PNG_BYTES, headers={"content-type": "image/jpeg"})
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=png)
+            stored = covers.store(7, covers.open_library_url(ENGLISH))
+
+        assert stored == "/covers/7.png"
+        assert (covers_dir / "7.png").is_file()
+
     def test_it_replaces_a_cover_stored_in_another_format(self, covers_dir):
         """Two formats of the same book both existing means which one is served
-        depends on lookup order. `uploads.replace_image` owns that rule."""
+        depends on lookup order. `cover_store.save` owns that rule."""
         (covers_dir / "7.png").write_bytes(PNG_BYTES)
 
         with respx.mock(assert_all_called=False) as mock:
@@ -685,30 +697,51 @@ class TestStoring:
 
 
 class TestWhatIsOnDisk:
-    """Files are the one thing a database row does not carry with it, so this is
-    what the rest of the app asks instead of trusting `cover_url`."""
+    """The URL a stored file is served at, which is this module's half.
 
-    def test_it_finds_a_stored_cover_in_any_format(self, covers_dir):
+    **Finding the file is `cover_store`'s and is tested there.** This class held
+    three assertions on `stored_path` and `stored_ids`, which were re-exports of
+    `cover_store.path_of` and `book_ids` and are gone: a test of a forwarding
+    function is a test of forwarding. `tests/test_cover_store.py::
+    TestFindingWhatIsStored` covers the lookups, the login background not being
+    a book among them.
+    """
+
+    def test_it_builds_a_url_for_whatever_format_is_there(self, covers_dir):
         (covers_dir / "7.webp").write_bytes(WEBP_BYTES)
-        assert covers.stored_path(7) is not None
+
         assert covers.local_url_for(7) == "/covers/7.webp"
 
-    def test_a_book_with_no_file_has_none(self, covers_dir):
-        assert covers.stored_path(7) is None
+    def test_a_book_with_no_file_has_no_url(self, covers_dir):
         assert covers.local_url_for(7) is None
 
-    def test_it_lists_every_book_id_with_a_file(self, covers_dir):
+    def test_the_url_is_stable_when_a_book_holds_two_formats(
+        self, covers_dir, monkeypatch
+    ):
+        """`ALLOWED_IMAGE_EXTENSIONS` is a frozenset and its iteration order is
+        not stable between processes, and a book can hold two formats: an upload
+        sweeps the losers and `backup.restore` deliberately does not.
+
+        **`merge_books` compares against this, not against the path**, which is
+        why the URL needs its own arm: `cover_store.path_of`'s stability is
+        pinned in that module's tests, and a stable path with an unstable URL
+        would make a merge decide differently on two runs.
+
+        Stability, not a winner: the order is arbitrary and being the same order
+        twice is the whole requirement.
+        """
         (covers_dir / "7.jpg").write_bytes(JPEG_BYTES)
-        (covers_dir / "9.png").write_bytes(PNG_BYTES)
+        (covers_dir / "7.png").write_bytes(PNG_BYTES)
 
-        assert covers.stored_ids() == {7, 9}
+        seen = set()
+        for order in (["jpg", "png", "webp", "jpeg"], ["webp", "png", "jpeg", "jpg"]):
+            monkeypatch.setattr(cover_store, "ALLOWED_IMAGE_EXTENSIONS", order)
+            seen.add(covers.local_url_for(7))
 
-    def test_the_login_background_is_not_a_book(self, covers_dir):
-        """It lives in this directory and belongs to no book, so a scan that
-        counted it would report a cover for whichever id it parsed to."""
-        (covers_dir / "login_bg.png").write_bytes(PNG_BYTES)
-
-        assert covers.stored_ids() == set()
+        # `None not in`, because a lookup that stopped finding anything returns
+        # {None}, which is the most stable answer there is.
+        assert None not in seen
+        assert len(seen) == 1
 
     def test_forgetting_removes_every_format(self, covers_dir):
         """SQLite reuses an id once the highest row goes, so a leftover file is
@@ -716,9 +749,9 @@ class TestWhatIsOnDisk:
         (covers_dir / "7.jpg").write_bytes(JPEG_BYTES)
         (covers_dir / "7.png").write_bytes(PNG_BYTES)
 
-        covers.forget(7)
+        cover_store.remove(7)
 
-        assert covers.stored_ids() == set()
+        assert cover_store.book_ids() == set()
 
     def test_adopting_moves_a_cover_to_another_book(self, covers_dir):
         """A merge lets the keeper absorb the loser's `cover_url`, which names a
@@ -726,7 +759,7 @@ class TestWhatIsOnDisk:
         (covers_dir / "9.jpg").write_bytes(JPEG_BYTES)
 
         assert covers.adopt(4, 9) == "/covers/4.jpg"
-        assert covers.stored_ids() == {4}
+        assert cover_store.book_ids() == {4}
 
     def test_adopting_a_cover_that_is_not_there_answers_none(self, covers_dir):
         assert covers.adopt(4, 9) is None
@@ -738,7 +771,7 @@ class TestWhatIsOnDisk:
         (covers_dir / "9.jpg").write_bytes(JPEG_BYTES)
 
         assert covers.adoption_url(4, 9) == "/covers/4.jpg"
-        assert covers.stored_ids() == {9}
+        assert cover_store.book_ids() == {9}
 
     def test_the_adoption_url_agrees_with_what_adopting_produces(self, covers_dir):
         """Two spellings of one answer, which is a thing that drifts. A merge
@@ -994,68 +1027,3 @@ def await_resolve_with_deadline(isbn: str, budget: float) -> str | None:
 
     return asyncio.run(covers.resolve(isbn, deadline=monotonic() + budget))
 
-
-class TestResolvingACoverOnDiskIsDeterministic:
-    """Two formats of one base must resolve the same way twice.
-
-    `ALLOWED_IMAGE_EXTENSIONS` is a frozenset and its iteration order is not
-    stable between processes. A book can hold two formats: an upload sweeps the
-    losers, and `backup.restore` deliberately does not, because a restore
-    reproduces the directory the archive describes.
-
-    **The consequence is not cosmetic.** `merge_books` decides whether the keeper
-    adopts a cover by comparing `keeper.cover_url` against `local_url_for`, which
-    reads `stored_path`. Unordered, the same merge on the same files either
-    adopts the cover or hands the loser to `forget`, which deletes both.
-
-    These assert **stability, not a particular winner**: the order is arbitrary
-    and only being the same order twice is required.
-    """
-
-    def test_two_formats_of_one_base_resolve_to_the_same_file_every_time(
-        self, covers_dir
-    ):
-        (COVERS_DIR / "7.jpg").write_bytes(JPEG_BYTES)
-        (COVERS_DIR / "7.png").write_bytes(PNG_BYTES)
-        (COVERS_DIR / "7.webp").write_bytes(WEBP_BYTES)
-
-        answers = {covers.stored_path(7) for _ in range(20)}
-
-        # `None not in`, because {None} is the most stable answer there is: a
-        # lookup that stopped finding anything satisfies a bare length check.
-        assert None not in answers
-        assert len(answers) == 1
-
-    def test_the_order_does_not_depend_on_the_frozensets_own(
-        self, covers_dir, monkeypatch
-    ):
-        """The real test of the fix, and the one the loop above cannot be.
-
-        A frozenset iterates the same way inside one process, so twenty calls
-        agree whether or not anything sorts them. Re-presenting the allowlist in
-        a different order is what a second process does, and the answer must not
-        move.
-        """
-        (COVERS_DIR / "7.jpg").write_bytes(JPEG_BYTES)
-        (COVERS_DIR / "7.png").write_bytes(PNG_BYTES)
-
-        seen = set()
-        for order in (["jpg", "png", "webp", "jpeg"], ["webp", "png", "jpeg", "jpg"]):
-            monkeypatch.setattr(covers, "ALLOWED_IMAGE_EXTENSIONS", order)
-            seen.add(covers.stored_path(7))
-
-        assert None not in seen
-        assert len(seen) == 1
-
-    def test_local_url_for_is_stable_the_same_way(self, covers_dir, monkeypatch):
-        """`merge_books` compares against this, not against `stored_path`."""
-        (COVERS_DIR / "7.jpg").write_bytes(JPEG_BYTES)
-        (COVERS_DIR / "7.png").write_bytes(PNG_BYTES)
-
-        seen = set()
-        for order in (["jpg", "png", "webp", "jpeg"], ["webp", "png", "jpeg", "jpg"]):
-            monkeypatch.setattr(covers, "ALLOWED_IMAGE_EXTENSIONS", order)
-            seen.add(covers.local_url_for(7))
-
-        assert None not in seen
-        assert len(seen) == 1

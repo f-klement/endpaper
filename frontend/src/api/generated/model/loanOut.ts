@@ -5,11 +5,11 @@
  * Catalogue, lend and track a collection of books, on the shelf and in files, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
-import type { BookOut } from "./bookOut.ts";
+import type { BookColumns } from "./bookColumns.ts";
 import type { UserOut } from "./userOut.ts";
 
 export interface LoanOut {
-  book?: BookOut | null;
+  book?: BookColumns | null;
   book_id: number;
   /** @minimum 0 */
   days_out?: number;

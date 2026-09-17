@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import type { UserOut } from "../../api/generated/model";
+import { usePublishedCatalogue } from "../../app/hooks";
 import { useTranslation } from "../../i18n";
 import { readStoredUser } from "../hooks";
 import BackgroundUploader from "./components/BackgroundUploader";
@@ -12,7 +13,6 @@ import {
   useAddressConfirmation,
   useLoginBackground,
   useLoginForm,
-  usePublishedCatalogue,
   useRecovery,
 } from "./hooks";
 import { Icon } from "../../components";

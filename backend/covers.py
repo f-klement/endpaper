@@ -25,22 +25,26 @@ the worst case is the cover the app already had.
 publishing work. `portal.dnb.de/opac/mvb/cover` is the book trade's own image
 service, needs no key, and returned real covers (43 KB, 42 KB) for two German
 books Open Library has nothing for.
+
+**Where a cover comes from, and what URL one is served at.** `cover_store` is the
+other half and answers a different question: where the file is, and what it is
+called.
 """
 
 import asyncio
 import logging
 from collections import Counter
 from enum import StrEnum
-from pathlib import Path
 from time import monotonic
 from typing import Final
 from urllib.parse import urljoin, urlsplit
 
 import httpx
 
-from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR, MAX_UPLOAD_BYTES
+import cover_store
+from config import MAX_UPLOAD_BYTES
 from isbn import parse as parse_isbn
-from uploads import replace_image, sniff_image_extension
+from uploads import sniff_image_extension
 
 logger = logging.getLogger("endpaper.covers")
 
@@ -200,7 +204,7 @@ def local_url(book_id: int, extension: str) -> str:
 
 def local_url_for(book_id: int) -> str | None:
     """The URL a book's stored cover is served at, if it has one on disk."""
-    path = stored_path(book_id)
+    path = cover_store.path_of(book_id)
     return None if path is None else local_url(book_id, path.suffix.lstrip("."))
 
 
@@ -537,10 +541,10 @@ async def resolve_many(isbns: list[str]) -> dict[str, str | None]:
 #
 # So the bytes are fetched once and served from this app, through the
 # authenticated cover route that already applies `visible_to()`. They are files
-# under `COVERS_DIR`, named by book id; see `docs/decisions.md` for why that
-# rather than a column, and for what it costs. The remote URL stays as the
-# fallback when a download fails, which degrades to the old behaviour rather
-# than to no cover at all.
+# rather than a column; `docs/decisions.md` has why and what it costs, and
+# `cover_store` is the module that holds the directory. The remote URL stays
+# as the fallback when a download fails, which degrades to the old behaviour
+# rather than to no cover at all.
 #
 # Deliberately synchronous, unlike `resolve` above. `resolve` runs on the event
 # loop beside a metadata lookup, where six seconds of waiting must not block
@@ -549,71 +553,11 @@ async def resolve_many(isbns: list[str]) -> dict[str, str | None]:
 # of this would exist only to be bridged back with `asyncio.run` at three call
 # sites. An `async def` handler calls it through `asyncio.to_thread`.
 
-#: Not a book, and therefore not something `stored_ids` or `forget` may touch.
-#: `routers/settings.py` writes it and `routers/covers.get_login_background`
-#: serves it; it is in this directory because that is where those two agree.
-LOGIN_BG_BASE: Final = "login_bg"
-
-
-def stored_path(book_id: int) -> Path | None:
-    """The cover file this app holds for a book, in whatever format, or None.
-
-    **`sorted`, and the order itself does not matter: being the same order twice
-    does.** `ALLOWED_IMAGE_EXTENSIONS` is a frozenset, whose iteration order is
-    not stable between processes, and a book can have two formats on disk: an
-    upload sweeps the losers but `backup.restore` deliberately does not, since a
-    restore reproduces the directory the archive describes. This function is what
-    `local_url_for` reads, and `merge_books` decides whether the keeper adopts a
-    cover by comparing `keeper.cover_url` against it. Unordered, that comparison
-    flips between processes: one run adopts the cover, the next hands the loser
-    to `forget`, which deletes both files. Alphabetical is arbitrary and stable,
-    which is the whole requirement.
-    """
-    for extension in sorted(ALLOWED_IMAGE_EXTENSIONS):
-        candidate = Path(COVERS_DIR) / f"{book_id}.{extension}"
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def stored_ids() -> set[int]:
-    """Every book id with a cover file behind it.
-
-    One directory read rather than a `stat` per book, because the caller is the
-    backfill and it asks about the whole library at once. On the deployment's
-    NFS mount the difference between one readdir and three thousand stats is
-    the difference between a click and a timeout.
-
-    A name that is not `<int>.<ext>` is skipped, which is what keeps
-    `login_bg.png` out of it.
-    """
-    directory = Path(COVERS_DIR)
-    if not directory.is_dir():
-        return set()
-
-    found: set[int] = set()
-    for entry in directory.iterdir():
-        if not entry.is_file() or entry.suffix.lstrip(".").lower() not in ALLOWED_IMAGE_EXTENSIONS:
-            continue
-        # `isascii()` beside `isdigit()`, so a filename of non ASCII digits
-        # cannot raise out of the `int()` and take the whole orphan sweep with
-        # it. See `isbn.is_valid_isbn13`.
-        if entry.stem.isascii() and entry.stem.isdigit():
-            found.add(int(entry.stem))
-    return found
-
-
-def forget(book_id: int) -> None:
-    """Delete every stored cover for a book. Called when the book goes for good.
-
-    A file is not deleted by deleting a row, so this is the cost of holding
-    covers on disk rather than in the database. A cover whose book no longer
-    exists is dead bytes no query will ever find, and worse than that: SQLite
-    reuses an id once the highest row goes, so the next book to take it would
-    inherit somebody else's cover.
-    """
-    for extension in ALLOWED_IMAGE_EXTENSIONS:
-        (Path(COVERS_DIR) / f"{book_id}.{extension}").unlink(missing_ok=True)
+# The three below are re-exports of `cover_store`, under this module's older
+# names, and they carry no rule of their own. They exist because
+# `routers/books.py` calls them at six sites and folding those into
+# `cover_store` is a change to a file this one is not. Nothing in here calls
+# them: where a cover lives is asked of `cover_store` directly.
 
 
 def adoption_url(book_id: int, from_book_id: int) -> str | None:
@@ -627,7 +571,7 @@ def adoption_url(book_id: int, from_book_id: int) -> str | None:
     landed.
 
     **The extension is read here and read again by `adopt`**, from the same
-    `stored_path`, so the filesystem stays the one source of truth and neither
+    `cover_store.path_of`, so the filesystem stays the one source of truth and neither
     half caches an answer the other could contradict. What that does not close
     is the gap between the two reads: an upload that replaces the loser's cover
     while the merge is committing leaves a row naming `.png` and a file written
@@ -641,7 +585,7 @@ def adoption_url(book_id: int, from_book_id: int) -> str | None:
     None when there is no file to adopt, which the caller stores as "no cover"
     rather than as a promise it cannot keep.
     """
-    source = stored_path(from_book_id)
+    source = cover_store.path_of(from_book_id)
     if source is None:
         return None
     return local_url(book_id, source.suffix.lstrip(".").lower())
@@ -658,65 +602,49 @@ def adopt(book_id: int, from_book_id: int) -> str | None:
 
     **Called after the transaction commits**, with the URL already written by
     `adoption_url`, and the return value is **load bearing rather than
-    informational**. It is the only signal that the move did not happen, and
-    `replace_image` is atomic: on `OSError` it removes its own temporary file
-    and re-raises, so the source is still there and None means "these bytes are
-    the only copy, do not sweep them". A caller that discards this answer and
-    then forgets the source id destroys a hand-uploaded cover for good, since
-    nothing remote exists for the backfill to re-fetch. `merge_books` is the
-    only caller and does exactly that check.
+    informational**. It is the only signal that the move did not happen:
+    `cover_store.move` unlinks the source only once the write has succeeded, so
+    None means "these bytes are the only copy, do not sweep them". A caller that
+    discards this answer and then forgets the source id destroys a hand-uploaded
+    cover for good, since nothing remote exists for the backfill to re-fetch.
+    `merge_books` is the only caller and does exactly that check.
     """
-    source = stored_path(from_book_id)
-    if source is None:
-        return None
-    # The **name's** extension, not the bytes'. `backup.restore` may have kept a
-    # legacy cover whose two disagree, and this is where such a file travels to a
-    # new book id. Re-deriving it from the bytes would rename the file and leave
-    # the `cover_url` this function returns pointing at the old name.
-    extension = source.suffix.lstrip(".").lower()
-    # Through `replace_image` rather than a rename, so the keeper's existing
-    # covers in other formats go the same way they do on an upload.
     try:
-        replace_image(Path(COVERS_DIR), str(book_id), extension, source.read_bytes())
+        moved = cover_store.move(book_id, from_book_id)
     except OSError as error:
         logger.warning("Could not move a cover from book %d: %s", from_book_id, error)
         return None
-    source.unlink(missing_ok=True)
-    return local_url(book_id, extension)
+    return None if moved is None else local_url(book_id, moved.suffix.lstrip("."))
 
 
 def duplicate(book_id: int, from_book_id: int) -> str | None:
     """Copy a cover file from one book's id to another's. The new URL, or None.
 
-    `adopt` without the delete, for adding a second copy of a title. The two
-    rows must not share a file: files are named by book id and `forget` deletes
-    by id, so purging either copy would blank the other's cover while leaving a
-    `cover_url` pointing at nothing.
+    `adopt` without the delete, for adding a second copy of a title. The bytes
+    are copied rather than shared, and `cover_store.copy` says what sharing one
+    file between two rows would cost.
 
     Only worth doing for a cover this app already holds. A remote URL is
     inherited by assignment and a book with neither is resolved from its ISBN
     like any other new row, both of which cost no bytes on disk.
     """
-    source = stored_path(from_book_id)
-    if source is None:
-        return None
-    extension = source.suffix.lstrip(".").lower()
     try:
-        replace_image(Path(COVERS_DIR), str(book_id), extension, source.read_bytes())
+        copied = cover_store.copy(book_id, from_book_id)
     except OSError as error:
         logger.warning("Could not copy a cover from book %d: %s", from_book_id, error)
         return None
-    return local_url(book_id, extension)
+    return None if copied is None else local_url(book_id, copied.suffix.lstrip("."))
 
 
-def download(url: str, deadline: float | None = None) -> tuple[bytes, str] | None:
-    """Fetch a cover and identify its format. None if it is not usable.
+def download(url: str, deadline: float | None = None) -> bytes | None:
+    """Fetch a cover's bytes. None if they are not an image this app serves.
 
-    The extension comes from the magic bytes, never from the URL and never from
-    the response's `Content-Type`: this is a file from a third party, neither of
+    Usable is decided by the magic bytes, never by the URL and never by the
+    response's `Content-Type`: this is a file from a third party, neither of
     those is evidence about the bytes, and
-    `portal.dnb.de/opac/mvb/cover?isbn=...` has no extension in it at all. Same
-    rule, and the same function, as an upload.
+    `portal.dnb.de/opac/mvb/cover?isbn=...` has no extension in it at all. The
+    bytes are handed on unnamed, because what a cover file is called is
+    `cover_store`'s to decide and one decision is all there is room for.
 
     The body is read in **raw** chunks against `MAX_COVER_BYTES` rather than
     with `response.read()`, so a service answering with an endless stream is
@@ -808,44 +736,41 @@ def download(url: str, deadline: float | None = None) -> tuple[bytes, str] | Non
         return None
 
     data = b"".join(chunks)
-    extension = sniff_image_extension(data)
-    if extension is None:
+    if sniff_image_extension(data) is None:
         # A 200 that is not an image is an error page with the wrong status,
         # which is how both of these services report "no cover" on a bad day.
+        # Counted as a failed download here rather than left to the store's
+        # refusal, so the log says which of the two it was.
         logger.info("Cover download was not an image: %s", target)
         return None
-    return data, extension
+    return data
 
 
 def store(book_id: int, url: str, deadline: float | None = None) -> str | None:
     """Pull a remote cover in and write it. The local URL, or None on failure.
 
-    The write goes through `uploads.replace_image`, which writes beside the
-    destination and `os.replace`s it into place, so a failure mid-write cannot
-    leave a book pointing at a file that no longer exists, and which clears the
-    other formats of the same book afterwards, so which one is served does not
-    depend on lookup order. Reimplementing either here would be a second copy of
-    reasoning that took an incident to get right.
+    Where the file goes and what it is called are `cover_store`'s: this function
+    knows a book id and some bytes.
     """
-    fetched = download(url, deadline)
-    if fetched is None:
+    data = download(url, deadline)
+    if data is None:
         record(CoverOutcome.DOWNLOAD_FAILED)
         return None
 
-    data, extension = fetched
     try:
-        replace_image(Path(COVERS_DIR), str(book_id), extension, data)
-    except OSError as error:
-        # A full or unwritable volume. Counted as a failed download rather than
-        # raised: the book is already saved, and losing its cover must not turn
-        # a successful add into a 500.
+        destination = cover_store.save(book_id, data)
+    except (OSError, cover_store.NotAnImage) as error:
+        # A full or unwritable volume, or bytes `download` should already have
+        # refused. Counted as a failed download rather than raised: the book is
+        # already saved, and losing its cover must not turn a successful add
+        # into a 500.
         record(CoverOutcome.DOWNLOAD_FAILED)
         logger.warning("Could not write the cover for book %d: %s", book_id, error)
         return None
 
     record(CoverOutcome.DOWNLOADED)
     logger.info("Stored a %d byte cover for book %d from %s", len(data), book_id, url)
-    return local_url(book_id, extension)
+    return local_url(book_id, destination.suffix.lstrip("."))
 
 
 def resolve_and_store(

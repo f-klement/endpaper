@@ -1507,12 +1507,15 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
             near="that need no credential at all answer 395",
         ),
     ],
-    ("backend/metadata.py", "{n} sources"): [
+    ("backend/bibliographic.py", "{n} sources"): [
         NotTheRoster(
-            "the sources that reach `_is_physical_book`, which is the roster "
-            "minus the two that never ask it and has no constant of its own",
-            near="_is_physical_book",
+            "the sources that reach `bibliographic.is_physical_book`, which is "
+            "the roster minus the two that never ask it, Open Library and "
+            "Google Books, and has no constant of its own",
+            near="is_physical_book",
         ),
+    ],
+    ("backend/metadata.py", "{n} sources"): [
         Counts("SEARCH_SOURCES", near="asked at once"),
         # The chain a default install actually runs, in the block that says so
         # and in the Argentine block's denominator, and **they are two different
@@ -1716,12 +1719,6 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
             "two that answer Dublin Core and has no constant of its own",
             near="carrier vocabulary",
         ),
-        # The OPDS entry's statement of how much of the title search fan out
-        # refuses an electronic record. It is the fan out itself, so it takes a
-        # Counts rather than a NotTheRoster: the sentence's whole argument is
-        # that a born digital title depends on the two of that set which apply
-        # no such rule, and a source joining or leaving it moves both halves.
-        Counts("SEARCH_SOURCES", near="a title search fans out to"),
     ],
     # The same fact, restated where the filename fallback tells a member why a
     # book kept its file name. Three sites, one in the module and two in the

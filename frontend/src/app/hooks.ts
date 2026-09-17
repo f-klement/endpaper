@@ -6,7 +6,11 @@ import {
   useGetMyAppearance,
   useSetMyAppearance,
 } from "../api/generated/endpoints/users/users";
-import type { ExportFormat, FeatureFlagsOut } from "../api/generated/model";
+import type {
+  ExportFormat,
+  FeatureFlagsOut,
+  Locale,
+} from "../api/generated/model";
 import { downloadFile } from "../api/mutator";
 import { resolveAppearance, type Appearance } from "../theme";
 
@@ -39,21 +43,6 @@ export function useExportLibrary(): UseExportLibraryResult {
   };
 }
 
-/**
- * The server's feature flags, for the shell.
- *
- * Here rather than inline in `providers.tsx` so that the rule holds without an
- * exception: only a `hooks.ts` imports from `api/generated/endpoints`. One
- * exception is one more than a test can enforce, and the indirection is the
- * whole reason a regeneration does not ripple through the components.
- *
- * `retry: false` because the shell renders regardless: a failure here means
- * falling back to the browser's language, not an error screen.
- */
-export function useFeatureFlags(): FeatureFlagsOut | undefined {
-  return useFeatureFlagsState().flags;
-}
-
 export interface FeatureFlagsState {
   flags: FeatureFlagsOut | undefined;
   /**
@@ -76,9 +65,13 @@ export interface FeatureFlagsState {
 /**
  * The flags, and whether they have arrived.
  *
- * `useFeatureFlags` is this with the second half dropped, rather than a second
- * query beside it: two call sites configuring one endpoint is how they come to
- * disagree about `retry` or `staleTime`.
+ * **The only place this endpoint is configured**, which is a rule with a test
+ * rather than a hope: `tests/houseRules.test.ts` holds it, and holds the
+ * measurement of what it prevents. Every reader below goes through here, and
+ * so does the one caller that needs the second half.
+ *
+ * `retry: false` because everything reading this renders regardless: a failure
+ * means the fallback each reader documents, not an error screen.
  */
 export function useFeatureFlagsState(): FeatureFlagsState {
   const query = useGetFeatureFlags({
@@ -88,6 +81,70 @@ export function useFeatureFlagsState(): FeatureFlagsState {
   // well as on an answer, and stays false through a background refetch. That
   // is the question this is asking.
   return { flags: query.data, isResolved: !query.isPending };
+}
+
+/**
+ * The flags, one question at a time.
+ *
+ * A reader per flag rather than call sites reading fields off a shared object.
+ * A caller holding the object also picks that field's fallback, and the
+ * fallback is a property of the field rather than of the screen asking: there
+ * is one right answer for a flag that has not arrived, and it is what an
+ * existing library already had. Spelling it per caller is how `?? false` and
+ * `=== true` came to sit beside each other for the same question.
+ *
+ * Each of them goes through `useFeatureFlagsState`, which is what keeps the
+ * endpoint on one set of options. What that prevents, measured, is at the
+ * guard: `tests/houseRules.test.ts`, "the feature flags query has one owner".
+ */
+
+/** Whether a Google Books lookup will reach Google: switched on, and keyed. */
+export function useGoogleBooksReady(): boolean {
+  return useFeatureFlagsState().flags?.google_books_ready ?? false;
+}
+
+/** Whether Goodreads lookup links should be rendered. */
+export function useGoodreadsLookup(): boolean {
+  return useFeatureFlagsState().flags?.goodreads_lookup_enabled ?? false;
+}
+
+/**
+ * Whether this deployment has a published catalogue to offer.
+ *
+ * `public_catalogue_published` is the **server's** conjunction of library mode
+ * and the publish switch, not either row, so a browser cannot get the nesting
+ * rule wrong by reading one of them.
+ */
+export function usePublishedCatalogue(): boolean {
+  return useFeatureFlagsState().flags?.public_catalogue_published ?? false;
+}
+
+/**
+ * Whether this Library is run as a small archive rather than a household.
+ *
+ * The raw row, and unlike the reader above it there is nothing to conjoin: the
+ * server gates every MARC route on this row alone, so a client reading it gets
+ * the answer those routes give. The export menu is one of them.
+ *
+ * **For rendering, not for writing.** False here is the same value before the
+ * request has answered and after it has failed. Anything keying a stored
+ * choice on the mode needs `useFeatureFlagsState().isResolved` to tell the two
+ * apart, which is why `pages/Home/hooks.ts` reads the state rather than this.
+ */
+export function useLibraryMode(): boolean {
+  return useFeatureFlagsState().flags?.library_mode ?? false;
+}
+
+/**
+ * The language a browser falls back to when its own is not one this app
+ * speaks. `undefined` until the flags arrive, and that is the answer the
+ * locale provider wants: the browser's own language is known synchronously and
+ * is right for almost everyone, so there is nothing to substitute here.
+ *
+ * The one reader that is not a boolean, which is why it is not written `??`.
+ */
+export function useServerDefaultLocale(): Locale | undefined {
+  return useFeatureFlagsState().flags?.default_locale;
 }
 
 export interface UseStoredAppearanceResult {

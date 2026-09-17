@@ -530,8 +530,9 @@ def flip_catalogue_name(raw: str) -> str:
     LibraryThing writes its primary author in catalogue order, and Goodreads
     offers both orders in separate columns. One comma means a person; none, or
     more than one, means a corporate name or a list of people, and reordering
-    either of those mangles it. The same rule as `metadata._flip_catalogue_name`,
-    which reads it off MARC records for the same reason.
+    either of those mangles it. The same rule as
+    `bibliographic.flip_catalogue_name`, which reads it off catalogue records for
+    the same reason.
     """
     name = raw.strip().rstrip(",")
     if name.count(",") != 1:

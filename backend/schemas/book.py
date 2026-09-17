@@ -17,11 +17,22 @@ from enums import (
 )
 from google_books import split_categories
 from models import (
+    AUTHOR_LINE_MAX,
     CATEGORIES_MAX,
     COVER_URL_MAX,
+    CURRENCY_LENGTH,
     DESCRIPTION_MAX,
+    GOOGLE_BOOKS_ID_MAX,
+    ISBN_MAX,
+    LANGUAGE_MAX,
+    LOCATION_MAX,
     MAX_PAGE_NUMBER_IN_A_BOOK,
     MAX_SERIES_INDEX,
+    PUBLISHER_MAX,
+    PURCHASE_SOURCE_MAX,
+    SERIES_NAME_MAX,
+    SUBTITLE_MAX,
+    TITLE_MAX,
 )
 from schemas.author import RefusedAssertionOut
 from schemas.classification import (
@@ -137,18 +148,18 @@ class BookCreate(BaseModel):
     # Accepts any written form (hyphenated, spaced, ISBN-10) and stores the
     # canonical ISBN-13, so the same book cannot be added twice under two
     # spellings. See the validator below.
-    isbn: str | None = Field(default=None, max_length=20)
-    title: str = Field(min_length=1, max_length=500)
-    subtitle: str | None = Field(default=None, max_length=500)
-    author: str | None = Field(default=None, max_length=500)
-    publisher: str | None = Field(default=None, max_length=255)
+    isbn: str | None = Field(default=None, max_length=ISBN_MAX)
+    title: str = Field(min_length=1, max_length=TITLE_MAX)
+    subtitle: str | None = Field(default=None, max_length=SUBTITLE_MAX)
+    author: str | None = Field(default=None, max_length=AUTHOR_LINE_MAX)
+    publisher: str | None = Field(default=None, max_length=PUBLISHER_MAX)
     year: int | None = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
     description: str | None = Field(default=None, max_length=DESCRIPTION_MAX)
     cover_url: str | None = Field(default=None, max_length=COVER_URL_MAX)
     is_private: bool = False
-    series_name: str | None = Field(default=None, max_length=255)
+    series_name: str | None = Field(default=None, max_length=SERIES_NAME_MAX)
     series_index: float | None = Field(default=None, ge=0, le=MAX_SERIES_INDEX)
-    location: str | None = Field(default=None, max_length=120)
+    location: str | None = Field(default=None, max_length=LOCATION_MAX)
     #: Which collection to file it into, or absent for none. Refused with a 400
     #: when no such collection exists, rather than surfacing the foreign key as
     #: a 500. Bounded like every other caller-supplied row id: see MAX_ROW_ID.
@@ -158,12 +169,12 @@ class BookCreate(BaseModel):
     #: but it meant this API accepted six characters no engine that enforces a
     #: width would store, and `importing.py` had to consult both numbers and
     #: take the smaller. Nothing legitimate is lost: every language this app
-    #: writes comes from `metadata._LANGUAGES` (two letters) or Google's own
+    #: writes comes from `bibliographic.LANGUAGES` (two letters) or Google's own
     #: `language` (two or three), and the longest tag anybody could want,
     #: `zh-Hant-HK`, is exactly 10. A row already holding a longer value stays
     #: readable and editable: `BookOut` bounds nothing and `BookDetailsUpdate`
     #: has no language field.
-    language: str | None = Field(default=None, max_length=10)
+    language: str | None = Field(default=None, max_length=LANGUAGE_MAX)
     page_count: int | None = Field(default=None, ge=1, le=MAX_PAGE_NUMBER_IN_A_BOOK)
     # The one collector field offered at add time. Somebody scanning a book is
     # holding it, so this is the one moment they can answer without checking.
@@ -270,7 +281,7 @@ class CopyCreate(BaseModel):
     added it, so `PATCH /api/books/{id}/privacy` can change it afterwards.
     """
 
-    location: str | None = Field(default=None, max_length=120)
+    location: str | None = Field(default=None, max_length=LOCATION_MAX)
     #: Deliberately **not** inherited from the book being copied, unlike the
     #: work fields and unlike `is_private`. Which collection a copy belongs to
     #: is a fact about the object, like its shelf and its condition: the
@@ -282,9 +293,11 @@ class CopyCreate(BaseModel):
     condition: BookCondition | None = None
     lending: LendingWillingness | None = None
     purchase_price_minor: int | None = Field(default=None, ge=0, le=MAX_PRICE_MINOR)
-    purchase_currency: str | None = Field(default=None, min_length=3, max_length=3)
+    purchase_currency: str | None = Field(
+        default=None, min_length=CURRENCY_LENGTH, max_length=CURRENCY_LENGTH
+    )
     purchased_at: date | None = None
-    purchase_source: str | None = Field(default=None, max_length=120)
+    purchase_source: str | None = Field(default=None, max_length=PURCHASE_SOURCE_MAX)
 
     @field_validator("purchase_currency")
     @classmethod
@@ -293,18 +306,16 @@ class CopyCreate(BaseModel):
         return value.upper() if value else value
 
 
-class BookOut(BaseModel):
-    #: Authority identifiers a catalogue asserted for this Book's author and
-    #: this Library declined, because it already holds a different one.
-    #:
-    #: **Empty on every response but two.** Only `PUT /{id}/refresh` and
-    #: `POST /{id}/enrich` fetch a catalogue record and so can produce one; a
-    #: plain read has nothing to report and leaves it empty. It is on `BookOut`
-    #: rather than on an enrichment-only model because those two handlers return
-    #: different types and the fact is the same one.
-    #:
-    #: Not stored. See `schemas.author.RefusedAssertionOut`.
-    refused_identifiers: list[RefusedAssertionOut] = Field(default_factory=list)
+class BookColumns(BaseModel):
+    """Everything on a Book payload that a Book row answers for itself.
+
+    A column, or something derived from one by a string operation with no
+    statement behind it. Validating this from an ORM object is complete: every
+    field here has a value the moment the row is loaded.
+
+    **Split from the rest so that the rest cannot be forgotten.** See `BookOut`.
+    """
+
     id: int
     isbn: str | None
     title: str
@@ -321,7 +332,7 @@ class BookOut(BaseModel):
     #: the two rules must not be swapped).
     #:
     #: Costs no statement: `authors.split_authors` is a string operation on a
-    #: column already loaded. See the note above `_books_to_out` about what
+    #: column already loaded. See the note above `books_to_out` about what
     #: adding a per-request *query* here would cost.
     authors: list[str] = []
     publisher: str | None
@@ -372,13 +383,6 @@ class BookOut(BaseModel):
     #: Which collection this **object** is filed in, or null for none. Per row
     #: rather than per copy group: see `models.Book.collection_id`.
     collection_id: int | None = None
-    #: Its name, filled in by `serialisation.books_to_out` in one statement for
-    #: the whole page. A projection of the row the id names, not a second copy
-    #: of it: nothing writes this, and a client that renamed a collection reads
-    #: the new name on the next fetch. Present so a card can show where a book
-    #: lives without every consumer fetching the collection list to join
-    #: against.
-    collection_name: str | None = None
 
     format: BookFormat | None = None
     condition: BookCondition | None = None
@@ -390,46 +394,6 @@ class BookOut(BaseModel):
     purchase_currency: str | None = None
     purchased_at: date | None = None
     purchase_source: str | None = None
-
-    #: How many copies of this title the library holds, counting this row.
-    #:
-    #: 1 for almost every book. Served on every payload rather than only on the
-    #: detail page, because two copies are two rows and the library grid shows
-    #: both: without a number on the card, a shelf with a spare paperback looks
-    #: like a catalogue that has double-added something.
-    #:
-    #: Counts only the copies the caller may see, like everything else here. A
-    #: member who made their own copy private does not thereby tell the rest of
-    #: the library that a third copy exists.
-    copy_count: int = 1
-
-    # Nothing below here is a column. Every one is computed per request and
-    # depends on *who is asking*, so the same row serialises differently for
-    # different members. Never cache a BookOut across accounts.
-    active_loan: LoanOut | None = None
-    my_status: ReadStatus = ReadStatus.UNREAD
-    my_rating: int | None = None
-    my_started_at: datetime | None = None
-    my_finished_at: datetime | None = None
-
-    # The caller's own latest recorded position, from `reading_progress`.
-    # Personal like the four above: a member never sees another member's.
-    my_progress_page: int | None = None
-    #: Derived, never stored twice: `page / page_count` when the page count is
-    #: known, else whatever percent was recorded, else null. Rounded to a whole
-    #: number, which is the precision a progress bar can show.
-    my_progress_percent: int | None = None
-    my_progress_recorded_at: datetime | None = None
-
-    #: Whether the caller has offered to talk about this book.
-    my_wants_to_discuss: bool = False
-    #: Everybody who has, the caller included.
-    #:
-    #: The one per-member field on this payload that is **not** scoped to who
-    #: is asking, and deliberately so: a flag meaning "ask me about it" is
-    #: worth nothing if only the person who set it can see it. It says nothing
-    #: about anybody's reading status, which stays private.
-    discuss_with: list[UserOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -455,19 +419,147 @@ class BookOut(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def derive_authors(self) -> BookOut:
+    def derive_authors(self) -> BookColumns:
         """Split the credit line, every time this model is built.
 
         Here rather than in `serialisation.books_to_out` so the two fields
-        cannot disagree: any future caller that builds a `BookOut` gets the
-        same split, and a value passed in for `authors` is overwritten rather
-        than believed. `author` is the fact; this is that fact parsed.
+        cannot disagree: any future caller that builds one gets the same split,
+        and a value passed in for `authors` is overwritten rather than believed.
+        `author` is the fact; this is that fact parsed.
 
         Free: a string operation on a column already loaded, with no statement
         behind it.
         """
         self.authors = split_authors(self.author)
         return self
+
+
+class ViewerFields(BaseModel):
+    """The part of a Book payload that no Book row answers.
+
+    Twelve fields, computed once per page by `serialisation.books_to_out` from
+    queries a Book does not carry: the open loan, the caller's reading record,
+    the caller's latest position, who is willing to talk about it, how many
+    copies the caller may see, and the name behind `collection_id`.
+
+    **No defaults, and that is the whole reason this is a type.** Every one of
+    them used to be declared on `BookOut` with a plausible one: `my_status`
+    defaulted to UNREAD, `copy_count` to 1, `discuss_with` to empty. A default
+    on a field that is always written is a value that validates and is wrong,
+    so a thirteenth field declared and then not assigned produced a well formed
+    200 carrying a wrong answer with nothing red anywhere. Required here, the
+    same omission is a `TypeError` at the one construction site.
+
+    **Eleven of the twelve are scoped to the caller and `collection_name` is
+    not**, which is a name this type does not quite fit. It is here because it
+    has the same failure mode rather than the same audience: it is computed by
+    the same loop, from the same page of queries, and a forgotten write to it
+    would be the same silent wrong answer. `discuss_with` is the reverse case
+    and is documented at the field.
+
+    This is what `shelf.Outbound` does for the public path, where the class of
+    error is the opposite: there the danger is a per viewer field arriving at a
+    reader who has no viewer, and it is closed the same way, by construction.
+    """
+
+    #: The open loan on this copy, or null while it is on the shelf.
+    active_loan: LoanOut | None
+    #: The name behind `collection_id`, filled in in one statement for the whole
+    #: page. A projection of the row the id names, not a second copy of it:
+    #: nothing writes this, and a client that renamed a collection reads the new
+    #: name on the next fetch. Present so a card can show where a book lives
+    #: without every consumer fetching the collection list to join against.
+    collection_name: str | None
+    #: How many copies of this title the library holds, counting this row.
+    #:
+    #: 1 for almost every book. Served on every payload rather than only on the
+    #: detail page, because two copies are two rows and the library grid shows
+    #: both: without a number on the card, a shelf with a spare paperback looks
+    #: like a catalogue that has double-added something.
+    #:
+    #: Counts only the copies the caller may see, like everything else here. A
+    #: member who made their own copy private does not thereby tell the rest of
+    #: the library that a third copy exists.
+    copy_count: int
+    #: Everybody who has offered to talk about this book, the caller included.
+    #:
+    #: The one field here that is **not** scoped to who is asking, and
+    #: deliberately so: a flag meaning "ask me about it" is worth nothing if
+    #: only the person who set it can see it. It says nothing about anybody's
+    #: reading status, which stays private.
+    discuss_with: list[UserOut]
+
+    #: The caller's own reading record. A member never sees another member's.
+    my_status: ReadStatus
+    my_rating: int | None
+    my_started_at: datetime | None
+    my_finished_at: datetime | None
+    #: Whether the caller has offered to talk about this book.
+    my_wants_to_discuss: bool
+
+    #: The caller's own latest recorded position, from `reading_progress`.
+    my_progress_page: int | None
+    #: Derived, never stored twice: `page / page_count` when the page count is
+    #: known, else whatever percent was recorded, else null. Rounded to a whole
+    #: number, which is the precision a progress bar can show.
+    my_progress_percent: int | None
+    my_progress_recorded_at: datetime | None
+
+
+class BookOut(ViewerFields, BookColumns):
+    """One Book, as one member sees it. The wire shape, flat and unchanged.
+
+    **Never cache one across accounts**: half of what is on it is an answer to
+    who asked. The split above is what makes that readable rather than a comment
+    in the middle of a field list.
+
+    Built only by `seen_by`, which is the point: `model_validate(book)` cannot
+    produce one, because a Book row does not know eleven of these twelve.
+
+    **The base order is what puts the columns first in the response body.**
+    Pydantic collects fields in reverse MRO, so the class listed second is the
+    one whose fields lead, which is the opposite of how it reads. It governs the
+    body's key order and nothing else: `scripts/dump_openapi.py` dumps with
+    `sort_keys=True`, so the schema and everything orval writes from it are
+    alphabetical whatever this says.
+    """
+
+    #: Authority identifiers a catalogue asserted for this Book's author and
+    #: this Library declined, because it already holds a different one.
+    #:
+    #: **Empty on every response but two, and its default is therefore not the
+    #: kind `ViewerFields` refuses.** Only `PUT /{id}/refresh` and
+    #: `POST /{id}/enrich` fetch a catalogue record and so can produce one; the
+    #: other eighteen callers have nothing to report, and the empty list is the
+    #: answer rather than a placeholder for one. It is written by
+    #: `routers.books._with_refusals`, which copies rather than assigning into
+    #: the serialiser's loop.
+    #:
+    #: Not stored. See `schemas.author.RefusedAssertionOut`.
+    refused_identifiers: list[RefusedAssertionOut] = Field(default_factory=list)
+
+    @classmethod
+    def seen_by(cls, columns: BookColumns, viewer: ViewerFields) -> BookOut:
+        """The one construction site.
+
+        **The guarantee is upstream of this line**, at the `ViewerFields(...)`
+        call in `serialisation.books_to_out`: a field added there and not
+        written fails to construct, and by the time both halves reach here they
+        are already validated. This assembles them.
+
+        **It re-validates the columns**, which is a real cost and a measured
+        one. Per book, on the control plane: `BookColumns.model_validate` 19.5
+        microseconds, `ViewerFields(**kwargs)` 2.4, this reassembly 20.1, the
+        whole path 46.2. That roughly doubles per book serialisation and is
+        about half a millisecond on a page of 25, against six to eight SQL round
+        trips. **Not `model_construct`**, which measured 167 microseconds, eight
+        times the cost of validating, besides skipping the validators.
+
+        The one thing the re-validation asks of a `BookColumns` field is that a
+        `mode="before"` validator on it be idempotent, because it runs twice.
+        `parse_categories` and `derive_authors` are, and nothing pins that.
+        """
+        return cls(**columns.__dict__, **viewer.__dict__)
 
 
 class BookEnrichmentOut(BaseModel):
@@ -558,18 +650,18 @@ class BookMatch(BaseModel):
     #: counterpart, so the column is the source of the number. A Google volume
     #: id is 12 characters (`zyTCAlFPjgYC`), so the column already carries 4.2x
     #: what the field holds.
-    google_books_id: str | None = Field(default=None, max_length=50)
-    title: str | None = Field(default=None, max_length=500)
-    subtitle: str | None = Field(default=None, max_length=500)
-    author: str | None = Field(default=None, max_length=500)
-    publisher: str | None = Field(default=None, max_length=255)
+    google_books_id: str | None = Field(default=None, max_length=GOOGLE_BOOKS_ID_MAX)
+    title: str | None = Field(default=None, max_length=TITLE_MAX)
+    subtitle: str | None = Field(default=None, max_length=SUBTITLE_MAX)
+    author: str | None = Field(default=None, max_length=AUTHOR_LINE_MAX)
+    publisher: str | None = Field(default=None, max_length=PUBLISHER_MAX)
     # `{"year": 2**63}` raised `OverflowError` on the commit and answered 500
     # to any member. Measured, and the reason this model started carrying
     # bounds at all.
     year: int | None = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
     description: str | None = Field(default=None, max_length=DESCRIPTION_MAX)
     page_count: int | None = Field(default=None, ge=1, le=MAX_PAGE_NUMBER_IN_A_BOOK)
-    language: str | None = Field(default=None, max_length=10)
+    language: str | None = Field(default=None, max_length=LANGUAGE_MAX)
     categories: str | None = Field(default=None, max_length=CATEGORIES_MAX)
     #: Bounded twice: `max_length` on what arrives, and the validator below on
     #: what the column ends up holding. See `_a_cover_url_the_column_can_hold`.
@@ -580,8 +672,8 @@ class BookMatch(BaseModel):
     #: a column's: `merge_into` names neither `isbn13` nor `title`, so neither
     #: is written on this route at all. Both critic seats caught the earlier
     #: wording claiming a write that does not happen.
-    isbn13: str | None = Field(default=None, max_length=20)
-    series_name: str | None = Field(default=None, max_length=255)
+    isbn13: str | None = Field(default=None, max_length=ISBN_MAX)
+    series_name: str | None = Field(default=None, max_length=SERIES_NAME_MAX)
     #: **The sharpest of the thirteen**, and a stored denial of service rather
     #: than an oversized row. `merge_into` writes this column, and
     #: `routers/books.list_series` computes `set(range(1, max(held) + 1))` over
@@ -733,15 +825,15 @@ class BookDetailsUpdate(BaseModel):
     unset; the two cases are distinguished with `model_fields_set`.
     """
 
-    title: str | None = Field(default=None, min_length=1, max_length=500)
-    subtitle: str | None = Field(default=None, max_length=500)
-    author: str | None = Field(default=None, max_length=500)
-    publisher: str | None = Field(default=None, max_length=255)
+    title: str | None = Field(default=None, min_length=1, max_length=TITLE_MAX)
+    subtitle: str | None = Field(default=None, max_length=SUBTITLE_MAX)
+    author: str | None = Field(default=None, max_length=AUTHOR_LINE_MAX)
+    publisher: str | None = Field(default=None, max_length=PUBLISHER_MAX)
     year: int | None = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
     description: str | None = Field(default=None, max_length=DESCRIPTION_MAX)
-    series_name: str | None = Field(default=None, max_length=255)
+    series_name: str | None = Field(default=None, max_length=SERIES_NAME_MAX)
     series_index: float | None = Field(default=None, ge=0, le=MAX_SERIES_INDEX)
-    location: str | None = Field(default=None, max_length=120)
+    location: str | None = Field(default=None, max_length=LOCATION_MAX)
 
     format: BookFormat | None = None
     condition: BookCondition | None = None
@@ -750,9 +842,11 @@ class BookDetailsUpdate(BaseModel):
     # Upper case, three letters, ISO 4217 shaped without asserting the code is
     # real: a library using a currency this app has never heard of is not an
     # error worth refusing an edit over.
-    purchase_currency: str | None = Field(default=None, min_length=3, max_length=3)
+    purchase_currency: str | None = Field(
+        default=None, min_length=CURRENCY_LENGTH, max_length=CURRENCY_LENGTH
+    )
     purchased_at: date | None = None
-    purchase_source: str | None = Field(default=None, max_length=120)
+    purchase_source: str | None = Field(default=None, max_length=PURCHASE_SOURCE_MAX)
 
     @field_validator("purchase_currency")
     @classmethod

@@ -58,7 +58,7 @@ from fastapi.responses import PlainTextResponse
 import settings_store
 from dependencies import DbSession, Paging, RowId, TagIdList, row_ids
 from enums import BookFormat
-from models import Book
+from models import SERIES_NAME_MAX, Book
 from ratelimit import client_address, public_catalogue_limiter
 from schemas import Page, PublicBookOut, PublicBookSort
 from serialisation import books_to_public_out
@@ -148,7 +148,7 @@ def list_public_books(
     q: Annotated[str | None, Query(max_length=200)] = None,
     tags: TagIdList = None,
     format: Annotated[BookFormat | None, Query()] = None,
-    series: Annotated[str | None, Query(max_length=255)] = None,
+    series: Annotated[str | None, Query(max_length=SERIES_NAME_MAX)] = None,
     sort: Annotated[PublicBookSort, Query()] = PublicBookSort.TITLE_ASC,
 ) -> Page[PublicBookOut]:
     """One page of the published catalogue.

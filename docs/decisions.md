@@ -2714,7 +2714,7 @@ identifies. Refusing anything carrying one drops 0 of 122 monographs.
 
 #### A `ValueError` no SRU handler caught, and a bound that could not have helped
 
-`_pages_from_extent` matched `(\d+)` and called `int()`. CPython refuses a conversion of more
+`bibliographic.pages_from_extent` matched `(\d+)` and called `int()`. CPython refuses a conversion of more
 than `sys.get_int_max_str_digits()` digits, 4,300 by default, and raises **`ValueError`**,
 which is neither `httpx.HTTPError` nor `ElementTree.ParseError`, so **none of the eight SRU
 handlers caught it**. One record with 4,301 digits in its `300 $a` turned search and lookup
@@ -2784,6 +2784,173 @@ was high throughout: three came from running the query against a database, two
 from a reader asking what the rule required rather than what it said. Three of
 the four fixes a reviewer proposed were themselves a step short of the family
 they were for. `CLAUDE.md` carries the general lessons.
+
+### The shared bibliographic vocabulary is a module, and MARC reading is not
+
+`metadata.py` held every rule about what a catalogue value **means** alongside every rule
+about how each serialisation **spells** it, privately, and `marc.py` reached past that wall at
+24 sites to read 20 of them.
+
+The obvious fix was the wrong one. Publishing a top level reader table, which is what the
+ticket proposed, serves **one** of the 24 sites: the other 23 read primitives rather than the
+decoder, and that reuse is deliberate, because a second MARC parser is a second set of field
+decisions to keep in step.
+
+**And the primitives are not MARC.** Counted with `ast` over `metadata.py`'s functions, by how
+many read each name and are not a MARC decoder: the language table five,
+`pages_from_extent`, `is_physical_book`, `is_placeholder_title` and `flip_catalogue_name`
+three each, `split_title_statement` two. Moving MARC wholesale into `marc.py` would have
+created reach ins in the opposite direction, from the Dublin Core and MODS decoders back into
+`marc.py`. There are two concepts here and not one, and the vocabulary comes out first.
+
+The membership test is one sentence: **a rule about what a bibliographic value means,
+independent of the serialisation it arrived in.** It excludes `_Subfields`, `_marc_fields` and
+`_subject_vocabulary`, which are MARC subfield readers wearing generic names, and it excludes
+a refusal one catalogue states for itself.
+
+`authors.py` is the precedent for the shape, and `bibliographic.py` rather than `fields.py` is
+deliberate: the module it serves is full of MARC datafields and subfields, and that is the
+wrong place to economise on one of the two names.
+
+### The catalogue family publishes its decoders, and three readers are not decoders
+
+The second half of the work above. `metadata.READERS` is the catalogue family's table of the
+contract `decoders.py` states, keyed on `Reader` and valued on
+`decode(record, Decoding) -> Record | None`. The three search readers are loops over it, so a
+reader reachable from a search is a reader in the published table by construction, and
+`tests/test_decoders.py` reaches a decoder through the door rather than through
+`metadata._marc_lookup`.
+
+**What the table does not buy is the reason this is written down.** The ticket said it would
+take `marc.py` from twenty names to one. Measured with `ast` over `marc.py`, the seam is 21
+sites and 17 names before and after: **zero**. `marc.read` is a third MARC profile and not a
+caller of the catalogue one, and the difference is measured rather than argued: through
+`READERS` a title of `Bd. 3` and an extent of `1 audio disc` are both refused, and `marc.read`
+must accept both, because an upload is a cataloguer handing over their own file and a reader
+that silently drops their rows is worse than one that imports a thin record they can fix.
+
+**Three catalogue readers are excluded and each exclusion is a measurement.** Open Library and
+Google Books answer in JSON, so their records cannot be values of an element typed table.
+`DUBLIN_CORE_BARE` is XML and is still not a decoder: `_nkp_record` stamps the ISBN that was
+**asked** onto the record and builds its cover URL from it, because the dialect carries
+identifier elements this app has no parser for, and a file asks no ISBN. Writing that parser
+is what admits the reader. The exclusions are a partition, so a new reader fails a test until
+somebody places it.
+
+### A list filter's toggle is a patch, not a helper over an array
+
+`toggledFilter` lives in `lib/bookFilters.ts` and takes the whole filter set, the field and
+the value, because what it holds is which fields of `BookFilters` are lists, read off the type
+rather than named. The same idiom is spelled three more times in `ScanPage` and `AuthorsPage`
+over three other state shapes. Folding those into one generic `toggled(list, value)` was
+refused: it is an import and a name for a line the caller could write, which is the shallow
+module ADR 0008 exists to refuse, and it would let no caller stop knowing anything.
+
+### `useLibrary`'s width is guarded structurally rather than by a number
+
+`tests/pages/Home/hooks.test.tsx` asserts the filter set is held in one `useState` and written
+in one place. A ceiling on the member count was refused: a stated bound has already stopped
+guarding in this repository without ever failing, because a smaller count is a weaker
+inequality, and a legitimate new query member would move it by hand anyway. The blind spots
+are stated in the guard's own docstring, and one of them is real: a member holding an alias of
+the door passes all three assertions.
+
+### One module owns the covers directory, and the sweep is chosen by the argument
+
+`config.COVERS_DIR` had five non test importers, each composing `<base>.<ext>` itself, and
+each choosing between `uploads.replace_image`, which sweeps the other formats of a base, and
+`uploads.write_image`, which must not. `uploads.py` could only state the hazard at its own
+site: picking the wrong one at a new call site was a one word edit.
+
+An allowlist of importing modules was weighed and refused in `uploads.py`, on the grounds that
+it names its importers rather than checking what reaches the disk. `cover_store.py` is the
+door that refusal left open: a caller names what it is storing, and the module decides the
+directory, the name, the extension, the sweep and the containment check.
+
+**The choice between the two writers is now a different argument rather than a different
+word.** `save` takes a book id and sweeps; `restore` takes a filename out of an archive and
+does not. An upload cannot reach `restore` without inventing a filename, and a restore cannot
+reach `save` without discarding the name the archive gave it.
+
+**Every write sniffs, including the three whose caller already sniffed.** That is what makes
+"nothing in this directory is anything but `ALLOWED_IMAGE_EXTENSIONS`" a property of one module
+rather than of four call sites checked by hand.
+
+`tests/test_cover_store.py::TestTheDirectoryHasOneOwner` is the enforcement, in three `ast`
+passes over every non test backend module, and it names its own blind spots. The third pass is
+there because an `ast.alias` is neither a `Name` nor an `Attribute`, so a bare
+`from uploads import replace_image` was caught by nothing: both critic seats found that hole
+independently.
+
+### A payload's per viewer half is a type, and it carries no defaults
+
+`BookOut` was one model on which twelve fields were declared with a plausible default and
+then written by assignment in `serialisation.books_to_out`'s loop: `my_status` defaulted to
+`unread`, `copy_count` to 1, `discuss_with` to empty. Every one of those defaults is a lie
+that validates, so a thirteenth field declared and not written answered 200 with a wrong
+value and nothing red anywhere. Discipline was holding on one constructor.
+
+It is `BookColumns`, what a Book row answers for itself, plus `ViewerFields`, the twelve,
+required. `BookOut` composes them flat, so the wire shape is unchanged, and
+`BookOut.seen_by` is the only way to build one. **A new per viewer field goes on
+`ViewerFields`**, and `tests/test_schemas.py::TestBookOut::
+test_bookout_declares_nothing_of_its_own_but_the_refusals` is what stops it going on
+`BookOut` instead, which would be the same defect one class up: measured, a field added
+there with a classification entry and no writer left about 620 tests green.
+
+`refused_identifiers` keeps its default and is the pinned exception. Its empty list is the
+answer for the eighteen callers that have nothing to report rather than a placeholder for
+one, and it is written by a `model_copy` rather than by the loop.
+
+**What it cost, and what it found.** One extra model construction per book, measured at 20
+microseconds against a 46 microsecond path, about half a millisecond on a page of 25 beside
+six to eight SQL round trips. `model_construct` was measured and refused at 167
+microseconds. What it found on the first run is the argument for the whole shape:
+`LoanOut.book` was a `BookOut` built straight off the ORM relationship, so two of the three
+loan routes had been serving `my_status: unread` and an empty `discuss_with` whoever asked.
+
+### `LoanOut.book` is `BookColumns`, and it stops there rather than at four fields
+
+A loan payload has no viewer to answer for, so the nested book is the type with nothing
+viewer shaped on it. The list route had been hiding the defect by running every book on the
+page through `books_to_out` a second time, eight statements, to fill twelve fields no client
+reads; the two single loan routes had no such second pass and answered the defaults. The
+page now costs 7 statements against 12, and the overdue page 9 against 14, both constant in
+the page's length.
+
+**Why not narrower still.** The only readers of a nested loan book are `LoanRow.tsx`, which
+takes the title, the author and the cover, and `notifications.py`, which takes the title. A
+four field type would serve both and would cost three fewer `selectinload`s, since
+`BookColumns` carries `tags`, `classifications` and `identifiers`. Measured 2026-09-16, those
+three options are worth +6 statements on a page of 3 loans and +27 on a page of 10, on the
+list routes and on the overdue page alike. It was refused because the
+type would then be a fifth Book shape whose only definition is what two current readers
+happen to use, and the next reader of a loan's book would either widen it or reach past it.
+`BookColumns` is a shape with a rule behind it: everything a Book row answers for itself.
+The three options are the price of having one, and they are pinned by exact counts rather
+than left to be noticed.
+
+### A measured number lives where the column is declared
+
+Thirty `max_length` bounds in `schemas/book.py` were bare numbers, twenty of which equalled a
+constant `models.py` already published and used on the column. Every one agreed, which is
+what made it invisible: a ceiling written `20` beside a column declared `String(ISBN_MAX)` is
+only wrong on the commit that widens the column, and then nothing goes red.
+
+They name the constants now, and `LOCATION_MAX`, `PURCHASE_SOURCE_MAX`, `CURRENCY_MAX` and
+`BORROWER_NAME_MAX` exist because their columns had none.
+`tests/test_house_rules.py::TestEveryTextCeilingComesFromTheColumn` holds both halves: every
+bound on a name a Book column has is that column's width, and none of them is written as a
+number. The second half reads every backend module rather than one file, and the three
+spellings this tree uses. **It does not reach a fourth**, and that is stated rather than
+answered with another arm: a bound reached through an alias imported from another module,
+through `type X = ...`, or through `TypeAlias`. What bounds the cost of those is the first
+half, which compares the value and fires on the commit that widens the column, which is the
+commit the second half exists to catch early rather than the only one that matters.
+
+**`LOCATION_MAX` and `PURCHASE_SOURCE_MAX` are two constants with one value, deliberately.**
+A shelf mark and the name of a shop are different facts that happen to agree at 120 today,
+and one constant would mean widening either silently widened the other.
 
 ## Frontend
 
@@ -5832,19 +5999,35 @@ The measurement then decides each option separately, which is the entry:
 | `joinedload(Loan.loaned_by)` | +3 and +10, page holding returned loans only | 0, and cannot be anything else |
 | `joinedload(Loan.book).selectinload(Book.tags)` | **-1**, deleted | **-1**, deleted |
 
-`books_to_out` fetches the page's **active** loans with both users joinedloaded, so
-`loaned_to` and `loaned_by` are answered by somebody else's query on an active page and only
-`active_only=false` pays for them. `list_overdue` returns unreturned loans by construction,
-so there they are free in every shape the route can produce. They stay, as the insurance
-that a change to `overdue_for_viewer` does not arrive as an N+1, and nothing pins them
-because there is nothing observable to pin: that is written beside them rather than left for
-the next diagonal to rediscover.
+**Three of those four rows were reversed on 2026-09-16**, and this table is left as it was
+measured rather than edited, because the paragraph below it is the argument and the argument
+is what changed. See *`LoanOut.book` is `BookColumns`* above. What reversed them is that the
+nested book stopped being a `BookOut`, so the second `books_to_out` pass over the page's books
+is gone: `loaned_to` and `loaned_by` are load bearing at every `active_only` and on the
+overdue page, and `selectinload(Book.tags)` is back beside two more like it. The `+3 and +10`
+deltas in the first row survive; the baseline they were measured against, 11, is 7 now.
 
-`selectinload(Book.tags)` is the one deleted, and the line that separates it from the two
-kept is worth stating: it is redundant under **every** page shape, because `books_to_out`
-selectinloads tags for every book it serialises, while the other two are redundant only under
-some. A statement that can never do work is deleted; one that does no work today is kept and
-documented.
+The paragraphs that follow were the reasoning of the day and are what the reversal overturned.
+They are kept because the shape of the argument is still the one to make, and reading them as
+current is the mistake this note exists to stop.
+
+> `books_to_out` fetches the page's **active** loans with both users joinedloaded, so
+> `loaned_to` and `loaned_by` are answered by somebody else's query on an active page and only
+> `active_only=false` pays for them. `list_overdue` returns unreturned loans by construction,
+> so there they are free in every shape the route can produce. They stay, as the insurance
+> that a change to `overdue_for_viewer` does not arrive as an N+1, and nothing pins them
+> because there is nothing observable to pin.
+>
+> `selectinload(Book.tags)` is the one deleted, and the line that separates it from the two
+> kept is worth stating: it is redundant under **every** page shape, because `books_to_out`
+> selectinloads tags for every book it serialises, while the other two are redundant only
+> under some. A statement that can never do work is deleted; one that does no work today is
+> kept and documented.
+
+**The lesson that outlived both readings**: a statement was called redundant because another
+query happened to populate the same relationship, and that other query was somebody else's to
+delete. What makes an option safe to drop is that nothing else can need it, not that nothing
+else needs it today.
 
 **A cost figure means nothing without the mutation that produced it**, and this table
 cost a round by not saying. The first row was reported once as +6 and +20 and once as +3
@@ -7698,7 +7881,7 @@ gone stale twice into a test.
 
 ### A refusal written in two languages was refusing in two languages
 
-**#112.** `metadata._NOT_A_BOOK` keeps a digitised copy off a shelf by matching
+**#112.** `bibliographic._NOT_A_BOOK` keeps a digitised copy off a shelf by matching
 `online[- ]?(?:ressource|resource)` and `elektronische ressource`. The Czech is **`online
 zdroj`**, which matches none of it and which appeared in the first record ever probed from
 this catalogue. So the refusal was scoped to German and English without saying so, and
@@ -8174,13 +8357,19 @@ matching nothing fails, and a `KnownStale` that has been corrected fails.
 **Rejected: a blanket scan.** Most occurrences count something that is not the roster, so an
 unclassified scan fails on its first run at that scale and is switched off within the day.
 
-**This register is inside its own subject**, and the pruning of 2026-09-05 is what proves the
-arrangement works: entries were rewritten, the sentences several verdicts were written for went
-with them, and the guard failed rather than going quiet. The census raises 5 candidates in it.
-**1** is a live claim the guard now checks against `sources.py`; **4** are not the roster,
-being this entry's own worked examples, a sentence about what a shared pattern would have
-changed, and a survey of national libraries in the Z39.50 transport entry. The live one is the
-OPDS entry's statement of how much of the title search fan out refuses an electronic record.
+**This register is inside its own subject**, and two prunings are what prove the arrangement
+works. On 2026-09-05 entries were rewritten, the sentences several verdicts were written for
+went with them, and the guard failed rather than going quiet. On 2026-09-16 the live claim
+here went the same way: the OPDS entry's statement of how much of the title search fan out
+refuses an electronic record carried four counts of the seeded roster, the roster gained a
+fifth MARC source, and the sentence was rewritten to name which two sources apply no rule
+rather than to count anything. Its verdict went with it, and this guard is how that was
+noticed rather than left.
+
+The census raises 4 candidates in it. **0** are live claims the guard now checks against
+`sources.py`; **4** are not the roster, being this entry's own worked examples, a sentence
+about what a shared pattern would have changed, and a survey of national libraries in the
+Z39.50 transport entry.
 All three figures are recomputed from the verdict table rather than reread.
 
 **Rejected: an enumeration of sites.** A list of regexes goes stale exactly like the numbers
@@ -8360,7 +8549,7 @@ version is a writer you cannot go back and fix.
 
 ## The record's own carrier code decides, and prose is the fallback
 
-`_NOT_A_BOOK` was the whole not-a-book rule and every alternative in it was German or English,
+`bibliographic._NOT_A_BOOK` was the whole not-a-book rule and every alternative in it was German or English,
 so the Czech National Library's `1 online zdroj` matched none of them and an online resource
 reached a member's shelf.
 
@@ -9564,7 +9753,7 @@ in this tree reads a MARC21 indicator: filing is handled by stripping the delimi
 backend is in `marc.py`'s writer. The crosswalk's rules are keyed on the **UNIMARC** record's
 indicators all the same. Procedure 1 sets the MARC21 `100` first indicator from the UNIMARC
 `700` second indicator, which is what says whether the entry element is a forename or a
-surname. Nothing here reads it: `_flip_catalogue_name` guesses the same thing from the comma
+surname. Nothing here reads it: `bibliographic.flip_catalogue_name` guesses the same thing from the comma
 count, and gets a direct order name carrying one comma wrong. A dict built from `datafield`
 cannot express a rule keyed on something it discarded.
 
@@ -9733,11 +9922,12 @@ over `list(SourceFamily)` so a family added later is covered without an arm bein
 
 `decoders.Decoding` is the whole of what a decoder is handed: a label, a reader, and three
 knobs the decoder itself reads. No address, no transport, no query, no handle. The
-enforcement is the type on `metadata._LOOKUP_READERS` and `_SEARCH_READERS`, so mypy refuses
-a decoder taking a `targets.Target`, plus
+enforcement is the type on `metadata.READERS`, `_LOOKUP_READERS` and `_SEARCH_READERS`, so
+mypy refuses a decoder taking a `targets.Target`, plus
 `tests/test_decoders.py::TestADecoderWorksOnAFile`, which runs the claim rather than
-asserting it: a MARC record read off disk, decoded with a `Decoding` built by hand, no
-`Target` anywhere. That is the demand OPF makes, being both a zip entry inside an EPUB and a
+asserting it: a record read off disk, decoded with a `Decoding` built by hand, no `Target`
+anywhere. It goes through `metadata.READERS` now rather than through a private name, which
+is what made the same test reachable for all four serialisations rather than for MARC only. That is the demand OPF makes, being both a zip entry inside an EPUB and a
 loose file beside a book in a Calibre library.
 
 **What is not separated, stated rather than left to be found.** `metadata._BESPOKE_LOOKUPS`,
@@ -11180,14 +11370,20 @@ refused by construction rather than admitted by a prefix nobody revisited.
 
 ## A born digital title depends on two of the title search sources
 
-Of the eight sources a title search fans out to, six refuse a record that says it is electronic:
-five decide it from codes, the four MARC ones on their carrier codes and the Library of Congress
-on its MODS form, and the BnF from format prose. Only Open Library and Google Books apply no
-such rule.
+Of the sources a title search fans out to, all but two refuse a record that says it is
+electronic: the MARC ones decide it from their carrier codes and the Library of Congress from
+its MODS form, and the BnF from format prose. Only Open Library and Google Books apply no such
+rule.
 
-**The first version of this paragraph said four, one and three**, and a critic seat measured the
-BnF. Recorded because the correction ran against the paragraph's own argument, which is the kind
-that survives a reading.
+**The counts are gone rather than corrected**, and that is the third time this paragraph has
+carried a wrong one. It said four, one and three; it then said eight, six, five and four, and
+the four was wrong within a fortnight because `targets.SEEDED` gained a fifth MARC source.
+Every number here was a count of the seeded roster, which moves when a catalogue is added, and
+the argument never rested on any of them: what it rests on is which two sources apply no rule.
+Re-derive from `targets.SEEDED` if a number is wanted.
+
+A critic seat measured the BnF, and that correction ran against the paragraph's own argument,
+which is the kind that survives a reading.
 
 **And the premise it was raised from needed correcting too.** `_NOT_A_BOOK_FORMS_OF_ITEM` at
 MARC 008/23 was named as what refuses a born digital title. Measured over 2,605 live records,

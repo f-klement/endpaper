@@ -92,7 +92,15 @@ disagree with the first.
 
 `tests/houseRules.test.ts` enforces the boundary. It held with one exception before that
 test existed, a feature-flags call inline in `providers.tsx`, which is now
-`useFeatureFlags` in `app/hooks.ts`. One exception is one more than a test can express.
+`useServerDefaultLocale` in `app/hooks.ts`. One exception is one more than a test can
+express.
+
+**The boundary is about the file kind, and a second rule in the same test is about one
+endpoint.** A query read from several pages needs an owner as well, because every caller
+configuring it is a caller that can disagree with the rest about `retry` or `staleTime`
+while sharing their cache key. The feature flags query has one, `app/hooks.ts`, which
+publishes a named reader per flag so that a caller takes an answer rather than an object
+it has to pick a fallback off. The rule, and what it was bought by, are at that test.
 
 ## Dumb components
 

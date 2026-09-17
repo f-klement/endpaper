@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, model_validator
 
-from models import names_exactly_one_borrower
+from models import BORROWER_NAME_MAX, names_exactly_one_borrower
 from schemas.common import RowIdField
 from schemas.user import UserOut
 
@@ -11,12 +11,9 @@ if TYPE_CHECKING:
     # See the note in book.py: these two modules reference each other, the
     # unquoted annotation relies on PEP 649 deferred evaluation, and
     # model_rebuild() in __init__ is what resolves it.
-    from schemas.book import BookOut
+    from schemas.book import BookColumns
 
 
-#: Matches `loans.loaned_to_name` in the ORM. A longer name is a paste, not a
-#: person.
-MAX_BORROWER_NAME = 120
 
 
 class LoanCreate(BaseModel):
@@ -24,7 +21,7 @@ class LoanCreate(BaseModel):
     #: A member of the library...
     loaned_to_user_id: RowIdField | None = None
     #: ...or somebody with no account at all. Exactly one of the two.
-    loaned_to_name: str | None = Field(default=None, max_length=MAX_BORROWER_NAME)
+    loaned_to_name: str | None = Field(default=None, max_length=BORROWER_NAME_MAX)
     # Optional. Most library lending has no deadline, and demanding one would
     # make the common case worse to serve the rare one.
     due_at: datetime | None = None
@@ -107,7 +104,25 @@ class LoanOut(BaseModel):
     #: go on. Both come from `lending`, which is the only place either is
     #: computed.
     days_out: int = Field(default=0, ge=0)
-    book: BookOut | None = None
+    #: The book this loan is of, when the caller asked for it.
+    #:
+    #: **`BookColumns`, not `BookOut`.** A loan payload has no viewer to answer
+    #: for, and this was the wider type: `LoanOut.model_validate(loan)` builds
+    #: the nested book off the ORM relationship, which cannot answer any of the
+    #: twelve per viewer fields, so it took their defaults and every single loan
+    #: route served a book reading `my_status: unread`, `copy_count: 1` and an
+    #: empty `discuss_with` whoever asked. Nothing was red, because a default
+    #: validates.
+    #:
+    #: The list route did not have that defect, and the way it avoided it is the
+    #: argument for this type rather than against it: it ran every book on the
+    #: page through `books_to_out` a second time, eight statements, to fill
+    #: twelve fields no client reads. The only reader of this object takes
+    #: `title`, `author` and `cover_url`.
+    #:
+    #: `BookOut` cannot be built this way at all now: its per viewer half is
+    #: required and `BookOut.seen_by` is the one place it is supplied.
+    book: BookColumns | None = None
     loaned_to: UserOut | None = None
     loaned_by: UserOut | None = None
     model_config = {"from_attributes": True}

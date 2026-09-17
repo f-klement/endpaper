@@ -13,7 +13,6 @@ from dependencies import CurrentUser, DbSession, Paging, RowId
 from enums import LendingWillingness, SettingKey
 from models import Book, Loan, User
 from schemas import LoanCreate, LoanOut, MyOverdueOut, OverdueNotifyResult, Page
-from serialisation import books_to_out
 from shelf import Shelf
 
 router = APIRouter(prefix="/api/loans", tags=["loans"])
@@ -42,33 +41,25 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _to_out_many(
-    loans: list[Loan], current_user: User, db: Session, now: datetime
-) -> list[LoanOut]:
-    """Serialise a page of loans, with each book's per-member fields filled in.
+def _to_out_many(loans: list[Loan], now: datetime) -> list[LoanOut]:
+    """Serialise a page of loans.
 
-    The nested `BookOut` used to come from a bare `model_validate`, so every
-    book on the loans page reported `my_status: "unread"` and
-    `active_loan: null` regardless of what the reader had actually done with
-    it. Those two fields are computed per request by `books_to_out`, which is
-    the only thing that knows how, so the books go through it here as well.
+    **This used to run every book on the page through `books_to_out` a second
+    time**, because the nested book was a `BookOut` and a bare `model_validate`
+    could not fill its per request half: every book on the loans page reported
+    `my_status: "unread"` and `active_loan: null` whatever the reader had
+    actually done with it. That was eight statements to fill twelve fields no
+    client reads, and it fixed the list route while the two single loan routes
+    kept the defect.
 
-    `now` is the caller's and is not read here, so a page is serialised against
-    the same instant its query was filtered with. See `_now`.
+    `LoanOut.book` is a `BookColumns` now, which a Book row answers by itself,
+    so there is nothing per request left to fill and no second pass to make.
+    The field's docstring carries the reasoning.
+
+    `now` is the caller's, so a page is serialised against the same instant its
+    query was filtered with. See `_now`.
     """
-    books = {loan.book.id: loan.book for loan in loans if loan.book}
-    serialised = {
-        out.id: out
-        for out in books_to_out(list(books.values()), current_user, db)
-    }
-
-    results: list[LoanOut] = []
-    for loan in loans:
-        out = _to_out(loan, now)
-        if loan.book is not None:
-            out.book = serialised.get(loan.book.id)
-        results.append(out)
-    return results
+    return [_to_out(loan, now) for loan in loans]
 
 
 def _to_out(loan: Loan, now: datetime) -> LoanOut:
@@ -153,44 +144,63 @@ def list_loans(
     # SQLite's CURRENT_TIMESTAMP has only second resolution, so loans recorded
     # in the same second tie on loaned_at. id breaks the tie and keeps both the
     # ordering and the paging stable.
-    # The book's own relationships are loaded too. `LoanOut.book` is a
-    # `BookOut`, which serialises the adding member, so joinedloading only
-    # `Loan.book` left this endpoint at 53 statements for 25 loans: the exact
-    # N+1 `docs/architecture.md` says was eliminated, surviving here.
+    # The book's own relationships are loaded too. `LoanOut.book` serialises
+    # the adding member, so joinedloading only `Loan.book` left this endpoint at
+    # 53 statements for 25 loans: the exact N+1 `docs/architecture.md` says was
+    # eliminated, surviving here.
     #
-    # Three options, and each is here because dropping it alone was measured.
-    # Over pages of 3 and 10 loans, with a distinct adder, lender and borrower
-    # per loan, on 2026-08-29:
+    # Every option is here because dropping it alone was measured, over pages of
+    # 3 and 10 loans with a distinct adder, lender and borrower per loan. **The
+    # deltas, not the absolutes**: each is one lazy load per row, so each costs
+    # the page's length, and that is what the exact counts below pin. The
+    # absolutes were restated here from a 2026-08-29 measurement and every one
+    # of the three was wrong by 2026-09-16, because the baseline moved under
+    # them when the second `books_to_out` pass went.
     #
     #     .joinedload(Book.added_by)   +3 and +10 on any page
-    #     joinedload(Loan.loaned_to)   +3 and +10 on a page holding returned loans
-    #     joinedload(Loan.loaned_by)   +3 and +10 on a page holding returned loans
+    #     joinedload(Loan.loaned_to)   +3 and +10 on any page
+    #     joinedload(Loan.loaned_by)   +3 and +10 on any page
+    #
+    # **The last two rows read "on a page holding returned loans" until
+    # 2026-09-16**, and the paragraph below says why they no longer do.
     #
     # **The first row is the chain link, not the whole option, and the two cost
     # different amounts.** Dropping `.joinedload(Book.added_by)` and keeping
-    # `joinedload(Loan.book)` lazy loads one member per loan: measured 14 for 3
-    # and 21 for 10 against a baseline of 11, so +3 and +10. Dropping the entire
-    # first option lazy loads the Book as well, two per loan, which is +6 and
-    # +20. Both are real; they are answers to different questions. Written as a
-    # bare `Book.added_by` this table did not say which, and two seats read it
-    # two ways on the same afternoon.
+    # `joinedload(Loan.book)` lazy loads one member per loan, which is +3 and
+    # +10. Dropping the entire first option lazy loads the Book as well, two per
+    # loan, which is +6 and +20. Both are real; they are answers to different
+    # questions. Written as a bare `Book.added_by` this table did not say which,
+    # and two seats read it two ways on the same afternoon.
     #
-    # The last two are free while `active_only` holds, because `books_to_out`
-    # fetches every ACTIVE loan over the page's books with both users
-    # joinedloaded, and those are the same rows. `active_only=false` is the
-    # page they are for: a returned loan is in no such fetch, so without them
-    # `_to_out` lazy loads two users per row.
+    # **The last two are load bearing at every `active_only`, and they were not
+    # always.** They used to be free on an active page, because the second
+    # `books_to_out` pass fetched every active loan over the page's books with
+    # both users joinedloaded and those were the same rows. That pass is gone
+    # with `LoanOut.book`'s narrowing to `BookColumns`, so nothing else
+    # populates either relationship and `_to_out` lazy loads two users per row
+    # without them, on both routes.
     #
-    # A fourth, `joinedload(Loan.book).selectinload(Book.tags)`, was deleted in
-    # the same measurement. `books_to_out` selectinloads `Book.tags` for every
-    # book on the page whatever its shape, so the option spent one SELECT per
-    # request repopulating a populated collection: measured at -1 statement in
-    # both routes at both lengths. Nothing failed when it was deleted, which is
-    # why the tests over these two routes now build a page whose every
-    # relationship names a different row.
+    # What pins them is the pair of statement counts below, which are exact and
+    # measured at two page lengths. The comment that used to sit here said
+    # nothing observable pinned them, and that was true of the arrangement it
+    # described.
+    #
+    # **The three collection options are back, and they are the batching the
+    # second `books_to_out` pass used to supply.** One of them, `Book.tags`, was
+    # deleted on 2026-08-29 as redundant, because that pass selectinloaded it
+    # for the whole page. With the nested book narrowed to `BookColumns` there
+    # is no second pass, so every collection on it lazy loads one SELECT per
+    # book: measured, 13 statements for 3 loans against 34 for 10, which is the
+    # N+1 these tests exist to catch, arrived by removing the thing that hid it.
+    # With them, the cost is constant in the page again and lower than it was,
+    # because a `selectinload` per relationship is three statements where
+    # `books_to_out` was eight.
     loans = (
         query.options(
             joinedload(Loan.book).joinedload(Book.added_by),
+            joinedload(Loan.book).selectinload(Book.tags),
+            joinedload(Loan.book).selectinload(Book.classifications),
+            joinedload(Loan.book).selectinload(Book.identifiers),
             joinedload(Loan.loaned_to),
             joinedload(Loan.loaned_by),
         )
@@ -201,7 +211,7 @@ def list_loans(
     )
 
     return Page[LoanOut](
-        items=_to_out_many(loans, current_user, db, now),
+        items=_to_out_many(loans, now),
         total=total,
         page=paging.page,
         page_size=paging.page_size,
@@ -336,17 +346,19 @@ def list_overdue(db: DbSession, current_user: CurrentUser, paging: Paging) -> Pa
     # page below, and SQLite will not accept an ORDER BY over a bare COUNT.
     total = query.with_entities(func.count(Loan.id)).order_by(None).scalar() or 0
 
-    # The same three options as `list_loans`, where the measurement behind them
-    # is written down. `loaned_to` and `loaned_by` cost nothing here and cannot:
-    # `overdue_for_viewer` returns only unreturned loans, so every row on this
-    # page is already in the active loan fetch `books_to_out` makes. They stay
-    # as the insurance that a change to that query does not arrive as an N+1,
-    # and no test pins them, because there is nothing observable to pin.
-    # `.joinedload(Book.added_by)` is pinned, at +3 and +10; dropping the whole
-    # option, and so the Book with it, is +6 and +20.
+    # The same options as `list_loans`, where the measurement behind them is
+    # written down. **`loaned_to` and `loaned_by` are load bearing here too**,
+    # and this comment used to say the opposite: they were free while a second
+    # `books_to_out` pass joinedloaded both users over every active loan on the
+    # page, and that pass is gone. `.joinedload(Book.added_by)` is pinned at +3
+    # and +10; dropping the whole option, and so the Book with it, is +6 and
+    # +20. The exact count below pins the rest.
     loans = (
         query.options(
             joinedload(Loan.book).joinedload(Book.added_by),
+            joinedload(Loan.book).selectinload(Book.tags),
+            joinedload(Loan.book).selectinload(Book.classifications),
+            joinedload(Loan.book).selectinload(Book.identifiers),
             joinedload(Loan.loaned_to),
             joinedload(Loan.loaned_by),
         )
@@ -356,7 +368,7 @@ def list_overdue(db: DbSession, current_user: CurrentUser, paging: Paging) -> Pa
     )
 
     return Page[LoanOut](
-        items=_to_out_many(loans, current_user, db, now),
+        items=_to_out_many(loans, now),
         total=total,
         page=paging.page,
         page_size=paging.page_size,

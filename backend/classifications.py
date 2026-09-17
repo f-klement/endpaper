@@ -36,25 +36,11 @@ from sqlalchemy.orm import Session
 
 from catalogue import Heading
 from enums import ClassificationScheme, HeadingKind
+from logvalues import clipped
 from models import Book, Classification
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK, ClassificationIn
 
 logger = logging.getLogger("endpaper.classifications")
-
-
-#: How much of a rejected third party value reaches the log.
-#:
-#: A catalogue response has no size cap anywhere in `metadata.py`, so an
-#: untruncated `%r` of a record writes as many bytes to the log as the record
-#: holds. `backup.py` already solves the identical problem the same way with
-#: `cover[:120]` in its own "dropped rather than refused" line.
-LOGGED_VALUE_MAX = 200
-
-
-def clipped(value: object) -> str:
-    """A third party value, short enough to log. See `LOGGED_VALUE_MAX`."""
-    text = repr(value)
-    return text if len(text) <= LOGGED_VALUE_MAX else text[:LOGGED_VALUE_MAX] + "..."
 
 
 #: Which heading survives a full book, most worth keeping first.

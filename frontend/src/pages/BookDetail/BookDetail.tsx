@@ -7,6 +7,7 @@ import {
   type UserOut,
 } from "../../api/generated/model";
 import { CollapsibleSection, ErrorState, Spinner } from "../../components";
+import { useGoodreadsLookup } from "../../app/hooks";
 import { useTranslation } from "../../i18n";
 import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import BookHeader from "./components/BookHeader";
@@ -43,7 +44,6 @@ import {
   useBookProgress,
   useBookQuotes,
   useBookSections,
-  useGoodreadsLookup,
 } from "./hooks";
 
 interface BookDetailProps {

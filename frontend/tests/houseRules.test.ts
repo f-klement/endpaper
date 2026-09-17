@@ -78,6 +78,104 @@ describe("the generated client stays behind hooks.ts", () => {
   });
 });
 
+/**
+ * One endpoint, one set of options.
+ *
+ * The rule above is not this rule, and the difference is what let this one
+ * break. That one asks whether the generated client is reached from a
+ * `hooks.ts`; the flags query was called from five of them, all passing, while
+ * three inherited `MAX_RETRIES` for a request the shell had decided not to
+ * retry. All five share a query key, so which observer mounted first decided
+ * the options for every one of them.
+ *
+ * Per endpoint rather than a rule about every endpoint, because most have one
+ * caller and need no owner. This one is read by the shell, the login page, the
+ * scanner and the book page, which is what makes an owner worth a test.
+ */
+describe("the feature flags query has one owner", () => {
+  const OWNER = "app/hooks.ts";
+  const GENERATED = "api/generated/endpoints/settings/settings";
+
+  /**
+   * Every way the generated client exposes this endpoint, less the one that is
+   * not a configuration.
+   *
+   * **Matching one name is what a first draft of this did, and two evasions
+   * walked past it.** Orval emits six identifiers per operation, and
+   * `useQuery({...getGetFeatureFlagsQueryOptions(), retry: 5})` reintroduces
+   * the exact defect this rule exists for, in a `hooks.ts`, while naming
+   * nothing the rule was watching. So the match is the operation rather than
+   * the hook: every one of the six carries `etFeatureFlags`.
+   *
+   * **The query key is struck out first, because invalidating is not
+   * configuring.** `pages/SettingsPage/hooks.ts` invalidates by it after a
+   * settings write, which is a caller that has to know the key and must not
+   * own the options. Struck out by text rather than allowed by path, so the
+   * exemption belongs to the identifier and not to a file.
+   *
+   * **Three residuals, stated rather than coded around**, all one root: this
+   * matches text over a whole file rather than code. `setQueryDefaults` keyed
+   * off the query key alone would configure the query and name nothing this
+   * matches. A hand rolled `useQuery` on `/api/settings/features` is a second
+   * reader of the same endpoint and is invisible here. And a comment naming
+   * the owner by identifier is an offender, which is the opposite of what this
+   * repository asks of a cross reference: measured, so point at
+   * `app/hooks.ts` by file rather than by hook name.
+   *
+   * Matching the path as well was measured and refused: it turns the clean
+   * tree red at `pages/ScanPage/hooks.ts`, which names the path in a comment.
+   * Closing any of the three properly means matching code rather than text.
+   */
+  function configures(source: string): boolean {
+    return /[Gg]etFeatureFlags/.test(
+      source.split("getGetFeatureFlagsQueryKey").join(""),
+    );
+  }
+
+  it("is configured nowhere but there", () => {
+    const offenders = entries()
+      // The generated module, which declares the operation rather than calling
+      // it. `api/generated/` and not `api/`: `api/mutator.ts` and
+      // `api/query-client.ts` are hand written, and excluding them by accident
+      // is a second evasion that passed.
+      .filter(([path]) => !path.startsWith("api/generated/"))
+      .filter(([path]) => path !== OWNER)
+      .filter(([, source]) => configures(source))
+      .map(([path]) => path);
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("is configured there, so the rule above is not vacuous", () => {
+    // **Through the same predicate the rule is spelled with**, which is the
+    // only thing that catches the way this rule dies: a regenerated client
+    // names the operation something else, `configures` then matches nothing in
+    // the tree, and "no offenders" reads exactly like a rule being kept.
+    //
+    // Asserting the import path instead does not catch it, and that was
+    // measured rather than reasoned: the owner can keep importing this module
+    // while nothing in it matches any more.
+    const owner = entries().find(([path]) => path === OWNER);
+    expect(owner && configures(owner[1])).toBe(true);
+    expect(owner?.[1]).toContain(`from "../${GENERATED}"`);
+  });
+
+  it("leaves the caller that invalidates by key alone", () => {
+    // The boundary the strike-out draws, asserted from both sides so it cannot
+    // be satisfied by refusing everything or by allowing it.
+    expect(configures('import { getGetFeatureFlagsQueryKey } from "x";')).toBe(
+      false,
+    );
+    expect(configures("useGetFeatureFlags({ query: { retry: 5 } })")).toBe(
+      true,
+    );
+    expect(
+      configures("useQuery({ ...getGetFeatureFlagsQueryOptions(), retry: 5 })"),
+    ).toBe(true);
+    expect(configures("getFeatureFlags()")).toBe(true);
+  });
+});
+
 describe("nothing hand-written lives under the assets directory", () => {
   // The invariant behind the backend's cache policy, which gives everything in
   // `assets/` a year with `immutable` and everything else `no-cache`. That is

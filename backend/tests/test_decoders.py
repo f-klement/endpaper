@@ -49,6 +49,16 @@ def _off_disk() -> ElementTree.Element:
     return ElementTree.fromstring(FIXTURE.read_text(encoding="utf-8"))
 
 
+def _one_record_off_disk() -> ElementTree.Element:
+    """The fixture's single `<record>`, which is what a decoder is handed.
+
+    The document around it is a `<collection>`, and finding the record in it is
+    the caller's job rather than the decoder's: a zip entry and a loose file
+    wrap one differently again.
+    """
+    return next(_off_disk().iter("{http://www.loc.gov/MARC21/slim}record"))
+
+
 def _named(decoder: Callable[..., object]) -> str:
     """A decoder's name for a failure message, without asserting it has one.
 
@@ -63,8 +73,17 @@ def _registered() -> list[Callable[..., object]]:
 
     The registries rather than a list of function names: a sixth decoder is
     covered by adding its row, which is the only way it becomes reachable.
+
+    **`metadata.READERS` is published and the other two are not**, and all three
+    are read here rather than the public one alone. A guard that watched only
+    the published table would stop seeing the response readers the moment the
+    per record table existed, which is the round this file is in.
     """
-    return [*metadata._LOOKUP_READERS.values(), *metadata._SEARCH_READERS.values()]
+    return [
+        *metadata.READERS.values(),
+        *metadata._LOOKUP_READERS.values(),
+        *metadata._SEARCH_READERS.values(),
+    ]
 
 
 class TestADecoderWorksOnAFile:
@@ -77,15 +96,27 @@ class TestADecoderWorksOnAFile:
     """
 
     def test_a_catalogue_decoder_reads_a_record_off_disk(self):
+        """Through `metadata.READERS`, never a decoder by name.
+
+        **The published table is the whole point of this test.** It used to call
+        `metadata._marc_lookup`, reaching past the wall the seam exists to draw
+        and asserting the contract through a type, `Lookup`, that a decoder
+        never answers with. What is asked here now is what `decoders.py`
+        specifies and nothing else: a parsed record and a `Decoding` in, a
+        `catalogue.Record` or `None` out.
+        """
         decoding = decoders.Decoding(
             source="a folder of files", reader=decoders.Reader.MARC_GND
         )
 
-        found = metadata._marc_lookup(_off_disk(), FIXTURE_ISBN, decoding)
+        record = metadata.READERS[decoding.reader](_one_record_off_disk(), decoding)
 
-        assert found.outcome is metadata.Outcome.FOUND
-        assert found.record is not None
-        assert found.record.title == "The Great Gatsby"
+        assert record is not None
+        assert record.title == "The Great Gatsby"
+        # **Read out of the record's own 020, not handed in.** The old call
+        # passed this ISBN as the question being asked, so the assertion could
+        # not tell a decoder that parses one from a caller that supplies one.
+        assert record.isbn == FIXTURE_ISBN
 
     def test_the_label_it_carries_is_not_a_catalogue(self):
         """`Decoding.source` is a `str` and this is why.
@@ -98,10 +129,10 @@ class TestADecoderWorksOnAFile:
             source="a folder of files", reader=decoders.Reader.MARC_GND
         )
 
-        found = metadata._marc_lookup(_off_disk(), FIXTURE_ISBN, decoding)
+        record = metadata.READERS[decoding.reader](_one_record_off_disk(), decoding)
 
-        assert found.record is not None
-        assert found.record.source == "a folder of files"
+        assert record is not None
+        assert record.source == "a folder of files"
         assert "a folder of files" not in {source.value for source in CatalogueSource}
 
     def test_a_decoding_built_by_hand_can_be_a_rows_exactly(self):
@@ -123,10 +154,9 @@ class TestADecoderWorksOnAFile:
         )
 
         assert by_hand == from_a_row
-        assert (
-            metadata._marc_lookup(_off_disk(), FIXTURE_ISBN, by_hand).record
-            == metadata._marc_lookup(_off_disk(), FIXTURE_ISBN, from_a_row).record
-        )
+        assert metadata.READERS[by_hand.reader](
+            _one_record_off_disk(), by_hand
+        ) == metadata.READERS[from_a_row.reader](_one_record_off_disk(), from_a_row)
 
 
 class TestADecoderIsNeverToldHowTheBytesArrived:
@@ -521,3 +551,158 @@ class TestEveryReaderBelongsToExactlyOneFamily:
         different failure than the one this class is about."""
         assert decoders.IMPORT_READERS
         assert decoders.CATALOGUE_READERS
+
+
+class TestEveryCatalogueReaderIsPlacedOrExcluded:
+    """`metadata.READERS` is a table and not a list of the ones somebody had.
+
+    **Stated as a partition, because an inclusion list is what goes stale when
+    the registry grows.** A new `Reader` admitted to
+    `decoders.CATALOGUE_READERS` fails here until it is either given a decoder
+    or given a reason in `metadata.NOT_DECODERS`, and neither is a thing a
+    reviewer can forget quietly. This is the shape `IMPORT_READERS` and
+    `CATALOGUE_READERS` already use on each other.
+
+    **The partition on its own cannot tell a decoder from an excuse**, and that
+    is what the reachability check below is for. A critic seat measured it: the
+    partition, the family check and the reason check all stay green while a
+    working decoder is demoted into `NOT_DECODERS` with a reason of `"x"`. What
+    an exclusion cannot do is stay reachable from a table that hands a reader an
+    element, which is the shape a parked decoder takes.
+
+    **One reader is exempt from that and it is named rather than described.**
+    `DUBLIN_CORE_BARE` is in `_LOOKUP_READERS` and excluded, because that path
+    supplies the ISBN `_nkp_record` stamps and a file does not. Writing the
+    reader that takes the ISBN out of the record promotes it and fails this
+    class, which is the direction an exemption should fail in.
+
+    **The blind spot that is left is unreported, and saying so is the point of
+    writing it down.** A bad reason on `OPEN_LIBRARY` or `GOOGLE_BOOKS` passes
+    every arm here and nothing anywhere else reports it: `metadata.NOT_DECODERS`
+    has exactly one reader in the application, its own definition, and `resolve`
+    consults the five dispatch tables rather than this one. Those two readers do
+    decode, through `_BESPOKE_LOOKUPS` and the search tables, which is why an
+    element table reachability test cannot see them. Widening `reachable` to the
+    bespoke tables would turn a one name exemption into a three name allowlist,
+    and an allowlist is what this class exists not to be.
+    """
+
+    def test_the_two_sets_partition_the_catalogue_family(self):
+        placed = set(metadata.READERS)
+        excluded = set(metadata.NOT_DECODERS)
+
+        assert placed | excluded == decoders.CATALOGUE_READERS, sorted(
+            (placed | excluded) ^ decoders.CATALOGUE_READERS
+        )
+        assert not placed & excluded, sorted(placed & excluded)
+
+    def test_no_import_reader_is_in_the_catalogue_table(self):
+        """The registries state which parsers are not their own, and this is the
+        catalogue half of that. `opds.READERS` holds the other."""
+        assert not set(metadata.READERS) & decoders.IMPORT_READERS
+        assert not set(metadata.NOT_DECODERS) & decoders.IMPORT_READERS
+
+    def test_an_exclusion_is_not_a_working_decoder_that_was_parked(self):
+        """The arm the partition cannot see. See this class's docstring.
+
+        `_LOOKUP_READERS` and `_SEARCH_READERS` both hand their reader an
+        element, so a reader in one of them and excluded here is a decoder this
+        table is declining to publish rather than one it cannot hold.
+        """
+        reachable = set(metadata._LOOKUP_READERS) | set(metadata._SEARCH_READERS)
+        parked = set(metadata.NOT_DECODERS) & reachable
+
+        assert parked == {decoders.Reader.DUBLIN_CORE_BARE}, sorted(
+            parked ^ {decoders.Reader.DUBLIN_CORE_BARE}
+        )
+
+    def test_every_exclusion_gives_a_reason_somebody_can_act_on(self):
+        """A `Reader` mapped to an empty string is an exclusion with no argument
+        behind it, which is how a temporary gap becomes permanent."""
+        assert all(reason.strip() for reason in metadata.NOT_DECODERS.values())
+
+    def test_every_decoder_in_the_table_answers_the_contract_shape(self):
+        """Driven rather than typed, because mypy is checked in a job this suite
+        does not run and a table is data at runtime.
+
+        One node of the wrong serialisation for every reader, which every
+        decoder here must refuse rather than raise on: that is the contract's
+        "one bad record fails alone and never the batch", asked of the decoder
+        rather than of its caller.
+        """
+        wrong = ElementTree.fromstring("<nothing-of-the-kind/>")
+
+        for reader, decoder in metadata.READERS.items():
+            decoding = decoders.Decoding(source="a folder of files", reader=reader)
+            assert decoder(wrong, decoding) is None, _named(decoder)
+
+
+class TestEverySerialisationDecodesWithNoSocket:
+    """What the published table makes possible, asserted rather than claimed.
+
+    **This is the shape the seam was drawn for and there used to be one test of
+    it.** A catalogue decoder could only be reached through a response reader,
+    so a test of a decoding rule needed a whole response and, for every source
+    but one, an HTTP double: measured over `tests/test_metadata.py` with `ast`,
+    140 of its 348 test functions named `respx` or a `silence_` helper. These
+    decode one record of each serialisation from a literal, with nothing that
+    could open a socket and no `Lookup`.
+
+    **`Decoding.source` is asserted on every one**, because it is what these two
+    readers did not honour until this round: `_bnf_record` and `_loc_record`
+    each hardcoded their own label. That is the defect `_nkp_record` already
+    had, and it shipped records labelled `nkp` from the Argentine catalogue
+    before a second source for its dialect made it visible.
+    """
+
+    MARC = (
+        '<record xmlns="http://www.loc.gov/MARC21/slim">'
+        "<leader>00000nam a22000003  4500</leader>"
+        '<datafield tag="245" ind1="1" ind2="0">'
+        '<subfield code="a">Stoner</subfield></datafield>'
+        '<datafield tag="300" ind1=" " ind2=" ">'
+        '<subfield code="a">278 Seiten</subfield></datafield></record>'
+    )
+    DUBLIN_CORE = (
+        '<record xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        "<dc:title>Un livre</dc:title><dc:type>texte imprime</dc:type>"
+        "<dc:format>200 p.</dc:format></record>"
+    )
+    MODS = (
+        '<mods xmlns="http://www.loc.gov/mods/v3">'
+        "<typeOfResource>text</typeOfResource>"
+        "<titleInfo><title>Clean Code</title></titleInfo>"
+        "<physicalDescription><form authority=\"marcform\">print</form>"
+        "<extent>464 p.</extent></physicalDescription></mods>"
+    )
+
+    @pytest.mark.parametrize(
+        "reader, document, title",
+        [
+            (decoders.Reader.MARC_GND, MARC, "Stoner"),
+            (decoders.Reader.MARC_PLAIN, MARC, "Stoner"),
+            (decoders.Reader.DUBLIN_CORE, DUBLIN_CORE, "Un livre"),
+            (decoders.Reader.MODS, MODS, "Clean Code"),
+        ],
+    )
+    def test_a_record_of_this_serialisation_decodes_from_a_literal(
+        self, reader, document, title
+    ):
+        decoding = decoders.Decoding(source="a folder of files", reader=reader)
+
+        record = metadata.READERS[reader](
+            ElementTree.fromstring(document), decoding
+        )
+
+        assert record is not None
+        assert record.title == title
+        assert record.source == "a folder of files"
+
+    def test_the_table_covers_every_reader_a_search_can_name(self):
+        """The table is the search path's only builder, so a reader reachable
+        from a search and absent here would be a `KeyError` on a live request.
+
+        Read off `_SEARCH_READERS` rather than listed, so a sixth search reader
+        is covered by adding its row.
+        """
+        assert set(metadata._SEARCH_READERS) <= set(metadata.READERS)

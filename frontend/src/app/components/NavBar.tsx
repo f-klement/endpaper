@@ -9,7 +9,7 @@ import {
 import { Icon } from "../../components";
 import type { IconName } from "../../components";
 import { useTranslation, type MessageKey } from "../../i18n";
-import { useExportLibrary, useFeatureFlags } from "../hooks";
+import { useExportLibrary, useLibraryMode } from "../hooks";
 
 /**
  * The three destinations that stay on the bar as icons.
@@ -124,7 +124,7 @@ export default function NavBar({
   // MARCXML is offered only in library mode. The server refuses the format
   // without it, so this decides what a household is shown rather than what it
   // may do.
-  const flags = useFeatureFlags();
+  const libraryMode = useLibraryMode();
   const { t } = useTranslation();
 
   // Under proxy auth both of these are inert: the upstream owns the session,
@@ -275,7 +275,7 @@ export default function NavBar({
 
             {exportOpen && (
               <div className="border-t border-paper-200 bg-paper-100 flex gap-2 px-4 py-2.5 dark:border-paper-800 dark:bg-paper-950/60">
-                {exportFormats(flags?.library_mode ?? false).map((format) => (
+                {exportFormats(libraryMode).map((format) => (
                   <button
                     key={format}
                     onClick={() => {

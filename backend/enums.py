@@ -7,7 +7,13 @@ schema as enumerations, which is what lets the generated TypeScript client have
 union types like `"unread" | "reading" | "read"` instead of `string`.
 """
 
+import logging
 from enum import StrEnum
+from typing import overload
+
+from logvalues import clipped
+
+logger = logging.getLogger("endpaper.enums")
 
 
 class ReadStatus(StrEnum):
@@ -1039,3 +1045,71 @@ class CredentialProvenance(StrEnum):
     #: The catalogue publishes its own login and this build carries it. The
     #: bottom of the ladder by construction: see `targets.ShippedCredential`.
     SHIPPED = "shipped"
+
+
+@overload
+def member_or[E: StrEnum](
+    enum: type[E], stored: object, default: E, *, context: str | None = None
+) -> E: ...
+
+
+@overload
+def member_or[E: StrEnum](
+    enum: type[E], stored: object, default: None, *, context: str | None = None
+) -> E | None: ...
+
+
+def member_or[E: StrEnum](
+    enum: type[E], stored: object, default: E | None, *, context: str | None = None
+) -> E | None:
+    """The member this stored value names, or the default, never an exception.
+
+    **The read end of the bargain every unconstrained enum column strikes.** A
+    column holding one of these is a plain VARCHAR, so the set is enforced by a
+    `CheckConstraint` or by nothing: `backup.restore` inserts through Core,
+    where no Pydantic model and no `@validates` hook fires, so an archive older
+    than a constraint decides the value. `enum(stored)` on a value outside the
+    set raises `ValueError`, and it raises where the row is read rather than
+    where it was written, which for a listing is a 500 on the whole page
+    instead of one wrong card.
+
+    SQLite cannot ALTER a CHECK, so a constraint costs a table rebuild in a
+    migration every time the enum grows. That is a fair price for a closed enum
+    and a recurring tax on one that is not, and this is what the second kind
+    pays instead.
+
+    **It logs, because the degrade is still data loss nobody can see.** The
+    value that arrived is in the message: the whole point of a restore going
+    quiet is that nothing afterwards says which rows it changed the reading of.
+
+    Pure, and takes the stored value rather than a row, so the rule is a table
+    of `(enum, stored) -> member | default` with no session and no HTTP behind
+    it. `models.DegradingEnum` is what puts a column behind it.
+    """
+    if isinstance(stored, enum):
+        return stored
+    if stored is None:
+        return default
+    try:
+        # **`str(stored)` and not `stored`**, because the parameter is `object`
+        # on purpose: a column can hand back an integer or a blob, and
+        # `StrEnum` takes a `str`. A member's value is a string, so this can
+        # only ever succeed on something that was already one, and everything
+        # else falls to the `ValueError` below with its value in the log.
+        return enum(str(stored))
+    except ValueError:
+        logger.warning(
+            "%s holds %s, which is not a %s; reading it as %r",
+            # The enum's name when the caller has nothing more specific. A
+            # column cannot say which row it was reading, and the one caller
+            # that can say so passes it.
+            context or enum.__name__,
+            # **Clipped, and that is not tidiness.** This fires once per row per
+            # column on every read, the column's declared length bounds nothing
+            # in SQLite, and the reader can be the unauthenticated public
+            # catalogue. `logvalues` holds the measurement.
+            clipped(stored),
+            enum.__name__,
+            default,
+        )
+        return default

@@ -24,6 +24,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.types import TypeDecorator
 
 import covers
 import filing
@@ -43,9 +44,81 @@ from enums import (
     OwnershipStatus,
     ReadStatus,
     TagCategory,
+    member_or,
 )
 
 logger = logging.getLogger("endpaper.models")
+
+
+class DegradingEnum(TypeDecorator[str]):
+    """A `String` column whose stored value is read as an enum member or as a default.
+
+    **The read end of the bargain, applied by the column rather than by each
+    reader.** An enum column here is a plain VARCHAR, so the set is kept by a
+    `CheckConstraint` or by nothing, and `backup.restore` inserts through Core
+    where neither a Pydantic model nor a `@validates` hook fires. A stray value
+    then raises in whatever coerces it, which for a listing is
+    `BookOut.model_validate` inside the page loop: one bad row 500s the page
+    rather than showing one wrong card.
+
+    Per column instead of per reader because the readers are not a list anybody
+    can hold. `books.format` alone is read by the listing, the detail route,
+    both exports, MARC, OPDS and SRU, and a rule spelled at each of them is a
+    rule a seventh reader does not know about. Here the value is a member
+    before anything sees it.
+
+    **It does not constrain the write**, deliberately: the DDL is still
+    `VARCHAR(n)` and `--autogenerate` sees the impl, so a column can move behind
+    this with no revision. That is the whole reason it exists for the enums that
+    grow, which cannot afford a CHECK: SQLite cannot ALTER one, so every new
+    member would cost a batch table rebuild.
+
+    `enums.member_or` is the rule and is pure; this is the plumbing.
+    `tests/test_house_rules.py::TestEveryEnumColumnIsConstrainedOrExemptWithAReason`
+    reads for this type by class rather than by column name, so a column that
+    loses it goes red.
+    """
+
+    impl = String
+    cache_ok = True
+
+    def __init__(self, enum: type[StrEnum], length: int, default: StrEnum | None = None):
+        super().__init__(length)
+        self.enum = enum
+        self.default = default
+
+    def process_bind_param(self, value: str | None, dialect: object) -> str | None:
+        """Passed through, and the absence of a `str()` here is load bearing.
+
+        A `StrEnum` member **is** a string, so nothing needs coercing, and
+        coercing anyway is a loosening rather than a convenience: measured, a
+        `String` column refuses a dict and a list through Core with a
+        `ProgrammingError`, and `str(value)` stores their repr instead. Both are
+        shapes an archive carries and `backup._parse_row` passes through
+        untouched, so it would turn a restore that failed loudly into a forged
+        string in the column, which the read end would then log on every page.
+        """
+        return value
+
+    def process_result_value(self, value: object, dialect: object) -> StrEnum | None:
+        return member_or(self.enum, value, self.default)
+
+    @property
+    def python_type(self) -> type[StrEnum]:
+        """What a reader gets, which is a member rather than a string.
+
+        **`TypeEngine.python_type` raises rather than answering**, and
+        `TypeDecorator` does not override it, so without this the three columns
+        behind this type became columns whose type will not say what they hold.
+        `tests/test_no_custody.py::test_every_column_says_what_it_carries`
+        exists for exactly that: a rule reading column types skips a type that
+        cannot answer, and it skips it silently.
+
+        The enum rather than `str`, because that is what comes back, and every
+        member is a `str` anyway, so a rule reasoning about strings still gets
+        a true answer.
+        """
+        return self.enum
 
 # Many-to-many association table for books <-> tags
 book_tags = Table(
@@ -742,6 +815,27 @@ SERIES_NAME_MAX = 255
 GOOGLE_BOOKS_ID_MAX = 50
 ISBN_MAX = 20
 
+#: Three more, added 2026-09-16 because their columns had none and the schema
+#: bounded them with bare numbers instead.
+#:
+#: **`LOCATION_MAX` and `PURCHASE_SOURCE_MAX` are both 120 and are two
+#: constants**, because they bound two different facts that happen to agree
+#: today. A shelf mark and the name of a shop have nothing to do with each
+#: other, and one constant would mean widening either one silently widened the
+#: other. `BORROWER_NAME_MAX` below is a third 120 and a third fact.
+LOCATION_MAX = 120
+PURCHASE_SOURCE_MAX = 120
+#: ISO 4217, which is three letters and will not become four. **`_LENGTH`, not
+#: `_MAX`**: this is the one of these that bounds both ends, so a field naming it
+#: writes `min_length` and `max_length` from it and a `_MAX` name would
+#: contradict its own use on the line where the fact is exactness.
+CURRENCY_LENGTH = 3
+#: A longer name is a paste, not a person. `loans.loaned_to_name` rather than a
+#: Book column, and here because this is where a column's width is named: it
+#: lived in `schemas/loan.py` documented as matching the ORM, which is 304's
+#: direction reversed and is how a schema and a column come to disagree.
+BORROWER_NAME_MAX = 120
+
 
 class Book(Base):
     __tablename__ = "books"
@@ -776,8 +870,13 @@ class Book(Base):
         # Constrained rather than degraded because this enum is **closed**: owned,
         # not owned, unknown is the whole of the question. SQLite cannot ALTER a
         # CHECK, so a constraint costs a table rebuild every time the enum grows,
-        # and this one will not. `user_books.status` and `classifications.scheme`
-        # are the other way round and are exempt in `test_house_rules.py`.
+        # and this one will not.
+        #
+        # The other half of the bargain is `DegradingEnum`, which is what
+        # `format`, `condition` and `lending` take instead: a stray value reads
+        # as the default and is logged rather than raising at every read.
+        # `user_books.status`, `classifications.scheme` and `tags.category` have
+        # neither yet and are exempt by name in `test_house_rules.py`.
         CheckConstraint(
             "ownership IN ('owned', 'not_owned', 'unknown')",
             name="ck_books_ownership",
@@ -822,7 +921,9 @@ class Book(Base):
     # own shelf taxonomy before they start, and a wrong vocabulary imposed up
     # front is worse than a slightly untidy one that grows. Indexed so the
     # filter and the distinct-values list stay cheap.
-    location: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    location: Mapped[str | None] = mapped_column(
+        String(LOCATION_MAX), nullable=True, index=True
+    )
 
     # Which named part of the shelf this **object** belongs to, or null while
     # it belongs to none.
@@ -865,7 +966,9 @@ class Book(Base):
     # paperback: a scan cannot tell, and guessing wrong on every imported book
     # is worse than admitting the answer is not known. Indexed because "have we
     # got this on audio" is a filter, not a search.
-    format: Mapped[BookFormat | None] = mapped_column(String(20), nullable=True, index=True)
+    format: Mapped[BookFormat | None] = mapped_column(
+        DegradingEnum(BookFormat, 20), nullable=True, index=True
+    )
 
     # Whether the library will lend this copy out, or null while nobody has
     # been asked. A standing intention rather than a state: the open `Loan`
@@ -879,7 +982,7 @@ class Book(Base):
     # could we lend the book club" is a filter over the whole catalogue, which
     # is a browse action rather than a search.
     lending: Mapped[LendingWillingness | None] = mapped_column(
-        String(20), nullable=True, index=True
+        DegradingEnum(LendingWillingness, 20), nullable=True, index=True
     )
 
     # ── Collector details ────────────────────────────────────────────────
@@ -892,7 +995,9 @@ class Book(Base):
     # condition or where a book is; the shelf location was already here, this
     # is the other half.
 
-    condition: Mapped[BookCondition | None] = mapped_column(String(20), nullable=True)
+    condition: Mapped[BookCondition | None] = mapped_column(
+        DegradingEnum(BookCondition, 20), nullable=True
+    )
 
     # **Minor units** (cents), not a decimal. SQLite has no decimal type, and
     # SQLAlchemy's Numeric over it round-trips through a float, which is how a
@@ -903,7 +1008,7 @@ class Book(Base):
     # Stored per book rather than as one setting, because a book bought on
     # holiday really does have a different currency, and a single library
     # currency would silently relabel it.
-    purchase_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    purchase_currency: Mapped[str | None] = mapped_column(String(CURRENCY_LENGTH), nullable=True)
 
     # A date, not a datetime: nobody knows what time they bought a book.
     purchased_at: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -911,7 +1016,9 @@ class Book(Base):
     # Free text, like `location`, and for the same reason: "the Oxfam on
     # Cowley Road" is a real answer and no vocabulary chosen up front contains
     # it.
-    purchase_source: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    purchase_source: Mapped[str | None] = mapped_column(
+        String(PURCHASE_SOURCE_MAX), nullable=True
+    )
 
     # Which set of deliberate copies this row belongs to, or null while the
     # library holds one of it.
@@ -1310,7 +1417,9 @@ class Loan(Base):
     # The whole point of recording a loan is remembering who has the book, and
     # the people most likely to keep one are exactly those who will never have
     # an account here. Free text, capped, and never joined on.
-    loaned_to_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    loaned_to_name: Mapped[str | None] = mapped_column(
+        String(BORROWER_NAME_MAX), nullable=True
+    )
     loaned_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     loaned_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     returned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

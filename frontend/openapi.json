@@ -667,6 +667,338 @@
         "title": "Body_upload_cover",
         "type": "object"
       },
+      "BookColumns": {
+        "description": "Everything on a Book payload that a Book row answers for itself.\n\nA column, or something derived from one by a string operation with no\nstatement behind it. Validating this from an ORM object is complete: every\nfield here has a value the moment the row is loaded.\n\n**Split from the rest so that the rest cannot be forgotten.** See `BookOut`.",
+        "properties": {
+          "added_at": {
+            "format": "date-time",
+            "title": "Added At",
+            "type": "string"
+          },
+          "added_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "authors": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors",
+            "type": "array"
+          },
+          "categories": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "classifications": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ClassificationOut"
+            },
+            "title": "Classifications",
+            "type": "array"
+          },
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "condition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BookCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Url"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BookFormat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "google_books_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Google Books Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "identifiers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BookIdentifierOut"
+            },
+            "title": "Identifiers",
+            "type": "array"
+          },
+          "is_private": {
+            "default": false,
+            "title": "Is Private",
+            "type": "boolean"
+          },
+          "isbn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isbn"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "lending": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LendingWillingness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/OwnershipStatus",
+            "default": "owned"
+          },
+          "page_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Count"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "purchase_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Currency"
+          },
+          "purchase_price_minor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Price Minor"
+          },
+          "purchase_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Source"
+          },
+          "purchased_at": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchased At"
+          },
+          "series_index": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Index"
+          },
+          "series_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Name"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TagOut"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "id",
+          "isbn",
+          "title",
+          "subtitle",
+          "author",
+          "publisher",
+          "year",
+          "description",
+          "cover_url",
+          "added_at"
+        ],
+        "title": "BookColumns",
+        "type": "object"
+      },
       "BookCondition": {
         "description": "The state of this particular copy.\n\nA deliberately coarse scale. Collectors use finer ones (near fine, very\ngood plus) and nobody else can apply them consistently, so a library\nwould end up with five spellings of \"a bit battered\".\n\nEX_LIBRARY is not a point on the scale: it is a fact about provenance that\nchanges what a copy is worth and what it looks like, and it is the one\ncategory people actually recognise.",
         "enum": [
@@ -1545,6 +1877,7 @@
         "type": "object"
       },
       "BookOut": {
+        "description": "One Book, as one member sees it. The wire shape, flat and unchanged.\n\n**Never cache one across accounts**: half of what is on it is an answer to\nwho asked. The split above is what makes that readable rather than a comment\nin the middle of a field list.\n\nBuilt only by `seen_by`, which is the point: `model_validate(book)` cannot\nproduce one, because a Book row does not know eleven of these twelve.\n\n**The base order is what puts the columns first in the response body.**\nPydantic collects fields in reverse MRO, so the class listed second is the\none whose fields lead, which is the opposite of how it reads. It governs the\nbody's key order and nothing else: `scripts/dump_openapi.py` dumps with\n`sort_keys=True`, so the schema and everything orval writes from it are\nalphabetical whatever this says.",
         "properties": {
           "active_loan": {
             "anyOf": [
@@ -1639,7 +1972,6 @@
             ]
           },
           "copy_count": {
-            "default": 1,
             "title": "Copy Count",
             "type": "integer"
           },
@@ -1678,7 +2010,6 @@
             "title": "Description"
           },
           "discuss_with": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/UserOut"
             },
@@ -1836,11 +2167,9 @@
             "title": "My Started At"
           },
           "my_status": {
-            "$ref": "#/components/schemas/ReadStatus",
-            "default": "unread"
+            "$ref": "#/components/schemas/ReadStatus"
           },
           "my_wants_to_discuss": {
-            "default": false,
             "title": "My Wants To Discuss",
             "type": "boolean"
           },
@@ -1989,7 +2318,19 @@
           "year",
           "description",
           "cover_url",
-          "added_at"
+          "added_at",
+          "active_loan",
+          "collection_name",
+          "copy_count",
+          "discuss_with",
+          "my_status",
+          "my_rating",
+          "my_started_at",
+          "my_finished_at",
+          "my_wants_to_discuss",
+          "my_progress_page",
+          "my_progress_percent",
+          "my_progress_recorded_at"
         ],
         "title": "BookOut",
         "type": "object"
@@ -3478,7 +3819,7 @@
           "book": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BookOut"
+                "$ref": "#/components/schemas/BookColumns"
               },
               {
                 "type": "null"

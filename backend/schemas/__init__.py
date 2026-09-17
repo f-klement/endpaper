@@ -29,6 +29,7 @@ from schemas.author import (
     RefusedAssertionOut,
 )
 from schemas.book import (
+    BookColumns,
     BookCreate,
     BookDetailsUpdate,
     BookDiscussUpdate,
@@ -51,6 +52,7 @@ from schemas.book import (
     PrivacyUpdate,
     PurgeResult,
     SeriesOut,
+    ViewerFields,
 )
 from schemas.classification import (
     MAX_CLASSIFICATIONS_PER_BOOK,
@@ -148,7 +150,15 @@ from schemas.user import (
     VerificationRequest,
 )
 
-# Resolve the BookOut <-> LoanOut forward references now that both are imported.
+# Resolve the BookColumns/BookOut <-> LoanOut forward references now that all
+# three are imported.
+#
+# `ViewerFields` is rebuilt as well and not only its subclass: it declares
+# `active_loan`, so it carries the same forward reference, and a caller
+# constructing one directly is the whole point of the type. Rebuilding `BookOut`
+# alone left `ViewerFields(...)` raising `PydanticUserError` from
+# `serialisation.books_to_out`, which is every listing in the application.
+ViewerFields.model_rebuild()
 BookOut.model_rebuild()
 LoanOut.model_rebuild()
 
@@ -185,6 +195,7 @@ __all__ = [
     "BookDiscussUpdate",
     "BookEnrichmentOut",
     "BookLookup",
+    "BookColumns",
     "BookOut",
     "BookRatingUpdate",
     "BookStatusUpdate",
@@ -278,6 +289,7 @@ __all__ = [
     "UserOut",
     "VerificationRedeem",
     "VerificationRequest",
+    "ViewerFields",
     # The tag key rule, as a type and as the function inside it. Exported
     # because `schemas/stats.py` annotates with the first, and because a test
     # exercises the second directly.

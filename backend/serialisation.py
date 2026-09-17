@@ -25,12 +25,14 @@ from enums import ClassificationScheme
 from models import Book, Collection, Loan, ReadingProgress, Tag, User
 from reading import Reading, discussers
 from schemas import (
+    BookColumns,
     BookOut,
     ClassificationIn,
     ClassificationOut,
     LoanOut,
     PublicBookOut,
     UserOut,
+    ViewerFields,
 )
 from shelf import Outbound, Shelf, rereading_filtered_rows
 
@@ -271,8 +273,11 @@ def _copy_counts(books: list[Book], current_user: User, db: Session) -> dict[str
     deleting one of two copies leaves the other reading "1" rather than
     claiming a copy that is in the bin.
 
-    Books with no group are absent from the result and read 1 from the default
-    on `BookOut`, which is the same answer without a row to carry it.
+    Books with no group are absent from the result, and `books_to_out` answers 1
+    for them: a row that is not one of several copies is one copy. **Written at
+    that call site rather than as a default on the field**, because a per viewer
+    field with a default is a value that validates and is wrong whenever
+    somebody forgets to compute it. See `schemas.book.ViewerFields`.
     """
     groups = {book.copy_group for book in books if book.copy_group is not None}
     if not groups:
@@ -392,38 +397,50 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
 
     results: list[BookOut] = []
     for book in books:
-        out = BookOut.model_validate(book)
-        if book.copy_group is not None:
-            out.copy_count = copy_counts.get(book.copy_group, 1)
-        if book.collection_id is not None:
+        loan = active_loans.get(book.id)
+        user_book = user_books.get(book.id)
+        progress = latest_progress.get(book.id)
+
+        # **Every field named once, in one expression.** This was twelve
+        # assignments onto a model built with a default for each of them, so a
+        # thirteenth field could be declared and never written and the response
+        # was a well formed 200 carrying the default. `ViewerFields` has no
+        # defaults, so the same omission is a `TypeError` here.
+        viewer = ViewerFields(
+            active_loan=loan_summary(loan) if loan else None,
             # `.get`, not indexing: the row can vanish between the two
             # statements, and a name nobody can look up is a null rather than a
             # 500 in the middle of a listing.
-            out.collection_name = collection_names.get(book.collection_id)
-        loan = active_loans.get(book.id)
-        out.active_loan = loan_summary(loan) if loan else None
-
-        user_book = user_books.get(book.id)
-        # No row means unread, and `status_of` is the one place that says so.
-        # It also coerces back to the enum, which matters because the column is
-        # a plain VARCHAR and assigning a str onto an enum-typed Pydantic field
-        # bypasses validation and serialises with a warning. (Assignment skips
-        # validation; model_validate would coerce.)
-        out.my_status = user_books.status_of(book.id)
-        out.my_rating = user_book.rating if user_book else None
-        out.my_started_at = user_book.started_at if user_book else None
-        out.my_finished_at = user_book.finished_at if user_book else None
-        out.my_wants_to_discuss = bool(user_book.wants_to_discuss) if user_book else False
-        out.discuss_with = discuss_with.get(book.id, [])
-
-        progress = latest_progress.get(book.id)
-        if progress is not None:
-            out.my_progress_page = progress.page
-            out.my_progress_percent = derived_percent(
-                progress.page, progress.percent, book.page_count
-            )
-            out.my_progress_recorded_at = progress.recorded_at
-        results.append(out)
+            collection_name=(
+                collection_names.get(book.collection_id)
+                if book.collection_id is not None
+                else None
+            ),
+            copy_count=(
+                copy_counts.get(book.copy_group, 1)
+                if book.copy_group is not None
+                else 1
+            ),
+            discuss_with=discuss_with.get(book.id, []),
+            # No row means unread, and `status_of` is the one place that says
+            # so. It also coerces back to the enum, which matters because the
+            # column is a plain VARCHAR.
+            my_status=user_books.status_of(book.id),
+            my_rating=user_book.rating if user_book else None,
+            my_started_at=user_book.started_at if user_book else None,
+            my_finished_at=user_book.finished_at if user_book else None,
+            my_wants_to_discuss=(
+                bool(user_book.wants_to_discuss) if user_book else False
+            ),
+            my_progress_page=progress.page if progress else None,
+            my_progress_percent=(
+                derived_percent(progress.page, progress.percent, book.page_count)
+                if progress
+                else None
+            ),
+            my_progress_recorded_at=progress.recorded_at if progress else None,
+        )
+        results.append(BookOut.seen_by(BookColumns.model_validate(book), viewer))
     return results
 
 

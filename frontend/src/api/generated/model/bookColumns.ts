@@ -10,32 +10,20 @@ import type { BookFormat } from "./bookFormat.ts";
 import type { BookIdentifierOut } from "./bookIdentifierOut.ts";
 import type { ClassificationOut } from "./classificationOut.ts";
 import type { LendingWillingness } from "./lendingWillingness.ts";
-import type { LoanOut } from "./loanOut.ts";
 import type { OwnershipStatus } from "./ownershipStatus.ts";
-import type { ReadStatus } from "./readStatus.ts";
-import type { RefusedAssertionOut } from "./refusedAssertionOut.ts";
 import type { TagOut } from "./tagOut.ts";
 import type { UserOut } from "./userOut.ts";
 
 /**
- * One Book, as one member sees it. The wire shape, flat and unchanged.
+ * Everything on a Book payload that a Book row answers for itself.
  *
- * **Never cache one across accounts**: half of what is on it is an answer to
- * who asked. The split above is what makes that readable rather than a comment
- * in the middle of a field list.
+ * A column, or something derived from one by a string operation with no
+ * statement behind it. Validating this from an ORM object is complete: every
+ * field here has a value the moment the row is loaded.
  *
- * Built only by `seen_by`, which is the point: `model_validate(book)` cannot
- * produce one, because a Book row does not know eleven of these twelve.
- *
- * **The base order is what puts the columns first in the response body.**
- * Pydantic collects fields in reverse MRO, so the class listed second is the
- * one whose fields lead, which is the opposite of how it reads. It governs the
- * body's key order and nothing else: `scripts/dump_openapi.py` dumps with
- * `sort_keys=True`, so the schema and everything orval writes from it are
- * alphabetical whatever this says.
+ * **Split from the rest so that the rest cannot be forgotten.** See `BookOut`.
  */
-export interface BookOut {
-  active_loan: LoanOut | null;
+export interface BookColumns {
   added_at: string;
   added_by?: UserOut | null;
   author: string | null;
@@ -43,13 +31,10 @@ export interface BookOut {
   categories?: string[];
   classifications?: ClassificationOut[];
   collection_id?: number | null;
-  collection_name: string | null;
   condition?: BookCondition | null;
-  copy_count: number;
   cover_url: string | null;
   deleted_at?: string | null;
   description: string | null;
-  discuss_with: UserOut[];
   format?: BookFormat | null;
   google_books_id?: string | null;
   id: number;
@@ -59,14 +44,6 @@ export interface BookOut {
   language?: string | null;
   lending?: LendingWillingness | null;
   location?: string | null;
-  my_finished_at: string | null;
-  my_progress_page: number | null;
-  my_progress_percent: number | null;
-  my_progress_recorded_at: string | null;
-  my_rating: number | null;
-  my_started_at: string | null;
-  my_status: ReadStatus;
-  my_wants_to_discuss: boolean;
   ownership?: OwnershipStatus;
   page_count?: number | null;
   publisher: string | null;
@@ -74,7 +51,6 @@ export interface BookOut {
   purchase_price_minor?: number | null;
   purchase_source?: string | null;
   purchased_at?: string | null;
-  refused_identifiers?: RefusedAssertionOut[];
   series_index?: number | null;
   series_name?: string | null;
   subtitle: string | null;

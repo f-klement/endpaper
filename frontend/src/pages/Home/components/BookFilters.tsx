@@ -5,6 +5,7 @@ import type {
   TagOut,
 } from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
+import { toggledFilter } from "../../../lib/bookFilters";
 import type { LibraryView } from "../../../lib/libraryView";
 import { TagPicker } from "../../components";
 import ClassificationPicker from "./ClassificationPicker";
@@ -27,23 +28,18 @@ interface BookFiltersProps {
   /**
    * Change one or more filters. One callback, not one per field.
    *
-   * Ten of these were separate props, each spelled in the interface, in the
-   * destructure and at its handler: thirty spellings for one object. Adding a
-   * filter cost a line in each, which is the abstraction making the next change
-   * harder rather than easier. The panel now says what changed and the caller
-   * decides what that means.
+   * Every control here reports the patch it makes and the caller decides what
+   * that means, picking one value out of a list and clearing the lot included.
+   * A prop per field instead costs the interface, the destructure and the
+   * handler a line each, so a filter added to the shape is three edits in this
+   * file before it is one anywhere else.
    */
   onFilterChange: (patch: Partial<Filters>) => void;
   locations: LocationOut[];
   collections: CollectionOut[];
-  onToggleTag: (tagId: number) => void;
-  onClearTags: () => void;
   classifications: ClassificationFacets | undefined;
   showClassificationPanel: boolean;
   onToggleClassificationPanel: () => void;
-  onToggleHeading: (heading: string) => void;
-  onToggleDivision: (division: string) => void;
-  onClearClassifications: () => void;
   view: LibraryView;
   onViewChange: (view: LibraryView) => void;
   /**
@@ -67,14 +63,9 @@ export default function BookFilters({
   onFilterChange,
   locations,
   collections,
-  onToggleTag,
-  onClearTags,
   classifications,
   showClassificationPanel,
   onToggleClassificationPanel,
-  onToggleHeading,
-  onToggleDivision,
-  onClearClassifications,
   view,
   onViewChange,
   canChangeView,
@@ -372,7 +363,7 @@ export default function BookFilters({
         </button>
         {activeTagCount > 0 && (
           <button
-            onClick={onClearTags}
+            onClick={() => onFilterChange({ tagIds: [] })}
             className="ml-2 text-xs text-paper-600 hover:text-paper-800 underline dark:text-paper-400 dark:hover:text-paper-300"
           >
             {t("library.clear")}
@@ -385,7 +376,9 @@ export default function BookFilters({
           <TagPicker
             tags={tags}
             selectedIds={filters.tagIds}
-            onToggle={onToggleTag}
+            onToggle={(tagId) =>
+              onFilterChange(toggledFilter(filters, "tagIds", tagId))
+            }
           />
         </div>
       )}
@@ -416,7 +409,10 @@ export default function BookFilters({
         </button>
         {activeClassificationCount > 0 && (
           <button
-            onClick={onClearClassifications}
+            // Both facets, because the badge above counts both: one control
+            // says how many things are narrowing the shelf, so one clear has
+            // to take them all off.
+            onClick={() => onFilterChange({ headings: [], ddcDivisions: [] })}
             className="ml-2 text-xs text-paper-600 hover:text-paper-800 underline dark:text-paper-400 dark:hover:text-paper-300"
           >
             {t("library.clear")}
@@ -430,8 +426,12 @@ export default function BookFilters({
             facets={classifications}
             selectedHeadings={filters.headings}
             selectedDivisions={filters.ddcDivisions}
-            onToggleHeading={onToggleHeading}
-            onToggleDivision={onToggleDivision}
+            onToggleHeading={(heading) =>
+              onFilterChange(toggledFilter(filters, "headings", heading))
+            }
+            onToggleDivision={(division) =>
+              onFilterChange(toggledFilter(filters, "ddcDivisions", division))
+            }
           />
         </div>
       )}
