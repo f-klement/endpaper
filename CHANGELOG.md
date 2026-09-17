@@ -1,11 +1,31 @@
 # Changelog
 
-## Unreleased
+## v0.17.2
 
-Refactors from an architecture review, and **nothing a member sees changes** except where
-this says so. They are here rather than left out because two of them fixed answers that
-were wrong on screen, and because a changelog that records only features is one nobody trusts
-about the rest.
+_2026-09-17_
+
+- **The pipeline's Socket preflight asks whether the host answered**, rather than what it
+  answered. It exits non zero on any HTTP error status, and the bare root of the scanner's
+  API answers this cluster with a redirect or a 403 depending on where the question is asked
+  from, so a probe about reachability reported a reachable host as blocked. The answer is
+  captured rather than piped, because the runner's shell runs with `pipefail` and a pipe
+  reports the reading command's status whatever the search found. The scanner is untouched;
+  the probe in front of it was wrong.
+
+**`v0.17.0` and `v0.17.1` carry the same contents and published nothing**: both pipelines
+stopped at that preflight, the second because the first fix was piped and the runner's shell
+runs with `pipefail`. No image and no GitHub tag was ever produced for either. The tags stay
+because tags here are protected, and this is the release that shipped.
+
+## v0.17.0
+
+_2026-09-17_
+
+Mostly an architecture review and what it turned up, so most of what follows is internal and
+says so. What a member or an operator does see: Postgres can hold the library, a shelf
+exported and imported back keeps its ratings and read dates, and two exports stopped letting
+a value write something the file did not mean. The internal entries are here rather than left
+out because a changelog that records only features is one nobody trusts about the rest.
 
 - **A book on the loans page no longer reports itself unread.** Every loan carried a copy of
   the book, and on two of the three loan routes that copy said the reading status was unread,
