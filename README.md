@@ -248,7 +248,7 @@ Environment variables:
 | Variable | Default | Purpose |
 |---|---|---|
 | `SECRET_KEY` | dev placeholder | Signs the JWTs. **Change this.** |
-| `DATABASE_URL` | `sqlite:///$DATA_DIR/library.db` | SQLAlchemy URL |
+| `DATABASE_URL` | `sqlite:///$DATA_DIR/library.db` | SQLAlchemy URL, and in practice where the SQLite file goes: the schema's CHECK constraints are written in SQLite's own SQL, so no other engine can create it |
 | `DATA_DIR` | `/app/data` | SQLite file + uploaded covers |
 | `ALLOW_REGISTRATION` | `true` | `false` closes new signups |
 | `APP_ENV` | `prod` | `dev` relaxes the startup secret-key check |

@@ -16,7 +16,7 @@ to reason about, so the second list is kept deliberately short.
 
 import json
 import secrets
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,23 @@ import sources
 import targets
 from enums import CatalogueSource, Locale, SettingKey
 from models import Setting
+
+#: **`metadata` is imported inside the two functions that need it at run time,
+#: and here for the annotation alone.** A module level import is a cycle, and it
+#: is not the one the design round expected: the chain measured on 2026-09-17 is
+#: `mailer` -> this module -> `metadata` -> `catalogue` -> `schemas.book` ->
+#: `schemas` -> `schemas.user` -> `mailer`, which reaches `mailer.MAX_ADDRESS`
+#: before `mailer` has defined it and fails at collection with an
+#: `AttributeError`. The annotation costs nothing because PEP 649 never evaluates
+#: it, which is the same arrangement `schemas/book.py` already relies on.
+#:
+#: **What goes red if this block is deleted is `mypy`, not the suite.** Measured
+#: 2026-09-17 by neutralising it: collection succeeds and the targeted files
+#: pass, while `mypy .` reports `Name "metadata" is not defined`. The rung is
+#: tested rather than self enforcing, and the two function level imports below
+#: are what the run time depends on.
+if TYPE_CHECKING:
+    import metadata
 
 # Defaults for anything never written. Stored as the same strings the table
 # holds, so there is one representation to reason about.
@@ -387,6 +404,112 @@ def catalogue_sources(db: Session) -> sources.Plan:
     resolve it once per request rather than to remember it between them.
     """
     return sources.in_force(stored_catalogue_sources(db), ready_sources(db))
+
+
+def _catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credential]:
+    """The login each catalogue's request will carry, resolved before it is made.
+
+    **Resolved here rather than in `metadata`, and that is the same rule the
+    Google Books key follows.** `metadata` builds every outbound catalogue
+    request and reaches no database; opening a sealed row there would put the
+    ORM behind every request to every catalogue. So this answers "what will the
+    next request send", which is `credentials.for_request`'s own question, and
+    `library_access` below hands the answer over as an argument.
+
+    **Only the targets whose door carries one**, which is
+    `metadata.carries_a_credential` and is asked rather than restated here: the
+    rule and this loop must not be able to disagree about which rows to resolve,
+    because a row skipped here is a request that goes out unauthenticated with
+    nothing saying so.
+
+    **The key is resolved once for the whole loop, never per source**, which is
+    the rule `_sources_with_a_credential` above states over the same shape of
+    loop. Resolving it reads every entry in `credentials.KEY_SOURCES`
+    and runs a BIP-39 decode per phrase held, so it is a keychain round trip per
+    source per lookup, on the path that adds a book, which is a member request
+    rather than an admin visit. The size it was costing is on the issue.
+
+    **The doors are collected before the key is touched, so a roster with none
+    resolves nothing.** That was today's roster until the Biblioteca Nacional
+    Argentina joined it, and the property is worth keeping stated because what
+    it bounds has not changed: the cost is **one** resolution per request now
+    that there is a door, and it stays one however many doors the roster grows,
+    where the defect this replaced was one per source. An install that has
+    stored no credential pays that one and **opens no envelope**, and so does
+    one whose credentials are all pinned by the environment: neither a pinned
+    credential nor a login this build ships reaches the store. What comes back
+    is no longer empty, since `sources.SHIPS_A_CREDENTIAL` is not, and the two
+    are worth keeping apart here because what this paragraph bounds is the
+    resolution rather than the mapping.
+    `tests/test_settings_store.py::TestTheKeyIsResolvedOncePerRequest` pins both
+    ends.
+
+    **It is not the only resolution on a lookup.** `ready_sources` above
+    resolves the key as well, to answer whether a credentialled source can be
+    asked at all, so a request that reaches a catalogue pays two. Both are an
+    environment read, a file read and a BIP-39 decode with no key derivation
+    function behind it; it is written down here rather than measured away
+    because the thing to watch is the shape, one per request, not the constant.
+
+    Written for the set rather than for its members because the next source to
+    declare that capability is the reason this plumbing exists.
+    """
+    import metadata  # noqa: PLC0415  the cycle above
+
+    doors = [
+        targets.SEEDED[source]
+        for source in sorted(sources.NEEDS_A_KEY)
+        if metadata.carries_a_credential(targets.SEEDED[source])
+    ]
+    if not doors:
+        return {}
+    state = credentials.key_state()
+    resolved: dict[CatalogueSource, credentials.Credential] = {}
+    for target in doors:
+        login = credentials.for_request(
+            db, target.source.value, target.base_url, state
+        )
+        if login is not None:
+            resolved[target.source] = login
+    return resolved
+
+
+def library_access(db: Session) -> metadata.Access:
+    """Everything one request may ask of the catalogues, resolved once.
+
+    **One question, one mechanism.** Every one of the six handlers that reaches a
+    catalogue used to assemble these three by hand, and four of them guarded the
+    key with `GOOGLE_BOOKS_ENABLED` as well. That switch is already a condition of
+    `ready_sources` above, so the plan had dropped Google before the second test
+    ran: two mechanisms answering one question, with a paragraph per site saying
+    which of them covered it. The plan is the gate, here and at every door.
+
+    **The key is resolved whatever the provider list says**, which is what the
+    two handlers that never had the conjunction already did. It travels no
+    further than a source in the plan: `metadata._lookup_one` hands it to a
+    bespoke adapter and `_search_one` to a metered one, and neither is
+    constructed for a source the plan left out.
+
+    **Not a FastAPI dependency.** `solve_dependencies` runs them in declaration
+    order and the first `HTTPException` propagates, so one declared before
+    `CurrentUser` would answer an unauthenticated caller with this route's 409
+    instead of a 401. It is resolved in the handler body, below the limiter.
+
+    What it costs is a handful of settings row reads and, where the roster holds
+    a door that carries a login, one keychain round trip. The second is the one
+    that can grow with the roster and the one that is bounded, at
+    `_catalogue_logins` above; the first is not itemised here because a number
+    written down beside a function stops being re-derived. The instruments are
+    `tests/routers/test_books_identifier_backfill.py::TestWhatABatchCostsTheDatabase`
+    and `tests/test_settings_store.py::TestTheKeyIsResolvedOncePerRequest`.
+    """
+    import metadata  # noqa: PLC0415  the cycle above
+
+    return metadata.Access(
+        plan=catalogue_sources(db),
+        api_key=google_books_api_key(db),
+        logins=_catalogue_logins(db),
+    )
 
 
 def library_mode(db: Session) -> bool:

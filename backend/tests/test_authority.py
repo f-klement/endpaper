@@ -984,9 +984,9 @@ class TestTheRefusalsAreStructural:
             "asyncio",
             "logging",
             "re",
-            "time",
             "dataclasses",
             "typing",
+            "deadline",
             "fetch",
             "enums",
         }, sorted(imported)

@@ -303,28 +303,54 @@ _PERSON_NOISE: Final = re.compile(
     r"\s*\(\s*\d{3,4}\s*[-–]?\s*\d{0,4}\s*\)"  # (1964-2020)
     r"|\s*\.\s*(Auteur|Autrice|Éditeur|Editeur|Traducteur|Traductrice|"
     r"Illustrateur|Illustratrice|Préfacier|Compilateur)[^.]*\.?\s*$"
-    r"|,\s*\d{4}\s*[-–]\s*\d{0,4}\s*$",  # , 1819-1891
+    # The `\.?` before the anchor is what lets this arm fire on its own.
+    # Without it `Melville, Herman, 1819-1891.` matches nothing, and the dates
+    # came off only because a caller removed the full stop first and ran the
+    # substitution again, which is a coupling that put the stop removal in the
+    # wrong function for six years.
+    r"|,\s*\d{4}\s*[-–]\s*\d{0,4}\s*\.?\s*$",  # , 1819-1891
     re.IGNORECASE,
 )
 
 #: A trailing initial, which is the one full stop in a name that is part of it.
 #: `Pohl, Robert O.` loses its meaning as `Robert O`, and the ISBD full stop
-#: this strips off `Melville, Herman.` looks exactly the same to a regex.
+#: `_drop_isbd_stop` takes off `Melville, Herman.` looks exactly the same to a
+#: regex.
 #: Measured: 2 of 53 live DNB records credit an author with a trailing initial.
 _TRAILING_INITIAL: Final = re.compile(r"(?:^|[\s.])[A-Za-z]\.$")
 
 
 def _strip_person_noise(raw: str) -> str:
-    """Drop life dates and role words from a catalogue person string."""
+    """Drop life dates and role words from a catalogue person string.
+
+    Neither is part of the name whatever the caller means to do with the cell,
+    so this runs on every branch. The terminal full stop is `_drop_isbd_stop`
+    and deliberately not here: it is the one piece of noise a reader cannot
+    tell from the name.
+    """
     cleaned = raw
     for _ in range(3):  # A name can carry both, in either order.
         stripped = _PERSON_NOISE.sub("", cleaned).strip().rstrip(",;")
-        if stripped.endswith(".") and not _TRAILING_INITIAL.search(stripped):
-            stripped = stripped[:-1].strip()
         if stripped == cleaned:
             break
         cleaned = stripped
     return cleaned
+
+
+def _drop_isbd_stop(name: str) -> str:
+    """The full stop a catalogue puts at the end of a heading.
+
+    **Only for a cell that is about to be rewritten anyway.** ISBD punctuation
+    and an abbreviation are spelled identically, and which one a cell carries
+    is a fact about where the cell came from rather than about the string: a
+    MARC `$a` ends in ISBD punctuation, and a `Primary Author` column somebody
+    typed ends in `Dr.`, `Jr.`, `Co.` or `Inc.`. So a cell handed back in the
+    order it arrived keeps its stop, and only the branch that reorders the name
+    takes it off.
+    """
+    if name.endswith(".") and not _TRAILING_INITIAL.search(name):
+        return name[:-1].strip()
+    return name
 
 
 def flip_catalogue_name(raw: str) -> str:
@@ -332,9 +358,27 @@ def flip_catalogue_name(raw: str) -> str:
 
     One comma means a person in catalogue order. None, or more than one, means
     something else (a corporate body, a compound credit) and is left alone.
+
+    **Left alone means the order and the full stop, not the noise and not the
+    spacing.** Life dates and a role word are not part of a corporate name
+    either, so they come off whichever branch runs, and the commas are counted
+    after they do: `Melville, Herman, 1819-1891` carries two of them until the
+    dates go. Runs of whitespace are collapsed on both branches too, for the
+    reason below. What only the flipping branch may take is the terminal full
+    stop, which `_drop_isbd_stop` explains.
     """
-    name = _strip_person_noise(raw.strip()).rstrip(",")
+    # Whitespace is collapsed before any regex runs, and that is a bound rather
+    # than tidying. Two of `_PERSON_NOISE`'s three arms are a `\s*` in front of
+    # a rare literal, which is quadratic over a run of spaces: measured on a
+    # worker node, 1.28 ms at 500 characters and 353 ms at 8,000. This function
+    # is on the CSV import path, and one 5 MB upload of 10,464 rows whose
+    # author cell was 498 spaces measured 17.96 s of CPU for that column alone
+    # before this line. No name means anything by a run of spaces.
+    #
+    # Nothing trims a trailing comma here: `_strip_person_noise` rstrips `,;`
+    # on its own first pass, so a second one at this site would be dead.
+    name = _strip_person_noise(" ".join(raw.split()))
     if name.count(",") != 1:
         return name
-    surname, forenames = (part.strip() for part in name.split(","))
+    surname, forenames = (part.strip() for part in _drop_isbd_stop(name).split(","))
     return f"{forenames} {surname}" if surname and forenames else name

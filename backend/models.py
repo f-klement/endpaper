@@ -30,6 +30,7 @@ import covers
 import filing
 from authors import AUTHOR_NAME_MAX
 from database import Base
+from dialect import DialectSQL
 from enums import (
     AuthMode,
     AuthorityProvenance,
@@ -502,8 +503,16 @@ class AuthorIdentifier(Base):
         # for the measurement and `TestEveryTextCeilingBindsOnBytesToo` for the
         # rule that stops the next ceiling shipping without one.
         CheckConstraint(
-            f"length(identifier) > 0 AND length(identifier) <= {AUTHORITY_IDENTIFIER_MAX}"
-            f" AND length(CAST(identifier AS BLOB)) <= {4 * AUTHORITY_IDENTIFIER_MAX}",
+            DialectSQL(
+                sqlite=(
+                    f"length(identifier) > 0 AND length(identifier) <= {AUTHORITY_IDENTIFIER_MAX}"
+                    f" AND length(CAST(identifier AS BLOB)) <= {4 * AUTHORITY_IDENTIFIER_MAX}"
+                ),
+                postgresql=(
+                    f"length(identifier) > 0 AND length(identifier) <= {AUTHORITY_IDENTIFIER_MAX}"
+                    f" AND octet_length(identifier) <= {4 * AUTHORITY_IDENTIFIER_MAX}"
+                ),
+            ),
             name="ck_author_identifiers_bounds",
         ),
     )
@@ -862,6 +871,7 @@ class Book(Base):
             "isbn",
             unique=True,
             sqlite_where=text("copy_group IS NULL"),
+            postgresql_where=text("copy_group IS NULL"),
         ),
         # `backup.restore` inserts through Core, where no Pydantic model and no
         # `@validates` fires, so an archive decides this value. A value outside
@@ -1401,6 +1411,7 @@ class Loan(Base):
             "book_id",
             unique=True,
             sqlite_where=text("returned_at IS NULL"),
+            postgresql_where=text("returned_at IS NULL"),
         ),
         CheckConstraint(ONE_BORROWER_SQL, name="ck_loans_one_borrower"),
     )
@@ -1623,10 +1634,20 @@ class Quote(Base):
         # and `tests/test_house_rules.py::TestEveryTextCeilingBindsOnBytesToo`
         # is what stops a new one being written without the byte arm.
         CheckConstraint(
-            f"length(text) <= {QUOTE_TEXT_MAX} "
-            f"AND length(CAST(text AS BLOB)) <= {4 * QUOTE_TEXT_MAX} "
-            f"AND (note IS NULL OR (length(note) <= {QUOTE_NOTE_MAX} "
-            f"AND length(CAST(note AS BLOB)) <= {4 * QUOTE_NOTE_MAX}))",
+            DialectSQL(
+                sqlite=(
+                    f"length(text) <= {QUOTE_TEXT_MAX} "
+                    f"AND length(CAST(text AS BLOB)) <= {4 * QUOTE_TEXT_MAX} "
+                    f"AND (note IS NULL OR (length(note) <= {QUOTE_NOTE_MAX} "
+                    f"AND length(CAST(note AS BLOB)) <= {4 * QUOTE_NOTE_MAX}))"
+                ),
+                postgresql=(
+                    f"length(text) <= {QUOTE_TEXT_MAX} "
+                    f"AND octet_length(text) <= {4 * QUOTE_TEXT_MAX} "
+                    f"AND (note IS NULL OR (length(note) <= {QUOTE_NOTE_MAX} "
+                    f"AND octet_length(note) <= {4 * QUOTE_NOTE_MAX}))"
+                ),
+            ),
             name="ck_quotes_text_bounds",
         ),
     )
@@ -1821,13 +1842,26 @@ class DigitalReference(Base):
         # are the ones where an unchecked value is an unbounded write or a
         # number that means nothing.
         CheckConstraint(
-            "length(root_label) >= 1 "
-            "AND length(relative_path) >= 1 "
-            f"AND length(root_label) + length(relative_path) <= {DIGITAL_REFERENCE_PATH_MAX} "
-            "AND length(CAST(root_label AS BLOB)) + length(CAST(relative_path AS BLOB)) "
-            f"<= {4 * DIGITAL_REFERENCE_PATH_MAX} "
-            "AND (size_bytes IS NULL OR (size_bytes >= 0 "
-            f"AND size_bytes <= {DIGITAL_REFERENCE_MAX_SIZE}))",
+            DialectSQL(
+                sqlite=(
+                    "length(root_label) >= 1 "
+                    "AND length(relative_path) >= 1 "
+                    f"AND length(root_label) + length(relative_path) <= {DIGITAL_REFERENCE_PATH_MAX} "
+                    "AND length(CAST(root_label AS BLOB)) + length(CAST(relative_path AS BLOB)) "
+                    f"<= {4 * DIGITAL_REFERENCE_PATH_MAX} "
+                    "AND (size_bytes IS NULL OR (size_bytes >= 0 "
+                    f"AND size_bytes <= {DIGITAL_REFERENCE_MAX_SIZE}))"
+                ),
+                postgresql=(
+                    "length(root_label) >= 1 "
+                    "AND length(relative_path) >= 1 "
+                    f"AND length(root_label) + length(relative_path) <= {DIGITAL_REFERENCE_PATH_MAX} "
+                    "AND octet_length(root_label) + octet_length(relative_path) "
+                    f"<= {4 * DIGITAL_REFERENCE_PATH_MAX} "
+                    "AND (size_bytes IS NULL OR (size_bytes >= 0 "
+                    f"AND size_bytes <= {DIGITAL_REFERENCE_MAX_SIZE}))"
+                ),
+            ),
             name="ck_digital_references_bounds",
         ),
     )
@@ -2295,8 +2329,13 @@ class BookIdentifier(Base):
         # wrote, so a NUL is never a legitimate one. The two credential columns
         # carry the same arm for the same reason.
         CheckConstraint(
-            f"length(value) > 0 AND length(value) <= {BOOK_IDENTIFIER_MAX}"
-            " AND instr(value, char(0)) = 0",
+            DialectSQL(
+                sqlite=(
+                    f"length(value) > 0 AND length(value) <= {BOOK_IDENTIFIER_MAX}"
+                    " AND instr(value, char(0)) = 0"
+                ),
+                postgresql=f"length(value) > 0 AND length(value) <= {BOOK_IDENTIFIER_MAX}",
+            ),
             name="ck_book_identifiers_bounds",
         ),
     )
@@ -2387,8 +2426,16 @@ class CustomField(Base):
     # is the one path that reaches this table without a Pydantic model.
     __table_args__ = (
         CheckConstraint(
-            f"length(name) > 0 AND length(name) <= {CUSTOM_FIELD_NAME_MAX}"
-            f" AND length(CAST(name AS BLOB)) <= {4 * CUSTOM_FIELD_NAME_MAX}",
+            DialectSQL(
+                sqlite=(
+                    f"length(name) > 0 AND length(name) <= {CUSTOM_FIELD_NAME_MAX}"
+                    f" AND length(CAST(name AS BLOB)) <= {4 * CUSTOM_FIELD_NAME_MAX}"
+                ),
+                postgresql=(
+                    f"length(name) > 0 AND length(name) <= {CUSTOM_FIELD_NAME_MAX}"
+                    f" AND octet_length(name) <= {4 * CUSTOM_FIELD_NAME_MAX}"
+                ),
+            ),
             name="ck_custom_fields_name_bounds",
         ),
         # **The enum is a plain VARCHAR, so this is what makes it closed.**
@@ -2473,8 +2520,16 @@ class CustomFieldValue(Base):
         # rather than a display one: without it a single NUL walks an archive's
         # value past the ceiling. See `ck_digital_references_bounds`.
         CheckConstraint(
-            f"length(value) > 0 AND length(value) <= {CUSTOM_FIELD_VALUE_MAX}"
-            f" AND length(CAST(value AS BLOB)) <= {4 * CUSTOM_FIELD_VALUE_MAX}",
+            DialectSQL(
+                sqlite=(
+                    f"length(value) > 0 AND length(value) <= {CUSTOM_FIELD_VALUE_MAX}"
+                    f" AND length(CAST(value AS BLOB)) <= {4 * CUSTOM_FIELD_VALUE_MAX}"
+                ),
+                postgresql=(
+                    f"length(value) > 0 AND length(value) <= {CUSTOM_FIELD_VALUE_MAX}"
+                    f" AND octet_length(value) <= {4 * CUSTOM_FIELD_VALUE_MAX}"
+                ),
+            ),
             name="ck_custom_field_values_bounds",
         ),
     )
@@ -2797,8 +2852,13 @@ class CatalogueTarget(Base):
     __tablename__ = "catalogue_targets"
 
     __table_args__ = (
+        # `= 1` on a boolean is a type error where the column is a real
+        # `boolean`, which it is on Postgres and is not on SQLite.
         CheckConstraint(
-            "requires_isbn_claim = 1 OR source = 'dnb'",
+            DialectSQL(
+                sqlite="requires_isbn_claim = 1 OR source = 'dnb'",
+                postgresql="requires_isbn_claim OR source = 'dnb'",
+            ),
             name="ck_catalogue_targets_isbn_claim",
         ),
         CheckConstraint(
@@ -2825,16 +2885,37 @@ class CatalogueTarget(Base):
         # it never overwrites a row naming a source the roster does not carry.
         # That is the writer a CHECK exists for, and it is the same boundary
         # `ck_opds_servers_credential_key` below records moving once already.
+        # **The Postgres arm carries no NUL clause and loses nothing**, because
+        # `varchar` there cannot hold the byte, so the charset rule is total and
+        # the ceiling exact without one. `b7d4e6f01a95` carries why the negation
+        # is unanchored and why `COLLATE "C"` is on it.
         CheckConstraint(
-            "(isbn_index = '' OR isbn_index NOT GLOB '*[^A-Za-z0-9._]*') "
-            "AND instr(isbn_index, char(0)) = 0 "
-            "AND (title_index = '' OR title_index NOT GLOB '*[^A-Za-z0-9._]*') "
-            "AND instr(title_index, char(0)) = 0",
+            DialectSQL(
+                sqlite=(
+                    "(isbn_index = '' OR isbn_index NOT GLOB '*[^A-Za-z0-9._]*') "
+                    "AND instr(isbn_index, char(0)) = 0 "
+                    "AND (title_index = '' OR title_index NOT GLOB '*[^A-Za-z0-9._]*') "
+                    "AND instr(title_index, char(0)) = 0"
+                ),
+                postgresql=(
+                    "(isbn_index = '' OR (isbn_index COLLATE \"C\") !~ '[^A-Za-z0-9._]') "
+                    "AND (title_index = '' OR (title_index COLLATE \"C\") !~ '[^A-Za-z0-9._]')"
+                ),
+            ),
             name="ck_catalogue_targets_indexes",
         ),
+        # **`typeof` has no Postgres arm and must keep its SQLite one.** The
+        # column is a real `integer` there, so the type test is the `IN` list's
+        # job; here affinity is a preference and this is the only arm refusing
+        # `'7 @and @attr 1=4 x'` in a column declared INTEGER.
         CheckConstraint(
-            "isbn_attribute IS NULL OR (typeof(isbn_attribute) = 'integer' "
-            "AND isbn_attribute IN (7))",
+            DialectSQL(
+                sqlite=(
+                    "isbn_attribute IS NULL OR (typeof(isbn_attribute) = 'integer' "
+                    "AND isbn_attribute IN (7))"
+                ),
+                postgresql="isbn_attribute IS NULL OR isbn_attribute IN (7)",
+            ),
             name="ck_catalogue_targets_use_attribute",
         ),
     )
@@ -2958,9 +3039,23 @@ class CatalogueCredential(Base):
         # Adding `instr(envelope, char(0)) = 0` alone bounds nothing, so it
         # arrives with the question of what bounds this column, which is
         # `credentials.unseal`'s to answer rather than this constraint's.
+        # **Each separator is escaped on the Postgres arm and that is the
+        # whole of it.** `GLOB` and a POSIX regex share `*` and part on `.`, so
+        # the naive `~ '^v1.*.*.*'` admits `v1XYZ`, with no separator in it at
+        # all: measured on PostgreSQL 16.2. Neither arm carries a NUL clause,
+        # here, and that asymmetry with the two rules below is deliberate on
+        # both engines: this column has no ceiling for one to make exact.
         CheckConstraint(
-            "(envelope GLOB 'v1.*.*.*' OR envelope GLOB 'v2.*.*.*') "
-            "AND length(envelope) >= 40",
+            DialectSQL(
+                sqlite=(
+                    "(envelope GLOB 'v1.*.*.*' OR envelope GLOB 'v2.*.*.*') "
+                    "AND length(envelope) >= 40"
+                ),
+                postgresql=(
+                    r"(envelope ~ '^v1\..*\..*\.' OR envelope ~ '^v2\..*\..*\.') "
+                    "AND length(envelope) >= 40"
+                ),
+            ),
             name="ck_catalogue_credentials_envelope",
         ),
         # **This column travels, which is why its values are closed.** The
@@ -2982,8 +3077,16 @@ class CatalogueCredential(Base):
         # every row rather than none. The asymmetry that caused the bug is what
         # makes `instr` the right instrument for it.
         CheckConstraint(
-            "length(source) BETWEEN 1 AND 32 AND instr(source, char(0)) = 0 "
-            "AND source NOT GLOB '*[^a-z0-9_-]*'",
+            DialectSQL(
+                sqlite=(
+                    "length(source) BETWEEN 1 AND 32 AND instr(source, char(0)) = 0 "
+                    "AND source NOT GLOB '*[^a-z0-9_-]*'"
+                ),
+                postgresql=(
+                    "length(source) BETWEEN 1 AND 32 "
+                    "AND (source COLLATE \"C\") !~ '[^a-z0-9_-]'"
+                ),
+            ),
             name="ck_catalogue_credentials_source",
         ),
     )
@@ -3092,8 +3195,16 @@ class OpdsServer(Base):
         # rule leaves only ASCII, so those two need no byte arm. A name is free
         # text and gets neither.
         CheckConstraint(
-            "length(name) BETWEEN 1 AND 100 "
-            "AND length(CAST(name AS BLOB)) <= 400",
+            DialectSQL(
+                sqlite=(
+                    "length(name) BETWEEN 1 AND 100 "
+                    "AND length(CAST(name AS BLOB)) <= 400"
+                ),
+                postgresql=(
+                    "length(name) BETWEEN 1 AND 100 "
+                    "AND octet_length(name) <= 400"
+                ),
+            ),
             name="ck_opds_servers_name",
         ),
         # **The same rule as `ck_catalogue_credentials_source`, and it is here
@@ -3132,10 +3243,19 @@ class OpdsServer(Base):
         # prefix, is a property of the enum. This is the same rule on the column
         # the boundary actually crosses.
         CheckConstraint(
-            "length(credential_key) BETWEEN 1 AND 32 "
-            "AND instr(credential_key, char(0)) = 0 "
-            "AND credential_key NOT GLOB '*[^a-z0-9_-]*' "
-            "AND credential_key GLOB 'opds-*'",
+            DialectSQL(
+                sqlite=(
+                    "length(credential_key) BETWEEN 1 AND 32 "
+                    "AND instr(credential_key, char(0)) = 0 "
+                    "AND credential_key NOT GLOB '*[^a-z0-9_-]*' "
+                    "AND credential_key GLOB 'opds-*'"
+                ),
+                postgresql=(
+                    "length(credential_key) BETWEEN 1 AND 32 "
+                    "AND (credential_key COLLATE \"C\") !~ '[^a-z0-9_-]' "
+                    "AND credential_key ~ '^opds-'"
+                ),
+            ),
             name="ck_opds_servers_credential_key",
         ),
         # The scheme rule, in SQL, so a hand edited archive cannot put a
@@ -3182,11 +3302,25 @@ class OpdsServer(Base):
         # cast is the only one that counts what is on the disk. Both ceilings
         # are read off `BASE_URL_MAX`, which `schemas/opds.py` imports, so no
         # write through the route can exceed either.
+        # **`.` is the Postgres spelling of GLOB's `?`, not `?`.** A regex `?`
+        # is a quantifier, so the naive `~ '^http://?*'` quantifies a quantifier
+        # and PostgreSQL 16.2 refuses to compile it at all, measured. The NUL
+        # arm goes with the engine; both ceilings stay, because neither is about
+        # a NUL.
         CheckConstraint(
-            "(base_url GLOB 'http://?*' OR base_url GLOB 'https://?*') "
-            "AND instr(base_url, char(0)) = 0 "
-            f"AND length(base_url) <= {BASE_URL_MAX} "
-            f"AND length(CAST(base_url AS BLOB)) <= {4 * BASE_URL_MAX}",
+            DialectSQL(
+                sqlite=(
+                    "(base_url GLOB 'http://?*' OR base_url GLOB 'https://?*') "
+                    "AND instr(base_url, char(0)) = 0 "
+                    f"AND length(base_url) <= {BASE_URL_MAX} "
+                    f"AND length(CAST(base_url AS BLOB)) <= {4 * BASE_URL_MAX}"
+                ),
+                postgresql=(
+                    "(base_url ~ '^http://.' OR base_url ~ '^https://.') "
+                    f"AND length(base_url) <= {BASE_URL_MAX} "
+                    f"AND octet_length(base_url) <= {4 * BASE_URL_MAX}"
+                ),
+            ),
             name="ck_opds_servers_base_url",
         ),
     )

@@ -9,6 +9,7 @@ the parser, in `tests/test_csv_import.py`.
 import csv
 import dataclasses
 import io
+from datetime import UTC, datetime
 
 import csv_import
 from enums import BookFormat, ReadStatus
@@ -729,10 +730,14 @@ _ROUND_TRIPPED: dict[str, str] = {
     "Title": "title",
     "Author": "author",
     "ISBN": "isbn",
+    "ISBN13": "isbn13",
     "Publisher": "publisher",
     "Year": "year",
+    "Pages": "pages",
     "Tags": "tags",
     "My Status": "status",
+    "Rating": "rating",
+    "Date Read": "date_read",
     "Format": "format",
 }
 
@@ -744,7 +749,16 @@ _ROUND_TRIPPED: dict[str, str] = {
 _NOT_READ_BACK: dict[str, str] = {
     "Description": "the book's blurb. `notes` is the member's own review, not this",
     "Date Added": "when this library got the book, not when anybody read it",
-    "Added By": "a username in this deployment, and meaningless in another",
+    # **A trust decision rather than a missing field**, and the difference is
+    # what stops the next reviewer closing it. `books.added_by_user_id` is the
+    # column `visible_to` and `in_trash_for` are built on, so a reader that
+    # honoured this column would let any member file a book as owned by another
+    # member from a file they uploaded. The header authenticates nothing: "this
+    # is our export" is a claim a file makes about itself, exactly as a calibre
+    # `opf:scheme` label is. If any entry in this table ever becomes readable,
+    # the column needs a third state rather than a direction, and round
+    # tripping must not be what a new column inherits.
+    "Added By": "who owns the row, and reading it back is a write to `visible_to`",
     "Condition": "no importer field",
     "Location": "a shelf in this house, and no importer field",
     "Collection": "no importer field. `docs/decisions.md`: not an import option",
@@ -755,12 +769,13 @@ _NOT_READ_BACK: dict[str, str] = {
 }
 
 #: Importer fields the export writes no column for.
+#:
+#: One, and it is refused rather than missing. A `Note` row carries
+#: `note_visible_to`, and the writer holds no viewer predicate, so a `Notes`
+#: column would be this export answering a question it cannot ask. The
+#: importer maps the field, and that is not a reason to fill it.
 _NOT_EXPORTED: dict[str, str] = {
-    "isbn13": "the export writes one ISBN column, and `isbn` reads it",
-    "rating": "the export carries no rating column",
-    "date_read": "the export carries no date read column",
-    "pages": "the export carries no page count column",
-    "notes": "`docs/api.md`: notes, quotes and loans are not in the CSV",
+    "notes": "a note has its own visibility and the writer has no viewer",
 }
 
 
@@ -789,6 +804,7 @@ class TestEndpapersOwnExportSurvivesItsOwnImporter:
             isbn=self.ISBN,
             publisher="Harcourt",
             year=1970,
+            page_count=204,
             description="An ocean that thinks.",
             format="paperback",
             location="Shelf 2",
@@ -819,6 +835,13 @@ class TestEndpapersOwnExportSurvivesItsOwnImporter:
         )
         client.put(
             f"/api/books/{book['id']}/status", json={"status": "read"}, headers=headers
+        )
+        # Marking it read is what stamps `finished_at`, and the rating is a
+        # separate act on a separate route. Both are on the member's own
+        # `UserBook` row rather than on the Book, which is why the export reads
+        # them off the batch it already loaded.
+        client.patch(
+            f"/api/books/{book['id']}/rating", json={"rating": 4}, headers=headers
         )
         return book
 
@@ -877,11 +900,16 @@ class TestEndpapersOwnExportSurvivesItsOwnImporter:
             author="Stanislaw Lem",
             isbn=self.ISBN,
             status=ReadStatus.READ,
-            rating=None,
-            date_read=None,
+            rating=4,
+            # Stamped by the status write above, so it is today by
+            # construction rather than by a fixture date. UTC, because
+            # `reading._stamp_reading_dates` writes `datetime.now(UTC)`, and
+            # `date.today()` is the runner's local day: on a positive offset
+            # the two disagree for the first hours of it.
+            date_read=datetime.now(UTC).date(),
             publisher="Harcourt",
             year=1970,
-            pages=None,
+            pages=204,
             format=BookFormat.PAPERBACK,
             tags=["sci-fi", "translated"],
             notes=None,

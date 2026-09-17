@@ -56,6 +56,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
+from dialect import DialectSQL
+
 revision: str = "c7b0a3e5d281"
 down_revision: str | Sequence[str] | None = "f4a1c62d0b97"
 branch_labels: str | Sequence[str] | None = None
@@ -96,9 +98,20 @@ def upgrade() -> None:
             f"scheme IN ({schemes})",
             name="ck_book_identifiers_scheme",
         ),
+        # **The NUL arm drops on Postgres and the reason is the column's type,
+        # not the engine.** Its job on SQLite is to make the character ceiling
+        # exact, which a `varchar` gives for nothing on an engine whose character
+        # types cannot hold the byte. A `bytea` column would take one freely, so
+        # `tests/test_dialect.py::TestEveryNulArmDroppedOnACharacterColumn`
+        # asserts the type rather than this comment asserting the engine.
         sa.CheckConstraint(
-            f"length(value) > 0 AND length(value) <= {_VALUE_MAX}"
-            " AND instr(value, char(0)) = 0",
+            DialectSQL(
+                sqlite=(
+                    f"length(value) > 0 AND length(value) <= {_VALUE_MAX}"
+                    " AND instr(value, char(0)) = 0"
+                ),
+                postgresql=f"length(value) > 0 AND length(value) <= {_VALUE_MAX}",
+            ),
             name="ck_book_identifiers_bounds",
         ),
         sa.ForeignKeyConstraint(["book_id"], ["books.id"], ondelete="CASCADE"),

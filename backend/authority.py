@@ -56,11 +56,11 @@ added here would widen what the browser may load.
 import asyncio
 import logging
 import re
-import time
 from dataclasses import dataclass, replace
 from typing import Any, Final
 
 import fetch
+from deadline import in_
 from enums import AuthorityScheme
 
 logger = logging.getLogger("endpaper.authority")
@@ -255,10 +255,16 @@ DEADLINE_SECONDS: Final = 8.0
 def deadline_from_now() -> float:
     """One absolute deadline for a whole lookup, for a caller making several.
 
-    `fetch.get` takes an absolute monotonic timestamp rather than a duration,
-    which is what lets one value bound a chain instead of each link.
+    Binds this module's budget to `deadline.in_`, which is what a deadline is:
+    one value bounding a chain instead of each link.
+
+    **Kept as a name of its own because three call sites read it**, all in
+    `routers/books.py`, which would otherwise each import `deadline` and reach
+    in here for `DEADLINE_SECONDS`. `covers` and `z3950` own a budget too and
+    call `in_` inline, at one site and two, which is what a name of their own
+    would be worth.
     """
-    return time.monotonic() + DEADLINE_SECONDS
+    return in_(DEADLINE_SECONDS)
 
 
 #: The longest name that may be put to a search.

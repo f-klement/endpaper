@@ -34,6 +34,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from database import MonthBucket
 from enums import ReadStatus
 from models import Book, User, UserBook
 from shelf import Shelf
@@ -324,7 +325,7 @@ class Reading:
         """
         rows = (
             shelf.select(
-                func.strftime("%Y-%m", UserBook.finished_at).label("month"),
+                MonthBucket(UserBook.finished_at).label("month"),
                 func.count(UserBook.id).label("count"),
             )
             .join(UserBook, UserBook.book_id == Book.id)

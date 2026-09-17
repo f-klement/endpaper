@@ -2609,3 +2609,425 @@ describe("the number of table columns is not written down", () => {
     expect(stated(count).test(`${count} rows`)).toBe(false);
   });
 });
+
+/**
+ * The module the rule below reads, keyed as the source glob keys it.
+ *
+ * One file rather than the directory, because the rule it carries is that
+ * module's own: `theme/patterns.ts` publishes a generator per primitive so that
+ * a geometry guard can reach it, and `docs/decisions.md` records why. A rule
+ * over every module in the tree would be a different rule, and a stricter one
+ * than this tree wants.
+ */
+const WALLPAPER = "../src/theme/patterns.ts";
+
+/**
+ * A path with its `.` and `..` segments collapsed and its extension dropped.
+ *
+ * **Both sides of the comparison go through it**, which is the half a match on
+ * the written specifier gets wrong: the glob keys the subject with an
+ * extension and an importer writes it with or without one, and
+ * `allowImportingTsExtensions` means both spellings occur.
+ */
+function flatten(parts: string[]): string {
+  const out: string[] = [];
+  for (const part of parts) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      if (out.length > 0 && out[out.length - 1] !== "..") out.pop();
+      else out.push("..");
+      continue;
+    }
+    out.push(part);
+  }
+  return out.join("/").replace(/\.(?:ts|tsx)$/, "");
+}
+
+/**
+ * A relative specifier, resolved against the module that wrote it.
+ *
+ * Both globs are keyed relative to this directory, so resolving into the same
+ * space makes an importer's `../../src/theme/patterns` and the glob's
+ * `../src/theme/patterns.ts` one string.
+ *
+ * **A bare specifier answers `null` and that is the known hole.** A package
+ * name cannot name a file under `src` today: `tsconfig.json` declares no
+ * `paths` and `vite.config.ts` aliases only under `test.alias`, which replaces
+ * a package with a double and never points into this tree. An alias added into
+ * `src` would make this rule quieter rather than louder, which is the direction
+ * to watch.
+ *
+ * **A query is left on, so a `?raw` import resolves to nothing.** That is the
+ * right answer twice over: it is a different module id carrying a string rather
+ * than a binding, so it references no export, and it is this tree's standard
+ * source text instrument, this file among its callers. Stripping the query made
+ * it resolve to the subject and then throw as a default import, which stops the
+ * run and names the wrong cause. Found by the design seat.
+ */
+function resolvedFrom(from: string, specifier: string): string | null {
+  if (!specifier.startsWith(".")) return null;
+  return flatten([...from.split("/").slice(0, -1), ...specifier.split("/")]);
+}
+
+/**
+ * The names one module imports from another, read off the import specifiers.
+ *
+ * **This is the whole point of the rule, and a grep cannot do it.** A word
+ * matched search over the tree counts a name written in a comment, a docstring
+ * or a string literal as a reference, so the evasion is not a new dead export,
+ * which either instrument catches: it is deleting the last import of a name and
+ * leaving the word behind in prose. `src/index.css` mentions this module twice
+ * and imports from it never, which is what that reads like.
+ *
+ * **Four ways of naming a module carry no name, and each throws rather than
+ * answering nothing.** A namespace import, a default import, an `export *` and
+ * a dynamic `import()` each reference the module while referencing no export,
+ * so treating any of them as "imported nothing" would let one of them turn this
+ * rule off with every arm still green. None exists today; the throw is what
+ * makes adding one a decision rather than an accident.
+ *
+ * **A specifier that is not a string literal is invisible here**, which is the
+ * one way past that does not throw: `import(`../src/theme/${name}`)` carries no
+ * value to compare. Nothing in this tree builds a specifier, and a module
+ * loaded that way is outside what any static reader can follow.
+ */
+function importedFrom(path: string, source: string, subject: string): string[] {
+  const names: string[] = [];
+  const refuse = (what: string): never => {
+    throw new Error(`${path} reaches ${subject} by ${what}`);
+  };
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value as unknown[]) walk(item);
+      return;
+    }
+    if (!isNode(value)) return;
+    const from = isNode(value.source) ? text(value.source.value) : null;
+    const specifiers = value.specifiers;
+    // **Both sides go through `flatten`**, which is the half a comparison on
+    // the written specifier gets wrong: the glob keys the subject with its
+    // extension and an importer writes it with or without one.
+    if (
+      from !== null &&
+      resolvedFrom(path, from) === flatten(subject.split("/"))
+    ) {
+      if (value.type === "ImportExpression") refuse("a dynamic import");
+      if (value.type === "ExportAllDeclaration") refuse("an export star");
+      for (const one of Array.isArray(specifiers) ? specifiers : []) {
+        if (!isNode(one)) continue;
+        if (one.type === "ImportNamespaceSpecifier")
+          refuse("a namespace import");
+        if (one.type === "ImportDefaultSpecifier") refuse("a default import");
+        const named = one.type === "ExportSpecifier" ? one.local : one.imported;
+        const name = isNode(named)
+          ? (text(named.name) ?? text(named.value))
+          : null;
+        if (name === null) refuse(`a specifier this cannot read: ${one.type}`);
+        else names.push(name);
+      }
+    }
+    for (const key of Object.keys(value)) walk(value[key]);
+  };
+  walk(parseAst(source, { lang: langOf(path) }));
+  return names;
+}
+
+/**
+ * Every name a module exports, read off the declarations.
+ *
+ * A default export and an `export *` throw for `importedFrom`'s reason turned
+ * round: neither publishes a name this rule could ask about, so counting either
+ * as nothing exported would shrink the subject silently.
+ */
+function exportedBy(path: string, source: string): string[] {
+  const names: string[] = [];
+  const ast = parseAst(source, { lang: langOf(path) }) as unknown as {
+    body: unknown[];
+  };
+  for (const node of ast.body) {
+    if (!isNode(node)) continue;
+    if (node.type === "ExportDefaultDeclaration")
+      throw new Error(`${path} has a default export`);
+    if (node.type === "ExportAllDeclaration")
+      throw new Error(`${path} re-exports a whole module`);
+    if (node.type !== "ExportNamedDeclaration") continue;
+    const declaration = node.declaration;
+    if (!isNode(declaration)) {
+      for (const one of Array.isArray(node.specifiers) ? node.specifiers : []) {
+        if (!isNode(one) || !isNode(one.exported)) continue;
+        const name = text(one.exported.name) ?? text(one.exported.value);
+        if (name !== null) names.push(name);
+      }
+      continue;
+    }
+    if (declaration.type === "VariableDeclaration") {
+      for (const one of Array.isArray(declaration.declarations)
+        ? declaration.declarations
+        : []) {
+        if (!isNode(one) || !isNode(one.id) || one.id.type !== "Identifier")
+          throw new Error(`${path} exports a binding pattern`);
+        const name = text(one.id.name);
+        if (name !== null) names.push(name);
+      }
+      continue;
+    }
+    const id = declaration.id;
+    const name = isNode(id) ? text(id.name) : null;
+    if (name === null)
+      throw new Error(`${path} exports an unnamed ${declaration.type}`);
+    names.push(name);
+  }
+  return names;
+}
+
+/** The exports of `subject` that nothing among `importers` imports by name. */
+function unreferenced(
+  subject: string,
+  subjectSource: string,
+  importers: [string, string][],
+): string[] {
+  const reached = new Set(
+    importers
+      .filter(([path]) => path !== subject)
+      .flatMap(([path, source]) => importedFrom(path, source, subject)),
+  );
+  return exportedBy(subject, subjectSource).filter(
+    (name) => !reached.has(name),
+  );
+}
+
+/**
+ * Every wallpaper export is reached by an import, somewhere.
+ *
+ * **The module publishes more than the app calls, on purpose**, and that is
+ * settled rather than tolerated: a generator per primitive is exported so
+ * `tests/theme/patterns.test.ts` can assert curve continuity, coverage and the
+ * widest empty run, none of which `patternDataUri` can state. Un-exporting them
+ * was refused once and the refusal shipped a defect, which
+ * `docs/decisions.md` records with the measurement.
+ *
+ * So the rule is not "export only what the app calls". It is that **every**
+ * name on the door is reached by somebody, which is what tells a deliberate
+ * test only export from one whose last caller went away. The eight this arrived
+ * with were the second kind.
+ */
+describe("every wallpaper export is imported by name somewhere", () => {
+  function scope(): [string, string][] {
+    return [
+      ...Object.entries(SOURCES),
+      ...Object.entries(TEST_SOURCES),
+      ["./houseRules.test.ts", ownSource] as [string, string],
+    ];
+  }
+
+  it("leaves none of them unreached", () => {
+    const source = SOURCES[WALLPAPER];
+    expect(source).toBeDefined();
+
+    expect(unreferenced(WALLPAPER, source ?? "", scope())).toEqual([]);
+  });
+
+  it("is reading a door and a tree, not two empty sets", () => {
+    // Both halves of the comparison, asserted: a subject with no exports and a
+    // scope with no importers agree, and the arm above cannot tell that from a
+    // rule that holds.
+    expect(exportedBy(WALLPAPER, SOURCES[WALLPAPER] ?? "")).toContain(
+      "patternDataUri",
+    );
+    expect(
+      exportedBy(WALLPAPER, SOURCES[WALLPAPER] ?? "").length,
+    ).toBeGreaterThan(10);
+    const reached = scope()
+      .filter(([path]) => path !== WALLPAPER)
+      .flatMap(([path, source]) => importedFrom(path, source, WALLPAPER));
+    expect(reached).toContain("PATTERNS");
+    expect(new Set(reached).size).toBeGreaterThan(10);
+  });
+
+  it("reports a name that nothing imports", () => {
+    // The rule's own mutation, run on synthetic input so the tree is not
+    // written to: an export no importer names is what this exists to find.
+    const subject = "../src/theme/patterns.ts";
+    expect(
+      unreferenced(subject, "export const alive = 1;\nexport const dead = 2;", [
+        ["./x.ts", 'import { alive } from "../src/theme/patterns";'],
+      ]),
+    ).toEqual(["dead"]);
+  });
+
+  it("does not count a name that only prose mentions", () => {
+    // The evasion, and the reason this reads specifiers rather than text:
+    // leaving the word behind in a comment, a docstring or a string is what a
+    // word matched grep takes for a reference.
+    const subject = "../src/theme/patterns.ts";
+    const prose = [
+      "// dead is the old name for alive",
+      "/** See dead in ../src/theme/patterns. */",
+      'const note = "dead";',
+      'import { alive } from "../src/theme/patterns";',
+    ].join("\n");
+
+    expect(
+      unreferenced(subject, "export const alive = 1;\nexport const dead = 2;", [
+        ["./x.ts", prose],
+      ]),
+    ).toEqual(["dead"]);
+  });
+
+  it("reads a name through every specifier that carries one", () => {
+    // A rename, a type only import and a re-export each name the export rather
+    // than the local binding, which is the half a reader can get backwards
+    // without any arm noticing.
+    const subject = "../src/theme/patterns.ts";
+    const source = [
+      'import { alive as here } from "../src/theme/patterns";',
+      'import type { Shape } from "../src/theme/patterns";',
+      'export { hidden } from "../src/theme/patterns";',
+      // **Renamed in both directions, which is what separates the two halves.**
+      // An import names `imported` and a re-export names `local`, and in
+      // `export { hidden } from` above the two identifiers are the same, so a
+      // reader taking `exported` there passed. Found by the security seat.
+      'export { buried as surfaced } from "../src/theme/patterns";',
+    ].join("\n");
+
+    expect(importedFrom("./x.ts", source, subject).sort()).toEqual([
+      "Shape",
+      "alive",
+      "buried",
+      "hidden",
+    ]);
+  });
+
+  it("resolves the specifier rather than matching its text", () => {
+    // Four spellings of one module, from three depths. A comparison on the
+    // written specifier reads the first as a different module from the second.
+    const subject = "../src/theme/patterns.ts";
+    for (const [from, written] of [
+      ["../src/theme/index.tsx", "./patterns"],
+      [
+        "../src/pages/AppearancePage/components/X.tsx",
+        "../../../theme/patterns",
+      ],
+      ["./theme/patterns.test.ts", "../../src/theme/patterns"],
+      ["./utils.tsx", "../src/theme/patterns.ts"],
+    ] as [string, string][]) {
+      expect(
+        importedFrom(from, `import { alive } from "${written}";`, subject),
+      ).toEqual(["alive"]);
+    }
+    // And a neighbour in the same directory is not this module.
+    expect(
+      importedFrom(
+        "../src/theme/index.tsx",
+        'import { alive } from "./palettes";',
+        subject,
+      ),
+    ).toEqual([]);
+    // **Nor is a module whose last two segments are the same two.** The whole
+    // resolved path is compared, so a second `theme/patterns` anywhere else in
+    // the tree is a different module. A resolver truncated to a basename pair
+    // satisfies every other case here. Found by the security seat.
+    expect(
+      importedFrom(
+        "./x.ts",
+        'import { alive } from "../src/other/theme/patterns";',
+        subject,
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not let a module vouch for its own exports", () => {
+    // A module importing from itself is legal and cyclic, and a name reached
+    // only that way is reached by nobody. The subject is dropped from the
+    // scope for that, and nothing else in any arm here would notice.
+    const subject = "../src/theme/patterns.ts";
+    expect(
+      unreferenced(subject, "export const dead = 1;", [
+        [subject, 'import { dead } from "./patterns";'],
+      ]),
+    ).toEqual(["dead"]);
+  });
+
+  it("keeps the value rule's table off every door but its own", () => {
+    // **`lib/stores.PRODUCED_VALUE` is on the door for the guard alone**, which
+    // its own docstring said and nothing enforced: a walk indexing the table
+    // directly re-creates the direct access consolidating the three copies
+    // removed, with every arm green. `producedValue` and `storeIdentifier` are
+    // the door. Found by the design seat.
+    const OWNER = "../src/lib/stores.ts";
+    const reached = Object.entries(SOURCES)
+      .filter(([path]) => path !== OWNER)
+      .flatMap(([path, source]) => importedFrom(path, source, OWNER));
+
+    expect(reached).not.toContain("PRODUCED_VALUE");
+    // The readers that do go through the door, so a reader finding nothing is
+    // distinguishable from a rule that holds.
+    expect(reached).toContain("storeIdentifier");
+  });
+
+  it("refuses every way of naming the module that names no export", () => {
+    // Each of these references the module and reaches no name, so answering
+    // "imported nothing" would leave this rule green while it stopped guarding.
+    //
+    // **The message is asserted, not merely that something threw.** A namespace
+    // and a default specifier carry no `imported`, so the unreadable specifier
+    // fallback throws for them anyway: against one loose pattern both dedicated
+    // refusals could be deleted with every arm green. Found by the design seat.
+    const subject = "../src/theme/patterns.ts";
+    const ways: [string, RegExp][] = [
+      ['import * as every from "../src/theme/patterns";', /a namespace import/],
+      ['import whole from "../src/theme/patterns";', /a default import/],
+      ['export * from "../src/theme/patterns";', /an export star/],
+      ['const m = await import("../src/theme/patterns");', /a dynamic import/],
+    ];
+    for (const [source, because] of ways) {
+      expect(() => importedFrom("./x.ts", source, subject)).toThrow(because);
+    }
+  });
+
+  it("ignores a source text import of the module", () => {
+    // `?raw` is a different module id carrying a string, so it reaches no
+    // export and is not a reference; it must not stop the run either, being
+    // what half the guards in this tree read a module with.
+    expect(
+      importedFrom(
+        "./x.ts",
+        'import text from "../src/theme/patterns.ts?raw";',
+        "../src/theme/patterns.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("reads a name off every kind of declaration a module can export", () => {
+    // **Wider than the subject writes today, on purpose.** `patterns.ts`
+    // carries a function, an interface, a type alias and a const, so a reader
+    // that dropped the specifier branch was invisible: nothing in this tree
+    // exports through a bare `export { ... }` and the rule would silently stop
+    // covering one the day somebody did. Found by the security seat.
+    expect(
+      exportedBy(
+        "../src/theme/patterns.ts",
+        [
+          "export function a() {}",
+          "export interface B { x: number }",
+          "export type C = string;",
+          "export const d = 1, e = 2;",
+          "const f = 3;",
+          "export { f };",
+          'export { g as h } from "./y";',
+        ].join("\n"),
+      ).sort(),
+    ).toEqual(["B", "C", "a", "d", "e", "f", "h"]);
+  });
+
+  it("refuses a door it cannot name", () => {
+    // A default export publishes no name, so counting it as nothing exported
+    // would hide it from the rule rather than report it.
+    expect(() => exportedBy("../src/theme/x.ts", "export default 1;")).toThrow(
+      /default export/,
+    );
+    expect(() =>
+      exportedBy("../src/theme/x.ts", 'export * from "./y";'),
+    ).toThrow(/re-exports/);
+  });
+});

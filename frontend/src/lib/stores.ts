@@ -143,6 +143,142 @@ export interface StoreIdentifier {
 }
 
 /**
+ * What each scheme's own producers write, as the shape of a value.
+ *
+ * **A property of the scheme, so it lives beside the scheme.** It was spelled
+ * twice, in `lib/calibre.ts` and in `pages/ScanPage/types.ts`, and the two were
+ * held in agreement by tests that read each other's source text. Neither
+ * module owns `StoreIdentifierScheme`; this one does.
+ *
+ * **What it refuses is a value that is not the scheme's shape**, which is
+ * narrower than it sounds and is worth saying plainly: it does not adjudicate
+ * between marketplaces, because every marketplace's value is an ASIN. What it
+ * is for is the key a plugin invented, since a name rule cannot tell
+ * `amazon_zz` from `amazon_de`. It is this app's own bound rather than the
+ * endpoint's, which takes any opaque token: a scheme is a claim about what the
+ * value is, and `enums.BookIdentifierScheme` states the rule this applies per
+ * row, that a scheme nothing reads an identifier out of is a row that lies.
+ *
+ * **It is load bearing rather than a sanity check**, and `mobi-asin` is where
+ * that shows: `ScanPage/types.LABELS_OF_SCHEME` admits that label and the value
+ * decides the row, 16 of that library's 31 such rows kept and 15 refused. The
+ * same ten characters as every other ASIN label, and nothing measured supports
+ * a narrower rule for it: what refuses those 15 is their length.
+ *
+ * **No matcher for the filler, which is the deliberate half.** Recognising the
+ * uuid calibre mints when a record has no ASIN would be an inclusion list over
+ * an open set, and calibre is free to mint a different filler tomorrow. A rule
+ * saying what an Amazon code is refuses every filler that is not ten characters
+ * of this alphabet, which is every filler that library holds and not every
+ * filler there could be.
+ *
+ * **A padded value is refused rather than trimmed.** Both shapes are anchored
+ * and whitespace is in neither alphabet, and closing one up would send a value
+ * this app invented rather than one the file carried.
+ *
+ * **The two rules are not grounded the same way, which is worth knowing before
+ * either is widened.** `takeout.ts` enforces a volume id shape of its own, so
+ * the Google half is the same rule twice and `tests/lib/stores.test.ts` sweeps
+ * that reader against this table rather than restating it. `kindle.ts` enforces
+ * nothing: it takes the `ASIN` element's text as written, so the ASIN bound
+ * rests on that module's measurement over 1,032 catalogue entries and on
+ * calibre's own regression fixtures, and a test can only pin the corpus rather
+ * than another rule.
+ *
+ * Wider files a wrong row; narrower drops an identifier the endpoint would have
+ * taken, silently. Neither is free.
+ *
+ * **Exported so its shape can be asserted, not so it can be read.** Callers ask
+ * `producedValue` or `storeIdentifier`, and `tests/houseRules.test.ts` holds
+ * every other module in `src` to that.
+ *
+ * **Every entry must be one character class, repeated a bounded number of
+ * times, anchored at both ends, with no flags.** That is a gate rather than a
+ * description of the two entries below, it is **narrower than the reasons that
+ * follow it**, and `VALUE_RULE` in `tests/lib/stores.test.ts` is where it is
+ * asserted and argued: a rule with a literal prefix satisfies every reason
+ * below and is refused there, so a scheme that wants one widens the form with
+ * its reason written down rather than re-spelling itself as one wide class.
+ *
+ * Asserted as that form rather than by scanning for the characters a bad rule
+ * would use, and the difference is the whole guard:
+ * `^(?:[A-Za-z0-9_-]{1,12}){1,12}$` carries no `+`, no `*` and no `|`, begins
+ * `^` and ends `$`, and backtracks exponentially. Measured at 927 ms, 2,396 ms
+ * and 28,675 ms for inputs of 25, 31 and 37 characters. **Those are a floor
+ * rather than a figure**: the machine is not named in a published file, and
+ * the growth rather than the seconds is the point. A member hands these values
+ * over in their own `metadata.db`, EPUB or export, so the cost of a rule here
+ * is theirs to pay.
+ *
+ * **A flag is part of the rule and none is allowed.** `m` makes `^` and `$`
+ * match at a line break, so `B000R34YKC` followed by a newline and anything at
+ * all would be admitted, which is exactly what anchoring is for; `g` and `y`
+ * carry a `lastIndex` that makes one `RegExp` object answer differently on
+ * successive calls. Found by the security seat.
+ */
+export const PRODUCED_VALUE: Record<StoreIdentifierScheme, RegExp> = {
+  // Ten characters of Amazon's alphabet. **Not narrowed to a `B` prefix**,
+  // which is the shape a Kindle catalogue can only hold: Amazon issues a
+  // printed edition's ISBN-10 as its ASIN, calibre's own regression fixture
+  // carries `amazon_ca` of `162380874X`, and four of the eight `ASIN` and
+  // `AMAZON` values in the 931 file library are exactly that, so a `B` rule
+  // would drop half of what this admits.
+  //
+  // **What that costs is that such a value is also the book's ISBN, and two
+  // columns carry two different tokens.** `opf.readIsbn` runs every candidate
+  // through `parseIsbn`, which answers the canonical ISBN-13, so the book
+  // carries the thirteen digit form while the identifier row carries the ten
+  // character one Amazon issued. Neither is a copy of the other.
+  //
+  // **Either case is accepted and neither is folded here**: a scheme's
+  // canonical form belongs to the scheme rather than to one reader, and
+  // `LibrarySettingsPage/types.CANONICAL_VALUE` is the one door every reader's
+  // value passes through.
+  asin: /^[A-Za-z0-9]{10}$/,
+  // Twelve characters of the URL safe alphabet, `takeout.ts`'s `VOLUME_ID` and
+  // its measurement over 24 sidecars. Calibre's own `google` fixture,
+  // `s7NIrgEACAAJ`, is one.
+  google_books: /^[A-Za-z0-9_-]{12}$/,
+};
+
+/**
+ * Would this scheme's own producers have written this value?
+ *
+ * The rule, asked as a question. `storeIdentifier` is the same rule asked for a
+ * row, and is what a reader walking a file calls; this is for a caller that
+ * has only the question, which is the agreement sweep against `takeout.ts`'s
+ * own line discriminator.
+ */
+export function producedValue(
+  scheme: StoreIdentifierScheme,
+  value: string,
+): boolean {
+  return PRODUCED_VALUE[scheme].test(value);
+}
+
+/**
+ * The row a labelled value becomes, or `null` where the scheme's readers would
+ * not have produced it.
+ *
+ * **The value is carried as the file wrote it.** Nothing is trimmed, lower
+ * cased or otherwise canonicalised here: a padded value is refused above rather
+ * than closed up, and a scheme's canonical form is
+ * `LibrarySettingsPage/types.CANONICAL_VALUE`'s, which is the one door every
+ * reader's value passes through.
+ *
+ * **A value the scheme's readers would not produce is dropped and the book is
+ * not**, `LibrarySettingsPage/types.boundIdentifiers`' rule: an import of nine
+ * hundred books must not turn on one library's odd row. That is why this
+ * answers `null` rather than throwing.
+ */
+export function storeIdentifier(
+  scheme: StoreIdentifierScheme,
+  value: string,
+): StoreIdentifier | null {
+  return producedValue(scheme, value) ? { scheme, value } : null;
+}
+
+/**
  * One book a store says this member has, whichever store said it.
  *
  * **Not one store's record**, `fileReaders.FileMetadata`'s rule and for its

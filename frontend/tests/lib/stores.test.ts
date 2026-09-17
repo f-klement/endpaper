@@ -21,8 +21,21 @@ import { createRequire } from "node:module";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { en } from "../../src/i18n";
-import { STORES, STORE_IDS, type StoreReading } from "../../src/lib/stores";
-import { A_VOLUME_ID, bookEntries, LIBRARY_FOLDER } from "./takeoutFixtures";
+import {
+  PRODUCED_VALUE,
+  producedValue,
+  storeIdentifier,
+  STORES,
+  STORE_IDS,
+  type StoreIdentifierScheme,
+  type StoreReading,
+} from "../../src/lib/stores";
+import {
+  A_VOLUME_ID,
+  bookEntries,
+  LIBRARY_FOLDER,
+  takeoutFile,
+} from "./takeoutFixtures";
 import { databaseOf } from "./sqliteFixtures";
 import { buildZip, packageDocument } from "../zipFixtures";
 
@@ -269,7 +282,12 @@ describe("a Kobo becomes the record the import writes from", () => {
 });
 
 describe("a Play Books export becomes the same record", () => {
-  async function takeoutFile(entries: Awaited<ReturnType<typeof bookEntries>>) {
+  /**
+   * An archive out of entries already built, where the fixtures' own
+   * `archiveOf` takes the specs. Named apart from it deliberately: two
+   * functions of one name in one file is this commit's own subject.
+   */
+  async function archiveOf(entries: Awaited<ReturnType<typeof bookEntries>>) {
     return new File([await buildZip({ entries })], "takeout.zip");
   }
 
@@ -278,7 +296,7 @@ describe("a Play Books export becomes the same record", () => {
     // rule: the index leads and the file fills what it left empty.
     const library = libraryIn(
       await STORES.playBooks.open(
-        await takeoutFile(
+        await archiveOf(
           await bookEntries({
             sidecar: { title: "What the store calls it" },
             epubTitle: "What the file calls it",
@@ -299,7 +317,7 @@ describe("a Play Books export becomes the same record", () => {
     // already made.
     const library = libraryIn(
       await STORES.playBooks.open(
-        await takeoutFile(
+        await archiveOf(
           await bookEntries({
             sidecar: { author: "One Unsplit Line" },
             opf: packageDocument(
@@ -322,7 +340,7 @@ describe("a Play Books export becomes the same record", () => {
   it("falls back to the index's one author where the file names none", async () => {
     const library = libraryIn(
       await STORES.playBooks.open(
-        await takeoutFile(
+        await archiveOf(
           await bookEntries({
             sidecar: { author: "Only In The Index" },
             opf: packageDocument(
@@ -343,7 +361,7 @@ describe("a Play Books export becomes the same record", () => {
     const good = await bookEntries({ name: "Dune" });
     const broken = await bookEntries({ name: "Torn", mimetype: "text/plain" });
     const library = libraryIn(
-      await STORES.playBooks.open(await takeoutFile([...good, ...broken])),
+      await STORES.playBooks.open(await archiveOf([...good, ...broken])),
     );
 
     expect(library.books).toHaveLength(1);
@@ -574,5 +592,393 @@ describe("an unreadable store is one skipped source, never a broken import", () 
     expect(await STORES.playBooks.open(new File([zip], "takeout.zip"))).toEqual(
       { ok: false, failure: "not-a-takeout" },
     );
+  });
+});
+
+/**
+ * The value rule, which was spelled twice before it was spelled here.
+ *
+ * `lib/calibre.ts` and `pages/ScanPage/types.ts` each carried a private
+ * `PRODUCED_VALUE`, identically named and identically typed, and the two were
+ * held in agreement by tests that read the other module's source text. Those
+ * two arms are gone. What replaces them is this file measuring the rule and
+ * each walk's own test measuring that its walk consults it.
+ */
+describe("what a scheme's own producers write", () => {
+  const SHAPES = Object.entries(PRODUCED_VALUE) as [
+    StoreIdentifierScheme,
+    RegExp,
+  ][];
+
+  /**
+   * The one form a value rule may take: a whole value, one character class, one
+   * bounded repeat.
+   *
+   * **Stated as the form rather than as the characters a bad rule would use**,
+   * which is the difference between a guard and a spell checker:
+   * `^(?:[A-Za-z0-9_-]{1,12}){1,12}$` carries no `+`, no `*` and no `|`, begins
+   * `^` and ends `$`, and backtracks exponentially. The scan this replaced
+   * admitted it, and so did the scan's own author's mutation. Found by the
+   * security seat.
+   *
+   * **A trailing `\$` is why the anchor is read as a form too.** A source
+   * ending in an escaped literal dollar satisfies `endsWith("$")` and anchors
+   * nothing, so `^[A-Za-z0-9]{10}\$` would admit that value followed by
+   * anything at all.
+   *
+   * **This is deliberately narrower than the property that justifies it, and
+   * that gap is the thing to read before widening either.** `^B[A-Za-z0-9]{9}$`
+   * is anchored, flagless and constant work, has every property named above,
+   * and is refused here; so is `^[A-Z]{2}[0-9]{8}$`. A prefixed rule is not
+   * hypothetical, it is what `PRODUCED_VALUE`'s own `asin` comment spends a
+   * paragraph declining. **The cheap way past a red arm here is to re-spell the
+   * rule as one wide class, which admits everything the prefix excluded**, so
+   * the answer is to widen this form with the reason written down rather than
+   * to loosen the class. Found by the design seat.
+   *
+   * **The one position sweep below depends on this.** It varies the last
+   * character only, and that bounds the whole value because this form
+   * guarantees a single class. Widen the form to two concatenated classes and
+   * the sweep silently stops bounding the other positions.
+   */
+  const VALUE_RULE = /^\^\[[^\]]+\]\{\d+(?:,\d+)?\}\$$/;
+
+  const wellFormed = (shape: RegExp) => VALUE_RULE.test(shape.source);
+
+  /** No flags, which are part of the rule and change what anchoring means. */
+  const unflagged = (shape: RegExp) => shape.flags === "";
+
+  /** One value each rule admits, so a sweep can vary a single character of it. */
+  const SAMPLE: Record<StoreIdentifierScheme, string> = {
+    asin: "B000R34YKC",
+    google_books: "s7NIrgEACAAJ",
+  };
+
+  const DIGITS = "0123456789";
+  const UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const LOWER = "abcdefghijklmnopqrstuvwxyz";
+
+  /**
+   * Which of the 128 ASCII code points each rule admits in one position, in
+   * code point order.
+   *
+   * **The set and not its size, and the difference is a live evasion.**
+   * `[A-Za-z0-8\x7f]` is 62 characters too: it drops the digit `9` from
+   * Amazon's alphabet and admits DEL, and against a count it passed every arm
+   * in all three files that touch this rule, every positive sample here being
+   * 9 free. Found by the design seat. A comparison of the characters fails
+   * naming the one that arrived, which is what stops the answer being to bump
+   * the literal.
+   *
+   * Total over the union, `PRODUCED_VALUE`'s own discipline: a scheme added
+   * with no alphabet here does not compile, so the sweep cannot quietly stop
+   * covering one.
+   */
+  const ALPHABET: Record<StoreIdentifierScheme, string> = {
+    asin: DIGITS + UPPER + LOWER,
+    google_books: `-${DIGITS}${UPPER}_${LOWER}`,
+  };
+
+  it("carries a shape for every scheme the union names", () => {
+    // **Completeness is the type's job, not this arm's**: the table is a
+    // `Record<StoreIdentifierScheme, RegExp>`, so a scheme added to that union
+    // with no shape here does not compile. What this arm buys is that the
+    // sweeps below are reading a populated table rather than agreeing over an
+    // empty one, which is the way every arm in this block passes for nothing.
+    expect(SHAPES.length).toBeGreaterThan(1);
+    expect(SHAPES.map(([scheme]) => scheme).sort()).toEqual([
+      "asin",
+      "google_books",
+    ]);
+  });
+
+  it("writes every shape as one class repeated a bounded number of times", () => {
+    // **The table is what this guards, not today's two entries.** Both of those
+    // do constant work and neither can backtrack. A consolidated table is where
+    // somebody later adds a scheme whose rule nests a quantifier or alternates,
+    // and that is the edit that introduces the class: these values come off a
+    // member's own `metadata.db`, EPUB or export, so the cost is theirs.
+    expect(SHAPES.filter(([, s]) => !wellFormed(s)).map(([k]) => k)).toEqual(
+      [],
+    );
+  });
+
+  it("names a rule written any other way", () => {
+    // The predicate's own negative cases, one property each, so dropping any
+    // one part of the form leaves one of these admitted. Deliberately not
+    // described by position: this list grows, and a comment saying which entry
+    // is which goes stale on the next append. Each carries its own reason where
+    // it needs one.
+    expect(
+      [
+        /[A-Za-z]{3}/,
+        /^[A-Za-z]{3}/,
+        /[A-Za-z]{3}$/,
+        /^[A-Za-z]{3}\$/,
+        /^[A-Za-z]{3}|x$/,
+        /^[A-Za-z]+$/,
+        /^(?:[A-Za-z0-9_-]{1,12}){1,12}$/,
+        // **A well formed core with something on either side of it**, which is
+        // what pins `VALUE_RULE`'s own two anchors. Every case above fails
+        // inside the core, so deleting either anchor from `VALUE_RULE` left all
+        // of them refused and every arm green, while the first of these matched
+        // arbitrary input and the second matched any string holding an `x`.
+        // Measured by the security seat.
+        /^[A-Za-z0-9]{10}$|.*/,
+        new RegExp("x|^[A-Za-z0-9]{10}$"),
+      ].filter(wellFormed),
+    ).toEqual([]);
+    expect(wellFormed(/^[A-Za-z0-9]{10}$/)).toBe(true);
+    // A range is the form too, so a rule of two lengths needs no argument.
+    expect(wellFormed(/^[A-Za-z0-9]{10,13}$/)).toBe(true);
+  });
+
+  it("carries no flag on any shape", () => {
+    expect(SHAPES.filter(([, s]) => !unflagged(s)).map(([k]) => k)).toEqual([]);
+  });
+
+  it("names a rule carrying a flag, whichever flag it is", () => {
+    // `m` is the one that matters and it defeats the form above without
+    // touching it: `^` and `$` then match at a line break, so an ASIN followed
+    // by a newline and anything at all is admitted. `g` and `y` carry a
+    // `lastIndex`, so one object answers differently on successive calls.
+    expect(
+      ["m", "g", "y", "i", "s", "u"]
+        .map((flag) => new RegExp("^[A-Za-z0-9]{10}$", flag))
+        .filter(unflagged),
+    ).toEqual([]);
+    expect(unflagged(/^[A-Za-z0-9]{10}$/)).toBe(true);
+  });
+
+  it("refuses a value carried past the anchor by a line break", () => {
+    // The consequence, asserted through the door rather than off the pattern,
+    // so the two readings have to agree.
+    expect(producedValue("asin", "B000R34YKC\nEVIL")).toBe(false);
+    expect(producedValue("google_books", "s7NIrgEACAAJ\nEVIL")).toBe(false);
+  });
+
+  it("admits the alphabet it names and no character more", () => {
+    // **A complete ASCII sweep read back as a set, never a list of what it
+    // refuses.** The instrument this adds to: a 15 candidate sample passed 88
+    // of 88 against `[A-Za-z0-9.]`, because no candidate carried a `.` at
+    // length ten, and the form assertion above does not move for that edit
+    // either, being about the pattern's shape rather than its class. Every one
+    // of the 128 ASCII code points is tried in the last position of a value
+    // each rule admits, and the characters that came back are compared, not
+    // how many there were. **Above ASCII this is a sample of five and not a
+    // sweep**, so it bounds nothing there.
+    const admitted = Object.fromEntries(
+      SHAPES.map(([scheme]) => {
+        const stem = SAMPLE[scheme].slice(0, -1);
+        let taken = "";
+        for (let code = 0; code < 128; code += 1) {
+          const one = String.fromCharCode(code);
+          if (producedValue(scheme, stem + one)) taken += one;
+        }
+        return [scheme, taken];
+      }),
+    );
+
+    expect(admitted).toEqual(ALPHABET);
+    // The count as well, so the boundary argument above stays attached to
+    // something that fails: 62 is the alphanumerics, 64 the URL safe set.
+    //
+    // **Sorted numerically and not by the default comparator**, which sorts
+    // lexicographically: `[9, 62, 64].sort()` is `[62, 64, 9]`, so a scheme
+    // with a single digit alphabet would have to have its expectation written
+    // in that order to pass. Found by the security seat.
+    expect(
+      Object.values(ALPHABET)
+        .map((one) => one.length)
+        .sort((a, b) => a - b),
+    ).toEqual([62, 64]);
+    expect(
+      ["\u00e9", "\u00fc", "\u4e2d", "\u{1f600}", "\u00a0"].filter((one) =>
+        SHAPES.some(([scheme]) =>
+          producedValue(scheme, SAMPLE[scheme].slice(0, -1) + one),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("is sweeping a value each rule actually admits", () => {
+    // The sweep varies the last character of `SAMPLE`, so a sample the rule
+    // already refuses would report every count as zero and leave the table
+    // above a pair of constants nothing measured.
+    expect(
+      SHAPES.filter(([scheme]) => !producedValue(scheme, SAMPLE[scheme])).map(
+        ([scheme]) => scheme,
+      ),
+    ).toEqual([]);
+  });
+
+  it("asks the table rather than a second spelling of it", () => {
+    // Driven off the table, so a scheme added to it is swept without an edit
+    // here. What it refuses is `producedValue` growing a rule of its own: a
+    // literal list would agree with a function that stopped reading the table.
+    const corpus = [
+      "B000R34YKC",
+      "aB3-dE6_gH9j",
+      "",
+      "   ",
+      "B000R34YK.",
+      "aB3-dE6_gH9.",
+      "162380874X",
+    ];
+    const disagreed = SHAPES.flatMap(([scheme, shape]) =>
+      corpus
+        .filter((value) => producedValue(scheme, value) !== shape.test(value))
+        .map((value) => `${scheme}: ${value}`),
+    );
+
+    expect(disagreed).toEqual([]);
+    // Both answers appear, so an agreement that held because nothing passed is
+    // not what was measured.
+    expect(
+      new Set(
+        SHAPES.flatMap(([scheme]) =>
+          corpus.map((value) => producedValue(scheme, value)),
+        ),
+      ),
+    ).toEqual(new Set([true, false]));
+  });
+
+  it("takes ten characters of Amazon's alphabet, in either case", () => {
+    expect(producedValue("asin", "B000R34YKC")).toBe(true);
+    expect(producedValue("asin", "b000r34ykc")).toBe(true);
+  });
+
+  it("takes a printed edition's ISBN-10, which is what Amazon issued", () => {
+    // Not narrowed to a `B` prefix: calibre's own regression fixture carries
+    // `amazon_ca` of this value, and four of the eight `ASIN` and `AMAZON`
+    // values in the 931 file library are an ISBN-10.
+    expect(producedValue("asin", "162380874X")).toBe(true);
+  });
+
+  it("refuses an Amazon value of any other length", () => {
+    expect(producedValue("asin", "B000R34YK")).toBe(false);
+    expect(producedValue("asin", "B000R34YKCD")).toBe(false);
+  });
+
+  it("refuses a character Amazon's alphabet does not have", () => {
+    expect(producedValue("asin", "B000R34YK.")).toBe(false);
+    expect(producedValue("asin", "B000R34YK-")).toBe(false);
+  });
+
+  it("refuses the uuid calibre mints where a file has no ASIN", () => {
+    // On its length and never by recognising a uuid, which would be an
+    // inclusion list over an open set: calibre may mint a different filler.
+    expect(producedValue("asin", "00000000-0000-4000-8000-000000000001")).toBe(
+      false,
+    );
+  });
+
+  it("takes twelve characters of the URL safe alphabet for a volume id", () => {
+    expect(producedValue("google_books", "s7NIrgEACAAJ")).toBe(true);
+    expect(producedValue("google_books", A_VOLUME_ID)).toBe(true);
+  });
+
+  it("refuses a volume id of any other length", () => {
+    expect(producedValue("google_books", "aB3-dE6_gH9")).toBe(false);
+    expect(producedValue("google_books", "aB3-dE6_gH9jk")).toBe(false);
+  });
+
+  it("refuses a character the URL safe alphabet does not have", () => {
+    expect(producedValue("google_books", "aB3-dE6_gH9.")).toBe(false);
+    expect(producedValue("google_books", "aB3-dE6_gH9+")).toBe(false);
+  });
+
+  it("refuses a padded value rather than trimming it", () => {
+    // Closing it up would send a value this app invented rather than the one
+    // the file carried.
+    expect(producedValue("asin", " B000R34YKC")).toBe(false);
+    expect(producedValue("asin", "B000R34YKC ")).toBe(false);
+    expect(producedValue("google_books", " s7NIrgEACAAJ")).toBe(false);
+  });
+
+  it("builds the row a walk keeps, with the value as it was written", () => {
+    // Neither trimmed nor lower cased: the canonical form of a scheme's value
+    // is `LibrarySettingsPage/types.CANONICAL_VALUE`'s, which is the one door
+    // every reader's value passes through, and doing it here as well would
+    // make that door optional.
+    expect(storeIdentifier("asin", "b000r34ykc")).toEqual({
+      scheme: "asin",
+      value: "b000r34ykc",
+    });
+  });
+
+  it("answers nothing for a value the scheme's readers would not produce", () => {
+    // `null` rather than a throw, because the caller is walking a library: an
+    // import of nine hundred books must not turn on one library's odd row.
+    expect(storeIdentifier("asin", "9780441013593")).toBeNull();
+    expect(storeIdentifier("google_books", "aB3-dE6_gH9.")).toBeNull();
+  });
+});
+
+/**
+ * The Google half is one rule and `takeout.ts` holds a second copy of it, on
+ * purpose.
+ *
+ * That module's `VOLUME_ID` is the same regex doing a different job: it tells
+ * the volume id line of a sidecar's metadata block from the reading state line
+ * beside it, without matching an English label a German export does not carry.
+ * Folding it into `PRODUCED_VALUE` would mean that widening the identifier rule
+ * to thirteen characters silently widens a line discriminator, and a reading
+ * state line of thirteen safe characters would be read as a volume id.
+ *
+ * **So the two stay apart and their agreement is this sweep.** It replaces one
+ * that read `takeout.ts`'s source for the constant, which could say the two
+ * spellings matched and could not say the constant was reached: a reader that
+ * kept the literal and stopped consulting it passed. This asks the reader.
+ */
+describe("the Takeout reader and the value rule admit the same volume ids", () => {
+  /**
+   * Nine sidecar lines: two real shapes, two lengths either side, two
+   * characters outside the alphabet and three that are nothing but one
+   * character of it repeated.
+   */
+  const CANDIDATES = [
+    "aB3-dE6_gH9j",
+    "s7NIrgEACAAJ",
+    "aB3-dE6_gH9",
+    "aB3-dE6_gH9jk",
+    "aB3-dE6_gH9.",
+    "aB3-dE6_gH9+",
+    "____________",
+    "------------",
+    "000000000000",
+  ];
+
+  it("takes a line as the volume id exactly where the rule admits it", async () => {
+    // One archive holding one book per candidate, so this is one read rather
+    // than nine. A sidecar whose metadata line is not a volume id makes the
+    // pair not a book at all, so a candidate the reader refused is a candidate
+    // absent from the library.
+    const library = libraryIn(
+      await STORES.playBooks.open(
+        await takeoutFile(
+          CANDIDATES.map((volumeId, at) => ({
+            name: `Book${at}`,
+            sidecar: { volumeId },
+          })),
+        ),
+      ),
+    );
+    const taken = new Set(
+      library.books.flatMap((book) =>
+        book.identifiers.map((identifier) => identifier.value),
+      ),
+    );
+
+    expect(
+      CANDIDATES.filter(
+        (candidate) =>
+          taken.has(candidate) !== producedValue("google_books", candidate),
+      ),
+    ).toEqual([]);
+    // Both answers appear, so an agreement that held because the archive was
+    // unreadable is not what was measured.
+    expect(taken.size).toBeGreaterThan(0);
+    expect(taken.size).toBeLessThan(CANDIDATES.length);
   });
 });

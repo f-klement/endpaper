@@ -4175,11 +4175,10 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
     """"Off means not asked" holds by signature, not by discipline.
 
     **A required parameter rather than a rule somebody remembers.** Every public
-    coroutine in `metadata.py` reaches a catalogue, and each takes `plan`
-    keyword only with no default, so mypy refuses a call site that forgets to
-    apply the library's provider list. A default would have made forgetting
-    silent, and the thing it would silently do is ask a source the library
-    switched off.
+    coroutine in `metadata.py` reaches a catalogue, and each takes the provider
+    list keyword only with no default, so mypy refuses a call site that forgets
+    to apply it. A default would have made forgetting silent, and the thing it
+    would silently do is ask a source the library switched off.
 
     This is the second leg. The first is that the plan is honoured *inside*
     those functions, which `tests/test_sources.py` owns. What this catches is a
@@ -4193,24 +4192,40 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
     them too would put the same decision in two places.
     """
 
-    #: The entry points as they stand. Named so that a **removed** door fails
-    #: this too: a rule that only checks what it finds passes happily on a file
-    #: whose subject has been deleted, which has happened twice in this suite.
+    #: The entry points as they stand, each mapped to the parameter that carries
+    #: the provider list. Named so that a **removed** door fails this too: a rule
+    #: that only checks what it finds passes happily on a file whose subject has
+    #: been deleted, which has happened twice in this suite.
+    #:
+    #: **Two spellings, because a door takes one or the other.** Four take a
+    #: `metadata.Access`, which carries the plan along with the key and the
+    #: logins; the two that send no login take the plan alone. Which is which is
+    #: `tests/test_metadata.py::TestNoDoorTakesTheKeyAndThePlanApart`, with the
+    #: reason beside each. What this rule asks of both is the same question: the
+    #: list arrives, and it cannot be defaulted away.
     DOORS = {
-        "lookup",
-        "lookup_volume",
-        "search",
-        "title_search",
-        "editions",
-        "candidates",
+        "lookup": "access",
+        "lookup_volume": "plan",
+        "search": "access",
+        "title_search": "access",
+        "editions": "plan",
+        "candidates": "access",
     }
 
     def _public_coroutines(self) -> dict[str, set[str]]:
+        """Every parameter however it is spelled, not two of the five lists.
+
+        Positional only, `*args` and `**kwargs` are the other three, and each
+        was a one character way past this. `ast.walk` over the whole `arguments`
+        node is the structural form; `tests/test_metadata.py` reads the same
+        signatures the same way.
+        """
         tree = ast.parse((BACKEND / "metadata.py").read_text())
         return {
             node.name: {
                 argument.arg
-                for argument in [*node.args.args, *node.args.kwonlyargs]
+                for argument in ast.walk(node.args)
+                if isinstance(argument, ast.arg)
             }
             for node in tree.body
             if isinstance(node, ast.AsyncFunctionDef)
@@ -4221,7 +4236,7 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
         missing = {
             name
             for name, arguments in self._public_coroutines().items()
-            if "plan" not in arguments
+            if not {"plan", "access"} & arguments
         }
         assert missing == set(), (
             f"these reach a catalogue with no provider list: {sorted(missing)}"
@@ -4229,7 +4244,7 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
 
     def test_the_doors_are_the_ones_this_rule_was_written_against(self):
         """A door removed or renamed is a finding, not a quieter pass."""
-        assert set(self._public_coroutines()) == self.DOORS
+        assert set(self._public_coroutines()) == set(self.DOORS)
 
     def test_the_plan_cannot_be_defaulted_away(self):
         """Keyword only with no default, or forgetting it stops being an error.
@@ -4238,9 +4253,9 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
         character of diff and turns a compile error into a source being asked
         that somebody switched off.
         """
-        for name in self.DOORS:
+        for name, carrier in self.DOORS.items():
             signature = inspect.signature(getattr(metadata, name))
-            parameter = signature.parameters["plan"]
+            parameter = signature.parameters[carrier]
             assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, name
             assert parameter.default is inspect.Parameter.empty, name
 

@@ -15,7 +15,10 @@ for the pool, and `TestTheCandidateTableIsWellFormed` for the two properties
 of the table that decide whether either can work at all.
 """
 
+import ast
+import inspect
 from datetime import date, datetime
+from pathlib import Path
 
 import pytest
 
@@ -23,18 +26,17 @@ import csv_import
 from csv_import import (
     CLAIMS,
     COLUMN_GUESSES,
-    HeaderNames,
     ImportError_,
-    build_mapping,
-    decode,
-    detect,
-    flip_catalogue_name,
-    match_format,
-    match_status,
+    _build_mapping,
+    _decode,
+    _detect,
+    _HeaderNames,
+    _match_format,
+    _match_status,
+    _parse_date,
+    _sniff_delimiter,
+    _unwrap_excel_formula,
     parse,
-    parse_date,
-    sniff_delimiter,
-    unwrap_excel_formula,
 )
 from enums import BookFormat, ReadStatus
 from import_readers import ImportReader
@@ -176,19 +178,19 @@ class TestColumnGuessing:
         reach the 13's candidates whether or not anything is removed.
         `TestAColumnIsClaimedOnce` is what covers the pool.
         """
-        mapping = build_mapping(["Title", "ISBN", "ISBN13"])
+        mapping = _build_mapping(["Title", "ISBN", "ISBN13"])
         assert mapping["isbn13"] == "ISBN13"
         assert mapping["isbn"] == "ISBN"
 
     def test_a_column_nothing_wants_is_left_alone(self):
-        mapping = build_mapping(["Title", "Owned Copies"])
+        mapping = _build_mapping(["Title", "Owned Copies"])
         assert "Owned Copies" not in mapping.values()
 
     def test_a_field_with_no_column_is_none(self):
-        assert build_mapping(["Title"])["rating"] is None
+        assert _build_mapping(["Title"])["rating"] is None
 
     def test_matching_ignores_case_and_separators(self):
-        assert build_mapping(["TITLE", "date_read"])["date_read"] == "date_read"
+        assert _build_mapping(["TITLE", "date_read"])["date_read"] == "date_read"
 
     def test_completed_is_a_header_in_one_table_and_a_cell_value_in_the_other(self):
         """`COLUMN_GUESSES` is matched against headers, `STATUS_GUESSES` against cells.
@@ -197,11 +199,11 @@ class TestColumnGuessing:
         row as a status, or leave a `Completed` column unmapped because the
         word was spoken for.
         """
-        mapping = build_mapping(["Title", "Completed"])
+        mapping = _build_mapping(["Title", "Completed"])
 
         assert mapping["date_read"] == "Completed"
         assert mapping["status"] is None
-        assert match_status("Completed") is ReadStatus.READ
+        assert _match_status("Completed") is ReadStatus.READ
 
 
 class TestTheCandidateTableIsWellFormed:
@@ -241,8 +243,8 @@ class TestAColumnIsClaimedOnce:
             (("isbn13", ("ean", "isbn")), ("isbn", ("isbn",))),
         )
 
-        assert build_mapping(["ISBN"]) == {"isbn13": "ISBN", "isbn": None}
-        assert build_mapping(["EAN", "ISBN"]) == {"isbn13": "EAN", "isbn": "ISBN"}
+        assert _build_mapping(["ISBN"]) == {"isbn13": "ISBN", "isbn": None}
+        assert _build_mapping(["EAN", "ISBN"]) == {"isbn13": "EAN", "isbn": "ISBN"}
 
     def test_a_file_naming_one_column_twice_fills_one_field_from_each(self, monkeypatch):
         """Two headers spelled the same way are two entries in the pool."""
@@ -252,7 +254,7 @@ class TestAColumnIsClaimedOnce:
             (("isbn13", ("isbn",)), ("isbn", ("isbn",))),
         )
 
-        assert build_mapping(["ISBN", "isbn"]) == {"isbn13": "ISBN", "isbn": "isbn"}
+        assert _build_mapping(["ISBN", "isbn"]) == {"isbn13": "ISBN", "isbn": "isbn"}
 
 
 class TestOverrides:
@@ -312,7 +314,7 @@ class TestFieldParsing:
         ],
     )
     def test_status_vocabularies(self, raw, expected):
-        assert match_status(raw) is expected
+        assert _match_status(raw) is expected
 
     @pytest.mark.parametrize(
         ("raw", "expected"),
@@ -336,18 +338,18 @@ class TestFieldParsing:
         ],
     )
     def test_format_vocabularies(self, raw, expected):
-        assert match_format(raw) is expected
+        assert _match_format(raw) is expected
 
     @pytest.mark.parametrize(
         "raw", ["2021/03/14", "2021-03-14", "14/03/2021", "14.03.2021"]
     )
     def test_date_shapes(self, raw):
-        parsed = parse_date(raw)
+        parsed = _parse_date(raw)
         assert parsed is not None and parsed.year == 2021
 
     def test_a_date_it_cannot_read_is_absent_rather_than_wrong(self):
         # A wrong date lands in "books finished in 2021" and nobody notices.
-        assert parse_date("sometime last spring") is None
+        assert _parse_date("sometime last spring") is None
 
     def test_a_rating_outside_the_scale_is_dropped(self):
         [row] = parse(b"Title,Rating\nDune,9\n").rows
@@ -361,20 +363,11 @@ class TestFieldParsing:
         [row] = parse(b"Title,Year Published\nDune,12345\n").rows
         assert row.year is None
 
-    def test_a_corporate_author_keeps_its_commas(self):
-        assert (
-            flip_catalogue_name("Springer, Berlin, Heidelberg")
-            == "Springer, Berlin, Heidelberg"
-        )
-
-    def test_a_name_with_no_comma_is_left_alone(self):
-        assert flip_catalogue_name("Frank Herbert") == "Frank Herbert"
-
     def test_unwrapping_leaves_an_ordinary_value_alone(self):
-        assert unwrap_excel_formula("9780441013593") == "9780441013593"
+        assert _unwrap_excel_formula("9780441013593") == "9780441013593"
 
     def test_an_empty_formula_becomes_empty(self):
-        assert unwrap_excel_formula('=""') == ""
+        assert _unwrap_excel_formula('=""') == ""
 
 
 class TestDecoding:
@@ -394,17 +387,17 @@ class TestDecoding:
         out, and the length is what makes this stronger than `is not None`,
         which a decode that swallowed a byte would also satisfy.
         """
-        assert len(decode(bytes(range(256)))) == 256
+        assert len(_decode(bytes(range(256)))) == 256
 
 
 class TestDelimiterSniffing:
     def test_a_comma_in_a_quoted_title_does_not_outvote_the_tabs(self):
         """Counted on the header line only, for exactly this reason."""
         sample = "Title\tAuthor\n\"Dune, or the Desert\"\tFrank Herbert\n"
-        assert sniff_delimiter(sample) == "\t"
+        assert _sniff_delimiter(sample) == "\t"
 
     def test_an_ordinary_csv(self):
-        assert sniff_delimiter("Title,Author\nDune,Frank Herbert\n") == ","
+        assert _sniff_delimiter("Title,Author\nDune,Frank Herbert\n") == ","
 
 
 # ── The 2026 audit ────────────────────────────────────────────────────────────
@@ -500,16 +493,16 @@ class TestTheCandidateListSetsPriority:
         headers = [guess for _, guesses in COLUMN_GUESSES for guess in guesses]
         first_written = {field: guesses[0] for field, guesses in COLUMN_GUESSES}
 
-        assert build_mapping(headers) == first_written
-        assert build_mapping(list(reversed(headers))) == first_written
+        assert _build_mapping(headers) == first_written
+        assert _build_mapping(list(reversed(headers))) == first_written
 
     def test_a_named_status_column_beats_a_bare_shelf_listed_before_it(self):
-        assert build_mapping(["Title", "Shelf", "Exclusive Shelf"])["status"] == (
+        assert _build_mapping(["Title", "Shelf", "Exclusive Shelf"])["status"] == (
             "Exclusive Shelf"
         )
 
     def test_a_page_count_beats_a_column_that_holds_a_shelf_dimension(self):
-        assert build_mapping(["Title", "Length", "Page Count"])["pages"] == "Page Count"
+        assert _build_mapping(["Title", "Length", "Page Count"])["pages"] == "Page Count"
 
     def test_a_length_of_column_beats_a_bare_length_column(self):
         """The position `length of` was added in, asserted rather than described.
@@ -518,7 +511,7 @@ class TestTheCandidateListSetsPriority:
         file carries both. This is the file that tells the two apart, and it is
         what stops the next reader tidying the name to the end of the list.
         """
-        assert build_mapping(["Title", "Length", "length_of"])["pages"] == "length_of"
+        assert _build_mapping(["Title", "Length", "length_of"])["pages"] == "length_of"
 
     def test_the_members_own_ratings_column_beats_a_bare_rating_column(self):
         """The other position, and the same diagonal.
@@ -527,7 +520,7 @@ class TestTheCandidateListSetsPriority:
         the `Rating` column, which is where a site that publishes an average
         puts everyone else's number.
         """
-        assert build_mapping(["Title", "Rating", "My Ratings"])["rating"] == "My Ratings"
+        assert _build_mapping(["Title", "Rating", "My Ratings"])["rating"] == "My Ratings"
 
     def test_a_librarything_row_keeps_its_page_count(self):
         """What the defect cost on a real file: 471 pages read as 5."""
@@ -573,7 +566,7 @@ class TestOneStrayByteDoesNotDecideTheEncodingOfTheWholeFile:
         The 0x81 is what puts the file on that path at all: without a byte that
         fails, this pair decodes strictly and the branch under test never runs.
         """
-        assert decode(b"a\x81b," + "Â£".encode("cp1252")) == "a�b,£"
+        assert _decode(b"a\x81b," + "Â£".encode("cp1252")) == "a�b,£"
 
     def test_a_file_carrying_replacement_characters_is_not_voted_out_by_them(self):
         """U+FFFD in the file is not a byte that failed, and is not counted.
@@ -591,7 +584,7 @@ class TestOneStrayByteDoesNotDecideTheEncodingOfTheWholeFile:
             + b"\n"
         )
 
-        text = decode(content)
+        text = _decode(content)
 
         assert text.endswith("…\n")
         assert text.count("�") == csv_import._STRAY_RUN_BUDGET + 2
@@ -607,7 +600,7 @@ class TestOneStrayByteDoesNotDecideTheEncodingOfTheWholeFile:
             b"Title\n" + b"caf\xe9 " * (csv_import._STRAY_RUN_BUDGET + 1) + "…".encode()
         )
 
-        text = decode(content)
+        text = _decode(content)
 
         assert text.count("café") == csv_import._STRAY_RUN_BUDGET + 1
         assert text.endswith("â€¦")
@@ -618,7 +611,7 @@ class TestOneStrayByteDoesNotDecideTheEncodingOfTheWholeFile:
             b"Title\n" + b"caf\xe9 " * csv_import._STRAY_RUN_BUDGET + "…".encode()
         )
 
-        text = decode(content)
+        text = _decode(content)
 
         assert text.count("café") == csv_import._STRAY_RUN_BUDGET
         assert text.endswith("…")
@@ -650,7 +643,7 @@ class TestEndpapersOwnExportRoundTrips:
         later candidate is consulted, so a fixture based version of this passes
         whatever `Collection` would have done.
         """
-        assert build_mapping(["Title", "Collection"])["status"] is None
+        assert _build_mapping(["Title", "Collection"])["status"] is None
 
 
 class TestOpenLibraryReadingLog:
@@ -668,7 +661,7 @@ class TestOpenLibraryReadingLog:
         What each word means is `test_status_vocabularies`' job.
         """
         shelves = ["Want to Read", "Currently Reading", "Already Read", "Stopped Reading"]
-        assert all(match_status(shelf) is not None for shelf in shelves)
+        assert all(_match_status(shelf) is not None for shelf in shelves)
 
     def test_the_export_carries_no_isbn_to_match_on(self):
         """A property of the export, recorded so nobody looks for the bug.
@@ -696,7 +689,7 @@ class TestOpenLibraryReadingLog:
         this field is a file that lists a bare `Rating` column before the
         member's own, which is what this asserts against.
         """
-        assert build_mapping(["Title", "Rating", "My Rating"])["rating"] == "My Rating"
+        assert _build_mapping(["Title", "Rating", "My Rating"])["rating"] == "My Rating"
 
     def test_the_publication_year_is_read(self):
         [row] = parse(OPEN_LIBRARY).rows
@@ -716,7 +709,7 @@ class TestBookWyrmExport:
     def test_every_bookwyrm_shelf_is_recognised(self):
         """Completeness for this service. The vocabulary itself is tested once."""
         shelves = ["to-read", "currently-reading", "read", "stopped-reading"]
-        assert all(match_status(shelf) is not None for shelf in shelves)
+        assert all(_match_status(shelf) is not None for shelf in shelves)
 
     def test_the_review_becomes_the_note(self):
         [row] = parse(BOOKWYRM).rows
@@ -778,7 +771,7 @@ class TestLibibsCurrentVocabulary:
         row empties the date, which is the only shape that can: the status has
         to carry itself.
 
-        Asking `match_status` directly instead would test the vocabulary rather
+        Asking `_match_status` directly instead would test the vocabulary rather
         than this file, and the vocabulary is already asked in
         `TestColumnGuessing`.
         """
@@ -801,10 +794,10 @@ class TestOpenreads:
     """From `bookwyrm/tests/data/openreads-csv-example.csv`, committed 2025-03-31."""
 
     def test_planned_is_a_book_somebody_wants_to_read(self):
-        assert match_status("planned") is ReadStatus.WANT_TO_READ
+        assert _match_status("planned") is ReadStatus.WANT_TO_READ
 
     def test_the_book_format_column_is_found(self):
-        assert build_mapping(["title", "book_format"])["format"] == "book_format"
+        assert _build_mapping(["title", "book_format"])["format"] == "book_format"
 
 
 #: Amazon's Kindle document listing, from
@@ -868,7 +861,7 @@ class TestOneCellCannotBuyUnboundedWork:
 
     **Asserted below as a count of calls rather than as a duration**, because a
     duration measured in a throttled pod says nothing, and because the count is
-    what the bound is: `parse_date` costs 16.56 microseconds on a miss and the
+    what the bound is: `_parse_date` costs 16.56 microseconds on a miss and the
     shape gate in front of it costs 0.21.
 
     A single enormous cell is not the shape of this: `csv.field_size_limit`
@@ -879,7 +872,7 @@ class TestOneCellCannotBuyUnboundedWork:
     def test_a_cell_of_rubbish_reaches_the_date_parser_and_not_the_date_format(
         self, monkeypatch
     ):
-        """The gate is in `parse_date` rather than in the unpacker, so it covers
+        """The gate is in `_parse_date` rather than in the unpacker, so it covers
         every caller that loops over parts, including one written later."""
         calls = 0
 
@@ -977,14 +970,14 @@ class TestOneCellCannotBuyUnboundedWork:
         self, monkeypatch
     ):
         calls = 0
-        real = csv_import.match_format
+        real = csv_import._match_format
 
         def counted(raw):
             nonlocal calls
             calls += 1
             return real(raw)
 
-        monkeypatch.setattr(csv_import, "match_format", counted)
+        monkeypatch.setattr(csv_import, "_match_format", counted)
 
         content = (
             "Title\tPrimary Author\tPublication\n"
@@ -1122,7 +1115,7 @@ class TestEachServicesOwnReaderIsTheOneThatRunsOnItsOwnFile:
         the answer unchanged is a name doing nothing.
         """
         claim = dict(CLAIMS)[reader]
-        assert isinstance(claim, HeaderNames)
+        assert isinstance(claim, _HeaderNames)
         headers = parse(content).headers
 
         for name in claim.names:
@@ -1150,7 +1143,7 @@ class TestEachServicesOwnReaderIsTheOneThatRunsOnItsOwnFile:
         claimed = {
             name
             for _, claim in CLAIMS
-            if isinstance(claim, HeaderNames)
+            if isinstance(claim, _HeaderNames)
             for name in claim.names
         }
         assert "hasbeendeleted" not in claimed
@@ -1167,7 +1160,7 @@ class TestEachServicesOwnReaderIsTheOneThatRunsOnItsOwnFile:
             (ImportReader.OPENREADS, csv_import._READINGS),
         ):
             claim = dict(CLAIMS)[reader]
-            assert isinstance(claim, HeaderNames)
+            assert isinstance(claim, _HeaderNames)
             assert column in claim.names
 
     def test_a_claim_may_be_about_something_other_than_a_header_row(
@@ -1178,10 +1171,10 @@ class TestEachServicesOwnReaderIsTheOneThatRunsOnItsOwnFile:
         Google Play Books' library export is nested JSON, so no set of header
         names could ever claim it and its first line may be a single `{`. This
         registers the claim that reader would carry, over text past line one and
-        not a `HeaderNames` at all, and asks `detect` to route to it.
+        not a `_HeaderNames` at all, and asks `_detect` to route to it.
 
         Asserting that every claim is callable would pass on the table this
-        replaces, since `HeaderNames` is callable too. The routing is the claim.
+        replaces, since `_HeaderNames` is callable too. The routing is the claim.
         """
         library_json = '{\n  "libraryDoc": {\n    "documentType": "Book"\n  }\n}\n'
 
@@ -1191,14 +1184,14 @@ class TestEachServicesOwnReaderIsTheOneThatRunsOnItsOwnFile:
             ((ImportReader.OPENREADS, lambda text: '"documentType": "Book"' in text),),
         )
 
-        assert detect(library_json) is ImportReader.OPENREADS
+        assert _detect(library_json) is ImportReader.OPENREADS
 
     def test_a_claim_is_handed_the_window_and_never_the_file(self, monkeypatch):
         """What the type accepts that a set of header names refused.
 
         A set of names could only ask about one line, so the work was bounded by
         what a claim was. A predicate is free to walk a 5 MB upload once per
-        claim, on a route reachable three times a minute, and `detect` is where
+        claim, on a route reachable three times a minute, and `_detect` is where
         that is stopped rather than in a sentence each claim keeps to itself.
         """
         seen: list[int] = []
@@ -1209,7 +1202,7 @@ class TestEachServicesOwnReaderIsTheOneThatRunsOnItsOwnFile:
 
         monkeypatch.setattr(csv_import, "CLAIMS", ((ImportReader.OPENREADS, record),))
 
-        detect("x" * (csv_import._CLAIM_WINDOW * 3))
+        _detect("x" * (csv_import._CLAIM_WINDOW * 3))
 
         assert seen == [csv_import._CLAIM_WINDOW]
 
@@ -1224,7 +1217,7 @@ class TestEachServicesOwnReaderIsTheOneThatRunsOnItsOwnFile:
         instruments read the unwindowed side and the other two put it at 132 ms
         and at 437.8 ms, so the figure written is the lowest of the three and a
         floor. An ordinary export with a newline in it is 0.06 ms either way.
-        `_headers_of` is what this asserts, because `detect` windows the text
+        `_headers_of` is what this asserts, because `_detect` windows the text
         before any claim sees it and would hide the fallback.
         """
         # Asserted on the whole answer, not on `[0]`'s length. Indexing it made
@@ -1238,7 +1231,7 @@ class TestEachServicesOwnReaderIsTheOneThatRunsOnItsOwnFile:
     def test_a_file_nothing_claims_is_read_generically(self):
         """The fallback is what bounds a detection miss: a file no claim fires
         on is read by the reader that reads it today, never by nothing."""
-        assert detect("Title,Author\nDune,Frank Herbert\n") is ImportReader.GENERIC
+        assert _detect("Title,Author\nDune,Frank Herbert\n") is ImportReader.GENERIC
 
     def test_the_member_may_name_a_reader_over_the_detector(self):
         parsed = parse(LIBRARYTHING_PUBLICATION, None, ImportReader.GENERIC)
@@ -1247,7 +1240,7 @@ class TestEachServicesOwnReaderIsTheOneThatRunsOnItsOwnFile:
 
     def test_a_file_the_detector_cannot_read_falls_back_rather_than_raising(self):
         """Detection runs before the file is known to be a table at all."""
-        assert detect("") is ImportReader.GENERIC
+        assert _detect("") is ImportReader.GENERIC
 
 
 class TestARowTheFileMarksAsDeletedDoesNotComeBack:
@@ -1670,3 +1663,118 @@ class TestOpenreadsReadingsCellIsAFinishDate:
         )
         [row] = parse(content).rows
         assert (row.status, row.date_read) == (ReadStatus.READ, date(2024, 3, 4))
+
+
+#: Every public name `csv_import` binds at module level that it defines itself.
+#:
+#: Four of them are the door and each has a caller outside this module:
+#: `routers/imports.py` opens `parse` and catches `ImportError_`, and
+#: `importing.py` writes an `ImportRow` out of a `ParsedFile`. The rest are
+#: data published deliberately, which is not the same claim: `COLUMN_GUESSES`
+#: is the table this module's own docstring tells a contributor to add a
+#: service to, and `MAX_ROWS` and its siblings are bounds another module
+#: quotes. A guard that refused them would be asserting that a table is a way
+#: in.
+#:
+#: **Imports are not in here**, and the reason is proportion rather than
+#: principle: `csv_import` binds fifteen public names by importing them, most
+#: of them from the standard library, and a rule that made every one of those
+#: an alias would be paid on every ordinary import to catch a case the arm
+#: below catches directly.
+THE_PUBLIC_SURFACE = {
+    # The door.
+    "ImportError_",
+    "ImportRow",
+    "ParsedFile",
+    "parse",
+    # Published data.
+    "CLAIMS",
+    "COLUMN_GUESSES",
+    "FORMAT_GUESSES",
+    "MAX_NEW_TAGS_PER_IMPORT",
+    "MAX_ROWS",
+    "MAX_TAGS_PER_BOOK",
+    "MAX_TAGS_PER_ROW",
+    "PREVIEW_ROWS",
+    "READERS",
+    "STATUS_GUESSES",
+    # The shapes the tables above are written in, and the module's logger.
+    "Claim",
+    "ReaderFn",
+    "UnpackCell",
+    "logger",
+}
+
+
+class TestTheModulePublishesADoorAndSomeTables:
+    """Ten names were public with no caller outside this file and its own tests.
+
+    Being public bought them nothing a test needed: this file already reaches
+    ten underscore names, so a private one is no harder to assert against. What
+    it cost was a second implementation of a rule that has a home,
+    `flip_catalogue_name`, which a reader could import from either module and
+    get different answers from.
+
+    Nothing failed when that happened, so the surface is written down here.
+    """
+
+    @staticmethod
+    def _bound_here() -> set[str]:
+        """Every name `csv_import` binds at module level and defines itself.
+
+        Read off the source rather than off `dir()`, which cannot tell a name
+        this module defines from one it imported. **Assignments are in scope
+        and not only `def` and `class`**, because the ordinary way a name that
+        was renamed comes back is a compatibility alias, `decode = _decode`,
+        and a guard reading definitions alone cannot see one.
+        """
+        source = Path(inspect.getsourcefile(csv_import) or "").read_text()
+        bound: set[str] = set()
+        for node in ast.parse(source).body:
+            if isinstance(
+                node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+            ):
+                bound.add(node.name)
+            elif isinstance(node, ast.Assign):
+                bound.update(
+                    target.id
+                    for target in node.targets
+                    if isinstance(target, ast.Name)
+                )
+            elif isinstance(node, ast.AnnAssign) and isinstance(
+                node.target, ast.Name
+            ):
+                bound.add(node.target.id)
+        return bound
+
+    def test_the_reader_finds_the_module_it_was_pointed_at(self):
+        """A pass over the wrong file, or over one that failed to parse, is an
+        empty set, and an empty set is a subset of everything."""
+        bound = self._bound_here()
+        assert "parse" in bound
+        assert len({name for name in bound if name.startswith("_")}) > 10
+
+    def test_the_public_names_are_exactly_the_written_surface(self):
+        """**Asserted equal, not as a subset**, on `test_public.py`'s
+        `UNGATED_BY_DESIGN` precedent: a subset test catches a name that was
+        withdrawn and forgives one that was added, and one that was added is
+        how a rule with a home somewhere else gets its second copy here.
+        """
+        public = {name for name in self._bound_here() if not name.startswith("_")}
+        assert public == THE_PUBLIC_SURFACE, (
+            "A name `csv_import` binds at module level is private unless "
+            "something outside this module and its tests reads it. Adding one "
+            "is a decision about what this module is for."
+        )
+
+    def test_the_rule_with_a_home_cannot_be_imported_from_here(self):
+        """The arm the two above cannot carry, and the one the deletion was for.
+
+        `from bibliographic import flip_catalogue_name` binds the name in this
+        module too, so `from csv_import import flip_catalogue_name` resolves
+        and a caller cannot tell which module answered. That is the state the
+        deleted copy left the tree in, spelled with one line instead of twelve.
+        `import bibliographic` is what avoids it, and the call site says where
+        the rule lives.
+        """
+        assert not hasattr(csv_import, "flip_catalogue_name")

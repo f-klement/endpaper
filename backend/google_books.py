@@ -530,11 +530,18 @@ def merge_into(book: object, match: BookMatch, *, overwrite: bool) -> list[str]:
         setattr(book, name, incoming)
         changed.append(name)
 
-    # A cover the member uploaded lives under /covers/ and always outranks a
-    # remote one, exactly as in the metadata refresh.
+    # A cover the member uploaded outranks a remote one, and `covers.is_local`
+    # is the only reader of the prefix that decides it. Spelling the prefix
+    # again here is how the two stop agreeing: a literal does not follow the
+    # constant, so the day it moves this writer keeps overruling an upload the
+    # refresh handler protects, with the stored row looking correct either way.
+    #
+    # The **predicate** is shared with the refresh handler and the precedence is
+    # not. That one clears a non local cover unconditionally; this one also asks
+    # whether the field is free to write and whether the value would change.
     incoming_cover = match.cover_url
     current_cover = getattr(book, "cover_url", None)
-    keeps_local_cover = (current_cover or "").startswith("/covers/")
+    keeps_local_cover = covers.is_local(current_cover)
     replaceable = not current_cover or overwrite
 
     if (

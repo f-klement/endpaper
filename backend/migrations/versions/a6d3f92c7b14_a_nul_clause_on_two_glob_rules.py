@@ -83,47 +83,68 @@ from collections.abc import Sequence
 
 from alembic import op
 
+from dialect import DialectSQL, SwappedRule
+
 revision: str = "a6d3f92c7b14"
 down_revision: str | Sequence[str] | None = "c7b0a3e5d281"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-#: Each GLOB rule this revision rewrites, as `(table, constraint, before, after)`.
+#: Each GLOB rule this revision rewrites. `dialect.SwappedRule` names the six
+#: fields and carries what `before` is checked against.
 #:
 #: **The SQL is written out rather than imported from `models`**, for the reason
 #: every revision here gives: a migration describes the schema at one moment and
 #: must not change meaning when a constant is retuned. The cost is a fact stored
 #: twice, and `tests/test_schema.py::TestTheGlobRulesThatLearnedAboutNul` is what
-#: stands between the copies.
+#: stands between the SQLite copies;
+#: `tests/test_dialect.py::TestTheRevisionsPostgresArmIsTheModelsPostgresArm`
+#: stands between the Postgres ones.
 #:
-#: **`before` is what `downgrade()` installs, and it is checked against the
-#: schema this revision found rather than against itself**: `drop_constraint`
-#: takes a name, so `upgrade()` never reads `before` and a wrong one breaks only
-#: the way back, in the one situation nobody is watching.
-_GLOB_RULES: tuple[tuple[str, str, str, str], ...] = (
-    (
+#: **This revision is the one where the two engines say different numbers of
+#: things, and the table is what makes that visible.**
+#:
+#: On `catalogue_targets` the Postgres `before` and `after` are **the same
+#: text**, because everything this revision adds there is a NUL arm and Postgres
+#: `varchar` cannot hold a NUL. The swap still runs, dropping and recreating an
+#: identical constraint, which costs one statement and keeps the chain one shape
+#: on both engines. Writing the two out rather than aliasing one to the other is
+#: the point: a reader sees that they are equal here and not there.
+#:
+#: On `opds_servers` they differ, because two of that rule's three new arms are
+#: ceilings rather than NUL clauses and both engines want them.
+_GLOB_RULES: tuple[SwappedRule, ...] = (
+    SwappedRule(
         "catalogue_targets",
         "ck_catalogue_targets_indexes",
         "(isbn_index = '' OR isbn_index NOT GLOB '*[^A-Za-z0-9._]*') "
         "AND (title_index = '' OR title_index NOT GLOB '*[^A-Za-z0-9._]*')",
+        "(isbn_index = '' OR (isbn_index COLLATE \"C\") !~ '[^A-Za-z0-9._]') "
+        "AND (title_index = '' OR (title_index COLLATE \"C\") !~ '[^A-Za-z0-9._]')",
         "(isbn_index = '' OR isbn_index NOT GLOB '*[^A-Za-z0-9._]*') "
         "AND instr(isbn_index, char(0)) = 0 "
         "AND (title_index = '' OR title_index NOT GLOB '*[^A-Za-z0-9._]*') "
         "AND instr(title_index, char(0)) = 0",
+        "(isbn_index = '' OR (isbn_index COLLATE \"C\") !~ '[^A-Za-z0-9._]') "
+        "AND (title_index = '' OR (title_index COLLATE \"C\") !~ '[^A-Za-z0-9._]')",
     ),
-    (
+    SwappedRule(
         "opds_servers",
         "ck_opds_servers_base_url",
         "base_url GLOB 'http://?*' OR base_url GLOB 'https://?*'",
+        "base_url ~ '^http://.' OR base_url ~ '^https://.'",
         "(base_url GLOB 'http://?*' OR base_url GLOB 'https://?*') "
         "AND instr(base_url, char(0)) = 0 "
         "AND length(base_url) <= 255 "
         "AND length(CAST(base_url AS BLOB)) <= 1020",
+        "(base_url ~ '^http://.' OR base_url ~ '^https://.') "
+        "AND length(base_url) <= 255 "
+        "AND octet_length(base_url) <= 1020",
     ),
 )
 
 
-def _swap(table: str, constraint: str, wanted: str) -> None:
+def _swap(table: str, constraint: str, sqlite: str, postgresql: str) -> None:
     """Replace one CHECK, letting batch mode reflect everything else.
 
     **No `copy_from`**, which replaces reflection rather than supplementing it:
@@ -134,14 +155,16 @@ def _swap(table: str, constraint: str, wanted: str) -> None:
     """
     with op.batch_alter_table(table) as batch:
         batch.drop_constraint(constraint, type_="check")
-        batch.create_check_constraint(constraint, wanted)
+        batch.create_check_constraint(
+            constraint, DialectSQL(sqlite=sqlite, postgresql=postgresql)
+        )
 
 
 def upgrade() -> None:
-    for table, constraint, _, after in _GLOB_RULES:
-        _swap(table, constraint, after)
+    for rule in _GLOB_RULES:
+        _swap(rule.table, rule.constraint, rule.after, rule.after_pg)
 
 
 def downgrade() -> None:
-    for table, constraint, before, _ in _GLOB_RULES:
-        _swap(table, constraint, before)
+    for rule in _GLOB_RULES:
+        _swap(rule.table, rule.constraint, rule.before, rule.before_pg)

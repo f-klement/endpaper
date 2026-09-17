@@ -250,6 +250,86 @@ class TestAPersonNameInCatalogueOrder:
         )
 
 
+class TestOnlyTheBranchThatFlipsACellMayTakeItsFullStop:
+    """"Left alone" is the docstring's word, and the noise strip broke it.
+
+    `_strip_person_noise` removed a terminal full stop from every cell it was
+    handed, including the ones the flip then refused to touch, and
+    `_TRAILING_INITIAL` spares a single letter only, so every multi letter
+    abbreviation lost its stop on the way through a branch that rewrote
+    nothing.
+
+    The population is not hypothetical. A LibraryThing "Primary Author" cell is
+    typed by a member, so a full stop at its end is an abbreviation (`Dr.`,
+    `Jr.`, `Co.`, `Inc.`, `Ltd.`) rather than the ISBD punctuation the removal
+    exists for. Which of the two a cell carries is a fact about where the cell
+    came from, so only a branch that is rewriting the name anyway may decide.
+    """
+
+    @pytest.mark.parametrize(
+        "cell",
+        [
+            "Doubleday & Co.",
+            "Simon & Schuster, New York, Inc.",
+            "Harcourt Brace Jovanovich, New York, Inc.",
+            "Frank Herbert",
+            "Springer Verlag, Berlin, Heidelberg",
+            "Ursula K. Le Guin",
+        ],
+    )
+    def test_a_cell_it_will_not_flip_comes_back_as_it_arrived(self, cell):
+        assert flip_catalogue_name(cell) == cell
+
+    def test_a_trailing_separator_comma_still_comes_off(self):
+        """The one edit a refused cell does take, and it is the edit `.strip()`
+        already is: punctuation between fields rather than part of a name."""
+        assert (
+            flip_catalogue_name("Springer, Berlin, Heidelberg,")
+            == "Springer, Berlin, Heidelberg"
+        )
+
+    def test_the_life_dates_still_come_off_a_cell_it_will_not_flip(self):
+        """The bound in the other direction, and the one the first fix for this
+        got wrong: a refused cell keeps its full stop, not its noise. Dates and
+        a role word are not part of a corporate name either, and seven call
+        sites in `metadata.py` store what comes back."""
+        assert flip_catalogue_name("Zafón Carlos (1964-2020)") == "Zafón Carlos"
+        assert (
+            flip_catalogue_name("Bibliothèque nationale de France. Éditeur")
+            == "Bibliothèque nationale de France"
+        )
+
+    def test_a_name_it_does_flip_does_lose_its_terminal_full_stop(self):
+        """The other side of the same rule, and the arm without which
+        `_drop_isbd_stop` can be deleted from the flip branch in silence:
+        every other flipping case in this file is written without a stop.
+        `Pohl, Robert O.` above is what stops the removal going too far."""
+        assert flip_catalogue_name("Mann, Thomas.") == "Thomas Mann"
+
+    def test_a_name_it_does_flip_still_loses_its_life_dates(self):
+        """The evasion this guard is written against.
+
+        Counting the commas before the noise comes off passes every arm above
+        and silently stops this flipping, because the cell carries two commas
+        until the dates go.
+        """
+        assert flip_catalogue_name("Melville, Herman, 1819-1891") == "Herman Melville"
+
+    def test_a_full_stop_after_the_life_dates_does_not_save_them(self):
+        """`_PERSON_NOISE`'s date arm is anchored at the end of the string, so
+        a stop behind the dates hides them from it. That was uncovered only
+        because the stop removal ran first, inside the same loop."""
+        assert flip_catalogue_name("Melville, Herman, 1819-1891.") == "Herman Melville"
+
+    def test_a_run_of_spaces_cannot_buy_the_regex_more_work(self):
+        """Two of `_PERSON_NOISE`'s three arms are a `\\s*` in front of a rare
+        literal, which is quadratic over a whitespace run, and this function is
+        on the CSV import path. Measured on a worker node: 1.28 ms for one 500
+        character run of spaces, against 1 microsecond once collapsed.
+        """
+        assert flip_catalogue_name("a" + " " * 498 + "b") == "a b"
+
+
 class TestTheTwoLanguageTablesAreOneTable:
     """`BIBLIOGRAPHIC_CODES` is derived from `LANGUAGES` and must stay so.
 

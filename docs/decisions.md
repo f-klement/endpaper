@@ -2033,8 +2033,10 @@ nothing here has that shape.
 ### `importing.py` owns applying an export, `csv_import.py` stays pure underneath
 
 The third module in the same series and found the same way, by measuring after the second
-shipped. `csv_import.py` was already right: 12 public names, no session, decode and sniff and
-map and parse. Everything the database knew about **applying** the result was in a route
+shipped. `csv_import.py` was already right: no session, and a door over decode and sniff and map
+and parse. **The count this sentence used to carry is deleted rather than corrected**, on
+this file's own rule: the module's surface has since been narrowed and a number in prose
+stops being re-derived the moment it is written. Everything the database knew about **applying** the result was in a route
 handler: the catalogue index, the matching, the gap filling, the tag invention, the reading
 record and the review, with a **143 line** `import_csv` around them.
 
@@ -4105,6 +4107,127 @@ names, and the loan picker that draws it is choosing an account.
 **Grouping and ordering tags is one call.** `groupTagsByCategory(tags, locale)` sorts before
 it filters, so no caller can get the grouping without the ordering. The categories keep
 `TAG_CATEGORY_ORDER`, which is curated rather than alphabetical.
+
+
+### `theme/patterns.ts` exports eleven names only its test imports
+
+Ranking modules by export width puts this one at the top, and the answer is no. **This is
+the third time it has been asked**, which is why it is written down rather than re-derived.
+
+`measure`, `lattice`, `flow`, `mirror`, `ribbon`, `swirl`, `wallpaperWeights`, `Layer`,
+`LayerWeight`, `Branch` and `Point` are on the door so `tests/theme/patterns.test.ts` can
+assert curve continuity, cell coverage and the widest empty run over one generator at a
+time. Six further names are what the app itself imports.
+
+**Un-exporting them was refused once and the refusal shipped a defect.** Asanoha's
+honeycomb broke in a 60px band on every 420px tile, 14% of the page, and the constructor
+invariant cited at the time as the guard on exactly that pattern turned out to be vacuous
+for it: the caller derives its extent from its own pitch, so it satisfies the check by
+construction and the check learns nothing.
+
+**What measuring through `patternDataUri` cannot say** is which of "the generator wrote a
+bad path" and "the generator was never called on this pattern" happened. A coverage
+assertion over a whole rasterised field, banded loosely enough not to be flaky across
+twenty odd patterns, cannot separate a 14% shortfall on one pattern from the spread it must
+tolerate. `patternDataUri` emits one `<g opacity>` per layer, so a raster instrument can
+attribute a failure to a **layer**; the Asanoha defect was in a primitive's pitch, one level
+below that. That gap is what the eleven exports buy.
+
+**The other shape offered is worse.** Splitting the generators into their own module
+publishes a slice rather than a concept, which is what ADR 0008 refuses for
+`routers/books.py`.
+
+What did ship is the un-export of eight names nothing imported at all: `radial`,
+`MotifSet`, `Cubic`, `Arc`, `LatticeOptions`, `RadialOptions`, `Harmonic`,
+`WallpaperColours`. `tests/houseRules.test.ts` now holds the door to the rule that every
+export is imported by name somewhere, **reading import specifiers rather than text**: a name
+left behind in a comment is what a word matched grep counts as a reference, and it is how
+`src/index.css` reads as an importer of this module.
+
+**One line for whoever reopens this.** `patternDataUri` interpolates `colours.ink` and
+`colours.bloom` into SVG attributes unescaped. Those come from `getComputedStyle` over the
+theme's custom properties and `setProperty(` appears nowhere under `src/`, so no member
+supplied value reaches them. If the generators were ever split out, the interpolation sites
+move with them and that function stops being the single place where a colour becomes markup.
+Keep it one function.
+
+
+### A store identifier's value rule lives beside the scheme, and `takeout.VOLUME_ID` does not
+
+What a value has to look like for a scheme's own producer to have written it is a property
+of `StoreIdentifierScheme`, so `lib/stores.ts` owns it: `PRODUCED_VALUE`, and the
+`producedValue` and `storeIdentifier` doors over it. It was spelled twice, in
+`lib/calibre.ts` and `pages/ScanPage/types.ts`, identically named and identically typed, and
+the two were held in agreement by tests that read the other module's **source text**.
+
+**Those source reading arms were worth nothing rather than a little.** A text comparison can
+say two spellings match and cannot say either is reached: keep the literal, stop consulting
+it, replace the live check with something wider, and both arms stay green for ever. The
+evasion that actually matters is a caller that stops asking, and neither arm asserted a
+caller. What replaces them is `tests/lib/stores.test.ts` measuring the rule and each walk's
+own test sweeping its walk against `producedValue`, in both directions.
+
+**The label tables stay where they are.** `lib/calibre.CALIBRE_TYPES` and
+`ScanPage/types.LABELS_OF_SCHEME` differ in both directions on purpose: one admits a
+marketplace suffix because the plugin writing that column was read, the other admits
+`mobi-asin` because the value rule reaches a distinction a Calibre type column cannot make.
+Only the value rule moved.
+
+**`takeout.VOLUME_ID` is the same regex doing a different job and stays private to that
+module.** It tells the volume id line of a sidecar's metadata block from the reading state
+line beside it, without matching an English label a German export does not carry. That is a
+discriminator between two lines of a text file, not an admission rule for a labelled
+identifier. **What folding it in would accept**: widening `producedValue("google_books", …)`
+to thirteen characters would silently widen that line discriminator, and a reading state
+line of thirteen URL safe characters would be classified as a volume id. The two stay apart
+and their agreement is a sweep in `tests/lib/stores.test.ts` that builds one archive per
+candidate line and asks the reader, rather than reading the constant.
+
+**The table is exported, and only for the guard.** A behavioural probe can show that a rule
+refuses a padded value; it cannot show that the rule has no second quantifier, so the
+patterns themselves have to be reachable. `tests/houseRules.test.ts` holds every other
+module in `src` off the table, which is what keeps the two doors the doors.
+
+**The assertion is the form, not the characters a bad rule would use**, and that distinction
+was bought in review. The first draft scanned for `+`, `*` and `|`;
+`^(?:[A-Za-z0-9_-]{1,12}){1,12}$` carries none of the three, is anchored at both ends, and
+backtracks exponentially, measured at 927 ms, 2,396 ms and 28,675 ms for inputs of 25, 31
+and 37 characters. **Those are a floor rather than a figure**: this file publishes and so
+cannot name the machine, and it is the growth rather than the seconds that decides.
+
+**So the guard requires every entry to be one character class repeated a bounded number of
+times, anchored at both ends, with no flags.** A flag is part of the rule: `m` makes `^` and
+`$` match at a line break, so an ASIN followed by a newline and anything at all would have
+been admitted while both of the first draft's arms stayed green.
+
+**The form is deliberately narrower than the cost property that justifies it, and that gap
+is the thing to read before widening either.** `^B[A-Za-z0-9]{9}$` is anchored, flagless and
+constant work, has every property the paragraph above names, and is refused. So is
+`^[A-Z]{2}[0-9]{8}$`. A prefixed rule is not hypothetical: it is what the `asin` entry's own
+comment spends a paragraph declining. **The cheap way past a red arm there is to re-spell
+the rule as one wide class, which admits everything the prefix excluded**, so the answer is
+to widen the form with the reason written down rather than to loosen the class.
+
+**A complete ASCII sweep pins the class itself, and it compares the characters admitted
+rather than how many there were.** It counted them first, and a count is not a set:
+`[A-Za-z0-8\x7f]` is 62 characters too, drops the digit `9` from Amazon's alphabet, admits
+DEL, and passed every arm in all three files that touch the rule, because every positive
+sample in the tree happened to be 9 free. 62 and 64 survive as a second assertion, because
+they are the boundary argument: the alphanumerics, and the URL safe set. This is the check a
+sample cannot make at all: an earlier sample of 15 candidates passed 88 of 88 against
+`[A-Za-z0-9.]`, because none of them carried a `.` at length ten.
+
+**Every guard here was evaded before it was believed, and every evasion that found a hole
+was picked by a seat other than the one that wrote the guard.** The guard's author chose
+mutations that landed on the cases it already covered, every time; the count is not written
+down because it would stop being re-derived. The sharpest was the form assertion's own two
+anchors, unguarded for a round because all seven of its negative cases failed inside a well
+formed core: deleting either anchor left every arm green while `^[A-Za-z0-9]{10}$|.*` passed
+as well formed.
+
+**The table is what needs guarding, not today's two rules**, because a consolidated table is
+where somebody later adds a scheme whose rule alternates, over values that come off a
+member's own file.
 
 ## The reading record has one owner, and it is a second privacy rule
 
@@ -10142,8 +10265,8 @@ says so because the first version of it said the opposite.
 
 ## The candidate list sets column priority, and the pool is kept though it is inert
 
-`build_mapping` iterates the candidates and looks each up among the headers. Iterating the
-headers instead, which is what it did, let the file decide: `build_mapping(["Title",
+`_build_mapping` iterates the candidates and looks each up among the headers. Iterating the
+headers instead, which is what it did, let the file decide: `_build_mapping(["Title",
 "Shelf", "Exclusive Shelf"])` and the same two headers reversed gave different answers, and
 a LibraryThing export's `Length` column (`5.12 inches`) stood before `Page Count`, so a 590
 page book imported with 4 pages.
@@ -10347,7 +10470,7 @@ places that carry the sentence.
 
 ## A candidate name added at the end of a list is a different change from one added in it
 
-`build_mapping` iterates the candidates, so a list's order is the priority. That makes adding
+`_build_mapping` iterates the candidates, so a list's order is the priority. That makes adding
 a name two decisions, and only one of them is visible in a diff: which name, and where.
 
 The two the 2026 audit turned up carry a comment each, because a file where the position
@@ -10387,7 +10510,7 @@ through the expression: `parse` derives READ from a parsed `date_read` whenever 
 column matched nothing. So an assertion on a derived status is blind the same way, and
 `test_the_columns_that_match` passes with `completed` deleted from the READ vocabulary.
 `test_the_status_word_is_recognised_rather_than_inferred_from_the_date` takes the date away
-instead, which is the only shape that observes the row: asking `match_status` directly would
+instead, which is the only shape that observes the row: asking `_match_status` directly would
 test the vocabulary rather than this file, and it was the first attempt at this test, caught
 in review as a mutation that was already covered elsewhere.
 
@@ -11165,7 +11288,7 @@ costs one compound cell rather than a member's deleted titles.
 ## A claim is a predicate over the front of the file, not a set of header names
 
 Google Play Books' export has no header row, so a signature written as a set of names would have
-forced the JSON reader to change what a signature is rather than to add one. `HeaderNames` is
+forced the JSON reader to change what a signature is rather than to add one. `_HeaderNames` is
 the only implementation there is today.
 
 **The cost is what the type stopped bounding.** A set of names could only ask one question about
@@ -13440,3 +13563,571 @@ detector has stopped detecting anything. That is now separated by a fixture over
 itself, four shapes with no number in them, which cannot drift as the schema changes.
 Measured: blinding `_has_a_top_level_or` to return False fails three named tests, that fixture
 among them.
+
+## The local cover precedence is `covers.is_local` and nothing else
+
+`google_books.merge_into` spelled `(current_cover or "").startswith("/covers/")` against the
+constant `covers.py` holds. The predicate is now shared and the **precedence is not**: the
+refresh handler in `routers/books.py` clears a non local cover unconditionally, where
+`merge_into` also asks whether the field is free and whether the value would change. Those two
+differ on purpose and both stay.
+
+Enforced structurally rather than by a grep, because the literal is legitimate in two other
+places: `tests/test_covers.py::TestNoOtherModuleDecidesWhetherACoverIsLocal` refuses both roads
+to a duplicate, reading the constant and spelling it again, and
+`TestMergeInto::test_the_local_cover_rule_is_covers_own` monkeypatches `LOCAL_COVER_PREFIX` so a
+copy of the literal fails behaviourally.
+
+**One evasion is open and is stated in the guard's docstring rather than papered over**: a
+prefix assembled rather than written, `startswith("/cover" + "s/")`. It was picked by the
+security seat against the design seat's guard, which is the arrangement that found it.
+
+**Refused with it**: `enrichment.apply(book, match, how)`. The three write disciplines write
+three different column sets, 12 and 9 with an intersection of 8, `update_book_details` is a
+member's own PATCH rather than enrichment, and the `BookMatch` bound on the refresh path is a
+fourth door this tree already refused. What may be reopened later is a module owning the column
+sets only.
+
+## Outside evidence cannot claim to be this deployment's own file
+
+`catalogue.Record` is the seam every source adapter writes through, so the refusal is there and
+not at either writer: a rule at one writer is a rule the next source added does not get.
+`_REFUSED_AS_OUR_OWN` holds it, one entry, and `_drop_claimed_as_ours` runs **after**
+`_drop_unstorable` because these are string predicates and a `Record` is built from somebody
+else's JSON: `covers.is_local(b"/covers/x")` raises `TypeError`, which no adapter catches and
+which would be a 500 on a member's search rather than a dropped field.
+
+Integrity rather than confidentiality: the render is re-authorized per book id and
+`schemas/public.py` drops local covers from the published catalogue. What it bought an outside
+source before was a Book whose cover was pinned against both automated writers for good.
+
+## `COVER_HOSTS` entries are bare hosts, and two readers need them to be
+
+The CSP splices each entry verbatim into `img-src`; `is_fetchable` compares
+`urlsplit(listed).hostname`, which discards a path and a port. An entry carrying either means
+two different things, and the fetch reading is the wider one, which is the wrong direction for
+the tuple that closed the SSRF. Asserted per entry, and measured against a mutation adding
+`/opac` to the DNB entry, which **no other guard in that file caught**, the buildable URL walk
+included.
+
+## Escaping a CSV export cell is the default, and the exemption is the claim
+
+The export skipped `_csv_safe` on eight of eighteen cells and the comment above
+them said four. Seven were safe by type or by an enum validator. The eighth,
+`Purchase Currency`, was a member supplied string that had looked like the enum
+case: `min_length=3, max_length=3` plus an upper case, which `=A1` satisfies.
+
+The guard that closes the class needs the column as a value, and the module
+that would have carried it was refused. What carries it instead is an `ast`
+pass over the writer's own two argument lists,
+`test_books.py::TestNoCellOfTheCsvExportSkipsTheEscape`: it pairs each header
+with its cell and reads whether that cell is a `_csv_safe` call.
+
+**It asserts no exempt set, because there is none**, and the first version of
+this entry described one: an exempt set held equal to a named list with a
+reason per name. That version was refused in review and the section below says
+why. This paragraph is what the tree does.
+
+**The count is deliberately not written in the comment any more.** A number,
+once written down, is copied rather than re-derived, and the previous comment
+is the proof: it stated four, named six columns as the reason, and the eighth
+lived in the gap.
+
+## The flip counts commas after the noise strip and returns the value from before it
+
+Both halves are load bearing and they pull opposite ways.
+`Melville, Herman, 1819-1891` carries two commas until the life dates come off,
+so counting first stops it flipping, which is the obvious wrong fix: it passes
+every arm written for the defect. The strip also removes a terminal full stop,
+and ISBD punctuation and an abbreviation are spelled identically, so the
+refusal branch must not hand back the stripped value.
+
+**Residue, accepted:** a one comma cell ending in an abbreviation
+(`Seuss, Dr.`, `Smith, John Jr.`) still loses its stop. That is the branch that
+does edit the cell, and telling `Dr.` from the ISBD stop on `Mann, Thomas.`
+needs more than a regex. `_TRAILING_INITIAL` spares a single letter only, which
+is measured against 53 live DNB records at its own site.
+
+## `csv_import` has four public names, and the tables are not among them
+
+Ten public names had no caller outside the module and its own tests. Being
+public bought them nothing a test needed: the file already reached ten
+underscore names. One of them, `flip_catalogue_name`, was a second
+implementation of a rule with a home, and the two disagreed while the docstring
+said they were the same rule.
+
+`test_csv_import.py::TestTheModulePublishesADoorAndSomeTables::test_the_public_names_are_exactly_the_written_surface`
+asserts the public `def` and `class` names equal to `parse`, `ParsedFile`,
+`ImportRow`, `ImportError_`. It covers
+callables only. `COLUMN_GUESSES`, the other tables, the type aliases and the
+`MAX_` bounds stay public and stay out of the guard: they are data, and this
+module's own docstring tells a contributor that adding a service is adding
+names to a table. A guard covering them would be asserting that a table is a
+door.
+
+## What the export refuses, and why each refusal is not a gap
+
+- **`Notes`.** The importer maps it. A `Note` row carries `note_visible_to` and
+  the writer holds no viewer predicate, so the column would be the export
+  answering a question it cannot ask.
+- **`Added By` and `Date Added` stay write only.** A trust decision, not a
+  bounding one. `books.added_by_user_id` is the column `visible_to` and
+  `in_trash_for` are built on, so a reader honouring `Added By` would let any
+  member file a book as owned by another member from a file they uploaded. The
+  header authenticates nothing: "this is our export" is a claim a file makes
+  about itself, exactly as a calibre `opf:scheme` label is. If any entry in
+  `_NOT_READ_BACK` ever becomes readable, the column needs a **third state**
+  rather than a direction, and round tripping must not be what a new column
+  inherits. Written without a count, because that table's membership is
+  guarded and its size is not.
+- **`Format` is read back out of an uploaded file**, so a cell does reach that
+  column from outside. It carries no formula because
+  `csv_import._match_format` answers a `BookFormat` or nothing, never the
+  cell, and the export escapes it anyway.
+
+## `exchange.py` was refused and the round trip test it was filed for existed already
+
+The module did not survive its own deletion test: one writer, one reader, and
+`_csv_safe`'s rule is one comment at one site. Both critic seats had
+independently refused the per column "is it member supplied" flag, which was
+the module's whole interface, because a wrong boolean is a formula in a
+spreadsheet with a green build.
+
+Measured while implementing: the round trip test the ticket asked for was
+already in the tree at `0a8bb0b`, as
+`test_imports.py::TestEndpapersOwnExportSurvivesItsOwnImporter`, and it is
+stronger than the one specified. It partitions the live export header and
+`COLUMN_GUESSES` into three named tables with a reason per entry, so a column
+added to the writer alone fails there. The work that remained was the four
+missing columns and killing the duplicate header literal in `TestExport`.
+
+## Only the branch that flips a cell may take its full stop
+
+Two rounds, and the second one is the finding.
+
+**Round one** returned the raw cell whenever the comma count was not one, which
+is what the settled decision said. It also stopped `_PERSON_NOISE` running on
+that branch, so life dates and role words survived into `books.author` through
+seven `metadata.py` call sites: `Zafón Carlos (1964-2020)` came back whole, and
+so did `Bibliothèque nationale de France. Éditeur`. Nothing went red, because
+every `flip_catalogue_name` assertion in the tree was a one comma name.
+
+**Round two** separates the two things `_strip_person_noise` was doing. The
+noise comes off on every branch, because dates and a role word are not part of
+a corporate name either. The terminal full stop is `_drop_isbd_stop`, applied
+only where the name is being reordered anyway, because ISBD punctuation and an
+abbreviation are spelled identically and which one a cell holds is a fact about
+where the cell came from rather than about the string.
+
+That needed one regex change: `_PERSON_NOISE`'s date arm gained a `\.?` before
+its anchor. Without it, `Melville, Herman, 1819-1891.` matches nothing, and the
+dates used to come off only because the stop was removed first and the
+substitution ran again, which is the coupling that put the stop removal in the
+wrong function.
+
+Differential against `0a8bb0b` over 38 cells, taken by the design seat on a
+second instrument: **7 differ, 5 of them the defect** (`Doubleday & Co.`,
+`United Nations.`, `Smith, John, Jr. (1900-1980). Auteur`, and both `Inc.`
+cells) and **2 the whitespace collapse below**, which is a separate change.
+`Melville, Herman, 1819-1891.` flips now, which neither `0a8bb0b` nor the first
+attempt at this did.
+
+## `_PERSON_NOISE` on the import path is quadratic over a whitespace run
+
+Deleting the CSV copy put `_PERSON_NOISE` on an upload route for the first
+time. Two of its three arms are a `\s*` in front of a rare literal. Measured on
+a worker node: 1.28 ms for one 500 character run of spaces, 353 ms at 8,000,
+and **17.96 s of CPU** for the author column of a 5 MB upload of 10,464 rows
+whose author cell is 498 spaces, against 0.006 s for the implementation that
+was deleted. `import_limiter` allows three of those a minute per member.
+
+Collapsing whitespace before the regex is the bound, and it costs nothing a
+name means: 1.28 ms falls to 1 microsecond. The `[:500]` cap is necessary and
+not sufficient; uncapped, one 160,000 character cell measured 154 s.
+
+## The count that guards a guard must not be read off the thing it guards
+
+`TestExport`'s escape arm is parametrised over `_FORMULA_LEAD`, so shortening
+that tuple shortens the test, and the suite stays green. Measured: reducing it
+to `("=",)` was caught by nothing in the tree, and every other escape assertion
+in the repository uses `=`. The arm is kept, because it proves each character
+is handled, and an equality assertion on the tuple is added beside it, because
+only that stops it shrinking. Found by a mutation the security seat chose; the
+author had chosen one that the guard already covered.
+
+## Not carried over: the export's column order
+
+`test_csv_has_the_expected_header` was the only assertion on the order of the
+export's columns, and it is gone. What replaced it compares the header as a
+**set** against `COLUMN_GUESSES` and a named list, and pairs headers with cells
+positionally without asserting a sequence, so reordering both lists together is
+invisible. For a header bearing CSV read by `DictReader` that is not a
+contract, which is why nothing replaced it, but it is a property that used to
+be pinned and now is not.
+
+
+## No export cell is exempt from the escape, and there is no list of exemptions
+
+The first fix for the currency column kept the eight exemptions and wrote them
+into a named set with a reason each, asserted equal to what the writer does.
+The security seat refused it on the reason the set itself stated: the
+exemptions rest on the validator at the **API**, and `backup._parse_row`
+inserts a restored archive through Core. It coerces the temporal columns,
+validates `cover_url`, recomputes `name_folded` and nothing else, and SQLite is
+dynamically typed. Measured with stdlib `sqlite3`, and independently on both
+seats: `=cmd|'/c calc'!A1` into an `INTEGER` column stores with
+`typeof() = 'text'` and reads back as the string. So `Year`, `Pages`, `Rating`
+and `Purchase Price` were exempt on an argument that path defeats, and the
+admin who restores an archive is not the member who later opens the export.
+
+Every cell goes through `_csv_safe` now. It costs nothing, because the function
+only touches a value that would otherwise be executed, and the guard collapses
+to "a cell that is not a `_csv_safe` call is a failure": no named set to keep
+in step with the writer and no argument about which write paths exist.
+
+**The escape is a spelling rule and not a property check**, which is worth
+knowing rather than fixing. A rewrite escaping a tag name inside the join
+rather than the joined string is safe and goes red; one weakening `_csv_safe`
+itself is unsafe and does not. The second half is `TestExport`'s arm over
+`_FORMULA_LEAD`, which needed an equality assertion beside it because it is
+parametrised off the very tuple it guards: reducing that tuple to `("=",)`
+reduced the test to one arm, and was measured to be caught by nothing.
+
+## Left open: `csv_import` can still re-export a second rule with a home
+
+The surface guard covers what the module defines and assigns, not what it
+imports, because `csv_import` binds fifteen public names by importing them and
+a rule aliasing every one would be paid on every ordinary import.
+`flip_catalogue_name` has its own arm because it is the name whose second copy
+this work deleted. The structural version, if this ever bites again, is to ask
+the question of first party `ImportFrom` bindings only, which is six names
+rather than fifteen.
+
+## What the escape guard structurally cannot carry
+
+`TestNoCellOfTheCsvExportSkipsTheEscape` matches a `_csv_safe` Call node at the top of
+each cell. It cannot see a cell that matches the pattern and does not escape,
+which is `_csv_safe` itself, and a **second** module-level `def _csv_safe`
+shadowing the first satisfies `hasattr`, the matcher and the empty bare list.
+That one is caught by `TestExport::test_every_lead_a_spreadsheet_would_run_is_neutralised`,
+because that arm goes over HTTP. Covered by name rather than by the guard,
+which is why the two live beside each other.
+
+The vacuity directions that are closed, checked by the security seat rather
+than reasoned about: two empty list literals leave `bare == []` passing and the
+"at least one escaped" arm red; an alias at the call sites keeps `hasattr` true
+and makes all 22 cells bare, which fails in the right direction; swapping the
+two lists fails the string literal assertion; a third `writerow` fails the
+`len(written) == 2` assertion.
+
+
+## The thing retiring the exemption list cost, which is not the exemption
+
+`ESCAPING_EXEMPT_BY_TYPE` was doing two jobs and only one of them is retired.
+The other was that it was the **only written statement in the tree of which
+export columns are member supplied and which the app computes**, and that fact
+is still live: `_NOT_READ_BACK`'s trust argument for `Added By` rests on it,
+and so does any future decision to make one of the unread columns readable.
+`_csv_safe`'s docstring names the member supplied ones in prose, which is an
+enumeration rather than a partition. Nothing is uncovered today; the partition
+is where to look if that changes.
+
+Also lost, and covered elsewhere: the old set was keyed on **header names**, so
+renaming a header on an exempt column went red at that guard. It now goes red
+only in `test_imports.py::test_every_export_column_is_read_back_or_named_as_not_read`,
+which asserts the live header equal to `_ROUND_TRIPPED` union `_NOT_READ_BACK`.
+`_export_columns()` parses the header list for the count and the uniqueness
+check alone, so whoever simplifies that helper down to the row list is giving
+that up.
+
+## SQLite is the engine, and a dialect keyword in `models.py` is a description
+
+Decided by the owner 2026-09-17, and recorded with its measurement in the architecture
+decision that already holds the one container bargain.
+
+**Alembic owns the schema.** `init_db` runs the revisions and has no `create_all`,
+so `models.py`'s CHECK constraints and partial index clauses describe what a
+revision installed rather than enforcing anything themselves. `conftest.py` states
+the same fact from the suite's side. Two reviews in one round both took a dialect
+keyword in `models.py` for the deployed schema, which is how a fix landed in the
+file that does not create it.
+
+**A month bucket is one concept with two spellings**, `database.MonthBucket`,
+rather than a branch at each call site. A dialect with no arm is refused when the
+query compiles.
+
+**A count of files mentioning a token is not a count of files emitting one.** The
+figure for "eight revision files carry a SQLite only token" was a grep over whole
+files; the sentence it supported was about DDL. Read as non docstring string
+literals: six emit one inside DDL, a seventh inside a data migration's UPDATE, an
+eighth only in prose arguing the rule is out of scope. Both seats caught it
+independently and landed on different numbers, six and seven, because they were
+answering different questions; the fix was to state all three and say what was
+counted, not to pick one.
+
+**Compiling a statement against a dialect proves almost nothing.** Measured
+2026-09-17: SQLAlchemy renders `strftime(...)` for the Postgres dialect and raises
+nothing, so "it compiles" catches only a construct whose own compiler refuses.
+A guard that wants more has to read the rendered SQL. An arm written as a compile
+check was deleted for this reason after its author had believed it structural.
+
+## A deadline is a bare float, and the type behind it stayed deferred
+
+"How long is left of this deadline" was written four times: a private helper in `covers`
+and in `z3950`, and the same subtraction inline in `z3950` and `fetch`, across two spellings
+of the clock. It is one module now, `backend/deadline.py`, with `in_` and `left` and nothing
+else.
+
+**The type the ticket asked for was refused before this, and the refusal is why the door is
+two functions wide.** `z3950.association` refuses a deadline further away than its own
+`TIMEOUT_SECONDS`: a ceiling, because the client's socket timeout is derived from that
+deadline, so a caller asking for an hour would set an hour on the socket too. `opds.sync`
+caps each page at the smaller of the sync's end and one request's timeout: a clamp on a
+running total. A single narrowing door expresses the clamp and cannot express the ceiling,
+and the failure is silent: a caller that narrows by construction satisfies the ceiling, the
+refusal behind it becomes unreachable, and the next reader deletes it as dead code with
+nothing going red. `tests/test_deadline.py::TestTheDoorIsTwoFunctionsWide` fails on a third
+public name and on a further parameter to either of the two, which is where that gets argued
+again rather than assumed.
+
+Expiry stayed where it was for the same shape of reason: `authority` raises
+`AuthorityUnavailable`, `fetch` and `z3950` raise `DeadlineExceeded`, and `opds` returns
+what it has with `truncated=True`. One raising reader cannot serve all three.
+
+`left` is overloaded rather than returning `float | None` to every caller: `z3950` holds a
+definite deadline for an association's whole life and would otherwise narrow a `None` it
+cannot receive.
+
+**A door widens sideways as readily as it grows a name**, and the guard was written to count
+names. `in_(seconds, ceiling=...)` is the refused narrowing under a name already on the list,
+and the name set stays `{in_, left}`; a module level budget parked here was invisible for a
+second reason, that a float has no `__module__`. Both were found by the seat that did not
+write the guard, which is what that arrangement is bought for.
+
+## `errors.API_PREFIXES` and `covers.LOCAL_COVER_PREFIX` are two concepts sharing a spelling
+
+Asked when `covers.stored_url` removed the other two spellings of `/covers/`. They move
+together and neither derives from the other: both follow the path the cover route is mounted
+at, which is a third fact, spelled without a trailing slash in `routers/covers.py`'s
+`APIRouter(prefix=...)`. The other five members of `API_PREFIXES` have no module to ask, and
+folding the tuple into `covers` would make an error handler import the cover module to answer
+a routing question.
+
+Both critic seats landed independently on one stale line, from opposite directions: the
+docstring of `_works_out_what_is_left` still said "all three private helpers", written by the
+round that corrected that same number in three other places. This repository's own rule says
+a stale figure arrives in the commit that removes a fabricated one, and it did, one function
+below its own correction. It was caught because the seats were run separately and neither saw
+the other's findings first.
+
+The other convergence is the shape of the wave's guards: the design seat found a walk
+exempting by basename, so `routers/covers.py` was outside both cover rules, and the security
+seat found a door guard counting names while the argument it defends is about what the door
+can express. Both are the same defect, a guard counting the wrong thing, and neither seat saw
+the other's.
+
+## The key, the plan and the logins reach a catalogue as one value
+
+`metadata.Access` is frozen and carries the plan, the API key and the logins.
+The resolver is `settings_store.library_access`, and the split is not cosmetic:
+`metadata.py` reaches no database and the resolver reads settings and opens the
+keychain.
+
+**The first draft of this paragraph gave a second reason and it was false.** It
+said the resolver has to ask `metadata.carries_a_credential` which doors take a
+login, so one module holding both would cycle. Measured by the design seat on
+2026-09-17 by two instruments: module level `import settings_store` and `import
+credentials` added to `metadata.py` collects the whole suite at exit 0, and a
+static import closure over `backend/` puts `settings_store` inside
+`closure(metadata)` and not the other way about. With both in one module
+`carries_a_credential` is a local name anyway.
+
+**The cycle that is real runs the other way, and it is what decides the
+import.** `settings_store` importing `metadata` at module level fails at
+collection: `mailer` imports `settings_store`, which would import `metadata`,
+which imports `catalogue`, which imports `schemas.book`, which imports the
+`schemas` package, which imports `schemas.user`, which reads
+`mailer.MAX_ADDRESS` before `mailer` has defined it. Measured 2026-09-17,
+`AttributeError: partially initialized module 'mailer'`. So `metadata` is
+imported inside the two functions that need it at run time and under
+`TYPE_CHECKING` for the annotation, which PEP 649 never evaluates. **What goes
+red if that block is deleted is `mypy`, not the suite**: collection still exits
+0 and the targeted files pass, while `mypy` reports `Name "metadata" is not
+defined`. The rung is tested rather than self enforcing.
+
+**The Google Books switch is not read on the outbound path any more.**
+`ready_sources` puts Google Books in the plan only when its section is on and a
+key is in force, and the key travels no further than a source the plan admits:
+`_lookup_one` hands it to a bespoke adapter and `_search_one` to a metered one,
+and neither is constructed for a source the plan left out. Two of the six
+handlers never had the conjunction, so this is the other four adopting what they
+already did.
+
+**`Access.logins` has a default and that is deliberate.**
+`routers/books.py::_google_books_in_force` builds one for `lookup_volume`, whose
+one bespoke target keeps its secret in a query string and sends no login.
+Resolving a keychain there would be a round trip per request for a credential
+that path cannot send. What that default costs is that a hand built access type
+checks and sends nothing, so the ast walk in `tests/test_metadata.py` asks
+whether each router call's access came from `library_access`, scoped per
+function: the router binds the name `access` in six handlers and one of them
+binds it from a resolver that opens no keychain.
+
+**The refusal stayed in the handler.** `access.plan.asked` and
+`access.plan.searched_harder` are read at the three sites that refuse, and
+`_no_sources` and `_lookup_failure` still turn the answer into a status code. A
+predicate on `Access` taking an argument that picks the roster would be a
+behaviour switch, which is the shape this file already records as the thing a
+reviewer agrees with and a hole survives behind.
+
+**`Access` is resolved in the handler body and never as a sibling `Depends`.**
+FastAPI's `solve_dependencies` runs dependencies in declaration order and the
+first `HTTPException` propagates, so one declared before `CurrentUser` would
+answer an unauthenticated caller with this route's 409 instead of a 401.
+
+**The key reaches a metered door and no other.** `metadata._lookup_one` used to
+hand `api_key` to every bespoke target, which is how the security seat's
+recorded evasion worked: a row added to `_BESPOKE_LOOKUPS` receives the
+deployment's key by arriving. It now passes it only where
+`Capability.METERED` holds, which is the test `_search_one` already applied on
+the other path. Nothing in force changes: Open Library is the other bespoke door
+and its adapter opens with `del api_key`.
+
+**A second resolution of the key inside a handler is a redundancy and not a
+defect, and the reason is the call site.** `ready_sources` resolves the key too,
+and there that resolution **is** the gate keeping a keyless Google out of the
+plan. A second read beside an already resolved `access` gates nothing, because
+the gate for that call is `access.plan`. It costs one settings row read. Written
+down because the shape, work done twice, reads as waste and gets refiled.
+
+**The walk that says a login was resolved reads rebinds as well as
+bindings, and asks `symtable` what a binding is.** `frozen=True` refuses
+mutation of the object and not rebinding of the name, so `access =
+library_access(db)` followed by `access = metadata.Access(plan=access.plan,
+api_key=access.api_key)` sent no login and left every guard green. The walk now
+collects both halves per scope and subtracts.
+
+**Three drafts of that rule enumerated the spellings and each was short.** The
+first read `ast.Store` and missed `except ... as`; the second added that one
+field and called it the only exception, which was false by six, since the two
+`match` name fields, `MatchMapping.rest` and `ast.alias`'s two are plain strings
+as well. Each was caught by the other seat and each fix was one further arm. The
+rule is now `symtable`, which is the compiler's own answer and covers the
+spellings the grammar grows; what is enumerated is the diagonal, one arm per
+spelling, whose job is to report by name when the rule stops covering one.
+
+**The scope walk that decides which statements are asked was still an
+enumeration after the helper stopped being one.** A `def` binds its own name
+where it stands, and the walk skipped the statement to avoid its body, so a name
+shadowed by a `def` still read as carrying a login; `class` was caught, and that
+asymmetry was the tell. A nested function's **parameter** shadows it too, and
+that one cannot be fixed by refusing to descend, because a handler wrapping its
+outbound call in a nested function is a shape the router already has. Both seats
+reached the first independently.
+
+**A child scope binds names no statement declares, and they shadow.** A
+function's parameter and a comprehension's target are the two, and the walk
+subtracts what each child scope names for itself before descending. Refusing to
+descend is not the alternative: the router already wraps an outbound call in a
+nested function that reads what its handler resolved.
+
+**One member of that family was answered by a language change rather than by a
+rule.** PEP 709 inlined a list, set and dict comprehension into the enclosing
+scope in 3.12, so their targets reached the symbol table and read correctly
+before anything handled them; a generator expression kept its own scope and was
+open. The tell is the asymmetry, not the miss.
+
+**And a walrus inside a comprehension binds in the enclosing scope**, which is
+the same language rule from the other end and the direction a scope subtracting
+fix goes wrong in: `[x for x in rows if (access := build())]` has to read as a
+rebind of the handler's own name rather than be swallowed. Both seats took one
+rule apart from opposite ends without seeing each other's work.
+
+**A symbol table block is found by name and never by position.** Under PEP 649
+a module's first child block is `__annotate__`, so `get_children()[0]` returned
+an annotation scope holding one symbol called `.format` and every binding read
+as a rebind. It reproduced only in the suite pod: the control plane runs Python
+3.13 and the pod runs 3.14.7, which is a reminder that a probe on this machine
+is not a measurement of the suite.
+
+## Editing applied migrations was allowed, on one condition
+
+2026-09-17. Ten revisions gained a spelling per engine through `dialect.DialectSQL`, which
+the compiler visits, so a third engine is refused where the rule is rendered rather than by
+a server later. `down_revision` never moved and nothing was added, so the edit only ever changes what a **fresh** database
+executes. The argument that no database in the field is affected is a claim over a
+population nobody here can enumerate, and Alembic stores a revision id rather than a
+checksum, so nothing would detect an edit either way. What makes it defensible is a
+measurement rather than the argument: the whole chain rendered into a SQLite file before
+and after, with `sqlite_master` identical.
+
+**The comparison had to be order normalised, and finding that out came first.** A batch
+rebuild emits reflected constraints and foreign keys in an order that varies between
+processes: measured, two renders of one unmodified tree differed on four tables by ordering
+alone. Comparing the raw text would have reported a change that was not one, and the fix is
+to compare the set of clauses in each `CREATE TABLE` rather than their sequence. The
+control is that two independent renders of the unmodified tree both normalise to what the
+edited tree produces.
+
+## A grep cannot find what it does not spell
+
+2026-09-17. The Postgres gap was counted three times by grepping the revision files for
+`GLOB`, `instr` and `char(0)`, later widened to `CAST(... AS BLOB)` and `typeof(`, and the
+answer moved from eight files to nine. The chain, run against a real PostgreSQL 16.2, stops
+at the **eighth** revision, on `UPDATE tags SET is_predefined = 1`: a boolean column
+assigned an integer, carrying none of the five tokens. The instrument that found it existed
+because it shipped **before** the repair, which is the whole argument for a job that reports
+a known gap rather than a ticket that describes one.
+
+## The naive regex translation of a GLOB fails two different ways
+
+2026-09-17, measured on PostgreSQL 16.2. `GLOB` and a POSIX regex share `*` and part on `.`
+and `?`, and the two spellings in this schema part differently:
+
+* `GLOB 'v1.*.*.*'` spelled `~ '^v1.*.*.*'` **silently widens**: `'v1XYZ' ~ '^v1.*.*.*'` is
+  true, so a value with no separator at all passes a shape check the GLOB refused. The
+  correct spelling escapes each separator: `~ '^v1\..*\..*\.'`.
+* `GLOB 'http://?*'` spelled `~ '^http://?*'` does **not** widen, and the prediction that it
+  would admit `http:/` is wrong. It does not compile: `invalid regular expression:
+  quantifier operand invalid`, because `*` quantifies the `?`. The correct spelling is
+  `~ '^http://.'`, since `.` is the regex spelling of GLOB's `?`.
+
+The pair is worth keeping because the prediction was still what made anybody look, and
+because only one of the two failures is the kind a green pipeline hides.
+
+## A NUL arm is subsumed by a column type, not by an engine
+
+2026-09-17. `instr(x, char(0)) = 0` is dropped on the Postgres arm of six columns. The
+reason usually given, that Postgres rejects NUL in text, is half of it: the arm's second job
+on SQLite is to make `length()` exact and the charset rule total, and both follow from a
+character type that cannot hold the byte. `bytea` holds one freely, and a sealed blob in a
+text column is the shape this schema already has. So the rule is asserted against the column
+type rather than stated in a comment:
+`tests/test_dialect.py::TestEveryNulArmDroppedOnACharacterColumn`.
+
+`ck_catalogue_credentials_envelope` deliberately carries no NUL arm on **either** engine,
+because that column has no ceiling for one to make exact. The asymmetry has its own case, so
+regularising the three is a test failure rather than a tidy.
+
+## Creation is not preservation
+
+2026-09-17. A schema that can be created proves nothing about what it refuses. Every CHECK
+here exists for `backup.restore`, which deletes and re-inserts whole tables through Core with
+no validating arm, so the application's own writes never test one.
+`tests/test_backup.py::TestTheSchemaRefusesEveryRecordedHostileValue` attempts each recorded
+hostile value as a raw insert on whichever engine the suite is pointed at: 36 refusals and 4
+positive controls, clean on SQLite and on PostgreSQL 16.2.
+
+**Three of the 36 exist because a mutation found nothing.** The security seat picked
+`credential_key ~ '^opds-'` reduced to `~ 'opds-'` and predicted that no named test would
+catch it, correctly: the conjunct count is unchanged, no models against revision comparison
+covers that constraint, and the token scan has nothing to say. No recorded value placed a
+pattern off the front of any of the three anchored rules. `xopds-1`, `ftp://http://x` and a
+valid envelope with a character in front of it close it, and re-running that mutation now
+fails on the first of them.
+
+**It asserts that the value does not land, never which constraint refused it**, and that is
+what lets one corpus serve two engines: a NUL in a `varchar` is a CHECK violation on SQLite
+(SQLSTATE 23514 equivalent) and an encoding refusal from the server on Postgres (22021). The
+positive controls are load bearing: without them a baseline row broken for any unrelated
+reason makes every case raise and every case pass.

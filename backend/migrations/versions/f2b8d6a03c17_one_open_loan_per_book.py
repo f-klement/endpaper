@@ -49,6 +49,14 @@ def upgrade() -> None:
         ["book_id"],
         unique=True,
         sqlite_where=sa.text("returned_at IS NULL"),
+        # **Both dialects, or Postgres gets a stricter rule with no error.** A
+        # `sqlite_where` alone is not a partial index anywhere else: on Postgres
+        # this becomes a plain UNIQUE on `book_id`, so a book can be lent exactly
+        # once, ever, and returning it does not free it. Measured 2026-09-17 on
+        # PostgreSQL 16.2 by reading `pg_indexes` after the chain: no WHERE
+        # clause. `models.py` has carried both since it was written; a revision
+        # is what a database actually runs.
+        postgresql_where=sa.text("returned_at IS NULL"),
         if_not_exists=True,
     )
 

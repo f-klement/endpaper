@@ -34,7 +34,7 @@ class CollectionStat(BaseModel):
 
 
 class MonthStat(BaseModel):
-    # A "YYYY-MM" bucket key, produced by SQLite's strftime.
+    # A "YYYY-MM" bucket key, produced by `database.MonthBucket`.
     month: str = Field(pattern=r"^\d{4}-\d{2}$")
     count: int = Field(ge=0)
 

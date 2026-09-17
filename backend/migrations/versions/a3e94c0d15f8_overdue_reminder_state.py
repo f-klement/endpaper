@@ -43,6 +43,9 @@ def _create_open_loan_index() -> None:
         ["book_id"],
         unique=True,
         sqlite_where=sa.text("returned_at IS NULL"),
+        # Both dialects. `f2b8d6a03c17` carries what a `sqlite_where` alone does
+        # to this index on Postgres.
+        postgresql_where=sa.text("returned_at IS NULL"),
         if_not_exists=True,
     )
 

@@ -3,6 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter
 from sqlalchemy import func
 
+from database import MonthBucket
 from dependencies import CurrentUser, DbSession
 from models import Book, Collection, ReadingProgress, Tag, User, book_tags
 from reading import Reading
@@ -106,7 +107,7 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
 
     by_month = (
         shelf.select(
-            func.strftime("%Y-%m", Book.added_at).label("month"),
+            MonthBucket(Book.added_at).label("month"),
             func.count(Book.id).label("count"),
         )
         .group_by("month")

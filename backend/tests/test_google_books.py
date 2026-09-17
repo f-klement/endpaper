@@ -12,6 +12,7 @@ import httpx
 import pytest
 import respx
 
+import covers
 import fetch
 from google_books import (
     VOLUME_ID,
@@ -248,12 +249,33 @@ class TestMergeInto:
         assert book.publisher == "Chilton"
 
     def test_never_replaces_a_locally_uploaded_cover(self):
-        # An uploaded cover lives under /covers/ and outranks a remote one,
-        # exactly as in the metadata refresh.
+        # An uploaded cover lives under the local prefix and outranks a remote
+        # one, which is the same question the metadata refresh asks.
         book = Book(title="Dune", cover_url="/covers/12.png")
         merge_into(book, _as_match(VOLUME), overwrite=True)
 
         assert book.cover_url == "/covers/12.png"
+
+    def test_the_local_cover_rule_is_covers_own(self, monkeypatch):
+        """Behavioural, because a grep is satisfied by the defect it replaced.
+
+        This writer spelled the prefix itself. Every arm above passed, and goes
+        on passing, for a copy of the literal: the two answers only diverge once
+        the prefix moves. `covers.is_local` reads `LOCAL_COVER_PREFIX` at call
+        time, so moving it here moves this writer with it, and a copy answers
+        for the old prefix and overrules an upload the refresh handler protects.
+
+        The structural half is
+        `test_covers.py::TestNoOtherModuleDecidesWhetherACoverIsLocal`, which
+        refuses the copy in any module rather than at this one call.
+        """
+        monkeypatch.setattr(covers, "LOCAL_COVER_PREFIX", "/held/")
+        book = Book(title="Dune", cover_url="/held/1.jpg")
+
+        # The cover alone: this volume fills nine other empty fields, and the
+        # question here is which of them `cover_url` is not.
+        assert "cover_url" not in merge_into(book, _as_match(VOLUME), overwrite=True)
+        assert book.cover_url == "/held/1.jpg"
 
     def test_fills_an_absent_cover(self):
         book = Book(title="Dune", cover_url=None)
@@ -535,7 +557,7 @@ class TestTheThreeSpellings:
     """One rule, spelled in three files, and only this one is a security bound.
 
     `takeout.ts` keeps a sidecar line that is not an id out of the browser's
-    parse and `calibre.ts` keeps a plugin's invented value out of a stored row.
+    parse and `stores.ts` keeps a plugin's invented value out of a stored row.
     Neither runs on the server: `backup.restore` writes `book_identifiers`
     through Core and runs no Pydantic model, so a restored row reaches
     `lookup_by_volume_id` having passed neither. This test is what stops the
@@ -561,9 +583,17 @@ class TestTheThreeSpellings:
     #: the first version on an argument about Python's `$` that is about the
     #: **backend** pattern and was applied to the wrong side: both browser
     #: modules spell `^...$`, where JavaScript's `$` is end of input.
+    #: **This map names files, so it goes stale when one moves, and it did.**
+    #: The browser's half of the rule lived in `calibre.ts` and
+    #: `ScanPage/types.ts` until they were folded into `stores.ts`, beside the
+    #: type whose property the rule is. Nothing on the frontend broke and
+    #: nothing on the frontend could notice: this is a backend test reading
+    #: frontend source, so only a backend run sees it, and the branch that moved
+    #: the literal had no reason to make one. It failed loudly on the merge,
+    #: which is the arrangement working rather than a near miss.
     ASSIGNMENTS = {
         "frontend/src/lib/takeout.ts": f"const VOLUME_ID = /^{SHAPE}$/",
-        "frontend/src/lib/calibre.ts": f"google_books: /^{SHAPE}$/",
+        "frontend/src/lib/stores.ts": f"google_books: /^{SHAPE}$/",
     }
 
     @pytest.mark.parametrize("relative", sorted(ASSIGNMENTS))

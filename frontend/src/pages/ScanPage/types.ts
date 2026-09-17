@@ -10,6 +10,10 @@ import { AUTHOR_SEPARATOR, boundNumber, boundText } from "../../lib/bookBounds";
 import { normaliseLocation } from "../../lib/lastLocation";
 import type { FileIdentifier, FileMetadata } from "../../lib/fileReaders";
 import type { StoreIdentifier, StoreIdentifierScheme } from "../../lib/stores";
+// The value rule, beside the scheme whose property it is. This module spelled
+// it a second time and `lib/calibre.ts` a third, held in agreement by tests
+// that read each other's source text.
+import { storeIdentifier } from "../../lib/stores";
 import { boundIdentifiers } from "../SettingsPage/LibrarySettingsPage/types";
 import type { NameClues } from "../../lib/fileName";
 import type { AudiobookGroup } from "../../lib/audiobookGroups";
@@ -216,8 +220,8 @@ export function draftFromMatch(match: BookMatch): BookDraft {
  * library, the two halves separate by length: **16 values are a `B` followed by
  * nine alphanumerics and 15 are a uuid or hex string of 32 to 40 characters**,
  * which is the filler calibre mints into that record when a file has no ASIN.
- * A label cannot tell those apart and `PRODUCED_VALUE` can, so the row is kept
- * on the value and never on the label alone. Owner's decision, 2026-09-11.
+ * A label cannot tell those apart and `stores.producedValue` can, so the row is
+ * kept on the value and never on the label alone. Owner's decision, 2026-09-11.
  *
  * **What that buys and what it does not.** This library's filler is refused on
  * its length, and `lib/calibre.identifiersWithScheme` records the limit that
@@ -274,68 +278,18 @@ const SCHEME_OF_LABEL = new Map<string, StoreIdentifierScheme>(
 );
 
 /**
- * What a value has to look like for the scheme's own readers to have made it.
- *
- * **The same fact `lib/calibre.PRODUCED_VALUE` holds**, because it is a
- * property of the scheme rather than of whoever wrote the label: ten characters
- * of Amazon's alphabet for an ASIN, twelve of the URL safe alphabet for a
- * volume id. This module's mirrored test reads both out of source and requires
- * them to be the same text, which is what `takeout.VOLUME_ID` and that table
- * already do for the Google half. A single home for it beside
- * `StoreIdentifierScheme` is raised rather than taken here.
- *
- * **It is what carries `mobi-asin`**, so the shape is load bearing rather than
- * a sanity check: the label is admitted and the value decides, 16 of that
- * library's 31 such rows kept and 15 refused. **The same ten characters as the
- * other three labels**, and nothing measured supports a narrower rule for this
- * one: what refuses those 15 is their length.
- *
- * **No matcher for the filler, which is the deliberate half.** Recognising a
- * uuid would be an inclusion list over an open set, and calibre is free to mint
- * a different filler tomorrow. A rule saying what an Amazon code is refuses
- * every filler that is not ten characters of this alphabet, which is every
- * filler that library holds and not every filler there could be.
- *
- * **The ASIN alphabet is not narrowed to a `B` prefix.** Amazon issues a
- * printed edition's ISBN-10 as its ASIN, and in that library **four of the
- * eight `ASIN` and `AMAZON` values are exactly that**, so a `B` rule would drop
- * half of what this admits. What it costs is that such a value is also the
- * book's ISBN.
- *
- * **Two columns and two different tokens, which is the answer to that.**
- * `opf.readIsbn` runs every candidate through `parseIsbn`, which answers the
- * canonical ISBN-13, so the book carries the thirteen digit form while the
- * identifier row carries the ten character one Amazon issued. Neither is a copy
- * of the other, and the row records what Amazon knows the book by rather than
- * restating the edition's number. **Written without the worked pair**: the
- * first draft carried one and its ISBN-13 was wrong, which is what a literal
- * nothing recomputes does.
- *
- * **A padded value is refused rather than trimmed.** The shape is anchored and
- * whitespace is not in either alphabet, and closing one up would send a value
- * this app invented rather than one the file carried.
- *
- * Total over `StoreIdentifierScheme`, `LABELS_OF_SCHEME`' discipline: a scheme
- * added to that union with no shape here is a compile error rather than a label
- * admitted on its name alone.
- */
-const PRODUCED_VALUE: Record<StoreIdentifierScheme, RegExp> = {
-  asin: /^[A-Za-z0-9]{10}$/,
-  google_books: /^[A-Za-z0-9_-]{12}$/,
-};
-
-/**
  * The identifiers a picked file labelled with a scheme this app stores.
  *
  * **A name rule decides the scheme and a value rule decides whether the row is
  * kept**, which is `lib/calibre.identifiersWithScheme`'s shape and its reason: a
- * label is a claim a file makes, and a file is untrusted input. Both rules are
- * above.
+ * label is a claim a file makes, and a file is untrusted input. The name rule is
+ * `LABELS_OF_SCHEME` above; the value rule is `stores.storeIdentifier`, beside
+ * the scheme whose property it is.
  *
  * **The label is trimmed and the value is not.** `opf.ts` reads `opf:scheme`
  * with `getAttribute`, which trims nothing, while its EPUB 3 route and every
  * other reader in the family hand over a label that is already trimmed; the
- * value needs no trim because `PRODUCED_VALUE` refuses whitespace outright.
+ * value needs no trim because the value rule refuses whitespace outright.
  * Lower cased for the reason calibre's own readers lower case a type: the
  * spelling is whatever a producer felt like, and this library holds `ASIN`
  * beside `isbn`.
@@ -360,8 +314,9 @@ export function identifiersFromFile(
     if (identifier.scheme === null) continue;
     const scheme = SCHEME_OF_LABEL.get(identifier.scheme.trim().toLowerCase());
     if (scheme === undefined) continue;
-    if (!PRODUCED_VALUE[scheme].test(identifier.value)) continue;
-    kept.push({ scheme, value: identifier.value });
+    const row = storeIdentifier(scheme, identifier.value);
+    if (row === null) continue;
+    kept.push(row);
   }
   return kept;
 }

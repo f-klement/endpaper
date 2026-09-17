@@ -50,7 +50,6 @@ import ipaddress
 import json as jsonlib
 import logging
 import socket
-import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -58,6 +57,8 @@ from typing import Any, Final, Protocol
 from urllib.parse import urljoin
 
 import httpx
+
+from deadline import in_, left
 
 logger = logging.getLogger("endpaper.fetch")
 
@@ -1046,13 +1047,13 @@ async def get(
     `get_once` for the ones that make one.
     """
     cap = MAX_RESPONSE_BYTES if limit is None else limit
-    ends = time.monotonic() + TIMEOUT_SECONDS if deadline is None else deadline
-    left = ends - time.monotonic()
-    if left <= 0:
+    ends = in_(TIMEOUT_SECONDS) if deadline is None else deadline
+    remaining = left(ends)
+    if remaining <= 0:
         raise DeadlineExceeded(f"{url[:200]} ran out of time before answering")
 
     try:
-        async with asyncio.timeout(left):
+        async with asyncio.timeout(remaining):
             return await _walk_hops(client, url, params, cap, credential)
     except TimeoutError:
         # `from None`: the cancellation is machinery, and every caller catches

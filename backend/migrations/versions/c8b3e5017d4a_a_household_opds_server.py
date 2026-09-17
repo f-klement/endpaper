@@ -73,6 +73,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
+from dialect import DialectSQL
+
 revision: str = "c8b3e5017d4a"
 down_revision: str | Sequence[str] | None = "e4f7a2c81b09"
 branch_labels: str | Sequence[str] | None = None
@@ -99,9 +101,34 @@ _SAFE_KEY = (
     "AND credential_key GLOB 'opds-*'"
 )
 
+#: The same rule on Postgres. The NUL arm drops for the reason `f3a20d68c4b1`
+#: states and a guard, not a comment, holds this column to a character type
+#: there. `GLOB 'opds-*'` is a prefix with no bound after it, so `^opds-` is the
+#: whole of it: the ceiling above already bounds the rest.
+_SAFE_KEY_PG = (
+    "length(credential_key) BETWEEN 1 AND 32 "
+    'AND (credential_key COLLATE "C") !~ \'[^a-z0-9_-]\' '
+    "AND credential_key ~ '^opds-'"
+)
+
 #: `?*` rather than `*`, so `http://` on its own is refused along with
 #: `file:///etc/passwd`. GLOB's `?` is exactly one character.
 _HTTP_SCHEME = "base_url GLOB 'http://?*' OR base_url GLOB 'https://?*'"
+
+#: The same prefix rule on Postgres, and the second highest risk line here.
+#:
+#: **`?` is where `GLOB` and a POSIX regex part.** GLOB's `?` is exactly one
+#: character; a regex `?` is a quantifier on what precedes it. So the naive
+#: `~ '^http://?*'` is not the same rule, and on PostgreSQL 16.2 it is not a
+#: rule at all: measured, `invalid regular expression: quantifier operand
+#: invalid`, because `*` then quantifies the `?`. A settled note predicted it
+#: would silently admit `http:/`; it refuses to compile instead, which is the
+#: better failure and is recorded because the prediction was the reason to look.
+#:
+#: `.` is the correct spelling of GLOB's `?`, and it matches a newline on both
+#: engines. Measured on PostgreSQL 16.2: `http://x` accepted, and `http:/`,
+#: `http://`, `file:///etc/passwd` and `https://x` all refused by the first arm.
+_HTTP_SCHEME_PG = "base_url ~ '^http://.' OR base_url ~ '^https://.'"
 
 
 def upgrade() -> None:
@@ -114,8 +141,14 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name="pk_opds_servers"),
         sa.UniqueConstraint("credential_key", name="uq_opds_servers_credential_key"),
         sa.CheckConstraint("length(name) BETWEEN 1 AND 100", name="ck_opds_servers_name"),
-        sa.CheckConstraint(_SAFE_KEY, name="ck_opds_servers_credential_key"),
-        sa.CheckConstraint(_HTTP_SCHEME, name="ck_opds_servers_base_url"),
+        sa.CheckConstraint(
+            DialectSQL(sqlite=_SAFE_KEY, postgresql=_SAFE_KEY_PG),
+            name="ck_opds_servers_credential_key",
+        ),
+        sa.CheckConstraint(
+            DialectSQL(sqlite=_HTTP_SCHEME, postgresql=_HTTP_SCHEME_PG),
+            name="ck_opds_servers_base_url",
+        ),
     )
 
 

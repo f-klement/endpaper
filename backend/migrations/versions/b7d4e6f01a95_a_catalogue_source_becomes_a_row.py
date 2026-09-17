@@ -65,6 +65,8 @@ from typing import Any
 import sqlalchemy as sa
 from alembic import op
 
+from dialect import DialectSQL
+
 revision: str = "b7d4e6f01a95"
 down_revision: str | Sequence[str] | None = "a3f7c1d94e82"
 branch_labels: str | Sequence[str] | None = None
@@ -87,6 +89,24 @@ depends_on: str | Sequence[str] | None = None
 #: is zero is the direction a restore needs: nothing `targets._INDEX` accepts is
 #: refused here.
 _INDEX_REPERTOIRE = "*[^A-Za-z0-9._]*"
+
+#: The same repertoire as a POSIX bracket expression, for the Postgres arm.
+#:
+#: **Unanchored and negated, rather than an anchored positive**, so newline
+#: semantics cannot be argued about: `x !~ '[^...]'` is true exactly when no
+#: character of `x` is outside the set, and a newline is outside it like any
+#: other refused character. An anchored `^[...]*$` would turn on whether `$`
+#: matches before a trailing newline, which is a question this rule should not
+#: have.
+#:
+#: **`COLLATE "C"` is not decoration.** A range inside a bracket expression is
+#: read against the operand's collation, so `A-Za-z0-9` under a collation this
+#: deployment does not choose is a repertoire nobody has measured. Measured on
+#: PostgreSQL 16.2 under `C` and under `en_GB.utf8`: identical for this
+#: expression, including `café` refused and `pica.isb` accepted. So this is
+#: insurance against the collations that were not measured, which is every
+#: other one, rather than a repair for an observed break.
+_INDEX_REFUSED_PG = "[^A-Za-z0-9._]"
 
 _SEEDED_ROWS: list[dict[str, Any]] = [
     {
@@ -363,17 +383,36 @@ def upgrade() -> None:
         sa.Column("reads_author_identifiers", sa.Boolean(), nullable=False),
         sa.Column("timeout_seconds", sa.Float(), nullable=True),
         sa.Column("is_seeded", sa.Boolean(), nullable=False),
+        # `= 1` on a boolean is a type error on Postgres, where the column is
+        # a real `boolean` and not an integer wearing a name. The SQLite arm is
+        # this revision's own text.
         sa.CheckConstraint(
-            "requires_isbn_claim = 1 OR source = 'dnb'",
+            DialectSQL(
+                sqlite="requires_isbn_claim = 1 OR source = 'dnb'",
+                postgresql="requires_isbn_claim OR source = 'dnb'",
+            ),
             name="ck_catalogue_targets_isbn_claim",
         ),
         sa.CheckConstraint(
             "transport IN ('sru', 'bespoke')",
             name="ck_catalogue_targets_transport",
         ),
+        # **`GLOB` and a POSIX regex share `*` and part on `.` and `?`**, so a
+        # translation that looks right is the risk here rather than one that
+        # fails. This rule carries neither character, and the empty arm is
+        # redundant on Postgres, where an empty string satisfies the negation
+        # already: it is kept so the two arms are the same sentence twice.
         sa.CheckConstraint(
-            f"(isbn_index = '' OR isbn_index NOT GLOB '{_INDEX_REPERTOIRE}') "
-            f"AND (title_index = '' OR title_index NOT GLOB '{_INDEX_REPERTOIRE}')",
+            DialectSQL(
+                sqlite=(
+                    f"(isbn_index = '' OR isbn_index NOT GLOB '{_INDEX_REPERTOIRE}') "
+                    f"AND (title_index = '' OR title_index NOT GLOB '{_INDEX_REPERTOIRE}')"
+                ),
+                postgresql=(
+                    f"(isbn_index = '' OR (isbn_index COLLATE \"C\") !~ '{_INDEX_REFUSED_PG}') "
+                    f"AND (title_index = '' OR (title_index COLLATE \"C\") !~ '{_INDEX_REFUSED_PG}')"
+                ),
+            ),
             name="ck_catalogue_targets_indexes",
         ),
         # `targets._USE_ATTRIBUTES` in SQL. The column is declared INTEGER and
@@ -383,9 +422,22 @@ def upgrade() -> None:
         # `IN` does not, so it is redundant rather than dead, and it is kept as a
         # type test beside a value test. `models.CatalogueTarget` carries the
         # seven probes and what each spelling does to them.
+        # **`typeof` drops on the Postgres arm and must not drop on the SQLite
+        # one.** The comment above says why it is there: SQLite's affinity is a
+        # preference, so a Core insert puts `'7 @and @attr 1=4 x'` in a column
+        # declared INTEGER. Postgres has no such column, and the honest sounding
+        # "Postgres enforces the type, so delete the arm" would take the only
+        # type test on the engine everybody runs.
+        # `tests/test_dialect.py::TestNoSqliteArmLostAClause` is what refuses
+        # that, and it is per engine rather than a diff between the two.
         sa.CheckConstraint(
-            "isbn_attribute IS NULL OR (typeof(isbn_attribute) = 'integer' "
-            "AND isbn_attribute IN (7))",
+            DialectSQL(
+                sqlite=(
+                    "isbn_attribute IS NULL OR (typeof(isbn_attribute) = 'integer' "
+                    "AND isbn_attribute IN (7))"
+                ),
+                postgresql="isbn_attribute IS NULL OR isbn_attribute IN (7)",
+            ),
             name="ck_catalogue_targets_use_attribute",
         ),
     )

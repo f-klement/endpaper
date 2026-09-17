@@ -111,7 +111,6 @@ the ticket asks for a library rather than a spider.
 """
 
 import logging
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final
@@ -125,6 +124,7 @@ import isbn as isbn_module
 import metadata
 from catalogue import Record
 from credentials import Credential, origin_of
+from deadline import in_, left
 from decoders import Decoding, Reader
 
 logger = logging.getLogger("endpaper.opds")
@@ -586,7 +586,7 @@ async def holdings(
         # rather than walked with an origin of "".
         raise UnusableAddress("That address cannot be used as a server's identity.")
 
-    ends = time.monotonic() + deadline_seconds
+    ends = in_(deadline_seconds)
     found: list[Record] = []
     not_held = 0
     pages = 0
@@ -607,7 +607,7 @@ async def holdings(
             if pages >= max_pages or len(found) >= max_entries:
                 truncated = True
                 break
-            if time.monotonic() >= ends:
+            if left(ends) <= 0:
                 truncated = True
                 break
             seen.add(target)
@@ -624,7 +624,7 @@ async def holdings(
                     # `catalogue_client`'s per socket operation timeout, which
                     # bounds a read and not a request. Found by a critic reading
                     # the bounds table against `fetch.py:497`.
-                    deadline=min(ends, time.monotonic() + fetch.TIMEOUT_SECONDS),
+                    deadline=min(ends, in_(fetch.TIMEOUT_SECONDS)),
                     credential=credential,
                 )
             except fetch.AddressRefused as refusal:

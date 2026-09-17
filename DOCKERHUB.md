@@ -59,7 +59,7 @@ volumes:
 |---|---|---|
 | `SECRET_KEY` | none | **Signs session tokens. Set it.** The container refuses to start in production without one, because the example value makes every session forgeable |
 | `DATA_DIR` | `/app/data` | The SQLite file and the cover images. This is the only path worth persisting |
-| `DATABASE_URL` | `sqlite:///$DATA_DIR/library.db` | Point elsewhere if you must; SQLite is what it is tested against |
+| `DATABASE_URL` | `sqlite:///$DATA_DIR/library.db` | Moves the SQLite file. SQLite is the only engine this schema can be created on: several tables carry CHECK constraints written in SQLite's own SQL, so another URL does not get as far as a schema |
 | `ALLOW_REGISTRATION` | `true` | Set `false` once your library has signed up, or anyone reaching the port can create an account |
 | `AUTH_MODE` | `local` | `local`, `ldap`, or `proxy`. See below |
 | `GOOGLE_BOOKS_API_KEY` | none | Optional. Metadata works without it: the German National Library, K10plus and Open Library are queried first and need no key |

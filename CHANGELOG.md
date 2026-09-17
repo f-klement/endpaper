@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-Eight refactors from an architecture review, and **nothing a member sees changes** except
-where this says so. They are here rather than left out because two of them fixed answers that
+Refactors from an architecture review, and **nothing a member sees changes** except where
+this says so. They are here rather than left out because two of them fixed answers that
 were wrong on screen, and because a changelog that records only features is one nobody trusts
 about the rest.
 
@@ -40,6 +40,73 @@ about the rest.
 - **The feature flags the interface reads have one owner.** Five call sites configured the
   same request and three of them disagreed about whether to retry it, so a failure was retried
   on two pages and not on the rest, and which page you opened first decided it for the others.
+- **A catalogue can no longer hand this library a cover that pretends to be its own upload.**
+  A cover a member uploads is served from this app and outranks anything a catalogue offers,
+  which is what keeps an enrichment run from undoing somebody's own work. A remote record
+  could answer with a URL shaped like one of those files, and from then on every automated
+  correction stood aside from it: only editing the book by hand undid it. An outside
+  source's cover is refused now wherever it arrives from.
+- **The rule "an uploaded cover wins" is asked in one place.** The enrichment writer answered
+  it itself rather than asking, so the two could have disagreed. Nothing a member sees
+  changes today.
+- **A store identifier's value rule has one home.** What an ASIN or a Google volume id has to
+  look like was spelled in two modules and kept in step by tests that read each other's source
+  text; it now lives beside the scheme whose property it is, and each reader's own test sweeps
+  that reader against it in both directions.
+- **The wallpaper module's door is narrower by eight names**, each of which nothing outside the
+  module imported. The eleven its geometry test reaches stay, and `docs/decisions.md` now
+  records why with the measurement that bought them.
+- **A currency code that was a spreadsheet formula reached the CSV export live.** `Purchase
+  Currency` was the one member supplied text column that skipped the formula escape. Its
+  validator asks for three characters and upper cases them, which `=A1` answers, so nothing
+  between the payload and the file refused a formula. The comment above the block counted four
+  exempt cells where there were eight, and justified them by naming six columns, which is how
+  it hid. **Every cell of that export is escaped now, with no exemptions**: a restored archive
+  is inserted through Core, which coerces dates and nothing else, so SQLite will hold a formula
+  in an integer column and read it back as one.
+- **A catalogue order name flip edited cells it had refused to flip.** A cell with none or more
+  than one comma is meant to be left alone; the noise strip ran before the commas were counted
+  and took the terminal full stop off `Doubleday & Co.` and `Simon & Schuster, New York, Inc.`
+  on the way through. The rule has one implementation now.
+- **A shelf exported and imported back lost every rating and every read date.** The importer has
+  always mapped both columns and the export did not write them. It writes twenty two columns
+  now, four of them new: `Rating`, `Date Read`, `Pages` and `ISBN13`.
+- **The statistics and the reading history no longer call a SQLite only function** to build
+  their month buckets, so those two queries are engine independent.
+- **The `DATABASE_URL` documentation says what is true.** SQLite is the only engine this
+  schema can be created on: several tables carry CHECK constraints written in SQLite's own
+  SQL, so another URL does not get as far as a schema. The line that invited you to point it
+  elsewhere is gone.
+- **The cover store's own URL has a name.** The sign in background's URL was built by hand in
+  the settings router, which was the cover prefix spelled a third and fourth time, and the
+  house rule that only one module decides where a cover lives exempted those two lines with a
+  count. The exemption is gone with them.
+- **One module answers how long is left of a deadline.** It was a private helper in two
+  modules and the same subtraction inline in two more. Every signature, every budget and every
+  expiry class stays where it was; what moved is the arithmetic and the choice of clock.
+- **The three values every outbound catalogue request needs are one resolved value.** The
+  provider list, the Google Books key and the per source logins used to be assembled by hand
+  before each call at six handlers, and four of those also guarded the key with a switch the
+  roster already requires: one question answered by two mechanisms, with a paragraph per site
+  saying which one covered it.
+- **The Google Books key reaches a metered catalogue door and no other.** It used to go to
+  every bespoke one, so a catalogue added to that table would have received this deployment's
+  key by arriving. Nothing in force changes today: the other bespoke door is Open Library,
+  whose adapter discards it.
+- A backfill from store identifiers reads one settings row fewer per request, measured at 12
+  SELECTs a batch against 13.
+- **Postgres can create the schema, which it could not before.** The migration chain stopped
+  at its eighth revision, and ten revisions and fourteen CHECK constraints were written in
+  SQLite's own SQL. Each now carries a spelling per engine, the SQLite one unchanged and any
+  third engine refused where it is rendered. Two partial unique indexes that silently became
+  plain ones on Postgres, so a book could be lent exactly once ever and a second copy of a
+  title was refused, carry both dialects' clauses now. **SQLite remains the primary target and
+  what the whole suite runs on**, parts of the suite assert SQLite behaviour and do not run
+  elsewhere, and the image ships no Postgres driver, so pointing `DATABASE_URL` at one still
+  needs a driver installed.
+- A Postgres job in the pipeline that creates the schema on a real server, finishes a database
+  left half migrated, and runs the engine aware part of the suite against the result,
+  including a corpus of every recorded hostile value attempted as a raw insert.
 
 ## v0.16.1
 
@@ -855,7 +922,7 @@ byte identical, which is about the schema and was never about this.
   import template rather than off an export, and the importer says so beside them.
 
 - **The CSV importer's column priority is the candidate list's, not the file's.**
-  `build_mapping` iterated the file's headers, so the same two columns in the other order
+  `_build_mapping` iterated the file's headers, so the same two columns in the other order
   gave a different answer: a LibraryThing export's `Length` (`5.12 inches`) stood before
   `Page Count` and a 590 page book imported with 4 pages. The docstring, two comments, the
   same paragraph in `docs/api.md` and a test all stated the rule the code did not follow.

@@ -13,9 +13,11 @@ directory being written to.
 import json
 import zipfile
 from io import BytesIO
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
+from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError
 
 import backup
 import credentials
@@ -26,6 +28,9 @@ from backup import RestoreError
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from database import Base, SessionLocal
 from enums import CatalogueSource, ClassificationScheme
+from migrations.versions import (
+    b7d4e6f01a95_a_catalogue_source_becomes_a_row as a_catalogue_source_becomes_a_row,
+)
 from models import (
     AuthorAlias,
     Book,
@@ -2132,3 +2137,244 @@ class TestARestoreWritesOnlyAnImage:
 
         assert {p.name: p.read_bytes() for p in COVERS_DIR.glob("1.*")} == bodies
         assert restored["covers"] == 2
+
+# ── Every value this schema exists to refuse, on whichever engine is running ──
+
+
+class Refusal(NamedTuple):
+    """One hostile value, the column it goes in, and why it must not land."""
+
+    table: str
+    column: str
+    value: object
+    why: str
+
+
+#: A valid `catalogue_targets` row, taken from the revision that seeded the
+#: table rather than typed out here, so a column added to that table arrives in
+#: this baseline instead of turning every case below into a NOT NULL failure
+#: wearing the name of a CHECK.
+CATALOGUE_TARGET: dict[str, object] = dict(a_catalogue_source_becomes_a_row._SEEDED_ROWS[1])
+
+#: The four tables whose CHECK constraints are security bounds, each with a row
+#: that **must** land. Without these the corpus below passes on a baseline that
+#: is broken for some other reason: every insert raises, every case is green,
+#: and nothing has been asked about any constraint at all.
+VALID_ROWS: dict[str, dict[str, object]] = {
+    "catalogue_targets": CATALOGUE_TARGET,
+    "catalogue_credentials": {"source": "bne", "envelope": "v1." + "a" * 40 + ".b.c"},
+    "opds_servers": {
+        "name": "The study",
+        "base_url": "http://192.0.2.10:8083/opds",
+        "credential_key": "opds-aa00",
+    },
+    "book_identifiers": {"book_id": None, "scheme": "asin", "value": "B000123456"},
+}
+
+#: A NUL, spelled once. Every case using it is a value the tree records.
+NUL = "\x00"
+
+REFUSED: tuple[Refusal, ...] = (
+    # ── catalogue_targets: the index columns reach a CQL query unquoted ──
+    Refusal(
+        "catalogue_targets", "isbn_index", "bath.isbn or 1=1",
+        "the substitution the charset rule exists for",
+    ),
+    Refusal(
+        "catalogue_targets", "isbn_index", "bath isbn",
+        "a space alone, which is what a repertoire widened by [:space:] on one "
+        "engine would admit and no legitimate index name carries",
+    ),
+    Refusal(
+        "catalogue_targets", "isbn_index", f"bath.isbn{NUL} or 1=1",
+        "the NUL concatenation the tree records: nine characters by SQLite's "
+        "length() and seventeen bytes on disk",
+    ),
+    Refusal(
+        "catalogue_targets", "isbn_index", "café",
+        "one non ASCII letter, which a collation this deployment did not choose "
+        "could otherwise fold into A-Za-z",
+    ),
+    Refusal(
+        "catalogue_targets", "title_index", f"WOE{NUL} or 1=1",
+        "the second index column, stated rather than assumed to follow",
+    ),
+    Refusal(
+        "catalogue_targets", "title_index", "dc title",
+        "the second index column's charset rule",
+    ),
+    Refusal(
+        "catalogue_targets", "isbn_attribute", "7 @and @attr 1=4 x",
+        "a string in a column declared INTEGER, which SQLite's affinity permits "
+        "and only the typeof arm refuses there",
+    ),
+    Refusal(
+        "catalogue_targets", "isbn_attribute", 4,
+        "a use attribute outside the one this schema knows",
+    ),
+    # ── catalogue_credentials.source: it travels into a URL path ──
+    Refusal(
+        "catalogue_credentials", "source", f"bne{NUL}../../books/5?",
+        "the payload that steered an admin's own authenticated DELETE at "
+        "/api/books/5",
+    ),
+    Refusal("catalogue_credentials", "source", "../../books/5?", "the same payload, plain"),
+    Refusal("catalogue_credentials", "source", "BNE", "outside the repertoire"),
+    Refusal("catalogue_credentials", "source", "café", "one non ASCII letter"),
+    Refusal("catalogue_credentials", "source", "", "the floor"),
+    Refusal("catalogue_credentials", "source", "x" * 33, "the ceiling"),
+    # ── catalogue_credentials.envelope: the shape that is not a password ──
+    Refusal(
+        "catalogue_credentials", "envelope", "v1XYZ" + "z" * 40,
+        "no separator at all, which is what a regex spelled ^v1.*.*.* admits "
+        "and GLOB 'v1.*.*.*' never did",
+    ),
+    Refusal(
+        "catalogue_credentials", "envelope", "hunter2hunter2hunter2hunter2hunter2hunter2",
+        "a plaintext password written in by a hand edited archive",
+    ),
+    Refusal(
+        "catalogue_credentials", "envelope", "xv1." + "a" * 40 + ".b.c",
+        "a valid shape with a character in front of it, which is what an "
+        "unanchored version pattern admits",
+    ),
+    Refusal("catalogue_credentials", "envelope", "v1.a.b.c", "shorter than any envelope this build writes"),
+    Refusal(
+        "catalogue_credentials", "envelope", "v1." + "a" * 40 + ".b",
+        "two separators where the shape wants three",
+    ),
+    # ── opds_servers.credential_key: the two key spaces stay apart ──
+    Refusal(
+        "opds_servers", "credential_key", "bne",
+        "a roster catalogue's key space, which is the row that had the "
+        "library's sealed BNE login sent to an address the archive named",
+    ),
+    Refusal(
+        "opds_servers", "credential_key", f"opds-1{NUL}../../books/5?",
+        "the NUL concatenation the tree records for this column",
+    ),
+    Refusal(
+        "opds_servers", "credential_key", "xopds-1",
+        "the prefix off the front, which is the whole of what an anchor is: it "
+        "passes every other arm, and an unanchored `~ 'opds-'` admits it",
+    ),
+    Refusal("opds_servers", "credential_key", "OPDS-1", "outside the repertoire"),
+    Refusal("opds_servers", "credential_key", "opds.1", "a dot is not in the repertoire"),
+    # ── opds_servers.base_url: a sync fetches it ──
+    Refusal(
+        "opds_servers", "base_url", "http:/",
+        "one slash, which is what a regex spelled ^http://?* would admit if it "
+        "compiled at all",
+    ),
+    Refusal("opds_servers", "base_url", "http://", "a scheme and no host"),
+    Refusal(
+        "opds_servers", "base_url", "ftp://http://x",
+        "an http prefix that is not the prefix, which an unanchored pattern "
+        "admits and a sync would then fetch over ftp",
+    ),
+    Refusal("opds_servers", "base_url", "file:///etc/passwd", "the wrong scheme entirely"),
+    Refusal(
+        "opds_servers", "base_url", f"http://x{NUL}" + "y" * 100_000,
+        "the megabyte parked behind a NUL, which length() reported as 8",
+    ),
+    Refusal("opds_servers", "base_url", "http://" + "x" * 300, "the character ceiling"),
+    # ── opds_servers.name ──
+    Refusal("opds_servers", "name", "", "the floor"),
+    Refusal("opds_servers", "name", "n" * 101, "the ceiling"),
+    # ── book_identifiers.value: a token a machine wrote ──
+    Refusal(
+        "book_identifiers", "value", f"B0{NUL}" + "x" * 10_000,
+        "the value a character ceiling alone admits on a Core insert",
+    ),
+    Refusal("book_identifiers", "value", "", "the floor"),
+    Refusal("book_identifiers", "value", "x" * 61, "the ceiling"),
+    Refusal("book_identifiers", "scheme", "kindle", "a scheme this release does not have"),
+)
+
+
+def attempt(table_name: str, overrides: dict[str, object], book_id: int | None) -> None:
+    """One Core insert into one table, exactly as `restore` performs it.
+
+    **Through Core and not through a model**, which is the whole point: `restore`
+    inserts with `table.insert()`, so `@validates` never fires, no Pydantic model
+    runs and no dataclass is constructed. Whatever refuses the row here is the
+    database, and the database is all that stands between a hand edited archive
+    and these columns.
+
+    Its own session, committed, because a CHECK is enforced at the statement on
+    SQLite and at the statement on Postgres but surfaces through the commit on
+    some drivers. Rolling back in `finally` leaves nothing for the next case.
+    """
+    table = Base.metadata.tables[table_name]
+    row = dict(VALID_ROWS[table_name]) | overrides
+    if row.get("book_id") is None and "book_id" in row:
+        row["book_id"] = book_id
+    session = SessionLocal()
+    try:
+        session.execute(table.insert(), row)
+        session.commit()
+    finally:
+        session.rollback()
+        session.close()
+
+
+def row_count(table_name: str) -> int:
+    session = SessionLocal()
+    try:
+        return session.execute(
+            select(func.count()).select_from(Base.metadata.tables[table_name])
+        ).scalar_one()
+    finally:
+        session.close()
+
+
+class TestTheSchemaRefusesEveryRecordedHostileValue:
+    """The corpus, run against whichever engine the suite is pointed at.
+
+    **Here rather than in `test_schema.py`, because `restore` is the writer
+    every one of these constraints exists for.** It deletes and re-inserts whole
+    tables through Core, so it is the one path into these columns with no
+    validating arm on it, and an archive is a file somebody was handed.
+
+    **It asserts that the value does not land, not which constraint refused it**,
+    and that is what makes one corpus serve two engines. A NUL in a `varchar` is
+    refused by a CHECK on SQLite and by the server's own encoding rule on
+    Postgres, with different SQLSTATEs and different exception messages; what
+    both engines owe this application is that the row is not there afterwards.
+
+    **The positive controls are load bearing.** Without them a baseline row
+    broken for any unrelated reason, a column added to a table, a NOT NULL nobody
+    filled, makes every case below raise and every case below pass, and the
+    corpus then says nothing about any constraint at all.
+    """
+
+    @pytest.fixture
+    def a_book_id(self, client, admin, make_book) -> int:
+        """`book_identifiers.book_id` is a foreign key, so its cases need a real
+        book or they fail on the reference rather than on the value."""
+        return make_book(admin["headers"], title="A book to hang an identifier on")["id"]
+
+    @pytest.mark.parametrize("table_name", sorted(VALID_ROWS), ids=lambda name: name)
+    def test_the_valid_row_lands(self, table_name, a_book_id):
+        """The control. Each baseline row is a row this application would write,
+        so a corpus whose refusals are all really NOT NULL failures fails here
+        first."""
+        attempt(table_name, {}, a_book_id)
+
+        assert row_count(table_name) == 1
+
+    @pytest.mark.parametrize(
+        "case", REFUSED, ids=lambda case: f"{case.table}.{case.column}={case.value!r:.40}"
+    )
+    def test_the_value_is_refused(self, case: Refusal, a_book_id):
+        """Attempted, not reasoned about, and the table checked afterwards.
+
+        The second assertion is not redundant with the first: a driver that
+        raises after the row is committed, or a constraint silently dropped on
+        one engine while the insert fails for an unrelated reason, are both
+        green on `pytest.raises` alone.
+        """
+        with pytest.raises(DBAPIError):
+            attempt(case.table, {case.column: case.value}, a_book_id)
+
+        assert row_count(case.table) == 0, case.why

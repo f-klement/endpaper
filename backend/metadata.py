@@ -99,6 +99,48 @@ Logins = Mapping[CatalogueSource, fetch.Credential]
 _NO_LOGINS: Final[Logins] = MappingProxyType({})
 
 
+@dataclass(frozen=True, slots=True)
+class Access:
+    """What one request may ask of the catalogues, resolved once.
+
+    Every door below used to take the three separately, and six handlers
+    assembled them in the same order before each one. What that spread was the
+    ability to get them out of step: a handler reaching outward twice could ask
+    two different rosters, and one that resolved the plan and forgot the logins
+    sent an unauthenticated request with nothing saying so.
+
+    **Frozen, because the value being resolved once is the whole of it.**
+    `routers/books.py::enrich_book` reaches outward up to three times off one of
+    these, and a plan narrowed in place between two of them is exactly the defect
+    resolving it once removes. A signature guard cannot see that happen; the
+    type can refuse it.
+
+    **`api_key` is `repr=False` with a `__str__` beside it, on
+    `credentials.Credential`'s rule**, stated at `credentials.py:1162` and not
+    restated here. Every `logins` value already prints under that same rule, so
+    without it the aggregate would be the one thing here that leaks.
+
+    **Resolved by `settings_store.library_access`, which lives there and not
+    here.** This module makes every outbound catalogue request and reaches no
+    database; the resolver reads settings and opens the keychain. That invariant
+    is the reason, and it is the whole of it: a module level import the other
+    way round does cycle, and `settings_store`'s own import block carries the
+    chain it measured.
+    """
+
+    #: Which catalogues this library asks, and in what order.
+    plan: sources.Plan
+    #: Google Books' key, which is this deployment's own and travels in a query
+    #: string. Empty where none is in force, and the plan is what decides
+    #: whether Google is asked at all.
+    api_key: str = field(repr=False)
+    #: The login each catalogue's request carries. See `Logins`.
+    logins: Logins = _NO_LOGINS
+
+    def __str__(self) -> str:
+        return f"<access to {len(self.plan.asked)} catalogue(s)>"
+
+
 class Outcome(StrEnum):
     """Why a source did or did not produce a record.
 
@@ -671,9 +713,17 @@ async def lookup_volume(
     asked on **every** lookup, because a bill for a book another catalogue
     already answered is a bill for nothing. Nothing else can answer this one.
 
-    **`plan` is keyword only with no default**, the rule every public entry point
-    in this module follows: a caller that forgot it would silently ask Google on
-    behalf of a library that switched Google off.
+    **`plan` is keyword only with no default**, which is what `access` is at the
+    four doors that take one: a caller that forgot it would silently ask Google
+    on behalf of a library that switched Google off.
+
+    **The key and the plan apart, and not an `Access`**, which is the one
+    exemption `tests/test_metadata.py::TestNoDoorTakesTheKeyAndThePlanApart`
+    names. One bespoke target answers here and its secret is an API key in a
+    query string, so there is no login to send: an `Access` would hand this door
+    a keychain it drops without a word, which is the shape that makes a caller
+    believe a login went out. Resolving one for this route costs a keychain
+    round trip per request as well.
 
     **Not cached**, where `lookup` is. The cache is keyed on an ISBN and exists
     because a scan repeats: the same barcode is read twice while somebody
@@ -4112,10 +4162,19 @@ async def _lookup_one(
     rule as a question anything may ask, and
     `tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt` is
     the tripwire that asks it of the roster.
+
+    **Only a metered one, which is the same test `_search_one` already applies.**
+    The key is this deployment's own and it is metered quota: a bespoke target
+    that is not metered has no use for it and must not be handed it, because a
+    row added to `_BESPOKE_LOOKUPS` would otherwise receive it by arriving. That
+    is the evasion the security seat recorded against this rule on 2026-09-17,
+    and it costs nothing today: Open Library is the other bespoke door and its
+    adapter opens with `del api_key`.
     """
     if target.transport is targets.Transport.SRU:
         return await _sru_lookup(target, isbn, credential)
-    return await _BESPOKE_LOOKUPS[target.reader](isbn, api_key)
+    metered = api_key if target.can(Capability.METERED) else ""
+    return await _BESPOKE_LOOKUPS[target.reader](isbn, metered)
 
 
 async def _search_one(
@@ -4363,12 +4422,10 @@ class Search:
 
 async def search(
     query: str,
-    api_key: str = "",
     limit: int = 10,
     prefer_language: str | None = None,
     *,
-    plan: sources.Plan,
-    logins: Logins = _NO_LOGINS,
+    access: Access,
     harder: bool = False,
 ) -> list[Record]:
     """The rows alone, for a caller with no use for the roster.
@@ -4380,11 +4437,9 @@ async def search(
     return (
         await title_search(
             query,
-            api_key,
             limit,
             prefer_language,
-            plan=plan,
-            logins=logins,
+            access=access,
             harder=harder,
         )
     ).matches
@@ -4392,22 +4447,20 @@ async def search(
 
 async def title_search(
     query: str,
-    api_key: str = "",
     limit: int = 10,
     prefer_language: str | None = None,
     *,
-    plan: sources.Plan,
-    logins: Logins = _NO_LOGINS,
+    access: Access,
     harder: bool = False,
 ) -> Search:
     """Find a book by title and author, across every catalogue this library asks.
 
-    **Which catalogues those are is `plan`**, the household's choice rather than
-    this module's: a source switched off is never constructed and never awaited.
-    What follows describes the eight a new install asks.
+    **Which catalogues those are is `access.plan`**, the household's choice
+    rather than this module's: a source switched off is never constructed and
+    never awaited. What follows describes the eight a new install asks.
 
-    **`logins` is what a catalogue asking for one is sent**, resolved by the
-    caller: see `Logins`.
+    **`access.logins` is what a catalogue asking for one is sent**, resolved by
+    the caller: see `Access`.
 
     Three tiers, which is what keeps this both broad and quick.
 
@@ -4481,7 +4534,7 @@ async def title_search(
     #
     # A slot is the second condition, and it is taken without waiting. See
     # `_HARDER_AT_ONCE`.
-    harder_now = harder and bool(plan.searched_only_harder)
+    harder_now = harder and bool(access.plan.searched_only_harder)
     # `locked()` then `acquire()` is atomic here and it is worth saying why,
     # because it reads like a race. `Semaphore.acquire` returns without
     # suspending while a slot is free, and this is one event loop, so no task
@@ -4500,9 +4553,9 @@ async def title_search(
         # and returning the same rows as before with nothing to say what
         # happened.
         roster, deadline = (
-            (plan.searched_harder, SEARCH_HARDER_DEADLINE_SECONDS)
+            (access.plan.searched_harder, SEARCH_HARDER_DEADLINE_SECONDS)
             if harder_now
-            else (plan.searched, SEARCH_DEADLINE_SECONDS)
+            else (access.plan.searched, SEARCH_DEADLINE_SECONDS)
         )
         tiers = await _within_deadline(
             [
@@ -4510,8 +4563,8 @@ async def title_search(
                     targets.SEEDED[name],
                     trimmed,
                     limit,
-                    api_key,
-                    credential=logins.get(name),
+                    access.api_key,
+                    credential=access.logins.get(name),
                 )
                 for name in roster
             ],
@@ -4530,7 +4583,7 @@ async def title_search(
     return Search(
         ranked[:limit],
         tuple(roster),
-        tuple(name for name in plan.searched_harder if name not in asked),
+        tuple(name for name in access.plan.searched_harder if name not in asked),
     )
 
 
@@ -5068,13 +5121,11 @@ async def editions(
 
 async def candidates(
     query: str,
-    api_key: str = "",
     isbn: str | None = None,
     limit: int = 10,
     prefer_language: str | None = None,
     *,
-    plan: sources.Plan,
-    logins: Logins = _NO_LOGINS,
+    access: Access,
 ) -> list[Record]:
     """Editions to choose between for a book that already exists, cluster first.
 
@@ -5095,15 +5146,8 @@ async def candidates(
     deadline, so a slow Open Library costs its rows rather than the response.
     """
     cluster, searched = await asyncio.gather(
-        _work_cluster(isbn, max(limit - 1, 0), prefer_language, plan),
-        search(
-            query,
-            api_key,
-            limit=limit,
-            prefer_language=prefer_language,
-            plan=plan,
-            logins=logins,
-        ),
+        _work_cluster(isbn, max(limit - 1, 0), prefer_language, access.plan),
+        search(query, limit=limit, prefer_language=prefer_language, access=access),
     )
     rows = list(cluster)
     # **Deduplicated on the ISBN and on nothing else**, which is the one thing
@@ -5228,13 +5272,7 @@ def _worst(attempts: list[tuple[str, Outcome]]) -> Outcome:
     return Outcome.NOT_FOUND
 
 
-async def lookup(
-    raw_isbn: str,
-    api_key: str = "",
-    *,
-    plan: sources.Plan,
-    logins: Logins = _NO_LOGINS,
-) -> Lookup:
+async def lookup(raw_isbn: str, *, access: Access) -> Lookup:
     """Resolve an ISBN to the best record the free catalogues can produce.
 
     Two phases. The leading `sources.ALWAYS_ASKED` enabled sources are asked
@@ -5253,8 +5291,8 @@ async def lookup(
     The ISBN is canonicalised first, so a lookup costs nothing for input that
     could not be a book, and the cache is keyed on one spelling.
 
-    **`logins` is what a catalogue asking for one is sent**, resolved by the
-    caller: see `Logins`. It is deliberately not part of the cache key, because
+    **`access.logins` is what a catalogue asking for one is sent**, resolved by
+    the caller: see `Access`. It is deliberately not part of the cache key, because
     a cached record is a book rather than a session: the same edition comes back
     whoever asked for it.
     """
@@ -5273,11 +5311,14 @@ async def lookup(
     # `return_exceptions` is not set: every source already turns its own
     # failures into an UNAVAILABLE outcome, so an exception escaping one of
     # them is a bug worth seeing rather than a network condition to absorb.
-    together = plan.lookup_together
+    together = access.plan.lookup_together
     fast = await asyncio.gather(
         *(
             _lookup_one(
-                targets.SEEDED[name], isbn, api_key, credential=logins.get(name)
+                targets.SEEDED[name],
+                isbn,
+                access.api_key,
+                credential=access.logins.get(name),
             )
             for name in together
         )
@@ -5311,9 +5352,12 @@ async def lookup(
     # one: it is a round trip that cannot answer, and the tail stops at the first
     # hit so it is paid in front of whatever would have. `sources.SERVES_GROUPS`
     # carries the measurement and the bound that keeps it from losing a book.
-    for name in plan.lookup_in_turn(registration_group(isbn)):
+    for name in access.plan.lookup_in_turn(registration_group(isbn)):
         result = await _lookup_one(
-            targets.SEEDED[name], isbn, api_key, credential=logins.get(name)
+            targets.SEEDED[name],
+            isbn,
+            access.api_key,
+            credential=access.logins.get(name),
         )
         attempts.append((name, result.outcome))
         if result.found and result.record is not None:
@@ -5352,7 +5396,7 @@ async def lookup(
     # what `test_a_metered_source_with_a_remit_is_still_not_no_sources` pins.
     # The chain is the thing actually being asked about; `attempts` getting the
     # right answer is a coincidence of two rules that live elsewhere.
-    outcome = Outcome.NO_SOURCES if not plan.lookup_chain else _worst(attempts)
+    outcome = Outcome.NO_SOURCES if not access.plan.lookup_chain else _worst(attempts)
     missed = Lookup(outcome, source="", attempts=attempts)
     async with _cache_lock:
         _remember(isbn, missed)

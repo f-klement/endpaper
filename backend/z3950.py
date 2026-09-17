@@ -31,7 +31,6 @@ bound by bound comparison with `fetch.py` is in `docs/decisions.md`.
 import asyncio
 import logging
 import re
-import time
 import unicodedata
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -39,6 +38,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import Enum
 from typing import Final, Protocol
+
+from deadline import in_, left
 
 logger = logging.getLogger("endpaper.z3950")
 
@@ -540,18 +541,15 @@ class Association:
     def _where(self) -> str:
         return f"{self.target.host}:{self.target.port}"
 
-    def _left(self, deadline: float) -> float:
-        return deadline - time.monotonic()
-
     async def _open(self, client: Client) -> None:
         """Open the association, or end it. Never leaves a session nobody holds."""
-        left = self._left(self.deadline)
-        if left <= 0:
+        remaining = left(self.deadline)
+        if remaining <= 0:
             self._end(DeadlineExceeded(f"{self._where} {BEFORE_STARTING}"))
             raise DeadlineExceeded(f"{self._where} {BEFORE_STARTING}")
-        pending = self._executor.submit(client.open, self.target, timeout=left)
+        pending = self._executor.submit(client.open, self.target, timeout=remaining)
         try:
-            self._session = await asyncio.wait_for(asyncio.wrap_future(pending), left)
+            self._session = await asyncio.wait_for(asyncio.wrap_future(pending), remaining)
         except TimeoutError:
             # **The session is still coming and nobody is waiting for it.** A thread
             # cannot be cancelled, so the client will finish and hand back a real
@@ -628,12 +626,12 @@ class Association:
         session = self._session
         if session is None:
             raise Closed(f"{self._where} has no open session")
-        left = self._left(deadline)
-        if left <= 0:
+        remaining = left(deadline)
+        if remaining <= 0:
             raise DeadlineExceeded(f"{self._where} {BEFORE_STARTING}")
         pending = self._executor.submit(run, session)
         try:
-            return await asyncio.wait_for(asyncio.wrap_future(pending), left)
+            return await asyncio.wait_for(asyncio.wrap_future(pending), remaining)
         except TimeoutError:
             # The call is still running and still holds the connection. Ending the
             # association queues the close behind it on the same thread.
@@ -672,8 +670,8 @@ async def association(
     exchange today: the client's own socket timeout is derived from this deadline, so a
     caller asking for an hour would set an hour there too.
     """
-    ends = time.monotonic() + TIMEOUT_SECONDS if deadline is None else deadline
-    if ends - time.monotonic() > TIMEOUT_SECONDS:
+    ends = in_(TIMEOUT_SECONDS) if deadline is None else deadline
+    if left(ends) > TIMEOUT_SECONDS:
         raise ValueError(
             f"deadline must not be more than TIMEOUT_SECONDS ({TIMEOUT_SECONDS}) away"
         )
@@ -803,6 +801,6 @@ async def search_once(
     same: several questions to one target should share one association, and here they
     share its clock as well.
     """
-    ends = time.monotonic() + TIMEOUT_SECONDS if deadline is None else deadline
+    ends = in_(TIMEOUT_SECONDS) if deadline is None else deadline
     async with association(target, client=client, deadline=ends) as open_association:
         return await search(open_association, pqf, records=records, limit=limit)

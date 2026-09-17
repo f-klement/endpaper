@@ -55,6 +55,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
+from dialect import DialectSQL, for_bind
+
 revision: str = "d9c1f47b2a06"
 down_revision: str | Sequence[str] | None = "c8b3e5017d4a"
 branch_labels: str | Sequence[str] | None = None
@@ -75,13 +77,26 @@ _ENVELOPE_AFTER = (
     f"AND length(envelope) >= {_MIN_ENVELOPE}"
 )
 
+#: The same two shapes on Postgres. Each separator is escaped, because the naive
+#: `~ '^v1.*.*.*'` admits `v1XYZ`: `f3a20d68c4b1` carries the measurement.
+_SHAPE_PG = r"envelope ~ '^v{version}\..*\..*\.'"
+_ENVELOPE_BEFORE_PG = (
+    f"{_SHAPE_PG.format(version=1)} AND length(envelope) >= {_MIN_ENVELOPE}"
+)
+_ENVELOPE_AFTER_PG = (
+    f"({_SHAPE_PG.format(version=1)} OR {_SHAPE_PG.format(version=2)}) "
+    f"AND length(envelope) >= {_MIN_ENVELOPE}"
+)
+
 _CONSTRAINT = "ck_catalogue_credentials_envelope"
 
 
-def _swap(wanted: str) -> None:
+def _swap(sqlite: str, postgresql: str) -> None:
     with op.batch_alter_table("catalogue_credentials") as batch:
         batch.drop_constraint(_CONSTRAINT, type_="check")
-        batch.create_check_constraint(_CONSTRAINT, wanted)
+        batch.create_check_constraint(
+            _CONSTRAINT, DialectSQL(sqlite=sqlite, postgresql=postgresql)
+        )
 
 
 def upgrade() -> None:
@@ -98,7 +113,7 @@ def upgrade() -> None:
     # or a file, and a machine upgrading without it would have lost them anyway.
     #
     # So the whole upgrade is widening the constraint to admit both versions.
-    _swap(_ENVELOPE_AFTER)
+    _swap(_ENVELOPE_AFTER, _ENVELOPE_AFTER_PG)
 
 
 def downgrade() -> None:
@@ -112,5 +127,20 @@ def downgrade() -> None:
     # to a build that cannot open a `v2` envelope costs the ones re-sealed since
     # the upgrade whatever this does, so deleting them is naming that rather
     # than leaving rows no build can read.
-    op.execute(sa.text("DELETE FROM catalogue_credentials WHERE envelope GLOB 'v2.*'"))
-    _swap(_ENVELOPE_BEFORE)
+    #
+    # `GLOB 'v2.*'` is a prefix match on the literal three characters `v2.`, so
+    # the Postgres arm anchors and escapes the dot rather than leaving `.` as
+    # "any character", which would also delete a `v2X` row this constraint never
+    # admitted.
+    op.execute(
+        sa.text(
+            for_bind(
+                op.get_bind(),
+                sqlite="DELETE FROM catalogue_credentials WHERE envelope GLOB 'v2.*'",
+                postgresql=(
+                    r"DELETE FROM catalogue_credentials WHERE envelope ~ '^v2\.'"
+                ),
+            )
+        )
+    )
+    _swap(_ENVELOPE_BEFORE, _ENVELOPE_BEFORE_PG)

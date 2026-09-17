@@ -166,7 +166,7 @@ export interface Pattern {
  * A shape is defined by being placed, so nothing can reach `<defs>` that no
  * layer references and no `<use>` can point at a definition that is not there.
  */
-export interface MotifSet {
+interface MotifSet {
   /** The id for a shape, defining it on first use. */
   id(shape: string): string;
   /** The `<defs>` body: every shape once, in first-use order. */
@@ -196,7 +196,7 @@ function motifSet(): MotifSet {
 export type Point = [number, number];
 
 /** One cubic Bezier: start, two control points, end. */
-export type Cubic = [Point, Point, Point, Point];
+type Cubic = [Point, Point, Point, Point];
 
 /** A branch is a run of cubics sharing endpoints. */
 export type Branch = Cubic[];
@@ -261,7 +261,7 @@ function stems(branches: Branch[], width: number): string {
  * spacing spread from 1.01x to 2.83x. Remove this and the next person to add a
  * cubic gets a bunched stem and twice the leaves.
  */
-export interface Arc {
+interface Arc {
   /** Total length in px. */
   length: number;
   /** Position and tangent at a distance along the whole branch. */
@@ -530,7 +530,7 @@ function stroked(body: string, width: number, colour = "{ink}"): string {
 // ── Primitives for the decorated papers ─────────────────────────────────
 
 /** How a lattice is laid out. See `lattice`. */
-export interface LatticeOptions {
+interface LatticeOptions {
   /**
    * Offset every other row by half a column.
    *
@@ -607,7 +607,7 @@ export function lattice(
   return parts.join("");
 }
 
-export interface RadialOptions {
+interface RadialOptions {
   /** How many copies. */
   count: number;
   /** Degrees between them. 360 / count closes the ring; less makes a fan. */
@@ -625,7 +625,7 @@ export interface RadialOptions {
  * calls say the same thing, and the fact that a lily has three petals is then
  * stated once.
  */
-export function radial(
+function radial(
   motifs: MotifSet,
   shape: string,
   at: At,
@@ -655,7 +655,7 @@ export function radial(
 }
 
 /** One harmonic of a wave. See the note on periodicity in the header. */
-export interface Harmonic {
+interface Harmonic {
   /** Cycles across the tile. An integer, or the wave does not meet itself. */
   cycles: number;
   amplitude: number;
@@ -2765,7 +2765,7 @@ const COLOUR_TOKENS: Record<ResolvedTheme, WallpaperColours> = {
  * Token names going in, values coming out. The page is not an ink and is never
  * painted: it is there because the alpha is solved against it.
  */
-export interface WallpaperColours {
+interface WallpaperColours {
   ink: string;
   bloom: string;
   page: string;

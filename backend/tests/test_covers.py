@@ -16,6 +16,8 @@ import ast
 import gzip
 from pathlib import Path
 from time import monotonic, sleep
+from typing import Final
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -308,6 +310,78 @@ class TestTheHostList:
         # mixed content, which the browser blocks anyway.
         assert all(host.startswith("https://") for host in covers.COVER_HOSTS)
 
+    @pytest.mark.parametrize("entry", covers.COVER_HOSTS)
+    def test_every_listed_entry_is_a_host_and_nothing_else(self, entry):
+        """Two readers with two grammars, and the shape is what keeps them agreeing.
+
+        `middleware.py` splices each entry verbatim into the CSP's `img-src`,
+        where a path and a port are part of the source. `is_fetchable` compares
+        `urlsplit(listed).hostname`, which **discards** both. So an entry
+        carrying either means two different things, and the one it means to the
+        fetch is the wider: the whole host on 443, against the one listed path.
+        Wider at the fetch than at the render is the wrong direction for the
+        tuple that closed the SSRF.
+
+        **A round trip rather than a list of what an entry may not carry**, and
+        the difference is not tidiness. The list was four arms and
+        `https://books.google.com?` passed all four: `urlsplit` reads the `?` as
+        an empty query, so path, query, fragment, port and userinfo are all
+        clean, and the CSP still receives a source the fetch reader does not.
+        Reconstructing from what the fetch reader actually reads leaves nothing
+        to enumerate. The scheme is the test beside this one; this asserts that
+        an entry is that scheme and a host and nothing else.
+
+        **The character arm survives the round trip and is not redundant.**
+        `urlsplit` keeps a space inside the netloc, so
+        `https://books.google.com evil.test` reconstructs to itself and is two
+        sources to the CSP and one impossible host to the fetch. A `;` is the
+        sharper half: before any `/` it stays in the netloc too, and in the
+        policy it ends `img-src` and starts a directive of the entry's choosing.
+        """
+        parsed = urlsplit(entry)
+
+        assert entry == f"{parsed.scheme}://{parsed.hostname}", entry
+        assert not any(c.isspace() or c == ";" for c in entry), entry
+
+
+_BACKEND: Final = Path(__file__).resolve().parent.parent
+
+
+def _our_modules() -> list[Path]:
+    """Every module of ours but `covers.py`, which is the one that may.
+
+    **What vendored means is `test_house_rules._is_vendored`.** This walk
+    named `.venv` and `site-packages` for itself, which was right about
+    `site-packages` and blind to `.uv-cache/`: the pipeline sets
+    `UV_CACHE_DIR` inside `backend/`, so it read third party source there
+    and nowhere a developer would see it. The `site-packages` half is now in
+    the shared predicate, put there because this module and `test_marc.py`
+    reached it independently.
+
+    **The two names left are matched relative to `_BACKEND`**, not against
+    the whole path: asked absolutely, a checkout under a directory called
+    `tests` empties this walk and every rule below it passes on nothing.
+
+    **The one exemption is a path and not a basename**, which is what says
+    `routers/covers.py` is walked. Spelled `path.name`, this tree's two files
+    called `covers.py` were both exempt, so the router that serves the store
+    could hold an image host or the prefix and neither rule below would see
+    it. Measured before this exemption became a path: 85 files walked,
+    `routers/covers.py` not among them. It is 86 with it.
+    """
+    found = [
+        path
+        for path in _BACKEND.rglob("*.py")
+        if not _is_vendored(path, _BACKEND)
+        and not {"tests", "migrations"}
+        & set(path.relative_to(_BACKEND).parts)
+        and path.relative_to(_BACKEND).as_posix() != "covers.py"
+    ]
+    # The packages it must cover rather than a number: a count is satisfied
+    # by a walk that lost a whole directory. See `test_accounts._sources`.
+    assert {"routers", "schemas"} <= {path.parent.name for path in found}, found
+    return found
+
 
 class TestNoOtherModuleBuildsACoverUrl:
     """House rule: `covers.py` is the only module that knows an image host.
@@ -324,35 +398,9 @@ class TestNoOtherModuleBuildsACoverUrl:
     caught too.
     """
 
-    BACKEND = Path(__file__).resolve().parent.parent
-
     def modules(self) -> list[Path]:
-        """Every module of ours but `covers.py`, which is the one that may.
-
-        **What vendored means is `test_house_rules._is_vendored`.** This walk
-        named `.venv` and `site-packages` for itself, which was right about
-        `site-packages` and blind to `.uv-cache/`: the pipeline sets
-        `UV_CACHE_DIR` inside `backend/`, so it read third party source there
-        and nowhere a developer would see it. The `site-packages` half is now in
-        the shared predicate, put there because this module and `test_marc.py`
-        reached it independently.
-
-        **The two names left are matched relative to `BACKEND`**, not against
-        the whole path: asked absolutely, a checkout under a directory called
-        `tests` empties this walk and every rule below it passes on nothing.
-        """
-        found = [
-            path
-            for path in self.BACKEND.rglob("*.py")
-            if not _is_vendored(path, self.BACKEND)
-            and not {"tests", "migrations"}
-            & set(path.relative_to(self.BACKEND).parts)
-            and path.name != "covers.py"
-        ]
-        # The packages it must cover rather than a number: a count is satisfied
-        # by a walk that lost a whole directory. See `test_accounts._sources`.
-        assert {"routers", "schemas"} <= {path.parent.name for path in found}, found
-        return found
+        """The walk, kept as a method because three tests below read it."""
+        return _our_modules()
 
     @staticmethod
     def _literal_parts(node: ast.AST) -> list[str]:
@@ -439,6 +487,170 @@ class TestNoOtherModuleBuildsACoverUrl:
     def test_it_reads_the_backend_at_all(self):
         # A glob that matched nothing would make both tests above pass forever.
         assert len(self.modules()) > 20
+
+
+class TestNoOtherModuleDecidesWhetherACoverIsLocal:
+    """House rule: `covers.py` is the only module that answers this question.
+
+    Three readers of `LOCAL_COVER_PREFIX` live there, and `covers.is_local` is
+    the one every other module asks.
+
+    "An uploaded cover outranks a remote one" is read by every automated writer,
+    and `google_books.py` spelled it `(current_cover or "").startswith(
+    "/covers/")` against the constant `covers.py` holds. A second spelling does
+    not fail loudly: it answers correctly until the prefix moves, and from then
+    on that writer overrules an upload the other one protects, with the stored
+    row looking correct from either end.
+
+    **`TestNoOtherModuleBuildsACoverUrl` does not reach this**, which is why
+    there are two rules and not one arm on the first. That walk looks for a
+    module **building** a cover URL out of a host literal; a module that only
+    **classifies** one builds nothing and stays green.
+
+    Two tests, because the constant and its value are two roads to the same
+    duplicate: import the name and test it yourself, or write the prefix out
+    again. An `import ... as` is caught by the first, which reads the imported
+    name rather than the local one.
+
+    **What this does not catch**, measured by the security seat against this
+    class rather than guessed: a prefix **assembled** rather than written.
+    `(book.cover_url or "").startswith("/cover" + "s/")` passes both tests, and
+    so do `"".join(("/cover", "s/"))`, `f"/cover{'s'}/"` and a `getattr` naming
+    the constant as a string, because `ast.parse` folds adjacent literals and
+    nothing else. **An f-string is only a blind spot when the prefix is what it
+    assembles**: `f"/covers/{name}"` carries the whole prefix as one constant
+    and is caught, which is how `routers/settings.py` was found. A slice
+    comparison, an `in` and a `removeprefix` are not blind spots either: each
+    has to name the constant or spell the prefix as one literal, and an arm
+    above sees it. The behavioural guard is
+    `test_google_books.py::TestMergeInto::test_the_local_cover_rule_is_covers_own`,
+    which catches any of them at the one writer it covers.
+    """
+
+    PREFIX_NAME: Final = "LOCAL_COVER_PREFIX"
+
+    #: Where the literal stands for some reason other than deciding whether a
+    #: cover is local, **and how many times in each**. A count and not a name:
+    #: exempting the file admits the next occurrence in it silently, and the
+    #: next occurrence is as likely as not to be the thing this rule exists to
+    #: refuse. Keyed by path rather than basename, because this tree has two
+    #: `settings.py`.
+    #:
+    #: `errors.API_PREFIXES` routes by path, so that a missing cover requested
+    #: by an `<img>` answers JSON rather than a whole HTML error page. Not this
+    #: rule's question, and the same string.
+    #:
+    #: **Two concepts sharing a spelling, rather than one derivable from the
+    #: other**, and the tell is the other five members of that tuple: `/api/`,
+    #: `/auth/`, `/openapi.json`, `/docs` and `/redoc` have no module to ask,
+    #: and a path added to it next may have nothing to do with covers. The two
+    #: do move together, but neither derives from the other: both follow the
+    #: path the cover route is mounted at, which is a third fact and is spelled
+    #: `"/covers"` at `routers/covers.py`'s `APIRouter(prefix=...)`. **That
+    #: literal is invisible here because it has no trailing slash**, not
+    #: because of where it lives: the walk above reads that file, so the whole
+    #: prefix written out in it would be counted like anywhere else.
+    ELSEWHERE_FOR_ANOTHER_REASON: Final[dict[str, int]] = {"errors.py": 1}
+
+    @classmethod
+    def _names_the_constant(cls, tree: ast.AST) -> list[int]:
+        """Line numbers where an expression names the constant.
+
+        The three nodes that can carry the name: the import itself, which
+        catches an `as` alias because it reads the imported name; a bare use of
+        what that import bound; and the `covers.` attribute spelling, which is
+        how every other module in this tree reaches the module.
+        """
+        found: list[int] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                named = any(a.name == cls.PREFIX_NAME for a in node.names)
+            elif isinstance(node, ast.Name):
+                named = node.id == cls.PREFIX_NAME
+            elif isinstance(node, ast.Attribute):
+                named = node.attr == cls.PREFIX_NAME
+            else:
+                continue
+            if named:
+                found.append(node.lineno)
+        return found
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "from covers import LOCAL_COVER_PREFIX",
+            "from covers import LOCAL_COVER_PREFIX as p",
+            "local = url.startswith(LOCAL_COVER_PREFIX)",
+            "local = url.startswith(covers.LOCAL_COVER_PREFIX)",
+        ],
+    )
+    def test_the_rule_reports_every_spelling_it_exists_for(self, source: str):
+        """**The arm this class did not have**, and the one a mutation walked
+        through: with the `Attribute` branch replaced by `named = False` the
+        whole file stayed green, because a rule that reports nothing reports no
+        offenders either. Four sources over three branches, the import twice
+        because an `as` alias is a second way into it, so dropping any branch
+        names a case here rather than passing quietly."""
+        assert self._names_the_constant(ast.parse(source)) == [1]
+
+    @pytest.mark.parametrize(
+        "source",
+        ["local = covers.is_local(url)", "prefix = LOCAL_COVER_PREFIXES"],
+    )
+    def test_asking_covers_is_not_reported(self, source: str):
+        assert self._names_the_constant(ast.parse(source)) == []
+
+    def test_no_module_reads_the_constant(self):
+        offenders = [
+            f"{path.relative_to(_BACKEND)}:{line}"
+            for path in _our_modules()
+            for line in self._names_the_constant(ast.parse(path.read_text()))
+        ]
+
+        assert offenders == [], (
+            "only covers.py may read LOCAL_COVER_PREFIX; ask covers.is_local: "
+            + ", ".join(offenders)
+        )
+
+    #: How many times `covers.py` itself may read the constant: the two
+    #: classifiers and the one builder.
+    #:
+    #: **Recomputed rather than stated.** The class docstring above says three,
+    #: and a sentence is what a fourth reader walks past: measured, `local_url`
+    #: spelling the prefix itself instead of going through `stored_url` changes
+    #: no answer anywhere and no test named it.
+    READERS_INSIDE_COVERS: Final = 3
+
+    def test_covers_itself_reads_it_three_times(self):
+        source = (_BACKEND / "covers.py").read_text()
+        loads = [
+            node.lineno
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Name)
+            and node.id == self.PREFIX_NAME
+            and isinstance(node.ctx, ast.Load)
+        ]
+
+        assert len(loads) == self.READERS_INSIDE_COVERS, loads
+
+    def test_no_module_writes_the_prefix_out_again(self):
+        found: dict[str, int] = {}
+        for path in _our_modules():
+            occurrences = sum(
+                1
+                for node in ast.walk(ast.parse(path.read_text()))
+                if isinstance(node, ast.Constant)
+                and node.value == covers.LOCAL_COVER_PREFIX
+            )
+            if occurrences:
+                found[path.relative_to(_BACKEND).as_posix()] = occurrences
+
+        # One equality rather than a list of offenders, so that a new
+        # occurrence inside an exempt file is as loud as a new file.
+        assert found == self.ELSEWHERE_FOR_ANOTHER_REASON, (
+            "this spells the local cover prefix rather than asking "
+            "covers.is_local; the counts above say which files may"
+        )
 
 
 class TestOutcomesAreCounted:
@@ -712,6 +924,12 @@ class TestWhatIsOnDisk:
 
         assert covers.local_url_for(7) == "/covers/7.webp"
 
+    def test_a_file_the_store_names_itself_has_a_url_too(self):
+        """The login background is stored under a name rather than a book id,
+        and `local_url` cannot answer for it. Its router asks this instead of
+        spelling the prefix a third time."""
+        assert covers.stored_url("login_bg.png") == "/covers/login_bg.png"
+
     def test_a_book_with_no_file_has_no_url(self, covers_dir):
         assert covers.local_url_for(7) is None
 
@@ -864,10 +1082,37 @@ class TestTheInteractiveBudget:
             assert await_resolve_with_deadline(ENGLISH, 0.0) is None
 
     def test_each_request_is_capped_at_what_is_left(self):
-        """Otherwise the real ceiling is the budget plus one whole timeout."""
-        assert covers._time_left(None) is None
-        left = covers._time_left(monotonic() + 1.5)
-        assert left is not None and 0 < left <= 1.5
+        """Otherwise the real ceiling is the budget plus one whole timeout.
+
+        **Read off the request rather than off the arithmetic**, which is
+        `deadline.left`'s now and pinned in `tests/test_deadline.py`: httpx
+        carries the timeout it was handed in the request's extensions, so this
+        is how long the image service's socket would actually have been held.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            assert await_resolve_with_deadline(ENGLISH, 1.5) is not None
+
+        held_for = route.calls[0].request.extensions["timeout"]["read"]
+        assert 0 < held_for <= 1.5 < covers.TIMEOUT_SECONDS
+
+    def test_a_download_is_capped_at_what_is_left_as_well(self):
+        """`covers.py` makes requests at two sites and the arm above reaches
+        one. `resolve` never calls `download`, so the identical cap there was
+        pinned by nothing and a mutation dropping it went green."""
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(
+                    200, content=JPEG_BYTES, headers={"content-type": "image/jpeg"}
+                )
+            )
+            fetched = covers.download(
+                covers.open_library_url(ENGLISH), deadline=monotonic() + 1.5
+            )
+
+        assert fetched is not None
+        held_for = route.calls[0].request.extensions["timeout"]["read"]
+        assert 0 < held_for <= 1.5 < covers.TIMEOUT_SECONDS
 
     def test_the_budget_is_shorter_than_a_single_timeout_chain(self):
         # Three checks plus a download at six seconds each is the 24 this bounds.

@@ -21,6 +21,7 @@ import models  # noqa: F401  (registers the tables on Base.metadata)
 import schema
 import targets
 from database import Base, engine
+from dialect import SwappedRule
 from enums import (
     AuthorityScheme,
     BookFormat,
@@ -3095,10 +3096,10 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
 
 
     @pytest.mark.parametrize(
-        ("table_name", "constraint", "before", "after"), bind_every_text_ceiling._CEILINGS
+        "rule", bind_every_text_ceiling._CEILINGS, ids=lambda rule: rule.constraint
     )
     def test_the_downgrade_puts_each_ceiling_back(
-        self, table_name: str, constraint: str, before: str, after: str
+        self, rule: SwappedRule
     ) -> None:
         """`downgrade()`, run rather than read, and `before` checked against a
         schema this revision did not write.
@@ -3130,14 +3131,14 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
 
         # The independent half: this schema is what the previous revisions
         # installed, so it is evidence about `before` rather than an echo of it.
-        assert self._installed_check(constraint) == " ".join(before.split())
+        assert self._installed_check(rule.constraint) == " ".join(rule.before.split())
 
         schema.upgrade_to_head()
-        assert self._installed_check(constraint) == " ".join(after.split())
+        assert self._installed_check(rule.constraint) == " ".join(rule.after.split())
 
         command.downgrade(schema._alembic_config(), self.PREVIOUS)
 
-        assert self._installed_check(constraint) == " ".join(before.split())
+        assert self._installed_check(rule.constraint) == " ".join(rule.before.split())
 
     def test_the_upgrade_refuses_a_row_the_new_ceiling_cannot_hold(self) -> None:
         """The revision's own account of what it does to existing rows.
@@ -3195,10 +3196,10 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
 
 
     @pytest.mark.parametrize(
-        ("table_name", "constraint", "before", "after"), bind_every_text_ceiling._CEILINGS
+        "rule", bind_every_text_ceiling._CEILINGS, ids=lambda rule: rule.constraint
     )
     def test_the_revisions_text_is_the_models_text(
-        self, table_name: str, constraint: str, before: str, after: str
+        self, rule: SwappedRule
     ) -> None:
         """The revision writes its SQL out rather than importing a constant, so
         the two copies are a fact stored twice and this is what stands between
@@ -3214,12 +3215,12 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
         declared = " ".join(
             str(next(
                 one
-                for one in Base.metadata.tables[table_name].constraints
-                if isinstance(one, CheckConstraint) and one.name == constraint
+                for one in Base.metadata.tables[rule.table].constraints
+                if isinstance(one, CheckConstraint) and one.name == rule.constraint
             ).sqltext).split()
         )
 
-        assert " ".join(after.split()) == declared
+        assert " ".join(rule.after.split()) == declared
 
 
 class TestTheIdentifierBoundsSurvivedIntoTheMigration:
@@ -3466,11 +3467,12 @@ class TestTheGlobRulesThatLearnedAboutNul:
         )
 
     @pytest.mark.parametrize(
-        ("table_name", "constraint", "before", "after"),
+        "rule",
         a_nul_clause_on_two_glob_rules._GLOB_RULES,
+        ids=lambda rule: rule.constraint,
     )
     def test_the_revisions_text_is_the_models_text(
-        self, table_name: str, constraint: str, before: str, after: str
+        self, rule: SwappedRule
     ) -> None:
         """The revision writes its SQL out rather than importing from `models`,
         so the two copies are a fact stored twice and this is what stands
@@ -3481,7 +3483,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
         `test_the_downgrade_puts_each_rule_back` is what holds that half, against
         a database built by other revisions entirely.
         """
-        assert " ".join(after.split()) == self._declared(table_name, constraint)
+        assert " ".join(rule.after.split()) == self._declared(rule.table, rule.constraint)
 
     @staticmethod
     def _declared(table_name: str, constraint: str) -> str:
@@ -3499,11 +3501,12 @@ class TestTheGlobRulesThatLearnedAboutNul:
         )
 
     @pytest.mark.parametrize(
-        ("table_name", "constraint", "before", "after"),
+        "rule",
         a_nul_clause_on_two_glob_rules._GLOB_RULES,
+        ids=lambda rule: rule.constraint,
     )
     def test_the_model_is_the_rule_a_migrated_database_carries(
-        self, table_name: str, constraint: str, before: str, after: str
+        self, rule: SwappedRule
     ) -> None:
         """The model's copy against the DDL, as an equality rather than a
         containment.
@@ -3518,17 +3521,18 @@ class TestTheGlobRulesThatLearnedAboutNul:
         self._migrated()
 
         installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check(
-            constraint
+            rule.constraint
         )
 
-        assert installed == self._declared(table_name, constraint)
+        assert installed == self._declared(rule.table, rule.constraint)
 
     @pytest.mark.parametrize(
-        ("table_name", "constraint", "before", "after"),
+        "rule",
         a_nul_clause_on_two_glob_rules._GLOB_RULES,
+        ids=lambda rule: rule.constraint,
     )
     def test_the_downgrade_puts_each_rule_back(
-        self, table_name: str, constraint: str, before: str, after: str
+        self, rule: SwappedRule
     ) -> None:
         """`downgrade()` run rather than read, with `before` checked against a
         schema this revision did not write.
@@ -3548,14 +3552,14 @@ class TestTheGlobRulesThatLearnedAboutNul:
         self._at_previous()
         installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check
 
-        assert installed(constraint) == " ".join(before.split())
+        assert installed(rule.constraint) == " ".join(rule.before.split())
 
         schema.upgrade_to_head()
-        assert installed(constraint) == " ".join(after.split())
+        assert installed(rule.constraint) == " ".join(rule.after.split())
 
         command.downgrade(schema._alembic_config(), self.PREVIOUS)
 
-        assert installed(constraint) == " ".join(before.split())
+        assert installed(rule.constraint) == " ".join(rule.before.split())
 
     #: A NUL's position in the smuggled value, and the bytes that value holds.
     #:
@@ -3759,9 +3763,9 @@ class TestTheGlobRulesThatLearnedAboutNul:
         copies left every case here green.
         """
         after = next(
-            after
-            for _, constraint, _, after in a_nul_clause_on_two_glob_rules._GLOB_RULES
-            if constraint == "ck_opds_servers_base_url"
+            rule.after
+            for rule in a_nul_clause_on_two_glob_rules._GLOB_RULES
+            if rule.constraint == "ck_opds_servers_base_url"
         )
         arm = f"AND length(CAST(base_url AS BLOB)) <= {4 * models.BASE_URL_MAX}"
         assert after.count(arm) == 1, "the byte arm is not the text this removes"

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 import config
 import cover_store
+import covers
 import credentials
 import metadata
 import notifications
@@ -149,7 +150,7 @@ async def get_login_image() -> LoginImageOut:
     path = cover_store.login_background_path()
     if path is None:
         raise HTTPException(status_code=404, detail="No login background set")
-    return LoginImageOut(url=f"/covers/{path.name}")
+    return LoginImageOut(url=covers.stored_url(path.name))
 
 
 @router.post("/login-image", response_model=LoginImageOut)
@@ -163,7 +164,7 @@ async def set_login_image(
     # `cover_store`'s.
     data = await read_image_upload(file)
     destination = cover_store.save_login_background(data)
-    return LoginImageOut(url=f"/covers/{destination.name}")
+    return LoginImageOut(url=covers.stored_url(destination.name))
 
 
 # ── Runtime settings ──────────────────────────────────────────────────────────

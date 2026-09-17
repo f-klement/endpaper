@@ -72,9 +72,13 @@ import type { SqliteDatabase, SqliteRow } from "./sqlite";
 // record a request builder takes. Borrowed rather than restated: it is the
 // one list `LibrarySettingsPage/types.ts` holds a total `Record` over, so a
 // second spelling of it here would be a scheme this reader could name and
-// that builder could not send. Types only, so nothing in `stores.ts` is
-// linked in.
+// that builder could not send.
+//
+// `storeIdentifier` is that module's value rule, borrowed for the same reason
+// one step down: what an ASIN looks like is a property of the scheme, and this
+// module used to spell it a second time.
 import type { StoreIdentifier, StoreIdentifierScheme } from "./stores";
+import { storeIdentifier } from "./stores";
 import { columnsIn, decimal, integer, text } from "./sqliteRow";
 
 /**
@@ -388,62 +392,22 @@ const SCHEME_OF_TYPE = new Map<string, StoreIdentifierScheme>(
  * rows, and nothing matches on either.
  *
  * **What the open family costs is a plugin's invented key**, `amazon_zz` and
- * whatever else somebody writes; `PRODUCED_VALUE` is the bound on that, and it
- * refuses a value that is not ASIN shaped rather than a marketplace. The suffix
- * is stripped from every type rather than from the Amazon ones alone, because a
- * per family arm is the enumeration this rule exists to avoid; no reader writes
- * `google_de`, and one that did would still be writing a volume id.
+ * whatever else somebody writes; `stores.producedValue` is the bound on that,
+ * and it refuses a value that is not ASIN shaped rather than a marketplace. The
+ * suffix is stripped from every type rather than from the Amazon ones alone,
+ * because a per family arm is the enumeration this rule exists to avoid; no
+ * reader writes `google_de`, and one that did would still be writing a volume
+ * id.
  */
 const MARKETPLACE_SUFFIX = /_[a-z]{2,3}$/;
-
-/**
- * What each scheme's own producers write, as the shape of a value.
- *
- * **What it refuses is a value that is not the scheme's shape**, which is
- * narrower than it sounds and is worth saying plainly: it does not adjudicate
- * between marketplaces, because every marketplace's value is an ASIN. What it
- * is for is the key a plugin invented, since the name rule cannot tell
- * `amazon_zz` from `amazon_de`. It is this app's own bound rather than the
- * endpoint's, which takes any opaque token: a scheme is a claim about what the
- * value is, and `enums.BookIdentifierScheme` states the rule this applies per
- * row, that a scheme nothing reads an identifier out of is a row that lies.
- *
- * **The two are not grounded the same way, which is worth knowing before
- * either is widened.** `takeout.ts` enforces a volume id shape of its own, so
- * that one is the same rule twice and `tests/lib/calibre.test.ts` reads that
- * module's source and sweeps the two against each other rather than restating
- * it. `kindle.ts` enforces nothing: it takes the `ASIN` element's text as
- * written, so the ASIN bound rests on that module's measurement over 1,032
- * catalogue entries and on calibre's own regression fixtures, and a test can
- * only pin the corpus rather than another rule.
- *
- * Wider files a wrong row; narrower drops an identifier the endpoint would have
- * taken, silently. Neither is free.
- */
-const PRODUCED_VALUE: Record<StoreIdentifierScheme, RegExp> = {
-  // Ten characters of Amazon's alphabet. `kindle.ts` measured every one of
-  // 1,032 catalogue entries at ten characters. **Not narrowed to a `B`
-  // prefix**, which is the shape a Kindle catalogue can only hold: Amazon
-  // issues a printed edition's ISBN-10 as its ASIN, and calibre's own
-  // regression fixture carries `amazon_ca` of `162380874X`. **Either case is
-  // accepted and neither is folded here**: a scheme's canonical form belongs to
-  // the scheme rather than to one reader, and
-  // `LibrarySettingsPage/types.CANONICAL_VALUE` is the one door both readers
-  // pass a value through.
-  asin: /^[A-Za-z0-9]{10}$/,
-  // Twelve characters of the URL safe alphabet, `takeout.ts`'s `VOLUME_ID` and
-  // its measurement over 24 sidecars. Calibre's own `google` fixture,
-  // `s7NIrgEACAAJ`, is one.
-  google_books: /^[A-Za-z0-9_-]{12}$/,
-};
 
 /**
  * The identifiers whose type names a scheme this app has, out of a book's rows.
  *
  * **A type is a name and an optional marketplace**, and the name decides the
  * scheme: `CALIBRE_TYPES` holds the three names, `MARKETPLACE_SUFFIX` holds the
- * suffix as a shape, and `PRODUCED_VALUE` decides whether the value is one the
- * scheme's readers produce. What that replaces is a list of spellings:
+ * suffix as a shape, and `stores.storeIdentifier` decides whether the value is
+ * one the scheme's readers produce. What that replaces is a list of spellings:
  * `amazon_de`, `amazon_uk` and eleven more are one rule here, and a marketplace
  * Amazon opens tomorrow needs no edit.
  *
@@ -459,7 +423,7 @@ const PRODUCED_VALUE: Record<StoreIdentifierScheme, RegExp> = {
  *   producer puts in that record is a real ASIN, a uuid calibre mints when
  *   there is none (`metadata/mobi.py`) or a content hash. Calibre refuses it by
  *   default for the same reason, `use_mobi_asin` being `False` with a help text
- *   warning that the value may be another store's. `PRODUCED_VALUE` would
+ *   warning that the value may be another store's. `stores.producedValue` would
  *   refuse the uuid on its length; what it cannot do is tell a ten character
  *   ASIN from a ten character something else, which is why the decline is on
  *   the type.
@@ -508,8 +472,9 @@ export function identifiersWithScheme(
     const type = identifier.type.toLowerCase();
     const scheme = SCHEME_OF_TYPE.get(type.replace(MARKETPLACE_SUFFIX, ""));
     if (scheme === undefined) continue;
-    if (!PRODUCED_VALUE[scheme].test(identifier.value)) continue;
-    kept.push({ scheme, value: identifier.value });
+    const row = storeIdentifier(scheme, identifier.value);
+    if (row === null) continue;
+    kept.push(row);
   }
   return kept;
 }

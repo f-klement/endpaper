@@ -35,7 +35,6 @@ import asyncio
 import logging
 from collections import Counter
 from enum import StrEnum
-from time import monotonic
 from typing import Final
 from urllib.parse import urljoin, urlsplit
 
@@ -43,6 +42,7 @@ import httpx
 
 import cover_store
 from config import MAX_UPLOAD_BYTES
+from deadline import in_, left
 from isbn import parse as parse_isbn
 from uploads import sniff_image_extension
 
@@ -198,8 +198,20 @@ def is_local(url: str | None) -> bool:
     return url is not None and url.startswith(LOCAL_COVER_PREFIX)
 
 
+def stored_url(name: str) -> str:
+    """The URL the store serves the file `name` at.
+
+    The store names its own files (`cover_store` decides that a book's cover is
+    `<id>.<ext>` and the login background is `login_bg.<ext>`); this says where
+    they are served from, which is the one fact `LOCAL_COVER_PREFIX` holds.
+    `local_url` is the same answer for the caller that has a book id rather
+    than a file name.
+    """
+    return f"{LOCAL_COVER_PREFIX}{name}"
+
+
 def local_url(book_id: int, extension: str) -> str:
-    return f"{LOCAL_COVER_PREFIX}{book_id}.{extension}"
+    return stored_url(f"{book_id}.{extension}")
 
 
 def local_url_for(book_id: int) -> str | None:
@@ -333,7 +345,7 @@ def https_url(url: str | None) -> str | None:
     whatever the CSP says. The result is a stored cover that is correct, and
     invisible, with no error anywhere.
 
-    All four hosts in `COVER_HOSTS` serve the same bytes over TLS, so the
+    Every host in `COVER_HOSTS` serves the same bytes over TLS, so the
     upgrade is free. A locally uploaded cover is a relative `/covers/1.jpg`
     with no scheme and is returned untouched.
     """
@@ -387,16 +399,6 @@ def candidates(isbn: str) -> tuple[str, ...]:
     return (open_library_url(isbn), dnb_url(isbn))
 
 
-def _time_left(deadline: float | None) -> float | None:
-    """Seconds until the deadline, or None when there is no budget.
-
-    A caller treats <= 0 as spent. Returning the figure rather than a boolean is
-    what lets each request be capped at what is actually left, so a budget of
-    four seconds is four seconds and not four plus one timeout.
-    """
-    return None if deadline is None else deadline - monotonic()
-
-
 async def _check(
     client: httpx.AsyncClient, url: str, deadline: float | None = None
 ) -> bool | None:
@@ -423,10 +425,10 @@ async def _check(
         if not is_fetchable(target):
             logger.warning("Refused to check a cover on an unlisted host: %s", target[:200])
             return False
-        left = _time_left(deadline)
-        if left is not None and left <= 0:
+        remaining = left(deadline)
+        if remaining is not None and remaining <= 0:
             return None
-        timeout = TIMEOUT_SECONDS if left is None else min(TIMEOUT_SECONDS, left)
+        timeout = TIMEOUT_SECONDS if remaining is None else min(TIMEOUT_SECONDS, remaining)
         try:
             async with client.stream("GET", target, timeout=timeout) as response:
                 if response.is_redirect:
@@ -485,8 +487,8 @@ async def resolve(
         timeout=TIMEOUT_SECONDS, follow_redirects=False, headers=_IDENTITY
     ) as client:
         for url in order:
-            left = _time_left(deadline)
-            if left is not None and left <= 0:
+            remaining = left(deadline)
+            if remaining is not None and remaining <= 0:
                 # Out of budget. Whatever was remembered as unverified is
                 # returned below, which is the honest answer: a candidate that
                 # could not be checked, not a candidate that failed.
@@ -667,11 +669,11 @@ def download(url: str, deadline: float | None = None) -> bytes | None:
                 "Refused to download a cover from an unlisted host: %s", target[:200]
             )
             return None
-        left = _time_left(deadline)
-        if left is not None and left <= 0:
+        remaining = left(deadline)
+        if remaining is not None and remaining <= 0:
             logger.info("Cover download ran out of budget: %s", target[:200])
             return None
-        timeout = TIMEOUT_SECONDS if left is None else min(TIMEOUT_SECONDS, left)
+        timeout = TIMEOUT_SECONDS if remaining is None else min(TIMEOUT_SECONDS, remaining)
         chunks = []
         try:
             with (
@@ -722,7 +724,7 @@ def download(url: str, deadline: float | None = None) -> bytes | None:
                     # under it holds this open past any budget: the check above
                     # bounds the bytes and this bounds the seconds. Without it
                     # `INTERACTIVE_BUDGET_SECONDS` is a number nobody keeps.
-                    remaining = _time_left(deadline)
+                    remaining = left(deadline)
                     if remaining is not None and remaining <= 0:
                         logger.info("Cover download ran past its budget: %s", target[:200])
                         return None
@@ -813,7 +815,7 @@ def resolve_and_store(
     against a per-read timeout, which a server sizing chunks at one byte
     stretches for as long as it likes. What that actually costs is one
     threadpool worker and a stalled backfill, and the precondition is a
-    compromised host on `COVER_HOSTS`, all six of which are https, so an on-path
+    compromised host on `COVER_HOSTS`, every one of which is https, so an on-path
     attacker cannot reach it. Accepted on those grounds rather than on a bound
     that does not exist. Giving the backfill a per-book deadline would close it
     and is the fix if that ever stops being true.
@@ -823,7 +825,7 @@ def resolve_and_store(
     thread; the two `async def` handlers reach it through `asyncio.to_thread`,
     which also gives it a thread with no running loop.
     """
-    deadline = None if budget is None else monotonic() + budget
+    deadline = None if budget is None else in_(budget)
     try:
         candidate = None if is_local(supplied) else supplied
         if candidate is None and isbn:

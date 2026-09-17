@@ -1,5 +1,7 @@
 """Tests for backend/settings_store.py."""
 
+import dataclasses
+
 import pytest
 
 import credentials
@@ -277,3 +279,200 @@ class TestACredentialMakesASourceReady:
             "hunter2",
         )
         assert CatalogueSource.GOOGLE_BOOKS not in settings_store.source_credentials(db)
+
+
+class TestTheKeyIsResolvedOncePerRequest:
+    """`_catalogue_logins` resolves the encryption key for the loop, not per source.
+
+    **The cost is counted, not reasoned about.** Resolving reads every entry in
+    `credentials.KEY_SOURCES` and runs a BIP-39 decode per phrase held, so on a
+    machine with a keychain it is a round trip; this is the member request path,
+    so it is paid per lookup rather than per admin visit.
+
+    **Two instruments, because one careful reading is one reading.**
+    `_supplied` is counted here, and `KeySource.read` is counted by
+    `test_the_key_sources_are_read_once_over` below, which observes the effect
+    rather than the function: a resolution that stopped going through
+    `_supplied` would leave the first count at zero and say nothing.
+
+    **The arm that is a cost rather than a saving has a test of its own.** A
+    roster whose credential doors are all pinned in the environment opens no
+    envelope, so it needs no key, and it now pays one resolution where it paid
+    none. That is stated at `_catalogue_logins` and pinned by
+    `test_a_pinned_only_roster_pays_one_resolution`, because a fix measured only
+    where it saves is a fix nobody has asked the other question of.
+
+    **The whole request is counted by
+    `tests/routers/test_books.py::TestTheLookupRouteDoesNotPayPerSourceEither`**,
+    which is a route and stays with the route. The resolver being right is not
+    the route using it.
+    """
+
+    @staticmethod
+    def _counted(monkeypatch) -> list[int]:
+        """A one element tally of `credentials._supplied` invocations."""
+        tally = [0]
+        real = credentials._supplied
+
+        def counting():
+            tally[0] += 1
+            return real()
+
+        monkeypatch.setattr(credentials, "_supplied", counting)
+        return tally
+
+    @staticmethod
+    def _seal(db, key_phrase, monkeypatch, *names: str) -> None:
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", key_phrase)
+        for name in names:
+            address = targets.SEEDED[CatalogueSource(name)].base_url
+            credentials.put(db, name, address, "alice", "hunter2")
+
+    @pytest.fixture
+    def key_phrase(self) -> str:
+        return credentials.generate_phrase()
+
+    def test_the_shipping_roster_resolves_the_key_once_and_opens_no_envelope(
+        self, db, monkeypatch
+    ):
+        """Nothing is patched, so this is the roster as it ships.
+
+        **The arm that matters has survived two changes to what the roster
+        answers**, and it is the tally rather than the mapping: an install
+        storing no credential pays one resolution and not one per source. A
+        tally above one here is the defect this class exists for, arriving from
+        the other side.
+
+        What the mapping holds did change, twice. It was empty while no door
+        carried a login at all; it was still empty once one did, because nobody
+        had entered one; and it now carries the shipped default, which costs no
+        resolution because it opens no envelope. So the roster as it ships pays
+        exactly what it paid before and sends a login it did not send.
+        """
+        tally = self._counted(monkeypatch)
+
+        resolved = settings_store._catalogue_logins(db)
+
+        assert set(resolved) == sources.SHIPS_A_CREDENTIAL
+        assert tally[0] == 1
+
+    def test_two_sealed_logins_cost_what_one_costs(
+        self, db, key_phrase, monkeypatch
+    ):
+        """The count is flat in the number of sources, which is the whole fix."""
+        self._seal(db, key_phrase, monkeypatch, "dnb")
+        monkeypatch.setattr(
+            sources, "NEEDS_A_KEY", frozenset({CatalogueSource.DNB})
+        )
+        tally = self._counted(monkeypatch)
+        assert len(settings_store._catalogue_logins(db)) == 1
+        one = tally[0]
+
+        credentials.put(
+            db,
+            "k10plus",
+            targets.SEEDED[CatalogueSource.K10PLUS].base_url,
+            "alice",
+            "hunter2",
+        )
+        monkeypatch.setattr(
+            sources,
+            "NEEDS_A_KEY",
+            frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
+        )
+        tally[0] = 0
+        assert len(settings_store._catalogue_logins(db)) == 2
+        two = tally[0]
+
+        assert (one, two) == (1, 1), (
+            f"{one} resolution for one sealed login and {two} for two: the cost "
+            "moves with the roster, which is the defect this exists to catch"
+        )
+
+    def test_a_lost_key_is_resolved_once_as_well(
+        self, db, key_phrase, monkeypatch
+    ):
+        """The deployment whose key is gone, which is the arm that was 1 + N.
+
+        Both critic seats found it independently: `_material` fell through to
+        `require_key` on a state that already said there was no key, so the one
+        state where every other reader answers from the value it was handed was
+        the one state this re-read every store, per source.
+
+        Nothing is readable here, so the loop resolves no login at all. That is
+        the point: the cost was being paid to learn nothing.
+        """
+        self._seal(db, key_phrase, monkeypatch, "dnb", "k10plus")
+        monkeypatch.setattr(
+            sources,
+            "NEEDS_A_KEY",
+            frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
+        )
+        monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY")
+        assert credentials.key_material() is None, (
+            "a key is still in force, so this measures the readable path"
+        )
+        tally = self._counted(monkeypatch)
+
+        assert settings_store._catalogue_logins(db) == {}
+
+        assert tally[0] == 1
+
+    def test_a_pinned_only_roster_pays_one_resolution(self, db, monkeypatch):
+        """The cost side of the change, stated rather than discovered.
+
+        A pinned credential never opens an envelope, so before this the loop
+        touched no key store at all. It now resolves once for the request.
+        """
+        monkeypatch.setattr(
+            sources,
+            "NEEDS_A_KEY",
+            frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
+        )
+        monkeypatch.setenv(credentials.env_variable_name("dnb"), "alice:hunter2")
+        monkeypatch.setenv(
+            credentials.env_variable_name("k10plus"), "alice:hunter2"
+        )
+        tally = self._counted(monkeypatch)
+
+        assert len(settings_store._catalogue_logins(db)) == 2
+
+        assert tally[0] == 1
+
+    def test_the_key_sources_are_read_once_over(
+        self, db, key_phrase, monkeypatch
+    ):
+        """The second instrument: every store is read once, not once per source.
+
+        This counts what the machine actually does, where the test above counts
+        a call to one of our own functions. The issue's measurement is in this
+        unit: three key source reads per sealed source rather than three in all.
+        """
+        self._seal(db, key_phrase, monkeypatch, "dnb", "k10plus")
+        monkeypatch.setattr(
+            sources,
+            "NEEDS_A_KEY",
+            frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
+        )
+        reads: list[str] = []
+        one_pass = [source.token for source in credentials.KEY_SOURCES]
+
+        def watching(source: credentials.KeySource) -> credentials.KeySource:
+            def read() -> str:
+                reads.append(source.token)
+                return source.read()
+
+            return dataclasses.replace(source, read=read)
+
+        monkeypatch.setattr(
+            credentials,
+            "KEY_SOURCES",
+            tuple(watching(source) for source in credentials.KEY_SOURCES),
+        )
+
+        assert len(settings_store._catalogue_logins(db)) == 2
+
+        assert reads == one_pass, (
+            f"{reads} store reads for two sealed logins, where one pass over "
+            "the stores is one read each"
+        )

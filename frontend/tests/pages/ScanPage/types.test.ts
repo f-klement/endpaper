@@ -34,6 +34,9 @@ import {
   type PendingBook,
 } from "../../../src/pages/ScanPage/types";
 import { identifiersWithScheme } from "../../../src/lib/calibre";
+// The value rule both walks apply, asked directly, so the arm below can say
+// this walk consults it rather than that two literals match.
+import { producedValue } from "../../../src/lib/stores";
 import { TEXT_CEILINGS } from "../../../src/lib/bookBounds";
 import type { FileMetadata } from "../../../src/lib/fileReaders";
 import { CARRIES_A_BOOK } from "../../carriesABook";
@@ -181,18 +184,6 @@ const SCHEMA = import.meta.glob("../../../openapi.json", {
   import: "default",
   eager: true,
 }) as Record<string, string>;
-
-/**
- * The two modules that spell the value rule, as text.
- *
- * Read rather than imported because both tables are private to their module,
- * which is `tests/lib/calibre.test.ts`' arrangement for the same problem one
- * module over.
- */
-const VALUE_RULE_SOURCES = import.meta.glob(
-  ["../../../src/lib/calibre.ts", "../../../src/pages/ScanPage/types.ts"],
-  { query: "?raw", import: "default", eager: true },
-) as Record<string, string>;
 
 interface Operation {
   operationId?: string;
@@ -846,56 +837,43 @@ describe("which of a file's labels reach the endpoint", () => {
     ]);
   });
 
-  it("holds a value to the shape the Calibre reader holds it to", () => {
-    // **The two tables compared as text, not sampled.** This arm was a list of
-    // 15 candidates and the design seat beat it: widening the ASIN class to
-    // `[A-Za-z0-9.]` passed 88 of 88, because no candidate carried a `.` at
-    // length 10. A sample cannot hold a character class, so the rule is that
-    // the two spellings are the same spelling. `tests/lib/calibre.test.ts`
-    // reads `takeout.VOLUME_ID` the same way, which is the third copy of the
-    // Google half; a single home for all of them is raised rather than taken.
-    const declared = (path: string) => {
-      const source = VALUE_RULE_SOURCES[path] ?? "";
-      // A glob that matched nothing would make the comparison below compare two
-      // empty tables and pass for ever.
-      expect(source.length).toBeGreaterThan(1000);
-      const block = /const PRODUCED_VALUE[^=]*=\s*\{([\s\S]*?)\n\};/.exec(
-        source,
-      );
-      expect(block).not.toBeNull();
-      return Object.fromEntries(
-        [...block![1]!.matchAll(/^\s*(\w+):\s*(\/.*\/),\s*$/gm)].map(
-          ([, scheme, pattern]) => [scheme!, pattern!],
-        ),
-      );
-    };
-
-    const mine = declared("../../../src/pages/ScanPage/types.ts");
-    const calibre = declared("../../../src/lib/calibre.ts");
-    // Both schemes on both sides, so an extractor that found one entry cannot
-    // pass by comparing a table of one with a table of one.
-    expect(Object.keys(mine).sort()).toEqual(["asin", "google_books"]);
-    expect(mine).toEqual(calibre);
-
-    // **What the text comparison cannot say: that this is the table that runs.**
-    // A second `PRODUCED_VALUE` elsewhere in the module, or a rule that stopped
-    // consulting it, leaves the comparison green. So each extracted pattern is
-    // asked of the function, on a value it accepts and one it refuses.
-    const probes: [string, string, string][] = [
-      ["asin", "AMAZON", "B000R34YKC"],
-      ["asin", "AMAZON", "B000R34YK."],
-      ["google_books", "GOOGLE", "aB3-dE6_gH9j"],
-      ["google_books", "GOOGLE", "aB3-dE6_gH9."],
+  it("keeps a row exactly where the shared value rule admits it", () => {
+    // **The seam, and it is asserted in both directions.** The value rule and
+    // its reasons live in `lib/stores.ts`, beside the scheme whose property
+    // they are; `tests/lib/stores.test.ts` measures the rule. What only this
+    // file can see is that **this walk consults it**, which is the evasion no
+    // assertion over the table can reach: keep the table complete and have one
+    // caller stop asking, and every other arm stays green.
+    //
+    // This replaced an arm that compared the two modules' tables as text, and
+    // an earlier one that sampled 15 candidates: widening the ASIN class to
+    // `[A-Za-z0-9.]` passed 88 of 88 there, because no candidate carried a `.`
+    // at length 10. Neither instrument could say the rule was reached.
+    const candidates = [
+      "B000R34YKC",
+      "162380874X",
+      "B000R34YK.",
+      "B000R34YK",
+      "aB3-dE6_gH9j",
+      "aB3-dE6_gH9",
     ];
-    for (const [scheme, label, value] of probes) {
-      const pattern = new RegExp(mine[scheme]!.slice(1, -1));
-      expect(labelled(label, value).length === 1).toBe(pattern.test(value));
-    }
-    // Both answers appear among the probes, so an agreement that held because
-    // nothing passed is not what was measured.
-    expect(
-      new Set(probes.map(([, label, value]) => labelled(label, value).length)),
-    ).toEqual(new Set([0, 1]));
+    const swept = candidates.flatMap((value) =>
+      (["AMAZON", "GOOGLE"] as const).map((label) => {
+        const scheme = label === "AMAZON" ? "asin" : "google_books";
+        return {
+          at: `${label}: ${value}`,
+          kept: labelled(label, value).length === 1,
+          admitted: producedValue(scheme, value),
+        };
+      }),
+    );
+
+    expect(swept.filter((one) => one.kept !== one.admitted)).toEqual([]);
+    // Both answers appear, so an agreement that held because nothing passed is
+    // not what was measured.
+    expect(new Set(swept.map((one) => one.kept))).toEqual(
+      new Set([true, false]),
+    );
   });
 });
 

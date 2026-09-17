@@ -41,6 +41,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
+from dialect import for_bind
+
 revision: str = "b8e2f04c17aa"
 down_revision: str | None = "d5c31b7a09fe"
 branch_labels: Sequence[str] | None = None
@@ -59,9 +61,16 @@ def upgrade() -> None:
             """
         )
     )
+    # **`instr` is SQLite's and `strpos` is Postgres's**, and they take their
+    # arguments in the same order, which is the trap in translating this one:
+    # `position` takes them the other way round. Both answer 0 for absent, so
+    # the comparison is the same on either engine. The first statement above
+    # needs no branch: `substr` and `lower` are both standard.
     op.execute(
         sa.text(
-            """
+            for_bind(
+                op.get_bind(),
+                sqlite="""
             UPDATE books
                SET cover_url = NULL
              WHERE cover_url IS NOT NULL
@@ -70,7 +79,18 @@ def upgrade() -> None:
                      substr(cover_url, 1, 8) = '/covers/'
                  AND instr(cover_url, '..') = 0
                )
-            """
+            """,
+                postgresql="""
+            UPDATE books
+               SET cover_url = NULL
+             WHERE cover_url IS NOT NULL
+               AND lower(substr(cover_url, 1, 8)) <> 'https://'
+               AND NOT (
+                     substr(cover_url, 1, 8) = '/covers/'
+                 AND strpos(cover_url, '..') = 0
+               )
+            """,
+            )
         )
     )
 

@@ -264,6 +264,28 @@ _AS_STORED: Final[dict[str, Callable[[str], str | None]]] = {
     "cover_url": covers.https_url,
 }
 
+#: Which values name something only this deployment can create, and so are not
+#: an outside source's to assert.
+#:
+#: One entry, and it is an integrity hole rather than an untidy row. A
+#: `cover_url` under `covers.LOCAL_COVER_PREFIX` names a file **this** app
+#: stored and serves. Nothing downstream refuses one arriving from a catalogue:
+#: `models`' `@validates("cover_url")` runs `covers.storable`, whose local arm
+#: exists for a member's own upload, so `/covers/7.jpg` from a remote record is
+#: stored, and `covers.is_local` then answers True for it. That predicate is
+#: what both automated writers read to decide precedence, so a remote record
+#: pins a Book's cover against every later correction and only a member's own
+#: edit undoes it. Not a disclosure: the render is re-authorized per book id and
+#: `schemas/public.py` drops local covers from the published catalogue.
+#:
+#: Here rather than at either writer because this is the seam every source
+#: adapter crosses: a rule at one writer is a rule the next source added does
+#: not get. `tests/test_catalogue.py::TestARecordCannotClaimThisAppsOwnFiles`
+#: asserts the incoming direction, which is the half nothing tested.
+_REFUSED_AS_OUR_OWN: Final[dict[str, Callable[[str], bool]]] = {
+    "cover_url": covers.is_local,
+}
+
 #: What a numeric fact has to fall inside, closed at both ends.
 #:
 #: These are not column widths: all three columns are `Integer` or `Float` and
@@ -424,6 +446,30 @@ def _drop_unstorable(record: Record) -> list[str]:
     return dropped
 
 
+def _drop_claimed_as_ours(record: Record) -> list[str]:
+    """Clear every scalar this source was not entitled to assert, and name them.
+
+    The field rather than the record, as above: a catalogue that answered with
+    one value it may not give still answered, and `_REFUSED_AS_OUR_OWN` carries
+    what the one entry costs if it is not dropped.
+
+    **Runs after `_drop_unstorable`, and the order is the whole of why this is
+    not folded into that loop.** These predicates are string predicates, and a
+    `Record` is built from somebody else's JSON: `covers.is_local(b"/covers/x")`
+    raises `TypeError`, which no adapter catches and which is a 500 on a
+    member's search rather than a dropped field. That loop is the gate that has
+    already cleared a value of the wrong type, and it is the same argument its
+    own docstring makes for gating before `_AS_STORED`.
+    """
+    dropped: list[str] = []
+    for name, refused in _REFUSED_AS_OUR_OWN.items():
+        value = getattr(record, name)
+        if value is not None and refused(value):
+            object.__setattr__(record, name, None)
+            dropped.append(name)
+    return dropped
+
+
 @dataclass(frozen=True, slots=True)
 class Record:
     """One catalogue's answer about one book. Evidence, never a Book.
@@ -574,7 +620,10 @@ class Record:
         bound is cheap and is **not** idempotent across a `replace`:
         `with_cover` puts a URL on a record the image services chose, after the
         flag is already set, so a bound below the guard would let that one field
-        through unchecked. Everything else `replace` copies has been bounded
+        through unchecked. `_drop_claimed_as_ours` is above it for the same
+        reason and not for symmetry: `with_cover` writes whatever its caller
+        passes, and it is the one field on a `replace` that has not already been
+        through a refusal. Everything else `replace` copies has been bounded
         already, so re-checking it costs the comparisons and finds nothing.
 
         Measured on the worst shape `_folded` records: one process on the four
@@ -625,6 +674,18 @@ class Record:
             logger.info(
                 "Dropped %s from a record from %r: the column cannot hold it",
                 ", ".join(dropped),
+                self.source,
+            )
+
+        claimed = _drop_claimed_as_ours(self)
+        if claimed:
+            # Warning rather than info: a catalogue naming one of this
+            # deployment's own files is not a value that failed to fit, and the
+            # log line is the only place it is visible at all.
+            logger.warning(
+                "Dropped %s from a record from %r: an outside source cannot "
+                "claim this app's own file",
+                ", ".join(claimed),
                 self.source,
             )
 

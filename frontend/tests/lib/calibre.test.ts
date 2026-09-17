@@ -24,10 +24,9 @@ import type { FileMetadata } from "../../src/lib/fileReaders";
 import { openSqlite } from "../../src/lib/sqlite";
 import { CALIBRE_SCHEMA, databaseOf, engine } from "./sqliteFixtures";
 
-// The Takeout reader's own volume id rule, for the sweep that holds the two
-// to one shape. A `?raw` specifier is a different module id, so this is a
-// string rather than a second evaluation of that reader, which needs jsdom.
-import takeoutSource from "../../src/lib/takeout.ts?raw";
+// The value rule this walk applies, asked directly, so the arm below can say
+// the walk consults it rather than that two literals match.
+import { producedValue } from "../../src/lib/stores";
 
 /** A library holding whatever these rows put in it. */
 async function library(...rows: string[]) {
@@ -971,39 +970,42 @@ describe("which of a library's identifiers reach the endpoint", () => {
     ]);
   });
 
-  it("holds the volume id to the shape the Takeout reader holds it to", async () => {
-    // **Swept against that module's own rule, not against examples.** The two
-    // readers produce one scheme's values and a difference between them is a
-    // row one would send and the other would not. Read out of the source
-    // because the constant is private to it, which is `kindle.test.ts`'s
-    // arrangement for the same problem.
-    const declared = /const VOLUME_ID = (\/\S+\/);/.exec(takeoutSource);
-    expect(declared).not.toBeNull();
-    const volumeId = new RegExp(declared![1]!.slice(1, -1));
-
+  it("keeps a row exactly where the shared value rule admits it", async () => {
+    // **The seam, and it is asserted in both directions.** The value rule and
+    // its reasons live in `lib/stores.ts`, beside the scheme whose property
+    // they are; `tests/lib/stores.test.ts` measures the rule. What only this
+    // file can see is that **this walk consults it**, which is the evasion a
+    // shape assertion cannot reach: a table left complete and a caller that
+    // stopped asking leaves every other arm green.
+    //
+    // Both a type admitted and a type refused are swept, because a walk that
+    // dropped the value check keeps the refused ones and a walk that dropped
+    // the type check keeps nothing new at all.
     const candidates = [
+      "B000R34YKC",
+      "162380874X",
+      "B000R34YK.",
+      "B000R34YK",
       "aB3-dE6_gH9j",
-      "s7NIrgEACAAJ",
       "aB3-dE6_gH9",
-      "aB3-dE6_gH9jk",
-      "aB3-dE6_gH9.",
-      "aB3-dE6_gH9+",
-      "____________",
-      "------------",
-      "000000000000",
     ];
-    const agreed = await Promise.all(
-      candidates.map(async (candidate) => ({
-        candidate,
-        kept: (await schemed(row("google", candidate))).length === 1,
-        produced: volumeId.test(candidate),
-      })),
+    const swept = await Promise.all(
+      candidates.flatMap((value) =>
+        (["amazon", "google"] as const).map(async (type) => {
+          const scheme = type === "amazon" ? "asin" : "google_books";
+          return {
+            at: `${type}: ${value}`,
+            kept: (await schemed(row(type, value))).length === 1,
+            admitted: producedValue(scheme, value),
+          };
+        }),
+      ),
     );
 
-    expect(agreed.filter((one) => one.kept !== one.produced)).toEqual([]);
-    // Both answers appear, so an equality that held because nothing passed is
+    expect(swept.filter((one) => one.kept !== one.admitted)).toEqual([]);
+    // Both answers appear, so an agreement that held because nothing passed is
     // not what was measured.
-    expect(new Set(agreed.map((one) => one.kept))).toEqual(
+    expect(new Set(swept.map((one) => one.kept))).toEqual(
       new Set([true, false]),
     );
   });

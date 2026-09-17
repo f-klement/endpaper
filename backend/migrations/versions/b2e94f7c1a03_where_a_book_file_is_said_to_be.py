@@ -46,6 +46,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
+from dialect import DialectSQL
+
 revision: str = "b2e94f7c1a03"
 down_revision: str | Sequence[str] | None = "a3d7f1b09c25"
 branch_labels: str | Sequence[str] | None = None
@@ -88,14 +90,39 @@ def upgrade() -> None:
             "confirmed_at", sa.DateTime(), server_default=sa.func.now(), nullable=False
         ),
         sa.Column("missing_since", sa.DateTime(), nullable=True),
+        # **`octet_length` is Postgres's spelling of the byte arm and the arm is
+        # kept on both.** It is not redundant beside the character ceiling on
+        # either engine: on SQLite it is the only bound a NUL carrying value
+        # meets, and on Postgres it is what refuses four byte characters filling
+        # a column whose ceiling is counted in characters. Deleting it because
+        # one engine makes it look unnecessary is how the live engine loses its
+        # only bound.
+        #
+        # `size_bytes` is declared `Integer`, so Postgres refuses a value above
+        # `int4` by type where SQLite refuses it by this arm. Both refuse; the
+        # exception class and the message an operator sees differ, which is the
+        # same split `backup.py` records for a violating restore.
         sa.CheckConstraint(
-            "length(root_label) >= 1 "
-            "AND length(relative_path) >= 1 "
-            f"AND length(root_label) + length(relative_path) <= {_PATH_MAX} "
-            "AND length(CAST(root_label AS BLOB)) + length(CAST(relative_path AS BLOB)) "
-            f"<= {4 * _PATH_MAX} "
-            "AND (size_bytes IS NULL OR (size_bytes >= 0 "
-            f"AND size_bytes <= {_MAX_SIZE}))",
+            DialectSQL(
+                sqlite=(
+                    "length(root_label) >= 1 "
+                    "AND length(relative_path) >= 1 "
+                    f"AND length(root_label) + length(relative_path) <= {_PATH_MAX} "
+                    "AND length(CAST(root_label AS BLOB)) + length(CAST(relative_path AS BLOB)) "
+                    f"<= {4 * _PATH_MAX} "
+                    "AND (size_bytes IS NULL OR (size_bytes >= 0 "
+                    f"AND size_bytes <= {_MAX_SIZE}))"
+                ),
+                postgresql=(
+                    "length(root_label) >= 1 "
+                    "AND length(relative_path) >= 1 "
+                    f"AND length(root_label) + length(relative_path) <= {_PATH_MAX} "
+                    "AND octet_length(root_label) + octet_length(relative_path) "
+                    f"<= {4 * _PATH_MAX} "
+                    "AND (size_bytes IS NULL OR (size_bytes >= 0 "
+                    f"AND size_bytes <= {_MAX_SIZE}))"
+                ),
+            ),
             name="ck_digital_references_bounds",
         ),
         sa.ForeignKeyConstraint(["book_id"], ["books.id"]),

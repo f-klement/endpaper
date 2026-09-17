@@ -64,7 +64,52 @@ _TMP_DATA_DIR = Path(tempfile.mkdtemp(prefix="endpaper-tests-", dir=_fastest_scr
 # controller process too, which owns a directory but runs no tests.
 atexit.register(shutil.rmtree, _TMP_DATA_DIR, True)
 os.environ["DATA_DIR"] = str(_TMP_DATA_DIR)
-os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_DATA_DIR / 'test.db'}"
+
+
+def _database_url() -> str:
+    """SQLite unless something asked, out loud, for the other engine.
+
+    **`ENDPAPER_TEST_DATABASE_URL` and not `DATABASE_URL`**, which is the same
+    rule the `_ENV_OVERRIDES` loop below applies to every other setting: a value
+    in the shell that happens to run the suite must not silently decide what the
+    suite runs against. This name exists for one caller, the pipeline's
+    `test:postgres` job, and a developer who exports it has said which engine
+    they meant.
+
+    **One database per xdist worker.** The workers share nothing else: each gets
+    its own `mkdtemp` directory and, on SQLite, its own file. Against one server
+    they would share a schema, and `clean_database` empties every table between
+    tests, so worker two would delete worker one's rows mid test. The name is
+    derived from `PYTEST_XDIST_WORKER` and the database is created here, before
+    `main` is imported and runs the chain into it.
+
+    **Created and checked through `scripts/postgres_database.py`, which the
+    pipeline also calls.** A bare `CREATE DATABASE` here inherits whatever
+    `template1` on that server carries, and the collation is what a POSIX bracket
+    range in a CHECK constraint is read against, so a worker database made any
+    other way is a database the charset rules were never measured on.
+    """
+    asked = os.getenv("ENDPAPER_TEST_DATABASE_URL")
+    if not asked:
+        return f"sqlite:///{_TMP_DATA_DIR / 'test.db'}"
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from sqlalchemy.engine import make_url
+
+    from scripts.postgres_database import create_if_absent, wrong_locale
+
+    url = make_url(asked)
+    worker = os.getenv("PYTEST_XDIST_WORKER")
+    if worker:
+        url = url.set(database=f"{url.database}_{worker}")
+        create_if_absent(asked, str(url.database))
+    rendered = url.render_as_string(hide_password=False)
+    wrong = wrong_locale(rendered)
+    assert wrong is None, f"{url.database} is not a database this schema was measured on: {wrong}"
+    return rendered
+
+
+os.environ["DATABASE_URL"] = _database_url()
 # Durability is meaningless for a database dropped after every test, and the
 # fsync it buys was most of this suite's runtime. See database._synchronous.
 os.environ["SQLITE_SYNCHRONOUS"] = "OFF"
@@ -217,8 +262,9 @@ def _schema_once() -> None:
     the source arm instead.
 
     Session scoped rather than per test: each xdist worker is a separate process
-    with its own `mkdtemp` directory and its own database file, so this runs once
-    per worker and they cannot collide.
+    with its own `mkdtemp` directory and its own database, a file on SQLite and
+    one created by `_database_url` on Postgres, so this runs once per worker and
+    they cannot collide.
     """
     from sqlalchemy import inspect as reflect
 
@@ -264,9 +310,13 @@ def clean_database(_schema_once: None) -> Iterator[None]:
     and enforced. `Base.metadata.sorted_tables` is dependency ordered, so
     reversing it deletes children first.
 
-    Ids still restart at 1, which the `covers_dir` fixture depends on, because
-    nothing here uses `AUTOINCREMENT`: SQLite reuses the highest free rowid, and
-    an empty table has none taken.
+    Ids still restart at 1 **on SQLite**, which the `covers_dir` fixture depends
+    on, because nothing here uses `AUTOINCREMENT`: SQLite reuses the highest free
+    rowid, and an empty table has none taken. **Postgres does not**, measured:
+    eighteen columns there default to `nextval(...)` and a DELETE does not touch
+    a sequence. So every case that reads a literal id is a case that runs on one
+    engine, which is why the pipeline's Postgres job selects rather than running
+    the suite.
     """
     _empty_and_reseed()
     yield

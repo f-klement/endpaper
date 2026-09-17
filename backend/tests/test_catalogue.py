@@ -17,6 +17,7 @@ import pytest
 from pydantic import ValidationError
 
 import catalogue
+import covers
 import google_books
 import isbn as isbn_utils
 import metadata
@@ -1528,3 +1529,83 @@ class TestAScalarThatIsNotTextIsDroppedRatherThanMeasured:
     def test_a_float_is_still_a_number(self):
         """`series_index` is a float column and half numbers are real."""
         assert Record(series_index=1.5).series_index == 1.5
+
+
+class TestARecordCannotClaimThisAppsOwnFiles:
+    """A catalogue may not answer with a URL naming a file this app stores.
+
+    `covers.storable` admits the local shape because a member's own upload has
+    it, so nothing downstream refused `/covers/7.jpg` arriving from a remote
+    record: it was stored, and `covers.is_local` then answered True for it. That
+    is the predicate both automated writers read to step aside, so one remote
+    record pinned a Book's cover against every later correction and only a
+    member's own edit undid it.
+
+    **The incoming direction is the half nothing tested.**
+    `test_google_books.py::TestMergeInto` asserts that an existing local cover
+    survives a merge, which is the outgoing direction and stays true either way.
+
+    Not a disclosure: the render is re-authorized per book id and
+    `schemas/public.py` drops local covers from the published catalogue.
+    """
+
+    LOCAL: Final = "/covers/7.jpg"
+
+    def test_a_catalogue_cannot_supply_one(self):
+        assert Record(cover_url=self.LOCAL).cover_url is None
+
+    def test_the_resolved_cover_goes_through_the_same_door(self):
+        """`with_cover` is the one method writing a field after `_folded` is set.
+
+        `dataclasses.replace` re-enters `__post_init__` with the flag already
+        True, so a refusal placed below that guard would never see this field.
+        Both callers today hand it `record.cover_url`, which this has already
+        cleared, so what this pins is the seam rather than a path a source can
+        reach.
+        """
+        assert Record().with_cover(self.LOCAL).cover_url is None
+
+    def test_an_uploaded_file_cannot_either(self):
+        """The other producer. `_KEPT_WHOLE_ON_UPLOAD` carries `cover_url`, so
+        this door would otherwise pass it through untouched."""
+        assert Record.from_upload(cover_url=self.LOCAL).cover_url is None
+
+    def test_a_remote_cover_is_untouched(self):
+        url = "https://covers.openlibrary.org/b/isbn/9783446249974-L.jpg"
+
+        assert Record(cover_url=url).cover_url == url
+
+    def test_the_prefix_is_read_from_covers_at_call_time(self, monkeypatch):
+        """Behavioural rather than a grep, for the reason
+        `test_google_books.py::TestMergeInto::test_the_local_cover_rule_is_covers_own`
+        states: a copy of the literal here passes every arm above until the
+        prefix moves, and then refuses the wrong shape."""
+        monkeypatch.setattr(covers, "LOCAL_COVER_PREFIX", "/held/")
+
+        assert Record(cover_url="/held/1.jpg").cover_url is None
+        assert Record(cover_url=self.LOCAL).cover_url == self.LOCAL
+
+    def test_the_type_gate_runs_first(self):
+        """`covers.is_local(b"/covers/7.jpg")` raises `TypeError`, which no
+        adapter catches and which is a 500 on a member's search rather than a
+        dropped field. `_drop_unstorable` has already cleared the value."""
+        assert Record(cover_url=cast(str, self.LOCAL.encode())).cover_url is None
+
+    def test_every_refused_field_is_one_the_type_gate_covers(self):
+        """The ordering is a rule only while both tables name the same fields.
+
+        `_drop_unstorable`'s `isinstance(value, str)` arm runs for the names in
+        `_TEXT_CEILINGS` and for no others, so a field added to
+        `_REFUSED_AS_OUR_OWN` alone would reach a string predicate with whatever
+        somebody else's JSON put there.
+        """
+        assert set(catalogue._REFUSED_AS_OUR_OWN) <= set(catalogue._TEXT_CEILINGS)
+
+    def test_the_log_names_the_field_and_the_source(self, caplog):
+        """The drop is silent otherwise: the record still validates, the Book
+        still saves, and the cover is simply the next candidate."""
+        with caplog.at_level(logging.WARNING, logger="endpaper.catalogue"):
+            Record(source="open_library", cover_url=self.LOCAL)
+
+        assert "cover_url" in caplog.text
+        assert "open_library" in caplog.text

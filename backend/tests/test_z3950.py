@@ -461,8 +461,11 @@ class TestOneAssociationIsOneClock:
         # version passed with the comparison changed from `>` to `>=`, which is the off by
         # one it exists to catch, so it was a fixture named for something it did not test.
         frozen = time.monotonic()
-        # Patched on the stdlib module `z3950` imports, not on an attribute of it:
-        # `z3950.time` is not an export and mypy refuses to reach through it.
+        # Patched on the stdlib module itself, which is what `deadline.py` reads
+        # the clock through: `z3950` no longer imports `time` at all, and
+        # patching a name `deadline` imported by value would not reach it.
+        # `test_deadline.py::test_it_reads_the_clock_late_enough_to_be_frozen`
+        # is what keeps that true from the other side.
         monkeypatch.setattr(time, "monotonic", lambda: frozen)
         client = FakeClient()
         async with z3950.association(

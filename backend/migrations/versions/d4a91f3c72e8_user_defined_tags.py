@@ -19,6 +19,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
+from dialect import for_bind
+
 revision: str = "d4a91f3c72e8"
 down_revision: str | Sequence[str] | None = "c9f2a8e41b06"
 branch_labels: str | Sequence[str] | None = None
@@ -37,7 +39,22 @@ def upgrade() -> None:
         )
 
     # Everything already here came from the seed list.
-    op.execute(sa.text("UPDATE tags SET is_predefined = 1"))
+    #
+    # **A branch for a literal, because Postgres has a boolean type and SQLite
+    # does not.** `is_predefined = 1` assigns an integer to a `boolean` column
+    # and Postgres refuses it outright, which is where the chain stopped before
+    # this branch existed: the eighth revision, not the twelfth the ADR named,
+    # and carrying none of the tokens anyone had grepped for. The SQLite arm is
+    # the text this revision shipped with, unchanged.
+    op.execute(
+        sa.text(
+            for_bind(
+                op.get_bind(),
+                sqlite="UPDATE tags SET is_predefined = 1",
+                postgresql="UPDATE tags SET is_predefined = true",
+            )
+        )
+    )
 
 
 def downgrade() -> None:
@@ -53,11 +70,28 @@ def downgrade() -> None:
     # downgrade followed by an upgrade.
     op.execute(
         sa.text(
-            "DELETE FROM book_tags WHERE tag_id IN "
-            "(SELECT id FROM tags WHERE is_predefined = 0)"
+            for_bind(
+                op.get_bind(),
+                sqlite=(
+                    "DELETE FROM book_tags WHERE tag_id IN "
+                    "(SELECT id FROM tags WHERE is_predefined = 0)"
+                ),
+                postgresql=(
+                    "DELETE FROM book_tags WHERE tag_id IN "
+                    "(SELECT id FROM tags WHERE is_predefined = false)"
+                ),
+            )
         )
     )
-    op.execute(sa.text("DELETE FROM tags WHERE is_predefined = 0"))
+    op.execute(
+        sa.text(
+            for_bind(
+                op.get_bind(),
+                sqlite="DELETE FROM tags WHERE is_predefined = 0",
+                postgresql="DELETE FROM tags WHERE is_predefined = false",
+            )
+        )
+    )
 
     with op.batch_alter_table("tags") as batch:
         batch.drop_column("is_predefined")

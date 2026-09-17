@@ -46,6 +46,18 @@ dev = [
     "pip-audit>=2.9.0",
     "jsonschema>=4.23.0",
     "keyring>=25.7.0",
+    # The Postgres driver, and it is here rather than in `dependencies` on
+    # purpose. Postgres is the supported optional drop in, so CI has to create
+    # the schema on one and run the suite against it; the shipped image is
+    # Alpine and creates SQLite, and carries no Postgres driver at all.
+    #
+    # **pg8000 rather than psycopg, because of that image.** pg8000 is pure
+    # Python, so it installs on musl with no libpq and no compiler; psycopg
+    # publishes no musl wheel and psycopg2 wants both. Its paramstyle is
+    # `format`, the same `%` hazard psycopg2 has, so `database.MonthBucket`'s
+    # note about choosing a `to_char` pattern with no `%` in it still holds
+    # under this driver rather than being a claim about a different one.
+    "pg8000>=1.31.5",
 ]
 
 [tool.pytest.ini_options]

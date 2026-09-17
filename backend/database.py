@@ -2,8 +2,10 @@ import os
 from collections.abc import Generator
 from typing import Any, Final
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import String, create_engine, event, exc
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.sql.functions import FunctionElement
 
 from config import database_url
 
@@ -79,6 +81,67 @@ def _synchronous() -> str:
     """
     mode = os.getenv("SQLITE_SYNCHRONOUS", "FULL").strip().upper()
     return mode if mode in _SYNCHRONOUS_MODES else "FULL"
+
+
+# ── Where a query's two dialects differ ──────────────────────────────────────
+#
+# **Expressions only.** A query module names a concept and the arm for each
+# engine lives here, so a second dialect is a list in one file rather than a
+# hunt for dialect specific calls across every module that queries.
+#
+# **The schema's dialect differences are not here and do not belong here**:
+# they are the CHECK constraints and partial index clauses in `models.py`, and
+# the DDL a deployment actually runs is `migrations/`. Claiming this file as the
+# only home for both halves sends a reader to one file and past the half where
+# both of this rule's bugs lived.
+
+
+class MonthBucket(FunctionElement[str]):
+    """A "YYYY-MM" label for a timestamp column. The stats group on it.
+
+    `func.strftime` stood at both call sites and is SQLite only, so any other
+    engine would raise on the two endpoints that used it. One construct rather
+    than a branch at each call site, because the month bucket is one concept
+    and both callers group and order by its label.
+
+    An unsupported dialect fails when the query is compiled, by the default
+    arm below, rather than emitting a call to a `month_bucket` function no
+    database has. `backend/tests/test_dialect_portability.py` pins all three
+    arms and the two endpoints.
+    """
+
+    inherit_cache = True
+    name = "month_bucket"
+    type = String()
+
+
+@compiles(MonthBucket, "sqlite")
+def _month_bucket_sqlite(element: MonthBucket, compiler: Any, **kw: Any) -> str:
+    # The `%` needs no doubling because SQLite's DBAPI takes qmark parameters.
+    # Under a `%` paramstyle it would read as a bind placeholder and the driver
+    # would fail on the statement, which is why the Postgres arm below reaches
+    # for `to_char`, whose pattern has no `%` in it at all.
+    return f"strftime('%Y-%m', {compiler.process(element.clauses, **kw)})"
+
+
+@compiles(MonthBucket, "postgresql")
+def _month_bucket_postgresql(element: MonthBucket, compiler: Any, **kw: Any) -> str:
+    return f"to_char({compiler.process(element.clauses, **kw)}, 'YYYY-MM')"
+
+
+@compiles(MonthBucket)
+def _month_bucket_unsupported(element: MonthBucket, compiler: Any, **kw: Any) -> str:
+    """Every dialect with no arm above, refused loudly.
+
+    Without this, SQLAlchemy compiles a `FunctionElement` generically and emits
+    `month_bucket(...)`, which no database defines: the failure then arrives
+    from the server as an unknown function, naming nothing about this app.
+    """
+    raise exc.CompileError(
+        f"MonthBucket has no spelling for the {compiler.dialect.name} dialect. "
+        "SQLite and Postgres are the two spelled here; add an arm in "
+        "database.py rather than a dialect specific function at a call site."
+    )
 
 
 class Base(DeclarativeBase):

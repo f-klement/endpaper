@@ -72,6 +72,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
+from dialect import DialectSQL
+
 revision: str = "f3a20d68c4b1"
 down_revision: str | Sequence[str] | None = "a1e7c93b60df"
 branch_labels: str | Sequence[str] | None = None
@@ -105,6 +107,33 @@ _SAFE_SOURCE = (
     "length(source) BETWEEN 1 AND 32 AND instr(source, char(0)) = 0 AND source NOT GLOB '*[^a-z0-9_-]*'"
 )
 
+#: The same rule on Postgres, where two of the three arms say something else.
+#:
+#: **The NUL arm is gone and that is not "Postgres rejects NUL" on its own.**
+#: Its second job on SQLite is to make `length()` exact and the charset rule
+#: total, and both of those follow on an engine whose `text` cannot hold the
+#: character at all. **What is subsumed is the dependency, not the character**,
+#: and the subsumption is a property of the column's **type** rather than of the
+#: engine: `bytea` takes a NUL freely. `tests/test_dialect.py::TestEveryNul
+#: ArmDroppedOnACharacterColumn` asserts this column is a character type on
+#: Postgres, which is a guard rather than this sentence.
+#:
+#: **Unanchored negative, and `-` last.** A tidy to `\-` or a reorder inside the
+#: bracket makes it a range. `COLLATE "C"` for the reason `b7d4e6f01a95` states.
+_SAFE_SOURCE_PG = (
+    'length(source) BETWEEN 1 AND 32 AND (source COLLATE "C") !~ \'[^a-z0-9_-]\''
+)
+
+#: The envelope's shape on Postgres, and the highest risk line in this file.
+#:
+#: **`GLOB` and a POSIX regex share `*` and differ on `.`.** The naive
+#: translation of `GLOB 'v1.*.*.*'` is `~ '^v1.*.*.*'`, which admits `v1XYZ`
+#: with no dot in it at all: measured on PostgreSQL 16.2, true. Escaping each
+#: separator is the whole fix. What this asserts is what the SQLite arm asserts:
+#: the `v1.` prefix and at least two further separators. Measured: `v1.a.b.c`
+#: accepted, `v1.a.b` refused, `v1XYZ` refused, `v2.a.b.c` refused.
+_ENVELOPE_SHAPE_PG = r"envelope ~ '^v1\..*\..*\.'"
+
 #: Shorter than any envelope this build can write, longer than any plaintext
 #: worth defending against. A 12 byte nonce and a 16 byte tag are 38 base64url
 #: characters between them before a single byte of secret, and `v1`, the
@@ -118,12 +147,20 @@ def upgrade() -> None:
         sa.Column("source", sa.String(length=_SOURCE_WIDTH), nullable=False),
         sa.Column("envelope", sa.Text(), nullable=False),
         sa.PrimaryKeyConstraint("source", name="pk_catalogue_credentials"),
+        # **No NUL arm here, on either engine, and the asymmetry survives the
+        # port.** `envelope` is `Text` with no ceiling, so `instr` would bound
+        # nothing; the docstring above carries it. Regularising the three
+        # constraints in this schema so that all of them carry one is the shape
+        # this repository has paid for before.
         sa.CheckConstraint(
-            f"envelope GLOB 'v1.*.*.*' AND length(envelope) >= {_MIN_ENVELOPE}",
+            DialectSQL(
+                sqlite=f"envelope GLOB 'v1.*.*.*' AND length(envelope) >= {_MIN_ENVELOPE}",
+                postgresql=f"{_ENVELOPE_SHAPE_PG} AND length(envelope) >= {_MIN_ENVELOPE}",
+            ),
             name="ck_catalogue_credentials_envelope",
         ),
         sa.CheckConstraint(
-            _SAFE_SOURCE,
+            DialectSQL(sqlite=_SAFE_SOURCE, postgresql=_SAFE_SOURCE_PG),
             name="ck_catalogue_credentials_source",
         ),
     )

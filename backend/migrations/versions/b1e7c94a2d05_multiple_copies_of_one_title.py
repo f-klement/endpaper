@@ -61,6 +61,13 @@ def upgrade() -> None:
         ["isbn"],
         unique=True,
         sqlite_where=sa.text("copy_group IS NULL"),
+        # **Both dialects, or this revision undoes itself on Postgres.** With
+        # only the SQLite clause it lands there as a plain UNIQUE on `isbn`,
+        # which is the index the two lines above deliberately rebuilt as a
+        # non unique one: a second copy of a title is then refused, and refusing
+        # it is exactly what this revision exists to stop. Measured 2026-09-17
+        # on PostgreSQL 16.2 from `pg_indexes` after the chain.
+        postgresql_where=sa.text("copy_group IS NULL"),
     )
 
 

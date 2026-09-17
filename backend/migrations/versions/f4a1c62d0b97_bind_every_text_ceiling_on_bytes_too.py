@@ -96,74 +96,97 @@ from collections.abc import Sequence
 
 from alembic import op
 
+from dialect import DialectSQL, SwappedRule
+
 revision: str = "f4a1c62d0b97"
 down_revision: str | Sequence[str] | None = "b2e94f7c1a03"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-#: Every ceiling this revision widens with a byte arm, as
-#: `(table, constraint, before, after)`.
+#: Every ceiling this revision widens with a byte arm. `dialect.SwappedRule`
+#: names the six fields and carries what `before` is checked against.
 #:
 #: **The SQL is written out rather than imported from `models`**, for the reason
 #: every revision here gives: a migration describes the schema at one moment and
 #: must not change meaning when a constant is retuned. The cost is a fact stored
 #: twice, and
 #: `tests/test_schema.py::TestEveryTextCeilingIsInstalledWithItsByteArm` is what
-#: stands between the copies.
+#: stands between the SQLite copies;
+#: `tests/test_dialect.py::TestTheRevisionsPostgresArmIsTheModelsPostgresArm`
+#: stands between the Postgres ones.
 #:
-#: **`before` is what `downgrade()` installs, and it is checked against the
-#: schema this revision found rather than against itself.**
+#: **`before` is checked against the schema this revision found rather than
+#: against itself.**
 #: `TestEveryTextCeilingIsInstalledWithItsByteArm::test_the_downgrade_puts_each
 #: _ceiling_back` reads `sqlite_master` at `b2e94f7c1a03` before upgrading at
 #: all, which is the only reading of it that is evidence: a version that
 #: downgraded and then compared was a tautology, because `downgrade()` installs
 #: exactly what it is asked to.
 #:
-#: `drop_constraint` takes a name, so the upgrade never reads `before` and a
-#: wrong one breaks only the way back, silently and in the one situation nobody
-#: is watching.
-_CEILINGS: tuple[tuple[str, str, str, str], ...] = (
-    (
+#: **`length(CAST(x AS BLOB))` is SQLite's byte count and `octet_length(x)` is
+#: Postgres's, and the arm is kept on both** rather than dropped as redundant on
+#: either. Each `before_pg` is its `before` unchanged, because a character only
+#: ceiling is already portable, and it is written out rather than aliased so a
+#: row reads as one rule twice and a future divergence has somewhere to go.
+_CEILINGS: tuple[SwappedRule, ...] = (
+    SwappedRule(
         "quotes",
         "ck_quotes_text_bounds",
+        "length(text) <= 2000 AND (note IS NULL OR length(note) <= 1000)",
         "length(text) <= 2000 AND (note IS NULL OR length(note) <= 1000)",
         "length(text) <= 2000 "
         "AND length(CAST(text AS BLOB)) <= 8000 "
         "AND (note IS NULL OR (length(note) <= 1000 "
         "AND length(CAST(note AS BLOB)) <= 4000))",
+        "length(text) <= 2000 "
+        "AND octet_length(text) <= 8000 "
+        "AND (note IS NULL OR (length(note) <= 1000 "
+        "AND octet_length(note) <= 4000))",
     ),
-    (
+    SwappedRule(
         "author_identifiers",
         "ck_author_identifiers_bounds",
         "length(identifier) > 0 AND length(identifier) <= 60",
+        "length(identifier) > 0 AND length(identifier) <= 60",
         "length(identifier) > 0 AND length(identifier) <= 60"
         " AND length(CAST(identifier AS BLOB)) <= 240",
+        "length(identifier) > 0 AND length(identifier) <= 60"
+        " AND octet_length(identifier) <= 240",
     ),
-    (
+    SwappedRule(
         "custom_fields",
         "ck_custom_fields_name_bounds",
         "length(name) > 0 AND length(name) <= 60",
+        "length(name) > 0 AND length(name) <= 60",
         "length(name) > 0 AND length(name) <= 60"
         " AND length(CAST(name AS BLOB)) <= 240",
+        "length(name) > 0 AND length(name) <= 60"
+        " AND octet_length(name) <= 240",
     ),
-    (
+    SwappedRule(
         "custom_field_values",
         "ck_custom_field_values_bounds",
         "length(value) > 0 AND length(value) <= 500",
+        "length(value) > 0 AND length(value) <= 500",
         "length(value) > 0 AND length(value) <= 500"
         " AND length(CAST(value AS BLOB)) <= 2000",
+        "length(value) > 0 AND length(value) <= 500"
+        " AND octet_length(value) <= 2000",
     ),
-    (
+    SwappedRule(
         "opds_servers",
         "ck_opds_servers_name",
         "length(name) BETWEEN 1 AND 100",
+        "length(name) BETWEEN 1 AND 100",
         "length(name) BETWEEN 1 AND 100 "
         "AND length(CAST(name AS BLOB)) <= 400",
+        "length(name) BETWEEN 1 AND 100 "
+        "AND octet_length(name) <= 400",
     ),
 )
 
 
-def _swap(table: str, constraint: str, wanted: str) -> None:
+def _swap(table: str, constraint: str, sqlite: str, postgresql: str) -> None:
     """Replace one CHECK, letting batch mode reflect everything else.
 
     **No `copy_from`**, which replaces reflection rather than supplementing it:
@@ -174,14 +197,16 @@ def _swap(table: str, constraint: str, wanted: str) -> None:
     """
     with op.batch_alter_table(table) as batch:
         batch.drop_constraint(constraint, type_="check")
-        batch.create_check_constraint(constraint, wanted)
+        batch.create_check_constraint(
+            constraint, DialectSQL(sqlite=sqlite, postgresql=postgresql)
+        )
 
 
 def upgrade() -> None:
-    for table, constraint, _, after in _CEILINGS:
-        _swap(table, constraint, after)
+    for rule in _CEILINGS:
+        _swap(rule.table, rule.constraint, rule.after, rule.after_pg)
 
 
 def downgrade() -> None:
-    for table, constraint, before, _ in _CEILINGS:
-        _swap(table, constraint, before)
+    for rule in _CEILINGS:
+        _swap(rule.table, rule.constraint, rule.before, rule.before_pg)

@@ -60,6 +60,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Final
 
+import bibliographic
 from enums import BookFormat, ReadStatus
 from import_readers import Extraction, ImportReader
 from isbn import parse as parse_isbn
@@ -342,7 +343,7 @@ class ImportError_(Exception):
 
 
 def _stray_bytes_as_cp1252(error: UnicodeError) -> tuple[str, int]:
-    """The error handler `decode` reads a non UTF-8 byte with.
+    """The error handler `_decode` reads a non UTF-8 byte with.
 
     `replace` on the inner decode because cp1252 leaves five byte values
     undefined (0x81, 0x8d, 0x8f, 0x90, 0x9d), and a handler that raised on
@@ -355,7 +356,7 @@ def _stray_bytes_as_cp1252(error: UnicodeError) -> tuple[str, int]:
     **It resumes at `error.end`, and one past it eats the next byte.** A 0x81
     between `Ace` and `Books` comes back as `Ace`, the replacement character,
     `ooks`: the `B` is consumed here and never decoded, silently and in the
-    middle of a cell. The run count `decode` budgets against cannot see it
+    middle of a cell. The run count `_decode` budgets against cannot see it
     either, because that count comes from a `replace` decode, which never
     calls this.
     """
@@ -401,7 +402,7 @@ _STRAY_RUN_BUDGET: Final = 50_000
 _REPLACEMENT_AS_UTF8: Final = "�".encode()
 
 
-def decode(content: bytes) -> str:
+def _decode(content: bytes) -> str:
     """Text from bytes, deciding per byte where the file is UTF-8 and per file
     where it is not.
 
@@ -448,7 +449,7 @@ def decode(content: bytes) -> str:
     return body.decode("utf-8", errors=_STRAY_BYTES)
 
 
-def sniff_delimiter(sample: str) -> str:
+def _sniff_delimiter(sample: str) -> str:
     """Comma or tab.
 
     Sniffed rather than declared per service. LibraryThing exports tab
@@ -472,7 +473,7 @@ def _normalise_term(raw: str) -> str:
     return re.sub(r"[\s_-]+", " ", raw.strip().lower())
 
 
-def build_mapping(headers: list[str]) -> dict[str, str | None]:
+def _build_mapping(headers: list[str]) -> dict[str, str | None]:
     """Guess which header holds which field.
 
     **The candidates are what is iterated, and the file's column order decides
@@ -504,7 +505,7 @@ def build_mapping(headers: list[str]) -> dict[str, str | None]:
     return mapping
 
 
-def match_status(raw: str) -> ReadStatus | None:
+def _match_status(raw: str) -> ReadStatus | None:
     term = _normalise_term(raw)
     if not term:
         return None
@@ -514,7 +515,7 @@ def match_status(raw: str) -> ReadStatus | None:
     return None
 
 
-def match_format(raw: str) -> BookFormat | None:
+def _match_format(raw: str) -> BookFormat | None:
     term = _normalise_term(raw)
     if not term:
         return None
@@ -524,24 +525,7 @@ def match_format(raw: str) -> BookFormat | None:
     return None
 
 
-def flip_catalogue_name(raw: str) -> str:
-    """`Mann, Thomas` becomes `Thomas Mann`.
-
-    LibraryThing writes its primary author in catalogue order, and Goodreads
-    offers both orders in separate columns. One comma means a person; none, or
-    more than one, means a corporate name or a list of people, and reordering
-    either of those mangles it. The same rule as
-    `bibliographic.flip_catalogue_name`, which reads it off catalogue records for
-    the same reason.
-    """
-    name = raw.strip().rstrip(",")
-    if name.count(",") != 1:
-        return name
-    surname, forenames = (part.strip() for part in name.split(","))
-    return f"{forenames} {surname}" if surname and forenames else name
-
-
-def unwrap_excel_formula(value: str) -> str:
+def _unwrap_excel_formula(value: str) -> str:
     """Turn Goodreads' `="9780441013593"` into `9780441013593`.
 
     They wrap identifier columns this way so spreadsheets do not strip leading
@@ -561,7 +545,7 @@ def _clean(value: str | None) -> str:
     LibraryThing wraps values in square brackets, which is why BookWyrm's
     importer for it strips them too.
     """
-    text = unwrap_excel_formula(value or "")
+    text = _unwrap_excel_formula(value or "")
     if text.startswith("[") and text.endswith("]"):
         text = text[1:-1]
     return text.strip()
@@ -628,7 +612,7 @@ def _int(
 _A_DATE_SHAPE: Final = re.compile(r"\s*\d{1,4}\s*[-/.]\s*\d{1,2}\s*[-/.]\s*\d{1,4}\s*")
 
 
-def parse_date(raw: str) -> date | None:
+def _parse_date(raw: str) -> date | None:
     """A date in whichever shape the exporting service or spreadsheet used.
 
     Anything unrecognised is treated as absent. A wrong date is worse than no
@@ -660,7 +644,7 @@ def _year(raw: str) -> int | None:
     **3**. A cell that parses as a date gives up its year; everything else is
     an ordinary bounded number.
     """
-    as_date = parse_date(raw)
+    as_date = _parse_date(raw)
     if as_date is not None:
         return as_date.year
     return _int(raw, minimum=1, maximum=2200)
@@ -722,7 +706,7 @@ class _Table:
 
 def _read_table(text: str) -> _Table:
     """The file as a table, or a refusal naming what is wrong with it."""
-    delimiter = sniff_delimiter(text)
+    delimiter = _sniff_delimiter(text)
     reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
 
     # The `csv` module raises on structural problems the caller can do
@@ -756,7 +740,7 @@ def _headers_of(text: str) -> list[str]:
     """The header row alone, for a detector that must not pay for the file.
 
     **The first line is sliced off before anything reads it**, because
-    `sniff_delimiter` splits whatever it is handed into every line, and every
+    `_sniff_delimiter` splits whatever it is handed into every line, and every
     claim in `CLAIMS` asks this question again. Over the whole text that is one
     list of every line in a 5 MB upload per claim.
 
@@ -785,7 +769,7 @@ def _headers_of(text: str) -> list[str]:
     """
     line = text[: text.find("\n") + 1 or _CLAIM_WINDOW]
     try:
-        return next(csv.reader(io.StringIO(line), delimiter=sniff_delimiter(line)), [])
+        return next(csv.reader(io.StringIO(line), delimiter=_sniff_delimiter(line)), [])
     except csv.Error:
         return []
 
@@ -793,7 +777,7 @@ def _headers_of(text: str) -> list[str]:
 def _by_normalised_name(headers: list[str]) -> dict[str, str]:
     """Normalised header name to the header itself, first of a repeat winning.
 
-    First wins, matching `build_mapping`'s pool, which hands a repeated name to
+    First wins, matching `_build_mapping`'s pool, which hands a repeated name to
     the earlier column.
     """
     found: dict[str, str] = {}
@@ -808,7 +792,7 @@ def _guessed_mapping(headers: list[str], overrides: Mapping[str, str]) -> dict[s
     An override naming a header that is not in the file is ignored rather than
     raising: it describes a file that is not this one.
     """
-    mapping = build_mapping(headers)
+    mapping = _build_mapping(headers)
     for field_name, header in overrides.items():
         if field_name in mapping and header in headers:
             mapping[field_name] = header
@@ -849,15 +833,19 @@ def _row_from(raw: dict[str, str], mapping: dict[str, str | None]) -> ImportRow 
 
     return ImportRow(
         title=title[:500],
-        author=flip_catalogue_name(cell("author"))[:500] or None,
+        # Bounded **before** the flip, not after: the cap is what stops a
+        # 5 MB upload paying for regex work on 20,000 oversized cells, and
+        # applied after the call it protects nothing. No name a catalogue
+        # writes reaches 500 characters, so no result changes.
+        author=bibliographic.flip_catalogue_name(cell("author")[:500]) or None,
         isbn=isbn,
-        status=match_status(cell("status")),
+        status=_match_status(cell("status")),
         rating=_int(cell("rating"), minimum=1, maximum=5),
-        date_read=parse_date(cell("date_read")),
+        date_read=_parse_date(cell("date_read")),
         publisher=cell("publisher")[:255] or None,
         year=_year(cell("year")),
         pages=_int(cell("pages")),
-        format=match_format(cell("format")),
+        format=_match_format(cell("format")),
         tags=_split_tags(cell("tags")),
         notes=cell("notes") or None,
     )
@@ -1102,12 +1090,12 @@ def _unpack_publication(value: str, row: ImportRow) -> None:
 
     if row.format is None:
         # Bounded, because the parts of this cell are bounded by the upload and
-        # not by anything about a publication. `match_format` costs 1.46
+        # not by anything about a publication. `_match_format` costs 1.46
         # microseconds on a miss, so an unbounded scan over a 5 MB file of
         # commas was 6.1 seconds of CPU on a route any member can reach three
         # times a minute. No real cell carries a format past the eighth comma.
         for part in text[year_at.end() :].split(",")[:_FORMAT_PARTS_SCANNED]:
-            row.format = match_format(part)
+            row.format = _match_format(part)
             if row.format is not None:
                 break
 
@@ -1132,7 +1120,7 @@ def _unpack_readings(value: str, row: ImportRow) -> None:
     """
     if row.date_read is not None:
         return
-    finishes = [parse_date(part) for part in value.split("|")[1::2]]
+    finishes = [_parse_date(part) for part in value.split("|")[1::2]]
     dates = [finish for finish in finishes if finish is not None]
     if dates:
         row.date_read = max(dates)
@@ -1217,7 +1205,7 @@ Claim = Callable[[str], bool]
 
 
 @dataclass(frozen=True)
-class HeaderNames:
+class _HeaderNames:
     """A claim that a file's header row carries all of these names.
 
     The only kind of claim there is today, and a class rather than a closure so
@@ -1250,12 +1238,12 @@ class HeaderNames:
 #:
 #: Ordered, and the first claim that fires wins.
 CLAIMS: Final[tuple[tuple[ImportReader, Claim], ...]] = (
-    (ImportReader.LIBRARYTHING, HeaderNames(frozenset({_PUBLICATION, "primary author"}))),
-    (ImportReader.OPENREADS, HeaderNames(frozenset({_READINGS, "book format"}))),
+    (ImportReader.LIBRARYTHING, _HeaderNames(frozenset({_PUBLICATION, "primary author"}))),
+    (ImportReader.OPENREADS, _HeaderNames(frozenset({_READINGS, "book format"}))),
 )
 
 
-def detect(text: str) -> ImportReader:
+def _detect(text: str) -> ImportReader:
     """Which reader a file is for, from the file itself.
 
     Consulted only when the member did not name one.
@@ -1285,7 +1273,7 @@ def parse(
     already.
 
     `reader` names one explicitly and is the escape hatch for a file the
-    detector reads as the wrong service's. Left out, `detect` chooses and
+    detector reads as the wrong service's. Left out, `_detect` chooses and
     `ParsedFile.reader` reports what it chose.
 
     `overrides` replaces a guessed column with one the reader picked, which is
@@ -1298,9 +1286,9 @@ def parse(
     file itself is: it is the member's own upload, and the column is theirs to
     remove.
     """
-    text = decode(content)
+    text = _decode(content)
     if not text.strip():
         raise ImportError_("That file is empty.")
 
-    chosen = reader if reader is not None else detect(text)
+    chosen = reader if reader is not None else _detect(text)
     return READERS[chosen](text, Extraction(reader=chosen, overrides=overrides or {}))
