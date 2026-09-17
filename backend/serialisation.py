@@ -18,10 +18,11 @@ import re
 from collections.abc import Sequence
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, aliased, joinedload, selectinload
+from sqlalchemy.orm import Session, aliased, selectinload
 
 import ddc
 from enums import ClassificationScheme
+from lending import Loans
 from models import Book, Collection, Loan, ReadingProgress, Tag, User
 from reading import Reading, discussers
 from schemas import (
@@ -370,13 +371,11 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
         selectinload(Book.identifiers),
     ).all()
 
-    active_loans = {
-        loan.book_id: loan
-        for loan in db.query(Loan)
-        .options(joinedload(Loan.loaned_to), joinedload(Loan.loaned_by))
-        .filter(Loan.book_id.in_(book_ids), Loan.returned_at.is_(None))
-        .all()
-    }
+    # One statement for the whole page, which is why the door is plural: the
+    # singular form of this question turns a listing into the N+1 this function
+    # exists to prevent. The two joinedloads the badge needs are the door's, so
+    # `loan_summary` below reads both without a statement per row.
+    active_loans = Loans.open_on(db, book_ids)
 
     # One query for the whole page, not one per book. The row carries the
     # status, the rating and both dates, so adding those three fields cost no

@@ -1,9 +1,9 @@
 # Backend test coverage
 
-**7355 tests**, in 112 files, recounted with `--collect-only` on 2026-09-17.
+**7404 tests**, in 112 files, recounted with `--collect-only` on 2026-09-17.
 
 **The headline equals the passed count today, and that is a fact about the tree rather than
-a simplification.** The gate reports `7355 passed`, with no skip and no `xfail`: the strict
+a simplification.** The gate reports `7404 passed`, with no skip and no `xfail`: the strict
 `xfail` that recorded a defect in the CSV importer is gone, because the work that closed the
 defect closed it.
 
@@ -15,7 +15,7 @@ the skip once made the check undoable, and a rule rewritten as `collected == pas
 the tree happens to have neither is one that fails for the wrong reason the day somebody adds
 either.
 
-**The rows below sum to 7298, fifty seven short, and the shortfall is deliberate.** Those
+**The rows below sum to 7347, fifty seven short, and the shortfall is deliberate.** Those
 tests live in eight files on the publish gate's DENY list, which this published register may
 not name: a published file pointing at a stripped path fails the gate. **The number moves
 whenever one of those files gains a test, and so does the count of files, which was six until
@@ -68,7 +68,7 @@ why the helper uses regexes.
 | `conformance/test_isbn.py` | 33 | **The Python half of the shared fixture set.** Holds no ISBN expectation of its own: `conformance/cases/isbn.json` is the specification, and this is a dispatch table plus the guards that stop the suite passing while testing nothing |
 | `test_ddc.py` | 29 | **Dewey headings.** That a number splits from its caption and a year does not, that the segmentation prime is stripped rather than rejected, that the projection reads the number |
 | `test_backup.py` | 159 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores. |
-| `test_lending.py` | 17 | **The loan clock.** Overdue, days overdue and days out, each arm of each; that a returned loan stops counting at its return; that `days_out`'s clamp is the reachable one |
+| `test_lending.py` | 42 | **The loan clock.** Overdue, days overdue and days out, each arm of each; that a returned loan stops counting at its return; that `days_out`'s clamp is the reachable one |
 | `test_opds.py` | 94 | **The OPDS reader.** Which addresses this server will open, what one Atom entry becomes, the identifier the census says is not there, the doctype refusal, the decoder-on-a-file property, and the origin pin over paging. `TestNoResponseMovesTheOrigin` is the one to read first |
 | `routers/test_opds.py` | 44 | **The OPDS routes.** The admin gate on configuration against a member's right to sync, the credential lifecycle, and that deleting a server or moving it to another origin takes its login with it |
 | `test_bibliographic.py` | 65 | **What a bibliographic value means, with no record and no transport.** Every rule on its own, that the two language tables are one table inverted, and that only the four carrier aware doors reach the prose refusal, and that the catalogue order flip counts commas after the noise strip and takes a terminal full stop only on the branch that reorders a name |
@@ -106,7 +106,7 @@ why the helper uses regexes.
 | `test_uploads.py` | 33 | Content-sniffed image validation and the size cap |
 | `test_middleware.py` | 27 | Security headers, CSP contents, HSTS conditions |
 | `test_main.py` | 59 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan, what the built files say about being reused, the shell that has to answer a client route |
-| `test_house_rules.py`                      |   297 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter. Also the one decision of what vendored code is: each of the five walks over this tree driven against a constructed tree with each kind of vendored path planted in front of it, and no other test module allowed to define a walk of its own |
+| `test_house_rules.py`                      |   310 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter. Also the one decision of what vendored code is: each of the five walks over this tree driven against a constructed tree with each kind of vendored path planted in front of it, and no other test module allowed to define a walk of its own |
 | `test_scratch_report.py` | 4 | **The scratch report names the filesystem the databases landed on.** `conftest._fastest_scratch()` falls back from `/dev/shm` to disk silently |
 | `test_roster_counts.py` | 78 | **A number spelled in prose, recomputed.** Every number written beside a roster noun is found by a census and must carry a verdict naming a cardinality computed from `sources.py`. The census walks the tree minus what a tool owns, so a new file is covered without anybody remembering, and it reads this register. |
 | `schemas/test_book.py` | 39 | **Two request bodies writing one column must agree about it.** `BookMatch` bounded four of its seventeen fields while `merge_into` wrote them all |
@@ -151,7 +151,7 @@ why the helper uses regexes.
 | `routers/test_books_reading.py` | 31 | Ratings, and the rules for stamping reading dates |
 | `routers/test_books_series.py` | 30 | Series gaps, shelf locations, partial detail edits, and that the gap range is truncated at `MAX_SERIES_INDEX`, pinned from both edges so neither a smaller ceiling nor a missing one passes |
 | `routers/test_books_authors.py` | 110 | The author index and its privacy, the `?author=` filter, merging and reversing one, the library wide mapping against the filtered shelf, the flat map, and undoing a merge. |
-| `routers/test_books.py`                    |   132 | Listing, search, sorting, tagging, covers, notes, export, ownership, that every cell the export writes goes through the formula escape with no exemption, and that a login this deployment holds leaves with the request that needs it |
+| `routers/test_books.py`                    |   143 | Listing, search, sorting, tagging, covers, notes, export, ownership, that every cell the export writes goes through the formula escape with no exemption, and that a login this deployment holds leaves with the request that needs it |
 | `routers/test_books_identifiers.py`        |    28 | The identifier a store knows a book by, over the API: written with the book, read back on it, refused where the scheme is not one this app names, bounded so a payload cannot carry an unbounded list, and removed by any member who may write the book, where an invisible book and one belonging to somebody else are both 404 |
 | `schemas/test_identifier.py`               |    17 | What a store identifier may contain, at the door: the character classes refused, which are whitespace and both invisible Unicode categories, checked as the same set the client filter refuses rather than against examples |
 | `test_identifiers.py`                      |    10 | Writing identifiers onto a book: duplicates within one payload dropped rather than refused, because a client reading two of its own files may find one book in both, and the repoint a merge performs |

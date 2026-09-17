@@ -11,6 +11,7 @@ import settings_store
 from auth import require_admin
 from dependencies import CurrentUser, DbSession, Paging, RowId
 from enums import LendingWillingness, SettingKey
+from lending import Loans
 from models import Book, Loan, User
 from schemas import LoanCreate, LoanOut, MyOverdueOut, OverdueNotifyResult, Page
 from shelf import Shelf
@@ -106,10 +107,10 @@ def list_loans(
     overdue_only: bool = False,
 ) -> Page[LoanOut]:
     now = _now()
-    # Rooted at the shelf and joined outward to `loans`, so the privacy
-    # predicate is on the query by construction. A loan of a book the caller
-    # cannot see would otherwise disclose its title and who has it, straight
-    # through the loans list.
+    # `Loans.seen_by`, which is rooted at the shelf and joined outward to
+    # `loans`, so the privacy predicate is on the query by construction. A loan
+    # of a book the caller cannot see would otherwise disclose its title and
+    # who has it, straight through the loans list.
     #
     # **Library mode changes nothing here, and that is a finding rather than an
     # omission.** The mode was asked to let a member see loans on every book
@@ -121,97 +122,36 @@ def list_loans(
     # private books out of their own loan list. The relaxation the mode really
     # carries is `notifications.sees_every_loan`, which is a clause about the
     # loan's parties and not about the book. See `docs/decisions.md`.
-    query = Shelf.seen_by(db, current_user.id).select(Loan).join(Loan, Loan.book_id == Book.id)
+    loans = Loans.seen_by(db, current_user.id)
 
     if active_only:
-        query = query.filter(Loan.returned_at.is_(None))
+        loans = loans.open()
 
     if overdue_only:
         # Filtered in SQL rather than by serialising the whole list and
         # discarding most of it, so `total` and the paging stay honest.
-        # Implies active: a returned loan is closed, whenever it came back.
-        #
-        # `notifications.overdue_clauses`, not the three clauses written out
-        # again. They were, until 2026-09-05, in the same file as the module
-        # that exists to stop this rule having copies: a third statement of it,
-        # beside the Python form in `lending.is_overdue` and the SQL form it
-        # now calls. It also carries `Book.deleted_at`, which is redundant here
-        # because the Shelf already applied it, and free.
-        query = query.filter(*notifications.overdue_clauses(now))
-
-    total = query.with_entities(func.count(Loan.id)).order_by(None).scalar() or 0
+        # Implies active: a returned loan is closed, whenever it came back, so
+        # asking for both costs a redundant clause and nothing else.
+        loans = loans.overdue(now)
 
     # SQLite's CURRENT_TIMESTAMP has only second resolution, so loans recorded
     # in the same second tie on loaned_at. id breaks the tie and keeps both the
     # ordering and the paging stable.
-    # The book's own relationships are loaded too. `LoanOut.book` serialises
-    # the adding member, so joinedloading only `Loan.book` left this endpoint at
-    # 53 statements for 25 loans: the exact N+1 `docs/architecture.md` says was
-    # eliminated, surviving here.
     #
-    # Every option is here because dropping it alone was measured, over pages of
-    # 3 and 10 loans with a distinct adder, lender and borrower per loan. **The
-    # deltas, not the absolutes**: each is one lazy load per row, so each costs
-    # the page's length, and that is what the exact counts below pin. The
-    # absolutes were restated here from a 2026-08-29 measurement and every one
-    # of the three was wrong by 2026-09-16, because the baseline moved under
-    # them when the second `books_to_out` pass went.
-    #
-    #     .joinedload(Book.added_by)   +3 and +10 on any page
-    #     joinedload(Loan.loaned_to)   +3 and +10 on any page
-    #     joinedload(Loan.loaned_by)   +3 and +10 on any page
-    #
-    # **The last two rows read "on a page holding returned loans" until
-    # 2026-09-16**, and the paragraph below says why they no longer do.
-    #
-    # **The first row is the chain link, not the whole option, and the two cost
-    # different amounts.** Dropping `.joinedload(Book.added_by)` and keeping
-    # `joinedload(Loan.book)` lazy loads one member per loan, which is +3 and
-    # +10. Dropping the entire first option lazy loads the Book as well, two per
-    # loan, which is +6 and +20. Both are real; they are answers to different
-    # questions. Written as a bare `Book.added_by` this table did not say which,
-    # and two seats read it two ways on the same afternoon.
-    #
-    # **The last two are load bearing at every `active_only`, and they were not
-    # always.** They used to be free on an active page, because the second
-    # `books_to_out` pass fetched every active loan over the page's books with
-    # both users joinedloaded and those were the same rows. That pass is gone
-    # with `LoanOut.book`'s narrowing to `BookColumns`, so nothing else
-    # populates either relationship and `_to_out` lazy loads two users per row
-    # without them, on both routes.
-    #
-    # What pins them is the pair of statement counts below, which are exact and
-    # measured at two page lengths. The comment that used to sit here said
-    # nothing observable pinned them, and that was true of the arrangement it
-    # described.
-    #
-    # **The three collection options are back, and they are the batching the
-    # second `books_to_out` pass used to supply.** One of them, `Book.tags`, was
-    # deleted on 2026-08-29 as redundant, because that pass selectinloaded it
-    # for the whole page. With the nested book narrowed to `BookColumns` there
-    # is no second pass, so every collection on it lazy loads one SELECT per
-    # book: measured, 13 statements for 3 loans against 34 for 10, which is the
-    # N+1 these tests exist to catch, arrived by removing the thing that hid it.
-    # With them, the cost is constant in the page again and lower than it was,
-    # because a `selectinload` per relationship is three statements where
-    # `books_to_out` was eight.
-    loans = (
-        query.options(
-            joinedload(Loan.book).joinedload(Book.added_by),
-            joinedload(Loan.book).selectinload(Book.tags),
-            joinedload(Loan.book).selectinload(Book.classifications),
-            joinedload(Loan.book).selectinload(Book.identifiers),
-            joinedload(Loan.loaned_to),
-            joinedload(Loan.loaned_by),
-        )
-        .order_by(Loan.loaned_at.desc(), Loan.id.desc())
-        .offset(paging.offset)
-        .limit(paging.limit)
-        .all()
+    # The ordering is the argument and the eager loading is not: this route and
+    # `list_overdue` differ by exactly this pair of clauses and by nothing
+    # else, which is why `lending.RENDERED` could be one plan and this could
+    # not. What that plan costs, and the measurement behind each option, is
+    # written there.
+    rows, total = loans.page(
+        paging.offset,
+        paging.limit,
+        Loan.loaned_at.desc(),
+        Loan.id.desc(),
     )
 
     return Page[LoanOut](
-        items=_to_out_many(loans, now),
+        items=_to_out_many(rows, now),
         total=total,
         page=paging.page,
         page_size=paging.page_size,
@@ -276,12 +216,12 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
             },
         )
 
-    already_out = (
-        db.query(Loan)
-        .filter(Loan.book_id == payload.book_id, Loan.returned_at.is_(None))
-        .first()
-    )
-    if already_out is not None:
+    # `Loans.open_on`, which has no viewer and needs none: the book was
+    # resolved through the Shelf three statements above, so whether this
+    # caller may see it is already answered. The refusal is friendlier than
+    # `uq_loans_one_open_per_book` and never instead of it: the index is what
+    # holds the rule when two requests race.
+    if Loans.open_on(db, [payload.book_id]):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Book is already loaned out")
 
     loan = Loan(
@@ -346,22 +286,23 @@ def list_overdue(db: DbSession, current_user: CurrentUser, paging: Paging) -> Pa
     # page below, and SQLite will not accept an ORDER BY over a bare COUNT.
     total = query.with_entities(func.count(Loan.id)).order_by(None).scalar() or 0
 
-    # The same options as `list_loans`, where the measurement behind them is
-    # written down. **`loaned_to` and `loaned_by` are load bearing here too**,
-    # and this comment used to say the opposite: they were free while a second
-    # `books_to_out` pass joinedloaded both users over every active loan on the
-    # page, and that pass is gone. `.joinedload(Book.added_by)` is pinned at +3
-    # and +10; dropping the whole option, and so the Book with it, is +6 and
-    # +20. The exact count below pins the rest.
+    # `lending.RENDERED`, the one load plan, which this route and `list_loans`
+    # used to write out separately and which had already drifted by an
+    # `order_by`. The measurement behind each option is written there; the
+    # exact statement counts at two page lengths, here and on the loans list,
+    # are what pin it.
+    #
+    # Applied to a query rather than through `Loans.page`, and the reason is
+    # that `as_query` is one way. `overdue_for_viewer` adds the
+    # lender-or-borrower arm, which is a decision about who may read what and is
+    # deliberately not behind the door, and once it has done so there is no
+    # constructor that takes a narrowed query back: one that did would be a
+    # fourth audience with no predicate, which is what
+    # `tests/test_lending.py::TestOnlyTheDeskBuildsAScope` refuses. So this
+    # route counts and pages by hand, and the count below is the one spelling
+    # of that this file still carries.
     loans = (
-        query.options(
-            joinedload(Loan.book).joinedload(Book.added_by),
-            joinedload(Loan.book).selectinload(Book.tags),
-            joinedload(Loan.book).selectinload(Book.classifications),
-            joinedload(Loan.book).selectinload(Book.identifiers),
-            joinedload(Loan.loaned_to),
-            joinedload(Loan.loaned_by),
-        )
+        query.options(*lending.RENDERED)
         .offset(paging.offset)
         .limit(paging.limit)
         .all()
@@ -448,28 +389,20 @@ async def notify_overdue(
 def return_loan(loan_id: RowId, db: DbSession, current_user: CurrentUser) -> LoanOut:
     """Recording a return is a shelf action, not an ownership one, so any member
     may do it, for any book they can see."""
-    loan = (
-        Shelf.seen_by(db, current_user.id)
-        .select(Loan)
-        .join(Loan, Loan.book_id == Book.id)
-        .filter(Loan.id == loan_id)
-        .first()
-    )
+    loan = Loans.seen_by(db, current_user.id).with_id(loan_id)
     if loan is None:
         raise HTTPException(status_code=404, detail="Loan not found")
-    if loan.returned_at is not None:
-        raise HTTPException(status_code=400, detail="Loan already returned")
 
-    # Naive UTC, like every other clock in this file and like the column
-    # itself. It was `datetime.now(UTC)`, an aware value written into a
-    # `DateTime` with no timezone, which reached the disk as the same instant
-    # only because SQLAlchemy's SQLite formatter drops the offset, and read
-    # back naive only because `expire_on_commit` refetches it. Anything that
-    # touched the attribute before that refetch, which is what `lending`
-    # does with `days_out`, would subtract a naive datetime from an aware one
-    # and raise.
     now = _now()
-    loan.returned_at = now
+    # `lending.close`, which owns the naive UTC frame this line got wrong once
+    # and refuses a loan that has already come back rather than moving the date
+    # it came back on. Its docstring carries both.
+    try:
+        lending.close(loan, now)
+    except lending.AlreadyClosed as closed:
+        raise HTTPException(
+            status_code=400, detail="Loan already returned"
+        ) from closed
     db.commit()
     # The same instant the return was stamped with, so `days_out` on the row
     # this answers with counts to the return rather than to a clock read a

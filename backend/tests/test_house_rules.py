@@ -13,6 +13,7 @@ import importlib
 import inspect
 import os
 import re
+import tomllib
 import warnings
 from enum import StrEnum
 from fnmatch import fnmatch
@@ -5714,12 +5715,12 @@ class TestOneInstanceIssuesALoan:
             "exemption for a module is what a real write would then arrive "
             "under"
         ),
-        "routers/loans.py: writes loans.returned_at": (
-            "the same desk closing the loan it issued"
-        ),
-        "routers/books.py: writes loans.returned_at": (
-            "merging two records and trashing one both close an open loan, "
-            "because the book they were about stops existing as that row"
+        "lending.py: writes loans.returned_at": (
+            "`lending.close`, the one place a loan comes back. Three modules "
+            "wrote this column until 2026-09-17 and each carried its own "
+            "naive UTC stamp; the desk closing a loan, the merge and the trash "
+            "now all call one function, which is what `TestOnlyTheLendingDesk"
+            "NamesReturnedAt` holds"
         ),
         "notifications.py: writes loans.notified_at": (
             "when a reminder last went out, which is delivery state rather "
@@ -7284,3 +7285,294 @@ class TestEveryTextCeilingComesFromTheColumn:
         names = {path.name for path in _python_sources()}
 
         assert {"book.py", "books.py", "public.py"} <= names
+
+
+class TestTheShippedImageCarriesThePostgresDriver:
+    """A supported engine the image cannot reach is a documented import error.
+
+    `pg8000` arrived as a dev group dependency for the pipeline's Postgres job,
+    and the Dockerfile installs with `uv sync --frozen --no-dev`, so the image
+    shipped no driver at all while `README.md` and `DOCKERHUB.md` offered the
+    engine. That is the defect this rule exists for, and the move back into the
+    dev group is a one line edit with no other symptom.
+
+    **It reads `pyproject.toml` and not the environment.** The suite runs under
+    `uv sync --frozen`, which installs the dev group too, so importing `pg8000`
+    here would pass with the dependency declared in either place.
+
+    **What it cannot see is the lock**, which is what `uv sync` actually
+    installs. `--frozen` does not compare the two, so a manifest naming the
+    driver and a lock without it installs nothing and passes here. The
+    instrument for that is the pipeline's `test:postgres` job, which syncs the
+    same lock and then runs the migration chain over `postgresql+pg8000://`.
+    """
+
+    def test_pg8000_is_a_runtime_dependency_and_not_a_dev_one(self) -> None:
+        manifest = tomllib.loads((BACKEND / "pyproject.toml").read_text())
+        runtime = [
+            spec for spec in manifest["project"]["dependencies"] if spec.startswith("pg8000")
+        ]
+        dev = manifest["dependency-groups"]["dev"]
+
+        assert runtime, (
+            "pg8000 has left [project].dependencies, so `uv sync --no-dev` in the "
+            "Dockerfile no longer installs it and the image ships no Postgres driver."
+        )
+        # A declared dependency an environment marker excludes is not a shipped one, and
+        # the image is one platform. Without this, `pg8000>=1.31.5; sys_platform ==
+        # 'win32'` reads as present and installs nothing.
+        assert ";" not in runtime[0], (
+            f"the runtime pg8000 spec carries an environment marker, {runtime[0]!r}, so "
+            "whether the image gets a driver depends on the platform it is built for."
+        )
+        assert not any(spec.startswith("pg8000") for spec in dev), (
+            "pg8000 is declared twice; the runtime entry already covers the suite."
+        )
+
+def _names_returned_at(source: str) -> list[int]:
+    """Line numbers where a module names the `returned_at` attribute.
+
+    Every `ast.Attribute` spelled `returned_at`, whatever the receiver, which is
+    deliberately wider than "the filter": `Loan.returned_at.is_(None)` in a
+    query, `loan.returned_at is None` in a Python `if`, and
+    `joinedload(Loan.returned_at)` in an option list are all one node to this
+    pass. The narrower form, reading the attribute only off the resolved `Loan`
+    class, costs one fewer allowlist entry and cannot see the second of those
+    three, which is the shape the merge in `routers/books.py` was written in.
+
+    **A declaration is not a use and is outside this rule by construction, not
+    by exemption.** `models.py` and `schemas/loan.py` both spell the name as an
+    `AnnAssign` target, which is an `ast.Name`; the partial index spells it
+    inside `text("returned_at IS NULL")`, which is an `ast.Constant`. Neither
+    is an attribute, so neither needs an argument here.
+    """
+    return sorted(
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Attribute) and node.attr == "returned_at"
+    )
+
+
+class TestOnlyTheLendingDeskNamesReturnedAt:
+    """An open loan is `returned_at IS NULL`, and `lending.py` is where that is
+    written down.
+
+    It was written at nine sites in five modules, and the cost was not the
+    duplication: a caller who wanted an open loan also had to know the naive
+    UTC frame, the Shelf rooted join and a six line eager load block, none of
+    which the filter tells you about. `docs/decisions.md` records what the
+    disagreement already cost once, when the one open loan rule lived in three
+    places and one of them was wrong.
+
+    **This rule and `TestOneInstanceIssuesALoan` cover different cases, and
+    neither subsumes the other.** That one is keyed on module **and kind**, so
+    it catches a new *writer*, including a Core insert that names no class and
+    a write to a column this rule says nothing about. This one is one attribute
+    anywhere, so it catches a *read*: a filter, a comparison in Python, an
+    option list. A module reading `returned_at` and writing nothing is invisible
+    to that rule and is exactly how the filter spread the first time.
+
+    **What this cannot see:**
+
+    * **`getattr(loan, "returned_at")` and its `setattr` twin.** The name is a
+      string, and a rule that read strings would report the partial index's own
+      `text()` in `models.py`.
+    * **`Loan.due_at` alone.** A query filtering on the deadline and not on the
+      return selects a closed loan, and every rule here stays green: the
+      attribute is never named. It is the reason `Loans.overdue` calls
+      `notifications.overdue_clauses` rather than assembling clauses itself.
+    * **A test.** `_source_modules()` excludes `tests/`, and the suite spells
+      the column freely, because a test asserting what a closed loan looks like
+      has to be able to write one.
+
+    **The receiver is deliberately not read.** `Loan.returned_at`,
+    `models.Loan.returned_at`, `loan.returned_at` and `self.loan.returned_at`
+    are one case here, and the last two are the reason: reading the attribute
+    only off the resolved `Loan` class would cost one fewer allowlist entry and
+    would not see the merge in `routers/books.py`, which was written as a
+    comparison on a fetched row. The last two parametrised spellings below are
+    what stop the pass being narrowed back to a plain name.
+    """
+
+    #: Every module that may name the column, and why.
+    #:
+    #: **Asserted by equality, never as a subset.** Three, and the third is the
+    #: one the ticket that asked for this rule did not expect: a payload field
+    #: is a use of the column that is not a use of the filter.
+    NAMES_RETURNED_AT: Final = {
+        "lending.py": (
+            "the desk itself: `Loans.open`, `Loans.open_on`, `is_open`, "
+            "`close` and `days_out` are the filter, the Python form, the write "
+            "and the clock, and they are here together because they are one "
+            "rule read five ways"
+        ),
+        "notifications.py": (
+            "`overdue_clauses`, which is not a spelling of this filter but the "
+            "definition of the shared overdue door: one spelling for every "
+            "caller, and a `Book.deleted_at` clause the Python form cannot "
+            "carry. `Loans.overdue` calls it rather than restating it, so the "
+            "column is named there once and nowhere else in the module"
+        ),
+        "serialisation.py": (
+            "`loan_summary` renders the column into `LoanOut`. A payload field "
+            "is not a query: there is no scope to get wrong and no second "
+            "statement of the rule, and routing a read of a column through a "
+            "function that only returns it would be a name with nothing in it"
+        ),
+    }
+
+    def test_the_modules_that_name_the_column_are_the_argued_ones(self):
+        found = {
+            name
+            for name, source in _source_modules().items()
+            if _names_returned_at(source)
+        }
+        assert found == set(self.NAMES_RETURNED_AT), (
+            f"Added: {sorted(found - set(self.NAMES_RETURNED_AT))}. Gone: "
+            f"{sorted(set(self.NAMES_RETURNED_AT) - found)}. Whether a book is "
+            "still out is `lending.py`'s to answer: ask `Loans.open()`, "
+            "`Loans.open_on()` or `lending.is_open()`, or close it with "
+            "`lending.close()`. Adding a line here is claiming the column "
+            "means something other than the state of a loan."
+        )
+
+    def test_the_desk_really_does_name_it(self):
+        """Anti vacuity. The equality above is satisfied by a pass that finds
+        nothing anywhere, which is what a rename of the column produces, and by
+        one whose allowlist has grown to cover the tree.
+
+        **Exact, not a floor.** It was `>= 4` against a measured 7, which is a
+        weaker inequality than the thing it stands for: three of the desk's
+        seven sites could go with the guard still green, and a smaller count is
+        exactly how a stated bound stops guarding without ever failing. Moving
+        it is allowed when the change is deliberate and re-measured.
+
+        **It is also the only tripwire on a new use inside `lending.py`.** Both
+        allowlists here are keyed on the module, so a function added beside
+        `close` is indistinguishable from `close` to every rule in this file.
+        Measured 2026-09-17 by both critic seats, from opposite ends: a
+        `reopen(loan)` writing `returned_at = None` takes the count to 8 and
+        this is what fails, and a mutation of `is_open` takes it to 6 and this
+        is what fails."""
+        found = _names_returned_at(_source_modules()["lending.py"])
+        assert len(found) == 7, found
+        assert set(self.NAMES_RETURNED_AT) < set(_source_modules())
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "rows = db.query(Loan).filter(Loan.returned_at.is_(None))\n",
+            "if loan.returned_at is None:\n    pass\n",
+            "loan.returned_at = now\n",
+            "q = q.options(joinedload(Loan.returned_at))\n",
+            "closed = [row for row in rows if row.returned_at is not None]\n",
+            "rows = db.query(Loan).filter(models.Loan.returned_at.is_(None))\n",
+            "if self.loan.returned_at is None:\n    pass\n",
+        ],
+        ids=[
+            "a filter",
+            "a comparison in Python",
+            "a write",
+            "an option list",
+            "a comprehension",
+            "a dotted class",
+            "a receiver that is not a plain name",
+        ],
+    )
+    def test_the_column_named_any_of_these_ways_is_reported(self, spelling):
+        """The diagonal, one mutation each. A sample carrying two spellings
+        passes with either half of the pass deleted and never says which half
+        caught it."""
+        assert _names_returned_at(spelling) != []
+
+    def test_a_declaration_is_not_a_use(self):
+        """The other side of the diagonal, and it is what keeps `models.py` and
+        `schemas/loan.py` off the list above without an argument each. A rule
+        that reported the column's own definition is one somebody exempts the
+        model for, and an exemption for the model is what a query then arrives
+        under."""
+        assert _names_returned_at("returned_at: datetime | None = None\n") == []
+        assert _names_returned_at('text("returned_at IS NULL")\n') == []
+        assert _names_returned_at("book.deleted_at = now\n") == []
+
+
+class TestTheLendingCycleStaysPlain:
+    """`lending` and `notifications` import each other, and only a plain
+    `import` on both sides makes that work.
+
+    `build_digest` reads the clock facts from `lending`, and `Loans.overdue`
+    calls the predicate in `notifications`. Both are settled: the predicate has
+    five callers and a clause the Python form cannot carry, so it stays where
+    it is, and the door calls it rather than absorbing it.
+
+    A plain `import X` binds the module object and defers every attribute read
+    to call time, so the cycle resolves whichever side is imported first. A
+    `from X import name` on **both** sides does not: the second module to start
+    executing asks a half built module for an attribute it has not defined yet,
+    and the process dies at import with an `ImportError` naming a symbol that
+    is plainly there.
+
+    **Loud, but only in the arrangement that has it.** A `from` form on one
+    side alone works today and fails the day the other side grows one, which is
+    a build broken by an edit to a file nobody touched. That is what this rule
+    is for; the runtime is what catches the case it is already in.
+
+    **What this cannot see: the same cycle one module longer.**
+    `serialisation.py` does `from lending import Loans`, so an
+    `import serialisation` added to `notifications.py` closes a three module
+    ring whose third side is a `from` form, and whichever order the interpreter
+    starts in decides whether it survives. `CYCLE` is a pair rather than a
+    derivation, so nothing here reports it. Deriving the ring instead was
+    refused as more machinery than the one edit it would catch, and the edit is
+    named here instead.
+
+    **Measured 2026-09-17, both directions, because the ring is loud in one and
+    silent in the other.** `import serialisation` added to `lending.py` does not
+    collect at all: `ImportError: cannot import name 'Loans' from partially
+    initialized module 'lending'`, suite exit 4 and no `N passed` line. The same
+    import added to `notifications.py` passes 813 tests with nothing red. So the
+    direction a person would reach for first is the one nothing here catches.
+    """
+
+    CYCLE = ("lending.py", "notifications.py")
+
+    def test_neither_side_reaches_into_the_other_with_a_from_import(self):
+        sources = _source_modules()
+        offences = []
+        for name in self.CYCLE:
+            other = next(o for o in self.CYCLE if o != name).removesuffix(".py")
+            offences += [
+                f"{name}:{node.lineno}"
+                for node in ast.walk(ast.parse(sources[name]))
+                if isinstance(node, ast.ImportFrom) and node.module == other
+            ]
+        assert offences == [], (
+            f"{offences}: `lending` and `notifications` import each other, so "
+            "each must bind the other as a module and read its attributes at "
+            "call time. A `from` form on both sides is an ImportError at "
+            "startup."
+        )
+
+    def test_the_cycle_is_really_there(self):
+        """Anti vacuity. With either import gone the rule above passes for a
+        reason that has nothing to do with what it claims, and the next person
+        to add a `from` form gets no warning."""
+        sources = _source_modules()
+        for name in self.CYCLE:
+            other = next(o for o in self.CYCLE if o != name).removesuffix(".py")
+            # The module body, not `ast.walk`, and the difference is what the
+            # claim is about. A deferred `import notifications` inside
+            # `Loans.overdue` satisfies a walk and leaves no cycle at import
+            # time at all, so the rule above would then be guarding an
+            # arrangement the tree does not have. Measured 2026-09-17: with the
+            # import moved into that method, nothing in the suite moved.
+            imported = {
+                alias.name
+                for node in ast.parse(sources[name]).body
+                if isinstance(node, ast.Import)
+                for alias in node.names
+            }
+            assert other in imported, (
+                f"{name} no longer imports {other} at module level, so the "
+                "cycle the rule above is about is not the one in the tree"
+            )

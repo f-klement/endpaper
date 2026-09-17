@@ -87,18 +87,41 @@ caught would prove nothing about the new one. What is *still* not caught:
   names no `Book` at all.
 * **A child table that carries a user.** `notes`, `quotes`, `user_books`,
   `reading_progress` and `loans` are outside the fourth pass on purpose: each
-  has a viewer of its own. Measured by running this pass over the tree with
-  that entity set, they are read in **45 statements across 8 modules**, or 40
-  across 7 outside `shelf.py`, against **10 across 4** for the book-owned
-  tables, out of the 68 modules `_source_modules()` returns. Both halves of that comparison are this
-  pass's own output, on the same day; an earlier statement of it compared two
-  different methods and neither number reproduced. What holds those five is the
-  per-row ownership `reading.py` and the routers apply. **That is a description
-  of the tree, not a guarantee**: all 33 were read, and every one is narrowed
-  to a resolved Book, to ids a route resolved, or to the caller's own
-  `user_id`. `routers/books.py:2495` is already a library-wide index over
+  has a viewer of its own. Re-measured 2026-09-17 by running this pass over the
+  tree with that entity set: **45 statements across 9 modules**, or 40 across 8
+  outside `shelf.py`, against **25 across 5** for the book-owned tables, or 20
+  across 4 outside it, out of the **89** modules `_source_modules()` returns. Both halves of that
+  comparison are this pass's own output, on the same day; an earlier statement
+  of it compared two different methods and neither number reproduced.
+
+  **The figure this replaces did not reproduce either**: the same method
+  answers 49 across 8 at `0a8bb0b`, where the line above said 45 across 8. The
+  module count is the half worth reading, and it went to 9 because `lending.py`
+  arrived with 6 while `routers/loans.py` fell from 9 to 2,
+  `routers/books.py` from 17 to 16, `notifications.py` from 6 to 5 and
+  `serialisation.py` from 3 to 2.
+
+  What holds those five tables is the per-row ownership `reading.py`, the
+  routers and now `lending.py` apply. **That is a description of the tree, not a
+  guarantee.** `routers/books.py:2495` is already a library-wide index over
   `quotes`, written correctly through the Shelf with a join, so the class is
   live on a user-carrying table and nothing here would catch it written wrong.
+
+  **`lending.py` reads past a viewer**, which makes it the fourth module in the
+  tree to: `shelf.py`'s two named functions, `backup.py`, `notifications.py`'s
+  digest, and now this. One method does it, `Loans.open_on`, which takes Book
+  ids and no viewer because every caller resolved its Books through the Shelf
+  or through `dependencies.py` first. `Loans.for_a_channel` is **not** the
+  second: it goes through `Shelf.seen_by_the_public`, which is a stricter
+  predicate than `visible_to` with no ownership arm at all, so a request routed
+  through it by mistake sees less rather than more.
+
+  The cost is stated rather than left to be found. Before the door, a viewerless
+  Loan query was a statement somebody had to justify at its call site; behind
+  one it is a method call that looks like every other. What replaces that
+  justification is that it cannot be reached without naming it, and that it
+  takes ids rather than criteria, so it cannot quietly become a way to read the
+  table. That is the same pair `shelf.rereading_filtered_rows` rests on.
 * **A Python-side aggregate off a Shelf.** `Shelf.select()` is anchored at the
   filtered `books`, so counting its rows in Python is safe; counting the rows
   of an *allowlisted* book-owned read is not, which is why every entry in
@@ -131,8 +154,9 @@ caught would prove nothing about the new one. What is *still* not caught:
   with no predicate. Not caught by passes 1 to 3, and **the reason is a cost,
   measured**: `Book` in a narrowing clause is **14 statements across 5 modules**
   outside `shelf.py` and off a shelf-rooted chain, and **22 across 9** counting
-  those, against the **15 across 4** the fourth pass carries. Extending the
-  clause rule to `Book` means classifying every one of them by hand.
+  those, against the **20 across 4** the fourth pass carries, re-measured
+  2026-09-17 by summing `BOOK_OWNED_READERS`. Extending the clause rule to
+  `Book` means classifying every one of them by hand.
 
   That last pair said **7 across 3** until 2026-09-10 and both halves were
   wrong: an `ast` walk over `BOOK_OWNED_READERS` answered 10 across 4 before a
@@ -271,6 +295,13 @@ QUERY_BUILDERS = {"shelf.py"}
 #: shape at all, which is why closing this blind spot costs one allowlist entry
 #: rather than the four fresh exemptions the old guard costed the same widening
 #: at and refused.
+#:
+#: **`lending.py` was added here on 2026-09-17 and taken out the same day.**
+#: `Loans.for_a_channel` wrote `Book.is_private.is_(False)` onto a bare
+#: `db.query(Loan)`, which is the join shape; it goes through
+#: `Shelf.seen_by_the_public` instead, which is that audience already. The
+#: entry would have exempted every future join in that module rather than the
+#: one statement it was added for, which is the cost of a second name here.
 JOIN_CALLERS = {"notifications.py"}
 
 #: Modules that read every row of `books` without naming `Book` in the query,
@@ -2277,6 +2308,38 @@ class TestTheShelfIsTheOnlyWayIn:
         for predicate in PREDICATES:
             assert f"def {predicate}(" in models, predicate
 
+    @staticmethod
+    def _callees(source: str) -> set[str]:
+        """Every call in a module, spelled as its callee.
+
+        `ast`, not a substring, and the difference is a failure this file
+        already has a paragraph about: `lending.py`'s module docstring contains
+        the literal `Shelf.seen_by(db, viewer).select(Loan).join(...)`, so a
+        substring assertion that the door roots at the Shelf passes with the
+        rooting deleted. A guard satisfied by the prose arguing for the rule
+        guards nothing.
+        """
+        return {
+            ast.unparse(node.func)
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call)
+        }
+
+    @staticmethod
+    def _privacy_calls(source: str) -> set[str]:
+        """Every `Book.is_private.is_(...)` a module writes, with its argument.
+
+        The argument is the whole point: `is_(True)` is the count of what was
+        held back and `is_(False)` is the audience, and a rule that could not
+        tell them apart would pass a module that had swapped them.
+        """
+        return {
+            ast.unparse(node)
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call)
+            and ast.unparse(node.func) == "Book.is_private.is_"
+        }
+
     def test_notifications_reads_books_and_is_deliberately_not_a_shelf(self):
         """Named rather than left as a silent pass.
 
@@ -2290,9 +2353,23 @@ class TestTheShelfIsTheOnlyWayIn:
         **The exemption is the digest's and does not cover the module.** The in
         app channel added for #86 has a viewer, and it does not get to inherit a
         note written about a scheduled job: `overdue_for_viewer` is rooted at
-        `Shelf.seen_by`, which is the door, and its own tests pin who sees what.
-        So this asserts both halves rather than one: the digest still
-        partitions, and the half with a viewer still goes through the Shelf.
+        the Shelf, and its own tests pin who sees what. So this asserts both
+        halves rather than one: the digest still partitions, and the half with a
+        viewer still goes through the Shelf.
+
+        **Two of the three halves became calls on 2026-09-17**, so both files
+        are read and both are read as calls. This module's viewerless half is
+        `Loans.for_a_channel`, which is `Shelf.seen_by_the_public`, and its
+        viewer scoped half is `Loans.seen_by`, which is `Shelf.seen_by`. The
+        third, `is_(True)`, is `count_private_overdue`, which is not a loan
+        scope at all: it counts what the exclusion held back without naming any
+        of it, and it stays here.
+
+        **The door is asserted not to restate the predicate**, rather than to
+        contain it. A `lending.py` that wrote `Book.is_private.is_(False)` onto
+        a query of its own would be the arrangement this rule exists to refuse,
+        one table further out, and it is what that module shipped for half a
+        day.
 
         This fails if that module ever applies a viewer predicate **itself**,
         because at that point it has stopped using the seam.
@@ -2314,9 +2391,12 @@ class TestTheShelfIsTheOnlyWayIn:
         the dotted call, and saying it did was a measurement nobody had taken.
         """
         source = (BACKEND / "notifications.py").read_text()
-        assert "Book.is_private.is_(False)" in source
-        assert "Book.is_private.is_(True)" in source
-        assert "Shelf.seen_by(" in source
+        desk = (BACKEND / "lending.py").read_text()
+
+        assert {"lending.Loans.for_a_channel", "lending.Loans.seen_by"} <= self._callees(source)
+        assert {"Shelf.seen_by_the_public", "Shelf.seen_by"} <= self._callees(desk)
+        assert self._privacy_calls(source) == {"Book.is_private.is_(True)"}
+        assert self._privacy_calls(desk) == set()
 
         assert _predicate_calls(source) == set(), (
             "notifications.py applies a visibility predicate itself. Its viewer "

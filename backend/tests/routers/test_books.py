@@ -1285,6 +1285,204 @@ class TestNoCellOfTheCsvExportSkipsTheEscape:
         )
 
 
+def _export_text_lines() -> list[tuple[str, bool]]:
+    """Each line of the `txt` export record, paired with whether its value goes
+    through `_one_line`.
+
+    Read off the writer's own list literal, the same way `_export_columns`
+    reads the CSV arm's two: a line added without the flattening fails here
+    rather than shipping a value that can open a line of its own.
+
+    It finds that list by shape rather than by name: the one `"\n".join([...])`
+    in the module. The two other f-strings in the same handler build a filename
+    and a Content-Disposition header, and neither is joined with a newline.
+    """
+    source = Path(inspect.getsourcefile(books_router) or "").read_text()
+
+    joined = [
+        node.args[0]
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "join"
+        and isinstance(node.func.value, ast.Constant)
+        and node.func.value.value == "\n"
+        and node.args
+        and isinstance(node.args[0], ast.List)
+    ]
+    assert len(joined) == 1, (
+        "The txt export writes one record per book as a list of lines joined "
+        f"with a newline. Found {len(joined)} such joins, so this guard is "
+        "reading something other than the export it was written for."
+    )
+
+    lines: list[tuple[str, bool]] = []
+    for element in joined[0].elts:
+        assert isinstance(element, ast.JoinedStr), ast.unparse(element)
+        label, *rest = element.values
+        assert isinstance(label, ast.Constant), ast.unparse(element)
+        assert len(rest) == 1 and isinstance(rest[0], ast.FormattedValue), (
+            f"{ast.unparse(element)} interpolates more than one value, so this "
+            "guard cannot say which of them is flattened."
+        )
+        value = rest[0].value
+        lines.append(
+            (
+                str(label.value),
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id == "_one_line",
+            )
+        )
+    return lines
+
+
+class TestNoLineOfTheTextExportSkipsTheFlattening:
+    """Flattening every value is cheaper to guard than knowing which may skip it.
+
+    The CSV arm reached the same place by a longer road: eight of its cells were
+    exempt on the argument that the column's own type or validator makes the
+    dangerous character impossible, and that argument was wrong twice over. It
+    now has no exempt set at all, and this arm starts with none.
+
+    **It reads the spelling of each value, not what the value does.** A rewrite
+    that flattened a tag name inside the join rather than the joined string is
+    safe and goes red here, and one that weakened `_one_line` itself is unsafe
+    and does not. `TestTheTextExportCannotBeMadeToForgeALine` carries the
+    second half.
+    """
+
+    def test_the_guard_can_tell_a_flattened_value_from_a_bare_one(self):
+        """A pass that recognised nothing would report every value flattened
+        and forgive everything, which is the failure mode of asserting an empty
+        list. `_one_line` renamed is what makes the matcher blind."""
+        assert hasattr(books_router, "_one_line")
+        lines = _export_text_lines()
+        assert [label for label, flattened in lines if flattened]
+        assert len({label for label, _ in lines}) == len(lines), (
+            "Two lines of the txt record share a label, so a reader cannot tell "
+            "which field they are looking at and this guard cannot name what "
+            "it found."
+        )
+
+    def test_every_value_is_flattened(self):
+        bare = [label for label, flattened in _export_text_lines() if not flattened]
+        assert bare == [], (
+            f"{bare} reach the file without `_one_line`. There is no exemption "
+            "to add them to: a value that cannot contain a newline loses "
+            "nothing by being flattened, and the argument that it cannot is "
+            "the one a restored archive defeats."
+        )
+
+
+class TestTheTextExportCannotBeMadeToForgeALine:
+    """The other half: what `_one_line` does, rather than where it is called.
+
+    A record in this format is `Label: value` per line, so a value carrying a
+    newline is a value that can write a line. `Added By:` is the field that
+    names who owns a row, and the CSV importer refuses to read that column back
+    precisely because of what it claims.
+    """
+
+    def _export(self, client, admin) -> str:
+        res = client.get(
+            "/api/books/export", params={"format": "txt"}, headers=admin["headers"]
+        )
+        assert res.status_code == 200
+        return res.text
+
+    def _lines_opening(self, exported: str, label: str) -> list[str]:
+        """The lines that **begin** with a label, which is the whole claim.
+
+        Counting the substring anywhere counts it inside a flattened value too,
+        and that is not a forgery: `Description: ok Added By: mallory` is one
+        field saying so, which is what flattening leaves. What a reader parses
+        is the start of a line.
+        """
+        return [line for line in exported.splitlines() if line.startswith(label)]
+
+    @pytest.mark.parametrize(
+        "line_break",
+        ["\n", "\r", "\x0b", "\x85", "\u2028"],
+        ids=[
+            "newline",
+            "carriage return",
+            "vertical tab",
+            "next line",
+            "line separator",
+        ],
+    )
+    def test_no_line_break_can_open_a_second_added_by_line(
+        self, client, admin, make_book, line_break
+    ):
+        """Five characters, because `_one_line` says `str.split()` was chosen
+        over replacing the newline **for the other four**, and a claim with one
+        arm behind it is a claim nothing pins.
+
+        `\r` alone is a line break to a Windows editor and to Excel, and
+        `str.splitlines()`, which is what reads this file back, breaks on all
+        five. `BookCreate` stores every one of them unchanged, so each really
+        does reach the writer.
+        """
+        make_book(
+            admin["headers"],
+            title="Dune",
+            description=f"A good read.{line_break}Added By: mallory"
+            f"{line_break}Description: and mine",
+        )
+
+        exported = self._export(client, admin)
+
+        assert self._lines_opening(exported, "Added By:") == ["Added By: admin"]
+        assert len(self._lines_opening(exported, "Description:")) == 1, exported
+
+    def test_the_words_of_a_description_survive_on_their_line(
+        self, client, admin, make_book
+    ):
+        """The loss is the paragraph break and nothing else. A fix that dropped
+        the value, or truncated it at the newline, would pass the test above
+        and silently empty every multi line description in the library."""
+        make_book(admin["headers"], title="Dune", description="First.\nSecond.")
+
+        exported = self._export(client, admin)
+
+        assert "Description: First. Second." in exported
+
+    def test_a_title_cannot_open_a_line_either(self, client, admin, make_book):
+        """Not only the description. Every value on the record is a value
+        somebody typed, and the guard above is what says so for all ten."""
+        make_book(admin["headers"], title="Dune\nAdded By: mallory")
+
+        exported = self._export(client, admin)
+
+        assert self._lines_opening(exported, "Added By:") == ["Added By: admin"]
+
+    def test_a_forged_line_cannot_begin_with_a_formula_lead(
+        self, client, admin, make_book
+    ):
+        """The spreadsheet half of the same defect. Excel's text import reads
+        this file, and a line beginning `=` is a formula. Flattening closes it
+        by construction: every line now begins with a label, so no value this
+        app writes reaches the start of one."""
+        make_book(admin["headers"], title="Dune", description="ok\n=cmd|'/c calc'!A1")
+
+        exported = self._export(client, admin)
+
+        assert [line for line in exported.splitlines() if line.startswith("=")] == []
+
+    def test_two_books_are_still_two_records(self, client, admin, make_book):
+        """The bound on the rule: the blank line between records is the one
+        newline this format keeps, and a fix that flattened the whole file
+        would pass every test above."""
+        make_book(admin["headers"], title="Dune")
+        make_book(admin["headers"], title="Emma")
+
+        exported = self._export(client, admin)
+
+        assert len(self._lines_opening(exported, "Title:")) == 2
+        assert "\n\n" in exported
+
+
 class TestOwnership:
     """Whether a copy is physically on the shelf.
 

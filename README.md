@@ -248,7 +248,7 @@ Environment variables:
 | Variable | Default | Purpose |
 |---|---|---|
 | `SECRET_KEY` | dev placeholder | Signs the JWTs. **Change this.** |
-| `DATABASE_URL` | `sqlite:///$DATA_DIR/library.db` | SQLAlchemy URL, and in practice where the SQLite file goes: the schema's CHECK constraints are written in SQLite's own SQL, so no other engine can create it |
+| `DATABASE_URL` | `sqlite:///$DATA_DIR/library.db` | SQLAlchemy URL, and in practice where the SQLite file goes. Postgres is the one other engine: spell it `postgresql+pg8000://user:password@host/endpaper`, and see below |
 | `DATA_DIR` | `/app/data` | SQLite file + uploaded covers |
 | `ALLOW_REGISTRATION` | `true` | `false` closes new signups |
 | `APP_ENV` | `prod` | `dev` relaxes the startup secret-key check |
@@ -261,6 +261,29 @@ Environment variables:
 | `CREDENTIAL_ENCRYPTION_KEY` | none | The 24 word recovery phrase that encrypts catalogue logins. Leave it unset and the app makes one for itself the first time you ask it to |
 | `CREDENTIAL_ENCRYPTION_KEY_FILE` | `$DATA_DIR/credential-key` | Read the phrase from this file instead. A Docker secret and a Kubernetes Secret both arrive this way |
 | `CATALOGUE_CREDENTIAL_<SOURCE>` | none | Pins one catalogue's login, as `username:password`, e.g. `CATALOGUE_CREDENTIAL_BNA`. Wins over one entered in Settings, which in turn wins over one Endpaper ships. **Setting it to nothing pins it as unusable rather than clearing it**, so `- CATALOGUE_CREDENTIAL_BNA=${LOGIN}` with `LOGIN` unset stops that catalogue answering; unset the variable to fall back |
+
+**SQLite or Postgres, and SQLite is the primary target.** It is the default, it needs no
+server, and it is what the whole test suite runs on. Postgres is the one other engine the
+schema is created on: the pipeline builds it on a real server from the same migration
+chain, finishes a database left half migrated, and runs the engine aware part of the suite
+against the result. The rest of the suite asserts SQLite behaviour and is not run there,
+so "supported" here means the schema and its constraints, not a second set of test
+results.
+
+The `pg8000` driver is **in the image**, so nothing has to be installed to use it. It is
+pure Python, which is why it is affordable on an Alpine image with no compiler: about
+2.4 MB installed, across five packages. The measurement and the method are in the comment
+beside the dependency in `backend/pyproject.toml`. **Spell the URL
+`postgresql+pg8000://`**; a bare `postgresql://` asks SQLAlchemy for psycopg2, which is
+not here.
+
+**That connection is not certificate checked and can be cleartext, so keep the server on
+a network you trust.** The driver offers TLS and, on a server that accepts it, verifies
+neither the certificate nor the hostname; on a server that does not, it carries on in the
+clear without saying so. Nothing in `DATABASE_URL` turns verification on. This is unlike
+the mail and Telegram paths, where verification is a property rather than a default and
+cannot be relaxed at all, so a `DATABASE_URL` carrying a password does not have the
+protection those do. `docs/security.md` states the posture in full.
 
 **Where a credential lives.** By default an admin pastes it into Settings and it is stored
 in the database. Setting the matching environment variable instead hands that job to the

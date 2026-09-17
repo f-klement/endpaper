@@ -73,10 +73,6 @@ about the rest.
   now, four of them new: `Rating`, `Date Read`, `Pages` and `ISBN13`.
 - **The statistics and the reading history no longer call a SQLite only function** to build
   their month buckets, so those two queries are engine independent.
-- **The `DATABASE_URL` documentation says what is true.** SQLite is the only engine this
-  schema can be created on: several tables carry CHECK constraints written in SQLite's own
-  SQL, so another URL does not get as far as a schema. The line that invited you to point it
-  elsewhere is gone.
 - **The cover store's own URL has a name.** The sign in background's URL was built by hand in
   the settings router, which was the cover prefix spelled a third and fourth time, and the
   house rule that only one module decides where a cover lives exempted those two lines with a
@@ -101,12 +97,26 @@ about the rest.
   third engine refused where it is rendered. Two partial unique indexes that silently became
   plain ones on Postgres, so a book could be lent exactly once ever and a second copy of a
   title was refused, carry both dialects' clauses now. **SQLite remains the primary target and
-  what the whole suite runs on**, parts of the suite assert SQLite behaviour and do not run
-  elsewhere, and the image ships no Postgres driver, so pointing `DATABASE_URL` at one still
-  needs a driver installed.
+  what the whole suite runs on**, and parts of the suite assert SQLite behaviour and do not
+  run elsewhere.
 - A Postgres job in the pipeline that creates the schema on a real server, finishes a database
   left half migrated, and runs the engine aware part of the suite against the result,
   including a corpus of every recorded hostile value attempted as a raw insert.
+- **The Postgres driver is in the image**, so pointing `DATABASE_URL` at a server installs
+  nothing. Spell it `postgresql+pg8000://user:password@host/endpaper`: a bare
+  `postgresql://` asks for psycopg2, which needs libpq and a compiler and is not there.
+  `pg8000` is pure Python, which is what makes it affordable on an Alpine image: about 2.4 MB
+  installed across five packages. **That connection is not certificate checked** and drops to
+  cleartext silently if the server declines TLS, which no `DATABASE_URL` can change, so the
+  README and the Docker Hub page now say to keep the server on a network you trust.
+- **A book description could forge a line in the plain text export**, because the value was
+  interpolated whole into a format whose records are lines. A forged line beginning `=` was
+  then run by a spreadsheet's text import. Every value is written on one line now: a
+  description with a line break reads as one paragraph in that format, which is what it
+  looked like already, since nothing indents or quotes a continuation.
+- **Whether a book is still out is one question with one answer.** It was the same filter at
+  nine sites in five modules, each of which also had to know the naive UTC frame, the Shelf
+  rooted join and a six line eager load block.
 
 ## v0.16.1
 

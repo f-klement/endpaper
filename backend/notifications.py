@@ -5,8 +5,8 @@ member identity behind it and lands where the whole household reads, so putting 
 private book's title through one defeats the single promise the data model makes.
 
 **The in app channel is the exception, and it is the rule rather than a hole in
-it.** Its audience is a member, so `overdue_for_viewer` roots the query at
-`Shelf.seen_by` and each reader gets exactly what `visible_to` already grants,
+it.** Its audience is a member, so `overdue_for_viewer` roots the query at the Shelf, through
+`lending.Loans.seen_by`, and each reader gets exactly what `visible_to` grants,
 their own private books included: being told about your own book is not a
 disclosure. That is why this module's exemption from the Shelf rule covers **the
 digest only**. The digest has no viewer; that query does.
@@ -50,7 +50,6 @@ from database import SessionLocal
 from enums import OverdueNotifyReason, OverdueSender, SettingKey
 from models import Book, Loan, User
 from schemas.settings import MAX_REMINDER_DAYS, MIN_REMINDER_DAYS
-from shelf import Shelf
 
 logger = logging.getLogger("endpaper.notifications")
 
@@ -194,15 +193,19 @@ def reminder_days(db: Session) -> int:
 def overdue_clauses(now: datetime) -> list[ColumnElement[bool]]:
     """What makes a loan overdue and still worth looking at, in one place.
 
-    **Five callers** ask this question, and restating it in any of them is how
-    they drift. They already had: the private count carried a `notified_at`
-    clause copied from the digest, where it does not belong, and under-reported
-    because of it. The fifth is `routers/loans.list_loans`, which restated the
-    three loan clauses inline until 2026-09-05, in the same release as the
-    module that exists to stop this rule having copies.
+    **Three callers** ask this question, counted 2026-09-17 by walking the
+    tree: `lending.Loans.overdue`, and the two counts below. Restating it in
+    any of them is how they drift, and they already had: the private count
+    carried a `notified_at` clause copied from the digest, where it does not
+    belong, and under-reported because of it.
 
-    Public, not `_overdue_clauses`, because of that fifth caller: a name
-    another module reaches for is not private, whatever the underscore says.
+    It was five until the loan door landed. `routers/loans.list_loans` and
+    `overdue_for_viewer` both stopped calling this directly and now reach it
+    through `Loans.overdue`, which is one caller rather than two.
+
+    Public, not `_overdue_clauses`, because of the caller in `lending.py`: a
+    name another module reaches for is not private, whatever the underscore
+    says.
 
     **The Python form of the same rule is `lending.is_overdue`**, which is what
     the serialised `is_overdue` flag and `days_overdue` both read. This one
@@ -222,27 +225,24 @@ def overdue_clauses(now: datetime) -> list[ColumnElement[bool]]:
 def due_for_reminder(db: Session, now: datetime, days: int) -> list[Loan]:
     """Open loans past their date that nothing has chased recently.
 
-    The two clauses on top of `overdue_clauses` are the two this query owns.
+    **`Loans.for_a_channel`, which is the audience rather than a filter.** The
+    privacy exclusion is that constructor's and is written there, including why
+    it is not `seen_by` with an admin's id and why `.is_(False)` is the only
+    safe spelling. Excluded **in the query**, not filtered out afterwards, so a
+    counting mistake downstream cannot put a private title in the payload.
 
-    Privacy: `.is_(False)` rather than `not Book.is_private`, for the reason
-    `visible_to` states. The latter collapses to a constant and matches every
-    row, which here would ship every private title. Excluded **in the query**,
-    not filtered out afterwards, so a counting mistake downstream cannot put
-    one in the payload.
-
-    The reminder interval: never notified, or notified longer ago than the
-    interval. That is the whole state this feature keeps.
+    One clause is this query's own, and it is the one thing about a reminder
+    that is not about a loan: never notified, or notified longer ago than the
+    interval. That is the whole state this feature keeps, which is why it is
+    added here through `as_query` rather than owned by the door.
     """
     cutoff = now - timedelta(days=days)
     return (
-        db.query(Loan)
-        .join(Book, Loan.book_id == Book.id)
+        lending.Loans.for_a_channel(db)
+        .overdue(now)
+        .as_query()
         .options(joinedload(Loan.book), joinedload(Loan.loaned_to))
-        .filter(
-            *overdue_clauses(now),
-            Book.is_private.is_(False),
-            (Loan.notified_at.is_(None)) | (Loan.notified_at < cutoff),
-        )
+        .filter((Loan.notified_at.is_(None)) | (Loan.notified_at < cutoff))
         .order_by(Loan.due_at, Loan.id)
         .all()
     )
@@ -329,16 +329,18 @@ def overdue_for_viewer(db: Session, viewer: User, now: datetime) -> Query[Loan]:
     **Rooted at the Shelf**, which is what makes this different from every other
     sender in the module: it has a viewer, so it inherits `visible_to` and shows
     a member their own private books without disclosing anybody else's.
+    `Loans.seen_by` is where that rooting lives now.
+
+    **The lender-or-borrower arm is written here and not behind that door**,
+    because it is not a property of a loan: it is the decision `sees_every_loan`
+    makes about who may read what. A `.overdue(now)` that carried it by default
+    would hand every member the admin view of who is holding which book, with
+    nothing at the call site to notice.
 
     **Returns the query rather than the rows**, so the caller chooses between
     counting and listing without a second implementation of the rule.
     """
-    query = (
-        Shelf.seen_by(db, viewer.id)
-        .select(Loan)
-        .join(Loan, Loan.book_id == Book.id)
-        .filter(*overdue_clauses(now))
-    )
+    query = lending.Loans.seen_by(db, viewer.id).overdue(now).as_query()
     if not sees_every_loan(db, viewer):
         query = query.filter(
             or_(

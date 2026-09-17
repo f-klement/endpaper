@@ -21,6 +21,7 @@ import custom_fields
 import ddc
 import google_books
 import isbn as isbn_utils
+import lending
 import marc
 import metadata
 import settings_store
@@ -67,6 +68,7 @@ from enums import (
 )
 from identifiers import add_identifiers
 from importing import identity_key
+from lending import Loans
 from logvalues import clipped
 from models import (
     AUTHOR_KEY_MAX,
@@ -812,8 +814,8 @@ def export_books(
                         if reading and reading.finished_at
                         else None
                     ),
-                    _csv_safe(book.added_at.date().isoformat() if book.added_at else ""),
-                    _csv_safe(book.added_by.username if book.added_by else ""),
+                    _csv_safe(_added_on(book)),
+                    _csv_safe(_added_by(book)),
                     _csv_safe(book.format),
                     _csv_safe(book.condition),
                     _csv_safe(book.location),
@@ -836,19 +838,31 @@ def export_books(
     else:
         blocks: list[str] = []
         for book in books:
+            # **Every value goes through `_one_line`, with no exceptions and no
+            # list of them**, exactly as every CSV cell goes through
+            # `_csv_safe`. A record here is lines, and a line is `Label: value`,
+            # so a value carrying a newline writes a line of its own: a
+            # description ending `\nAdded By: someone else` forges the one field
+            # in this file that says who owns a row. `_csv_safe` does not help,
+            # because the lead is not at the start of the value, it is at the
+            # start of a line inside it.
+            #
+            # `test_books.py::TestNoLineOfTheTextExportSkipsTheFlattening` reads
+            # this list's own elements and fails on any value that is not a
+            # `_one_line` call, so there is nothing here to keep in step.
             blocks.append(
                 "\n".join(
                     [
-                        f"Title: {book.title or ''}",
-                        f"Author: {book.author or ''}",
-                        f"ISBN: {book.isbn or ''}",
-                        f"Publisher: {book.publisher or ''}",
-                        f"Year: {book.year if book.year is not None else ''}",
-                        f"Tags: {'; '.join(tag.name for tag in book.tags)}",
-                        f"My Status: {statuses.status_of(book.id)}",
-                        f"Date Added: {book.added_at.date().isoformat() if book.added_at else ''}",
-                        f"Added By: {book.added_by.username if book.added_by else ''}",
-                        f"Description: {book.description or ''}",
+                        f"Title: {_one_line(book.title)}",
+                        f"Author: {_one_line(book.author)}",
+                        f"ISBN: {_one_line(book.isbn)}",
+                        f"Publisher: {_one_line(book.publisher)}",
+                        f"Year: {_one_line(book.year)}",
+                        f"Tags: {_one_line('; '.join(tag.name for tag in book.tags))}",
+                        f"My Status: {_one_line(statuses.status_of(book.id))}",
+                        f"Date Added: {_one_line(_added_on(book))}",
+                        f"Added By: {_one_line(_added_by(book))}",
+                        f"Description: {_one_line(book.description)}",
                     ]
                 )
             )
@@ -888,6 +902,69 @@ def _csv_safe(value: object) -> str:
     """
     text = "" if value is None else str(value)
     return f"'{text}" if text.startswith(_FORMULA_LEAD) else text
+
+
+def _one_line(value: object) -> str:
+    """Flatten a value onto the one line the `txt` export gives it.
+
+    **The record separator in that format is a newline**, and a line is
+    `Label: value`, so a value carrying a newline opens a line of its own and an
+    attacker chosen line is a forged field. `Added By:` is the one that names
+    who owns a row, which is why the CSV importer refuses to read that column
+    back at all. A forged line beginning `=` is then run by Excel's text import
+    wizard, and flattening closes that too: with this applied, every line in the
+    file begins with a label, so no field this app writes can start with a
+    formula lead.
+
+    `_csv_safe` is the wrong tool and not merely insufficient: it looks at the
+    start of the **value**, and the character that matters here is at the start
+    of a line **inside** it.
+
+    `str.split()` with no argument splits on every run of whitespace, so the
+    carriage return, the tab, the form feed, the vertical tab and Unicode's own
+    line separators go with the newline and the result is one line whatever the
+    value held. Measured: `str.split()` breaks on 29 code points and
+    `str.splitlines()`, which is what reads the file back, on 10, and the second
+    set is a subset of the first, swept over `range(0x110000)`. Chosen over
+    replacing `\n` alone because a CR-only line break is a line break to a
+    Windows editor and to Excel, and
+    `test_books.py::TestTheTextExportCannotBeMadeToForgeALine` drives five of
+    those characters rather than the one the newline case would have proved.
+
+    **It changes what the export contains, and the owner approved that on
+    2026-09-17.** A multi line description already rendered as an
+    indistinguishable block in this format, since nothing indents or quotes a
+    continuation, so what is lost is a paragraph break in a value a reader
+    could not parse anyway. What is gained is that the file cannot be made to
+    say something the library never recorded.
+
+    Applied to the typed values too, for the reason the CSV arm states at its
+    own call site: the argument that a column's validator makes this impossible
+    names the validator at the API, and `backup._parse_row` inserts a restored
+    archive through Core, which coerces the temporal columns and nothing else.
+    """
+    return "" if value is None else " ".join(str(value).split())
+
+
+def _added_on(book: Book) -> str:
+    """The date a Book was added, as an export writes it.
+
+    A date rather than the stored timestamp, and empty rather than `None`: that
+    is a decision about what an export says, and both arms of this handler make
+    it the same way. It was written out twice, character for character, which
+    is two places for one rule and was how the `txt` arm came to differ from
+    the CSV arm on other fields.
+    """
+    return book.added_at.date().isoformat() if book.added_at else ""
+
+
+def _added_by(book: Book) -> str:
+    """Who added a Book, as an export writes it: the username, not the row.
+
+    Empty for a Book whose adding member is gone, rather than the word `None`
+    in a column that names who owns the row. See `_added_on`.
+    """
+    return book.added_by.username if book.added_by else ""
 
 
 def _price_column(minor: int | None) -> str:
@@ -2600,9 +2677,13 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
         {loan.id: loan for loan in [*on_keeper, *moved]}.values(),
         key=lambda loan: (loan.loaned_at, loan.id),
     )
-    still_open = [loan for loan in open_loans if loan.returned_at is None]
+    # `lending.is_open`, not the column: the merge is the one caller that
+    # cannot ask `Loans.open_on`, because the repointing above is not flushed
+    # and these rows are the only place the survivor's loans exist yet.
+    still_open = [loan for loan in open_loans if lending.is_open(loan)]
+    now = datetime.now(UTC).replace(tzinfo=None)
     for loan in still_open[1:]:
-        loan.returned_at = datetime.now(UTC).replace(tzinfo=None)
+        lending.close(loan, now)
 
     # Progress moves wholesale. It carries no uniqueness of its own, so
     # unlike the statuses below there is nothing to resolve: two members'
@@ -3074,10 +3155,11 @@ def _trash(book: Book, db: Session) -> None:
 
     now = datetime.now(UTC).replace(tzinfo=None)
     book.deleted_at = now
-    for loan in db.query(Loan).filter(
-        Loan.book_id == book.id, Loan.returned_at.is_(None)
-    ):
-        loan.returned_at = now
+    # The Book is resolved and authorised by the caller, which is the scope
+    # `Loans.open_on` is for. One statement, and none at all for a Book that
+    # was never out.
+    for loan in Loans.open_on(db, [book.id]).values():
+        lending.close(loan, now)
 
 
 def _purge(book: Book, db: Session) -> int:

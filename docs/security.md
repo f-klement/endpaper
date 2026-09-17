@@ -767,6 +767,35 @@ every field, so one `logger.exception` would put the mail password in a log.
 so supporting it would be a supported way to print the mail password into the container
 log.
 
+### The database connection is not certificate checked and can be cleartext
+
+**SQLite is the default and opens no socket at all**, so this is a property of choosing
+Postgres rather than of running Endpaper. It is written here because the section above
+offers the SMTP path as this project's standard, and the database URL does not hold to it.
+
+**It is not the only outbound door that can be cleartext, and this is a pointer rather
+than a closed list.** The webhook's `http://` destination is beside the notification
+channels; the household OPDS feed's `Authorization: Basic` is under `## Known limits`; and
+the one catalogue that answers only over plaintext and only to an authenticated request is
+under `## Catalogue requests`, which is the only one of the three whose host an operator
+cannot move: the other two are addresses somebody chose, and a seeded catalogue's is a
+module constant.
+
+Pointed at a server, `DATABASE_URL` carries a password. `database.py` passes no
+`connect_args` on that path, so the connection takes `pg8000`'s defaults: a default TLS
+context with `check_hostname` set to `False` and `verify_mode` set to `CERT_NONE`, and, if
+the server does not answer the SSL request, **a session that continues in cleartext with
+nothing raised**. Neither is reachable from a `DATABASE_URL`: `connect_args` is the only
+channel an `SSLContext` arrives through, and SQLAlchemy's pg8000 dialect copies the URL's
+query string in as strings. The reading of the driver's source that establishes this sits
+beside the dependency in `backend/pyproject.toml` and is not repeated here.
+
+So the password is exposed to anyone who can answer for the address, and the traffic to
+anyone on the path. **Keep the server on a network you trust.** Making the connection
+verify is a change to `database.py` and is on the tracker; it needs a decision about what
+the default mode is, since matching this project's SMTP standard would refuse the self
+signed certificate most self hosted deployments have.
+
 ### The webhook URL is an admin-to-admin capability, and a blocklist would not fix it
 
 An admin can point it at an address inside the cluster, and a request will be made to it

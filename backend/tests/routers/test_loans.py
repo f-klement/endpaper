@@ -504,13 +504,30 @@ class TestTheNestedBook:
         statement added **or removed** is then noticed rather than absorbed.
         Moving it is allowed when the change is deliberate and measured.
 
+        **The options are `lending.RENDERED` since 2026-09-17, one plan for both
+        loan pages, and both pages keep their own count.** The plan being shared
+        is what makes a single assertion tempting, and it is the wrong trade:
+        the two routes differ in their ordering and in where their query comes
+        from, so what each count pins is that *this* route still applies the
+        plan. One assertion would pass a route that stopped, which is measured
+        rather than argued: deleting `.options(*lending.RENDERED)` from
+        `list_overdue` alone reds that route's count and leaves this one green.
+
         What it pins, measured 2026-08-29 by deleting each option alone:
         `joinedload(Loan.book).joinedload(Book.added_by)`. Dropping the
         `.joinedload(Book.added_by)` link alone is +3 and +10, one member per
         loan; dropping the whole option takes the Book with it and is +6 and
         +20. The figures answer different mutations, so both are stated.
-        `Loan.loaned_to` and `Loan.loaned_by` are free on an active page and
-        are pinned by the returned page below instead.
+        **`Loan.loaned_to` and `Loan.loaned_by` are load bearing here too**, and
+        this docstring said the opposite until 2026-09-17. They were free while
+        a second `books_to_out` pass joinedloaded both users over every active
+        loan on the page, and that pass went when `LoanOut.book` narrowed to a
+        `BookColumns`: `_to_out_many` is a plain comprehension now and nothing
+        else populates either relationship. `routers/loans.py` recorded that
+        correction on 2026-09-16 and these two docstrings were not read.
+
+        Re-measured 2026-09-17 by deleting `joinedload(Loan.loaned_to)` alone:
+        10 at three loans and 17 at ten, against the 7 below at both lengths.
         """
         for index in range(3):
             lend_between_strangers(client, make_book, _password_hash, index)
@@ -541,14 +558,19 @@ class TestTheNestedBook:
     def test_a_page_of_returned_loans_costs_the_same_whatever_its_length(
         self, client, admin, make_book, _password_hash
     ):
-        """`active_only=false` is the page `Loan.loaned_to` and `Loan.loaned_by`
-        are eager loaded for, and the only page on which they are observable.
+        """A page of returned loans costs what a page of open ones costs.
 
-        `books_to_out` fetches the page's **active** loans with both users
-        joinedloaded, so on the default page those two options are satisfied by
-        somebody else's query and deleting either changes nothing at all. A
-        returned loan is in no such fetch. Measured 2026-08-29 on this page:
-        deleting either alone costs +3 at three loans and +10 at ten.
+        **It is no longer the only page `Loan.loaned_to` and `Loan.loaned_by`
+        are observable on**, which is what this docstring said until
+        2026-09-17. They were free on the default page while a second
+        `books_to_out` pass fetched every active loan there with both users
+        joinedloaded; that pass is gone, so both options are load bearing at
+        every `active_only` and the test above pins them too. Measured
+        2026-08-29 on this page: deleting either alone costs +3 at three loans
+        and +10 at ten.
+
+        What this page still carries alone is the `active_only=false` arm
+        itself: a returned loan is in no such fetch by anybody.
         """
         for index in range(10):
             row = lend_between_strangers(client, make_book, _password_hash, index)

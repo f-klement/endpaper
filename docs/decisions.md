@@ -14131,3 +14131,172 @@ what lets one corpus serve two engines: a NUL in a `varchar` is a CHECK violatio
 (SQLSTATE 23514 equivalent) and an encoding refusal from the server on Postgres (22021). The
 positive controls are load bearing: without them a baseline row broken for any unrelated
 reason makes every case raise and every case pass.
+
+## The Postgres driver is a runtime dependency, and the image is the reason
+
+Owner's decision, 2026-09-17, on the issue asking whether `pg8000` belongs in the image.
+
+`pg8000` arrived as a dev group dependency for the pipeline's Postgres job. The Dockerfile
+installs with `uv sync --frozen --no-dev`, so the published image carried no driver at all
+while the published documentation offered the engine. An operator following it got an
+import error rather than a database, and the only way to run a documented option was to
+build their own image.
+
+**What decided it was the shape of the package, not the size.** The usual reason to refuse
+a driver in a slim image is the wheel: psycopg publishes no musl wheel and psycopg2 wants
+libpq and a compiler, so either would turn the Alpine runtime into a build image. `pg8000`
+is pure Python, so it installs on musl with nothing. That is also why it was the driver the
+dialect work chose in the first place.
+
+**The cost is measured, and it has one home.** About 2.4 MB installed across five
+distributions, four of them `pg8000`'s own chain. The digits, the endpoints, the date and
+the two instruments are in the comment beside the dependency in `backend/pyproject.toml`
+and are deliberately not repeated here, in the README or in the ADR: a seven digit number
+in four files is four things to update and nothing recomputes any of them.
+
+**The instrument that was wrong first.** `uv run --no-dev` is an inexact sync: it leaves
+the dev packages in place. A probe run that way reported 96 distributions and 231,540,698
+bytes and looked authoritative, because the flag was right there in the command. What
+prunes is `uv sync` into its own `UV_PROJECT_ENVIRONMENT`. The correct figure was then
+reconciled to the byte by a second instrument, a per entry sweep of the installed tree,
+and the first attempt at that sweep was 42,955 bytes short because `six` is a single module
+file whose bytecode lands in `site-packages/__pycache__/` rather than under a package
+directory.
+
+**What this does not buy.** The schema is created on Postgres and the recorded hostile
+value corpus is refused there; that is what `test:postgres` proves. It is not a second set
+of test results: `tests/test_database.py` asserts `engine.dialect.name == "sqlite"` and
+executes `PRAGMA`, and three other files read `sqlite_master` at runtime, so most of the
+suite does not run on the second engine and nothing skips on one. SQLite is the primary
+target and what the whole suite runs on. The published prose says so in those words.
+
+**`postgresql+pg8000://` is the spelling, and the bare scheme is the trap.** SQLAlchemy
+resolves `postgresql://` to psycopg2. Nothing in `database.py` rewrites it, so the obvious
+URL still fails, with an error naming a package the image deliberately does not carry.
+Every published table and every comment now spells the full scheme; normalising it in code
+is a separate decision and is in the tracker.
+
+**The connection is not certificate checked and can be cleartext, and shipping the driver
+is what made that an operator's problem rather than a developer's.** It is authenticated,
+by the password in the URL; what nothing authenticates is the server. Verified against pg8000 1.31.5's own source,
+2026-09-17: with no `ssl_context`, `core._make_socket` builds a default context and then
+sets `check_hostname = False` and `verify_mode = CERT_NONE`, and if the server does not
+answer the SSLRequest with `S` the `elif orig_ssl_context is not None` arm is false, so the
+session continues in cleartext with nothing raised. `database.py` passes `connect_args={}`
+for every non SQLite URL and SQLAlchemy's pg8000 dialect copies `url.query` in as strings,
+so no `DATABASE_URL` can supply an `SSLContext`. This is a weaker guarantee than the SMTP
+path, where `mailer.send` builds the context itself and nothing can relax it, and the
+difference is now stated at the `DATABASE_URL` row in both published files and in full in
+`docs/security.md`, rather than left for an operator to discover. Honouring an `sslmode` is a change to `database.py` and is in
+the tracker.
+
+**What stops it drifting back.**
+`tests/test_house_rules.py::TestTheShippedImageCarriesThePostgresDriver` reads
+`pyproject.toml` and requires `pg8000` in `[project].dependencies` and not in the dev
+group. It reads the manifest rather than importing the package on purpose: the suite runs
+under `uv sync --frozen`, which installs the dev group, so an import would pass with the
+dependency in either place and the guard would be decorative. **It cannot see the lock**,
+which is what `uv sync` installs, because `--frozen` does not compare the two; the
+instrument for that arm is `test:postgres`, which syncs the same lock and then runs the
+chain over `postgresql+pg8000://`. The class sits in the house rules file rather than
+beside the dialect tests because it reads `pyproject.toml` and mirrors no module, and
+because `test:postgres` selects `test_dialect.py` by name, which would have put a manifest
+assertion inside the Postgres job's junit report.
+
+## The channel's loans are the public shelf's, not a second spelling of it
+
+`Loans.for_a_channel` shipped as `Book.is_private.is_(False)` on a bare
+`db.query(Loan)` and was rewritten the same day. `Shelf.seen_by_the_public` is
+that audience already, and the difference is two things the hand written form
+lost: it dropped `deleted_at`, so the constructor on its own answered loans over
+trashed Books and was safe only because every caller chained `.overdue(now)`,
+which carries that clause; and it reached `books` through a join from a query
+rooted elsewhere, which cost `lending.py` an entry in `JOIN_CALLERS` that would
+have exempted every future join in the module rather than the one statement.
+
+A three audience door whose third audience is safe only in combination is not
+one.
+
+## The loan door has three constructors, not two
+
+`Loans.seen_by(db, viewer)` is Shelf rooted. `Loans.for_a_channel(db)` carries
+`Book.is_private.is_(False)` and has no viewer at all. They are different
+predicates rather than one with an argument: `visible_to` admits the viewer's
+**own** private Books, so a digest built as `Loans.seen_by(db, <an admin id>)`
+posts that admin's private titles to a Telegram channel. It compiles, it reads
+as "the digest runs as an admin", and nothing about it looks wrong at review.
+A two constructor door makes that the obvious workaround, which is why the
+third exists. Same argument as `Shelf.seen_by_the_public`, one table over.
+
+`Loans.open_on(db, book_ids)` is the third and has no audience at all: every
+caller has resolved its Books through the Shelf or through `dependencies.py`
+already. It is plural because its caller is a page, and a singular door turns
+the listing path into the N+1 `_books_to_out` exists to prevent.
+
+## What stayed outside that door, and why
+
+- **The overdue predicate**, `notifications.overdue_clauses`. Five callers, one
+  spelling, and a `Book.deleted_at` clause the Python form cannot carry.
+  `.overdue(now)` calls it. The cost is that `lending` and `notifications` now
+  import each other; both sides stay plain `import` forms and a house rule pins
+  that, because a `from` form on both sides is an ImportError at startup.
+- **The ordering**, which is the caller's argument. The two loan pages differ by
+  exactly that, and a `page()` that chose one would silently converge them.
+- **The lender-or-borrower arm**, which is `sees_every_loan`'s decision about who
+  may read what rather than a property of a Loan. A `.overdue(now)` carrying it
+  by default hands every member the admin view of who is holding what.
+- **`count_private_overdue`**, which tells a channel how much it is not being
+  told without naming any of it.
+
+## No migration: `close` is above the index, never instead of it
+
+`uq_loans_one_open_per_book` is a partial unique index over `(book_id) WHERE
+returned_at IS NULL`. The ticket proposed that "at most one open loan per Book"
+become a property of `close`; that is backwards. The rule is an index precisely
+because three application code paths had to agree about it and one did not.
+`close` refuses a second close in a sentence a person can read, and the index is
+what holds when two requests race.
+
+## The attribute rule is wider than the ticket asked for, and costs one line
+
+The settled note proposed "no module outside `lending.py` names `returned_at`,
+with `notifications.py` the one exception", and recorded three evasions it could
+not cover. The rule as built reports **any** `.returned_at` attribute access on
+any receiver, which catches two of those three: `joinedload(Loan.returned_at)`
+in an option list, and `loan.returned_at is None` read off a fetched instance,
+which is the shape the merge in `routers/books.py` was written in. It costs one
+more allowlist entry, `serialisation.py`, where a payload field renders the
+column. The third evasion, filtering on `Loan.due_at` alone, is covered by
+neither guard and is named on the class.
+
+A declaration is outside the rule by construction rather than by exemption: a
+column and a schema field are `AnnAssign` targets, and the index's own clause is
+a string, so `models.py` and `schemas/loan.py` need no argument.
+
+## The txt export flattens every value, with no exempt set
+
+`" ".join(str(value).split())` per interpolated value. The CSV arm reached the
+same place by a longer road: eight of its cells were exempt on the argument that
+the column's type or validator makes the dangerous character impossible, and the
+argument was wrong twice over, so the exempt set was removed entirely. This arm
+starts with none.
+
+`_csv_safe` is the wrong tool rather than an insufficient one: it looks at the
+start of the value, and the character that matters is at the start of a line
+**inside** it. Flattening closes the spreadsheet vector too, and by
+construction: every line in the file now begins with a label, so no value this
+app writes can reach the start of one.
+
+The behaviour change was approved by the owner on 2026-09-17. A multi line
+description already rendered as an indistinguishable block in that format.
+
+## A door is not shut by the absence of a caller
+
+`Loans.__init__` takes any query and applies no predicate, and it was held by
+"private by convention and by the absence of any other caller", which is the
+*stated* rung. `Loans(db.query(Loan))` names no `Book`, no `returned_at` and no
+`as_query`, so every guard over this change stayed green while it answered every
+private Book in the library: measured, three titles against the two that member
+may see. `TestOnlyTheDeskBuildsAScope` reports the construction and a `._query`
+read whose receiver is not `self`; the `self` arm is what keeps `shelf.py` and
+`sru.py` off the list without either being named.

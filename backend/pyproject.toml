@@ -23,6 +23,56 @@ dependencies = [
     "rapidfuzz>=3.14.5",
     "cryptography>=50.0.1",
     "mnemonic>=0.21",
+    # The Postgres driver, and it is a runtime dependency rather than a dev one
+    # because the image is what an operator gets. Postgres is the supported
+    # optional drop in and the schema is created on one in CI, so without this
+    # line `DATABASE_URL=postgresql+pg8000://...` answers with an import error
+    # rather than a database, and the only way to run a documented option is to
+    # build your own image.
+    #
+    # **pg8000 rather than psycopg, and that is what makes it affordable here.**
+    # pg8000 is pure Python, so it installs on the image's musl with no libpq and
+    # no compiler; psycopg publishes no musl wheel and psycopg2 wants both. The
+    # cost is measured rather than assumed, and **this comment is its one
+    # home**: the published files quote a rounded figure and point here, because
+    # a seven digit number in four places is four things to update and nothing
+    # recomputes any of them.
+    #
+    # The image's venv goes from 110,640,423 bytes over 38 distributions to
+    # 113,001,547 over 43: 2,361,124 bytes and 141 files, measured 2026-09-17 by
+    # running the Dockerfile's own `uv sync --frozen --no-dev
+    # --no-install-project` under UV_COMPILE_BYTECODE=1 on the pipeline's uv
+    # image, and reconciled to the byte against a per entry sweep of the
+    # installed tree. Four of the five distributions are pg8000's own chain:
+    # scramp, asn1crypto, python-dateutil and six.
+    #
+    # **That is the uncompressed layer, bytecode included, and not what a pull
+    # moves.** The compressed figure is not measured; for scale, the five wheels
+    # total 419,934 bytes in `uv.lock`.
+    #
+    # **`postgresql+pg8000://` is the spelling, and a bare `postgresql://` still
+    # fails.** SQLAlchemy resolves that to psycopg2, which is not here and cannot
+    # be: it needs libpq and a compiler. The published tables say the full scheme
+    # for that reason.
+    #
+    # **The connection is not certificate checked, and drops to cleartext
+    # silently if the server declines TLS.** It is authenticated, by the
+    # password in the URL; what nothing authenticates is the server.
+    # With no `ssl_context`, `pg8000.core._make_socket` builds a default context
+    # and then sets `check_hostname = False` and `verify_mode = CERT_NONE`; if
+    # the server does not answer the SSLRequest with `S`, the `elif
+    # orig_ssl_context is not None` arm is false and the session **continues in
+    # cleartext** with nothing raised. `database.py` passes `connect_args={}` for
+    # every non SQLite URL and SQLAlchemy's pg8000 dialect copies `url.query` in
+    # as strings, so no `DATABASE_URL` can supply an `SSLContext`. Verified
+    # against pg8000 1.31.5's own source, 2026-09-17. Honouring an `sslmode` is a
+    # change to `database.py` and is in the tracker.
+    #
+    # Its paramstyle is `format`, the same `%` hazard psycopg2 has, so
+    # `database.MonthBucket`'s note about choosing a `to_char` pattern with no `%`
+    # in it still holds under this driver rather than being a claim about a
+    # different one.
+    "pg8000>=1.31.5",
 ]
 
 [project.optional-dependencies]
@@ -46,18 +96,6 @@ dev = [
     "pip-audit>=2.9.0",
     "jsonschema>=4.23.0",
     "keyring>=25.7.0",
-    # The Postgres driver, and it is here rather than in `dependencies` on
-    # purpose. Postgres is the supported optional drop in, so CI has to create
-    # the schema on one and run the suite against it; the shipped image is
-    # Alpine and creates SQLite, and carries no Postgres driver at all.
-    #
-    # **pg8000 rather than psycopg, because of that image.** pg8000 is pure
-    # Python, so it installs on musl with no libpq and no compiler; psycopg
-    # publishes no musl wheel and psycopg2 wants both. Its paramstyle is
-    # `format`, the same `%` hazard psycopg2 has, so `database.MonthBucket`'s
-    # note about choosing a `to_char` pattern with no `%` in it still holds
-    # under this driver rather than being a claim about a different one.
-    "pg8000>=1.31.5",
 ]
 
 [tool.pytest.ini_options]
