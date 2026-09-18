@@ -14132,6 +14132,14 @@ what lets one corpus serve two engines: a NUL in a `varchar` is a CHECK violatio
 positive controls are load bearing: without them a baseline row broken for any unrelated
 reason makes every case raise and every case pass.
 
+**That corpus runs on Postgres where a release is about to happen, not on every push.**
+Owner's decision, 2026-09-18: the engine is an optional drop in and SQLite is the primary
+target, so 45 to 81 seconds of wall clock per pipeline duplicates an addon most changes
+cannot touch. The job's rules are a tag and the unattended patch branch, which are the two
+paths that reach a published artefact. **What this gives up is stated where the rule is**: a
+change that breaks the schema on Postgres lands on `main` green and stops the release rather
+than the merge request, which is later than ideal and still before anything is published.
+
 ## The Postgres driver is a runtime dependency, and the image is the reason
 
 Owner's decision, 2026-09-17, on the issue asking whether `pg8000` belongs in the image.

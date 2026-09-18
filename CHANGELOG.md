@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Postgres is checked where a release is about to happen**, rather than on every pipeline:
+  on a tag and on the unattended patch branch. It is an optional drop in and SQLite is the
+  primary target, so paying its wall clock on every push duplicated an addon most changes
+  cannot touch.
 - **The Socket preflight has one home.** It was spelled in the pipeline and again in the
   unattended patch release's script, each with a comment naming the other, so fixing one left
   the other stale: the nightly run stopped on it and paged. Both callers read the same script
