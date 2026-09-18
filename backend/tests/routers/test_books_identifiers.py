@@ -603,7 +603,7 @@ class TestRemovingOne:
         """The other half, and the reason the client does not promise finality.
 
         **The prose said the removal could not be undone and that was wrong.**
-        `_repoint_relations` moves a merged Book's identifiers onto the
+        `folding.fold` moves a merged Book's identifiers onto the
         survivor rather than re-asserting them, so import-then-merge puts the
         value back on the Book it came off. Both critic seats arrived at this
         from different directions, one from the writer register in

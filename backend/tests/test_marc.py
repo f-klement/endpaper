@@ -6,8 +6,9 @@ none of them needs a session. What does need one, the matching and the writing,
 is `tests/test_importing.py` and `tests/routers/test_imports_marc.py`.
 
 **The round trip is the strongest assertion available and it is not a
-tautology.** The writer is this module's and the reader is `metadata.py`'s, the
-same one that parses a live DNB or K10plus answer. So a record surviving the
+tautology.** The writer is this module's and the fields are read by
+`marc_fields.py`, the same reader that takes a live DNB or K10plus answer
+apart. So a record surviving the
 trip is evidence that what this app exports is a record this app's catalogue
 parser accepts, rather than one that merely validates against a schema. The
 fields that cannot survive it are asserted too, with the reason, because an
@@ -22,7 +23,7 @@ import types
 import pytest
 
 import marc
-import metadata
+import marc_fields
 from catalogue import Heading
 from enums import ClassificationScheme
 from schemas.book import BookCreate
@@ -266,7 +267,7 @@ class TestWhatTheRoundTripCannotCarry:
         """**The one entry here that is a rewrite rather than a loss**, and the
         worst of them.
 
-        `metadata._marc_title` falls back to
+        `marc_fields.Fields.title_statement` falls back to
         `bibliographic.split_title_statement` whenever
         `245` carries no `$b`, because a record that did not subfield itself
         puts the whole statement in `$a`. A record this app wrote always did
@@ -287,7 +288,7 @@ class TestWhatTheRoundTripCannotCarry:
         assert round_trip(title="Why:").title == "Why"
 
     def test_a_title_with_a_spaced_elided_article_is_closed_up(self):
-        """`metadata._fix_non_filing_space`. MARC puts a space after an elided
+        """`marc_fields` closes the gap. MARC puts a space after an elided
         article so sorting can skip it, and it is a filing device rather than
         how the title is printed. A repair rather than a loss, and here because
         the value does change."""
@@ -308,7 +309,7 @@ class TestWhatTheRoundTripCannotCarry:
         assert round_trip(description="One.\rTwo.").description == "One. Two."
 
     def test_a_description_written_over_several_lines_comes_back_on_one(self):
-        """`metadata._marc_text` collapses whitespace, because MARC pads its
+        """`marc_fields` collapses whitespace, because MARC pads its
         subfields. The words survive and the layout does not."""
         assert round_trip(description="One.\n\nTwo.").description == "One. Two."
 
@@ -341,7 +342,7 @@ class TestTheWriter:
     def test_the_namespace_is_the_one_the_reader_looks_for(self):
         """A reader and a writer disagreeing here produce a file this app
         cannot read back, and only a round trip would notice."""
-        assert metadata._MARC.strip("{}") == marc.NAMESPACE
+        assert marc_fields.NAMESPACE == marc.NAMESPACE
 
     def test_german_is_written_as_the_bibliographic_code_marc_uses(self):
         """ISO 639-2 has `ger` and `deu` for German and MARC takes the
@@ -351,8 +352,8 @@ class TestTheWriter:
 
     def test_an_added_author_is_marked_as_one_or_the_reader_drops_it(self):
         """`700` without `$4` is a translator or an editor as far as
-        `metadata._marc_author_entries` is concerned, so every author after the
-        first would vanish with nothing failing."""
+        `marc_fields.Fields` is concerned, so every author after the first would
+        vanish with nothing failing."""
         assert '<subfield code="4">aut</subfield>' in marc.write(
             [a_book(author="One Writer, Two Writer")]
         )
@@ -512,7 +513,7 @@ class TestOneBadRecordCostsOneRecord:
 
 
 class TestReadingRealCatalogueShapes:
-    """Fields as a live catalogue writes them, which is what `metadata.py`'s
+    """Fields as a live catalogue writes them, which is what `marc_fields.py`'s
     readers were measured against and what this reader inherits."""
 
     def test_isbd_punctuation_introducing_the_next_subfield_is_stripped(self):
@@ -537,7 +538,7 @@ class TestReadingRealCatalogueShapes:
         """`020 $q` is a binding or a volume, not only a cross reference.
 
         A Greek or Spanish catalogue file imported by hand used to lose its
-        ISBNs here, because this reader shares `metadata._marc_isbn` with the
+        ISBNs here, because this reader shares `marc_fields.Fields.isbn` with the
         lookup path and that rule refused every qualified entry.
         """
         parsed = marc.read(
@@ -599,7 +600,7 @@ class TestReadingRealCatalogueShapes:
     def test_a_subject_heading_naming_no_vocabulary_is_not_stored_as_one(self):
         """A `650` with no `$0` and no `$2 lcsh` is somebody's uncontrolled
         word. It feeds the tag suggestion and never the classifications table,
-        which is `_dnb_subjects` structurally rather than by a filter."""
+        which is `Fields.controlled_subjects` structurally rather than by a filter."""
         parsed = marc.read(
             a_record(datafield("245", ("a", "T")), datafield("650", ("a", "Cookery")))
         )
@@ -612,7 +613,8 @@ class TestReadingRealCatalogueShapes:
         `_extra_headings` decides an LCSH row by `== "lcsh"`, so a file writing
         `$2 LCSH` loses every one of them, silently, with the record otherwise
         whole. **That, and not the catalogues, is why
-        `metadata._subject_vocabulary` lower cases**: measured 2026-08-31, 0 of
+        `marc_fields.Subfields.subject_vocabulary` lower cases**: measured
+        2026-08-31, 0 of
         the twelve `$2` codes seen live appeared in two cases, and the two upper
         case ones are each written by one catalogue only. So no served record
         motivates the folding and this one line does, which is a reason nothing
@@ -641,23 +643,36 @@ class TestReadingRealCatalogueShapes:
         assert shouted.records[0].headings == quiet.records[0].headings
 
 
-class TestTheSeamIntoMetadataIsPinned:
-    """`marc.py` is the one module here that reads another's private names.
+class TestNoModuleReadsAnotherModulesPrivateNames:
+    """No module of ours reaches past another's door, with no exemption at all.
+
+    **`marc.py` was the one exemption and it is gone**, which is what
+    `marc_fields.py` was written for: this module composed `metadata.py`'s MARC
+    parser by name, 17 names at 21 sites, because an uploaded file is a third
+    MARC profile over the same fields and a second parser would be a second set
+    of field decisions to keep in step. It composes the same parser through a
+    door now, so there is nothing left to admit.
 
     **Derived with `ast`, never listed, and never counted here either.** A test
     naming the names would be the shape this repository records as wrong on
-    every first attempt, a guard that enumerates something open. So would a
-    number in this docstring: the set shrinks as rules leave `metadata.py` for
-    `bibliographic.py`, and a count written down is a count nobody re-derives.
-    `_private_reads` below is the instrument; run it for the set.
+    every first attempt, a guard that enumerates something open. `_private_reads`
+    below is the instrument and `_offenders` is the walk; run either for the set.
 
-    **What a rename actually breaks depends on where the name is read.**
-    `_MARC` and `_GND_PREFIX` are read at module scope, so renaming one stops
-    the application importing and every router test catches it. The rest are
-    read inside a function body, where nothing catches it until a request
-    arrives, and those are what this guard is for.
+    **The two halves are driven separately, because for one round only the
+    instrument was.** `_private_reads` answers about a string and `_offenders`
+    reads the tree, and an assertion that a set is empty observes neither: three
+    single anchor mutations of the walk left every test in this class green with
+    the rule reporting nothing. Half of that predates this module, so it is
+    stated rather than blamed on the change that found it: the version of this
+    class that admitted `marc.py` was disarmable the same way by dropping the
+    module stem half of its `ours` filter.
 
-    **`mypy` reports all of them statically and the CI pipeline does not run
+    **The rule is ours and not the standard library's.** `shelf.py` reads
+    `sys._getframe`, which is a documented name, so the filter is that the module
+    reached into is one of this package's own files rather than a list of names
+    to forgive.
+
+    **`mypy` reports a reach in statically and the CI pipeline does not run
     it.** The build runs `ruff check`, the OpenAPI diff and `pytest`, and its
     only mention of the type checker is a comment. That is a pipeline change and
     is raised rather than made here.
@@ -673,7 +688,7 @@ class TestTheSeamIntoMetadataIsPinned:
 
         **Two import shapes, because one of them was a hole.** The first version
         read only `import x` plus `x._y`, and
-        `from metadata import _marc_fields` walked straight past it: the guard
+        `from metadata import _parsed` walked straight past it: the guard
         could be evaded by changing an import style. That is the same blind spot
         `tests/test_shelf.py` records against its own first version, which
         caught a parenthesised list and sailed past a one line
@@ -686,7 +701,31 @@ class TestTheSeamIntoMetadataIsPinned:
         reported `shelf.py` three times, because `shelf` is also an ordinary
         local variable there and `shelf._unrated` is a method on an instance.
 
-        **Two remaining blind spots, stated rather than left to be found.**
+        **Three remaining blind spots, stated rather than left to be found.**
+
+        **A private member of a published class is invisible here**, and that is
+        new with `marc_fields.py`. This matches `<module>._x` and
+        `from X import _y`, so `Fields(node)._isbn_entries()` in another module
+        returns nothing: the receiver is a local, not an imported module name.
+        Reaching it means deciding whether an attribute chain ends in an
+        instance of a class of ours, which is the binding machinery the retired
+        `TestEveryBookQueryIsFiltered` was made of and was retired for, and any
+        cheaper rule is a list of receiver names, which is the enumeration this
+        file refuses everywhere else. Nothing stands in for it, and the
+        temptation is to claim something does. Published sites outside this
+        module name its private members: three in `test_metadata.py` are the
+        `Fields._isbn_entries` spelling this blind spot is about, and two in
+        `test_house_rules.py` are reads rather than prose. So neither "no
+        published prose points at one" nor "no module of ours reads one" is
+        true. What is true is narrower: this walk skips `tests/`, and no module
+        it does walk reads one.
+
+        **No total is given, deliberately.** Any total here has to exclude this
+        module's own test file and this sentence, which quotes the spelling and
+        so counts itself. `_is_vendored` in `test_house_rules.py` records the
+        same recursion: its first draft quoted both phrases and the census then
+        reported the comment. The narrow claim above is the part that guards; a
+        total is the part that rots.
 
         A file that does `import shelf` *and* binds `shelf` to something else in
         a local scope is reported for the local. Closing that needs the scope
@@ -722,7 +761,7 @@ class TestTheSeamIntoMetadataIsPinned:
                 and node.attr.startswith("_")
             ):
                 found.setdefault(imported[node.value.id], set()).add(node.attr)
-            # `from metadata import _marc_fields` reaches the same name by the
+            # `from metadata import _parsed` reaches the same name by the
             # other door and used to be invisible here.
             elif isinstance(node, ast.ImportFrom) and node.module:
                 private = {
@@ -755,30 +794,32 @@ class TestTheSeamIntoMetadataIsPinned:
         assert (BACKEND / "tests").is_dir()
         assert (BACKEND / "pyproject.toml").is_file()
 
-    def test_every_private_name_marc_reads_still_exists_on_metadata(self):
-        """A rename in `metadata.py` fails here rather than inside a request."""
-        source = (BACKEND / "marc.py").read_text(encoding="utf-8")
-        names = self._private_reads(source).get("metadata", set())
+    def test_the_instrument_reports_a_reach_in_it_is_shown(self):
+        """Both import spellings reach the same answer.
 
-        assert names, (
-            "marc.py no longer reads metadata's MARC parser, so either this "
-            "guard is vacuous or the reader has been rewritten twice"
-        )
-        missing = sorted(name for name in names if not hasattr(metadata, name))
-        assert missing == [], (
-            f"marc.py reads {missing} on metadata and metadata no longer has "
-            "them. The MARC reader composes that parser rather than restating "
-            "it, so a rename there is a break here."
-        )
+        This observes `_private_reads` and nothing else: it never touches the
+        walk, the file collection or the "one of ours" filter, which is why
+        `test_a_planted_reach_in_is_reported` exists beside it rather than
+        instead of it.
+        """
+        attribute = "import metadata\n\n\ndef _x(b):\n    return metadata._parsed(b)\n"
+        imported = "from metadata import _parsed\n"
 
-    def test_marc_is_the_only_module_reaching_into_another(self):
-        """The exception stays one exception.
+        assert self._private_reads(attribute) == {"metadata": {"_parsed"}}
+        assert self._private_reads(imported) == {"metadata": {"_parsed"}}
 
-        Reading another module's private names is a boundary this tree has
-        nowhere else. It is defensible exactly once, because the MARC field
-        knowledge was measured against live catalogues and must not be written
-        twice; a second module doing it is a second copy of that argument, and
-        the argument does not hold twice.
+    @classmethod
+    def _offenders(cls, root: pathlib.Path) -> dict[str, list[str]]:
+        """Every module under `root` reading another's private names, by path.
+
+        **`root` is a parameter for the reason `_python_sources` and
+        `test_bibliographic._callers` take one**: a walk asserted only against
+        this checkout is a walk nobody has watched fail, and the assertion this
+        serves is that a set is empty. Three single anchor mutations of the body
+        below left every test in this class green while the rule reported
+        nothing, because the only test that touched the walk was the one
+        asserting the empty set. `test_a_planted_reach_in_is_reported` drives it
+        against a tree it builds.
         """
         # **A directory of ours is decided structurally, never by name**, and
         # that took two red pipelines to learn. The first version skipped a set
@@ -806,7 +847,7 @@ class TestTheSeamIntoMetadataIsPinned:
                 and any(directory.rglob("*.py"))
             )
 
-        packages = sorted(d for d in BACKEND.iterdir() if is_ours(d))
+        packages = sorted(d for d in root.iterdir() if is_ours(d))
         def is_ours_file(f: pathlib.Path) -> bool:
             """Belt and braces under a package of ours: a nested environment or
             cache is excluded at any depth.
@@ -820,13 +861,14 @@ class TestTheSeamIntoMetadataIsPinned:
             answers a question about the filesystem that a path predicate
             cannot.
             """
-            return not _is_vendored(f, BACKEND)
+            return not _is_vendored(f, root)
 
-        sources = sorted(BACKEND.glob("*.py")) + [
+        sources = sorted(root.glob("*.py")) + [
             f for d in packages for f in sorted(d.rglob("*.py")) if is_ours_file(f)
         ]
 
-        # Only this application's own modules, so `metadata._MARC` counts and a
+        # Only this application's own modules, so `metadata._parsed` would count
+        # and a
         # standard library private does not: `os._exit` is a documented name and
         # nothing here is arguing about the standard library's boundaries.
         #
@@ -837,11 +879,9 @@ class TestTheSeamIntoMetadataIsPinned:
 
         offenders = {}
         for path in sources:
-            if path.name == "marc.py":
-                continue
             found = {
                 f"{module}.{attr}"
-                for module, attrs in self._private_reads(
+                for module, attrs in cls._private_reads(
                     path.read_text(encoding="utf-8")
                 ).items()
                 if module in ours
@@ -853,13 +893,90 @@ class TestTheSeamIntoMetadataIsPinned:
                 # not be told from one naming an installed package's own
                 # `metadata.py`, and two pipelines were spent guessing where the
                 # reported files were.
-                offenders[str(path.relative_to(BACKEND))] = sorted(found)
+                offenders[str(path.relative_to(root))] = sorted(found)
+        return offenders
+
+    def test_no_module_reaches_into_another(self):
+        """Reading another module's private names is a boundary this tree has
+        nowhere.
+
+        It was defensible exactly once, for the MARC field knowledge that was
+        measured against live catalogues and must not be written twice. That is
+        `marc_fields.py` now and the exemption is gone: a second module doing it
+        is a second copy of an argument that did not hold twice.
+        """
+        offenders = self._offenders(BACKEND)
 
         assert offenders == {}, (
             f"These modules read another module's private names: {offenders}. "
-            "marc.py is the only one this tree admits, and its reason is in its "
-            "own docstring."
+            "This tree admits none: publish what the caller needs, or move the "
+            "rule to a module both can read. `marc_fields.py` is the worked "
+            "example."
         )
+
+    @staticmethod
+    def _plant(root: pathlib.Path, **modules: str) -> pathlib.Path:
+        """A tree of the shape the walk expects: top level modules, one package.
+
+        The package is what makes the diagonal below meaningful, since the
+        module stem half and the package name half of the "one of ours" filter
+        are two terms and a mutation can drop either.
+        """
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "marc.py").write_text("# the anchor test looks for this\n")
+        (root / "pyproject.toml").write_text("")
+        (root / "tests").mkdir(exist_ok=True)
+        package = root / "routers"
+        package.mkdir(exist_ok=True)
+        (package / "books.py").write_text("import metadata\n")
+        for name, source in modules.items():
+            (root / f"{name}.py").write_text(source)
+        return root
+
+    def test_a_planted_reach_in_is_reported(self, tmp_path):
+        """The half this class was missing, and it was missing the whole rule.
+
+        Every other assertion here is that a set is empty or that
+        `_private_reads` answers about a string. Neither observes the walk that
+        builds the set, so mutating the file collection, the "one of ours"
+        filter or the report itself left all of them green with the rule
+        reporting nothing. Measured by a critic seat on three separate anchors.
+        """
+        root = self._plant(
+            tmp_path / "backend",
+            metadata="def _parsed(body):\n    return body\n",
+            intruder="import metadata\n\n\ndef read(b):\n    return metadata._parsed(b)\n",
+        )
+
+        assert self._offenders(root) == {"intruder.py": ["metadata._parsed"]}
+
+    def test_a_planted_reach_in_into_a_sub_package_is_reported(self, tmp_path):
+        """The other term of the filter, so dropping either half goes red.
+
+        `ours` is the module stems **plus** the package names, because
+        `import routers.books as b` then `b._x` keys under `routers`. Keyed on
+        stems alone this is invisible; keyed on packages alone the test above
+        is.
+        """
+        root = self._plant(
+            tmp_path / "backend",
+            intruder="import routers.books as b\n\n\ndef read():\n    return b._helper\n",
+        )
+
+        assert self._offenders(root) == {"intruder.py": ["routers._helper"]}
+
+    def test_a_standard_library_private_is_not_reported(self, tmp_path):
+        """The other half of the diagonal: it must not report everything.
+
+        `shelf.py` reads `sys._getframe`, which is documented, and a rule that
+        reported it would be about Python rather than about this application.
+        """
+        root = self._plant(
+            tmp_path / "backend",
+            intruder="import sys\n\n\ndef depth():\n    return sys._getframe(1)\n",
+        )
+
+        assert self._offenders(root) == {}
 
 
 class TestEveryColumnTheImporterWritesIsBounded:

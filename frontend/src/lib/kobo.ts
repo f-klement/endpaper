@@ -26,9 +26,9 @@
  *
  * So nothing below names a column it has not first found. `WANTED` is this
  * module's own list, the device's `content` table decides which of them are
- * read, and a column that is not there costs its field and is reported in
- * `missing` rather than costing the library. **A store that cannot be read is
- * one skipped source and never a broken import**: every outcome here is a value
+ * read, and a column that is not there costs its field rather than costing the
+ * library, which is what a book of nulls says. **A store that cannot be read is
+ * one skipped source and never a broken import**: every outcome is a value
  * in a closed union, so a caller importing from several places at once loses
  * this one and keeps the rest.
  *
@@ -171,17 +171,6 @@ export interface KoboBook {
   readonly acquisition: KoboAcquisition;
 }
 
-/** A field this device's schema could not fill. */
-export type KoboField =
-  | "title"
-  | "authors"
-  | "isbn"
-  | "publisher"
-  | "year"
-  | "language"
-  | "series"
-  | "format";
-
 /** Why a database yielded no library. Closed, one sentence each on screen. */
 export type KoboFailure =
   /** Opens as SQLite, and is not a Kobo device database. */
@@ -211,10 +200,6 @@ export interface KoboLibrary {
    * about Kobo rather than about their library.
    */
   readonly skipped: number;
-  /** The device's schema version, where the device carries one. */
-  readonly schemaVersion: number | null;
-  /** Fields no column on this device could fill. Sorted, so it compares. */
-  readonly missing: readonly KoboField[];
 }
 
 export type KoboReading =
@@ -360,46 +345,6 @@ function isTrue(value: unknown): boolean {
 }
 
 /**
- * The device's schema version, where it has one.
- *
- * Informational, and read rather than acted on: every decision below is taken
- * from the columns that are actually there, which is the same question asked of
- * the file rather than of a number the file states about itself.
- *
- * **One value's meaning does move with this number, and the answer is still not
- * to read it**: `ACCESSIBILITY` states which and why. `tests/lib/kobo.test.ts`
- * reads one device at seven stated versions and at none, and asserts one whole
- * library from all eight: every field of a book, the name every row was given,
- * every refusal this reader makes, and the fields reported missing. **Every
- * `dbversion` threshold in calibre's driver has an arm either side of it**, and
- * that test's own docstring carries what it still leaves uncovered, which is
- * the one home for it. calibre reads this table too and falls back to 0 when
- * it is absent, so an absent one is an old device rather than a broken file,
- * which is why no table at all is an arm of its own.
- */
-function schemaVersionOf(db: SqliteDatabase): number | null {
-  return integer(db.query("SELECT version FROM dbversion")[0]?.["version"]);
-}
-
-/** Which of `WANTED` this device does not have, as the fields they fill. */
-function missingFields(present: Set<string>): KoboField[] {
-  const fields = new Map<KoboField, readonly string[]>([
-    ["title", ["Title"]],
-    ["authors", ["Attribution"]],
-    ["isbn", ["ISBN"]],
-    ["publisher", ["Publisher"]],
-    ["year", ["DateCreated"]],
-    ["language", ["Language"]],
-    ["series", ["Series"]],
-    ["format", ["MimeType"]],
-  ]);
-  return [...fields]
-    .filter(([, columns]) => !columns.some((column) => present.has(column)))
-    .map(([field]) => field)
-    .sort();
-}
-
-/**
  * How the member came by this row's book, or `null` where the row is one of the
  * things a Kobo keeps beside a book.
  *
@@ -516,13 +461,5 @@ export function readKoboLibrary(db: SqliteDatabase): KoboReading {
     });
   }
 
-  return {
-    ok: true,
-    library: {
-      books,
-      skipped,
-      schemaVersion: schemaVersionOf(db),
-      missing: missingFields(present),
-    },
-  };
+  return { ok: true, library: { books, skipped } };
 }

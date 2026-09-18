@@ -12,6 +12,14 @@ The split from `config.py` is deliberate and worth keeping:
 
 A container that behaves differently depending on database contents is harder
 to reason about, so the second list is kept deliberately short.
+
+**The shape is functions over a `Session` the caller already holds**, so there
+is no object to construct and every operation takes one. That kind reads
+shallow per public name by construction, which is ADR 0008's own argument for
+`dependencies.py` and `custom_fields.py` rather than a gap here. The generic
+readers are the plumbing; the named answerers below them are what a caller
+stops having to know: a key, a parser, and where a switch is nested, the
+conjunction that must not be spelled twice.
 """
 
 import json
@@ -238,11 +246,36 @@ def in_force(db: Session, key: SettingKey) -> str:
 
     **Every consumer of a settable value goes through here rather than
     `get_raw`, and the two are not interchangeable.** `get_raw` answers "what is
-    in the table", which is what the settings screen needs in order to show what
-    an admin may edit; this answers "what will the next send use". Reading the
+    in the table" and this answers "what will the next send use". Reading the
     row directly is how a lookup fails for a reason the settings screen denies,
     which is the defect `google_books_api_key` was written to prevent and which
     every mail and Telegram setting can now reproduce.
+
+    **Checked rather than left to discipline.** No key with an entry in
+    `config._ENV_OVERRIDES` is read through a reader that cannot see the
+    environment, anywhere in the backend, with no module exempted. Delete
+    `tests/test_settings_store.py::TestAnOverriddenSettingIsReadWhereItIsPinned`
+    and the next key to gain an override can be read off the table by the
+    routine that uses it, with the settings screen reporting the environment's
+    value and nothing red.
+
+    **The check is narrower than the paragraph above it**, deliberately: a key
+    no variable pins may still be read either way, which is why
+    `notifications` reads the sender health record off the table and is right
+    to. The rule is dormant until the override arrives, and that is the day it
+    has to bite.
+
+    **The settings screen is not the exception it sounds like.** A screen
+    showing a value the next send will not use is the same defect at one
+    remove, so every field the environment can pin is reported from here too,
+    and `is_from_env` beside it is what lets the form disable an edit rather
+    than offer one the write would refuse.
+
+    **`get_int`, `get_locale` and `get_json` have no sibling here, and that is
+    the rule holding rather than a gap in it.** Nothing they read is a value a
+    deployment owns, and `config._ENV_OVERRIDES` is where what earns an entry is
+    argued. The first key of theirs to earn one fails the guard above until the
+    arm exists, which is the order the work has to happen in.
     """
     return config.env_override(key) or get_raw(db, key)
 

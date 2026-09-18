@@ -39,6 +39,15 @@ from enums import ReadStatus
 from models import Book, User, UserBook
 from shelf import Shelf
 
+#: The name of the table this module owns.
+#:
+#: Published so `folding.TRANSFERS` can declare a merge policy for it without
+#: importing `UserBook`, which is the import
+#: `TestReadingIsTheOnlyWayIn::test_no_module_but_the_reading_record_imports_user_book`
+#: refuses to every other module. A merge needs this table's identity, not its
+#: rows, and `resolve_merge` below is still the only thing that touches them.
+RECORDS_TABLE = UserBook.__tablename__
+
 #: The statuses that mean a Book has not been picked up yet, so recording a
 #: position in one is news rather than a correction.
 #:

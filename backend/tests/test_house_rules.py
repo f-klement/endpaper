@@ -26,6 +26,7 @@ import respx
 from pydantic import BaseModel
 from sqlalchemy import CheckConstraint
 
+import marc_fields
 import metadata
 import models as orm  # noqa: F401  (registers the tables on Base.metadata)
 import sources
@@ -4559,14 +4560,15 @@ class TestOneReaderPerAmbiguousSubfield:
     the subfield** while its docstring claimed to enforce "a subject field
     only", so `_subject_vocabulary(fields["082"][0])` was legal, was the exact
     failure described, and left this green. That half is now the signature:
-    `metadata._subject_vocabulary` takes the tag and raises outside
+    `marc_fields.Subfields.subject_vocabulary` takes the tag and raises outside
     `_DNB_SUBJECT_TAGS`, which no source scan can be evaded past. What is left
     here is the half a scan can do, which is that nothing else reads the
     subfield at all.
 
     **It matches the constant, not a list of spellings.** The first version
     enumerated `get`, `all` and a subscript, "three spellings because
-    `_Subfields` offers three". `_Subfields` subclasses `dict`, so it offers
+    `Subfields` offers three". `marc_fields.Subfields` subclasses `dict`, so it
+    offers
     every dict reader: measured against that version, **8 of 10** shapes
     carrying a literal `"2"` went unreported, including `e.pop("2", None)`,
     `e.setdefault("2", None)`, `dict.get(e, "2")`, `getattr(e, "get")("2")`,
@@ -4584,9 +4586,9 @@ class TestOneReaderPerAmbiguousSubfield:
     set cannot see a second site that reports the same qualified name, and a
     method sharing a module level function's name is the ordinary shape of that,
     not a contrived one. Measured by appending a `class _Reader` with its own
-    `_subject_vocabulary` to `metadata.py` in memory: the set form compared equal
+    `subject_vocabulary` to `marc_fields.py` in memory: the set form compared equal
     to `SITES` with the second reader present, and the list form reported
-    `metadata._subject_vocabulary` twice. So the count is load bearing and the
+    `marc_fields.subject_vocabulary` twice. So the count is load bearing and the
     comparison is on sorted **lists**.
 
     **Identity is the path, not `path.stem`.** That is the same defect one level
@@ -4622,7 +4624,7 @@ class TestOneReaderPerAmbiguousSubfield:
     #: stems.
     SITES = (
         ("marc.py", "_subject_fields"),
-        ("metadata.py", "_subject_vocabulary"),
+        ("marc_fields.py", "subject_vocabulary"),
     )
 
     #: The subfield whose meaning depends on the field it sits in.
@@ -4821,33 +4823,33 @@ class TestTheVocabularyReaderRefusesTheWrongField:
     """The half a source scan cannot do, asserted on the function itself.
 
     `TestOneReaderPerAmbiguousSubfield` used to claim this and could not deliver
-    it. `metadata._subject_vocabulary` takes the tag, so the check runs on every
-    call and no spelling gets past it.
+    it. `marc_fields.Subfields.subject_vocabulary` takes the tag, so the check
+    runs on every call and no spelling gets past it.
     """
 
-    ENTRY = metadata._Subfields((("a", "Ancient history"), ("2", "21")))
+    ENTRY = marc_fields.Subfields((("a", "Ancient history"), ("2", "21")))
 
     def test_a_subject_tag_is_read(self):
-        assert metadata._subject_vocabulary("650", self.ENTRY) == "21"
+        assert self.ENTRY.subject_vocabulary("650") == "21"
 
     def test_a_dewey_field_raises_rather_than_answering(self):
         """`082 $2` is the Dewey edition. This is the call the old docstring
         described as impossible while nothing stopped it."""
         with pytest.raises(ValueError, match="082"):
-            metadata._subject_vocabulary("082", self.ENTRY)
+            self.ENTRY.subject_vocabulary("082")
 
     def test_every_subject_tag_this_app_reads_is_accepted(self):
         """Membership is `_DNB_SUBJECT_TAGS` rather than a second list, so a tag
         added there is admitted here in the same edit. Asserted over the whole
         tuple, so a divergence cannot hide in the one tag nobody tried."""
-        for tag in metadata._DNB_SUBJECT_TAGS:
-            assert metadata._subject_vocabulary(tag, self.ENTRY) == "21", tag
+        for tag in marc_fields._DNB_SUBJECT_TAGS:
+            assert self.ENTRY.subject_vocabulary(tag) == "21", tag
 
     def test_the_two_other_callers_pass_a_tag_this_accepts(self):
-        """`_k10plus_record` and `marc._extra_headings` both pass `650` as a
+        """`metadata._k10plus_record` and `marc._extra_headings` both pass `650` as a
         literal. If that stops being a member, both raise on every record, and
         this says so at the rule rather than in a traceback."""
-        assert "650" in metadata._DNB_SUBJECT_TAGS
+        assert "650" in marc_fields._DNB_SUBJECT_TAGS
 
 
 class TestEveryPythonFileCompilesWithoutAWarning:
@@ -6868,7 +6870,13 @@ class TestOneDoorParsesAResponseBody:
         The companion above is an assertion that a set is empty, so it is also
         green when the walk finds nothing to look at: a renamed module, a
         changed import spelling, or a `_python_sources` that stopped returning
-        the modules that fetch. This names the four that do.
+        the modules that fetch. This names every module that does.
+
+        **`covers.py` is here for its client and not for its bodies**, which is
+        the distinction the companion rule turns on. It imports `fetch` for
+        `pinned_client` and the address policy, keeps its own read loop, and
+        parses nothing: an image is bytes. So it belongs in this set and has
+        nothing to be exempted from in the rule above.
         """
         fetchers = {
             path.name for path in _python_sources() if _imports_fetch(ast.parse(path.read_text()))
@@ -6879,6 +6887,7 @@ class TestOneDoorParsesAResponseBody:
             "authority.py",
             "google_books.py",
             "opds.py",
+            "covers.py",
         }
 
 

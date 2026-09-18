@@ -674,6 +674,30 @@ describe("checking a book against the file beside it", () => {
 });
 
 describe("the placeholder set, refused at both of a library's doors", () => {
+  /** One placeholder, and the two doors it has to be refused at. */
+  interface PlaceholderCase {
+    /**
+     * The set's own key.
+     *
+     * Typed as one of them rather than as a string, so removing a member from
+     * `CALIBRE_PLACEHOLDER` fails the typecheck here rather than quietly
+     * shrinking what the assertion below compares.
+     */
+    readonly key: keyof typeof CALIBRE_PLACEHOLDER;
+    /** How the two test names below read. */
+    readonly what: string;
+    /** Rows that put the placeholder in an index. */
+    readonly rows: readonly string[];
+    /** The one field this case empties on the index's side. */
+    readonly book: Partial<CalibreBook>;
+    /** The placeholder, as the file beside the book carries it. */
+    readonly file: Partial<FileMetadata>;
+    /** The field under test, read off whichever door answered. */
+    readonly read: (book: CalibreBook) => unknown;
+    /** What that field reads as once the placeholder is refused. */
+    readonly empty: unknown;
+  }
+
   /**
    * The set, named once, and the only place these tests say what one is.
    *
@@ -708,30 +732,6 @@ describe("the placeholder set, refused at both of a library's doors", () => {
    * docstring is the home of that exception. The arm stays because it asserts
    * what the door does, and the file door arm below is the member's coverage.
    */
-  /** One placeholder, and the two doors it has to be refused at. */
-  interface PlaceholderCase {
-    /**
-     * The set's own key.
-     *
-     * Typed as one of them rather than as a string, so removing a member from
-     * `CALIBRE_PLACEHOLDER` fails the typecheck here rather than quietly
-     * shrinking what the assertion below compares.
-     */
-    readonly key: keyof typeof CALIBRE_PLACEHOLDER;
-    /** How the two test names below read. */
-    readonly what: string;
-    /** Rows that put the placeholder in an index. */
-    readonly rows: readonly string[];
-    /** The one field this case empties on the index's side. */
-    readonly book: Partial<CalibreBook>;
-    /** The placeholder, as the file beside the book carries it. */
-    readonly file: Partial<FileMetadata>;
-    /** The field under test, read off whichever door answered. */
-    readonly read: (book: CalibreBook) => unknown;
-    /** What that field reads as once the placeholder is refused. */
-    readonly empty: unknown;
-  }
-
   const placeholders: readonly PlaceholderCase[] = [
     {
       key: "year",
@@ -955,7 +955,7 @@ describe("which of a library's identifiers reach the endpoint", () => {
 
   it("carries a repeat and either case through, folding neither", async () => {
     // **The seam, asserted rather than assumed.** A scheme's canonical form and
-    // the fold of a repeat are `LibrarySettingsPage/types`', because both are
+    // the fold of a repeat are `lib/bookRequest`', because both are
     // properties of the scheme and both readers go through that door; this one
     // answers one entry a matching row. The arms that pin the fold itself are
     // in that module's mirrored test.

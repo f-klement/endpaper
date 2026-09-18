@@ -47,12 +47,12 @@ that comment exists because the instinct to is strong and was wrong five times.
 
 The guarded set is half derived and half pinned, and the split is where an
 earlier version was wrong. Which tables are **children** of `books` is a foreign
-key, so `_children_of_books` derives it. Whether a child has a viewer of its own
+key, so `models.children_of_books` derives it. Whether a child has a viewer of its own
 is **not** a foreign key to `users`: `collections`, `author_aliases` and
 `author_identifiers` each carry a `created_by_user_id` that no query consults,
 so that predicate would have dropped `classifications` out of the guard the day
 somebody added `catalogued_by_user_id`. `BOOK_CHILDREN` is therefore pinned, and
-a ninth child fails a test until a person classifies it.
+an eleventh child fails a test until a person classifies it.
 
 **It is wider than the old guard**, which was blind to a query reaching `books`
 through `.join(Book, ...)` while naming no `Book` inside `query()`: its own
@@ -246,6 +246,7 @@ from models import (
     User,
     UserBook,
     book_tags,
+    children_of_books,
 )
 from shelf import (
     _MULTI_COLUMN_ORDERS,
@@ -315,35 +316,56 @@ JOIN_CALLERS = {"notifications.py"}
 #: that, since this rule structurally cannot.
 INDIRECT_READERS = {"backup.py"}
 
+#: Modules that hand a reading call a name this pass cannot resolve to an
+#: entity, so it cannot see what table they read.
+#:
+#: **Derived and then pinned, exactly as `BOOK_CHILDREN` is**, and for the
+#: reason that constant gives: the first version of this was a set with one name
+#: in it and one consumer, the diagonal below, which iterates the names already
+#: present. It covered an entry rotting and not the set going short, so a second
+#: module written in this style was invisible to the fourth pass with nothing
+#: red and no record. An inclusion list is one of the four tells this repository
+#: names; `_parameterised_readers` states the rule and this states the classification.
+#:
+#: Three, and they are three different things, which is why a person says which:
+#:
+#: * `folding.py` runs one transfer per child table of `books` and builds every
+#:   query on the model its policy was constructed with, so the entity name is
+#:   in an argument and never in a reading call. Its three merge statements used
+#:   to be spelled out in `routers/books.py` and to carry entries above saying
+#:   they were keyed on ids the route had resolved. That reason still holds and
+#:   this rule can no longer check it, so it is checked by shape instead:
+#:   `tests/test_folding.py::TestEveryReadIsBoundedToTheBooksBeingFolded` asks
+#:   what each narrowing call is handed, and `READ_ROOTS` there carries the
+#:   count that makes a new read somebody's decision, which is the half a shape
+#:   rule cannot do.
+#: * `serialisation.py` calls `db.query(entity)` where `entity` is an
+#:   `aliased(ReadingProgress, ...)` bound two lines above. The table is fixed
+#:   at import; only the spelling is indirect, and `reading_progress` carries a
+#:   member of its own so it is outside `BOOK_OWNED_TABLES` anyway.
+#: * `targets.py` calls `z3950.query(...)`, which is a Z39.50 client and not a
+#:   `Session`. `_builds_a_query` matches `query` on any receiver on purpose,
+#:   and its docstring says why, so a naming coincidence lands here rather than
+#:   being excluded by a rule that would also excuse a real one.
+#:
+#: `test_a_parameterised_reader_is_genuinely_invisible_to_this_pass` is what
+#: stops an entry outliving the gap it describes.
+PARAMETERISED_READERS = frozenset({"folding.py", "serialisation.py", "targets.py"})
+
 #: The entity the first three passes guard.
 _BOOK = frozenset({"Book"})
 
 
-def _children_of_books(metadata: MetaData) -> set[str]:
-    """Every table with a foreign key to `books`.
+def _child_names(metadata: MetaData) -> set[str]:
+    """`models.children_of_books` by name, which is the unit both pins below use.
 
-    Derived, because a foreign key is a structural fact the schema can answer.
-    What it cannot answer is the next question, so that one is pinned instead:
-    see `BOOK_CHILDREN`.
-
-    Takes a `MetaData` rather than reading `Base` itself so the derivation can
-    be tested against a synthetic schema. That test is what says this half is a
-    rule and not a list.
+    The derivation is in `models.py` rather than here because a second reader
+    needs it: `folding.TRANSFERS` refuses to import unless it declares a policy
+    for every one of these tables. A copy of it in the test tree would be the
+    same foreign key rule decided twice, and the copy is the one that would
+    stop being maintained.
     """
-    books = metadata.tables.get("books")
-    if books is None:
-        return set()
-    # Identity against the `books` table object, not its name. A foreign key's
-    # target is typed `FromClause` because a key can point into a join or a
-    # subquery, so reading `.name` off it is unsound as well as unchecked.
-    # Comparing the object is both narrower and stronger: a second table that
-    # happened to be called "books" in another MetaData would not match.
-    return {
-        table.name
-        for table in metadata.tables.values()
-        if table is not books
-        and any(fk.column.table is books for fk in table.foreign_keys)
-    }
+    return {table.name for table in children_of_books(metadata)}
 
 
 #: Every child of `books`, pinned rather than only derived.
@@ -632,23 +654,6 @@ BOOK_OWNED_READERS = {
             "book_tags.delete()",
             "deletes the association rows for a Tag being removed. A write, and "
             "reported for the `where` clause on it rather than for being one.",
-        ),
-        (
-            "Classification.book_id.in_(loser_ids)",
-            "moves the losing Books' classifications onto the keeper during a "
-            "merge, keyed on ids the route resolved.",
-        ),
-        (
-            "DigitalReference.book_id.in_(loser_ids)",
-            "moves the losing Books' file references onto the keeper in the "
-            "same merge, keyed on the same ids the same route resolved. A "
-            "write, and the rows it does not move it deletes.",
-        ),
-        (
-            "BookIdentifier.book_id.in_(loser_ids)",
-            "moves the losing Books' store identifiers onto the keeper in the "
-            "same merge, keyed on the same ids the same route resolved. A "
-            "write, and the rows it does not move it deletes.",
         ),
         (
             "Book.identifiers.any(",
@@ -1244,6 +1249,55 @@ def _book_owned_offences(source: str) -> list[int]:
             statement = owner.get(id(node))
             offences.add(statement.lineno if statement is not None else node.lineno)
     return sorted(offences)
+
+
+def _module_level_names(tree: ast.Module) -> set[str]:
+    """Everything bound at a module's top level: imports, defs, assignments.
+
+    What a reading call is handed resolves to an entity when it is one of these
+    and to a runtime value when it is not, which is the whole of the rule below.
+    """
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            names |= {alias.asname or alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            names |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+    return names
+
+
+def _parameterised_reads(source: str) -> list[int]:
+    """Lines where a query builder is handed a name bound at runtime.
+
+    **This pass's own walk with the argument test inverted.** `_book_owned_offences`
+    reports a call to `_builds_a_query` whose argument names a guarded entity; a
+    call whose argument names a **local** is one this pass structurally cannot
+    see, because the table is chosen when the function runs.
+
+    Over-reporting is the safe direction and is what the pinned set is for: a
+    receiver that is not a `Session` lands here too, which is how `targets.py`
+    arrives, and being classified by a person costs a sentence where a rule
+    narrow enough to exclude it would also excuse a real one.
+    """
+    tree = ast.parse(source)
+    bound = _module_level_names(tree)
+    select_names, module_names = _sqlalchemy_names(tree)
+    return sorted(
+        {
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and _builds_a_query(node.func, select_names, module_names)
+            and any(
+                isinstance(argument, ast.Name) and argument.id not in bound
+                for argument in node.args
+            )
+        }
+    )
 
 
 #: Modules a `from ... import *` can launder a predicate out of.
@@ -2220,8 +2274,8 @@ class TestTheShelfIsTheOnlyWayIn:
 
     def test_a_child_of_books_is_recognised_from_the_schema_alone(self):
         """The derived half, asked of a schema built here, because asking it of
-        the real one only re-states the eight tables that already exist and
-        would pass with the derivation replaced by that list."""
+        the real one only re-states the ten tables that already exist and would
+        pass with the derivation replaced by that list."""
         metadata = MetaData()
         Table("books", metadata, Column("id", Integer, primary_key=True))
         Table("users", metadata, Column("id", Integer, primary_key=True))
@@ -2240,7 +2294,7 @@ class TestTheShelfIsTheOnlyWayIn:
         )
         Table("publishers", metadata, Column("id", Integer, primary_key=True))
 
-        assert _children_of_books(metadata) == {"shelf_marks", "scribbles"}
+        assert _child_names(metadata) == {"shelf_marks", "scribbles"}
 
     def test_every_child_of_books_is_classified(self):
         """The pinned half, and the one that stops a new table defaulting to
@@ -2264,7 +2318,7 @@ class TestTheShelfIsTheOnlyWayIn:
         So the question the schema cannot answer is asked of a person, once,
         the first time a table appears.
         """
-        derived = _children_of_books(Base.metadata)
+        derived = _child_names(Base.metadata)
         assert derived == BOOK_CHILDREN, (
             "A table gained or lost a foreign key to `books`. Add it to "
             "BOOK_CHILDREN, and to BOOK_OWNED_TABLES as well if its rows carry "
@@ -2274,6 +2328,58 @@ class TestTheShelfIsTheOnlyWayIn:
         assert BOOK_OWNED_TABLES <= BOOK_CHILDREN, (
             f"BOOK_OWNED_TABLES names a table that is not a child of books: "
             f"{sorted(BOOK_OWNED_TABLES - BOOK_CHILDREN)}"
+        )
+
+    def test_every_parameterised_reader_is_classified(self):
+        """The direction an inclusion list is blind in: the set going short.
+
+        A module that hands a reading call a runtime name is one this pass
+        cannot see. Which of those is a hole and which is a coincidence is a
+        person's answer, asked once, the first time a module appears, exactly as
+        `test_every_child_of_books_is_classified` asks it of a new table.
+        """
+        derived = {
+            name
+            for name, source in _source_modules().items()
+            if _parameterised_reads(source)
+        }
+        assert derived == set(PARAMETERISED_READERS), (
+            "a module started or stopped handing a reading call a name bound at "
+            "runtime. This pass cannot see what table it reads, so say which it "
+            "is beside PARAMETERISED_READERS and how it is guarded instead: "
+            f"{sorted(derived ^ set(PARAMETERISED_READERS))}"
+        )
+
+    def test_the_derivation_sees_a_runtime_entity_and_not_an_imported_one(self):
+        """The rule, driven against two statements built here, because asking it
+        of the tree only restates the three modules that already answer."""
+        runtime = "def carry(db, model):\n    return db.query(model).all()\n"
+        imported = (
+            "from models import Book\n\ndef carry(db):\n    return db.query(Book).all()\n"
+        )
+
+        assert _parameterised_reads(runtime) == [2]
+        assert _parameterised_reads(imported) == []
+
+    def test_a_parameterised_reader_is_genuinely_invisible_to_this_pass(self):
+        """The diagonal on `PARAMETERISED_READERS`, in the direction that rots.
+
+        A module listed there is excused nothing: it is recorded as unseeable.
+        If one of them starts naming an entity in a reading call, this pass can
+        see it again and the entry becomes a note about a gap that closed, which
+        is worse than no note. Reported here rather than waiting for somebody to
+        re-derive it.
+        """
+        sources = _source_modules()
+        seen = {
+            name: _book_owned_offences(sources[name])
+            for name in PARAMETERISED_READERS
+            if _book_owned_offences(sources[name])
+        }
+        assert not seen, (
+            "these are named in PARAMETERISED_READERS as reads this pass cannot "
+            "see, and it can see them: give them entries in BOOK_OWNED_READERS "
+            f"and take them out of that set: {seen}"
         )
 
     def test_the_book_owned_set_is_the_entities_those_tables_map_to(self):

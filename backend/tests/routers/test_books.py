@@ -31,6 +31,7 @@ from models import (
 )
 from routers import books as books_router
 from tests.helpers import (
+    AT_OPEN_LIBRARY_COVERS,
     JPEG_BYTES,
     NOT_AN_IMAGE,
     PNG_BYTES,
@@ -107,7 +108,7 @@ def open_library_hit():
         # reaches the image services too. This fixture is the "Open Library
         # has it" case, so its cover service answers with a real image; the
         # DNB's has nothing for an English ISBN.
-        mock.get(url__startswith="https://covers.openlibrary.org/").mock(
+        mock.get(url__startswith=AT_OPEN_LIBRARY_COVERS).mock(
             return_value=httpx.Response(
                 200, content=JPEG_BYTES, headers={"content-type": "image/jpeg"}
             )
@@ -863,7 +864,7 @@ def open_library_oversized():
                 },
             )
         )
-        mock.get(url__startswith="https://covers.openlibrary.org/").mock(
+        mock.get(url__startswith=AT_OPEN_LIBRARY_COVERS).mock(
             return_value=httpx.Response(
                 200, content=JPEG_BYTES, headers={"content-type": "image/jpeg"}
             )

@@ -411,7 +411,7 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset(
 #: **"Most of the chain's coverage" was true when it was written and is not
 #: now**, which is why this paragraph says "much". Four things moved the free
 #: figure from 300 to 399 on the same 500 books: three national catalogues, the
-#: `020 $q` rule in `metadata._isbn_entries`, which was refusing 51 records
+#: `020 $q` rule in `marc_fields.Fields.isbn`, which was refusing 51 records
 #: the sources already held, and a fourth catalogue arriving with its login. The
 #: Greek figure above is the sharpest case, and it moved in
 #: two steps rather than one: **7 of 50 keyless before either change, 8 with the

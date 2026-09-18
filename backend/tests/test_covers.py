@@ -13,9 +13,10 @@ book it very likely has, so discarding a cover on that would lose it to a blip.
 """
 
 import ast
+import asyncio
 import gzip
 from pathlib import Path
-from time import monotonic, sleep
+from time import monotonic
 from typing import Final
 from urllib.parse import urlsplit
 
@@ -25,12 +26,31 @@ import respx
 
 import cover_store
 import covers
+import fetch
 from tests.conftest import REAL_RESOLVE_AND_STORE
-from tests.helpers import JPEG_BYTES, NOT_AN_IMAGE, PNG_BYTES, WEBP_BYTES
+from tests.helpers import (
+    AT_ANY_COVER_HOST,
+    AT_DNB_COVERS,
+    AT_GOOGLE_BOOKS_COVERS,
+    AT_OPEN_LIBRARY_COVERS,
+    JPEG_BYTES,
+    NOT_AN_IMAGE,
+    PNG_BYTES,
+    WEBP_BYTES,
+)
 from tests.test_house_rules import _is_vendored
 
+#: The two image services as a member, a candidate builder or a `Location`
+#: spells them. Assertions about what this module *produces* use these.
 OPEN_LIBRARY = "https://covers.openlibrary.org/"
 DNB = "https://portal.dnb.de/opac/mvb/cover"
+
+#: The same two as they are **addressed**, which is what a route has to match.
+#: `covers._client` pins the address and respx matches below that transport:
+#: `tests/helpers.AT_OPEN_LIBRARY_COVERS` has the whole reason, and the resolver
+#: that makes it so is installed for every test by `tests/conftest.py`.
+AT_OPEN_LIBRARY = AT_OPEN_LIBRARY_COVERS
+AT_DNB = AT_DNB_COVERS
 
 GERMAN = "9783423280150"
 ENGLISH = "9780441013593"
@@ -63,14 +83,14 @@ class TestChecking:
     @pytest.mark.asyncio
     async def test_a_verified_cover_is_returned(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
             assert await covers.resolve(ENGLISH) == covers.open_library_url(ENGLISH)
 
     @pytest.mark.asyncio
     async def test_a_404_moves_on_to_the_next_service(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
-            mock.get(url__startswith=DNB).mock(return_value=image())
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=AT_DNB).mock(return_value=image())
 
             assert await covers.resolve(ENGLISH) == covers.dnb_url(ENGLISH)
 
@@ -97,26 +117,26 @@ class TestTransientFailures:
     @pytest.mark.asyncio
     async def test_a_5xx_keeps_the_url_rather_than_discarding_it(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(503))
-            mock.get(url__startswith=DNB).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=httpx.Response(503))
+            mock.get(url__startswith=AT_DNB).mock(return_value=httpx.Response(404))
 
             assert await covers.resolve(ENGLISH) == covers.open_library_url(ENGLISH)
 
     @pytest.mark.asyncio
     async def test_a_timeout_keeps_the_url_too(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
                 side_effect=httpx.ConnectTimeout("slow")
             )
-            mock.get(url__startswith=DNB).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=AT_DNB).mock(return_value=httpx.Response(404))
 
             assert await covers.resolve(ENGLISH) == covers.open_library_url(ENGLISH)
 
     @pytest.mark.asyncio
     async def test_a_verified_cover_beats_an_unverifiable_one(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(503))
-            mock.get(url__startswith=DNB).mock(return_value=image())
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=httpx.Response(503))
+            mock.get(url__startswith=AT_DNB).mock(return_value=image())
 
             assert await covers.resolve(ENGLISH) == covers.dnb_url(ENGLISH)
 
@@ -125,11 +145,12 @@ class TestASuppliedUrl:
     """A URL from a volume record is not a guess: it exists by construction."""
 
     SUPPLIED = "https://books.google.com/thumb.jpg"
+    AT_SUPPLIED = f"{AT_GOOGLE_BOOKS_COVERS}thumb.jpg"
 
     @pytest.mark.asyncio
     async def test_it_is_tried_first_and_kept(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(self.SUPPLIED).mock(return_value=image())
+            mock.get(self.AT_SUPPLIED).mock(return_value=image())
             mock.get(url__regex=r".*").mock(return_value=image())
 
             assert await covers.resolve(ENGLISH, self.SUPPLIED) == self.SUPPLIED
@@ -137,8 +158,8 @@ class TestASuppliedUrl:
     @pytest.mark.asyncio
     async def test_a_dead_supplied_url_falls_through(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(self.SUPPLIED).mock(return_value=httpx.Response(404))
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            mock.get(self.AT_SUPPLIED).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
 
             assert await covers.resolve(ENGLISH, self.SUPPLIED) == covers.open_library_url(
                 ENGLISH
@@ -661,26 +682,26 @@ class TestOutcomesAreCounted:
 
     async def test_a_verified_cover_counts_as_verified(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
             await covers.resolve(ENGLISH)
         assert covers.outcome_counts()[covers.CoverOutcome.VERIFIED.value] == 1
 
     async def test_a_blip_counts_as_unverified(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(503))
-            mock.get(url__startswith=DNB).mock(return_value=httpx.Response(503))
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=httpx.Response(503))
+            mock.get(url__startswith=AT_DNB).mock(return_value=httpx.Response(503))
             await covers.resolve(ENGLISH)
         assert covers.outcome_counts()[covers.CoverOutcome.UNVERIFIED.value] == 1
 
     async def test_two_404s_count_as_no_candidate(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
-            mock.get(url__startswith=DNB).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=AT_DNB).mock(return_value=httpx.Response(404))
             assert await covers.resolve(ENGLISH) is None
         assert covers.outcome_counts()[covers.CoverOutcome.NO_CANDIDATE.value] == 1
 
 
-class _Raw(httpx.SyncByteStream):
+class _Raw(httpx.AsyncByteStream):
     """Bytes handed over exactly as given, whatever the headers claim.
 
     `httpx.Response(content=...)` decodes eagerly against `content-encoding`, so
@@ -692,22 +713,75 @@ class _Raw(httpx.SyncByteStream):
     def __init__(self, payload: bytes) -> None:
         self._payload = payload
 
-    def __iter__(self):
+    async def __aiter__(self):
         yield self._payload
 
 
-class _Trickle(httpx.SyncByteStream):
-    """A body that never ends and never idles long enough to time out.
+class _AsyncTrickle(httpx.AsyncByteStream):
+    """A body that arrives slowly and never idles long enough to time out.
 
-    Every chunk arrives inside `covers.TIMEOUT_SECONDS`, so httpx is satisfied
-    on every read and the connection stays open for as long as the sender wants.
-    That is the shape a per-operation timeout cannot see.
+    Every chunk arrives inside the client's own read timeout, so httpx is
+    satisfied on every read and the connection stays open for as long as the
+    sender wants. That is the shape a per operation timeout cannot see, and
+    the only thing that stops it is the hop's wall clock bound.
+
+    **`asyncio.sleep`, not `time.sleep`.** Both cover walks are coroutines, and
+    a blocking sleep inside one holds the event loop, so the `asyncio.timeout`
+    under test never gets to fire and the guard passes on a module that has
+    none.
+
+    **Finite, and the count is the guard's own bound rather than realism.** A
+    body that genuinely never ends makes a run with the bound removed unbounded
+    too: measured, deleting the `asyncio.timeout` from `covers._download` left a
+    mutation run at 69 tests and climbing with nothing left to stop it, because
+    that wrapper is now the only thing in that loop that watches a clock. Ending
+    makes a missing bound a **red** assertion instead of a suite nobody can wait
+    out.
+
+    **Each caller picks `chunks`, and one default would break one of them.** The
+    download guard wants the body to end soon after the bound would have cut, so
+    six is enough. The check guard wants the first 512 bytes to be **far** away,
+    because what it is watching for is `aiter_raw(512)` coming back, and at
+    three bytes a chunk a short body hands the buffer its remainder at the end
+    and answers True inside the budget anyway. 200 is 600 bytes.
     """
 
-    def __iter__(self):
-        for _ in range(1000):
-            sleep(0.01)
-            yield b"\xff\xd8\xff"
+    CHUNK = b"\xff\xd8\xff"
+
+    def __init__(self, *, interval: float, chunks: int) -> None:
+        self._interval = interval
+        self._chunks = chunks
+
+    async def __aiter__(self):
+        for _ in range(self._chunks):
+            await asyncio.sleep(self._interval)
+            yield self.CHUNK
+
+
+async def _slow_redirect_to_the_dnb(request):
+    """A 302 that spends most of a budget arriving, for the two hop guards.
+
+    A redirect carries no body, so a hop cannot be made slow with a stream: the
+    delay has to be in answering at all, which is what a `side_effect` is for.
+    """
+    await asyncio.sleep(0.8)
+    return httpx.Response(302, headers={"location": DNB + "?isbn=x"})
+
+
+class _NeverAnswers(httpx.AsyncByteStream):
+    """Headers, and then nothing for longer than any bound here.
+
+    The shape a per read timeout **does** eventually catch, at the client's own
+    figure rather than at the caller's budget, which is why a guard using it
+    asserts on the seconds and not only on the verdict: without the hop bound
+    the answer is still None, ten seconds later. It is here because the trickle
+    above cannot reach `_check`, which returns on the first chunk, so a guard on
+    that function has to be about a chunk that never comes.
+    """
+
+    async def __aiter__(self):
+        await asyncio.sleep(30)
+        yield b"\xff\xd8\xff"
 
 
 class TestDownloading:
@@ -717,7 +791,7 @@ class TestDownloading:
 
     def test_it_returns_the_bytes(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
             fetched = covers.download(covers.open_library_url(ENGLISH))
         assert fetched is not None
         assert fetched.startswith(b"\xff\xd8\xff")
@@ -726,7 +800,7 @@ class TestDownloading:
         """Both services report "no cover" on a bad day with an error page and
         a 200, and the bytes are the only thing that says so."""
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
                 return_value=httpx.Response(200, content=NOT_AN_IMAGE)
             )
             assert covers.download(covers.open_library_url(ENGLISH)) is None
@@ -738,7 +812,7 @@ class TestDownloading:
             headers={"content-type": "image/jpeg"},
         )
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=oversized)
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=oversized)
             assert covers.download(covers.open_library_url(ENGLISH)) is None
 
     def test_something_that_is_not_an_image_is_refused(self):
@@ -747,12 +821,12 @@ class TestDownloading:
             200, content=b"<html>no cover</html>", headers={"content-type": "text/html"}
         )
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=page)
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=page)
             assert covers.download(covers.open_library_url(ENGLISH)) is None
 
     def test_a_refused_connection_is_not_an_exception(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
                 side_effect=httpx.ConnectError("no route")
             )
             assert covers.download(covers.open_library_url(ENGLISH)) is None
@@ -767,7 +841,7 @@ class TestDownloading:
         nothing: JPEG, PNG and WebP are already compressed.
         """
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            route = mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
             covers.download(covers.open_library_url(ENGLISH))
 
         assert route.calls.last.request.headers["accept-encoding"] == "identity"
@@ -785,7 +859,7 @@ class TestDownloading:
         assert len(compressed) < covers.MAX_COVER_BYTES
 
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
                 return_value=httpx.Response(
                     200,
                     content=compressed,
@@ -807,7 +881,7 @@ class TestDownloading:
         image" the same thing.
         """
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
                 return_value=httpx.Response(
                     200,
                     stream=_Raw(JPEG_BYTES),
@@ -821,7 +895,7 @@ class TestDownloading:
 
     def test_an_identity_encoding_header_is_what_was_asked_for(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
                 return_value=httpx.Response(
                     200,
                     content=JPEG_BYTES,
@@ -839,33 +913,37 @@ class TestDownloading:
     def test_a_trickled_body_stops_at_the_budget(self):
         """httpx's timeout is per read, so it does not bound a download at all.
 
-        Measured on httpx 0.28.1, twenty bytes at 0.9s apiece completed in 18.0s
-        under a 1.0s timeout. The deadline was checked between hops and before
-        the read; a service dribbling chunks inside `TIMEOUT_SECONDS` sailed
-        past `INTERACTIVE_BUDGET_SECONDS` with a person waiting on it.
+        **The chunks arrive at 0.98x of the budget, which is the shape, and the
+        bound is 1.4x of it, which is the measurement.** The version this
+        replaces trickled at 0.01s against a 0.2s budget and allowed 3.0s: at
+        fifteen times the budget it passed on the code that overshot and on the
+        code that does not, so it distinguished nothing. Measured on this tree,
+        the overshooting shape returned after **1.973s** against 1.0s, because
+        the clock was consulted only once a chunk had already arrived and the
+        read in flight had a full budget of its own.
         """
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
                 return_value=httpx.Response(
                     200,
-                    stream=_Trickle(),
+                    stream=_AsyncTrickle(interval=0.98, chunks=6),
                     headers={"content-type": "image/jpeg"},
                 )
             )
             started = monotonic()
             fetched = covers.download(
-                covers.open_library_url(ENGLISH), deadline=monotonic() + 0.2
+                covers.open_library_url(ENGLISH), deadline=monotonic() + 1.0
             )
             spent = monotonic() - started
 
         assert fetched is None
-        assert spent < 3.0
+        assert spent < 1.4
 
 
 class TestStoring:
     def test_it_writes_the_file_and_returns_a_local_url(self, covers_dir):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
             stored = covers.store(7, covers.open_library_url(ENGLISH))
 
         assert stored == "/covers/7.jpg"
@@ -874,7 +952,7 @@ class TestStoring:
 
     def test_a_failed_download_stores_nothing_and_says_so(self, covers_dir):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=httpx.Response(404))
             assert covers.store(7, covers.open_library_url(ENGLISH)) is None
 
         assert list(covers_dir.iterdir()) == []
@@ -889,7 +967,7 @@ class TestStoring:
         """
         png = httpx.Response(200, content=PNG_BYTES, headers={"content-type": "image/jpeg"})
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=png)
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=png)
             stored = covers.store(7, covers.open_library_url(ENGLISH))
 
         assert stored == "/covers/7.png"
@@ -901,7 +979,7 @@ class TestStoring:
         (covers_dir / "7.png").write_bytes(PNG_BYTES)
 
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
             covers.store(7, covers.open_library_url(ENGLISH))
 
         assert not (covers_dir / "7.png").exists()
@@ -1021,7 +1099,7 @@ class TestResolveAndStore:
 
     def test_a_supplied_url_is_downloaded_and_replaced_by_the_local_one(self, covers_dir):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
             result = covers.resolve_and_store(3, ENGLISH, covers.open_library_url(ENGLISH))
         assert result == "/covers/3.jpg"
 
@@ -1030,14 +1108,14 @@ class TestResolveAndStore:
         work from the reader's browser even when it does not from the pod."""
         supplied = covers.open_library_url(ENGLISH)
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
                 side_effect=httpx.ConnectError("no route")
             )
             assert covers.resolve_and_store(3, ENGLISH, supplied) == supplied
 
     def test_with_no_supplied_url_it_asks_the_image_services(self, covers_dir):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
             assert covers.resolve_and_store(3, ENGLISH, None) == "/covers/3.jpg"
 
     def test_a_spent_budget_keeps_the_url_without_downloading_it(self, covers_dir):
@@ -1054,7 +1132,7 @@ class TestResolveAndStore:
     def test_without_a_budget_it_still_downloads(self, covers_dir):
         """The backfill passes none, so nothing about the ceiling reaches it."""
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
             assert covers.resolve_and_store(3, ENGLISH, None) == "/covers/3.jpg"
 
     def test_a_book_with_no_isbn_and_no_url_gets_nothing(self, covers_dir):
@@ -1065,7 +1143,7 @@ class TestResolveAndStore:
         """The column and the directory can drift. Trusting the column here is
         what would let a book claim a cover it does not have, for good."""
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
             assert covers.resolve_and_store(3, ENGLISH, "/covers/3.jpg") == "/covers/3.jpg"
 
         assert (covers_dir / "3.jpg").exists()
@@ -1081,42 +1159,128 @@ class TestTheInteractiveBudget:
         with respx.mock:
             assert await_resolve_with_deadline(ENGLISH, 0.0) is None
 
-    def test_each_request_is_capped_at_what_is_left(self):
-        """Otherwise the real ceiling is the budget plus one whole timeout.
+    def test_a_check_of_a_trickling_service_answers_inside_the_budget(self):
+        """The arm that was missing, and the one that cost the most.
 
-        **Read off the request rather than off the arithmetic**, which is
-        `deadline.left`'s now and pinned in `tests/test_deadline.py`: httpx
-        carries the timeout it was handed in the request's extensions, so this
-        is how long the image service's socket would actually have been held.
+        The guard this replaces read `request.extensions["timeout"]["read"]` and
+        said that figure was "how long the image service's socket would actually
+        have been held". It is not: it is what httpx was told to allow **per
+        read**, and `_check` used to make as many reads as `aiter_raw(512)`
+        needed to fill 512 bytes, consulting the clock on none of them. Measured
+        on this tree at 64 bytes a chunk, a 1.0 second budget returned after
+        7.900s.
         """
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
-            assert await_resolve_with_deadline(ENGLISH, 1.5) is not None
-
-        held_for = route.calls[0].request.extensions["timeout"]["read"]
-        assert 0 < held_for <= 1.5 < covers.TIMEOUT_SECONDS
-
-    def test_a_download_is_capped_at_what_is_left_as_well(self):
-        """`covers.py` makes requests at two sites and the arm above reaches
-        one. `resolve` never calls `download`, so the identical cap there was
-        pinned by nothing and a mutation dropping it went green."""
-        with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=OPEN_LIBRARY).mock(
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
                 return_value=httpx.Response(
-                    200, content=JPEG_BYTES, headers={"content-type": "image/jpeg"}
+                    200,
+                    stream=_AsyncTrickle(interval=0.02, chunks=200),
+                    headers={"content-type": "image/jpeg"},
                 )
             )
-            fetched = covers.download(
-                covers.open_library_url(ENGLISH), deadline=monotonic() + 1.5
-            )
+            started = monotonic()
+            verdict = _await(_check_one(covers.open_library_url(ENGLISH), budget=1.0))
+            spent = monotonic() - started
 
-        assert fetched is not None
-        held_for = route.calls[0].request.extensions["timeout"]["read"]
-        assert 0 < held_for <= 1.5 < covers.TIMEOUT_SECONDS
+        # True at all is the half that catches the buffering coming back: at
+        # three bytes a chunk, `aiter_raw(512)` needs 171 of them, so the hop
+        # bound cuts first and the verdict is None. `spent` is the half that
+        # catches the bound going away instead, since the buffered read would
+        # then finish at about 3.4s and answer True.
+        assert verdict is True
+        assert spent < 0.5
+
+    def test_a_check_of_a_service_that_never_answers_stops_at_the_budget(self):
+        """The arm the trickle cannot reach, since `_check` returns on a chunk.
+
+        Without the hop bound this waits out the client's own read timeout,
+        which is `fetch.TIMEOUT_SECONDS` and has nothing to do with the budget
+        a person is waiting through.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
+                return_value=httpx.Response(
+                    200, stream=_NeverAnswers(), headers={"content-type": "image/jpeg"}
+                )
+            )
+            started = monotonic()
+            verdict = _await(_check_one(covers.open_library_url(ENGLISH), budget=1.0))
+            spent = monotonic() - started
+
+        assert verdict is None
+        assert spent < 1.4
+
+    def test_a_hop_is_bounded_even_when_no_budget_was_given(self, monkeypatch):
+        """The backfill passes no deadline, and used to get no bound with it.
+
+        `min(TIMEOUT_SECONDS, remaining)` with nothing remaining is
+        `TIMEOUT_SECONDS`, so dropping the `min` and keeping only the budget
+        leaves this walk unbounded. `TIMEOUT_SECONDS` is moved rather than
+        waited out, because six seconds of suite time is the same evidence.
+        """
+        monkeypatch.setattr(covers, "TIMEOUT_SECONDS", 0.5)
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
+                return_value=httpx.Response(
+                    200, stream=_NeverAnswers(), headers={"content-type": "image/jpeg"}
+                )
+            )
+            started = monotonic()
+            verdict = _await(_check_one(covers.open_library_url(ENGLISH)))
+            spent = monotonic() - started
+
+        assert verdict is None
+        assert spent < 1.0
+
+    def test_a_second_hop_gets_what_the_first_one_left(self):
+        """The only arm that can see `_hop_seconds` being recomputed per hop.
+
+        **Every other guard here drives one hop, so the recomputation was
+        stated and nothing could fail on it**: hoisting `_hop_seconds(deadline)`
+        out of both `for` loops and reusing one value left the suite green,
+        because no test in this file registers a 302 under a clock. What the
+        hoist costs is the walk ceiling: each hop gets the **whole** budget
+        rather than what is left, so two hops are two budgets.
+
+        Measured with the first hop answering at 0.8 of a 1.0 second budget and
+        the second never answering: shipped **1.002s**, hoisted **1.818s**. The
+        bound sits between them with room on both sides rather than beside
+        either.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
+                side_effect=_slow_redirect_to_the_dnb
+            )
+            mock.get(url__startswith=AT_DNB).mock(
+                return_value=httpx.Response(
+                    200, stream=_NeverAnswers(), headers={"content-type": "image/jpeg"}
+                )
+            )
+            started = monotonic()
+            verdict = _await(_check_one(covers.open_library_url(ENGLISH), budget=1.0))
+            spent = monotonic() - started
+
+        assert verdict is None
+        assert spent < 1.4
 
     def test_the_budget_is_shorter_than_a_single_timeout_chain(self):
         # Three checks plus a download at six seconds each is the 24 this bounds.
         assert covers.INTERACTIVE_BUDGET_SECONDS < covers.TIMEOUT_SECONDS
+
+    def test_a_hop_is_bounded_before_the_clients_own_read_timeout_is(self):
+        """`_client`'s docstring says its `timeout=` "never binds first".
+
+        **The arm above cannot see that, because it only bounds this constant
+        from below.** Raising `covers.TIMEOUT_SECONDS` past `fetch`'s leaves it
+        green and makes the docstring false with nothing red: at 12 the client's
+        read timeout cuts before the hop's wall clock bound does, and the figure
+        a reader was told never binds is the one that does.
+
+        `fetch.TIMEOUT_SECONDS` is pinned at its own value one door along, so
+        this side is the movable one. Same shape as
+        `tests/test_opds.py::test_the_sync_deadline_is_longer_than_one_request`.
+        """
+        assert covers.TIMEOUT_SECONDS < fetch.TIMEOUT_SECONDS
 
 
 class TestWhatThisServerMayConnectTo:
@@ -1225,33 +1389,133 @@ class TestFetchesAreRefusedBeforeTheyHappen:
 
     def test_a_supplied_url_on_an_unlisted_host_is_not_checked_either(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
-            mock.get(url__startswith=DNB).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=AT_DNB).mock(return_value=httpx.Response(404))
             assert await_resolve(ENGLISH, "https://evil.test/x.jpg") is None
 
     def test_a_redirect_off_the_list_is_refused_rather_than_followed(self):
         """Following it is what turns one allowed host into a way to reach any
         other, including private address space and a scheme downgrade."""
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
                 return_value=httpx.Response(302, headers={"location": "http://10.0.0.1/x.jpg"})
             )
             assert covers.download(covers.open_library_url(ENGLISH)) is None
 
+    def test_a_redirect_to_an_unlisted_host_the_policy_admits_is_refused(self):
+        """The arm that keeps the **hand walked** hops guarded, and the one the
+        address policy took the teeth out of.
+
+        **`is_fetchable` on every hop is the primary control at this door, and
+        adding the address policy left every refusal in this class deliverable
+        by something else.** Measured with `follow_redirects=True` forced on at
+        both call sites, over this file and `tests/routers/test_books_covers.py`:
+        before the policy **1 failed of 154**, the arm above; with the policy
+        and without this arm **163 passed**; with this arm **2 failed of 171**,
+        and **171 passed** unmutated.
+
+        Every off list target in either file was `http://10.0.0.1/x.jpg`, which
+        `fetch.PUBLIC_ADDRESSES` refuses on its own, and `AddressRefused` is an
+        `httpx.HTTPError`, so the walk's own handler swallowed it and the
+        assertion held for the wrong reason.
+
+        So this target is unlisted **and** at an address the policy admits, and
+        it is the only shape that can tell the two controls apart. `elsewhere`
+        is where the resolver sends any host it was not told about, so a
+        followed redirect is a **request** rather than an absent route:
+        asserting on the return value alone would pass on a client that
+        followed it to a 404.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
+                return_value=httpx.Response(
+                    302, headers={"location": "https://evil.test/x.jpg"}
+                )
+            )
+            elsewhere = mock.get(url__startswith=f"https://{AT_ANY_COVER_HOST}").mock(
+                return_value=image()
+            )
+
+            assert covers.download(covers.open_library_url(ENGLISH)) is None
+
+        assert elsewhere.call_count == 0
+
+    def test_a_check_follows_no_redirect_off_the_list_either(self):
+        """`covers.py` makes requests at two sites and the arm above reaches one.
+
+        `resolve` never calls `download`, so the same hop rule on the checking
+        side is pinned separately or it is pinned by nothing. The same shape:
+        unlisted host, address the policy admits.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
+                return_value=httpx.Response(
+                    302, headers={"location": "https://evil.test/x.jpg"}
+                )
+            )
+            mock.get(url__startswith=AT_DNB).mock(return_value=httpx.Response(404))
+            elsewhere = mock.get(url__startswith=f"https://{AT_ANY_COVER_HOST}").mock(
+                return_value=image()
+            )
+
+            assert _await(covers.resolve(ENGLISH)) is None
+
+        assert elsewhere.call_count == 0
+
     def test_a_redirect_within_the_list_is_followed(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
                 return_value=httpx.Response(302, headers={"location": DNB + "?isbn=x"})
             )
-            mock.get(url__startswith=DNB).mock(return_value=image())
+            mock.get(url__startswith=AT_DNB).mock(return_value=image())
 
             fetched = covers.download(covers.open_library_url(ENGLISH))
 
         assert fetched is not None
 
+    @pytest.mark.parametrize(
+        ("location", "path"),
+        [
+            ("/b/id/7-M.jpg", "/b/id/7-M.jpg"),
+            ("7-M.jpg", "/b/isbn/7-M.jpg"),
+        ],
+    )
+    def test_a_relative_location_is_resolved_against_the_hop_it_came_from(
+        self, location, path
+    ):
+        """`_next_hop` exists to hold that rule in one place, and every other
+        `Location` in this file is absolute, so `urljoin(current, location)`
+        could be replaced by `location` with nothing red.
+
+        **What it costs is the host, which is the whole point.** A bare
+        `location` is not a URL `is_fetchable` can admit, so the next hop would
+        be refused and an ordinary relative redirect would stop working. The
+        second row is the one that pins the join rather than a prefix: it has no
+        leading slash, so the answer depends on the **path** of the hop it came
+        from and not only on its origin.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            # **The route's calls, not the router's.** This file nests a router
+            # inside `conftest.refuse_unmocked_network`'s, and `mock.calls`
+            # answered one entry for a walk that made two: the first draft of
+            # this test read it and failed on the shipped tree, which made an
+            # unrelated mutation look caught.
+            hops = mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
+                side_effect=[
+                    httpx.Response(302, headers={"location": location}),
+                    image(),
+                ]
+            )
+            fetched = covers.download(covers.open_library_url(ENGLISH))
+
+        assert fetched is not None
+        assert hops.call_count == 2
+        assert hops.calls[1].request.url.path == path
+        assert hops.calls[1].request.headers["host"] == "covers.openlibrary.org"
+
     def test_a_redirect_loop_gives_up(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
                 return_value=httpx.Response(
                     302, headers={"location": covers.open_library_url(ENGLISH)}
                 )
@@ -1259,16 +1523,223 @@ class TestFetchesAreRefusedBeforeTheyHappen:
             assert covers.download(covers.open_library_url(ENGLISH)) is None
 
 
+class TestWhereAListedHostAnswers:
+    """`COVER_HOSTS` says which hosts this server may ask. This says which
+    **addresses** it will open a connection to, and the two are different
+    questions: a listed host whose resolver answers inside this cluster was
+    fetched until `covers._client` went through `fetch.pinned_client`.
+
+    **Defence in depth here, not the primary control, and saying so is the
+    point.** The member picks the URL and `is_fetchable` is what refuses it;
+    this refuses an address behind a host that rule already admitted. Two of
+    the six listed hosts are wildcards, so the label under them is not the
+    app's to choose either.
+
+    The classification happens after resolution and the connection goes to the
+    address that passed, so a name is not a way round it. `tests/test_fetch.py`
+    is where the transport itself is tested; these are the two doors.
+    """
+
+    #: Inside this cluster, and on this address policy's refused list.
+    INSIDE = "10.0.0.7"
+
+    @staticmethod
+    def _answering(address: str):
+        async def resolve_to(host: str, port: int) -> tuple[str, ...]:
+            return (address,)
+
+        return resolve_to
+
+    def test_a_listed_host_answering_inside_the_cluster_is_not_checked(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(covers, "resolver", self._answering(self.INSIDE))
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=f"https://{self.INSIDE}").mock(
+                return_value=image()
+            )
+            _await(covers.resolve(ENGLISH))
+
+        assert route.call_count == 0
+        # Refused reads as "could not be checked", which is what a service that
+        # did not answer has always read as: the guess is kept, unverified,
+        # rather than a cover being thrown away.
+        assert covers.outcome_counts().get(covers.CoverOutcome.VERIFIED.value, 0) == 0
+
+    def test_a_listed_host_answering_inside_the_cluster_is_not_downloaded(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(covers, "resolver", self._answering(self.INSIDE))
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=f"https://{self.INSIDE}").mock(
+                return_value=image()
+            )
+            fetched = covers.download(covers.open_library_url(ENGLISH))
+
+        assert fetched is None
+        assert route.call_count == 0
+
+    def test_a_listed_host_on_a_public_address_is_still_fetched(self):
+        """What this must **not** have refused, which is every real cover."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
+            fetched = covers.download(covers.open_library_url(ENGLISH))
+
+        assert fetched is not None
+
+    def test_the_request_still_speaks_as_the_name_it_was_addressed_by(self):
+        """The pin moves the address and nothing else.
+
+        A `Host` carrying the literal would reach a different virtual host on
+        every one of these services, and the TLS name is checked against the
+        certificate.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
+                return_value=image()
+            )
+            covers.download(covers.open_library_url(ENGLISH))
+
+        assert route.calls[0].request.headers["host"] == "covers.openlibrary.org"
+
+    def test_a_wildcard_cover_host_is_still_reached(self):
+        """Two of the six entries name a label this app never writes down.
+
+        `COVER_HOSTS` carries `*.googleusercontent.com` and `*.us.archive.org`,
+        so the host a member supplies under either is one no map in this suite
+        could enumerate. `tests/helpers.cover_resolver` answers one address for
+        anything it was not told about, which is what keeps those two reachable
+        rather than a lookup failure.
+        """
+        supplied = "https://lh3.googleusercontent.com/x"
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=f"https://{AT_ANY_COVER_HOST}").mock(
+                return_value=image()
+            )
+            assert _await(covers.resolve(ENGLISH, supplied)) == supplied
+
+        assert route.call_count == 1
+
+
+class TestAHostIdnaCannotDecode:
+    """`idna.IDNAError` is a `UnicodeError` and not an `httpx.HTTPError`, so
+    both walks' handlers missed it. Measured on this tree: `covers.resolve`
+    raised `idna.core.InvalidCodepoint` into `metadata.lookup`, which catches
+    `httpx.HTTPError` and `ElementTree.ParseError` and would have answered 500
+    on a member's lookup. `fetch._walk_hops` records the same trap.
+
+    **Two hops reach it, and the first one is the member's**, which is why this
+    class is not named for `Location`. On a redirect the raise comes from httpx
+    building the request inside `send()` even at `follow_redirects=False`, to
+    populate `response.next_request`. On the **first** URL `httpx.URL()` raises
+    before any transport runs, and `is_fetchable` admits the shape:
+    `*.googleusercontent.com` is a wildcard, so `xn--a.googleusercontent.com` is
+    a listed host and `cover_url` is member input on `BookCreate`.
+    """
+
+    LOCATION = "http://xn--a.gov/x.jpg"
+    #: A listed host, by the wildcard, whose label `idna` refuses to decode.
+    SUPPLIED = "https://xn--a.googleusercontent.com/x.jpg"
+
+    def test_a_check_refuses_a_location_rather_than_raising(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
+                return_value=httpx.Response(302, headers={"location": self.LOCATION})
+            )
+            mock.get(url__startswith=AT_DNB).mock(return_value=httpx.Response(404))
+
+            assert _await(covers.resolve(ENGLISH)) is None
+
+    def test_a_download_refuses_a_location_rather_than_raising(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
+                return_value=httpx.Response(302, headers={"location": self.LOCATION})
+            )
+            assert covers.download(covers.open_library_url(ENGLISH)) is None
+
+    def test_a_download_refuses_it_on_the_first_hop_with_no_redirect_in_sight(self):
+        """The arm a member reaches, and the one the `Location` arms cannot see.
+
+        Nothing is mocked, deliberately: `is_fetchable` admits this URL and the
+        raise happens while the request is being built, so a passing test here
+        is one that made no request at all. respx fails on any it did make.
+
+        **The first assertion is the precondition, not a second subject.**
+        Without it, tightening the wildcard to refuse a punycode label leaves
+        this green while testing nothing: the URL would be refused before any
+        request and `download` would still answer None.
+        """
+        assert covers.is_fetchable(self.SUPPLIED) is True
+
+        with respx.mock:
+            assert covers.download(self.SUPPLIED) is None
+
+    def test_a_check_refuses_it_on_the_first_hop_too(self):
+        """`resolve` puts a supplied URL at the front of its candidate list.
+
+        The first assertion is the precondition. See the arm above for what
+        goes green without it.
+        """
+        assert covers.is_fetchable(self.SUPPLIED) is True
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            mock.get(url__startswith=AT_DNB).mock(return_value=httpx.Response(404))
+
+            assert _await(covers.resolve(ENGLISH, self.SUPPLIED)) is None
+
+
+class TestNoCoverRequestIsMadeOutsideTheDoor:
+    def test_covers_constructs_nothing_from_httpx(self):
+        """Every request this module makes is made with `covers._client`.
+
+        **Not an enumeration of the two client classes**, which is the shape
+        that goes stale: this reports **any** call to anything in the `httpx`
+        namespace. `httpx.HTTPError` appears in `except` clauses and
+        `httpx.Response` and `httpx.AsyncClient` in annotations, and neither is
+        a call, so the rule needs no exceptions today and none for a class httpx
+        adds tomorrow.
+
+        What it cannot see is `_client` being pointed at
+        `fetch.catalogue_client`, which drops the pin while leaving every other
+        bound in place. `TestWhereAListedHostAnswers` is that arm.
+        """
+        source = (_BACKEND / "covers.py").read_text()
+        built = sorted(
+            node.func.attr
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "httpx"
+        )
+        assert built == []
+
+
+def _await(work):
+    """Run one coroutine from a sync test, on a loop of its own."""
+    return asyncio.run(work)
+
+
+async def _check_one(url: str, *, budget: float | None = None) -> bool | None:
+    """`_check` against a client of its own, for the tests about one candidate.
+
+    `resolve` asks two services and keeps the first answer it can use, so a
+    guard about what one check **costs** cannot read it through `resolve`.
+    """
+    async with covers._client() as client:
+        deadline = None if budget is None else monotonic() + budget
+        return await covers._check(client, url, deadline)
+
+
 def await_resolve(isbn: str, supplied: str) -> str | None:
     """`resolve` from a sync test, on its own loop."""
-    import asyncio
-
     return asyncio.run(covers.resolve(isbn, supplied))
 
 
 def await_resolve_with_deadline(isbn: str, budget: float) -> str | None:
     """`resolve` with an already spent budget, from a sync test."""
-    import asyncio
-
     return asyncio.run(covers.resolve(isbn, deadline=monotonic() + budget))
 

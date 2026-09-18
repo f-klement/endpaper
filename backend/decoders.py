@@ -6,23 +6,21 @@ one is told. Each family publishes its own table of them, `metadata.READERS`
 and `opds.READERS`, keyed on `Reader` and valued on this contract; this module
 is the contract both are held to. What a value **means** once a decoder has it
 out of the serialisation is `bibliographic.py`, which both families read and
-neither owns.
+neither owns. How MARC21 **spells** one is `marc_fields.py`, which the catalogue
+family and the upload reader both read and neither owns.
 
 **A table rather than a name per caller.** A caller that wants a decoded record
 asks the family for the reader its `Decoding` names rather than naming a
 decoder, which is what lets a decoder written for a catalogue be handed a file.
 
-**It is not yet true of every caller, and the exception is measured rather than
-hidden.** `marc.py` composes `metadata.py`'s MARC parser by name: counted with
-`ast` as attribute loads of a private name on that module, **21 sites over 17
-names**. Twelve of the seventeen are spelled `_marc_` or `_dnb_` and five are
-not, and the split is given by spelling because "field reader" is not a category
-two readers agree on.
-
-It composes rather than asks because an uploaded file is a third MARC profile,
-refusing only a record with no title where a catalogue decoder also refuses a
-volume slot and a disc. Closing that means moving MARC field reading, not
-publishing a table. `metadata.NOT_DECODERS` names every catalogue reader the
+**`marc.py` composes rather than asks, and that is now composition through a
+door.** An uploaded file is a third MARC profile, refusing only a record with no
+title where a catalogue decoder also refuses a volume slot and a disc, so it
+cannot be served by the table. It reads the same fields through
+`marc_fields.Fields`; until that module existed it read 17 private names of
+`metadata.py` at 21 sites, which was the only module to module private read in
+the backend. `tests/test_marc.py::TestNoModuleReadsAnotherModulesPrivateNames` is what keeps
+the count at zero. `metadata.NOT_DECODERS` names every catalogue reader the
 table cannot hold, and why.
 
 ## The contract, and both families are held to it
@@ -76,9 +74,10 @@ with no namespace at all and the BnF's selector returns zero against it.
 Koha makes this half data, with `add_xslt`, and this project deliberately does
 not: a stylesheet cannot refuse a digitisation that shares an ISBN with the
 book. The refusals a row could not express are the decoder's whole reason to be
-code: `metadata._marc_claims_isbn`, `bibliographic.is_placeholder_title`,
+code: `marc_fields.Fields.claims_isbn`, `bibliographic.is_placeholder_title`,
 `bibliographic.is_physical_book`, the non sorting bracket conventions,
-`metadata._isbn_entries`.
+`marc_fields.Fields.isbn`, which is the other reader of the rule about which
+`020` entries are a record's own.
 """
 
 from dataclasses import dataclass

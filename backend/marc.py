@@ -1,8 +1,10 @@
 """MARC21 records in and out, as pure functions over bytes.
 
-**Reading is not written here.** `metadata.py` already parses MARCXML from four
-catalogues, and a second parser would be a second set of field decisions to keep
-in step. This module reuses it.
+**Field reading is not written here.** `marc_fields.py` already parses MARCXML
+for four catalogues, and a second parser would be a second set of field
+decisions to keep in step. This module reuses it, through the door rather than
+past it: what is left here is the upload's own policy, which refuses a record
+with no title and nothing else.
 
 **What the writer emits is deliberately narrow.** It carries the bibliographic
 fields this app stores and nothing about the copy: no shelf mark, no price, no
@@ -28,9 +30,11 @@ from typing import TYPE_CHECKING, Final
 from xml.etree import ElementTree
 
 import bibliographic
+import marc_fields
 import metadata
 from catalogue import Heading, Record
 from enums import ClassificationScheme
+from marc_fields import Fields, Subfields
 
 if TYPE_CHECKING:  # pragma: no cover
     from models import Book
@@ -88,21 +92,21 @@ MAX_RECORDS: Final = 20_000
 #: need not check it.
 LEADER: Final = "00000nam a22000003  4500"
 
-#: MARCXML's namespace, which `metadata._MARC` reads and this writes.
+#: MARCXML's namespace, which `marc_fields` reads and this writes.
 #:
 #: Written as the default namespace on `<collection>` so a record reads as the
-#: specification prints it. Taken from `metadata._MARC` rather than spelled
-#: again: a reader and a writer disagreeing about the namespace produce a file
-#: this app cannot read back, and the round trip test would be the only thing
-#: that noticed.
-NAMESPACE: Final = metadata._MARC.strip("{}")
+#: specification prints it. Taken from `marc_fields.NAMESPACE` rather than
+#: spelled again: a reader and a writer disagreeing about the namespace produce
+#: a file this app cannot read back, and the round trip test would be the only
+#: thing that noticed.
+NAMESPACE: Final = marc_fields.NAMESPACE
 
 #: How a GND number is written back into `$0`, and the scheme name for `$2`.
 #:
-#: `metadata._GND_PREFIX` is the reader's half. Stored bare in
+#: `marc_fields.GND_PREFIX` is the reader's half. Stored bare in
 #: `classifications.number`, so the prefix is put back on the way out: `$0`
 #: without it names no authority file and the reader drops it.
-_GND_PREFIX: Final = metadata._GND_PREFIX
+_GND_PREFIX: Final = marc_fields.GND_PREFIX
 
 #: `$2` values naming the vocabulary a `650` heading came from.
 #:
@@ -136,7 +140,7 @@ _ILLEGAL_XML: Final = re.compile(
 def _text(value: object) -> str:
     """One subfield's value, as MARCXML may carry it.
 
-    Normalised to NFC, because `metadata._marc_text` normalises what it reads:
+    Normalised to NFC, because `marc_fields` normalises what it reads:
     a round trip through two different normal forms compares unequal while
     rendering identically, which is the defect that measurement records for the
     DNB. Control characters dropped: see `_ILLEGAL_XML`.
@@ -173,7 +177,7 @@ def _datafield(
 def _credited_names(author: str | None) -> list[str]:
     """The `author` column split back into the people it names.
 
-    **The exact inverse of `metadata._marc_authors`**, which joins the names it
+    **The exact inverse of `Fields.authors`**, which joins the names it
     read with `", "`. So a record this app wrote, read back and written again
     names the same people in the same order.
 
@@ -199,17 +203,17 @@ def _record_element(book: Book) -> ElementTree.Element:
     | Field | From | Read back by |
     |---|---|---|
     | `001` | `books.id` | nothing: it identifies the record in this system |
-    | `020 $a` | `isbn` | `metadata._marc_isbn` |
-    | `041 0# $a` | `language` | `metadata._marc_language` |
+    | `020 $a` | `isbn` | `Fields.isbn` |
+    | `041 0# $a` | `language` | `Fields.language` |
     | `050 #4 $a` | an `lcc` classification | this module's `_classifications` |
-    | `082 04 $a` | a `ddc` classification | `metadata._marc_ddc` |
-    | `100 0# $a` | the first credited name | `metadata._marc_authors` |
-    | `245 10 $a $b $n $p` | `title`, `subtitle`, `series_index`, `series_name` | `metadata._marc_title` |
-    | `264 #1 $b $c` | `publisher`, `year` | `metadata._marc_publisher`, `_marc_year` |
+    | `082 04 $a` | a `ddc` classification | `Fields.ddc_headings` |
+    | `100 0# $a` | the first credited name | `Fields.authors` |
+    | `245 10 $a $b $n $p` | `title`, `subtitle`, `series_index`, `series_name` | `Fields.title_statement` |
+    | `264 #1 $b $c` | `publisher`, `year` | `Fields.publisher`, `Fields.year` |
     | `300 ## $a` | `page_count` | `bibliographic.pages_from_extent` |
-    | `520 ## $a` | `description` | `metadata._marc_description` |
-    | `650 #7 $a $0 $2` | a `gnd` or `lcsh` classification | `metadata._dnb_subjects`, this module |
-    | `700 0# $a $4` | every credited name after the first | `metadata._marc_authors` |
+    | `520 ## $a` | `description` | `Fields.description` |
+    | `650 #7 $a $0 $2` | a `gnd` or `lcsh` classification | `Fields.controlled_subjects`, this module |
+    | `700 0# $a $4` | every credited name after the first | `Fields.authors` |
 
     **`100` and `700` carry first indicator `0`, "forename".** That is the
     specification's name for a personal name in direct order, which is what
@@ -220,20 +224,20 @@ def _record_element(book: Book) -> ElementTree.Element:
     is not, and their filing would be wrong for every author with more than one
     forename.
 
-    **`700` carries `$4 aut`.** `metadata._marc_author_entries` reads a `700`
+    **`700` carries `$4 aut`.** `Fields` reads a `700`
     only when its relator code says the person wrote the thing, since
     translators and editors arrive in the same field. Without `$4` every author
     after the first is dropped on the way back in, and the batch would look
     correct: one author instead of three, with nothing failing.
 
     **`245` uses `$n` and `$p` for a series, which is what the reader does.**
-    `metadata._marc_title` treats `$a` as the collective title and `$p` as the
+    `Fields.title_statement` treats `$a` as the collective title and `$p` as the
     part somebody is holding, so a Book with a series writes the series name in
     `$a` and its own title in `$p`. Writing the title in `$a` and the series
     somewhere else would read back as a book whose title is the series.
 
     **The second indicator of `245` is `0`, not the number of non-filing
-    characters.** `metadata._marc_text` strips the non-sorting delimiters on the
+    characters.** `marc_fields` strips the non-sorting delimiters on the
     way in, so a stored title begins at its first character and there is nothing
     for a receiving system to skip. A non-zero count here would make it skip
     real letters.
@@ -287,7 +291,7 @@ def _series_number(index: float | None) -> str | None:
     """A series index as `245 $n` writes it.
 
     Whole numbers without the decimal point, because `3.0` is not how a volume
-    is numbered and `metadata._marc_title` reads the first digit run anyway, so
+    is numbered and `Fields.title_statement` reads the first digit run anyway, so
     `3.5` reads back as 3. **A fractional index does not survive the round
     trip**, and that is a property of `$n` being free text rather than something
     this writer can fix: the field carries `Bd. 3` and `[1]` in real records.
@@ -337,11 +341,11 @@ def _subject_fields(book: Book) -> Iterator[ElementTree.Element | None]:
     **`$a` is the caption and `$0` is the identifier, which is the same split
     the table stores.** A GND row keeps its number in `$0` with the
     `(DE-588)` prefix put back on, because that prefix is how MARC says which
-    authority file a number belongs to and `metadata._gnd_identifier` reads
+    authority file a number belongs to and `Subfields.gnd_identifier` reads
     nothing without it.
 
     **A GND row with no caption writes no field, and cannot.** `650` without
-    `$a` is a heading with no heading; `metadata._dnb_subjects` skips it, and so
+    `$a` is a heading with no heading; `Fields.controlled_subjects` skips it, and so
     does every other reader. `Classification.label` is nullable and a MARC `082`
     supplies none, so this is reachable: a Book whose GND row arrived without a
     caption exports without that subject. Writing the number into `$a` instead
@@ -498,7 +502,7 @@ def _parsed(content: bytes) -> ElementTree.Element:
 SOURCE: Final = "marc"
 
 
-def _call_number(entry: metadata._Subfields) -> str | None:
+def _call_number(entry: Subfields) -> str | None:
     """An `050` field as one Library of Congress call number.
 
     `$a` is the classification and `$b` the item number, and they are one
@@ -511,8 +515,8 @@ def _call_number(entry: metadata._Subfields) -> str | None:
     return " ".join(parts) or None
 
 
-def _extra_headings(fields: dict[str, list[metadata._Subfields]]) -> list[Heading]:
-    """The two schemes `metadata.py` has no MARC reader for.
+def _extra_headings(fields: Fields) -> list[Heading]:
+    """The two schemes `marc_fields.py` has no reader for.
 
     It reads Dewey from `082` and GND from the subject fields, because those are
     what the catalogues it queries send. A file a library hands over carries the
@@ -521,12 +525,12 @@ def _extra_headings(fields: dict[str, list[metadata._Subfields]]) -> list[Headin
     * `050` is the Library of Congress call number, which is the field a MARC
       export exists to carry: it is what the receiving library shelves by.
     * `650` with `$2 lcsh` and no `$0` is a Library of Congress subject
-      heading. `metadata._dnb_subjects` puts its `$a` in `subjects` and writes
+      heading. `Fields.controlled_subjects` puts its `$a` in `subjects` and writes
       no heading, because it looks for a GND number and there is none. The
       authorised string **is** the identifier for LCSH, which is
       `ClassificationScheme` saying so, so it goes in `number`.
 
-    **The `$2` reader is `metadata._subject_vocabulary` since #134**, where this
+    **The `$2` reader is `Subfields.subject_vocabulary` since #134**, where this
     module used to hold a second copy called `_uncontrolled_source`. Both lower
     cased and both existed to make one vocabulary one string; two copies of that
     is one rule that can drift, and the case folding is exactly the half a
@@ -538,26 +542,26 @@ def _extra_headings(fields: dict[str, list[metadata._Subfields]]) -> list[Headin
     """
     headings = [
         Heading(ClassificationScheme.LCC, number)
-        for entry in fields.get("050", [])
+        for entry in fields.get("050")
         for number in [_call_number(entry)]
         if number
     ]
     headings += [
         Heading(ClassificationScheme.LCSH, heading)
-        for entry in fields.get("650", [])
-        if metadata._subject_vocabulary("650", entry) == "lcsh"
-        and metadata._gnd_identifier(entry) is None
+        for entry in fields.get("650")
+        if entry.subject_vocabulary("650") == "lcsh"
+        and entry.gnd_identifier() is None
         for heading in [bibliographic.strip_isbd_punctuation(entry.get("a", ""))]
         if heading
     ]
     return headings
 
 
-def _record(fields: dict[str, list[metadata._Subfields]]) -> Record | None:
+def _record(fields: Fields) -> Record | None:
     """One MARC record as evidence about a book, or None if it names none.
 
-    **Every scalar is read by `metadata.py`'s own reader**, so a record this
-    app imports is read exactly as a record this app looks up is. What is here
+    **Every scalar is read by `marc_fields.py`**, so a record this app imports
+    is read exactly as a record this app looks up is. What is here
     rather than there is the policy that differs, and there are three pieces of
     it.
 
@@ -578,12 +582,12 @@ def _record(fields: dict[str, list[metadata._Subfields]]) -> Record | None:
     authority store where every other entry has been checked.
 
     **`700` needs `$4 aut` to count as an author**, which is
-    `metadata._marc_author_entries`'s rule and not this reader's. Where nothing
-    is credited with writing the book, `_marc_credited_names` names everybody
+    `marc_fields.Fields`'s rule and not this reader's. Where nothing
+    is credited with writing the book, `Fields.credited_names` names everybody
     the record names, which is what an edited volume looks like in MARC.
 
     **A fourth divergence is known and not fixed here, because the fix is in
-    `metadata.py`.** `_marc_isbn` drops the commonest legacy `020 $a` spelling:
+    `marc_fields.py`.** `Fields.isbn` drops the commonest legacy `020 $a` spelling:
     measured, `9783161484100`, `978-3-16-148410-0` and `9783161484100 :` all
     parse, and `9783161484100 (pbk.)` returns None. The ISBD colon is stripped
     and a parenthesised qualifier is not, because that parser was written
@@ -594,12 +598,11 @@ def _record(fields: dict[str, list[metadata._Subfields]]) -> Record | None:
     stripping the qualifier in `marc.py` would be a second notion of what an
     `020` says, which is what this module exists not to build.
     """
-    title_entry = (fields.get("245") or [metadata._Subfields(())])[0]
-    title, subtitle, series_name, series_index = metadata._marc_title(title_entry)
+    title, subtitle, series_name, series_index = fields.title_statement()
     if not title:
         return None
 
-    subjects, gnd = metadata._dnb_subjects(fields)
+    subjects, gnd = fields.controlled_subjects()
 
     # `from_upload`, not `Record(...)`: an over-wide string in a file somebody
     # handed over is cut to the column rather than dropped, because
@@ -607,19 +610,19 @@ def _record(fields: dict[str, list[metadata._Subfields]]) -> Record | None:
     # full, and the network path it differs from, are on that classmethod.
     return Record.from_upload(
         source=SOURCE,
-        isbn=metadata._marc_isbn(fields),
+        isbn=fields.isbn(),
         title=title,
         subtitle=subtitle,
-        author=metadata._marc_authors(fields) or metadata._marc_credited_names(fields),
-        publisher=metadata._marc_publisher(fields),
-        year=metadata._marc_year(fields),
-        description=metadata._marc_description(fields),
-        language=metadata._marc_language(fields),
-        page_count=bibliographic.pages_from_extent(metadata._marc_extent(fields)),
+        author=fields.authors() or fields.credited_names(),
+        publisher=fields.publisher(),
+        year=fields.year(),
+        description=fields.description(),
+        language=fields.language(),
+        page_count=bibliographic.pages_from_extent(fields.extent()),
         series_name=series_name,
         series_index=series_index,
         subjects=tuple(subjects),
-        headings=tuple(metadata._marc_ddc(fields) + _extra_headings(fields) + gnd),
+        headings=tuple(fields.ddc_headings() + _extra_headings(fields) + gnd),
     )
 
 
@@ -651,7 +654,7 @@ def read(content: bytes) -> ParsedMarc:
     # `iter` rather than `findall`, so a `<record>` reached through a wrapper
     # is found: an SRU response nests them under `<recordData>`, and a
     # cataloguer exporting from their own system may hand over either shape.
-    nodes = list(root.iter(f"{metadata._MARC}record"))
+    nodes = list(root.iter(marc_fields.RECORD_TAG))
     if not nodes:
         # A bare `<record>` with no namespace is the other real shape, and it
         # is worth naming rather than reporting an empty file: several tools
@@ -675,7 +678,7 @@ def read(content: bytes) -> ParsedMarc:
     records = []
     skipped = 0
     for node in nodes:
-        record = _record(metadata._marc_fields(node))
+        record = _record(Fields(node))
         if record is None:
             skipped += 1
         else:

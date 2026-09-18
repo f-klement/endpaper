@@ -8,6 +8,7 @@ import in the test suite.
 """
 
 import atexit
+import contextlib
 import os
 import shutil
 import sys
@@ -199,6 +200,7 @@ from ratelimit import (  # noqa: E402
     recovery_request_address_limiter,
     register_limiter,
 )
+from tests.helpers import cover_resolver  # noqa: E402
 
 
 def pytest_terminal_summary(terminalreporter: Any) -> None:
@@ -345,6 +347,28 @@ def _empty_and_reseed() -> None:
         )
 
 
+def forget_any_encryption_key() -> None:
+    """Remove the key file, wherever `CREDENTIAL_ENCRYPTION_KEY_FILE` points now.
+
+    **`missing_ok` is not "do not raise", and that is the whole of this
+    function.** It swallows `FileNotFoundError` and nothing else, so a key path
+    whose parent is a regular file raises `NotADirectoryError`, and a test
+    pointing it somewhere unreachable is exactly what
+    `test_a_place_no_file_can_go_is_reported_rather_than_raising_an_oserror`
+    does. Between them the two cover the whole of "there is no key here": the
+    file is absent, or the directory it would be in is not a directory.
+
+    **`NotADirectoryError` and not `OSError`, because the reason only holds for
+    the reachable cases.** "A path this cannot reach holds no key" is true of
+    these two and false of `PermissionError` and `IsADirectoryError`, which say
+    the path **is** reachable, a key may be sitting on it, and the removal
+    failed. Suppressing those would break the fixture's own first line, "No key
+    survives a test, in either direction", and report nothing.
+    """
+    with contextlib.suppress(NotADirectoryError):
+        credentials.key_file().unlink(missing_ok=True)
+
+
 @pytest.fixture(autouse=True)
 def forget_the_encryption_key() -> Iterator[None]:
     """No key survives a test, in either direction.
@@ -354,10 +378,16 @@ def forget_the_encryption_key() -> Iterator[None]:
     would find a key it did not create and, worse, one that opens credentials it
     knows nothing about. Cleared before as well as after, because a test that
     fails part way through leaves one behind.
+
+    **Whether this runs before or after a `monkeypatch` undo is not this
+    fixture's to know**, which is why the work is behind a name that can be
+    called directly: it read a key path still pointing under a regular file once,
+    and the arrangement that put it there was an unrelated autouse fixture in
+    this file taking `monkeypatch`.
     """
-    credentials.key_file().unlink(missing_ok=True)
+    forget_any_encryption_key()
     yield
-    credentials.key_file().unlink(missing_ok=True)
+    forget_any_encryption_key()
 
 
 @pytest.fixture(autouse=True)
@@ -471,6 +501,42 @@ def refuse_unmocked_network() -> Iterator[None]:
     """
     with respx.mock(assert_all_called=False):
         yield
+
+
+@pytest.fixture(autouse=True)
+def cover_hosts_resolve_to_fixtures() -> Iterator[None]:
+    """Every image service resolves to a fixed literal, for every test.
+
+    `covers._client` goes through `fetch.pinned_client`, which resolves the name
+    itself. Left alone that is a real DNS lookup of a real image service from a
+    unit test, which `refuse_unmocked_network` cannot see: it refuses requests,
+    not name lookups. Autouse rather than opt in for the same reason that
+    fixture is: the tests reaching this are the many that add a book, not the
+    few that are about covers.
+
+    `tests/helpers.py` holds the map, because `silence_covers` registers its
+    routes against the same addresses.
+
+    **Sets and restores by hand rather than taking `monkeypatch`, and that is
+    not style.** Requesting it here makes this the second autouse fixture in
+    this file to do so, which moves when pytest builds the shared `monkeypatch`
+    and therefore when it undoes: measured, adding the `monkeypatch` form put
+    its undo **after** `forget_the_encryption_key`'s teardown, so that fixture
+    read a `CREDENTIAL_ENCRYPTION_KEY_FILE` still pointing under the file
+    `test_a_place_no_file_can_go_is_reported_rather_than_raising_an_oserror`
+    creates, and `unlink(missing_ok=True)` raised `NotADirectoryError`, which
+    `missing_ok` does not cover. One error, in a test this file has nothing to
+    do with, from an autouse fixture that only reads a module attribute.
+
+    A test wanting its own resolver still uses `monkeypatch.setattr`, which
+    undoes to this value before this restores the shipped one.
+    """
+    shipped = covers.resolver
+    covers.resolver = cover_resolver
+    try:
+        yield
+    finally:
+        covers.resolver = shipped
 
 
 @pytest.fixture(autouse=True)

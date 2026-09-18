@@ -133,10 +133,9 @@
  * ## What a Kindle library cannot supply, stated rather than discovered
  *
  * **No ISBN, no language, no series and no description.** The format has no
- * element for any of them, which is why none of them is a `KindleField`: a
- * field this reader could want and a document could lack is a different thing
- * from a field the format never had. A heuristic pulling a series out of a
- * title is the thing not to add, for `mobi.ts`'s reason.
+ * element for any of them, so `ELEMENTS` names none and every book this reader
+ * answers carries `null` there. A heuristic pulling a series out of a title is
+ * the thing not to add, for `mobi.ts`'s reason.
  *
  * **One publisher.** `<publishers>` is a list and carried at most one member in
  * all 1,032 entries: 250 of the 2018 capture's 279 carry exactly one and 29
@@ -230,24 +229,6 @@ export interface KindleBook {
   readonly personal: boolean;
 }
 
-/** A field no entry in this document carried. */
-export type KindleField = "title" | "authors" | "publisher" | "year";
-
-/**
- * Every field `missing` can name, so the list is one thing rather than two.
- *
- * Declared beside the type it enumerates and asserted against it: a field added
- * to `KindleField` and not here would never be reported missing, and the reader
- * would say a document supplied something it had never looked for.
- * `tests/lib/kindle.test.ts` recomputes the pair rather than restating either.
- */
-const FIELDS: readonly KindleField[] = [
-  "title",
-  "authors",
-  "publisher",
-  "year",
-];
-
 /** Why a document yielded no library. Closed, one sentence each on screen. */
 export type KindleFailure =
   /** Not this catalogue: unparseable, or XML that is something else. */
@@ -278,20 +259,6 @@ export interface KindleLibrary {
    * their library.
    */
   readonly skipped: number;
-  /** The document's own `<cache_metadata><version>`, where it carries one. */
-  readonly schemaVersion: number | null;
-  /**
-   * Fields no entry in this document carried. Sorted, so it compares.
-   *
-   * **Occupancy and not a schema, which is the difference from `kobo.ts`'s
-   * field of the same name.** There a missing field is a column the device does
-   * not have, which no amount of data can produce; here there is no schema to
-   * ask, so what this says is that nothing in the document filled the field.
-   * `docs/decisions.md` carries the pair, because one word rendering two
-   * different facts on one import surface is the thing to know before writing
-   * the sentence a member reads.
-   */
-  readonly missing: readonly KindleField[];
 }
 
 export type KindleReading =
@@ -383,15 +350,13 @@ export const MAX_CACHE_BYTES = 16 * 1024 * 1024;
  * read, because nothing here composes a path out of anything the file said.
  *
  * The second half is that an element that is nowhere in the document costs its
- * field and is reported in `missing` rather than costing the library. **A store
- * that cannot be read is one skipped source and never a broken import**: every
- * outcome here is a value in a closed union, so a caller importing from several
- * places at once loses this one and keeps the rest.
+ * field rather than costing the library, which is what a book of nulls says.
+ * **A store that cannot be read is one skipped source and never a broken
+ * import**: every outcome is a value in a closed union, so a caller importing
+ * from several places at once loses this one and keeps the rest.
  */
 const ELEMENTS = [
   "response",
-  "cache_metadata",
-  "version",
   "add_update_list",
   "meta_data",
   "ASIN",
@@ -513,23 +478,6 @@ function childText(parent: Element, name: KindleElement): string | null {
   return value ? value : null;
 }
 
-/**
- * The document's own version, where it states one.
- *
- * Informational, and read rather than acted on: every decision below is taken
- * from the elements that are actually there, which is the same question asked
- * of the document rather than of a number the document states about itself.
- * Both captures carry `1`.
- */
-function schemaVersionOf(root: Element): number | null {
-  const metadata = childrenNamed(root, "cache_metadata")[0];
-  if (metadata === undefined) return null;
-  const stated = childText(metadata, "version");
-  if (stated === null) return null;
-  const version = Number(stated);
-  return Number.isInteger(version) ? version : null;
-}
-
 /** Every `<author>` an entry names, in the document's order. */
 function readAuthors(entry: Element): string[] {
   return childrenNamed(entry, "authors")
@@ -575,13 +523,6 @@ function ownership(entry: Element): boolean | null {
  * lost, and being told a file is not the format it claimed is a smaller harm
  * than an unbounded parse. It is not a fourth failure because it is not a
  * fourth sentence: the member is holding a file this app will not read.
- *
- * **`missing` is derived from the values the entries yielded and not from a
- * second reading of the document**, because the two would be free to disagree
- * and the disagreement would be invisible. What follows from that, stated
- * because it reads oddly at first: a document whose every publication date the
- * year window refuses reports `year` missing, which is the true sentence about
- * what this reader could take out of it.
  */
 export function readKindleLibrary(xml: string): KindleReading {
   if (xml.length > MAX_CACHE_BYTES) return { ok: false, failure: "too-large" };
@@ -609,17 +550,11 @@ export function readKindleLibrary(xml: string): KindleReading {
 
   let skipped = 0;
   const books: KindleBook[] = [];
-  const filled = new Set<KindleField>();
   for (const entry of entries) {
     const title = childText(entry, "title");
     const authors = readAuthors(entry);
     const publisher = readPublisher(entry);
     const year = leadingYear(childText(entry, "publication_date"));
-    if (title !== null) filled.add("title");
-    if (authors.length > 0) filled.add("authors");
-    if (publisher !== null) filled.add("publisher");
-    if (year !== null) filled.add("year");
-
     const asin = childText(entry, "ASIN");
     const personal = ownership(entry);
     if (asin === null || personal === null) {
@@ -629,11 +564,7 @@ export function readKindleLibrary(xml: string): KindleReading {
     books.push({ asin, title, authors, publisher, year, personal });
   }
 
-  const missing = FIELDS.filter((field) => !filled.has(field)).sort();
-  return {
-    ok: true,
-    library: { books, skipped, schemaVersion: schemaVersionOf(root), missing },
-  };
+  return { ok: true, library: { books, skipped } };
 }
 
 /**

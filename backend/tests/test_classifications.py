@@ -19,6 +19,7 @@ from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
 
 import decoders
+import marc_fields
 import metadata
 import targets
 from catalogue import Heading
@@ -550,7 +551,7 @@ def _marc_probe(reader: decoders.Reader, extra: str) -> bool:
     )
     built = metadata._marc_build(
         decoders.Decoding(source="probe", reader=reader),
-        metadata._marc_fields(record),
+        marc_fields.Fields(record),
         "9783960092353",
     )
     return built is not None and bool(built.headings)

@@ -115,7 +115,7 @@ class Subject:
     carried as the record wrote it and nothing here reads it as a scheme.
 
     **`vocabulary` is lower cased and `identifier` is not.** The folding is
-    `metadata._subject_vocabulary`'s, and the reason is in this repository
+    `marc_fields.Subfields.subject_vocabulary`'s, and the reason is in this repository
     rather than in the catalogues: `marc._extra_headings` decides an LCSH
     heading by `== "lcsh"`, so an uploaded file writing `$2 LCSH` would lose
     every one of them silently. **No served record motivates it**, which is
@@ -334,7 +334,7 @@ _UNBOUNDED: Final = frozenset({"source"})
 #: `cover_url` and `google_books_id` are not reachable from a MARC file today:
 #: `_MARC_RECORD_FIELDS` carries neither. The other two are, and neither can
 #: arrive over-wide: `_marc_language` reads a three letter `041 $a`, and
-#: `metadata._marc_isbn` returns `isbn.parse` output. All four are classified
+#: `marc_fields.Fields.isbn` returns `isbn.parse` output. All four are classified
 #: anyway, because a set that is exhaustive by assertion cannot acquire a field
 #: by default, which is the shape this repository keeps finding.
 _CUT_ON_UPLOAD: Final = frozenset(
@@ -641,11 +641,12 @@ class Record:
         are not read as one number.
 
         **Here rather than in each parser, and that is a rule moving rather than
-        a rule added.** `metadata._dnb_subjects` deduplicated its own subjects
-        because 689 restates the 600, 650 and 651 headings it was built from, so
-        the reference record 9783446249974 named Stevenson, Samoainseln and
-        Schatz twice each. The old `_as_match` deduplicated headings for the
-        search path and `_merge` did it again for the lookup path. Three sites,
+        a rule added.** `marc_fields.Fields.controlled_subjects` deduplicated
+        its own subjects because 689 restates the 600, 650 and 651 headings it
+        was built from, so the reference record 9783446249974 named Stevenson,
+        Samoainseln and Schatz twice each. The old `_as_match` deduplicated
+        headings for the search path and `_merge` did it again for the lookup
+        path. Three sites,
         one rule, and the next source added would have had to know about all
         three.
 
@@ -1107,7 +1108,7 @@ def _union(headings: Iterable[Heading]) -> tuple[Heading, ...]:
     that declares nothing arriving before one that does.** One record restates
     itself: a `689` chain repeats the `600`, `650` and `651` headings it was
     built from and declares no `$2` of its own. What decides is
-    `metadata._DNB_SUBJECT_TAGS`, whose order is `650 651 655 689 600`, so an
+    `marc_fields._DNB_SUBJECT_TAGS`, whose order is `650 651 655 689 600`, so an
     undeclared `650` or `651` reaches this loop **before** the `655` that names
     the same concept as a content type, and without the fill-in the undeclared
     copy would keep the place and the declaration would be dropped.

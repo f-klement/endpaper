@@ -81,22 +81,6 @@ export const KEPT_WHOLE: ReadonlySet<BoundedText> = new Set<BoundedText>([
 ]);
 
 /**
- * The value the column can hold, or `null`.
- *
- * Whitespace is trimmed first, because a file's own padding is not part of the
- * value and counting it against the ceiling would cut a title that fits.
- *
- * **Measured and cut in code points, never in UTF-16 units**, which is two
- * faults in one. The ceiling belongs to a Python `str` and to a SQLite column,
- * both of which count code points, so measuring in units refuses at 250 emoji
- * what the server would have taken 500 of. Worse, a cut landing between the
- * halves of a surrogate pair produces a lone surrogate, which is not a string
- * any encoder will emit: pydantic answers `string_unicode` and the whole book
- * is lost to a 422, which is the exact outcome this module exists to prevent.
- * The same class is already fixed twice in this tree, at `notifications.py` and
- * `z3950.py`; this is the third place it can happen.
- */
-/**
  * How several authors become the one line `BookCreate.author` holds.
  *
  * **`backend/authors.py` splits on a comma and on nothing else**, so this is
@@ -129,6 +113,22 @@ export const AUTHOR_SEPARATOR = ", ";
 export const QUERY_FLOOR = 2;
 export const QUERY_CEILING = 200;
 
+/**
+ * The value the column can hold, or `null`.
+ *
+ * Whitespace is trimmed first, because a file's own padding is not part of the
+ * value and counting it against the ceiling would cut a title that fits.
+ *
+ * **Measured and cut in code points, never in UTF-16 units**, which is two
+ * faults in one. The ceiling belongs to a Python `str` and to a SQLite column,
+ * both of which count code points, so measuring in units refuses at 250 emoji
+ * what the server would have taken 500 of. Worse, a cut landing between the
+ * halves of a surrogate pair produces a lone surrogate, which is not a string
+ * any encoder will emit: pydantic answers `string_unicode` and the whole book
+ * is lost to a 422, which is the exact outcome this module exists to prevent.
+ * The same class is already fixed twice in this tree, at `notifications.py` and
+ * `z3950.py`; this is the third place it can happen.
+ */
 export function boundText(
   field: BoundedText,
   value: string | null | undefined,

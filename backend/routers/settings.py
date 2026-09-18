@@ -201,7 +201,16 @@ def _read_settings(db: DbSession) -> SettingsOut:
     # The one in force, which is the environment's when it has one. Showing the
     # stored key's preview while a different key is actually being used would
     # be worse than showing nothing.
-    key = from_env or settings_store.get_raw(db, SettingKey.GOOGLE_BOOKS_API_KEY)
+    #
+    # **Asked rather than spelled out.** `from_env or get_raw(...)` is
+    # `in_force`'s own body, so writing it here puts precedence in two places
+    # and makes this the one stored read of a key the environment can pin in the
+    # whole backend: the exemption
+    # `tests/test_settings_store.py::TestAnOverriddenSettingIsReadWhereItIsPinned`
+    # would then need. `from_env` stays because the response also reports
+    # **whether** the deployment supplied it, which is provenance rather than
+    # the value.
+    key = settings_store.in_force(db, SettingKey.GOOGLE_BOOKS_API_KEY)
     webhook_secret = settings_store.get_raw(db, SettingKey.OVERDUE_WEBHOOK_SECRET)
     # The one in force for both, for the reason the Google key's preview is:
     # showing a preview of a secret that is not the one being used is worse

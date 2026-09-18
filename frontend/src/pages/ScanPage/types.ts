@@ -14,7 +14,7 @@ import type { StoreIdentifier, StoreIdentifierScheme } from "../../lib/stores";
 // it a second time and `lib/calibre.ts` a third, held in agreement by tests
 // that read each other's source text.
 import { storeIdentifier } from "../../lib/stores";
-import { boundIdentifiers } from "../SettingsPage/LibrarySettingsPage/types";
+import { boundIdentifiers, boundRecord } from "../../lib/bookRequest";
 import type { NameClues } from "../../lib/fileName";
 import type { AudiobookGroup } from "../../lib/audiobookGroups";
 
@@ -295,7 +295,7 @@ const SCHEME_OF_LABEL = new Map<string, StoreIdentifierScheme>(
  * beside `isbn`.
  *
  * **One entry a matching label, folded and capped nowhere here.**
- * `LibrarySettingsPage/types.boundIdentifiers` is where a repeat of one scheme
+ * `lib/bookRequest.boundIdentifiers` is where a repeat of one scheme
  * and value becomes one row and where the request's ceiling of eight is, and
  * the two belong together: the ceiling truncates, so a repeat left standing
  * would spend a slot. Two labels naming **different** values stay two rows,
@@ -332,6 +332,19 @@ export function identifiersFromFile(
  * `lib/bookBounds.ts` carries that rule and the reason for the cut or drop
  * split.
  *
+ * **Most of those values are not this flow's to bound**, and
+ * `lib/bookRequest.boundRecord` is where a `SourceRecord` becomes them: a
+ * store's import and a Calibre library's pass through the same door, so the
+ * mapping from what a source said to what the request calls it is one
+ * expression rather than three. `subtitle` is bounded here because only a file
+ * states one.
+ *
+ * **What this path does not hand the door is the missing title.** A blank one
+ * is `""` here and is `null` for both imports, and the difference is who is
+ * watching: the member is on this screen and can type a title, where an import
+ * of nine hundred books has to report the row instead. `BookLookup` requires
+ * both `title` and `isbn` as strings, which is what the two fallbacks are.
+ *
  * **The identifiers a file labelled `ASIN`, `AMAZON` or `GOOGLE` are sent, and
  * every other label is refused.** `identifiersFromFile` is that rule and says
  * what each refusal was measured against; `boundIdentifiers` is the same door
@@ -362,17 +375,12 @@ export function identifiersFromFile(
  * reader.
  */
 export function draftFromFile(record: FileMetadata): BookDraft {
+  const bound = boundRecord(record);
   return {
-    isbn: boundText("isbn", record.isbn) ?? "",
-    title: boundText("title", record.title) ?? "",
+    ...bound,
+    isbn: bound.isbn ?? "",
+    title: bound.title ?? "",
     subtitle: boundText("subtitle", record.subtitle),
-    author: boundText("author", record.authors.join(AUTHOR_SEPARATOR)),
-    publisher: boundText("publisher", record.publisher),
-    year: boundNumber("year", record.year),
-    description: boundText("description", record.description),
-    language: boundText("language", record.language),
-    series_name: boundText("series_name", record.seriesName),
-    series_index: boundNumber("series_index", record.seriesIndex),
     // The file names neither, and an empty list is what the confirm step and
     // the batch both already handle.
     classifications: [],

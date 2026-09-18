@@ -188,7 +188,7 @@ class TestARecordFoldsWhatOneSourceRepeats:
         """The pair this actually serves, which is a field declaring nothing
         arriving **before** one that declares.
 
-        `metadata._DNB_SUBJECT_TAGS` is read in the order `650 651 655 689 600`,
+        `marc_fields._DNB_SUBJECT_TAGS` is read in the order `650 651 655 689 600`,
         so an undeclared `650` naming a concept reaches the fold before the
         `655 $2 gnd-content` that says what it is. Without the fill-in the
         undeclared copy keeps the place and the declaration is dropped.

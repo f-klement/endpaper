@@ -95,20 +95,6 @@ const OWNED = entry(`
   <content_type>application/x-mobipocket-ebook</content_type>
 `);
 
-/**
- * The `FIELDS` array as `kindle.ts` declares it, in the order it declares it.
- *
- * Read out of the source rather than restated, so the two rules below that turn
- * on it cannot agree with a declaration that has moved.
- */
-function declaredFields(): string[] {
-  const array = /const FIELDS: readonly KindleField\[\] = \[([^\]]+)\]/.exec(
-    readerSource,
-  );
-  expect(array, "the FIELDS declaration moved").not.toBeNull();
-  return [...array![1]!.matchAll(/"([^"]+)"/g)].map((match) => match[1]!);
-}
-
 /** The library, or a failure raised where the assertion can see it. */
 function libraryOn(...entries: string[]): KindleLibrary {
   const read = readKindleLibrary(cache(...entries));
@@ -132,10 +118,6 @@ describe("reading a library", () => {
       year: 1965,
       personal: false,
     } satisfies KindleBook);
-  });
-
-  it("reports the document's own version", () => {
-    expect(libraryOn(OWNED).schemaVersion).toBe(1);
   });
 
   it("keeps every author an entry names, in the document's order", () => {
@@ -343,9 +325,13 @@ describe("the year an entry claims", () => {
   });
 });
 
-describe("a document this reader does not have all of", () => {
-  it("names the fields no entry could fill", () => {
-    const library = libraryOn(
+describe("an element this document does not carry", () => {
+  it("keeps the entry and leaves every field the element would have filled", () => {
+    // **A field costs itself and never the book**, which is the rule the reader
+    // states and the whole of what an absent element does here. The entry
+    // carries an ASIN and a content type, so it is one this member owns; the
+    // three elements it does not carry arrive as the record's empty answers.
+    const [book] = booksOn(
       entry(`
         <ASIN>B000000030</ASIN>
         <title>A Constructed Title</title>
@@ -353,134 +339,30 @@ describe("a document this reader does not have all of", () => {
       `),
     );
 
-    expect(library.missing).toEqual(["authors", "publisher", "year"]);
+    expect(book).toEqual({
+      asin: "B000000030",
+      title: "A Constructed Title",
+      authors: [],
+      publisher: null,
+      year: null,
+      personal: false,
+    } satisfies KindleBook);
   });
 
-  it("counts a field one entry filled as filled for the document", () => {
-    // 29 of the capture's 279 entries carry no publisher, and a library where
-    // 29 books lack one is not a library with no publishers in it.
-    const library = libraryOn(
-      OWNED,
-      entry(`
-        <ASIN>B000000031</ASIN>
-        <cde_contenttype>EBOK</cde_contenttype>
-      `),
-    );
-
-    expect(library.missing).toEqual([]);
-  });
-
-  it("reads a field off an entry it refused", () => {
-    // `missing` describes the document rather than the shelf: a sample carrying
-    // a publisher proves the document can carry one, and the member is owed
-    // that distinction rather than a field marked absent because the only entry
-    // holding it was not theirs.
-    const library = libraryOn(
-      entry(`
-        <ASIN>B000000032</ASIN>
-        <title>A Constructed Title</title>
-        <authors><author>Surname, Given</author></authors>
-        <publishers><publisher>An Imprint</publisher></publishers>
-        <publication_date>1965-08-01T00:00:00+0000</publication_date>
-        <cde_contenttype>EBSP</cde_contenttype>
-      `),
-    );
-
-    expect(library).toMatchObject({ books: [], skipped: 1, missing: [] });
-  });
-
-  it("names them in one order however the reader listed them", () => {
-    // **The arm the sort has, and what it rests on is asserted rather than
-    // relied on.** Its whole power is that `FIELDS` is declared in the union's
-    // order rather than the alphabet's: alphabetise that four line array and
-    // the sort becomes unobservable here, silently and with every arm still
-    // green, so whoever deletes the sort next is not caught. Measured, on a
-    // mutation chosen by the seat that did not write this arm.
-    //
-    // The fixture fills `year` alone, so the three that remain put `publisher`
-    // where the two orders disagree about it. No other fixture here does, and
-    // a comparator wrong only about `publisher` passes without one.
-    const declared = declaredFields().filter((field) => field !== "year");
-    const sorted = [...declared].sort();
-    expect(
-      declared,
-      "FIELDS is now in alphabetical order, so this arm no longer observes " +
-        "the sort in readKindleLibrary: put the declaration back into the " +
-        "order KindleField names, or pin the sort another way",
-    ).not.toEqual(sorted);
-
-    const library = libraryOn(
-      entry(`
-        <ASIN>B000000033</ASIN>
-        <publication_date>1965-08-01T00:00:00+0000</publication_date>
-        <cde_contenttype>EBOK</cde_contenttype>
-      `),
-    );
-
-    expect(library.missing).toEqual(sorted);
-  });
-
-  it("says the year is missing when every date it holds is not a year", () => {
-    // The consequence `kindle.ts` states and which reads oddly at first: the
-    // element is there on every entry and no entry yielded a year, so a year is
-    // what this reader could not take out of the document. Calibre's placeholder
-    // for a book with no date is the value that produces it.
-    const library = libraryOn(
+  it("has no year where the date is calibre's placeholder for no date", () => {
+    // The element is there on every entry and the year window refuses the
+    // value, so the book carries no year rather than the reader carrying an
+    // impossible one. This is the value calibre writes for a book with no date.
+    const [book] = booksOn(
       entry(`
         <ASIN>B000000034</ASIN>
         <title>A Constructed Title</title>
-        <authors><author>Surname, Given</author></authors>
-        <publishers><publisher>An Imprint</publisher></publishers>
         <publication_date>0101-01-01T00:00:00+0000</publication_date>
         <cde_contenttype>EBOK</cde_contenttype>
       `),
     );
 
-    expect(library.missing).toEqual(["year"]);
-  });
-
-  it("has nothing missing on a document carrying every element", () => {
-    expect(libraryOn(OWNED).missing).toEqual([]);
-  });
-
-  it("says a document with no version has no version", () => {
-    const read = readKindleLibrary(
-      `<response><add_update_list>${OWNED}</add_update_list></response>`,
-    );
-
-    expect(read.ok && read.library.schemaVersion).toBeNull();
-  });
-
-  it("says a version that is not a number is no version", () => {
-    const read = readKindleLibrary(`
-      <response>
-        <cache_metadata><version>one</version></cache_metadata>
-        <add_update_list>${OWNED}</add_update_list>
-      </response>`);
-
-    expect(read.ok && read.library.schemaVersion).toBeNull();
-  });
-
-  /**
-   * The two spellings of the field list, held against each other.
-   *
-   * **Recomputed from the module's own source rather than restated here**, in
-   * both directions: a member added to the type and not to the array would
-   * never be reported missing, and one added to the array and not to the type
-   * would not compile. Restating either list in this file would give the pair a
-   * third home and this test would agree with whichever it was written from.
-   */
-  it("can report every field its own type names", () => {
-    const union = /export type KindleField =([^;]+);/.exec(readerSource);
-    expect(union).not.toBeNull();
-    const named = [...union![1]!.matchAll(/"([^"]+)"/g)]
-      .map((match) => match[1])
-      .sort();
-
-    expect([...declaredFields()].sort()).toEqual(named);
-    // A pattern that matched nothing would satisfy the equality with two empty
-    // lists, which is the evasion this second assertion closes.
-    expect(named.length).toBeGreaterThan(0);
+    expect(book?.year).toBeNull();
   });
 });
 

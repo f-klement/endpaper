@@ -1008,12 +1008,19 @@ authenticated caller choosing which address the pod connects to, being redirecte
 private space and down to plain http, and reading an image-shaped answer back out.
 
 `covers.is_fetchable` is the gate, derived from `COVER_HOSTS`, applied in **both**
-`covers.download` and `covers._check` before every request. `follow_redirects=False` in both
-clients: redirects are walked by hand with a limit of two hops and `is_fetchable` re-run on
-each `Location`, because a client that follows them turns one allowed host into a way to
-reach any other. Refused with it: any scheme but https, any host not on the list, a
-non-default port, and a URL carrying credentials (`https://covers.openlibrary.org@evil.test/`
-reads as a listed host to a person and resolves to `evil.test` in every client).
+`covers.download` and `covers._check` before every request. `follow_redirects=False` on the
+client both share: redirects are walked by hand with a limit of two hops and `is_fetchable`
+re-run on each `Location`, because a client that follows them turns one allowed host into a
+way to reach any other. A `Location` whose host cannot be decoded is refused with the rest,
+which it was not: httpx builds the redirect request even with redirects off, so an
+undecodable host raised a `UnicodeError` past a handler that catches `httpx.HTTPError` and
+out of `covers.resolve` into the metadata lookup that calls it. **The same refusal covers
+the first hop**, which is not a redirect at all: `is_fetchable` admits
+`https://xn--a.googleusercontent.com/x.jpg` through the `*.googleusercontent.com` wildcard
+and `httpx.URL()` raises on it before any transport runs, so a member's own `cover_url`
+reaches it. Refused with it: any scheme but https, any host not on the list, a non-default
+port, and a URL carrying credentials (`https://covers.openlibrary.org@evil.test/` reads
+as a listed host to a person and resolves to `evil.test` in every client).
 
 **The blind version of this was open long before covers were stored.** `covers.resolve` has
 put a supplied URL at the front of its candidate list and called `_check` on it since the
@@ -1025,6 +1032,25 @@ newer one would have left the older hole open and looked closed.
 pointed at and must keep admitting any `https://` URL, because a hotlinked cover is the
 fallback when a download fails. What may be rendered and what this server may connect to are
 different questions with different answers.
+
+**The host rule says nothing about where that host answers, and the address policy is the
+second half.** `covers._client` builds both walks' client with
+`fetch.pinned_client(fetch.PUBLIC_ADDRESSES)`, which resolves the name once per request,
+refuses every class of address but public, and connects to the literal that passed: a listed
+host whose resolver answers inside this cluster used to be fetched. It is defence in depth
+rather than the primary control here, and stating which is which matters. The member picks
+the URL and `is_fetchable` is what refuses it; this refuses an address behind a host that
+rule already admitted, which is the residual a fixed allowlist still leaves: two of the six
+entries are wildcards, and DNS for any of them is answered by somebody else. `opds.py` takes
+the same policy under `HOUSEHOLD_ADDRESSES`, which admits private space because a
+household's own server is there; no image service is, so this door admits none.
+
+**One hop is bounded by wall clock, not by a read timeout.** A per read timeout bounds a
+read, so a service sending chunks just inside it holds the socket for as many reads as it
+cares to make. Measured, a 1.0 second budget bought 1.973s of `covers.download` and 7.900s
+of `covers._check`. Each hop now runs inside an `asyncio.timeout` of `min(TIMEOUT_SECONDS,
+what is left)`, so the interactive budget is the ceiling it claims to be and a walk with no
+budget is bounded per hop rather than not at all.
 
 `POST /api/books/covers/backfill` is scoped to the books the caller can see. It is not
 admin-only, because `visible_to()` has no admin bypass and an admin-only backfill could
@@ -1160,8 +1186,10 @@ one page and the next is refused on the page where it changed.
 household's own library server is on the household's own network. It refuses link local,
 which is never a household server and is where the cloud metadata endpoint sits, along with
 multicast, the unspecified address and every range nobody enumerated.
-`fetch.PUBLIC_ADDRESSES` admits public addresses only and has no caller in this build: it is
-for a catalogue host somebody types, which is not built.
+`fetch.PUBLIC_ADDRESSES` admits public addresses only, which is strictly less than the
+household policy admits, and `covers._client` is its caller: every image service on
+`COVER_HOSTS` is on the internet. The catalogue host somebody types, which this constant
+was written ahead of, is still not built.
 
 **What this is not.** Under the household policy this is not a request forgery control: an
 admin's address still reaches this pod's own loopback, every ClusterIP and the router, and
@@ -1169,11 +1197,9 @@ so does a name that resolves to any of them. **One range changed.** What limits 
 unchanged and is in Known limits below. A name at a public address that proxies inward is
 refused by nothing here, and no address policy anywhere can see it.
 
-**Four of the five outbound doors are not wired to it**, and the count is worth reading
+**Three of the five outbound doors are not wired to it**, and the count is worth reading
 against the list rather than past it. The eleven seeded catalogues are not, because their
-hosts are module constants. Covers is not, because it has a read loop of its own, so a listed
-image host whose resolver answers inside this cluster is still fetched, and it is the one door
-whose URL a **member** supplies. The webhook is not, because which policy fits it is undecided
+hosts are module constants. The webhook is not, because which policy fits it is undecided
 rather than known. Z39.50 cannot be, because pinning is done by rewriting an HTTP request and
 it speaks none: `fetch.classify` and `fetch.AddressPolicy` are reusable there, and the pin is
 not.

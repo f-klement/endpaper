@@ -93,10 +93,8 @@ function perBookManifest(elements: string): string {
  *
  * **The identifier is an ISBN here and a UUID in `WRAPPED`**, so the one
  * fixture every arm reaches fills `isbn` and the other leaves it null. A
- * fixture whose identifier never check digits would make
- * `has nothing missing on a document filling every field` unwritable, and one
- * where both did would leave nothing asserting that an unparseable identifier
- * is still kept.
+ * fixture where both check digitted would leave nothing asserting that an
+ * unparseable identifier is still kept.
  */
 const FULL = record(`
   <dc:title>A Constructed Title</dc:title>
@@ -131,10 +129,9 @@ const WRAPPED = record(`
  * there**, and the arms on this fixture are what hold that line: a reader
  * stopping at the first such element answers nothing for this record.
  *
- * **The one fixture where `identifier` is null and `isbn` is not**, which is
- * the direction `DigitalEditionsField` claims when it says neither member
- * implies the other. Both the book arms and the `missing` arm take it, so that
- * claim is asserted per record and per document off one document.
+ * **The one fixture where `identifier` is null and `isbn` is not**, and the two
+ * are not the same question: `identifier` is the first element's text and
+ * `isbn` is whichever element check digits, so neither implies the other.
  */
 const EMPTY_FIRST = record(`
   <dc:title>A Constructed Title</dc:title>
@@ -145,21 +142,6 @@ const EMPTY_FIRST = record(`
 /** A record carrying a title and nothing else. */
 function titled(title: string): string {
   return record(`<dc:title>${title}</dc:title>`);
-}
-
-/**
- * The `FIELDS` array as the reader declares it, in the order it declares it.
- *
- * Read out of the source rather than restated, so the two rules below that turn
- * on it cannot agree with a declaration that has moved.
- */
-function declaredFields(): string[] {
-  const array =
-    /const FIELDS: readonly DigitalEditionsField\[\] = \[([^\]]+)\]/.exec(
-      readerSource,
-    );
-  expect(array, "the FIELDS declaration moved").not.toBeNull();
-  return [...array![1]!.matchAll(/"([^"]+)"/g)].map((match) => match[1]!);
 }
 
 /**
@@ -367,6 +349,22 @@ describe("reading a catalogue", () => {
     } satisfies DigitalEditionsBook);
   });
 
+  it("gives back a book of nulls for a record carrying nothing but a title", () => {
+    // **An element the document does not spell costs its field and never the
+    // record**, which is the reader's rule about evidence it took on the
+    // weakest sources it had. The record is shelved and says nothing else.
+    const [book] = booksOn(titled("Bare"));
+
+    expect(book).toEqual({
+      record: 1,
+      title: "Bare",
+      authors: [],
+      publisher: null,
+      identifier: null,
+      isbn: null,
+    } satisfies DigitalEditionsBook);
+  });
+
   it("reads a record whose metadata sits in a container", () => {
     const [book] = booksOn(WRAPPED);
 
@@ -386,8 +384,8 @@ describe("reading a catalogue", () => {
     // that is not a record and sits first wins: that gave a record a cover
     // caption for its title and a photographer for an author, and reordering the
     // same three elements gave the right answers. A read that goes no deeper
-    // loses a field, which `missing` reports; a read that prefers whatever came
-    // first puts a wrong book on a shelf, which nothing reports.
+    // leaves a field null, which the book shows; a read that prefers whatever
+    // came first puts a wrong book on a shelf, which nothing shows.
     const own = `
       <dc:title>The Real Title</dc:title>
       <dc:creator>Author, Real</dc:creator>`;
@@ -804,133 +802,6 @@ describe("an identifier is read as an ISBN where the value is one", () => {
 
     expect(labelled[0]!.isbn).toBe("9780306406157");
     expect(bare[0]!.isbn).toBe(labelled[0]!.isbn);
-  });
-});
-
-describe("a document this reader did not get everything out of", () => {
-  it("names the fields no record could fill", () => {
-    expect(libraryOn(titled("Bare")).missing).toEqual([
-      "authors",
-      "identifier",
-      "isbn",
-      "publisher",
-    ]);
-  });
-
-  it("counts a field one record filled as filled for the document", () => {
-    // Occupancy over the document rather than over a record: a catalogue where
-    // one book names its publisher is a catalogue this reader got publishers
-    // out of.
-    const library = libraryOn(
-      titled("Bare"),
-      record(`
-        <dc:title>A Constructed Title</dc:title>
-        <dc:publisher>An Imprint</dc:publisher>
-      `),
-    );
-
-    expect(library.missing).toEqual(["authors", "identifier", "isbn"]);
-  });
-
-  it("reads a field off a record it skipped", () => {
-    // The record has no title and is skipped, and it still says the document
-    // carried publishers. `missing` is what this reader could take out of the
-    // document, which is not the same question as which books it kept.
-    const library = libraryOn(
-      record("<dc:publisher>An Imprint</dc:publisher>"),
-    );
-
-    expect(library).toMatchObject({
-      books: [],
-      skipped: 1,
-      missing: ["authors", "identifier", "isbn"],
-    });
-  });
-
-  it("names them in one order however the reader listed them", () => {
-    // **The arm the sort has, and what it rests on is asserted rather than
-    // relied on.** Its whole power is that `FIELDS` is declared in the union's
-    // order rather than the alphabet's: alphabetise that array and the sort
-    // becomes unobservable here, silently and with every arm still green.
-    const declared = declaredFields().filter((field) => field !== "authors");
-    const sorted = [...declared].sort();
-    expect(
-      declared,
-      "FIELDS is now in alphabetical order, so this arm no longer observes " +
-        "the sort in readDigitalEditionsLibrary: put the declaration back " +
-        "into the order DigitalEditionsField names, or pin the sort another way",
-    ).not.toEqual(sorted);
-
-    const library = libraryOn(
-      record(`
-        <dc:title>A Constructed Title</dc:title>
-        <dc:creator>Surname, Given</dc:creator>
-      `),
-    );
-
-    expect(library.missing).toEqual(sorted);
-  });
-
-  it("has nothing missing on a document filling every field", () => {
-    expect(libraryOn(FULL).missing).toEqual([]);
-  });
-
-  it("names the ISBN missing where every identifier was something else", () => {
-    // **The case the field is a member for.** The document carried identifiers,
-    // so `identifier` is filled and only `isbn` says what this reader could not
-    // take out of them. A vocabulary without it would report the document as
-    // fully read.
-    expect(libraryOn(WRAPPED).missing).toEqual(["isbn"]);
-  });
-
-  it("can name the identifier missing on a document that yielded an ISBN", () => {
-    // **The claim `DigitalEditionsField` makes, at the level it makes it.**
-    // Neither member implies the other: `EMPTY_FIRST`'s first identifier has no
-    // text, so `identifier` is unfilled, and its second is an ISBN, so `isbn`
-    // is filled.
-    expect(libraryOn(EMPTY_FIRST).missing).toEqual([
-      "authors",
-      "identifier",
-      "publisher",
-    ]);
-  });
-
-  it("counts an ISBN off a record it skipped", () => {
-    // The half a caller cannot recompute from `books`: a record with no title
-    // is not shelved and still says the document carried ISBNs.
-    expect(
-      libraryOn(record("<dc:identifier>9780306406157</dc:identifier>")).missing,
-    ).toEqual(["authors", "publisher"]);
-  });
-
-  it("says this catalogue states no version of itself", () => {
-    // It states none anywhere published, so the field is `null` rather than
-    // absent: the shape is what every store reader answers in.
-    expect(libraryOn(FULL).schemaVersion).toBeNull();
-  });
-
-  /**
-   * The two spellings of the field list, held against each other.
-   *
-   * **Recomputed from the module's own source rather than restated here**, in
-   * both directions: a member added to the type and not to the array would
-   * never be reported missing, and one added to the array and not to the type
-   * would not compile. Restating either list in this file would give the pair a
-   * third home and this test would agree with whichever it was written from.
-   */
-  it("can report every field its own type names", () => {
-    const union = /export type DigitalEditionsField =([^;]+);/.exec(
-      readerSource,
-    );
-    expect(union).not.toBeNull();
-    const named = [...union![1]!.matchAll(/"([^"]+)"/g)]
-      .map((match) => match[1])
-      .sort();
-
-    expect([...declaredFields()].sort()).toEqual(named);
-    // A pattern that matched nothing would satisfy the equality with two empty
-    // lists, which is the evasion this second assertion closes.
-    expect(named.length).toBeGreaterThan(0);
   });
 });
 

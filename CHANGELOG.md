@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+- **Folding two Books has one door and a declared policy per child.** The merge carried ten
+  hand written transfer policies and nothing related them to Book's ten child collections, so
+  an eleventh child table was cascade deleted on every merge with nothing red. The child set
+  is derived from the foreign keys now, each child declares what a fold does with its rows,
+  and an eleventh with no policy fails at import naming the table. No behaviour change: the
+  ten policies, their ceilings and their order are what they were.
+- **A setting the deployment pins is read where it is pinned.** Ten settings can be fixed from
+  the environment, and a reader that consults the environment and one that does not were a
+  caller's choice at every site. Nothing went wrong, because all ten were already read
+  correctly; what is new is that they cannot quietly stop being. One place had that rule
+  written out by hand and now asks for it.
+- **A store import no longer computes two things nothing showed anybody.** Five of the six
+  device and store readers reported a schema version and a list of fields the file could not
+  fill, both dropped before they reached a screen. What a member sees is unchanged: a field a
+  device could not record still arrives empty.
+- **Cover fetches go through the same address policy the catalogue and OPDS doors use.** Both
+  cover walks build their client with `fetch.pinned_client`, which resolves an image service's
+  name once per request, admits public addresses only, and connects to the literal that passed,
+  so a listed host whose name answers inside the cluster is no longer fetched. A hop is bounded
+  by wall clock rather than by a per read timeout, which makes the interactive budget the
+  ceiling it always claimed to be: measured, a 1.0 second budget bought 1.973 seconds of a
+  download and 7.900 seconds of a candidate check, the second because the probe buffered and
+  its loop body ran once, so the clock was never consulted.
+- **A cover URL whose host cannot be decoded is refused rather than raised**, on the first hop
+  as well as on a redirect. It escaped both cover walks as a `UnicodeError`, which neither
+  their own handlers nor the metadata lookup above them catch, so one such URL answered 500 on
+  a member's ISBN lookup. `*.googleusercontent.com` is a wildcard on the host list, so this is
+  reachable from a URL a member puts on a book.
+- **MARC21 field reading is its own module**, `backend/marc_fields.py`. The upload reader and
+  the two catalogue profiles read the same fields through `Fields` and `Subfields`, instead of
+  `marc.py` reaching past `metadata.py`'s door for 17 private names at 21 sites, which was the
+  only module to module private read in the backend. No behaviour change.
+- **What a source said about a Book is one record and one door.** `lib/sourceRecord.ts`
+  declares the fields a picked file, a store's catalogue and a Calibre index all state, and the
+  three family types extend it rather than restating them. `lib/bookRequest.ts` is where that
+  record becomes the request's own names, bounded once: the two page modules spelled 34 of
+  those bounds and now spell 7. `boundIdentifiers` moved there from the library settings page,
+  which was the tree's only import from one page folder into another. No behaviour changes:
+  every field and every value is what it was, the Calibre and store bodies byte identical, and
+  the file scan draft's key order moves because the spread inserts the shared fields first.
 - **Postgres is checked where a release is about to happen**, rather than on every pipeline:
   on a tag and on the unattended patch branch. It is an optional drop in and SQLite is the
   primary target, so paying its wall clock on every push duplicated an addon most changes

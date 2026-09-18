@@ -823,7 +823,7 @@ describe("which of a file's labels reach the endpoint", () => {
 
   it("answers one entry a matching label, folding nothing", () => {
     // **The seam, asserted rather than assumed.** The fold and the ceiling are
-    // `LibrarySettingsPage/types.boundIdentifiers`', because both are
+    // `lib/bookRequest.boundIdentifiers`', because both are
     // properties of the scheme and every flow goes through that door; the arms
     // that pin them for this flow are in `draftFromFile` above.
     expect(

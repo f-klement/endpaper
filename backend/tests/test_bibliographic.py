@@ -375,14 +375,13 @@ class TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor:
     **The scan is every module of ours and not one file, and that is what
     publishing this name cost.** While the rule was `metadata._is_physical_book`
     a second module reaching it had to spell a private name, which
-    `tests/test_marc.py::test_marc_is_the_only_module_reaching_into_another`
-    refuses outside `marc.py`. A public name in another module is refused by
-    neither, so the check that used to read `metadata.py` alone now reads the
-    package.
+    `tests/test_marc.py::TestNoModuleReadsAnotherModulesPrivateNames` refuses
+    everywhere. A public name in another module is refused by neither, so the
+    check that used to read `metadata.py` alone now reads the package.
 
     **Both call spellings, and the `Attribute` arm is the one that matters
-    here.** `metadata.py` imports the name, so its calls are `Name`; every other
-    module would reach it as `bibliographic.is_physical_book`, which an `ast`
+    here.** `marc_fields.py` imports the name, so its calls are `Name`; every
+    other module reaches it as `bibliographic.is_physical_book`, which an `ast`
     walk keyed on `Name` cannot see. A guard that saw one spelling would be
     green on the whole class of evasion it was written for.
 
@@ -412,7 +411,7 @@ class TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor:
     #: `metadata.py` was invisible. Both are driven below rather than described.
     DOORS = frozenset(
         {
-            "metadata.py::_marc_is_physical_book",
+            "marc_fields.py::Fields.describes_a_book",
             "metadata.py::_bnf_record",
             "metadata.py::_loc_record",
             "metadata.py::_nkp_record",

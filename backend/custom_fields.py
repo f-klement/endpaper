@@ -44,6 +44,15 @@ from models import (
     CustomFieldValue,
 )
 
+#: The name of the table this module owns.
+#:
+#: Published so `folding.TRANSFERS` can declare a merge policy for it without
+#: importing `CustomFieldValue`, which is the import
+#: `TestOnlyABookReachesAValue::test_no_module_but_the_seam_imports_the_value`
+#: refuses to every other module. A merge needs this table's identity, not its
+#: values, and `resolve_merge` below is still the only thing that reads them.
+VALUES_TABLE = CustomFieldValue.__tablename__
+
 #: The two schemes a value may be linked at.
 #:
 #: Everything else is text, including the ones that are the reason this tuple
@@ -526,15 +535,15 @@ def resolve_merge(db: Session, keeper_id: int, loser_ids: Collection[int]) -> No
     **Not scoped to a Book anybody is holding**, and it cannot be: the merge
     deletes the losing rows, the cascade takes their values with them, and the
     Library silently loses what it typed on the Book that lost. Classifications,
-    notes, quotes and reading records are all moved across in
-    `routers/books.py::_repoint_relations` for the same reason, and every one of
-    them is there because leaving it out destroyed something quietly.
+    notes, quotes and reading records are all moved across by `folding.fold`
+    for the same reason, and every one of them is there because leaving it out
+    destroyed something quietly.
 
     The values cannot simply move: `(book_id, field_id)` is unique, so a field
     filled in on two of the merged Books would violate it. **The keeper's own
     value wins and the duplicate is dropped**, because that is the value
     attached to the Book that continues to exist. Among losers, the lowest id
-    wins, which is the same tie break `_repoint_relations` uses for
+    wins, which is the same tie break `folding.fold` uses for
     classifications.
 
     Built to be called before the flush, so it reads what is in the database

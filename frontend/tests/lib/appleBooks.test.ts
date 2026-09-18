@@ -4,11 +4,11 @@
  * **Every database below is constructed, and none came off a machine.** No Mac
  * was reachable from where this was written, so the schema is taken from
  * `github.com/tnahs/readstor`, which exports an Apple Books library and ships
- * the stores it is tested against. That is why the column names, the three
- * spellings of `ZEPUBID` and the shape of `Z_METADATA` below are quotations
- * rather than guesses. `src/lib/appleBooks.ts` names the repository, the branch
- * and the date it was read, and is the one home of those: a source in two files
- * is a source that drifts in one of them.
+ * the stores it is tested against. That is why the column names and the three
+ * spellings of `ZEPUBID` below are quotations rather than guesses.
+ * `src/lib/appleBooks.ts` names the repository, the branch and the date it was
+ * read, and is the one home of those: a source in two files is a source that
+ * drifts in one of them.
  *
  * A fixture presented as a real library when it is not would be worse than no
  * fixture, so this paragraph is the fixture's provenance and it is meant to be
@@ -60,8 +60,6 @@ const APPLE_SCHEMA = [
      ZLANGUAGE VARCHAR,
      ZPATH VARCHAR
    )`,
-  `CREATE TABLE Z_METADATA (Z_VERSION INTEGER PRIMARY KEY, Z_UUID VARCHAR, Z_PLIST BLOB)`,
-  `INSERT INTO Z_METADATA (Z_VERSION, Z_UUID) VALUES (1, 'ECD289BE-A6F0-42A4-B971-1F4BB42C3771')`,
 ];
 
 /**
@@ -142,10 +140,6 @@ describe("reading a library", () => {
         format: "EPUB",
       },
     ]);
-  });
-
-  it("reports the store's own model version", async () => {
-    expect((await libraryOn(SIDELOADED)).schemaVersion).toBe(1);
   });
 
   it("keeps one author string as one author", async () => {
@@ -340,33 +334,6 @@ describe("a schema this reader does not have all of", () => {
 
     expect(read.ok && read.library.skipped).toBe(0);
   });
-
-  it("names the fields no column in this store could fill", async () => {
-    const read = await store(
-      OLD_APPLE_SCHEMA,
-      `INSERT INTO ZBKLIBRARYASSET (Z_PK, ZASSETID) VALUES (1, 'a')`,
-    );
-
-    expect(read.ok && read.library.missing).toEqual([
-      "format",
-      "isbn",
-      "language",
-      "year",
-    ]);
-  });
-
-  it("has nothing missing on a store carrying every column", async () => {
-    expect((await libraryOn(SIDELOADED)).missing).toEqual([]);
-  });
-
-  it("says a store with no metadata table has no version", async () => {
-    const read = await store(
-      OLD_APPLE_SCHEMA,
-      `INSERT INTO ZBKLIBRARYASSET (Z_PK, ZASSETID) VALUES (1, 'a')`,
-    );
-
-    expect(read.ok && read.library.schemaVersion).toBeNull();
-  });
 });
 
 describe("an unreadable store is one skipped source, never a broken import", () => {
@@ -442,15 +409,6 @@ describe("an unreadable store is one skipped source, never a broken import", () 
         `CREATE TABLE ZBKLIBRARYASSET ("Z_PK); DROP TABLE ZBKLIBRARYASSET; --" TEXT)`,
       ],
       expected: { failure: "not-an-apple-books-library" },
-    },
-    {
-      what: "a metadata table that is not Core Data's",
-      rows: [
-        ...APPLE_SCHEMA.slice(0, 1),
-        `CREATE TABLE Z_METADATA (something VARCHAR)`,
-        `INSERT INTO ZBKLIBRARYASSET (Z_PK, ZASSETID) VALUES (1, 'a')`,
-      ],
-      expected: { books: 1, skipped: 0 },
     },
   ];
 
@@ -565,12 +523,10 @@ describe("the statement is built from this module's own column list", () => {
     // the module's list. That is the trade, and it is the right way round.
     //
     // **The equality is over every statement the module composes, in order, and
-    // not over the one that names the table.** Two drafts refused a widening of
-    // the asset statement and let the other one through: `SELECT * FROM
-    // Z_METADATA` passed, and so did `SELECT Z_VERSION, Z_PLIST FROM
-    // Z_METADATA`, which pulls the blob `appleBooks.ts` argues at length for
-    // never opening and spells the harm without a wildcard for a `*` arm to
-    // see. A list refuses a statement of any shape, and an added one as well.
+    // not over the one that names the table**, so a second statement added
+    // beside this one fails here whatever shape it takes. A draft asserting the
+    // asset statement alone let another one through, and `Z_PLIST` is the blob
+    // `appleBooks.ts` argues at length for never opening.
     //
     // The module's own list in its order, which this store carries in full, so
     // the equality is sensitive to every member of it rather than to two.
@@ -681,7 +637,6 @@ describe("the statement is built from this module's own column list", () => {
     expect(asked).toEqual([
       "PRAGMA table_info(ZBKLIBRARYASSET)",
       `SELECT ${WANTED_HERE.join(", ")} FROM ZBKLIBRARYASSET`,
-      "SELECT Z_VERSION FROM Z_METADATA",
     ]);
   });
 });

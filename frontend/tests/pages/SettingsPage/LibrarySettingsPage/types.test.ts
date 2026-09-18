@@ -22,13 +22,9 @@ import {
   BookIdentifierScheme,
 } from "../../../../src/api/generated/model";
 import type { CalibreBook } from "../../../../src/lib/calibre";
-import type {
-  StoreBook,
-  StoreIdentifierScheme,
-} from "../../../../src/lib/stores";
+import type { StoreBook } from "../../../../src/lib/stores";
 import {
   formatOf,
-  boundIdentifiers,
   storeToBookCreate,
   toBookCreate,
 } from "../../../../src/pages/SettingsPage/LibrarySettingsPage/types";
@@ -45,16 +41,9 @@ const SCHEMA = JSON.parse(
         properties: Record<string, unknown>;
         required?: string[];
       };
-      BookIdentifierIn: {
-        properties: { value: { maxLength: number } };
-      };
     };
   };
 };
-
-/** What the endpoint says an identifier may be, read back rather than typed. */
-const IDENTIFIER_CEILING =
-  SCHEMA.components.schemas.BookIdentifierIn.properties.value.maxLength;
 
 /**
  * How many the endpoint will take in one request, read back the same way.
@@ -437,172 +426,5 @@ describe("one store record as a request", () => {
 
     expect(created!.isbn).toBeNull();
     expect(created!.identifiers).toHaveLength(1);
-  });
-});
-
-describe("the identifiers a store gave, bounded for the wire", () => {
-  it("spells every scheme a store can answer the way the endpoint does", () => {
-    // The mapping is a total `Record`, the format mapping's rule. What the type
-    // cannot see is a value that compiles and is not one the endpoint's own
-    // enum holds, which is a 422 in the middle of somebody's device.
-    const known = new Set(Object.values(BookIdentifierScheme) as string[]);
-    const schemes: StoreIdentifierScheme[] = ["asin", "google_books"];
-    for (const scheme of schemes) {
-      expect(known).toContain(
-        boundIdentifiers([{ scheme, value: "x" }])[0]!.scheme,
-      );
-    }
-  });
-
-  it("writes an ASIN in the form Amazon issues one", () => {
-    // A canonicalisation and not an invention: Amazon's token has no lower case
-    // in it, so the fold recovers the issued value. `parseIsbn` is the
-    // precedent, putting every spelling of an ISBN into one.
-    expect(boundIdentifiers([{ scheme: "asin", value: "b00j4yqkhy" }])).toEqual(
-      [{ scheme: "asin", value: "B00J4YQKHY" }],
-    );
-  });
-
-  it("folds every letter of the alphabet it reaches, not most of them", () => {
-    // **The whole alphabet in one line, because a handful of literals leaves a
-    // letter riding free.** Found by the security seat: with the arms below
-    // alone, narrowing the fold to `[a-y]` left both mirrored files green, and
-    // a store sending an ASIN with a lower case `z` then earned the duplicate
-    // row this table exists to prevent.
-    // Written out on both sides rather than computed with `toUpperCase`, which
-    // is the builtin the fold is defined not to use: an oracle sharing a
-    // dependency with the thing under test is one that agrees with it.
-    expect(
-      boundIdentifiers([
-        { scheme: "asin", value: "abcdefghijklmnopqrstuvwxyz" },
-      ]),
-    ).toEqual([{ scheme: "asin", value: "ABCDEFGHIJKLMNOPQRSTUVWXYZ" }]);
-  });
-
-  it("folds nothing outside the alphabet the scheme is written in", () => {
-    // **The door cannot assume its input was vetted**: a store adapter sends
-    // what the file said. Measured over all 1,112,064 non surrogate code
-    // points, 1,552 change under `toUpperCase` and 1,526 of those are outside
-    // `[a-z]`, so a fold spelled that way would send a value this app invented,
-    // and 102 of them would change its length as well. `SS` here is what a
-    // `toUpperCase` gives and is the failure this arm names.
-    expect(boundIdentifiers([{ scheme: "asin", value: "straße" }])).toEqual([
-      { scheme: "asin", value: "STRAßE" },
-    ]);
-  });
-
-  it("leaves a volume id's case alone, its alphabet having both", () => {
-    // The other arm of the same table, and the one that says it is a rule
-    // rather than a fold somebody applied to everything: `aB3` and `AB3` are
-    // two volume ids, and either spelling names a book Google does not.
-    expect(
-      boundIdentifiers([{ scheme: "google_books", value: "aB3-dE6_gH9j" }]),
-    ).toEqual([{ scheme: "google_books", value: "aB3-dE6_gH9j" }]);
-  });
-
-  it("folds a repeat of one identifier, whichever reader sent it", () => {
-    // Two readers can name one edition, and the ceiling below truncates before
-    // the server's own deduplication ever sees the payload, so a repeat left
-    // standing costs the book a different identifier.
-    expect(
-      boundIdentifiers([
-        { scheme: "asin", value: "B00J4YQKHY" },
-        { scheme: "asin", value: "b00j4yqkhy" },
-        { scheme: "google_books", value: "aB3-dE6_gH9j" },
-      ]),
-    ).toEqual([
-      { scheme: "asin", value: "B00J4YQKHY" },
-      { scheme: "google_books", value: "aB3-dE6_gH9j" },
-    ]);
-  });
-
-  it("trims a reader's own padding off a value", () => {
-    // A store's XML indents its elements, and the unique index is on the exact
-    // characters, so padding would earn a second row for one identifier.
-    expect(
-      boundIdentifiers([{ scheme: "asin", value: "\n  B00J4YQKHY\n" }]),
-    ).toEqual([{ scheme: "asin", value: "B00J4YQKHY" }]);
-  });
-
-  it("drops a value the column cannot hold rather than losing the book", () => {
-    // `lib/bookBounds.ts`' rule applied to a field it does not cover: an import
-    // of nine hundred books must not turn into a 422 over one odd row.
-    expect(
-      boundIdentifiers([
-        { scheme: "asin", value: "B".repeat(IDENTIFIER_CEILING + 1) },
-        { scheme: "asin", value: "B00J4YQKHY" },
-      ]),
-    ).toEqual([{ scheme: "asin", value: "B00J4YQKHY" }]);
-  });
-
-  it("keeps a value spending the whole budget", () => {
-    // The other side, without which the drop above is satisfied by a rule that
-    // drops everything. Exactly on the boundary the schema declares.
-    expect(
-      boundIdentifiers([
-        { scheme: "asin", value: "B".repeat(IDENTIFIER_CEILING) },
-      ]),
-    ).toHaveLength(1);
-  });
-
-  it("measures the budget in code points, never in UTF-16 units", () => {
-    // A ceiling belongs to a Python `str` and to a SQLite column, both of which
-    // count code points, so measuring in units refuses half of what the server
-    // would take. `lib/bookBounds.ts` records the same fault costing a 422.
-    expect(
-      boundIdentifiers([
-        { scheme: "asin", value: "\u{1f4d6}".repeat(IDENTIFIER_CEILING) },
-      ]),
-    ).toHaveLength(1);
-  });
-
-  // **One arm per case `tests/schemas/test_identifier.py` names**, because this
-  // filter and that validator have to be the same rule: a character this keeps
-  // and the server refuses is a 422 for the whole book, which `writeBooks`
-  // files under `failures`. Five of these nine passed the `/\s/u` filter this
-  // replaced, measured by both critic seats over every non surrogate code point.
-  it.each([
-    ["a space in the middle", "B00J4 YQKHY"],
-    ["a tab", "B00J4\tYQKHY"],
-    ["a no-break space, Zs", "B00J4\u00a0YQKHY"],
-    ["a zero width space, Cf", "B00J4\u200bYQKHY"],
-    ["a soft hyphen, Cf", "B00J4\u00adYQKHY"],
-    ["a byte order mark, Cf", "B00J4\ufeffYQKHY"],
-    ["a C1 control, Cc", "B00J4\u0085YQKHY"],
-    ["a NUL, which is Cc", "B00J4\u0000YQKHY"],
-    ["a left-to-right mark, Cf", "B00J4\u200eYQKHY"],
-  ])("drops a value carrying %s", (_name, value) => {
-    expect(boundIdentifiers([{ scheme: "asin", value }])).toEqual([]);
-  });
-
-  it("keeps the two real shapes, which the same rule must not refuse", () => {
-    // The other side, without which the nine arms above are satisfied by a
-    // filter that drops everything. Both measured by their own readers: an
-    // ASIN is ten characters and a Google volume id is twelve of the URL safe
-    // alphabet, which includes the two characters a charset rule would have
-    // been tempted to exclude.
-    expect(
-      boundIdentifiers([
-        { scheme: "asin", value: "B00J4YQKHY" },
-        { scheme: "google_books", value: "zy-CAlFP_gYC" },
-      ]),
-    ).toHaveLength(2);
-  });
-
-  it("sends no more than one request may carry", () => {
-    // Over `maxItems` the endpoint answers 422 for the whole book, so a store
-    // that grew a longer list would cost a member the book rather than the
-    // extra entry. No store produces more than one today; this binds the case
-    // where one does.
-    const many = Array.from({ length: IDENTIFIER_LIMIT + 3 }, (_, index) => ({
-      scheme: "asin" as const,
-      value: `B${String(index).padStart(9, "0")}`,
-    }));
-
-    expect(boundIdentifiers(many)).toHaveLength(IDENTIFIER_LIMIT);
-  });
-
-  it("drops an empty value", () => {
-    expect(boundIdentifiers([{ scheme: "asin", value: "   " }])).toEqual([]);
   });
 });

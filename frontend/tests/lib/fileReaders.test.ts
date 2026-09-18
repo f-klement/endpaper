@@ -182,34 +182,52 @@ const SOURCES = import.meta.glob("../../src/**/*.{ts,tsx}", {
 const SEAM = "lib/fileReaders.ts";
 const ENTITY_GUARD = "lib/xmlEntities.ts";
 const YEAR_RULES = "lib/year.ts";
+const SOURCE_RECORD = "lib/sourceRecord.ts";
 
 /**
  * The family's shared vocabulary, and which module declares each part of it.
  *
- * **Three homes rather than one, because the family shares three different
- * kinds of thing.** The seam says what a reader is and what it answers with,
- * which every reader produces; the entity refusal is a rule about handing a
- * member's document to a parser, which four readers apply and which nothing in
- * the contract consults; the year rules say what a number has to be to be a
+ * **Four homes rather than one, because the family shares four different kinds
+ * of thing.** The seam says what a reader is and what it answers with, which
+ * every reader produces; the entity refusal is a rule about handing a member's
+ * document to a parser, which four readers apply and which nothing in the
+ * contract consults; the year rules say what a number has to be to be a
  * publication year, which eight readers reach for and which is neither the seam
- * nor a bound on a request body. A `FileReading` is the same shape whether or
- * not the bytes went through a parser at all, so the second was moved out, and
- * the third for the same reason one module over.
+ * nor a bound on a request body; and the source record says what any source
+ * states about a book, which is not this family's at all, a store's catalogue
+ * and a Calibre index stating the same ones. A `FileReading` is the same
+ * shape whether or not the bytes went through a parser at all, so the second
+ * was moved out, and the third and fourth for the same reason one module over.
  *
- * **The rules below are the same for all three and are written once**, which is
- * what makes a fourth home a row here rather than a fourth arm: whatever a home
+ * **The rules below are the same for all four and are written once**, which is
+ * what makes a fifth home a row here rather than a fifth arm: whatever a home
  * declares, it declares under no second name, and every module using one of
  * those names takes it from that home.
  */
 const SHARED_HOMES = [
   {
     path: SEAM,
-    /** Spelled with the opening brace, so a re-export cannot satisfy it. */
+    /**
+     * Spelled with the opening brace, so a re-export cannot satisfy it.
+     *
+     * `FileMetadata` carries its `extends` clause here for the same reason the
+     * brace is here: dropping the clause is what would move the shared fields
+     * back into this module, and a declaration string stopping at the name
+     * would not see it.
+     */
     declarations: [
-      "export interface FileMetadata {",
+      "export interface FileMetadata extends SourceRecord {",
       "export interface FileIdentifier {",
     ],
     names: ["FileMetadata", "FileIdentifier"],
+  },
+  {
+    // What every source states about a book, which three families declared
+    // separately: a picked file, a store's catalogue and a Calibre index. A row
+    // rather than a fifth arm, which is what this table is for.
+    path: SOURCE_RECORD,
+    declarations: ["export interface SourceRecord {"],
+    names: ["SourceRecord"],
   },
   {
     path: ENTITY_GUARD,

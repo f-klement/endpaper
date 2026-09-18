@@ -1,9 +1,14 @@
 # Backend test coverage
 
-**7404 tests**, in 112 files, recounted with `--collect-only` on 2026-09-17.
+**7520 tests**, in 114 files, counted off a full run on 2026-09-18.
+
+**Counted off a run rather than by `--collect-only` this time, because this project's own
+`addopts` carries `-q` and the suite runner adds `-n`, and the pair prints no node ids at
+all**: a `--collect-only -q` through the wrapper answers a warnings summary and nothing to
+count. Quote the instrument beside the number, since the two do not always agree.
 
 **The headline equals the passed count today, and that is a fact about the tree rather than
-a simplification.** The gate reports `7404 passed`, with no skip and no `xfail`: the strict
+a simplification.** The gate reports `7520 passed`, with no skip and no `xfail`: the strict
 `xfail` that recorded a defect in the CSV importer is gone, because the work that closed the
 defect closed it.
 
@@ -15,11 +20,13 @@ the skip once made the check undoable, and a rule rewritten as `collected == pas
 the tree happens to have neither is one that fails for the wrong reason the day somebody adds
 either.
 
-**The rows below sum to 7347, fifty seven short, and the shortfall is deliberate.** Those
+**The rows below sum to 7462, fifty eight short, and the shortfall is deliberate.** Those
 tests live in eight files on the publish gate's DENY list, which this published register may
 not name: a published file pointing at a stripped path fails the gate. **The number moves
 whenever one of those files gains a test, and so does the count of files, which was six until
-2026-09-16. Neither is derivable from anything below.**
+2026-09-16. Neither is derivable from anything below.** It was fifty seven on 2026-09-18 and
+is fifty eight later the same day, because one of those files gained a test: that is the
+check doing its job rather than a figure drifting.
 
 **The per file figures are collected tests, so they sum to the headline less that stated
 shortfall**, and that is the check. They are not `def test_` lines, which come to fewer, because a parametrised case is
@@ -72,8 +79,9 @@ why the helper uses regexes.
 | `test_opds.py` | 94 | **The OPDS reader.** Which addresses this server will open, what one Atom entry becomes, the identifier the census says is not there, the doctype refusal, the decoder-on-a-file property, and the origin pin over paging. `TestNoResponseMovesTheOrigin` is the one to read first |
 | `routers/test_opds.py` | 44 | **The OPDS routes.** The admin gate on configuration against a member's right to sync, the credential lifecycle, and that deleting a server or moving it to another origin takes its login with it |
 | `test_bibliographic.py` | 65 | **What a bibliographic value means, with no record and no transport.** Every rule on its own, that the two language tables are one table inverted, and that only the four carrier aware doors reach the prose refusal, and that the catalogue order flip counts commas after the noise strip and takes a terminal full stop only on the branch that reorders a name |
-| `test_marc.py` | 59 | **The MARCXML reader and writer.** That MARC is read through `metadata.py`'s parser rather than a second one, what the importer refuses that a lookup does not |
-| `test_metadata.py` | 490 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache, that a stored login reaches the request it was stored for and no other, that every door needing one declares it, and which transport actually carries one |
+| `test_marc.py` | 62 | **The MARCXML reader and writer.** That MARC is read through `metadata.py`'s parser rather than a second one, what the importer refuses that a lookup does not |
+| `test_marc_fields.py` | 68 | **What a MARC21 datafield and subfield spell.** The subfield reader and its repeats, the vocabulary a heading declares and the kind it asserts, the authority identifier, which added entry wrote the book, the component part refusal, and the carrier codes that decide a book from a recording. Seven classes moved out of `test_metadata.py` with the module, plus the namespace having one definition, `Fields` carrying the record it parsed, the 245 field picked in one place, and an absent tag reading as no fields |
+| `test_metadata.py` | 437 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache, that a stored login reaches the request it was stored for and no other, that every door needing one declares it, and which transport actually carries one |
 | `test_errors.py` | 38 | Content-negotiated errors, the 500 handler, API-vs-SPA routing |
 | `test_auth_backends.py` | 87 | Local, LDAP and proxy identity sources, and that a directory identity never adopts a test account |
 | `test_csv_import.py` | 170 | **Reading anybody's export.** One real shape per service, and the awkward part of each |
@@ -84,8 +92,8 @@ why the helper uses regexes.
 | `test_targets.py` | 71 | **A catalogue as a row.** The seeded roster field by field, what a row may carry, and the two query builders |
 | `test_decoders.py` | 36 | **What a decoder is, and what it is never told.** The contract, a catalogue decoder reading a record off a file with no `Target`, and the two family refusal and that the catalogue family's published table covers every reader a search can name |
 | `test_sru.py` | 205 | **The SRU server: the protocol, driven as a function over a query string.** That no index reaches a private or a trashed book |
-| `test_settings_store.py` | 48 | Typed reads and writes over the key/value table |
-| `test_credentials.py` | 262 | **Somebody else's login, sealed.** The envelope and its key generation, the three key sources, the recovery phrase and its checksum, the origin a credential is bound to, and the upgrade path: which sources may still open the superseded scheme, and the three instruments that end that acceptance |
+| `test_settings_store.py` | 87 | Typed reads and writes over the key/value table |
+| `test_credentials.py` | 264 | **Somebody else's login, sealed.** The envelope and its key generation, the three key sources, the recovery phrase and its checksum, the origin a credential is bound to, and the upgrade path: which sources may still open the superseded scheme, and the three instruments that end that acceptance |
 | `test_auth.py` | 22 | Password hashing, JWT creation and the auth dependencies |
 | `test_accounts.py` | 66 | **Recovery and confirmation, where the rules live rather than where they are served.** That one function builds a reset request so an admin can approve but never start one, that redeeming ends every session on the account, that a code is single use and expires, and that both branches of a resend cost the same. |
 | `test_recover.py` | 7 | The command line reset, which is the path for a library whose only admin has nobody to approve their request. |
@@ -97,7 +105,8 @@ why the helper uses regexes.
 | `test_import_readers.py` | 16 | **What a reader IS, and that the set of them is closed.** That a reader is handed decoded text and nothing about how the file arrived, that every registered one honours a column correction, and that a service fitting the candidate names is names alone and no code. |
 | `test_authority.py` | 121 | **The network half of author identity.** That the four cross references a GND record carries are read off it, that the record's own scheme is never among them |
 | `test_authorship.py` | 107 | **The database half of author identity.** That one read costs two statements and that a read after a write is not stale |
-| `test_shelf.py` | 224 | The seam every many-book query goes through, and the only enforcement of the privacy rule since the AST guard was deleted. |
+| `test_folding.py` | 34 | **Folding two Books.** That every child of `books` declares what a fold does with its rows and an eleventh fails at import naming the table, the four policies and their ceilings, that no read here looks past the Books in hand with the bound traced to the carry rather than to the column alone, and the read count that makes a person look at a read that appeared |
+| `test_shelf.py` | 227 | The seam every many-book query goes through, and the only enforcement of the privacy rule since the AST guard was deleted. |
 | `test_nothing_private_leaves.py` | 34 | **The export boundary, and what still crosses it.** That only the shelf builds an outbound payload, a route sweep derived from the live route table, and the shapes the guards admit they cannot see |
 | `test_no_custody.py` | 7 | **Nowhere to send a book file to.** Which routes accept an upload, as an equality in both directions with what each file is for, and that no mapped column carries bytes: the structural half of the promise that a book file is read in the browser and never uploaded |
 | `test_authors.py` | 63 | Splitting a credit line, the key that folds without asking against the one that only suggests, the index, the four suggestion rules |
@@ -127,8 +136,8 @@ why the helper uses regexes.
 | `routers/test_public.py` | 51 | The first routes reachable without a session: the gate as a router dependency rather than per handler, that nothing under the prefix accepts a write, 404 never 403 |
 | `schemas/test_public.py` | 25 | That the public payload is a total partition of `BookOut`, 18 published and 27 withheld with a reason each, and that no public model carries an alias |
 | `test_cover_store.py` | 55 | **The one module that knows where a cover lives.** The house rule in three `ast` passes, the two writers told apart in both directions, the containment check driven directly because no public function reaches that arm, and the on disk lookups' stability under a reordered allowlist |
-| `test_covers.py` | 127 | Fetching, sniffing, storing and serving a cover, the per-hop host allowlist, the shape every entry on it needs for the CSP and the fetch to mean the same thing, the same wire-byte reading the catalogue path uses, and the two house rules keeping `covers.py` the only module that knows an image host or decides a cover is local |
-| `test_reading.py` | 56 | **The seam every reading record goes through.** That a record is private to its member separately from the book being visible, and that rating a book or offering to discuss it stamps no dates. |
+| `test_covers.py` | 144 | Fetching, sniffing, storing and serving a cover, the per-hop host allowlist, the shape every entry on it needs for the CSP and the fetch to mean the same thing, the same wire-byte reading the catalogue path uses, and the two house rules keeping `covers.py` the only module that knows an image host or decides a cover is local |
+| `test_reading.py` | 58 | **The seam every reading record goes through.** That a record is private to its member separately from the book being visible, and that rating a book or offering to discuss it stamps no dates. |
 | `test_custom_fields.py` | 106 | **Household defined fields on a book.** That every reader and writer takes `Book` objects rather than ids |
 | `routers/test_books_identifier_backfill.py` | 25 | The bulk lookup by stored identifier: the batch and its cursor, that a miss clears the cursor and a timeout leaves the book a candidate, that a rate limited book is provably still one afterwards, and that no key is a 409 naming the switch rather than a clean run |
 | `routers/test_books_custom_fields.py` | 44 | The six routes: defining, renaming, filling in, and that a field on a book the caller cannot see is 404 rather than 403 |

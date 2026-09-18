@@ -22,7 +22,7 @@ from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
 #:
 #: **Both capped writers, and there are exactly two of those.**
 #: `classifications.add_headings` serves the create and selected enrichment paths.
-#: `_repoint_relations` serves a merge. `backup.restore` is a third writer of
+#: The merge transfer in `folding.py` serves a merge. `backup.restore` is a third writer of
 #: this table (`backup.py`, through `_TABLES`) and is deliberately uncapped: it
 #: reinstates a whole database rather than adding to one, it is admin only, and
 #: every other table is uncapped there for the same reason.

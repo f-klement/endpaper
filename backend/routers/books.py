@@ -19,6 +19,7 @@ import cover_store
 import covers
 import custom_fields
 import ddc
+import folding
 import google_books
 import isbn as isbn_utils
 import lending
@@ -58,7 +59,6 @@ from enums import (
     BookSort,
     BulkAction,
     CatalogueSource,
-    ClassificationScheme,
     ExportFormat,
     LendingWillingness,
     Locale,
@@ -79,11 +79,9 @@ from models import (
     AuthorIdentifier,
     Book,
     BookIdentifier,
-    Classification,
     Collection,
     CustomField,
     DigitalReference,
-    Loan,
     Note,
     Quote,
     ReadingProgress,
@@ -99,11 +97,9 @@ from ratelimit import (
     identifier_backfill_limiter,
     metadata_limiter,
 )
-from reading import Reading, resolve_merge
+from reading import Reading
 from schemas import (
-    MAX_CLASSIFICATIONS_PER_BOOK,
     MAX_DIGITAL_REFERENCES_PER_BOOK,
-    MAX_IDENTIFIERS_PER_BOOK,
     MAX_ROW_ID,
     AuthorBatchMergeOut,
     AuthorIdentifierOut,
@@ -1111,12 +1107,10 @@ def _store_cover(book: Book) -> bool:
         return False
 
     # Budgeted, because every caller of this is a request with a person waiting
-    # at the end of it. The backfill does not come through here and passes none,
-    # which bounds how many covers it fetches and **not** how long each one may
-    # take: a trickled body is held to `MAX_COVER_BYTES` and the per read
-    # timeout, and nothing else. That costs one threadpool worker and a stalled
-    # backfill, and it needs a compromised host in `COVER_HOSTS`, all six of
-    # which are https. `covers.resolve_and_store` carries the same note.
+    # at the end of it. What a run with **no** budget is bounded by is not
+    # restated here: `covers.resolve_and_store`'s own note is the one place that
+    # number lives, and the version of this comment that carried a second copy
+    # went stale the day the walk grew a per hop wall clock bound.
     resolved = covers.resolve_and_store(
         book.id, book.isbn, book.cover_url, budget=covers.INTERACTIVE_BUDGET_SECONDS
     )
@@ -2345,21 +2339,11 @@ def merge_books(
     # book is only visible to the member who added it, so anything that came
     # back from that filter is theirs to merge. See dependencies.book_for_write.
 
-    # The ISBN is unique, so the row it is being taken from has to let go of it
-    # first, in its own flush. Doing this after the absorb puts both UPDATEs in
-    # one executemany, where the set lands before the clear and trips the index.
-    # These rows are about to cease to exist, so releasing it costs nothing.
-    absorbed_isbn = next((loser.isbn for loser in losers if loser.isbn), None)
-    if keeper.isbn is None and absorbed_isbn is not None:
-        for loser in losers:
-            loser.isbn = None
-        db.flush()
-
-    _absorb_fields(keeper, losers, isbn_override=absorbed_isbn)
-    db.flush()
-
-    _repoint_relations(db, keeper, losers)
-    db.flush()
+    # Absorbing the columns and moving every child row is `folding.fold`, which
+    # is also where the flushes and the ISBN release ordering live. What stays
+    # here is this transaction's own business: the covers on disk, the copy
+    # group tokens, and when the commit happens.
+    folding.fold(db, keeper, losers)
 
     # Read before the loop: `db.expire(loser)` below would make each of these
     # a fresh SELECT, and after the delete there is nothing left to read them
@@ -2435,275 +2419,6 @@ def merge_books(
 
     db.refresh(keeper)
     return book_to_out(keeper, current_user, db)
-
-
-_MERGEABLE_FIELDS = (
-    # `isbn` is absent deliberately: it is unique and handled separately, ahead
-    # of everything here. See _absorb_fields.
-    #
-    # `copy_group` is absent for a different reason, and absorbing it would be
-    # a real bug rather than a missed field: it would make the survivor a copy
-    # of the loser's siblings, which nobody asked for and which the survivor's
-    # own owner never agreed to.
-    "subtitle", "author", "publisher", "year", "description", "cover_url",
-    "page_count", "language", "categories", "google_books_id",
-    "series_name", "series_index", "location",
-    # Present for the same reason `location` is: merging two entries for one
-    # book, one of them filed, should leave the survivor on that shelf rather
-    # than unfiled. It fills a gap and never overrides, so a keeper that is
-    # already in a collection stays where its owner put it.
-    "collection_id",
-    "format", "condition", "lending", "purchase_price_minor", "purchase_currency",
-    "purchased_at", "purchase_source",
-)
-
-
-def _absorb_fields(keeper: Book, losers: list[Book], *, isbn_override: str | None = None) -> None:
-    """Fill the survivor's gaps from the rows about to disappear.
-
-    `isbn_override` is passed because the losers have already been stripped of
-    their ISBN by the time this runs, so the value cannot be read back off
-    them. See the ordering note at the call site.
-    """
-    if keeper.isbn is None and isbn_override is not None:
-        keeper.isbn = isbn_override
-
-    for field in _MERGEABLE_FIELDS:
-        if getattr(keeper, field) is not None:
-            continue
-        for loser in losers:
-            value = getattr(loser, field)
-            if value is not None:
-                setattr(keeper, field, value)
-                break
-
-
-def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
-    loser_ids = [book.id for book in losers]
-
-    # Tags: a set union, since book_tags has no payload beyond the pair.
-    existing_tags = {tag.id for tag in keeper.tags}
-    for loser in losers:
-        for tag in loser.tags:
-            if tag.id not in existing_tags:
-                keeper.tags.append(tag)
-                existing_tags.add(tag.id)
-        loser.tags.clear()
-
-    # Classifications move too, and are deduplicated on the way: two rows for
-    # one book often carry the same DDC number, and
-    # `uq_classifications_book_scheme_number` would refuse the second on the
-    # flush. Without this the cascade on the loser's deletion takes them, so a
-    # merge would silently drop the provenance of the row that lost.
-    #
-    # A duplicate is absorbed rather than simply dropped. The keeper may hold
-    # `(ddc, 004, NULL)` from K10plus while the loser holds
-    # `(ddc, 004, "Informatik")` from the DNB, and deleting that row without
-    # taking its caption loses the caption for good: nothing re-enriches a
-    # survivor. Same rule as `classifications.add_headings`, a caption where there
-    # was none is strictly more than before.
-    #
-    # **`MAX_CLASSIFICATIONS_PER_BOOK` binds here too, and this is the only
-    # other writer that it binds.** `backup.restore` also writes this table and
-    # is deliberately uncapped, for the reason given at the constant.
-    # A merge takes up to 20 books, so without the count
-    # one request moves 8 x 19 = 152 rows onto the survivor, which is then the
-    # baseline for the next merge; merge carries no rate limiter, and every
-    # listing pays for the result because `books_to_out` selectin-loads this
-    # relationship onto every row of every page. An invariant stated "full stop"
-    # with one writer exempt from it is worse than a cap that admits it is soft,
-    # so this obeys it rather than documenting an exception.
-    #
-    # The overflow is **deleted**, which is exactly where it was going before
-    # this round: the cascade on the loser's deletion took every one of its
-    # headings. Keeper first and then losers in id order, so what survives is
-    # what was already stored, the same tie-break `classifications.add_headings` uses.
-    kept = {
-        (ClassificationScheme(entry.scheme), entry.number): entry
-        for entry in keeper.classifications
-    }
-    for heading in (
-        db.query(Classification)
-        .filter(Classification.book_id.in_(loser_ids))
-        .order_by(Classification.id)
-        .all()
-    ):
-        key = (ClassificationScheme(heading.scheme), heading.number)
-        survivor = kept.get(key)
-        if survivor is not None:
-            if survivor.label is None and heading.label is not None:
-                survivor.label = heading.label
-            # And its kind, on the same rule and for a sharper reason: the
-            # loser's row may be the corrected one. Only a record that declares
-            # a `$2` ever sets this, so a merge that dropped the half that had
-            # it would put a disc back among the subjects with nothing to see.
-            if survivor.kind is None and heading.kind is not None:
-                survivor.kind = heading.kind
-            db.delete(heading)
-            continue
-        if len(kept) >= MAX_CLASSIFICATIONS_PER_BOOK:
-            logger.info(
-                "Book %s is at the classification ceiling; merge drops %r",
-                keeper.id,
-                heading.number,
-            )
-            db.delete(heading)
-            continue
-        heading.book_id = keeper.id
-        kept[key] = heading
-
-    # Notes and loans carry their own history and simply move across. Assigned
-    # object by object rather than with a bulk UPDATE: a bulk update with
-    # synchronize_session=False leaves the session's loaded collections stale,
-    # and the delete that follows would cascade straight through them.
-    for note in db.query(Note).filter(Note.book_id.in_(loser_ids)).all():
-        note.book_id = keeper.id
-
-    # Quotes move with the notes. Without this the cascade on the loser's
-    # deletion would take them, and a merge would silently destroy passages
-    # somebody typed out by hand. The page numbers travel unchanged and may now
-    # describe a different printing, which is the standing cost of merging two
-    # rows that were two editions: the alternative is refusing the merge.
-    for quote in db.query(Quote).filter(Quote.book_id.in_(loser_ids)).all():
-        quote.book_id = keeper.id
-
-    # File references move with the quotes, deduplicated on the way for the
-    # reason the classifications above are: `uq_digital_references_location`
-    # would refuse the flush where the keeper and a loser were catalogued from
-    # the same file, which is the **likely** case rather than an edge, since
-    # two rows for one book are commonly two imports of one library.
-    #
-    # **Two arms, and they are two different events**, which is why they are not
-    # one condition. A duplicate is dropped and nothing is lost: two reports of
-    # one file are two accounts of the same thing, and the keeper already holds
-    # it. This is the difference from the classifications, where a duplicate is
-    # absorbed instead, because a caption where there was none is strictly more
-    # than before and a second report of a path is not.
-    #
-    # An overflow is a **loss**, and it is logged for that reason. The location
-    # was supplied by a Member and nothing regenerates it: no catalogue holds
-    # where somebody keeps their files. The classification block above logs its
-    # own drop and this one was silent, which is the shape where a comment
-    # saying "nothing is lost" sits over a statement that loses something.
-    #
-    # **`MAX_DIGITAL_REFERENCES_PER_BOOK` binds here too**, and this is the
-    # second of the two capped writers of this table, on the rule the
-    # classification ceiling records: a merge takes up to 20 books in one
-    # unlimited request, so an uncapped move is a stored write nobody bounded.
-    kept_files = {
-        (entry.root_label, entry.relative_path): entry
-        for entry in keeper.digital_references
-    }
-    for reference in (
-        db.query(DigitalReference)
-        .filter(DigitalReference.book_id.in_(loser_ids))
-        .order_by(DigitalReference.id)
-        .all()
-    ):
-        location = (reference.root_label, reference.relative_path)
-        if location in kept_files:
-            db.delete(reference)
-            continue
-        if len(kept_files) >= MAX_DIGITAL_REFERENCES_PER_BOOK:
-            logger.info(
-                "Book %s is at the digital reference ceiling; merge drops %r",
-                keeper.id,
-                reference.relative_path,
-            )
-            db.delete(reference)
-            continue
-        reference.book_id = keeper.id
-        kept_files[location] = reference
-
-    # Identifiers move with the file references, deduplicated on the way for the
-    # reason they are: `uq_book_identifiers_book_scheme_value` would refuse the
-    # flush where the keeper and a loser were imported from the same store, and
-    # two rows for one book commonly are two imports of one library.
-    #
-    # **Only an exact repeat is a duplicate here**, which is the difference from
-    # the headings above and is the whole reason the unique index carries the
-    # value. Two Kindle entries a member declared the same book carry two
-    # ASINs, and both survive: that is the merge saying which editions were
-    # folded together, and keying on the scheme alone would have made it an
-    # `IntegrityError` instead of a fact.
-    #
-    # **`MAX_IDENTIFIERS_PER_BOOK` binds here too**, on the rule the two blocks
-    # above record: a merge takes up to 20 books in one unlimited request, so an
-    # uncapped move is a stored write nobody bounded. The drop is a **loss** and
-    # is logged for that reason: an identifier came out of a member's own export
-    # and no catalogue holds it, so nothing regenerates it.
-    kept_identifiers = {
-        (BookIdentifierScheme(row.scheme), row.value) for row in keeper.identifiers
-    }
-    for identifier in (
-        db.query(BookIdentifier)
-        .filter(BookIdentifier.book_id.in_(loser_ids))
-        .order_by(BookIdentifier.id)
-        .all()
-    ):
-        assertion = (BookIdentifierScheme(identifier.scheme), identifier.value)
-        if assertion in kept_identifiers:
-            db.delete(identifier)
-            continue
-        if len(kept_identifiers) >= MAX_IDENTIFIERS_PER_BOOK:
-            logger.info(
-                "Book %s is at the identifier ceiling; merge drops %r",
-                keeper.id,
-                identifier.value,
-            )
-            db.delete(identifier)
-            continue
-        identifier.book_id = keeper.id
-        kept_identifiers.add(assertion)
-
-    moved = db.query(Loan).filter(Loan.book_id.in_(loser_ids)).all()
-    for loan in moved:
-        loan.book_id = keeper.id
-
-    # Merging two books that are both lent out used to give the survivor **two
-    # open loans**, which the data model says cannot happen: `returned_at IS
-    # NULL` is the single active loan. Every later `POST /api/loans` on that
-    # book then 409s forever, and the UI renders one `active_loan` so there is
-    # no way to see or close the other.
-    #
-    # The earliest one stays open, because it is the loan that has been out
-    # longest and is the one worth chasing. The rest are closed now: the books
-    # they described have just become one book, so they are not still out.
-    # Built from the objects in hand rather than by re-querying: the
-    # repointing above is not flushed yet, so a fresh query does not
-    # necessarily see the moved loans as belonging to the survivor.
-    on_keeper = db.query(Loan).filter(Loan.book_id == keeper.id).all()
-    open_loans = sorted(
-        {loan.id: loan for loan in [*on_keeper, *moved]}.values(),
-        key=lambda loan: (loan.loaned_at, loan.id),
-    )
-    # `lending.is_open`, not the column: the merge is the one caller that
-    # cannot ask `Loans.open_on`, because the repointing above is not flushed
-    # and these rows are the only place the survivor's loans exist yet.
-    still_open = [loan for loan in open_loans if lending.is_open(loan)]
-    now = datetime.now(UTC).replace(tzinfo=None)
-    for loan in still_open[1:]:
-        lending.close(loan, now)
-
-    # Progress moves wholesale. It carries no uniqueness of its own, so
-    # unlike the statuses below there is nothing to resolve: two members'
-    # readings of what turned out to be one book are two histories of one book.
-    # Left out, the losers' rows would be cascade-deleted with them, silently
-    # throwing away reading history the merge was never asked to touch.
-    for entry in db.query(ReadingProgress).filter(
-        ReadingProgress.book_id.in_(loser_ids)
-    ):
-        entry.book_id = keeper.id
-
-    # Every member's reading records, not just the caller's: see
-    # `reading.resolve_merge`, which owns why they cannot simply move.
-    resolve_merge(db, keeper.id, loser_ids)
-
-    # The library's own fields, for the reason the quotes above move: left out,
-    # the cascade on the loser's deletion would take a calibre-web link
-    # somebody typed by hand, silently. `custom_fields.resolve_merge` owns the
-    # collision rule, which is the keeper's own value winning.
-    custom_fields.resolve_merge(db, keeper.id, loser_ids)
 
 
 # ── Covers ────────────────────────────────────────────────────────────────────
@@ -2861,11 +2576,11 @@ def backfill_covers(
 #: **Deliberately not compared with the cover backfill's hundred**, and an
 #: earlier version of this paragraph was: "six at a time against a six second
 #: timeout, so a hundred books is at worst 100s". That figure does not exist.
-#: `backfill_covers` passes no budget to `covers.resolve_and_store`, whose own
-#: docstring says nothing then bounds a download in time, and one cover book is
-#: up to three candidate checks plus a download rather than one request. The
-#: two routes differ in the work per book, not in the timeout, so the hundred
-#: is not evidence about this fifty.
+#: `backfill_covers` passes no budget to `covers.resolve_and_store`, which
+#: bounds a hop rather than a book, and one cover book is up to three candidate
+#: checks plus a download rather than one request. The two routes differ in the
+#: work per book, not in the timeout, so the hundred is not evidence about this
+#: fifty.
 #:
 #: **What it costs a member is presses**, and that is the number to argue with:
 #: a 900 book Play Books import is 18 of them. The response says how many are

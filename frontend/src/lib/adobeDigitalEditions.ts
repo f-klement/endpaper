@@ -81,14 +81,13 @@
  * `dc:creator`, `dc:publisher` and `dc:identifier` in one metadata block, and
  * the app's library view has an Author column, so the record has to carry an
  * author somewhere. **What being wrong costs is a field, never a book**: an
- * element nothing in the document spells is reported in `missing`, which is the
- * true sentence about what this reader could take out of that document.
+ * element nothing in the document spells leaves that field `null` on every book
+ * the record yielded, and the record is still shelved.
  *
  * **No year, no language, no series, no description, no format.** No published
  * source shows a record carrying any of them, and an element invented here
- * would be a schema this reader made up. A field it never looks for is not the
- * same thing as a field a document did not fill, which is why none of them is a
- * `DigitalEditionsField`, `kindle.ts`'s distinction.
+ * would be a schema this reader made up, so `ELEMENTS` names none of them and
+ * every book this reader answers carries `null` there.
  *
  * **`de:thumbnailID` is deliberately not read.** It is a path to a cover file
  * on the member's own disk, and this app takes a cover from a book rather than
@@ -120,7 +119,7 @@
  * captures `kindle.ts` was built from.** No capture of this catalogue was
  * found, in a search that covered a code host's index as well as the web, so
  * the element names above are as strong as the evidence got. Every one of them
- * fails the same way, into `missing`.
+ * fails the same way, into a `null` field on a book that is still shelved.
  */
 
 import { parseIsbn } from "./isbn";
@@ -200,43 +199,6 @@ export interface DigitalEditionsBook {
   readonly isbn: string | null;
 }
 
-/**
- * A field no record in this document filled.
- *
- * **`isbn` is read off the `dc:identifier` elements rather than being a second
- * one**, and the two are still not the same question: `identifier` says the
- * first of them had text, `isbn` says one of them check digits. So neither
- * implies the other, and the case the member exists for is a document whose
- * every record named an identifier and none of them was an ISBN.
- *
- * It is a member because it is a value this reader produces, and a produced
- * field with no way of being reported missing leaves a caller to infer from
- * `books` what a skipped record also answers.
- */
-export type DigitalEditionsField =
-  "authors" | "publisher" | "identifier" | "isbn";
-
-/**
- * Every field `missing` can name, so the list is one thing rather than two.
- *
- * Declared beside the type it enumerates and asserted against it: a field added
- * to `DigitalEditionsField` and not here would never be reported missing, and
- * the reader would say a document supplied something it had never looked for.
- * `tests/lib/adobeDigitalEditions.test.ts` recomputes the pair rather than
- * restating either.
- *
- * **`title` is not a member and cannot be.** A record without one is skipped,
- * so a document that filled no title yields no books at all and says so through
- * `skipped`. A field that can only ever be reported on an empty library is a
- * field reported to nobody.
- */
-const FIELDS: readonly DigitalEditionsField[] = [
-  "authors",
-  "publisher",
-  "identifier",
-  "isbn",
-];
-
 /** Why a document yielded no library. Closed, one sentence each on screen. */
 export type DigitalEditionsFailure =
   /**
@@ -274,35 +236,6 @@ export interface DigitalEditionsLibrary {
    * under is nothing this app could show them.
    */
   readonly skipped: number;
-  /**
-   * Always `null`, because this catalogue states no version of itself.
-   *
-   * Kept rather than dropped: it is the shape every store reader answers in, and
-   * a reader missing a field of it is a reader a caller has to special case. A
-   * version element arriving in some later app has a home, and until then this
-   * says what is true.
-   */
-  readonly schemaVersion: null;
-  /**
-   * Fields no record in this document filled. Sorted, so it compares.
-   *
-   * **Occupancy and not a schema**, `kindle.ts`'s distinction and for its
-   * reason: there is no schema here to ask, so what this says is that nothing in
-   * the document filled the field. That covers the two elements this reader
-   * takes on the weaker evidence, which is what makes being wrong about them
-   * cost a field rather than a library.
-   *
-   * **Filled rather than spelled, which is the word `isbn` needs.** Three of
-   * these are elements a record either carries or does not; the fourth is what
-   * `readIsbn` could make of them, so a document whose every record names an
-   * identifier and none of them check digits reports `isbn` and not
-   * `identifier`.
-   *
-   * **Over every record and not only over `books`**, which is the whole reason
-   * a caller cannot recompute this: a record skipped for having no title still
-   * says what the document carried.
-   */
-  readonly missing: readonly DigitalEditionsField[];
   /**
    * Whether this catalogue said who owns these books. It never did.
    *
@@ -491,9 +424,9 @@ function childElements(parent: Element): Element[] {
  * `dc:title` and a `dc:creator` gave a record the caption for its title and the
  * photographer for an author, and moving that container after the record's own
  * two elements gave the right answers. **That trade was the wrong way round.**
- * A read that goes no deeper loses a field, which `missing` reports; a read that
- * prefers whatever came first puts a wrong book on a shelf, which nothing
- * reports.
+ * A read that goes no deeper leaves a field `null`, which the book shows; a
+ * read that prefers whatever came first puts a wrong book on a shelf, which
+ * nothing shows.
  *
  * **Descending is still needed and is still second.** The one source for
  * `dc:creator` and `dc:identifier` has the `dc:` terms in one metadata block, so
@@ -503,11 +436,10 @@ function childElements(parent: Element): Element[] {
  *
  * **What is left, stated rather than hidden.** A record with a foreign container
  * and no element of its own under that name still answers out of the container.
- * What makes that the right way round is not that a value beats none, which for
- * three of the four names would be a reported `missing` and is the direction
- * `kobo.ts` calls the safer one: it is that a container is this store's expected
- * shape, so refusing one would skip every wrapped record rather than lose a
- * field on an odd one.
+ * What makes that the right way round is not that a value beats none, which is
+ * the direction `kobo.ts` calls the safer one: it is that a container is this
+ * store's expected shape, so refusing one would skip every wrapped record
+ * rather than lose a field on an odd one.
  *
  * **By local name and not by namespace**, which the module docstring gives the
  * reason for. What it concedes is that a `de:title` and a `dc:title` are the
@@ -630,10 +562,6 @@ function readAuthors(record: Element): string[] {
  * title and `storeToBookCreate` drops a book without one anyway, so keeping it
  * here would move the loss from a number a member is shown to a preview row that
  * quietly disappears.
- *
- * **`missing` is derived from the values the records yielded and not from a
- * second reading of the document**, `kindle.ts`'s reason: the two would be free
- * to disagree and the disagreement would be invisible.
  */
 export function readDigitalEditionsLibrary(
   xml: string,
@@ -657,7 +585,6 @@ export function readDigitalEditionsLibrary(
 
   let skipped = 0;
   const books: DigitalEditionsBook[] = [];
-  const filled = new Set<DigitalEditionsField>();
   records.forEach((record, index) => {
     const authors = readAuthors(record);
     const publisher = firstText(record, "publisher");
@@ -666,10 +593,6 @@ export function readDigitalEditionsLibrary(
     const identifiers = within(record, "identifier");
     const identifier = textOf(identifiers[0]);
     const isbn = readIsbn(identifiers);
-    if (authors.length > 0) filled.add("authors");
-    if (publisher !== null) filled.add("publisher");
-    if (identifier !== null) filled.add("identifier");
-    if (isbn !== null) filled.add("isbn");
 
     const title = firstText(record, "title");
     if (title === null) {
@@ -686,16 +609,7 @@ export function readDigitalEditionsLibrary(
     });
   });
 
-  return {
-    ok: true,
-    library: {
-      books,
-      skipped,
-      schemaVersion: null,
-      missing: FIELDS.filter((field) => !filled.has(field)).sort(),
-      ownershipStated: false,
-    },
-  };
+  return { ok: true, library: { books, skipped, ownershipStated: false } };
 }
 
 /**

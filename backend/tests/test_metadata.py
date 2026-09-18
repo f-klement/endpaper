@@ -50,6 +50,7 @@ import covers
 import credentials
 import fetch
 import google_books
+import marc_fields
 import metadata
 import sources
 import targets
@@ -63,18 +64,12 @@ from enums import (
     HeadingKind,
 )
 from isbn import registration_group
+from marc_fields import Fields
 from metadata import (
     Outcome,
-    _dnb_subjects,
     _loc_record,
     _loc_subjects,
-    _marc_author_identifiers,
-    _marc_authors,
-    _marc_fields,
     _parsed,
-    _subject_identifier,
-    _subject_kind,
-    _subject_vocabulary,
 )
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.book import BookLookup
@@ -86,6 +81,7 @@ from tests.helpers import (
     silence_sru_catalogues,
     sru_response,
 )
+from tests.test_house_rules import _python_sources
 
 #: The `backend/` directory, so a doc guard can reach the repository root.
 BACKEND = Path(__file__).resolve().parent.parent
@@ -415,7 +411,8 @@ NLG = "http://catalogue.nlg.gr:210/biblios"
 #:
 #: Captured live 2026-08-30 from `dc.title=ιστορία`, control number 434736.
 #: **Its only 020 is qualified**, `$q (τ.1)`, which is the case the whole source
-#: turns on: under the rule before `_isbn_entries` this record answered nothing.
+#: turns on: under the rule before `Fields._isbn_entries` this record answered
+#: nothing.
 #: Its `$0` values are `urn:nbn:gr:nlg:` rather than `(DE-588)`, which is why the
 #: headings below are subjects and not GND rows.
 NLG_RECORD = _marc(
@@ -722,7 +719,8 @@ OENB_SEARCH = _oenb_envelope(OENB_ARTICLE, OENB_MONOGRAPH)
 #: A whole publication by its leader, and an **online resource** by its extent.
 #:
 #: The leader test passes it, so this is the record that shows `bibliographic.is_physical_book`
-#: is doing separate work from `_is_component_part`. Deleting either refusal
+#: is doing separate work from `marc_fields.is_component_part`. Deleting either
+#: refusal
 #: leaves the other in place and this row reaching the picker.
 OENB_ONLINE = (
     '<record xmlns="http://www.loc.gov/MARC21/slim">'
@@ -762,7 +760,7 @@ OENB_DIAGNOSTIC = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 """
 
 #: What a **mistyped index name** answers, and the reason this source needs
-#: `_marc_claims_isbn` more than any other here.
+#: `Fields.claims_isbn` more than any other here.
 #:
 #: Measured live 2026-08-27: `alma.isbn=9783825354077` returns 1 record and both
 #: `alma.isbn13=9783825354077` and `zzz.qqq=9783825354077` return **7,793,152**,
@@ -1637,10 +1635,13 @@ class TestTheResponseSizeCap:
         """
         # Bound and narrowed before the call: `find` answers `Element | None`,
         # and passing that straight in is a type error rather than a check.
-        marc_record = _parsed(self._marc_over_cap()).find(f".//{metadata._MARC}record")
+        marc_record = _parsed(self._marc_over_cap()).find(f".//{marc_fields.RECORD_TAG}")
         assert marc_record is not None
-        assert _marc_fields(marc_record)
-        assert _parsed(self._oenb_over_cap()).find(f".//{metadata._MARC}record") is not None
+        assert Fields(marc_record).get("245")
+        assert (
+            _parsed(self._oenb_over_cap()).find(f".//{marc_fields.RECORD_TAG}")
+            is not None
+        )
         assert (
             _parsed(self._dublincore_over_cap()).find(f".//{metadata._DC}title")
             is not None
@@ -1768,61 +1769,6 @@ class TestTheResponseSizeCap:
         assert result.source == "k10plus"
 
 
-class TestMarcSubfields:
-    """What a MARC record carries that a Dublin Core crosswalk had cleaned up."""
-
-    def test_a_repeated_subfield_keeps_every_value(self):
-        """082 holds `$a=830 $a=B`, and the letter is not a Dewey number."""
-        fields = _marc_fields(_marc_element('''
-          <datafield tag="082" ind1="7" ind2="4">
-           <subfield code="a">830</subfield><subfield code="a">B</subfield>
-          </datafield>'''))
-        assert fields["082"][0].all("a") == ["830", "B"]
-
-    def test_indexing_a_repeated_subfield_gives_the_first_value(self):
-        """`$0` arrives as the GND number, then two URIs for the same thing."""
-        fields = _marc_fields(_marc_element('''
-          <datafield tag="100" ind1="1" ind2=" ">
-           <subfield code="0">(DE-588)118181505</subfield>
-           <subfield code="0">https://d-nb.info/gnd/118181505</subfield>
-           <subfield code="a">Capus, Alex</subfield>
-          </datafield>'''))
-        assert fields["100"][0]["0"] == "(DE-588)118181505"
-
-    def test_the_non_sorting_delimiters_are_stripped(self):
-        """MARC brackets a leading article so it can be skipped when filing.
-
-        They are invisible in a terminal, and 28 of 85 live records hold one.
-        """
-        fields = _marc_fields(_marc_element(
-            '<datafield tag="245" ind1="1" ind2="0">'
-            '<subfield code="a">\x98Die\x9c Deutschen</subfield></datafield>'
-        ))
-        assert fields["245"][0]["a"] == "Die Deutschen"
-
-    def test_padding_inside_a_subfield_is_collapsed(self):
-        """MARC pads subfields. `245 $a` on the live record 9783446249974 reads
-        `Reisen im  Licht der Sterne`, where that record's own `776 $t` spells
-        it with one space."""
-        fields = _marc_fields(_marc_element(
-            '<datafield tag="245" ind1="1" ind2="0">'
-            '<subfield code="a">Reisen im  Licht der Sterne</subfield>'
-            "</datafield>"
-        ))
-        assert fields["245"][0]["a"] == "Reisen im Licht der Sterne"
-
-    def test_decomposed_text_is_normalised(self):
-        """The DNB serves MARC21 decomposed and Dublin Core composed.
-
-        Two spellings of one author is enough to store the same person twice.
-        """
-        fields = _marc_fields(_marc_element(
-            '<datafield tag="100" ind1="1" ind2=" ">'
-            '<subfield code="a">Mu\u0308ller, Hans</subfield></datafield>'
-        ))
-        assert fields["100"][0]["a"] == "M\u00fcller, Hans"
-
-
 class TestASubjectCarriesTheVocabularyTheRecordDeclared:
     """#134: the `$2` and the `$0`, which were both discarded before it.
 
@@ -1835,7 +1781,7 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
 
     @staticmethod
     def _subjects(datafields: str) -> list[Subject]:
-        subjects, _ = _dnb_subjects(_marc_fields(_marc_element(datafields)))
+        subjects, _ = Fields(_marc_element(datafields)).controlled_subjects()
         return subjects
 
     def test_the_declared_vocabulary_and_the_identifier_are_both_kept(self):
@@ -1848,7 +1794,7 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         ) == [Subject("Informatik", "gnd", "(DE-588)4026894-9")]
 
     def test_the_greek_authority_identifier_is_kept_whole(self):
-        """The field the ticket was written around. `_gnd_identifier` drops
+        """The field the ticket was written around. `Subfields.gnd_identifier` drops
         this, and measured 2026-08-31 it drops **11 of 11** of the National
         Library of Greece's identifiers, because none is a `(DE-588)`."""
         assert self._subjects(
@@ -1907,39 +1853,39 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
 
     def test_an_empty_leading_dollar_zero_does_not_lose_the_identifier(self):
         """The shape the live measurement could not see, because no catalogue
-        writes it: `_marc_text` turns `<subfield code="0"/>` into `""`, so the
+        writes it: `marc_fields` turns `<subfield code="0"/>` into `""`, so the
         first value is empty and the number sits behind it. 0 of the 718 live
         fields carry an empty `$0` anywhere, which is exactly why "the first
         `$0`" read as safe.
 
         **The two readers disagreeing is the defect, not the None.**
-        `_gnd_identifier` scans every `$0`, so it found the number and wrote a
+        `Subfields.gnd_identifier` scans every `$0`, so it found the number and wrote a
         classification row, while the subject beside it carried no identifier at
         all off the same field.
         """
-        entry = _marc_fields(_marc_element(
+        entry = Fields(_marc_element(
             '<datafield tag="650" ind1=" " ind2="7">'
             '<subfield code="a">Informatik</subfield>'
             '<subfield code="0"/>'
             '<subfield code="0">(DE-588)4026894-9</subfield>'
             '<subfield code="2">gnd</subfield></datafield>'
-        ))["650"][0]
+        )).get("650")[0]
 
         assert entry.all("0") == ["", "(DE-588)4026894-9"]
-        assert _subject_identifier(entry) == "(DE-588)4026894-9"
-        assert metadata._gnd_identifier(entry) == "4026894-9"
+        assert entry.subject_identifier() == "(DE-588)4026894-9"
+        assert entry.gnd_identifier() == "4026894-9"
 
     def test_a_field_whose_only_identifier_is_empty_has_none(self):
         """The diagonal for the test above: skipping empties must not invent
         one. Without this, a reader returning the last value would pass the
         test above and fail here."""
-        entry = _marc_fields(_marc_element(
+        entry = Fields(_marc_element(
             '<datafield tag="650" ind1=" " ind2="7">'
             '<subfield code="a">Informatik</subfield>'
             '<subfield code="0"/></datafield>'
-        ))["650"][0]
+        )).get("650")[0]
 
-        assert _subject_identifier(entry) is None
+        assert entry.subject_identifier() is None
 
     def test_the_first_identifier_is_the_one_taken(self):
         """Where a live subject field carries a `(DE-588)` it is the first of
@@ -1960,26 +1906,27 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         the three fixtures in this file spell it `23sdnb`, `22/ger` and `21`.
 
         **This test used to assert the trap open.** It read
-        `_subject_vocabulary(fields["082"][0]) == "21"` to show the field really
-        carries a readable `$2`, which was true and was also the call the
-        docstring claimed was impossible. The reader now takes the tag and
-        raises, so the same demonstration is a `pytest.raises`, and the
+        a no argument `$2` read off `fields["082"][0]` and asserted `"21"`, to
+        show the field really carries a readable `$2`. That was true and was also
+        the call the docstring claimed was impossible. The reader takes the tag
+        now and raises, and cannot be spelled without one, so the same
+        demonstration is a `pytest.raises`, and the
         anti vacuity it was there for is unchanged: without it the two
         assertions below pass on a record with no subject field, which is every
         record.
         """
-        fields = _marc_fields(_marc_element(
+        fields = Fields(_marc_element(
             '<datafield tag="082" ind1="0" ind2="4">'
             '<subfield code="a">940</subfield>'
             '<subfield code="2">21</subfield></datafield>'
         ))
-        subjects, headings = _dnb_subjects(fields)
+        subjects, headings = fields.controlled_subjects()
 
         with pytest.raises(ValueError, match="082"):
-            _subject_vocabulary("082", fields["082"][0])
+            fields.get("082")[0].subject_vocabulary("082")
         assert subjects == []
         assert headings == []
-        assert [heading.number for heading in metadata._marc_ddc(fields)] == ["940"]
+        assert [heading.number for heading in fields.ddc_headings()] == ["940"]
 
     def test_a_classification_row_is_still_written_for_the_gnd_alone(self):
         """The half that deliberately did not change. A `classifications` row
@@ -1997,7 +1944,7 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
             '<subfield code="a">Informatik</subfield>'
             '<subfield code="2">gnd</subfield></datafield>'
         )
-        _, headings = _dnb_subjects(_marc_fields(_marc_element(greek + german)))
+        _, headings = Fields(_marc_element(greek + german)).controlled_subjects()
 
         assert headings == [
             Heading(ClassificationScheme.GND, "4026894-9", "Informatik")
@@ -2007,309 +1954,13 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         """A whole DNB record, through the parser and the seam. `650` declares
         `gnd` and `689` restates the same words declaring nothing, on 199 of 199
         live fields, and the record must carry the heading once."""
-        node = next(_parsed(DNB_RECORD).iter(f"{metadata._MARC}record"))
-        record = metadata._dnb_record(_marc_fields(node), "9783960092353")
+        node = next(_parsed(DNB_RECORD).iter(marc_fields.RECORD_TAG))
+        record = metadata._dnb_record(Fields(node), "9783960092353")
 
         assert record is not None
         assert record.subjects == (
             Subject("Informatik", "gnd", "(DE-588)4026894-9"),
         )
-
-
-class TestTheVocabularyDecidesWhatAHeadingAsserts:
-    """`#162`: the DNB writes a content type and a carrier into the same subject
-    fields as a subject, each with a `(DE-588)` number on it, so before this a
-    disc was stored as an assertion about what the book is about.
-
-    The measurement that made it a defect rather than a curiosity: `gnd-content`
-    carries a `(DE-588)` on 34 of 34 fields at the DNB, 26 of 26 at the OeNB and
-    27 of 27 at K10plus, and `_gnd_identifier` accepts every one of them.
-    """
-
-    def _headings(self, datafields):
-        return _dnb_subjects(_marc_fields(_marc_element(datafields)))[1]
-
-    def test_a_carrier_is_still_a_heading_and_says_it_is_a_carrier(self):
-        """Still `scheme=gnd`, because `(DE-588)4139307-7` is a GND record and
-        resolves as one whichever `$2` cites it. What changed is the kind."""
-        assert self._headings(
-            '<datafield tag="655" ind1=" " ind2="7">'
-            '<subfield code="a">CD-ROM</subfield>'
-            '<subfield code="0">(DE-588)4139307-7</subfield>'
-            '<subfield code="2">gnd-carrier</subfield></datafield>'
-        ) == [
-            Heading(
-                ClassificationScheme.GND, "4139307-7", "CD-ROM", HeadingKind.CARRIER
-            )
-        ]
-
-    def test_a_content_type_is_kept_rather_than_refused(self):
-        """The reason the fix is not a filter on the vocabulary code. Refusing
-        `gnd-content` outright would drop this heading, which is a content type
-        worth keeping and is why `655` is on `_DNB_SUBJECT_TAGS` at all."""
-        assert self._headings(
-            '<datafield tag="655" ind1=" " ind2="7">'
-            '<subfield code="a">Fiktionale Darstellung</subfield>'
-            '<subfield code="0">(DE-588)1071854844</subfield>'
-            '<subfield code="2">gnd-content</subfield></datafield>'
-        ) == [
-            Heading(
-                ClassificationScheme.GND,
-                "1071854844",
-                "Fiktionale Darstellung",
-                HeadingKind.CONTENT,
-            )
-        ]
-
-    def test_a_plain_gnd_subject_is_left_undeclared(self):
-        """`subject` is never written to the column: it is what
-        `classifications.kind_of` answers for a null. Storing it would put the
-        fallback's own answer in the row, and a stored value cannot be filled in
-        later by the record that names the heading properly."""
-        assert self._headings(
-            '<datafield tag="650" ind1=" " ind2="7">'
-            '<subfield code="a">Informatik</subfield>'
-            '<subfield code="0">(DE-588)4026894-9</subfield>'
-            '<subfield code="2">gnd</subfield></datafield>'
-        ) == [Heading(ClassificationScheme.GND, "4026894-9", "Informatik", None)]
-
-    @pytest.mark.parametrize("code", ["nlgaf", "gatbeg", "bisacsh", "local", "sswd"])
-    def test_a_vocabulary_this_app_has_no_reading_for_declares_no_kind(self, code):
-        """Twelve distinct `$2` codes turned up in one day's sampling of four
-        catalogues, against a MARC source code list holding hundreds. Reading
-        any of the rest as a kind is the crosswalk #134 refuses."""
-        assert _subject_kind(code) is None
-
-    def test_the_reader_is_asked_the_folded_code_and_not_the_field(self):
-        """`$2` is the Dewey **edition** on `082`, which is why
-        `_subject_vocabulary` takes a tag and raises. This takes the code that
-        reader already folded, so the case rule is not spelled twice."""
-        assert _subject_kind("GND-CARRIER".lower()) is HeadingKind.CARRIER
-        assert _subject_kind(None) is None
-
-
-class TestASubfieldReaderIsNotTwoReaders:
-    """The two `$0` questions, which look like one rule and are not."""
-
-    def test_the_vocabulary_reader_answers_none_where_there_is_no_dollar_two(self):
-        entry = _marc_fields(_marc_element(
-            '<datafield tag="650"><subfield code="a">X</subfield></datafield>'
-        ))["650"][0]
-
-        assert _subject_vocabulary("650", entry) is None
-
-    def test_the_identifier_reader_answers_none_where_there_is_no_dollar_zero(self):
-        entry = _marc_fields(_marc_element(
-            '<datafield tag="650"><subfield code="a">X</subfield></datafield>'
-        ))["650"][0]
-
-        assert _subject_identifier(entry) is None
-
-    def test_the_gnd_reader_still_searches_past_a_leading_house_number(self):
-        """`_gnd_identifier` asks whether the field names a GND record, so it
-        looks at every `$0`. `_subject_identifier` asks what the record led
-        with, so it looks at one. A field written in the other order separates
-        them, and no live catalogue writes that order: this pins the difference
-        rather than the data."""
-        entry = _marc_fields(_marc_element(
-            '<datafield tag="650" ind1=" " ind2="7">'
-            '<subfield code="0">(DE-101)1010836315</subfield>'
-            '<subfield code="0">(DE-588)4026894-9</subfield>'
-            '<subfield code="a">Informatik</subfield></datafield>'
-        ))["650"][0]
-
-        assert metadata._gnd_identifier(entry) == "4026894-9"
-        assert _subject_identifier(entry) == "(DE-101)1010836315"
-
-
-class TestTheAuthorsAuthorityIdentifier:
-    """`100 $0` and `700 $0`, which say which GND record wrote this book.
-
-    The subject fields carry the identical subfield and go somewhere else: 600
-    says a person is what the book is *about*. That split is
-    `enums.AuthorityScheme`.
-    """
-
-    @staticmethod
-    def _fields(*datafields: str):
-        return _marc_fields(_marc_element("".join(datafields)))
-
-    MAIN = (
-        '<datafield tag="100" ind1="1" ind2=" ">'
-        '<subfield code="0">(DE-588)1042243212</subfield>'
-        '<subfield code="a">Kane, Sean P.</subfield>'
-        '<subfield code="4">aut</subfield></datafield>'
-    )
-
-    def test_the_main_entry_identifier_is_stored_bare(self):
-        """Without `(DE-588)`: the scheme is a column, and keeping the prefix
-        would let one identifier arrive under two spellings the unique index
-        cannot collapse. The same rule `_gnd_identifier` states for a heading."""
-        assert _marc_author_identifiers(self._fields(self.MAIN)) == [
-            AuthorityAssertion("Sean P. Kane", AuthorityScheme.GND, "1042243212")
-        ]
-
-    def test_a_record_with_no_identifier_produces_none(self):
-        """21 of 73 live 100 fields carry no `(DE-588)` at all, measured over 85
-        records on 2026-08-24. Ordinary, not broken."""
-        fields = self._fields(
-            '<datafield tag="100" ind1="1" ind2=" ">'
-            '<subfield code="a">Kane, Sean P.</subfield></datafield>'
-        )
-
-        assert _marc_author_identifiers(fields) == []
-
-    def test_a_700_that_wrote_the_book_is_read(self):
-        fields = self._fields(
-            self.MAIN,
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            '<subfield code="0">(DE-588)1042243213</subfield>'
-            '<subfield code="a">Matthias, Karl</subfield>'
-            '<subfield code="4">aut</subfield></datafield>',
-        )
-
-        assert _marc_author_identifiers(fields) == [
-            AuthorityAssertion("Sean P. Kane", AuthorityScheme.GND, "1042243212"),
-            AuthorityAssertion("Karl Matthias", AuthorityScheme.GND, "1042243213"),
-        ]
-
-    def test_a_700_that_only_translated_it_is_not(self):
-        """`$4=trl` is a translator. Reading it would file a translator's GND
-        under a name that is not in this Book's credit line at all."""
-        fields = self._fields(
-            self.MAIN,
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            '<subfield code="0">(DE-588)9999</subfield>'
-            '<subfield code="a">Meier, Eva</subfield>'
-            '<subfield code="4">trl</subfield></datafield>',
-        )
-
-        assert [row.identifier for row in _marc_author_identifiers(fields)] == [
-            "1042243212"
-        ]
-
-    def test_an_added_entry_for_a_work_is_not_a_person_here(self):
-        """`$t` links the original title, and the name beside it is that work's
-        author rather than a second author of this book."""
-        fields = self._fields(
-            self.MAIN,
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            '<subfield code="0">(DE-588)9999</subfield>'
-            '<subfield code="a">Melville, Herman</subfield>'
-            '<subfield code="t">Moby Dick</subfield>'
-            '<subfield code="4">aut</subfield></datafield>',
-        )
-
-        assert [row.identifier for row in _marc_author_identifiers(fields)] == [
-            "1042243212"
-        ]
-
-    def test_every_identifier_is_filed_under_a_name_in_the_credit_line(self):
-        """The property `_marc_author_entries` exists to make structural.
-
-        Two loops testing the same three conditions would let the credit line
-        and the identifiers drift apart, and the symptom would be a row filed
-        under a spelling no Book carries: invisible, undeletable through the UI,
-        and never matched by anything.
-        """
-        fields = self._fields(
-            self.MAIN,
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            '<subfield code="0">(DE-588)1042243213</subfield>'
-            '<subfield code="a">Matthias, Karl</subfield>'
-            '<subfield code="4">aut</subfield></datafield>',
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            '<subfield code="0">(DE-588)9999</subfield>'
-            '<subfield code="a">Meier, Eva</subfield>'
-            '<subfield code="4">trl</subfield></datafield>',
-        )
-
-        credited = _marc_authors(fields) or ""
-        for row in _marc_author_identifiers(fields):
-            assert row.name in credited
-
-    def test_one_person_named_by_both_100_and_700_is_asserted_once(self):
-        fields = self._fields(
-            self.MAIN,
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            '<subfield code="0">(DE-588)1042243212</subfield>'
-            '<subfield code="a">Kane, Sean P.</subfield>'
-            '<subfield code="4">aut</subfield></datafield>',
-        )
-
-        assert len(_marc_author_identifiers(fields)) == 1
-
-
-class TestWhichAddedEntryWroteTheBook:
-    """What `700 $4` has to say before a name joins the credit line.
-
-    The rule is `metadata._AUTHOR_RELATORS` and the measurement behind it is
-    there too. These pin the three answers it gives, because the interesting one
-    is a refusal: a `700` that states no role is refused even where the credit
-    line would otherwise be one name long, and a reader looking at that record
-    alone sees a co-author being dropped.
-    """
-
-    @staticmethod
-    def _fields(*datafields: str):
-        return _marc_fields(_marc_element("".join(datafields)))
-
-    MAIN = (
-        '<datafield tag="100" ind1="1" ind2=" ">'
-        '<subfield code="a">Ferrante, Elena</subfield></datafield>'
-    )
-
-    @staticmethod
-    def _added(name: str, *relators: str) -> str:
-        roles = "".join(f'<subfield code="4">{value}</subfield>' for value in relators)
-        return (
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            f'<subfield code="a">{name}</subfield>{roles}</datafield>'
-        )
-
-    def test_a_700_stating_no_role_stays_out_of_the_credit_line(self):
-        """The record names the illustrator and the translator in the same
-        field as a co-author, and nothing in it says which is which."""
-        fields = self._fields(
-            self.MAIN,
-            self._added("Goldstein, Ann"),
-            self._added("Rossi, Marco"),
-        )
-
-        assert _marc_authors(fields) == "Elena Ferrante"
-
-    def test_a_record_crediting_nobody_still_names_everybody_it_names(self):
-        """The other half of the same rule: refusing the bare `700` costs a name
-        only where some other field supplied one."""
-        fields = self._fields(self._added("Goldstein, Ann"), self._added("Rossi, Marco"))
-
-        assert _marc_authors(fields) is None
-        assert metadata._marc_credited_names(fields) == "Ann Goldstein, Marco Rossi"
-
-    def test_a_second_relator_naming_an_author_is_read(self):
-        """`$4=edt $4=aut` is an editor who wrote a chapter too. Reading the
-        first `$4` alone dropped them."""
-        fields = self._fields(self.MAIN, self._added("Sokolicek, Alexander", "edt", "aut"))
-
-        assert _marc_authors(fields) == "Elena Ferrante, Alexander Sokolicek"
-
-    def test_a_relator_written_as_a_uri_says_the_same_thing(self):
-        fields = self._fields(
-            self.MAIN,
-            self._added("Goldstein, Ann", "http://id.loc.gov/vocabulary/relators/aut"),
-        )
-
-        assert _marc_authors(fields) == "Elena Ferrante, Ann Goldstein"
-
-    def test_a_uri_naming_a_translator_is_still_refused(self):
-        """The arm that says the URI is read for what it means rather than
-        refused for how it is spelled."""
-        fields = self._fields(
-            self.MAIN,
-            self._added("Goldstein, Ann", "http://id.loc.gov/vocabulary/relators/trl"),
-        )
-
-        assert _marc_authors(fields) == "Elena Ferrante"
 
 
 class TestK10plusIdentity:
@@ -2326,7 +1977,7 @@ class TestK10plusIdentity:
         out.** Re-read live on 2026-08-30, `pica.isb=9780441013593` returns two
         records: the translation, `9786171276895` with the American ISBN beside
         it as `$q amerik. Original`, and the American edition itself, both of
-        whose entries read `$q : pbk.`. Both halves of `_isbn_entries` are in
+        whose entries read `$q : pbk.`. Both halves of `Fields._isbn_entries` are in
         that one answer, which is why the two tests here are its two arms: the
         translation is refused because it names its own ISBN plainly, and the
         edition below is taken because it names nothing else.
@@ -2375,10 +2026,10 @@ class TestK10plusIdentity:
         an unrelated record on a shelf from a barcode scan.
 
         **`$a` and `$z` in one entry, deliberately, and that is what makes this
-        a guard rather than a restatement.** `_marc_claims_isbn` reading `$z`
+        a guard rather than a restatement.** `Fields.claims_isbn` reading `$z`
         is a one expression change and this fails on it. The other shape, an
-        020 carrying `$z` alone, is refused twice over, by `_isbn_entries`
-        dropping the entry and by `_marc_claims_isbn` reading `$a`, so no single
+        020 carrying `$z` alone, is refused twice over, by the `020` filter
+        dropping the entry and by `Fields.claims_isbn` reading `$a`, so no single
         expression change can reach it and the test below pins the behaviour
         without pinning either mechanism.
         """
@@ -2431,8 +2082,8 @@ class TestK10plusIdentity:
 
         **Behaviour, not mechanism.** Two things refuse this independently and
         neither can be removed alone to make this fail, which is stated rather
-        than left for whoever tries: `_isbn_entries` keeps only entries carrying
-        `$a`, and `_marc_claims_isbn` reads `$a`. Measured by mutation on
+        than left for whoever tries: the `020` filter keeps only entries carrying
+        `$a`, and `Fields.claims_isbn` reads `$a`. Measured by mutation on
         2026-09-05: widening either one on its own leaves the whole suite green.
         """
         with respx.mock(assert_all_called=False) as mock:
@@ -3573,7 +3224,7 @@ class TestWhatEachReaderCanSupply:
         a reader that is correct only while a catalogue's habits hold is the
         thing #134 exists to stop."""
         record = metadata._k10plus_record(
-            _marc_fields(_marc_element(
+            Fields(_marc_element(
                 '<datafield tag="650" ind1=" " ind2="7">'
                 "<subfield code=\"a\">Psychology</subfield>"
                 '<subfield code="0">(OCoLC)fst01081447</subfield>'
@@ -3589,7 +3240,7 @@ class TestWhatEachReaderCanSupply:
         """`$x` subdivides the `$a` above it rather than being a heading of its
         own, so the joined string takes the field's one `$2`."""
         record = metadata._k10plus_record(
-            _marc_fields(_marc_element(
+            Fields(_marc_element(
                 '<datafield tag="650" ind1=" " ind2="7">'
                 "<subfield code=\"a\">Frankreich</subfield>"
                 "<subfield code=\"x\">Geschichte</subfield>"
@@ -4507,7 +4158,8 @@ class TestTheAustrianNationalLibrary:
     async def test_a_heading_naming_another_vocabulary_is_not_a_classification(self):
         """`655 $a Roman $2 bellobv` has no `(DE-588)`, so it is a subject only.
 
-        Same rule `_dnb_subjects` applies to the DNB: a value with no GND number
+        Same rule `Fields.controlled_subjects` applies to the DNB: a value with no GND
+        number
         cannot become a classification row, and reaches `subjects`, which is the
         field documented as weak evidence.
         """
@@ -4573,7 +4225,7 @@ class TestTheAustrianNationalLibrary:
         putting it back through this index. The alternatives do not fail
         visibly: `alma.isbn13` and `zzz.qqq` both answer 200 with all 7,793,152
         records and no diagnostic, so a wrong value here is caught by
-        `_marc_claims_isbn` turning every lookup into a miss rather than by
+        `Fields.claims_isbn` turning every lookup into a miss rather than by
         anything raising. This says which index, so that the day it changes it
         changes here and not by accident.
         """
@@ -4776,13 +4428,14 @@ class TestTheAustrianNationalLibrarySearch:
     async def test_an_online_resource_is_not_offered_as_a_book(self):
         """`bibliographic.is_physical_book` is a second refusal, not a spare one.
 
-        This record's leader says monograph, so `_is_component_part` passes it,
-        and it carries no control field at all, so `_marc_carrier_is_book` passes
+        This record's leader says monograph, so `marc_fields.is_component_part` passes
+        it, and it carries no control field at all, so the carrier codes pass
         it too. Only the extent refuses it.
 
         That makes it the row proving the **prose half is not dead code at a MARC
         source** now that the carrier codes stand in front of it. It was written
-        to show `bibliographic.is_physical_book` doing separate work from `_is_component_part`
+        to show `bibliographic.is_physical_book` doing separate work from
+        `marc_fields.is_component_part`
         and it is a third refusal in that path rather than a second, so the job it
         is named for is the one it still does and the ordinal was the stale part.
         """
@@ -4932,8 +4585,8 @@ class TestTheNationalLibraryOfGreece:
     p90 lookup is a fifth of a second.
 
     **One thing made it not cheap**, and it is the reason this class exists
-    rather than a line in the ÖNB's: `_marc_claims_isbn` refused the records
-    that prove it works. See `_isbn_entries`.
+    rather than a line in the ÖNB's: `Fields.claims_isbn` refused the records
+    that prove it works. See `Fields._isbn_entries`.
 
     **A wrong index name is diagnosed here**, unlike at the ÖNB, and the identity
     check is kept regardless: this is a plaintext connection, so the record that
@@ -5574,190 +5227,6 @@ class TestTheBibliotecaNacionalArgentina:
         assert CatalogueSource.BNA not in sources.METERED
 
 
-class TestTheComponentPartRefusal:
-    """The leader test, alone, so its edges are visible.
-
-    Measured over the same 280 live records: the leader catches 155 of 155
-    component parts and loses 0 of 122 monographs, where refusing anything
-    carrying a 773 catches the same 155 and loses 3 monographs.
-    """
-
-    @pytest.mark.parametrize(
-        "leader, expected",
-        [
-            ("00733naa a2200229zc 4500", True),
-            ("00733nab a2200229zc 4500", True),
-            ("01533nam a2200505 c 4500", False),
-            ("01533nac a2200505 c 4500", False),
-            # A truncated leader is a broken record rather than an article, and
-            # the fields decide it on their own merits.
-            ("00733n", False),
-            ("", False),
-        ],
-    )
-    def test_the_bibliographic_level_decides(self, leader, expected):
-        record = ElementTree.fromstring(
-            '<record xmlns="http://www.loc.gov/MARC21/slim">'
-            f"<leader>{leader}</leader></record>"
-        )
-        assert metadata._is_component_part(record) is expected
-
-
-def _carrier_record(leader: str = "01533nam a2200505 c 4500", **fields: str) -> Any:
-    """One MARC record node from a leader and any control fields it needs.
-
-    Named for what it carries rather than for the schema: `_marc_record` above
-    is a different thing, a whole record body, and defining a second function of
-    that name here shadowed it and broke a size cap fixture two hundred lines
-    away. The suite caught it; nothing else would have.
-    """
-    controls = "".join(
-        f'<controlfield tag="{tag[:3]}">{value}</controlfield>'
-        for tag, value in fields.items()
-    )
-    return ElementTree.fromstring(
-        '<record xmlns="http://www.loc.gov/MARC21/slim">'
-        f"<leader>{leader}</leader>{controls}</record>"
-    )
-
-
-class TestTheCarrierDecides:
-    """The MARC codes, alone, so their edges are visible.
-
-    **A diagonal, verified by deleting each code rather than by claiming it.**
-    Every one of the ten codes in the three frozensets is pinned: drop any one
-    and a row goes red. That is the whole point of the block and the first
-    version of it did not have the property, while saying it did. A critic
-    measured it: **7 of the 10 survived deletion with all 14 rows green**, since
-    the two disc rows each carried two refusing features at once, `sd` on a `njm`
-    leader and `vd` on a `ngm` leader, so each covered for the other and neither
-    name was load bearing.
-
-    **So the rows are of three kinds, and 9 plus 7 plus 5 is 21.** Both critics
-    found the previous sentence separately: it said two kinds and accounted for
-    16 of the rows, which is the shape CLAUDE.md predicts for a fix round, a
-    corrected partition that does not sum. It replaced a claim that every row was
-    live, which was false but at least total, so the correction was weaker in the
-    dimension nobody re-checked.
-
-    **9 live**, shapes seen in a catalogue during the September 2026 roster
-    measurement. **7 constructed**, one per code that no live record refuses on
-    its own, and they have to exist: over 2,605 records only two of the ten codes
-    ever refuse a record by themselves, `007 c` on exactly one and leader/06 `m`
-    on exactly one, so a table drawn only from live shapes cannot pin this rule.
-    **5 edge**, none of them a live shape, which was checked rather than assumed:
-    of those 2,605, none carries a leader under 8 characters, an 008 under 24, an
-    empty `007`, or no control field at all.
-
-    The 5 are not decoration, and they do **three** jobs rather than one. Strip
-    the two length tests and **3 of them raise `IndexError`** where the other 18
-    rows do not: the truncated leader, the empty leader and the 11 character 008.
-    Change `value[:1]` to `value[0]` and leave both length tests alone and the
-    empty `007` row is the **only** one of the 21 that goes red, so it is the
-    sole pin for reading the carrier by prefix. The fifth, a record declaring
-    nothing at all, pins that silence decides nothing. No row is idle, which is a
-    better argument against trimming the table than a count of edges.
-
-    **This paragraph has now been wrong twice, and the second time it said 4.**
-    That 4 was a true measurement of the wrong thing: the script behind it
-    stripped the length tests **and** changed the slice in one pass, so it
-    counted a mutation nobody was describing. CLAUDE.md's line for it is that a
-    measurement is only evidence about the configuration it was taken under, and
-    the tell was available in the file: the row comment below already says an
-    empty `007` matches nothing rather than raising, so the sentence contradicted
-    a comment eleven lines away.
-
-    Its remaining blind spot: it pins codes, not the vocabulary. A carrier code
-    no catalogue here has written yet is invisible to it, and `008/23 s` is
-    pinned only by a constructed row because it has never been observed, sitting
-    in the constant on MARC's definition as `b` does in `_COMPONENT_PART_LEVELS`.
-    """
-
-    @pytest.mark.parametrize(
-        "leader, controls, expected",
-        [
-            # An online resource: one electronic carrier and nothing else.
-            ("01533nam a2200505 c 4500", {"007": "cr#|||||||||||"}, False),
-            # An audiobook and a videodisc, by their carrier.
-            ("01533njm a2200505 c 4500", {"007": "sd f||||||||||"}, False),
-            ("01533ngm a2200505 c 4500", {"007": "vd |||||||||||"}, False),
-            # A computer file, the NLG's `E-BOOK`, which carries no 007 at all.
-            ("01533nmm a2200505 c 4500", {}, False),
-            # ── Constructed, one per code no live record refuses alone ───────
-            # The two live disc rows above carry a refusing carrier **and** a
-            # refusing leader, so without these seven, seven of the ten codes
-            # could be deleted with this table still green.
-            ("01533nam a2200505 c 4500", {"007": "sd f||||||||||"}, False),
-            ("01533nam a2200505 c 4500", {"007": "vd |||||||||||"}, False),
-            ("01533ngm a2200505 c 4500", {}, False),
-            ("01533nim a2200505 c 4500", {}, False),
-            ("01533njm a2200505 c 4500", {}, False),
-            (
-                "01533nam a2200505 c 4500",
-                {"008": "210224s2020    gw |||||q|||| 00||||ger  "},
-                False,
-            ),
-            (
-                "01533nam a2200505 c 4500",
-                {"008": "210224s2020    gw |||||s|||| 00||||ger  "},
-                False,
-            ),
-            # Form of item, where the carrier is absent. 195 of the 2,605
-            # records measured carry no 007, so this is not a hypothetical.
-            ("01533nam a2200505 c 4500", {"008": "210224s2020    gw |||||o|||| 00||||ger  "}, False),
-            # A plain printed book: the text carrier, and a blank form of item.
-            (
-                "01533nam a2200505 c 4500",
-                {"007": "tu", "008": "210224s2020    gw ||||| |||| 00||||ger  "},
-                True,
-            ),
-            # **A text carrier beside an electronic one is a text.** 48 of those
-            # 2,605 are Austrian Books Online records for real 19th century
-            # prints, with the print's collation in the 300 and the scan in an
-            # 856. Refusing on any electronic 007 refuses all 48.
-            ("00796nam a2200265 cc4500", {"007": "cr#|||||||||||", "007a": "tu"}, True),
-            # Nothing declared at all decides nothing, which is the common case:
-            # a thin record is not a disc.
-            ("01533nam a2200505 c 4500", {}, True),
-            # A leader too short to index, and an 008 too short to reach 23.
-            ("00733n", {}, True),
-            ("", {}, True),
-            ("01533nam a2200505 c 4500", {"008": "210224s2020"}, True),
-            # An empty 007 is read by prefix and matches nothing rather than
-            # raising, which is why the carrier is not read positionally.
-            ("01533nam a2200505 c 4500", {"007": ""}, True),
-            # The ÖNB writes `#` where the DNB writes a space, and `|` means no
-            # attempt to code. 560 ÖNB **records** carry `#` here and the shipped
-            # rule keeps **556** of them, so a rule testing "not blank" would
-            # refuse 556 books outright.
-            ("01533nam a2200505 c 4500", {"008": "000101|1568    |||           ||| | lat c"}, True),
-            ("01533nam a2200505 c 4500", {"008": "210224s2020    gw ||||||||||| 00||||ger  "}, True),
-        ],
-    )
-    def test_the_record_states_its_own_carrier(self, leader, controls, expected):
-        assert metadata._marc_carrier_is_book(_carrier_record(leader, **controls)) is expected
-
-    def test_a_control_field_is_read_raw_and_never_through_marc_text(self):
-        """The blanks in an 008 are data, and collapsing them moves position 23.
-
-        Measured over 2,605 live records, and counted in **records**: `_marc_text`
-        alters the 008 of 2,043 of them and changes what sits at position 23 on
-        1,859. 847 records carry `o` there and 817 of those lose it, this 008
-        being one, so routing the control field through the shared subfield
-        reader turns this refusal into a pass with nothing failing anywhere.
-
-        **608 is what this paragraph said, and it is the count of distinct 008
-        values among those 817 records rather than a count of records.** A
-        critic caught it. The instrument had answered a narrower question than
-        the prose asked, which is the failure CLAUDE.md names, and it sat here
-        beside a comment in `metadata.py` that had the same slip twice over.
-        """
-        raw = "210224s2020    gw |||||o|||| 00||||ger  "
-        assert raw[23] == "o"
-        assert metadata._marc_text(raw)[23] != "o"
-        assert metadata._marc_carrier_is_book(_carrier_record(**{"008": raw})) is False
-
-
 class TestTheCarrierTestIsTheOnlyWayIn:
     """One door in front of every MARC parse path, enforced rather than asked.
 
@@ -5774,81 +5243,189 @@ class TestTheCarrierTestIsTheOnlyWayIn:
     `tests/test_bibliographic.py::TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor`
     asks the same question of every module of ours and of both call spellings.
 
-    **What it cannot see**, listed here rather than left to be discovered. Both
-    checks read plain `Name` calls, so an aliased call (`fields = _marc_fields`
-    then `fields(node)`) and an attribute call (`metadata._marc_fields(node)`)
-    are invisible to them; `_marc_fields` is private, so the second spelling is
-    refused outside `marc.py` by `tests/test_marc.py` rather than seen here.
-    `_fullest_physical`
-    satisfies the first check for the three lookups that name it, and it only
-    **ranks**, so a search path that ranked where it should refuse would pass
-    while refusing nothing; that is not true of any path today. A path that calls
-    the door and **discards the answer** satisfies both checks; that is the cheapest
-    evasion of the four and it is not detectable by any guard keyed on call
-    names, which is the same limit `TestTheShelfIsTheOnlyWayIn` lives with. And a
-    source that parses MARC datafields without calling `_marc_fields` at all is
-    outside the first check entirely: it would be a second reader of one format,
-    which is a finding on its own before it is a hole here.
+    **The walk is every module of ours, for the same reason and after the same
+    event.** While the parser was `metadata._marc_fields` a second module
+    building one had to spell a private name, which
+    `tests/test_marc.py::TestNoModuleReadsAnotherModulesPrivateNames` refuses, so
+    reading `metadata.py` alone was sound and that compensating control was
+    written into this class's blind spot list. `marc_fields.Fields` is public, so
+    any module can build one and no other guard refuses it: `marc.py` already
+    does. A check over one file would have been green on the whole class of
+    evasion it exists for.
+
+    **Both call spellings are collected.** The door is
+    `marc_fields.Fields.describes_a_book`, so every call to it is an
+    `ast.Attribute` and a walk keyed on `ast.Name` would see none of them. A call
+    is collected by the attribute's own name and never by its receiver's, so
+    binding a `Fields` to any name whatever does not hide the question it is then
+    asked.
+
+    **What it still cannot see**, listed here rather than left to be discovered.
+    A **rebinding** inside the module (`build = Fields` then `build(node)`) and a
+    call built by `getattr`. An **aliased import** (`from marc_fields import
+    Fields as F`) is the ordinary shape of the same evasion and is closed rather
+    than listed: `_functions` collects a call under the name it was imported as,
+    which is `test_marc.py::_private_reads`' rule and its reason.
+
+    `_fullest_physical` satisfies the first check for the lookup that names it,
+    and it only **ranks**, so a search path that ranked where it should
+    refuse would pass while refusing nothing; that is not true of any path today.
+    A path that calls the door and **discards the answer** satisfies both checks;
+    that is the cheapest evasion and it is not detectable by any guard keyed on
+    call names, which is the same limit `TestTheShelfIsTheOnlyWayIn` lives with.
+    And a source that parses MARC datafields without building a `Fields` at all
+    is outside the first check entirely: it would be a second reader of one
+    format, which is a finding on its own before it is a hole here.
     """
 
+    #: The one parse path that builds a `Fields` and asks nothing, by
+    #: `<path>::<function>`, with the reason it is not the defect this class
+    #: hunts.
+    #:
+    #: An upload is a cataloguer handing over their own file, so `marc.read`
+    #: refuses a record with no title and nothing else: `marc._record`'s
+    #: docstring carries the three divergences in full. A catalogue answered
+    #: about an object this app did not ask for, which is what the carrier test
+    #: is for; a file was chosen by the person importing it.
+    #:
+    #: `test_the_exemption_still_exists_to_be_exempted` is what stops this
+    #: outliving its subject.
+    EXEMPT = frozenset({"marc.py::read"})
+
     @staticmethod
-    def _functions() -> dict[str, set[str]]:
-        """Every function in `metadata.py`, by the plain names it calls."""
-        tree = ast.parse((Path(metadata.__file__)).read_text(encoding="utf-8"))
-        return {
-            node.name: {
-                call.func.id
-                for call in ast.walk(node)
-                if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
-            }
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        }
+    def _functions(root: Path = BACKEND) -> dict[str, set[str]]:
+        """Every function under `root`, as `<path>::<name>`, by the names it calls.
+
+        **`root` is a parameter for the reason `_python_sources` takes one**: a
+        walk asserted only against this checkout is a walk nobody has watched
+        fail. `test_a_planted_parse_path_that_asks_nothing_is_reported` drives
+        this one against a tree it builds, through this function rather than
+        through a second copy of it.
+
+        A plain call contributes its own name and a method or module attribute
+        call contributes the attribute's, so `Fields(node)`,
+        `marc_fields.Fields(node)` and `fields.describes_a_book(t)` are all
+        visible and none of them depends on what the receiver is called.
+
+        **A call is collected under the name it was imported as, not the name it
+        was bound to**, so `from marc_fields import Fields as F` then `F(node)`
+        is a reader. `test_marc.py::_private_reads` bought this same distinction
+        one file over and records what it cost: keying on the local binding made
+        an aliased import a clean evasion. Keyed on the binding here, a parse
+        path could import the door under any letter and this walk would report a
+        function that calls nothing it recognises.
+
+        **It over reports where a local shadows an alias**, which is the safe
+        direction and the same trade that guard takes: a module importing
+        `Fields as F` and separately calling some other local `F` is credited
+        with building one.
+
+        **Qualified by path and by enclosing scope**, which is
+        `test_bibliographic._callers`' rule and its reason: this package holds
+        more than one `covers.py`, and a `def` nested inside another function
+        takes the name of whatever encloses it.
+        """
+
+        def called(call: ast.Call, aliases: dict[str, str]) -> str | None:
+            if isinstance(call.func, ast.Name):
+                return aliases.get(call.func.id, call.func.id)
+            if isinstance(call.func, ast.Attribute):
+                return call.func.attr
+            return None
+
+        found: dict[str, set[str]] = {}
+
+        def visit(
+            node: ast.AST, path: str, qualified: str, aliases: dict[str, str]
+        ) -> None:
+            for child in ast.iter_child_nodes(node):
+                if isinstance(
+                    child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+                ):
+                    inner = (
+                        child.name
+                        if qualified == "<module>"
+                        else f"{qualified}.{child.name}"
+                    )
+                    if not isinstance(child, ast.ClassDef):
+                        found.setdefault(f"{path}::{inner}", set())
+                    visit(child, path, inner, aliases)
+                    continue
+                if isinstance(child, ast.Call) and qualified != "<module>":
+                    name = called(child, aliases)
+                    if name is not None:
+                        found.setdefault(f"{path}::{qualified}", set()).add(name)
+                visit(child, path, qualified, aliases)
+
+        for source in _python_sources(root):
+            tree = ast.parse(source.read_text(encoding="utf-8"))
+            visit(
+                tree,
+                str(source.relative_to(root)),
+                "<module>",
+                {
+                    alias.asname or alias.name: alias.name
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.ImportFrom)
+                    for alias in node.names
+                },
+            )
+        return found
+
+    @staticmethod
+    def _readers(functions: dict[str, set[str]]) -> dict[str, set[str]]:
+        """Every function that builds a `Fields`, by the names it calls."""
+        return {name: calls for name, calls in functions.items() if "Fields" in calls}
+
+    def test_the_exemption_still_exists_to_be_exempted(self):
+        """An allowlist entry for a path that no longer parses guards nothing.
+
+        `test_house_rules` states the rule this follows: twice in this
+        repository a guard went green with its own subject gone.
+        """
+        readers = set(self._readers(self._functions()))
+
+        assert not self.EXEMPT - readers, sorted(self.EXEMPT - readers)
 
     def test_a_marc_parse_path_cannot_skip_the_carrier_test(self):
         """Reading a MARC record's fields obliges you to ask about its carrier.
 
-        No allowlist, because outside these the correct answer is zero:
-        `_marc_fields` exists to turn one record into book fields, and a caller
-        doing that without asking whether it is a book is the defect.
+        One exemption, `EXEMPT` above, and outside it the correct answer is zero:
+        `Fields` exists to turn one record into book fields, and a caller doing
+        that without asking whether it is a book is the defect.
 
-        **Two, where this said eight, and the drop is the ticket rather than a
-        weakening.** The eight were five per source lookups and three per source
-        searches, each reading `_marc_fields` in its own copy of the same four
-        lines. They are `_marc_lookup` and `_marc_search`, driven by a row, so
-        the surface a new source can get wrong went from eight hand written paths
-        to none: a tenth catalogue that reads MARC adds a row and reaches these
-        two. A number that fell because its subject was deleted is the shape this
-        repository asks to be stated rather than quietly edited, so it is stated:
-        nothing was exempted and nothing stopped being checked, there are two
-        readers where there were eight.
+        **Three readers across the tree, where this counted two in one file, and
+        the third was always there.** `marc.read` has parsed uploads since before
+        this class was written; it was invisible while the parser was private to
+        `metadata.py` and this walked that file alone. So the number went up
+        because the walk widened, not because a path was added, and the number
+        that matters is that one of the three is exempt and two are not.
         """
-        readers = {
-            name: calls
-            for name, calls in self._functions().items()
-            if "_marc_fields" in calls
-        }
-        assert len(readers) == 2, sorted(readers)
+        functions = self._functions()
+        readers = self._readers(functions)
+        assert len(readers) == 3, sorted(readers)
         # **`_marc_lookup` needs both names and not either, and that is a
-        # regression this guard shipped for one round.** A critic deleted
-        # `_marc_is_physical_book` from its ranking arm and all three checks in
-        # this class stayed green: one function holds two policies now, so the
-        # filtering arm's `_fullest_physical` satisfied an "either" test on the
-        # ranking arm's behalf. Under the old shape the DNB lookup was its own function
+        # regression this guard shipped for one round.** A critic deleted the
+        # carrier door from its ranking arm and all three checks in this class
+        # stayed green: one function holds two policies now, so the filtering
+        # arm's `_fullest_physical` satisfied an "either" test on the ranking
+        # arm's behalf. Under the old shape the DNB lookup was its own function
         # naming only the door, so the same deletion failed. The mutation is a
         # live defect and not a cosmetic one: a DNB response holding a
         # digitisation and a printed record that both claim the ISBN answered
         # with the digitisation, `page_count` None against 300.
         required = {
-            "_marc_lookup": {"_marc_is_physical_book", "_fullest_physical"},
+            "metadata.py::_marc_lookup": {"describes_a_book", "_fullest_physical"},
         }
         assert not [
             name
             for name, calls in readers.items()
-            if not calls
-            >= required.get(name, set())
-            or not calls & {"_marc_is_physical_book", "_fullest_physical"}
-        ]
+            if name not in self.EXEMPT
+            and (
+                not calls >= required.get(name, set())
+                or not calls & {"describes_a_book", "_fullest_physical"}
+            )
+        ], sorted(readers)
 
     def test_the_lookup_ranking_helper_is_itself_inside_the_door(self):
         """The check above is satisfied one hop early by the filtering arm.
@@ -5856,13 +5433,96 @@ class TestTheCarrierTestIsTheOnlyWayIn:
         `_marc_lookup`'s filtering arm names `_fullest_physical` and not the
         door, so removing the carrier term from that helper's sort key would
         leave the checks above green for that arm. A critic measured it under the
-        old shape, where the K10plus lookup, the ÖNB lookup and the NLG lookup were three functions doing
-        it; the three are one arm of one function now and the hole is the same
-        one. It is scope rather than a hole, because the ranking has tests of its
-        own, and this closes it so the class docstring's claim is true of both
-        arms.
+        old shape, where the K10plus lookup, the ÖNB lookup and the NLG lookup
+        were three functions doing it; the three are one arm of one function now
+        and the hole is the same one. It is scope rather than a hole, because the
+        ranking has tests of its own, and this closes it so the class
+        docstring's claim is true of both arms.
         """
-        assert "_marc_is_physical_book" in self._functions()["_fullest_physical"]
+        assert (
+            "describes_a_book"
+            in self._functions()["metadata.py::_fullest_physical"]
+        )
+
+    @staticmethod
+    def _plant(root: Path, **modules: str) -> Path:
+        """A tree `_python_sources` will walk, holding the modules given."""
+        root.mkdir(parents=True, exist_ok=True)
+        for name, source in modules.items():
+            (root / f"{name}.py").write_text(source)
+        return root
+
+    #: A parse path spelled the way `metadata.py` spells it, with the door left
+    #: out. The receiver is deliberately not called `fields`: a walk keyed on the
+    #: receiver's name rather than the attribute's would pass this.
+    SKIPS_THE_DOOR = (
+        "import marc_fields\n\n\n"
+        "def _read(node):\n"
+        "    whatever = marc_fields.Fields(node)\n"
+        "    return whatever.isbn()\n"
+    )
+
+    def test_a_planted_parse_path_that_asks_nothing_is_reported(self, tmp_path):
+        """The evasion this class exists for, driven through its own instrument.
+
+        The version this replaced asserted a comprehension it had written
+        itself, so it could not fail for any change to `_functions`: reverting
+        the collector to its `ast.Name` arm alone left it green while two other
+        tests in this class went red. A test that re-implements the thing it is
+        testing observes nothing.
+        """
+        root = self._plant(tmp_path / "backend", intruder=self.SKIPS_THE_DOOR)
+        readers = self._readers(self._functions(root))
+
+        assert set(readers) == {"intruder.py::_read"}
+        assert not readers["intruder.py::_read"] & {
+            "describes_a_book",
+            "_fullest_physical",
+        }
+
+    def test_a_parse_path_that_imports_the_door_under_another_name_is_reported(
+        self, tmp_path
+    ):
+        """The ordinary spelling of the evasion, which is the import and not a
+        rebinding inside the module.
+
+        Keyed on the local binding this reader contributes the name `F`, so it
+        is not a reader, the count stays at its expected value and every other
+        test in this class stays green while the intruder asks nothing.
+        Measured by a critic seat against the real file list.
+        """
+        root = self._plant(
+            tmp_path / "backend",
+            intruder=(
+                "from marc_fields import Fields as F\n\n\n"
+                "def _read(node):\n"
+                "    return F(node).isbn()\n"
+            ),
+        )
+        readers = self._readers(self._functions(root))
+
+        assert set(readers) == {"intruder.py::_read"}
+        assert not readers["intruder.py::_read"] & {
+            "describes_a_book",
+            "_fullest_physical",
+        }
+
+    def test_a_planted_parse_path_that_asks_is_not_reported(self, tmp_path):
+        """The other half of the diagonal: it must not report every reader.
+
+        One line apart from the fixture above, so what separates them is the
+        call to the door and nothing else.
+        """
+        root = self._plant(
+            tmp_path / "backend",
+            intruder=self.SKIPS_THE_DOOR.replace(
+                "return whatever.isbn()", "return whatever.describes_a_book(None)"
+            ),
+        )
+        readers = self._readers(self._functions(root))
+
+        assert set(readers) == {"intruder.py::_read"}
+        assert "describes_a_book" in readers["intruder.py::_read"]
 
 
 class TestTheLookupsRankAPhysicalRecordFirst:
@@ -5886,8 +5546,8 @@ class TestTheLookupsRankAPhysicalRecordFirst:
             f'<subfield code="a">{pages}</subfield></datafield>'
             f"{extra}</record>"
         )
-        fields = _marc_fields(node)
-        return node, fields, metadata._k10plus_record(fields, "9783442267743")
+        fields = Fields(node)
+        return fields, metadata._k10plus_record(fields, "9783442267743")
 
     def _pair(self) -> Any:
         """A digitisation that is the fuller record, and a thinner printed one.
@@ -5919,7 +5579,7 @@ class TestTheLookupsRankAPhysicalRecordFirst:
         """
         online, printed = self._pair()
 
-        assert online[2].completeness > printed[2].completeness
+        assert online[1].completeness > printed[1].completeness
 
     def test_the_printed_edition_wins_over_the_fuller_digitisation(self):
         online, printed = self._pair()
@@ -6056,11 +5716,11 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
     so does registering a sixth source with no body. Making the **MARC**
     adapters pass `None` instead of the argument does **not**, and that is
     correct rather than a hole: all three MARC lookups filter their candidates
-    through `_marc_claims_isbn` first, so a record that reaches the parser is
-    guaranteed to carry a matching 020, and `_dnb_record`'s
-    `isbn = isbn or _marc_isbn(fields)` then supplies the same canonical value
-    from the record. Two independent mechanisms satisfy the invariant on those
-    paths, and the invariant is what `as_lookup()` needs. A test that failed
+    through `Fields.claims_isbn` first, so a record that reaches the parser is
+    guaranteed to carry a matching 020, and `_dnb_record` falls back to the
+    record's own `Fields.isbn`, which supplies the same canonical value. Two
+    independent mechanisms satisfy the invariant on those paths, and the
+    invariant is what `as_lookup()` needs. A test that failed
     there would be pinning which of the two ran, which is not the guarantee and
     would break on a legitimate refactor.
     """
@@ -6076,7 +5736,7 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
     #: **No body carries the canonical ISBN-13 anywhere**, which is what makes
     #: the assertion discriminating rather than circular. The JSON sources carry
     #: no identifier at all. The MARC sources cannot do that, because
-    #: `_marc_claims_isbn` refuses a record whose own 020 does not name the ISBN
+    #: `Fields.claims_isbn` refuses a record whose own 020 does not name the ISBN
     #: asked for, so their 020 carries the **ISBN-10** form, `0743273567`. That
     #: satisfies the identity check, which canonicalises both sides, while
     #: leaving `9780743273565` obtainable only from the argument. A first draft

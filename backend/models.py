@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    MetaData,
     String,
     Table,
     Text,
@@ -534,7 +535,7 @@ class AuthorIdentifier(Base):
     # Stored bare, without MARC's `(DE-588)` wrapper: the scheme is already a
     # column, and keeping the prefix would let one identifier arrive under two
     # spellings that `uq_author_identifiers_key_scheme` cannot collapse. The
-    # same rule `metadata._gnd_identifier` applies to a subject heading.
+    # same rule `marc_fields.Subfields.gnd_identifier` applies to a subject heading.
     identifier: Mapped[str] = mapped_column(
         String(AUTHORITY_IDENTIFIER_MAX), nullable=False
     )
@@ -1171,6 +1172,37 @@ class Book(Base):
         return stored
 
 
+def children_of_books(metadata: MetaData) -> set[Table]:
+    """Every table with a foreign key to `books`.
+
+    Derived, because a foreign key is a structural fact the schema can answer,
+    and asked by two rules that would otherwise each keep a list. The privacy
+    pin in `tests/test_shelf.py` classifies each child as scoped by its own
+    Member or scoped by the Book; `folding.TRANSFERS` says what becomes of its
+    rows when the Book they point at loses a merge. Delete this and both become
+    hand written enumerations of the same ten tables.
+
+    Takes a `MetaData` rather than reading `Base` itself so the derivation can
+    be driven against a synthetic schema. That test is what says this is a rule
+    and not a list.
+
+    Identity against the `books` table object, not its name. A foreign key's
+    target is typed `FromClause` because a key can point into a join or a
+    subquery, so reading `.name` off it is unsound as well as unchecked.
+    Comparing the object is both narrower and stronger: a second table that
+    happened to be called "books" in another `MetaData` would not match.
+    """
+    books = metadata.tables.get("books")
+    if books is None:
+        return set()
+    return {
+        table
+        for table in metadata.tables.values()
+        if table is not books
+        and any(fk.column.table is books for fk in table.foreign_keys)
+    }
+
+
 class UserBook(Base):
     """One member's reading status for one book.
 
@@ -1574,8 +1606,8 @@ class Quote(Base):
     **It hangs off the book row, not off `copy_group`.** A page number is a
     fact about an edition: page 214 of the paperback is not page 214 of the
     hardback. Everything else per copy already lives this way (notes, loans,
-    progress), and `_repoint_relations` moves these across on a merge exactly
-    as it moves notes.
+    progress), and `folding.fold` moves these across on a merge exactly as it
+    moves notes.
 
     Deliberately absent, each because a reference implementation has one and
     this app has no use for it: an end position and a position mode (BookWyrm
@@ -2205,7 +2237,7 @@ class BookIdentifier(Base):
 
     **A table rather than a column per scheme, and the case that decides it is
     already in the tree.** `POST /api/books/merge` folds up to 20 rows into one
-    and `_repoint_relations` moves their children across, so one Book really
+    and `folding.fold` moves their children across, so one Book really
     can end up carrying an ASIN and a Google volume id: two rows for one book
     are commonly two imports of two stores, which is the same argument
     `DigitalReference` makes about two machines. A nullable column would have
@@ -2258,7 +2290,7 @@ class BookIdentifier(Base):
     is open.** Some files must state the road, so the rule is not that nothing
     restates it: **no file states the road without the condition beside it.** A
     reader who meets the road alone believes a promise. Importing the store
-    file again offers a second Book, and `_repoint_relations` moves that Book's
+    file again offers a second Book, and `folding.fold` moves that Book's
     rows onto this one. It offers nothing when this Book already holds the ISBN
     the file carries: `_create_book` answers **409** rather than making a
     second Book, and an export carrying both an ISBN and a store identifier is

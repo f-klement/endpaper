@@ -898,7 +898,7 @@ describe("what a scheme's own producers write", () => {
 
   it("builds the row a walk keeps, with the value as it was written", () => {
     // Neither trimmed nor lower cased: the canonical form of a scheme's value
-    // is `LibrarySettingsPage/types.CANONICAL_VALUE`'s, which is the one door
+    // is `lib/bookRequest.CANONICAL_VALUE`'s, which is the one door
     // every reader's value passes through, and doing it here as well would
     // make that door optional.
     expect(storeIdentifier("asin", "b000r34ykc")).toEqual({
@@ -980,5 +980,175 @@ describe("the Takeout reader and the value rule admit the same volume ids", () =
     // unreadable is not what was measured.
     expect(taken.size).toBeGreaterThan(0);
     expect(taken.size).toBeLessThan(CANDIDATES.length);
+  });
+});
+
+/**
+ * Every member a reader's library declares is read by the adapter it reaches.
+ *
+ * **The seam is a reader's only consumer**, so a member no `from*` reads is a
+ * value produced for nobody. Five `schemaVersion` fields and five `missing`
+ * fields lived that way behind 23 union members and seven helpers until the
+ * seam was asked what it read.
+ *
+ * **Nothing here lists a store.** The adapters are found by their own
+ * declaration, each names the interface it takes, and the module that interface
+ * comes from is read off the import that brought it in. So a seventh store adds
+ * no line to this file and cannot be left out of it either.
+ *
+ * **The count is crossed against `STORE_IDS`**, which is derived from `STORES`
+ * rather than from the source text, so a declaration this regex stopped
+ * matching fails here rather than passing on a shorter list.
+ *
+ * **What this does not reach.** A member read by the adapter and then dropped
+ * on the floor is **unguarded**: `void library.schemaVersion;` as `fromKobo`'s
+ * first statement satisfies every arm below, measured by the design seat, and
+ * nothing about `StoreLibrary`'s own fields observes it. A field on a `*Book`
+ * rather than on a `*Library` is covered instead, by `storeToBookCreate`'s
+ * total mapping.
+ */
+describe("a reader's library says nothing the seam drops", () => {
+  // **`import.meta.glob` and not `node:fs`**, which `houseRules.test.ts`
+  // prefers for a reason that bites here: this file runs under happy-dom, where
+  // `import.meta.url` is not a `file:` URL and `fileURLToPath` throws before an
+  // assertion runs. `licence.test.ts` takes the node environment instead,
+  // because it reads across the trees and the glob is rooted at `frontend/`.
+  const MODULES = import.meta.glob("../../src/lib/*.ts", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+
+  function sourceOf(module: string): string {
+    const source = MODULES[`../../src/lib/${module}.ts`];
+    if (source === undefined) throw new Error(`no source for ${module}`);
+    return source;
+  }
+
+  /**
+   * The source with comments removed, so a rule cannot be satisfied by prose.
+   *
+   * **The eighth copy in this tree**, each keeping its own for the same stated
+   * reason: a test importing another test file evaluates that file's
+   * `describe`s. Counted rather than listed, because a list of the other seven
+   * goes stale in the direction where a ninth is written and nobody here knows.
+   * Ticketed at eight, since the reason for copying stops holding somewhere
+   * below it and `tests/lib/sqliteFixtures.ts` is the precedent for a shared
+   * helper that is not a test.
+   *
+   * Same known defect as every other copy: it cuts inside a string literal
+   * containing `//`. No module under `src/lib/` is shaped that way.
+   */
+  function withoutProse(source: string): string {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+  }
+
+  /** The index just past the delimiter closing the one that opens at `open`. */
+  function past(code: string, open: number): number {
+    const openers = "([{";
+    const closers = ")]}";
+    let depth = 0;
+    for (let at = open; at < code.length; at += 1) {
+      if (openers.includes(code[at]!)) depth += 1;
+      else if (closers.includes(code[at]!)) {
+        depth -= 1;
+        if (depth === 0) return at + 1;
+      }
+    }
+    throw new Error(`unbalanced from ${open}`);
+  }
+
+  interface Adapter {
+    /** The function, for the message a failure carries. */
+    readonly name: string;
+    /** The reader's library interface, which its parameter names. */
+    readonly library: string;
+    /** Members it reads off that parameter. */
+    readonly reads: ReadonlySet<string>;
+    /** Members the interface declares. */
+    readonly declared: readonly string[];
+  }
+
+  const ADAPTERS: readonly Adapter[] = (() => {
+    const seam = withoutProse(sourceOf("stores"));
+    const declaration = /function (from\w+)\((\w+): (\w+)\): StoreLibrary \{/g;
+    return [...seam.matchAll(declaration)].map((match) => {
+      const [whole, name, parameter, library] = match;
+      const opens = match.index + whole!.length - 1;
+      const body = seam.slice(opens, past(seam, opens));
+      const reads = new Set(
+        [...body.matchAll(new RegExp(`\\b${parameter}\\.(\\w+)`, "g"))].map(
+          (read) => read[1]!,
+        ),
+      );
+      // A destructure reads by name without spelling the parameter before it,
+      // so the names inside one count as reads. Without this arm a rewrite
+      // using it would fail here for no fault of its own.
+      //
+      // **`[^{}]`, not `[^}]`.** The body this searches begins with the
+      // function's own opening brace, so the looser class matched from there to
+      // the pattern's closing brace and handed the split `const { books` as its
+      // first name. Measured: the arm reported `books` unread against an
+      // adapter that destructured it, and `skipped` clean, which is a guard
+      // failing on correct code and half silent about it.
+      const unpacked = new RegExp(`\\{([^{}]*)\\}\\s*=\\s*${parameter}\\b`);
+      for (const spelt of unpacked.exec(body)?.[1]?.split(",") ?? []) {
+        const named = /^\s*(\w+)/.exec(spelt)?.[1];
+        if (named !== undefined) reads.add(named);
+      }
+      const from = new RegExp(
+        `import type \\{([^}]*\\b${library}\\b[^}]*)\\} from "\\./(\\w+)"`,
+      ).exec(seam);
+      if (from === null)
+        throw new Error(`${library!} is imported from nowhere`);
+      const module = withoutProse(sourceOf(from[2]!));
+      const shape = new RegExp(`export interface ${library} \\{`).exec(module);
+      if (shape === null) throw new Error(`${library!} is declared nowhere`);
+      const opensShape = shape.index + shape[0].length - 1;
+      const members = module.slice(opensShape, past(module, opensShape));
+      return {
+        name: name!,
+        library: library!,
+        reads,
+        // **`readonly` is optional and nothing in this repository requires
+        // it**: `frontend/` has no eslint config, `tsc` does not check it and
+        // prettier does not add it, and `lib/audiobookGroups.ts`,
+        // `lib/audiobook.ts` and `lib/bookFilters.ts` declare members without
+        // it today. A pattern spelling the keyword read a dead member added
+        // with it and passed over the same member added without, on three of
+        // the six libraries; it was the other seat that spelled it that way,
+        // because every mutation the author picked spelled it the way the
+        // author could see.
+        //
+        // **It reads a line start, so a member whose type opens a block over
+        // reports the names inside it**: `meta: {` with `count: number;` on
+        // the next line contributes `count` as well. Nothing in the tree has
+        // that shape, and the failure is loud and names the inner name, so the
+        // relaxed anchor is the cheaper trade. The same member written on one
+        // line reports correctly, as does a multi line union.
+        declared: [
+          ...members.matchAll(/^\s*(?:readonly\s+)?(\w+)\??\s*:/gm),
+        ].map((member) => member[1]!),
+      };
+    });
+  })();
+
+  it("finds one adapter for every store the card offers", () => {
+    expect(ADAPTERS.map((adapter) => adapter.name)).toHaveLength(
+      STORE_IDS.length,
+    );
+  });
+
+  it.each(ADAPTERS)("reads every member $library declares", (adapter) => {
+    // The instrument first: an adapter whose body or whose interface came back
+    // empty would satisfy the subset below without observing anything.
+    expect(adapter.declared.length).toBeGreaterThan(0);
+    expect(adapter.reads.size).toBeGreaterThan(0);
+
+    expect(
+      adapter.declared.filter((member) => !adapter.reads.has(member)),
+      `${adapter.library} declares this and ${adapter.name} never reads it: ` +
+        "give the member a consumer at the seam, or take it out of the reader",
+    ).toEqual([]);
   });
 });

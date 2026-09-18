@@ -93,6 +93,7 @@ import type { MoonReaderFailure, MoonReaderLibrary } from "./moonReader";
 import type { KindleFailure, KindleLibrary } from "./kindle";
 import type { KoboAcquisition, KoboFailure, KoboLibrary } from "./kobo";
 import type { SqliteFailure } from "./sqlite";
+import type { SourceRecord } from "./sourceRecord";
 import type { TakeoutFailure, TakeoutLibrary } from "./takeout";
 
 /**
@@ -129,7 +130,7 @@ export type StoreOwnership = "owned" | "unknown";
  *
  * **A union rather than the endpoint's enum**, because
  * `tests/houseRules.test.ts` denies every reader in this directory the
- * generated client. `LibrarySettingsPage/types.ts` holds a total `Record` over
+ * generated client. `lib/bookRequest.STORE_SCHEMES` holds a total `Record` over
  * this, so a scheme added here without a home there is a compile error rather
  * than a value the endpoint's enum does not have, answered with a 422 in the
  * middle of somebody's import.
@@ -232,7 +233,7 @@ export const PRODUCED_VALUE: Record<StoreIdentifierScheme, RegExp> = {
   //
   // **Either case is accepted and neither is folded here**: a scheme's
   // canonical form belongs to the scheme rather than to one reader, and
-  // `LibrarySettingsPage/types.CANONICAL_VALUE` is the one door every reader's
+  // `lib/bookRequest.CANONICAL_VALUE` is the one door every reader's
   // value passes through.
   asin: /^[A-Za-z0-9]{10}$/,
   // Twelve characters of the URL safe alphabet, `takeout.ts`'s `VOLUME_ID` and
@@ -263,11 +264,11 @@ export function producedValue(
  * **The value is carried as the file wrote it.** Nothing is trimmed, lower
  * cased or otherwise canonicalised here: a padded value is refused above rather
  * than closed up, and a scheme's canonical form is
- * `LibrarySettingsPage/types.CANONICAL_VALUE`'s, which is the one door every
+ * `lib/bookRequest.CANONICAL_VALUE`'s, which is the one door every
  * reader's value passes through.
  *
  * **A value the scheme's readers would not produce is dropped and the book is
- * not**, `LibrarySettingsPage/types.boundIdentifiers`' rule: an import of nine
+ * not**, `lib/bookRequest.boundIdentifiers`' rule: an import of nine
  * hundred books must not turn on one library's odd row. That is why this
  * answers `null` rather than throwing.
  */
@@ -284,14 +285,15 @@ export function storeIdentifier(
  * **Not one store's record**, `fileReaders.FileMetadata`'s rule and for its
  * reason: what a field holds is decided by what this app stores rather than by
  * what any vendor spells, so a third store fills these in rather than adding
- * to them. Every field but `key` goes into a `BookCreate` one line each, in
- * `LibrarySettingsPage/types.ts`.
+ * to them. Every field but `key` reaches a `BookCreate` in
+ * `LibrarySettingsPage/types.ts`, those of `SourceRecord` through
+ * `lib/bookRequest.boundRecord` and the rest a line each.
  *
  * **A field the store did not carry is `null` and never `""`.** A caller
  * reading `book.title` to decide whether the store named one would take an
  * empty string for a title.
  */
-export interface StoreBook {
+export interface StoreBook extends SourceRecord {
   /**
    * What the store calls this book, unique within the one source.
    *
@@ -301,16 +303,6 @@ export interface StoreBook {
    * them, because two stores number their own shelves.
    */
   readonly key: string;
-  readonly title: string | null;
-  /**
-   * Separate values, in the order the store gave them.
-   *
-   * **Never split out of one string here.** A store that carries its authors
-   * as one line is read as one author: the separator is undocumented in every
-   * store this has met, and a wrong guess turns one person into two.
-   */
-  readonly authors: readonly string[];
-  readonly isbn: string | null;
   /**
    * What the store's own catalogue calls this book, where that is not an ISBN.
    *
@@ -328,12 +320,6 @@ export interface StoreBook {
    * store's file path under one name.
    */
   readonly identifiers: readonly StoreIdentifier[];
-  readonly publisher: string | null;
-  readonly year: number | null;
-  readonly language: string | null;
-  readonly description: string | null;
-  readonly seriesName: string | null;
-  readonly seriesIndex: number | null;
   /** What kind of copy this is, or `null` where the store does not say. */
   readonly format: StoreFormat | null;
   /**

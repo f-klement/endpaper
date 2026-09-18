@@ -109,6 +109,48 @@ NLG = "http://catalogue.nlg.gr:210/biblios"
 NKP = "http://aleph.nkp.cz:9991/NKC"
 BNE = "https://catalogo.bne.es/view/sru/34BNE_INST"
 
+#: Where each cover host resolves for the whole suite. `cover_resolver` below is
+#: what answers, and `tests/conftest.py` installs it on `covers.resolver`.
+#:
+#: **Every cover request is addressed to one of these and not to the name.**
+#: `covers._client` goes through `fetch.pinned_client`, which connects to the
+#: address rather than looking the name up twice, and respx's default mocker
+#: patches httpcore, which is below that transport. So a route registered under
+#: a cover host's name is never matched. `tests/test_opds.py` records the same
+#: property one door along.
+#:
+#: **Globally routable literals, deliberately, and a documentation range will
+#: not do.** `fetch.PUBLIC_ADDRESSES` admits `AddressClass.PUBLIC` only, and
+#: Python answers `is_private` True for 192.0.2.0/24, 198.51.100.0/24 and
+#: 203.0.113.0/24, so `fetch.classify` calls all three RESERVED and the policy
+#: refuses them: routes registered there would never be reached. Nothing
+#: connects to these, because respx answers below the transport.
+AT_OPEN_LIBRARY_COVERS = "https://1.2.3.4/"
+AT_DNB_COVERS = "https://1.2.3.5/opac/mvb/cover"
+AT_GOOGLE_BOOKS_COVERS = "https://1.2.3.6/"
+
+#: Where every other cover host answers, the two wildcard entries included.
+AT_ANY_COVER_HOST = "1.2.3.7"
+
+_COVER_ADDRESSES = {
+    "covers.openlibrary.org": "1.2.3.4",
+    "portal.dnb.de": "1.2.3.5",
+    "books.google.com": "1.2.3.6",
+}
+
+
+async def cover_resolver(host: str, port: int) -> tuple[str, ...]:
+    """`covers.resolver` for the suite: a fixed address per image service.
+
+    **A map rather than `tests/test_fetch.py`'s `_Answers`**, which answers one
+    address per *call* in order. A cover walk asks about a different host on
+    each hop, and `resolve` asks about two services in one run, so an ordered
+    double would make a route's address depend on how many lookups a test
+    happened to make before it.
+    """
+    return (_COVER_ADDRESSES.get(host, AT_ANY_COVER_HOST),)
+
+
 #: An SRU envelope holding no records. Every SRU source answers 200 with an
 #: empty set rather than a 404, so mocking a 404 would test a case none of them
 #: produces.
@@ -135,7 +177,9 @@ def silence_covers(mock: Any) -> Any:
     A cover is checked before it is stored now, so every successful lookup
     reaches these hosts and an unstubbed test fails on the request.
     """
-    for base in (OPEN_LIBRARY_COVERS, DNB_COVERS):
+    # The addresses, not the names: see `AT_OPEN_LIBRARY_COVERS` for why a route
+    # under a cover host's name is never matched.
+    for base in (AT_OPEN_LIBRARY_COVERS, AT_DNB_COVERS):
         mock.get(url__regex=f"{re.escape(base)}.*").mock(
             return_value=httpx.Response(404)
         )

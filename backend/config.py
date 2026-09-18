@@ -297,6 +297,27 @@ def ensure_data_dirs() -> None:
 #: **A table rather than a function per key**, so the precedence rule below has
 #: one definition and adding a sender's credential is one line rather than a
 #: place to forget.
+#:
+#: **What earns an entry is that a deployment may legitimately own the value**:
+#: a credential a secret manager injects, the transport it is injected for, or
+#: the address it sends as, which is what `MAIL_DEFAULT_SENDER` is and neither
+#: of the first two.
+#: An admin preference a click can correct does not, which is why the default
+#: locale, the reminder interval, the catalogue switches and the account policy
+#: are absent. `enums.py` argues the switches and the policy at their own
+#: members: a variable takes a redeploy to correct, which is the wrong property
+#: for something somebody turns on by mistake.
+#:
+#: **An entry added here obliges the reader.** `settings_store` parses a stored
+#: value through one reader per type and not every one of them consults this
+#: table, so a key added here and read through one that does not would be pinned
+#: on the settings screen and ignored by the routine that uses it. Which readers
+#: those are is argued at `settings_store.in_force` and derived by the guard, so
+#: it is deliberately not listed here: a reader added later would make a list
+#: wrong with nothing red.
+#: `tests/test_settings_store.py::TestAnOverriddenSettingIsReadWhereItIsPinned`
+#: fails until that key's reader can see this table.
+#: The criterion above is prose; only the obligation is checked.
 _ENV_OVERRIDES: Final[dict[SettingKey, str]] = {
     SettingKey.GOOGLE_BOOKS_API_KEY: "GOOGLE_BOOKS_API_KEY",
     SettingKey.MAIL_SERVER: "MAIL_SERVER",

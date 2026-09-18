@@ -1539,8 +1539,8 @@ def _reads_and_returns_a_note(
     one.
 
     Two conditions, and the pair is what makes the rule structural instead of a
-    list of call sites. `_repoint_relations` reads `Note` and returns nothing,
-    because moving every note off a merged book is not a read for a viewer; it
+    list of call sites. `folding.py` reads `Note` and returns nothing, because
+    moving every note off a merged book is not a read for a viewer; it
     is out by its own signature rather than by being named here, and a version
     of it that started returning what it moves would walk in on the same day.
 
@@ -1700,7 +1700,7 @@ class TestANoteReadIsNarrowedToItsReader:
         assert _reads_and_returns_a_note(function, _note_aliases(tree))
 
     def test_a_function_that_moves_notes_without_returning_them_is_not_in_it(self):
-        """`_repoint_relations`' shape. It reassigns every note on a merged
+        """A merge transfer's shape. It reassigns every note on a merged
         book whatever its author, which is right, and it hands none back."""
         source = (
             "from models import Note\n"

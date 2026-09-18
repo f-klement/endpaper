@@ -172,6 +172,41 @@ NOT_OFFENCES = {
 }
 
 
+#: The modules a qualified call may be spelled through.
+#:
+#: `reading.resolve_merge(...)` is this module's own name; `db.resolve_merge(1)`
+#: is a method on something else and is not a caller. Without this the rule
+#: reports the second, which is how a guard gets satisfied by counting noise.
+_QUALIFIERS = {"reading"}
+
+
+def _named_way_callers(sources: dict[str, str]) -> dict[str, list[str]]:
+    """Every call site of the two functions that read past a Member.
+
+    **Both spellings.** The rule counted `ast.Name` only, so a caller writing
+    `reading.resolve_merge(...)` left the count at zero and the assertion below
+    read as a hole closing rather than opening.
+    """
+    calls: dict[str, list[str]] = {"discussers": [], "resolve_merge": []}
+    for name, source in sources.items():
+        if name == "reading.py":
+            continue
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in calls:
+                calls[func.id].append(f"{name}:{node.lineno}")
+            elif (
+                isinstance(func, ast.Attribute)
+                and func.attr in calls
+                and isinstance(func.value, ast.Name)
+                and func.value.id in _QUALIFIERS
+            ):
+                calls[func.attr].append(f"{name}:{node.lineno}")
+    return calls
+
+
 class TestReadingIsTheOnlyWayIn:
     def test_no_module_but_the_reading_record_imports_user_book(self):
         offenders = sorted(
@@ -199,20 +234,29 @@ class TestReadingIsTheOnlyWayIn:
         not. **Call sites, not modules**: a second `discussers` call inside
         `serialisation.py` would leave a set of module names unchanged.
         """
-        calls: dict[str, list[str]] = {"discussers": [], "resolve_merge": []}
-        for name, source in _source_modules().items():
-            if name == "reading.py":
-                continue
-            for node in ast.walk(ast.parse(source)):
-                if (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id in calls
-                ):
-                    calls[node.func.id].append(f"{name}:{node.lineno}")
+        calls = _named_way_callers(_source_modules())
 
         assert len(calls["discussers"]) == 1, calls
         assert len(calls["resolve_merge"]) == 1, calls
+
+    def test_a_qualified_call_counts_too(self):
+        """`reading.resolve_merge(...)` is an attribute, not a name, and this
+        rule counted only names: it reported **zero** callers of a function with
+        one, which is a floor that reads as a hole being closed. A module
+        importing this one for anything else calls it that way.
+        """
+        source = "import reading\n\ndef fold(db):\n    reading.resolve_merge(db, 1, [2])\n"
+
+        assert _named_way_callers({"folding.py": source})["resolve_merge"] == [
+            "folding.py:4"
+        ]
+
+    def test_a_method_of_that_name_on_something_else_is_not_a_caller(self):
+        """The other direction, so the rule cannot be satisfied by counting
+        every attribute call that happens to share the name."""
+        source = "def fold(db):\n    db.resolve_merge(1)\n"
+
+        assert _named_way_callers({"other.py": source})["resolve_merge"] == []
 
 
 class TestAbsenceMeansUnread:

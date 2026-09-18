@@ -6,24 +6,27 @@ constructions in `metadata.py` and one in `google_books.py`, each repeating the
 timeout, each following redirects anywhere, and none of them bounding the bytes
 read or the seconds spent. This module is the single definition of all four.
 
-**Covers are deliberately not a caller, and that is the answer to "why is there
-not one outbound policy for the whole app".** `covers.py` answers a different
-question: `cover_url` arrives on `BookCreate` from any signed in member, so the
-host is chosen by an attacker and has to be tested against an allowlist
-(`covers.is_fetchable`) on every hop. Folding them together would mean adding
-eleven catalogue hosts to `COVER_HOSTS`, and `COVER_HOSTS` is what the CSP's
-`img-src` is generated from: the merge would widen the browser policy to pay for
-a fetch policy. What the two do share is the *shape* of the read loop, and both
-now have it: refuse a hop that leaves the host, count raw bytes, stop at a
-deadline. See `docs/security.md`.
+**Covers are deliberately not a caller of `get`, and that is the answer to "why
+is there not one outbound policy for the whole app".** `covers.py` answers a
+different question: `cover_url` arrives on `BookCreate` from any signed in
+member, so the host is chosen by an attacker and has to be tested against an
+allowlist (`covers.is_fetchable`) on every hop. Folding them together would mean
+adding eleven catalogue hosts to `COVER_HOSTS`, and `COVER_HOSTS` is what the
+CSP's `img-src` is generated from: the merge would widen the browser policy to
+pay for a fetch policy. What the two do share is the *shape* of the read loop,
+and both now have it: refuse a hop the door's own rule does not admit, count raw
+bytes, stop at a deadline. **Not the same rule**, which the paragraph after next
+is about. See `docs/security.md`.
 
 **That argument is about the allowlist and says nothing about the address policy
-this module also holds**, which touches neither `COVER_HOSTS` nor the CSP.
-Covers is unpinned because it has a read loop of its own rather than because
-pinning would cost anything there, so a listed host whose resolver answers
-inside this cluster is still fetched. It is the one door whose URL a **member**
-supplies, which makes it the next one to wire rather than the one that needed it
-least.
+this module also holds**, which touches neither `COVER_HOSTS` nor the CSP. So
+`covers.py` takes the policy without taking the read loop: it builds its clients
+with `pinned_client(PUBLIC_ADDRESSES, ...)` and walks its own hops. Its hop rule
+is the reason the read loop could not come with it. `_same_host_hop` refuses a
+redirect that changes host, and the Open Library chain **is** a change of host,
+`covers.openlibrary.org` to `archive.org` to `ia<n>.us.archive.org`, so a shared
+walk would mean this module accepting a hop rule from its caller: a widening of
+every door here to buy one elsewhere.
 
 **"There is no allowlist here because the host is a module constant" is true of
 `metadata.py` and `google_books.py` and is no longer true of this module's
@@ -456,12 +459,12 @@ HOUSEHOLD_ADDRESSES: Final = AddressPolicy(
 #: names is on the internet, and every other class of address is either this
 #: pod's own network or a range no catalogue is served from.
 #:
-#: **It has no caller in this build.** The typed target feature is not written,
-#: and this constant exists so the door it will use is the one already tested
-#: rather than one written the day the row lands. The curated registry that
+#: **`covers.py` is the caller.** Every image service on `covers.COVER_HOSTS` is
+#: on the internet, so this is the set exactly. The typed target feature this
+#: constant was written ahead of is still not written; the curated registry that
 #: comes before it is vendored, so its hosts ship with the build and it needs
-#: none of this: pointing that at this policy would refuse a registry entry
-#: whose address is not public, which is a narrowing nobody asked for.
+#: none of this: pointing that at this policy would refuse a registry entry whose
+#: address is not public, which is a narrowing nobody asked for.
 #:
 #: **It is not the whole of what a typed target needs.** That design also
 #: requires **no redirects at all**, and a client from `pinned_client` still
@@ -649,10 +652,11 @@ class PinnedTransport(httpx.AsyncBaseTransport):
       one.
     * **Anything about the response.** The bytes are `get`'s problem: the cap,
       the deadline and the hop guard are unchanged and still do all of that.
-    * **The other outbound doors.** `covers.py` has its own read loop and its
-      own host allowlist, and `z3950.py` is not HTTP at all, so neither is
-      wired to this. Both reach hosts this build ships rather than hosts
-      somebody typed, which is why that is a gap and not a hole.
+    * **`z3950.py`, which is not HTTP at all** and so is not wired to this. It
+      reaches hosts this build ships rather than hosts somebody typed, which is
+      why that is a gap and not a hole. `covers.py` **is** wired to this now,
+      through `_client`, and keeps its own read loop and its own host allowlist
+      for the reason the module docstring gives.
     * **A proxy.** An egress proxy would take the connection out of this
       transport's hands entirely, which is why `pinned_client` refuses to read
       one from the environment. A deployment that needs one needs this decision

@@ -822,7 +822,7 @@ def within_bounds(attribute: str, value: Any) -> Any:
 #: beside it is the shape this repository keeps finding. A column added here is
 #: bounded on both paths or on neither.
 #:
-#: `isbn` is deliberately absent and is bounded already: `metadata._marc_isbn`
+#: `isbn` is deliberately absent and is bounded already: `marc_fields.Fields.isbn`
 #: returns `isbn.parse`'s output or None, which is thirteen digits.
 _MARC_RECORD_FIELDS: Final = (
     "title",

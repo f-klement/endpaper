@@ -433,7 +433,7 @@ def nlg_record(title: str = "Ιστορία της Ευρώπης") -> str:
 
     **Its only 020 is qualified**, `$q (τ.1)` for volume one, which is what four
     fifths of that catalogue's records with an ISBN look like and what
-    `metadata._isbn_entries` exists for. A search does not check an ISBN, so this
+    `marc_fields.Fields.isbn` exists for. A search does not check an ISBN, so this
     is not what the assertion turns on; it is here because a fixture that
     quietly drops the one convention the source needed would pass while
     describing a record the catalogue does not write.

@@ -67,10 +67,11 @@ import { leadingYear } from "./year";
 import { parseIsbn } from "./isbn";
 import { stripIsbnPrefix } from "./isbnLabel";
 import type { FileMetadata } from "./fileReaders";
+import type { SourceRecord } from "./sourceRecord";
 import type { SqliteDatabase, SqliteRow } from "./sqlite";
 // The vocabulary of schemes a reader in this directory can produce, and the
 // record a request builder takes. Borrowed rather than restated: it is the
-// one list `LibrarySettingsPage/types.ts` holds a total `Record` over, so a
+// one list `lib/bookRequest.STORE_SCHEMES` holds a total `Record` over, so a
 // second spelling of it here would be a scheme this reader could name and
 // that builder could not send.
 //
@@ -157,8 +158,14 @@ export interface CalibreIdentifier {
   readonly value: string;
 }
 
-/** What one row of `books` and everything linked to it asserts. */
-export interface CalibreBook {
+/**
+ * What one row of `books` and everything linked to it asserts.
+ *
+ * The `SourceRecord` fields are the ones a picked file and a store's catalogue
+ * also state, so they are declared once there. What is below is what only a
+ * library index can say.
+ */
+export interface CalibreBook extends SourceRecord {
   readonly id: number;
   /**
    * The book's directory, relative to the library root: `Author/Title (id)`.
@@ -167,18 +174,7 @@ export interface CalibreBook {
    * one thing the OPF cannot supply about itself.
    */
   readonly path: string;
-  readonly title: string | null;
-  /** Separate values, in link order. Joining them is the request's business. */
-  readonly authors: readonly string[];
   readonly identifiers: readonly CalibreIdentifier[];
-  /** Canonical ISBN-13, from whichever identifier carried a real one. */
-  readonly isbn: string | null;
-  readonly publisher: string | null;
-  readonly year: number | null;
-  readonly language: string | null;
-  readonly description: string | null;
-  readonly seriesName: string | null;
-  readonly seriesIndex: number | null;
   /**
    * The formats `data` names for this book, upper case as Calibre writes them.
    *
@@ -346,7 +342,7 @@ function readIsbn(identifiers: readonly CalibreIdentifier[]): string | null {
  * What Calibre's `identifiers.type` calls each scheme this app stores.
  *
  * **Total over the schemes a reader here can produce**, which is
- * `LibrarySettingsPage/types.STORE_SCHEMES`' discipline and its reason: a
+ * `lib/bookRequest.STORE_SCHEMES`' discipline and its reason: a
  * scheme added with nothing written here is a compile error, so what Calibre
  * calls it is answered when the scheme is added rather than by a library that
  * turns out to carry it. An empty list is a real answer and says Calibre has no
@@ -432,12 +428,12 @@ const MARKETPLACE_SUFFIX = /_[a-z]{2,3}$/;
  * - Everything a plugin invented, by the same rule and without naming any.
  *
  * **A value the scheme's readers would not produce is dropped and the book is
- * not**, `LibrarySettingsPage/types.boundIdentifiers`' rule: an import of nine
+ * not**, `lib/bookRequest.boundIdentifiers`' rule: an import of nine
  * hundred books must not turn on one library's odd row.
  *
  * **One entry a matching row, and nothing here is folded or capped.** Two
  * marketplaces naming one book both arrive, and so does a library that put one
- * ASIN under fifteen of them: `LibrarySettingsPage/types.boundIdentifiers` is
+ * ASIN under fifteen of them: `lib/bookRequest.boundIdentifiers` is
  * where a repeat is folded and where the request's ceiling is, and the two
  * belong together, because what the fold buys is a slot the ceiling would
  * otherwise have spent on a spelling. Measured by the security seat,

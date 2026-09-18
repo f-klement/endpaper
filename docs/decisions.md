@@ -12980,17 +12980,41 @@ seats found the same hole twice, from different directions, and it was measured 
 module: an archive could drive **846 times its own size** through the reader before the first fix
 and 21.1 times after, against 0.4 for an honest archive.
 
-## `missing` means a column on Kobo and a value on Kindle, and one import surface renders both
+## Two store reader fields nothing read, and why the one word they shared could not be given a sentence
 
-`kobo.ts` asks the device which columns its `content` table has, so a missing field is one the
-firmware could not record and no amount of data can produce one. `kindle.ts` has no schema to
-ask: its catalogue is XML and a field is missing when nothing in the document filled it. The
-word on screen is the same and the fact behind it is not, so a sentence written for one store
-is wrong for the other.
+`kobo.ts`, `appleBooks.ts`, `kindle.ts`, `adobeDigitalEditions.ts` and `moonReader.ts` each
+answered a `schemaVersion` and a `missing`. Nothing read either: `StoreLibrary` declares
+neither, so both were dropped at the adapter, and no message key named them. Deleted 2026-09-18
+with the five field vocabularies and the seven helpers behind them.
 
-The consequence worth knowing before writing that sentence: a Kindle document whose every
-publication date falls outside the year window reports `year` missing, which is true of what the
-reader could take out of it and reads oddly if the word is understood as Kobo's.
+**A member facing sentence was the alternative, and the word could not carry one.** Kobo, Apple
+Books and Moon+ asked the file which columns it had, so their `missing` was a field the firmware
+could not record and no amount of data would produce. Kindle and Adobe had no schema to ask:
+their catalogues are XML, and a field was missing when nothing in the document filled it. The
+word on screen would have been the same and the fact behind it was not, so the sentence that
+fits the first three is false for the other two. The case that makes it concrete: a Kindle
+catalogue whose every publication date fell outside the year window reported `year` missing with
+the element present on every entry, which was true of what the reader could take out of it and
+reads as a lie if the word is understood as Kobo's. **Anybody proposing that surface again is
+proposing five sentences, not one.**
+
+**The shape was also not given a name.** A base holding `books` and `skipped` would take six
+docstrings that differ and give them one home: `MoonReaderLibrary.skipped` records that its two
+tables overlap, so `books.length` and `skipped` do not add up to the rows read, where every
+other reader's do. `SourceRecord` was worth buying because its nine fields mean one thing in all
+three families. These two do not.
+
+**What it gives up, so a report is legible.** Kindle and Adobe read fields off entries and
+records they refused, so `missing` described the document rather than the shelf: a document
+whose only publisher sat on a skipped record now reads as one with no publishers. And a firmware
+with no `Publisher` column is no longer distinguishable from a device where no book has one.
+Both now present as a shelf of nulls, which is what a caller could always see.
+
+**What stops a sixth.** `tests/lib/stores.test.ts`, `a reader's library says nothing the seam
+drops`: every member a reader's `*Library` declares must be read by its adapter in `stores.ts`.
+Derived from source on both sides and crossed against `STORE_IDS`, so a seventh store adds no
+line to it and cannot be left out of it. **A member read and then discarded is outside it**, and
+the test says so: `void library.schemaVersion;` satisfies every arm.
 
 ## A store's own identifier is read and not kept, and the ASIN is where that first bit
 
@@ -14308,3 +14332,129 @@ private Book in the library: measured, three titles against the two that member
 may see. `TestOnlyTheDeskBuildsAScope` reports the construction and a `._query`
 read whose receiver is not `self`; the `self` arm is what keeps `shelf.py` and
 `sru.py` off the list without either being named.
+
+## An address policy can take the teeth out of the control it sits behind
+
+Adding `fetch.pinned_client` to the cover walks left the per hop host allowlist
+with no guard, and the suite did not notice. `is_fetchable` on every hop is the
+primary control at this door; the address policy is defence in depth. The only
+off list redirect target in either cover test file was `http://10.0.0.1/x.jpg`,
+which the new policy refuses on its own, and `AddressRefused` is an
+`httpx.HTTPError`, so the walk's own handler swallowed it and the assertion
+still held for the wrong reason.
+
+Measured, mutating `client.stream` to `follow_redirects=True` at both call
+sites: **1 of 154 failed before the policy, 163 passed after it, 2 of 171 fail
+now.** With the mutation live and no new arm, a redirect to an unlisted host at
+a public address was followed and downloaded.
+
+**So a new defence in depth layer is a reason to re-run the mutations for the
+layer beneath it.** The two arms that separate them use a target that is
+unlisted **and** at an address the policy admits, which is the only shape that
+can tell the two controls apart, and each asserts the other host was never
+called, which is what survives a client following the hop to a 404.
+
+The seat that added the layer could not have seen this from the direction it was
+looking, because the evidence is a test that still passes.
+
+## Making the cover download door async would cost one `asyncio.run`, not three
+
+The comment refusing it said `download` and `store` "are called from handlers"
+and that an async form would push `asyncio.run` out to three call sites.
+Measured: `download` has one application caller, `store`, which has one,
+`resolve_and_store`, which already calls `asyncio.run`. The handlers reach
+`_store_cover`, which calls `resolve_and_store`, and never reach either
+directly. The async form moves `asyncio.run` to **one** site and halves the
+event loops per book on the add path.
+
+The decision to keep the synchronous door stands; the reasons recorded for it
+now are the ones that hold, which are the 26 synchronous call expressions in
+`tests/test_covers.py` and `store`'s blocking disk write.
+
+## A closed vocabulary is a module, and the objection against this one was measured away
+
+`marc.py` read 17 private names of `metadata.py` at 21 sites, the only module to
+module private read in the backend. The objection recorded against moving MARC
+field reading out was that the Dublin Core and MODS decoders would then reach
+back into `marc.py`. That was measured before `bibliographic.py` existed, and it
+no longer holds: **no name in the moving set has a user outside the cluster**,
+and no Dublin Core or MODS decoder touches one.
+
+The moving set is derived rather than listed: a private name every one of whose
+users is inside the cluster, taken to a fixed point. That gives 40 names, not
+the 29 a first reading by hand proposed, because eleven module level constants
+have exactly one user each and that user moves.
+
+**A straight move would have been the wrong shape.** It would have published 22
+names over 156 statements and let `marc.py` name the same seventeen things with
+the word private removed. The door is six names, and the two that carry the
+work are scoped objects: `Fields` holds the record node, so a call that took
+`(node, fields, record)` takes a pair.
+
+## Folding two Books is one door, and the guard replacing an allowlist took three rounds
+
+`_repoint_relations` carried ten hand written transfer policies, one per child of
+`books`, and nothing related the ten to the ten. The child set is derived from the
+foreign keys now, and an eleventh child with no declared policy fails at import,
+naming the table.
+
+**This is not the split ADR 0008 refuses.** That refusal is about moving a resource
+into a file, and the figure that says which move this was is 72 routes unchanged.
+Both duplicate detection helpers stayed with the handler they serve.
+
+**The part worth reading is what the move cost and how long it took to notice.**
+Every query in the new module names its entity in a variable, so the privacy rule's
+fourth pass went blind to it: where the old code had three allowlisted statements
+that pass could see, it saw none. Closing that took three rounds, and each round's
+rule was evaded by the next seat:
+
+- A **substring** test. `"book_id" in unparse(chain)` is satisfied by
+  `order_by(model.book_id)` beside a dropped filter, which repoints every row in
+  that child table, for every Book in the Library, onto the keeper. Also satisfied
+  by `notin_`, one character from the allowed form, and by a filter naming another
+  table's column.
+- **One spelling.** Keyed on `.query(`, so every `select()`, `execute()` and
+  `text()` read was invisible, and `transfer.table.select()` reaches every Member's
+  reading records with no import of the model. The pass it replaced was spelling
+  agnostic on purpose.
+- **The column but not the value.** `in_(X)` for any X, so widening an existing
+  bound was free and the read count did not move, because no read was added.
+
+The rule states what is **allowed** rather than what is refused, because the
+refusals are open ended. It roots on the session rather than a method name, because
+`execute` and `scalars` are in neither `dir(Query)` nor `dir(Select)`. And the value
+must be an attribute chain off the carry the read reached its session through.
+
+**`READ_ROOTS` is the half a shape rule cannot do.** The old allowlist was enforced
+by a count, so a fourth read appearing in any spelling failed until a person wrote
+an entry describing it. A correctly bounded new read still moves that count.
+
+**Deriving an inclusion list found two modules the hand written one did not have**,
+one where the entity is an alias bound two lines above and one where a method named
+`query` on a non session receiver is a coincidence.
+
+## A guard that names no module is still exempting one, if its walk stops early
+
+`settings_store`'s pinned key rule said "anywhere in the backend, with no module
+exempted" and recognised two ways of reaching a reader. Six others were silent: a
+module level alias, a table of readers, `getattr`, `__dict__`, a relative import and
+a re export, each of which could take a deployment pinned key off the environment
+with nothing red. A module level table of `SettingKey` members already exists one
+file over, so the alias is that idiom one step across.
+
+**Three further shapes of the same defect, each found one clause further out**: a
+reader that mentions the environment door without honouring it was classified as
+honouring it, so three dead lines moved a pinned read out of view; the floor was a
+literal against a live count, with slack enough to lose the module holding seven of
+the ten pinnable keys; and the stated residue named a boundary the code did not
+have, three times running, each correction revealing the next.
+
+**The fix nearly introduced its own defect.** Walking every assignment made a name
+holding a reader's **result** reachable, so one read counted as two offenders. The
+rule reads the expression's own shape instead, looking through a collection literal.
+
+**What a narrowing costs is recorded where the narrowing is.** `functools.partial`
+fell from reported to silent, bought by removing a false offender on a clean tree.
+Two prescribed fixes were themselves red on a clean tree and were narrowed with the
+measurement that forced it: one flagged eight framework instantiations, the other a
+module that spells a reader's name and calls none.

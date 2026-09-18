@@ -22,6 +22,7 @@ import targets
 from database import Base
 from enums import CatalogueSource, CredentialProvenance
 from models import CatalogueCredential
+from tests.conftest import forget_any_encryption_key
 from tests.helpers import sealed_before_the_origin_was_bound
 from tests.test_house_rules import _is_vendored
 
@@ -1911,6 +1912,50 @@ class TestThereIsAWayBackFromNotWritingTheWordsDown:
 
     def test_discarding_nothing_clears_nothing(self):
         assert credentials.forget_key() == 0
+
+
+class TestTheSuiteCanForgetAKeyItCannotReach:
+    """`forget_the_encryption_key` runs for every test in the suite, and what it
+    is given is whatever `CREDENTIAL_ENCRYPTION_KEY_FILE` points at when it runs.
+
+    **`missing_ok=True` is not "do not raise".** It swallows `FileNotFoundError`
+    and nothing else, so a path whose parent is a regular file raises
+    `NotADirectoryError` out of an autouse fixture, which pytest reports as an
+    error at teardown on a test that passed.
+
+    **This is a property of the path, not of fixture ordering**, which is why
+    this test calls the work directly rather than arranging one. The ordering is
+    only how it was found: an unrelated autouse fixture in `tests/conftest.py`
+    took `monkeypatch`, which moved when the shared undo ran, and that fixture
+    then read a key path still pointing under the regular file the class below
+    creates.
+    """
+
+    def test_a_key_path_under_a_regular_file_is_forgotten_without_raising(
+        self, monkeypatch, tmp_path
+    ):
+        blocked = tmp_path / "not-a-directory"
+        blocked.write_text("")
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(blocked / "key"))
+
+        # Raises `NotADirectoryError` without the suppression, from a fixture
+        # every test in the suite runs.
+        forget_any_encryption_key()
+
+    def test_a_key_that_is_there_is_still_removed(self, tmp_path, monkeypatch):
+        """The half the suppression must not have cost.
+
+        A guard that only proves nothing raises is satisfied by a function that
+        does nothing, and this fixture's whole job is that no key survives a
+        test.
+        """
+        key = tmp_path / "key"
+        key.write_text("phrase")
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(key))
+
+        forget_any_encryption_key()
+
+        assert not key.exists()
 
 
 class TestTheKeyFileIsWrittenSafelyOrNotAtAll:

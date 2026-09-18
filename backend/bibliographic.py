@@ -9,10 +9,10 @@ of them owns these.
 
 **The membership test is one sentence: a rule about what a bibliographic value
 means, independent of the serialisation it arrived in.** It admits everything
-here. It excludes `metadata._Subfields`, `metadata._marc_fields` and
-`metadata._subject_vocabulary`, which are MARC subfield readers wearing generic
-names, and it excludes every refusal a single catalogue states for itself, such
-as `metadata._NKP_ONLINE`.
+here. It excludes `marc_fields.Subfields`, `marc_fields.Fields` and
+`marc_fields.Subfields.subject_vocabulary`, which are MARC subfield readers
+wearing generic names, and it excludes every refusal a single catalogue states
+for itself, such as `metadata._NKP_ONLINE`.
 
 **Why it is one module rather than a helper beside each decoder.** Seven of the
 nine are not MARC helpers that other formats borrow. Counted by an `ast` pass
@@ -238,7 +238,7 @@ def is_placeholder_title(title: str) -> bool:
 #: two that never ask it: the DNB, K10plus, the OENB, the NLG, the BNE, the NKP,
 #: the BNA, the BnF and the Library of Congress. Six of them state the carrier
 #: in codes and are asked those first, the five MARC ones through
-#: `metadata._marc_is_physical_book` and the Library of Congress through
+#: `marc_fields.Fields.describes_a_book` and the Library of Congress through
 #: `metadata._loc_carrier_is_book`. The three Dublin Core sources decide it from
 #: prose alone, and two of them state their own, `metadata._NKP_ONLINE` and
 #: `metadata._BNF_ONLINE`. **The BNA states none, deliberately**: none of the
@@ -269,7 +269,7 @@ def is_physical_book(extent: str | None, title: str | None) -> bool:
 
     **This is the fallback and no longer the whole rule.** A MARC record states
     its carrier in codes, so the five MARC sources ask
-    `metadata._marc_is_physical_book` and reach this through it, and the Library
+    `marc_fields.Fields.describes_a_book` and reach this through it, and the Library
     of Congress reads the MODS spelling of the same codes. What is left here is
     Dublin Core, which carries no such vocabulary at all, in two dialects across
     three sources. `metadata._marc_carrier_is_book` says why.

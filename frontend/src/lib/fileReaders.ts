@@ -3,6 +3,7 @@ import type { EpubFailure } from "./epub";
 import type { Fb2Failure } from "./fb2";
 import type { MobiFailure } from "./mobi";
 import type { PdfFailure } from "./pdf";
+import type { SourceRecord } from "./sourceRecord";
 import { supportedExtension, type SupportedExtension } from "./fileName";
 
 /**
@@ -62,15 +63,20 @@ export interface FileIdentifier {
  *
  * **Not one format's record, which is what a sixth reader has to know before
  * it fills any of this in.** 10 of the 11 fields go through
- * `ScanPage/types.draftFromFile` into `BookLookup` one line each, and only
- * `identifiers` does not, so what a field holds is decided by what this app
- * stores rather than by what any format spells. 6 of them carry a Dublin Core
- * element's name, and every one is normalised rather than copied. The other 5
- * name nothing in OPF at all: `subtitle` is a `title-type` refinement
- * resolved, `isbn` is a parsed and check digit tested ISBN drawn from the
- * identifiers whatever labelled them, `year` is a single number windowed out
- * of whichever date the format offers, and the two series fields are Calibre's
- * own `meta` names or an EPUB 3 collection.
+ * `ScanPage/types.draftFromFile` into `BookLookup`, and only `identifiers` does
+ * not, so what a field holds is decided by what this app stores rather than by
+ * what any format spells. 6 of them carry a Dublin Core element's name, and
+ * every one is normalised rather than copied. The other 5 name nothing in OPF
+ * at all: `subtitle` is a `title-type` refinement resolved, `isbn` is a parsed
+ * and check digit tested ISBN drawn from the identifiers whatever labelled
+ * them, `year` is a single number windowed out of whichever date the format
+ * offers, and the two series fields are Calibre's own `meta` names or an EPUB 3
+ * collection.
+ *
+ * **Every field but the two below is not this family's either**, and that is
+ * what `SourceRecord` is: a store's catalogue and a Calibre library state the
+ * same ones, and all three declared them separately until they did not. What is
+ * left here is what only a file can say.
  *
  * **So the name is the family's and never a format's**, beside `FileReader`,
  * `FileReading` and `FileFailure`. `tests/lib/fileReaders.test.ts` holds that
@@ -82,26 +88,16 @@ export interface FileIdentifier {
  * back from here for the same reason: the format that shaped this record is a
  * producer of it like any other, not its owner.
  */
-export interface FileMetadata {
-  readonly title: string | null;
-  readonly subtitle: string | null;
+export interface FileMetadata extends SourceRecord {
   /**
-   * Separate values, in document order.
+   * The rest of a title, where the file said which part was which.
    *
-   * **Not one string.** A creator is one person and the file already separates
-   * them, so joining here would throw away a fact the file supplied and make
-   * every later reader guess it back.
+   * **Here rather than on `SourceRecord`**, because no store and no Calibre
+   * column states one: holding it there would make every other reader write
+   * `null` for a field its source has no notion of.
    */
-  readonly authors: readonly string[];
+  readonly subtitle: string | null;
   readonly identifiers: readonly FileIdentifier[];
-  /** Canonical ISBN-13, from whichever spelling the format carried one in. */
-  readonly isbn: string | null;
-  readonly publisher: string | null;
-  readonly year: number | null;
-  readonly language: string | null;
-  readonly description: string | null;
-  readonly seriesName: string | null;
-  readonly seriesIndex: number | null;
 }
 
 export type FileReading =
