@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **The Socket preflight has one home.** It was spelled in the pipeline and again in the
+  unattended patch release's script, each with a comment naming the other, so fixing one left
+  the other stale: the nightly run stopped on it and paged. Both callers read the same script
+  now, and a house rule allows exactly one file to reach for that host while leaving every
+  file free to name it in prose.
+
 ## v0.17.2
 
 _2026-09-17_
