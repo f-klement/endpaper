@@ -10,9 +10,14 @@ answers, and `tests/test_marc.py` pins what an uploaded file and an export do.
 """
 
 import ast
+import inspect
+import string
 from pathlib import Path
+from typing import Any
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 import bibliographic
 from bibliographic import (
@@ -22,7 +27,10 @@ from bibliographic import (
     is_placeholder_title,
     pages_from_extent,
     split_title_statement,
+    strip_isbd_punctuation,
 )
+from models import MAX_PAGE_NUMBER_IN_A_BOOK
+from tests.strategies import text_around, witness
 from tests.test_house_rules import BACKEND, _python_sources
 
 
@@ -547,3 +555,445 @@ class TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor:
             "metadata.py::elsewhere._bnf_record",
             "metadata.py::Reader._bnf_record",
         }
+
+
+# ── The same rules as properties ──────────────────────────────────────────────
+#
+# **The classes above are catalogue records: the wordings six national libraries
+# actually send.** They are the reason each rule is shaped the way it is and
+# they stay. What is below is what the wordings are instances of, over strings
+# nobody picked, and the two answer different questions. A case says "the DNB
+# writes this"; a property says "and nothing else gets through either".
+#
+# **Every generator here is derived from the rule it is about**, and two of them
+# from the very regular expression under test, through `from_regex`. That is
+# deliberate where the property is an agreement between two functions: the disc
+# alternation is half of the not-a-book one, this module's docstring says so,
+# and a generator built from the disc pattern is what notices if the halves stop
+# agreeing.
+
+_TEXT = st.text(max_size=80)
+_MAYBE_TEXT = st.one_of(st.none(), _TEXT)
+
+#: An extent statement naming a disc, generated from the pattern that defines
+#: one rather than from the wordings a reader can think of.
+_DISC_EXTENTS = text_around(st.from_regex(bibliographic._IS_A_DISC, fullmatch=True))
+
+#: An extent statement naming something published online, the same way.
+_ONLINE_EXTENTS = text_around(st.from_regex(bibliographic._ONLINE_FORMS, fullmatch=True))
+
+#: A title that is a position in a multi-volume set.
+_PLACEHOLDER = st.from_regex(bibliographic._PLACEHOLDER_TITLES, fullmatch=True)
+
+#: The units an extent statement is read through, which is the list the rule
+#: itself carries: only spellings actually measured are in it.
+_UNITS = st.sampled_from(["Seiten", "S.", "p.", "pp.", "stran", "Bl."])
+
+
+def _digit_run(length: st.SearchStrategy[int]) -> st.SearchStrategy[str]:
+    """A run of digits of a drawn length, built by repetition.
+
+    **Not `st.text(min_size=4_301)`, and the difference is the whole point of
+    the witness beside this.** Hypothesis draws sizes from a distribution that
+    reaches the maximum rarely, so a strategy whose only long values sit at the
+    top of a wide size range produces them almost never: the first version of
+    this generator failed its own reachability witness at two thousand
+    examples. Drawing the length and repeating gives the long case its own
+    branch.
+    """
+    return st.builds(
+        lambda seed, size: (seed * (size // len(seed) + 1))[:size],
+        st.text(alphabet="0123456789", min_size=1, max_size=20),
+        length,
+    )
+
+
+#: An extent statement with a unit on it, including the digit run that turned
+#: every MARC source into a 500 at once: one record carried 4,301 digits in its
+#: `300 $a`, and CPython refuses an integer conversion above that with a
+#: `ValueError` no handler on that path was catching.
+_EXTENTS = st.one_of(
+    _TEXT,
+    st.builds(lambda run, unit: f"{run} {unit}", _digit_run(st.integers(1, 8)), _UNITS),
+    st.builds(
+        lambda run, unit: f"{run} {unit}",
+        _digit_run(st.integers(4_301, 4_600)),
+        _UNITS,
+    ),
+)
+
+
+def _text_arguments(function) -> list[Any] | None:
+    """A strategy per parameter, or None when this signature is not all text.
+
+    Read off the annotations rather than off a list of function names, so a
+    tenth rule added to the module is swept by the property below without
+    anybody remembering to add it.
+    """
+    strategies: list[Any] = []
+    for parameter in inspect.signature(function).parameters.values():
+        if parameter.annotation is str:
+            strategies.append(_TEXT)
+        elif parameter.annotation == (str | None):
+            strategies.append(_MAYBE_TEXT)
+        else:
+            return None
+    return strategies
+
+
+def _pure_rules() -> dict[str, tuple]:
+    """Every function this module defines, with the arguments it takes."""
+    return {
+        name: (function, _text_arguments(function))
+        for name, function in vars(bibliographic).items()
+        if inspect.isfunction(function)
+        and function.__module__ == bibliographic.__name__
+        # `__annotate__` is the module's own PEP 649 annotation evaluator, put
+        # here by the interpreter rather than by anybody writing a rule.
+        and not name.startswith("__")
+    }
+
+
+class TestEveryRuleHereIsSwept:
+    def test_the_sweep_covers_every_function_in_the_module(self):
+        """**The arm that fails when a rule joins the module and nothing tests it.**
+
+        A new function whose parameters are not text is not a failure of the
+        rule, it is a signature this sweep cannot build arguments for, and the
+        answer is to teach `_text_arguments` about it rather than to let it sit
+        outside the properties unnoticed. Naming the functions here instead
+        would be a list somebody has to remember, which is the thing this
+        repository keeps paying for.
+        """
+        unswept = [name for name, (_, args) in _pure_rules().items() if args is None]
+        assert not unswept, (
+            f"these rules take arguments the property sweep cannot generate: "
+            f"{unswept}. Teach `_text_arguments` their annotation."
+        )
+
+    def test_the_sweep_finds_the_module(self):
+        """The vacuity arm. Every assertion over `_pure_rules()` passes on an
+        empty dictionary, including the one above."""
+        assert len(_pure_rules()) >= 9
+
+
+@pytest.mark.property
+class TestEveryRuleAnswersForAnyString:
+    @given(data=st.data())
+    def test_no_rule_here_raises_on_any_text(self, data):
+        """**A catalogue is an outside input and a decoder has no handler**, so
+        a rule here that raises reaches the client as a 500.
+
+        This is the sweep, and it asks only that every rule answers. It draws
+        from `_TEXT`, so it is deliberately not where the hostile shapes live:
+        those are under the classes below, each with the witness that proves
+        its generator still reaches them.
+        """
+        for name, (function, strategies) in _pure_rules().items():
+            if strategies is None:
+                continue
+            arguments = [data.draw(strategy) for strategy in strategies]
+            try:
+                function(*arguments)
+            except Exception as error:
+                raise AssertionError(
+                    f"{name} raised {type(error).__name__} on {arguments!r}"
+                ) from error
+
+
+#: A run of text a catalogue would put between two ISBD separators.
+_PHRASE = st.text(
+    st.characters(categories=("Lu", "Ll", "Nd"), include_characters=" "),
+    min_size=1,
+    max_size=10,
+)
+
+#: A whole title statement, with the separators the two rules below are about.
+#:
+#: **Free text alone was the first version of this and it was nearly vacuous.**
+#: The separators are three characters with a space on each side, so
+#: `st.text()` produces one about nine times in two thousand draws: measured
+#: over ten runs of two hundred, `" / "` appeared in seven of them and in two
+#: runs nothing below exercised its own subject at all. The witnesses under this
+#: class are what caught that, and this generator is what fixed it.
+_TITLE_STATEMENTS = st.one_of(
+    _TEXT,
+    st.builds(
+        lambda original, title, subtitle, second, responsibility: (
+            original + title + subtitle + second + responsibility
+        ),
+        st.one_of(st.just(""), _PHRASE.map(lambda text: f"[{text}] ; ")),
+        _PHRASE,
+        st.one_of(st.just(""), _PHRASE.map(lambda text: f" : {text}")),
+        st.one_of(st.just(""), _PHRASE.map(lambda text: f" ; {text}")),
+        st.one_of(st.just(""), _PHRASE.map(lambda text: f" / {text}")),
+    ),
+)
+
+#: A subfield ending in the punctuation that introduces the next one.
+_ISBD_SUBFIELDS = st.one_of(
+    _TEXT,
+    st.builds(
+        lambda text, separator, padding: text + separator + padding,
+        _PHRASE,
+        st.sampled_from(["", "/", ":", ";", ",", "=", " :", " ;"]),
+        st.sampled_from(["", " ", "  "]),
+    ),
+)
+
+
+@pytest.mark.property
+class TestAValueIsQuotedFromTheRecordNeverRewritten:
+    """Both of these hand back a slice of what arrived.
+
+    A stored row is a catalogue assertion, and one this app has quietly
+    rewritten is worse than one it declined: the schema validators state that
+    for their own columns and these are the same rule for a title.
+    """
+
+    @given(raw=_ISBD_SUBFIELDS)
+    def test_stripping_isbd_punctuation_only_removes(self, raw):
+        stripped = strip_isbd_punctuation(raw)
+        assert stripped in raw
+        assert stripped == stripped.strip()
+
+    @given(raw=_TITLE_STATEMENTS)
+    def test_a_title_is_a_slice_of_the_statement_it_came_from(self, raw):
+        title, subtitle = split_title_statement(raw)
+        assert title in raw
+        assert title == title.strip()
+        assert " / " not in title, "the statement of responsibility survived"
+        assert subtitle is None or (subtitle and subtitle == subtitle.strip())
+
+    def test_the_generator_still_reaches_a_statement_of_responsibility(self):
+        """`" / " not in title` is the only assertion above that can fail, so a
+        generator producing no slash leaves that test asserting nothing."""
+        witness(
+            _TITLE_STATEMENTS,
+            lambda raw: " / " in raw,
+            reaches="a statement of responsibility",
+        )
+
+    def test_the_generator_still_reaches_a_subtitle(self):
+        witness(
+            _TITLE_STATEMENTS,
+            lambda raw: split_title_statement(raw)[1] is not None,
+            reaches="a statement that splits into a subtitle",
+        )
+
+    def test_the_generator_still_reaches_a_bracketed_original_title(self):
+        """Asked as the arm firing rather than as the shape arriving: a
+        statement that starts with a bracket and comes back without one is the
+        only evidence the substitution ran."""
+        witness(
+            _TITLE_STATEMENTS,
+            lambda raw: raw.startswith("[")
+            and not split_title_statement(raw)[0].startswith("["),
+            reaches="a translation whose original title is dropped",
+        )
+
+    def test_the_generator_still_reaches_punctuation_that_comes_off(self):
+        witness(
+            _ISBD_SUBFIELDS,
+            lambda raw: strip_isbd_punctuation(raw) != raw.strip(),
+            reaches="a subfield ending in the separator for the next one",
+        )
+
+
+@pytest.mark.property
+class TestAPageCountIsBoundedWhateverArrives:
+    """The recorded case is one record with 4,301 digits in its `300 $a`, which
+    turned search and lookup into a 500 for every MARC source at once, because
+    CPython refuses an integer conversion above that with a `ValueError` and
+    nothing on that path was catching one.
+
+    **`_EXTENTS` is where that input is generated and this is where it is
+    asserted**, which is why the incident is named here rather than beside the
+    sweep above: a generator of 80 character strings cannot hold 4,301 digits,
+    so a claim about this record attached to that sweep would be describing a
+    case it can never produce.
+    """
+
+    @given(raw=_EXTENTS)
+    def test_the_answer_is_none_or_a_number_a_book_could_have(self, raw):
+        pages = pages_from_extent(raw)
+        assert pages is None or 0 < pages <= MAX_PAGE_NUMBER_IN_A_BOOK
+
+    def test_the_generator_still_reaches_the_digit_run_that_caused_the_500(self):
+        witness(
+            _EXTENTS,
+            lambda raw: sum(character.isdigit() for character in raw) > 4_300,
+            reaches="an extent with more digits than CPython will convert",
+        )
+
+    def test_the_generator_still_reaches_an_extent_with_a_page_count_in_it(self):
+        witness(
+            _EXTENTS,
+            lambda raw: pages_from_extent(raw) is not None,
+            reaches="an extent that names a number of pages",
+        )
+
+
+@pytest.mark.property
+class TestTheTwoHalvesOfOneRefusalStayOneRefusal:
+    """`is_a_disc` is half of `is_physical_book`'s alternation, and this module's
+    docstring is where that is claimed. A generator built from the disc pattern
+    is what notices when the halves stop agreeing: split them and the property
+    fails with a disc that is also a physical book.
+    """
+
+    @given(extent=_DISC_EXTENTS, title=_MAYBE_TEXT)
+    def test_a_disc_is_never_a_physical_book(self, extent, title):
+        assert bibliographic.is_a_disc(extent)
+        assert not bibliographic.is_physical_book(extent, title)
+
+    @given(extent=_ONLINE_EXTENTS, title=_MAYBE_TEXT)
+    def test_an_online_resource_is_never_a_physical_book_either(self, extent, title):
+        assert not bibliographic.is_physical_book(extent, title)
+
+    @given(title=_PLACEHOLDER)
+    def test_a_volume_slot_is_a_placeholder_title(self, title):
+        assert is_placeholder_title(title)
+
+    def test_the_disc_generator_reaches_more_than_one_wording(self):
+        """The alternation is eight wordings wide and a generator stuck on the
+        first of them would pass this class while testing one."""
+        witness(
+            _DISC_EXTENTS,
+            lambda extent: "dvd" not in extent.lower(),
+            reaches="a disc that is not spelled dvd",
+        )
+
+
+#: A word a person's name is made of.
+_WORD = st.text(st.characters(categories=("Lu", "Ll")), min_size=1, max_size=8)
+
+#: A span of life dates, in the two spellings this module's noise pattern was
+#: written against: the BnF's `(1964-2020)` and MARC's `, 1819-1891`. A living
+#: person has an open span, which is the empty second year.
+_YEARS = st.builds(
+    lambda born, died: f"{born}-{died}",
+    st.integers(min_value=1_000, max_value=2_100),
+    st.one_of(st.just(""), st.integers(min_value=1_000, max_value=2_100).map(str)),
+)
+
+#: What a catalogue hangs off a name, as those catalogues write it.
+_NOISE = st.one_of(
+    st.just(""),
+    _YEARS.map(lambda years: f" ({years})"),
+    _YEARS.map(lambda years: f", {years}"),
+    st.sampled_from(["Auteur", "Autrice", "Traducteur", "Illustratrice"]).map(
+        lambda role: f". {role} du texte"
+    ),
+)
+
+#: A person or corporate cell as a catalogue writes it: in catalogue order or
+#: not, with or without the noise, with or without the ISBD full stop, and with
+#: the trailing initial that is the one full stop belonging to the name.
+_CATALOGUE_NAMES = st.one_of(
+    st.builds(
+        lambda surname, forenames, noise, stop: f"{surname}, {forenames}{noise}{stop}",
+        _WORD,
+        _WORD,
+        _NOISE,
+        st.sampled_from(["", "."]),
+    ),
+    st.builds(
+        lambda name, noise, stop: f"{name}{noise}{stop}",
+        _WORD,
+        _NOISE,
+        st.sampled_from(["", "."]),
+    ),
+    st.builds(
+        lambda surname, forenames, initial: f"{surname}, {forenames} {initial}.",
+        _WORD,
+        _WORD,
+        # **ASCII, because the rule it is about is.** `_TRAILING_INITIAL` is
+        # `[A-Za-z]`, so `Pohl, Robert O.` keeps its full stop and the same
+        # name with a Scandinavian or Greek initial loses it. Generating
+        # outside ASCII here would be generating the other branch under this
+        # branch's name, and the witness below is what caught that.
+        st.sampled_from(string.ascii_uppercase),
+    ),
+)
+
+
+@pytest.mark.property
+class TestAFlippedNameIsStillAName:
+    @given(raw=_TEXT)
+    def test_runs_of_whitespace_are_gone_on_both_branches(self, raw):
+        """**Not tidying: a bound.** Two of the noise pattern's three arms are a
+        `\\s*` in front of a rare literal, which is quadratic over a run of
+        spaces, and one upload of 10,464 rows whose author cell was 498 spaces
+        measured 17.96 s of CPU for that column alone before the collapse went
+        in. The collapse is only a bound while it happens on every branch, which
+        is what this asks and a case about a name cannot."""
+        flipped = flip_catalogue_name(raw)
+        assert " ".join(flipped.split()) == flipped
+
+    @given(raw=_TEXT)
+    def test_nothing_is_ever_added_to_a_cell(self, raw):
+        """Every branch removes or reorders. A cell that came back longer than
+        it arrived would be this app writing into a catalogue's assertion."""
+        assert len(flip_catalogue_name(raw)) <= len(" ".join(raw.split()))
+
+    @given(name=_CATALOGUE_NAMES)
+    def test_flipping_a_flipped_name_changes_nothing(self, name):
+        """**Scoped to a name, and the scope is the finding below rather than a
+        convenience.** The CSV import runs this once per cell, and a library
+        exported and imported again meets it a second time on the already
+        flipped form, so a name has to be stable under it. A cell that is not a
+        name is not, which the case under this class records.
+        """
+        once = flip_catalogue_name(name)
+        assert flip_catalogue_name(once) == once
+
+    def test_the_generator_still_reaches_a_cell_that_is_reordered(self):
+        witness(
+            _CATALOGUE_NAMES,
+            lambda name: "," in name and flip_catalogue_name(name) != name,
+            reaches="a cell in catalogue order",
+        )
+
+    def test_the_generator_still_reaches_a_cell_carrying_life_dates(self):
+        witness(
+            _CATALOGUE_NAMES,
+            lambda name: any(character.isdigit() for character in name)
+            and not any(
+                character.isdigit() for character in flip_catalogue_name(name)
+            ),
+            reaches="a cell whose life dates come off",
+        )
+
+    def test_the_generator_still_reaches_the_full_stop_that_is_part_of_a_name(self):
+        """`Melville, Herman.` loses its stop and `Pohl, Robert O.` keeps one,
+        and the two are the same shape to anything but `_TRAILING_INITIAL`. A
+        generator that reached only the first would leave the harder half of
+        `_drop_isbd_stop` untouched."""
+        witness(
+            _CATALOGUE_NAMES,
+            lambda name: "," in name
+            and name.endswith(".")
+            and "." in flip_catalogue_name(name),
+            reaches="a flipped name that keeps an initial's full stop",
+        )
+
+
+class TestACellWhoseSurnameIsPunctuationIsNotAName:
+    """Where flipping stops being stable, found by the property above and pinned.
+
+    `;,0` has exactly one comma, so it takes the flipping branch and comes back
+    as `0 ;`. On a second pass the leading semicolon is trailing, which is where
+    `_strip_person_noise` rstrips it, and the cell changes again.
+
+    **Recorded rather than fixed, and the bound is why.** Nothing reaches this
+    but a cell whose surname is punctuation, and no catalogue and no importer
+    produces one: a real cell ending in a semicolon is trimmed on the first pass
+    before the comma is counted. What it costs is that this function is a reader
+    of catalogue person strings and not a general normaliser, which is the claim
+    the property above is scoped by.
+    """
+
+    def test_it_flips_and_then_settles_somewhere_else(self):
+        assert flip_catalogue_name(";,0") == "0 ;"
+        assert flip_catalogue_name("0 ;") == "0"

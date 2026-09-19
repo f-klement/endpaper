@@ -150,6 +150,26 @@
   the other stale: the nightly run stopped on it and paged. Both callers read the same script
   now, and a house rule allows exactly one file to reach for that host while leaving every
   file free to name it in prose.
+- **The parsers and the normalisers are tested over generated input, and the budget that
+  makes that honest is itself a test.** Six surfaces gained property based tests through
+  `hypothesis`: the ISBN reader, the bibliographic rules every decoder shares, the CQL
+  parser and the LIKE escaping the SRU server builds its patterns with, and the two schema
+  validators that refuse invisible characters in an identifier and in a call number. 68
+  generated tests, running in the ordinary suite at 200 examples each. Measured on the
+  `builder` node: **168.70 s** for the whole backend suite, **163.39 s** for the same suite
+  with them deselected, and **17.72 s** for the 68 on their own, which includes collecting
+  all 7,755. A second profile at 2,000 examples takes those 68 to **46.62 s** and is for the
+  run somebody starts on purpose. **Every generator is derived from the rule it is about
+  rather than from a list of the ways that rule can be broken**, which is the defect this
+  closes: a sweep written by hand is a claim about its own bounds and says nothing about
+  them, and one in this tree read `range(0x11000)` as though it covered Unicode, a
+  sixteenth of the codepoints. The character classes come from Unicode categories, the
+  catalogue wordings from the very patterns under test, and the check digits from the
+  arithmetic rather than from the functions being checked. **A property is only a claim
+  about what its generator can reach**, so each one about a hostile class ships with a
+  witness that fails loudly when the class stops being reachable, and the example budget has
+  a floor that is measured from inside a running test rather than read off a settings
+  object: a profile quietly dropped to one example is a suite that passes and tests nothing.
 
 ## v0.17.2
 

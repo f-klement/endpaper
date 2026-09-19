@@ -56,11 +56,15 @@ class TestNothingImportsIt:
                 if names_it:
                     offenders.append(f"{path.relative_to(BACKEND)}:{node.lineno}")
         assert offenders == [], offenders
-        # **The packages it must cover, not a number.** This walk reads 124
-        # files, so `read > 30` did not bind: a mutation marking `routers` and
-        # `schemas` vendored left this guard green, and a router is exactly where
-        # an import of this module would make the password reset reachable over
-        # HTTP. Reading nothing is the failure mode that matters most here.
+        # **The packages it must cover, not a number.** This walk reads far more
+        # files than any floor worth writing, so `read > 30` did not bind: a
+        # mutation marking `routers` and `schemas` vendored left this guard
+        # green, and a router is exactly where an import of this module would
+        # make the password reset reachable over HTTP. Reading nothing is the
+        # failure mode that matters most here. **No file count in this comment,
+        # deliberately**: a figure written beside a rule drifts against the tree
+        # within weeks and is then read as current, so recount it with a command
+        # if you need it.
         assert {"routers", "schemas"} <= read, read
 
 

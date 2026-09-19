@@ -12,9 +12,14 @@ The old rule was a bare regex, `^(97[89]\\d{10}|\\d{10})$`, with no checksum,
 no normalisation and no ISBN-10/13 equivalence.
 """
 
+from typing import Final
+
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from isbn import (
+    BOOKLAND_PREFIXES,
     equivalent_forms,
     group_prefix,
     is_valid,
@@ -26,6 +31,7 @@ from isbn import (
     parse,
     registration_group,
 )
+from tests.strategies import witness
 
 # Real ISBNs, in both forms, for books that exist.
 DUNE_13 = "9780441013593"
@@ -409,3 +415,273 @@ class TestADigitIsNotAlwaysADigit:
         ordered against `"0"` to `"9"` by code point. `parse` is what stops it
         reaching that comparison at all."""
         assert registration_group("978" + self.ARABIC_INDIC_ZERO * 10) is None
+
+
+# ── The same rules as properties ──────────────────────────────────────────────
+#
+# **What the classes above pin is four defects and their fixes, case by case.**
+# What is below is the rule each case is an instance of, over inputs nobody
+# chose. The two are not redundant and neither replaces the other: a named case
+# carries the incident it came from, and a property carries the bound the case
+# has no way to state.
+#
+# The generators are built from the checksum arithmetic and from the predicate
+# `normalise` applies, never from a list of the spellings anybody has met. The
+# hand written list is what this module already paid for once: a survey script
+# that read `6` as a single digit registration group filed 23 ISBNs under a
+# group that does not exist and nothing failed.
+
+_DIGITS: Final = "0123456789"
+
+#: Every character an ISBN-10 check position may hold.
+_CHECK_CHARACTERS: Final = _DIGITS + "X"
+
+
+@st.composite
+def isbn10s(draw) -> str:
+    """A valid ISBN-10, from nine digits and the character modulus 11 wants.
+
+    **The check character is computed here rather than asked of the module.** A
+    generator that used `isbn10_to_isbn13` to decide what a valid ISBN-10 looks
+    like would agree with that function whatever it did, and every round trip
+    over it would pass by construction.
+    """
+    body = draw(st.text(alphabet=_DIGITS, min_size=9, max_size=9))
+    remainder = (
+        11 - sum(int(digit) * (10 - at) for at, digit in enumerate(body)) % 11
+    ) % 11
+    return body + ("X" if remainder == 10 else str(remainder))
+
+
+@st.composite
+def ean13s(draw) -> str:
+    """A valid EAN-13 with any prefix at all: a food packet as easily as a book."""
+    body = draw(st.text(alphabet=_DIGITS, min_size=12, max_size=12))
+    total = sum(int(digit) * (1 if at % 2 == 0 else 3) for at, digit in enumerate(body))
+    return body + str((10 - total % 10) % 10)
+
+
+@st.composite
+def isbn13s(draw) -> str:
+    """A valid EAN-13 that is also a book, which is the Bookland half of them."""
+    body = draw(st.sampled_from(BOOKLAND_PREFIXES)) + draw(
+        st.text(alphabet=_DIGITS, min_size=9, max_size=9)
+    )
+    total = sum(int(digit) * (1 if at % 2 == 0 else 3) for at, digit in enumerate(body))
+    return body + str((10 - total % 10) % 10)
+
+
+def discarded_characters() -> st.SearchStrategy[str]:
+    """Any character `normalise` throws away, derived from the rule it applies.
+
+    **The complement of `isascii() and isalnum()`, taken as a predicate rather
+    than as a list.** The list a reader would write is the hyphen and the space,
+    which is the formatting publishers use and about sixty of the million and a
+    half characters this covers. The two that mattered were neither: an
+    Arabic-Indic digit and a superscript two, each of which reached storage or a
+    500 through this exact door.
+    """
+    return st.characters().filter(
+        lambda character: not (character.isascii() and character.isalnum())
+    )
+
+
+@st.composite
+def formatted(draw) -> str:
+    """A real ISBN with the formatting a person or a catalogue puts through it."""
+    characters = list(draw(st.one_of(isbn10s(), isbn13s())))
+    for noise in draw(st.lists(discarded_characters(), max_size=6)):
+        characters.insert(draw(st.integers(min_value=0, max_value=len(characters))), noise)
+    return "".join(characters)
+
+
+@st.composite
+def near_misses(draw) -> str:
+    """A real ISBN with one character changed, which is the misread a checksum
+    exists to catch. Sometimes it changes nothing, which is the case a generator
+    written to always break something would never produce."""
+    isbn = draw(st.one_of(isbn10s(), isbn13s()))
+    at = draw(st.integers(min_value=0, max_value=len(isbn) - 1))
+    return isbn[:at] + draw(st.sampled_from(_CHECK_CHARACTERS)) + isbn[at + 1 :]
+
+
+#: Everything that reaches `parse`: a scan, a paste, a catalogue field, a
+#: barcode off something that is not a book, and text that is not any of those.
+#:
+#: **Free text on its own would be a generator that never reaches the accepting
+#: branch.** The chance of `st.text()` producing a string with a valid checksum
+#: is not worth stating, so a property given only that is a thorough test of the
+#: `return None` and silence about everything else. The witnesses below assert
+#: both branches are still reachable from this, which is the only thing standing
+#: between these properties and that.
+ANYTHING_SCANNED = st.one_of(
+    st.text(max_size=40),
+    isbn10s(),
+    isbn13s(),
+    ean13s(),
+    formatted(),
+    near_misses(),
+)
+
+
+@pytest.mark.property
+class TestTheGeneratorsReachBothBranches:
+    """The control on every property below, and the reason they are not empty.
+
+    A property over a generator that cannot produce the interesting class passes
+    and tests nothing. These fail loudly when that happens, which is the one
+    thing the properties themselves cannot report about themselves.
+    """
+
+    def test_something_generated_here_is_a_real_isbn(self):
+        witness(ANYTHING_SCANNED, lambda raw: parse(raw) is not None, reaches="an ISBN")
+
+    def test_something_generated_here_is_not(self):
+        witness(ANYTHING_SCANNED, lambda raw: parse(raw) is None, reaches="a non ISBN")
+
+    def test_the_discarded_characters_are_not_only_the_formatting_ones(self):
+        """Hyphens and spaces are the easy half and were never the defect."""
+        witness(
+            discarded_characters(),
+            lambda character: not character.isascii(),
+            reaches="a character outside ASCII",
+        )
+
+    def test_a_scanned_value_reaches_a_barcode_that_is_not_a_book(self):
+        witness(
+            ANYTHING_SCANNED,
+            lambda raw: is_valid_isbn13(normalise(raw))
+            and not normalise(raw).startswith(BOOKLAND_PREFIXES),
+            reaches="a valid EAN-13 that is not Bookland",
+        )
+
+
+@pytest.mark.property
+class TestParseAnswersForAnything:
+    @given(raw=ANYTHING_SCANNED)
+    def test_the_answer_is_none_or_a_canonical_isbn13(self, raw):
+        """`parse`'s contract about its output, which four callers rely on and
+        `targets.Target.isbn_query` states in its own reasoning: what comes back
+        is thirteen ASCII digits or nothing."""
+        canonical = parse(raw)
+        if canonical is None:
+            return
+        assert len(canonical) == 13
+        assert canonical.isascii() and canonical.isdigit()
+        assert canonical.startswith(BOOKLAND_PREFIXES)
+        assert is_valid_isbn13(canonical)
+
+    @given(raw=ANYTHING_SCANNED)
+    def test_parsing_a_parsed_value_changes_nothing(self, raw):
+        canonical = parse(raw)
+        assert parse(canonical) == canonical
+
+    @given(raw=ANYTHING_SCANNED)
+    def test_is_valid_is_the_same_question(self, raw):
+        assert is_valid(raw) is (parse(raw) is not None)
+
+
+@pytest.mark.property
+class TestNormaliseKeepsOnlyWhatItSaysItKeeps:
+    @given(raw=st.text(max_size=60))
+    def test_every_character_kept_is_ascii_alphanumeric(self, raw):
+        assert all(
+            character.isascii() and character.isalnum() for character in normalise(raw)
+        )
+
+    @given(raw=st.text(max_size=60))
+    def test_normalising_a_normalised_value_changes_nothing(self, raw):
+        assert normalise(normalise(raw)) == normalise(raw)
+
+    @given(
+        raw=st.text(max_size=40),
+        noise=discarded_characters(),
+        at=st.integers(min_value=0, max_value=60),
+    )
+    def test_inserting_a_discarded_character_anywhere_changes_nothing(
+        self, raw, noise, at
+    ):
+        """**The property the browser has to agree with**, and the one the
+        `isascii()` guard exists for. `conformance/cases/isbn.json` pins three
+        instances of it in both languages; this is the rule they are instances
+        of."""
+        position = at % (len(raw) + 1)
+        assert normalise(raw[:position] + noise + raw[position:]) == normalise(raw)
+
+
+@pytest.mark.property
+class TestACheckDigitIsUniqueWhichIsWhatMakesItOne:
+    """Modulus 11 and modulus 10 each admit exactly one completion of a body.
+
+    This is the arithmetic the two validators implement, asked as a question
+    about them rather than restated as a second implementation: if two check
+    characters passed, a single misread digit could land on a second valid ISBN
+    and the whole scheme buys nothing.
+    """
+
+    @given(body=st.text(alphabet=_DIGITS, min_size=9, max_size=9))
+    def test_one_character_completes_an_isbn10(self, body):
+        accepted = [
+            character
+            for character in _CHECK_CHARACTERS
+            if is_valid_isbn10(body + character)
+        ]
+        assert len(accepted) == 1
+
+    @given(body=st.text(alphabet=_DIGITS, min_size=12, max_size=12))
+    def test_one_digit_completes_an_isbn13(self, body):
+        accepted = [digit for digit in _DIGITS if is_valid_isbn13(body + digit)]
+        assert len(accepted) == 1
+
+
+@pytest.mark.property
+class TestTheTwoFormsAreOneBook:
+    @given(isbn10=isbn10s())
+    def test_an_isbn10_survives_the_trip_through_isbn13(self, isbn10):
+        """Which is the fix for the fourth defect: one book, one stored value."""
+        assert isbn13_to_isbn10(isbn10_to_isbn13(isbn10)) == isbn10
+
+    @given(isbn13=isbn13s())
+    def test_a_978_isbn13_survives_the_trip_through_isbn10(self, isbn13):
+        as_isbn10 = isbn13_to_isbn10(isbn13)
+        if not isbn13.startswith("978"):
+            assert as_isbn10 is None
+            return
+        assert as_isbn10 is not None
+        assert isbn10_to_isbn13(as_isbn10) == isbn13
+
+    @given(raw=ANYTHING_SCANNED)
+    def test_every_equivalent_form_is_the_same_book(self, raw):
+        """A duplicate check reads every form, so a form that parses to some
+        other ISBN would find the wrong row."""
+        canonical = parse(raw)
+        forms = equivalent_forms(raw)
+        if canonical is None:
+            assert forms == []
+            return
+        assert canonical in forms
+        assert all(parse(form) == canonical for form in forms)
+
+
+@pytest.mark.property
+class TestOnlyABookParses:
+    @given(ean=ean13s())
+    def test_a_valid_barcode_parses_exactly_when_it_is_bookland(self, ean):
+        """A loyalty card and a food packet carry valid EAN-13s, and neither is
+        a book to look up."""
+        assert (parse(ean) is not None) is ean.startswith(BOOKLAND_PREFIXES)
+
+
+@pytest.mark.property
+class TestARegistrationGroupNamesItsOwnPrefix:
+    @given(raw=ANYTHING_SCANNED)
+    def test_the_group_and_the_prefix_agree(self, raw):
+        """`sources._serves` reads both, and a group whose prefix disagreed with
+        the ISBN it came from would skip a catalogue for a book it holds."""
+        group = registration_group(raw)
+        if group is None:
+            return
+        canonical = parse(raw)
+        assert canonical is not None
+        assert group_prefix(group) == canonical[:3]
+        assert group.startswith(canonical[:3] + "-")

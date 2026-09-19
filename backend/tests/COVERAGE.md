@@ -1,10 +1,10 @@
 # Backend test coverage
 
-**7679 tests**, in 115 files, counted off a full run on 2026-09-19.
+**7780 tests**, in 118 files, counted off a full run on 2026-09-19.
 
 **Two instruments agree on it, which is why it is stated without a caveat.** A full run
 reports the passed count, and `--collect-only -q` through the wrapper prints one
-`path: count` line per file: 115 lines summing to 7679, equal to the run. Quote the
+`path: count` line per file: 118 lines summing to 7780, equal to the run. Quote the
 instrument beside the number, since the two do not always agree.
 
 **The pair prints no node ids**, because this project's `addopts` carries `-q` and the runner
@@ -25,14 +25,14 @@ the skip once made the check undoable, and a rule rewritten as `collected == pas
 the tree happens to have neither is one that fails for the wrong reason the day somebody adds
 either.
 
-**The rows below sum to 7608, seventy one short, and the shortfall is deliberate.** Those tests
-live in eight files on the publish gate's DENY list, which this published register may not
+**The rows below sum to 7684, ninety six short, and the shortfall is deliberate.** Those tests
+live in nine files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves
-whenever one of those files gains a test, and so does the count of files, which was six until
-2026-09-16. Neither is derivable from anything below.** It was fifty seven on 2026-09-18,
-fifty eight later that day, and seventy one on 2026-09-19, when one of those files gained a class
-pinning the gate's own pointer rule. That is the check doing its job rather than a figure
-drifting.
+whenever one of those files gains a test, and so does the count of files. Neither is
+derivable from anything below.** Both have moved four times since 2026-09-16, most recently
+when a ninth file joined the list carrying the guard for a development tool. That is the
+check doing its job rather than a figure drifting, and it is why this pair is recounted
+rather than adjusted by a delta.
 
 **The per file figures are collected tests, so they sum to the headline less that stated
 shortfall**, and that is the check. They are not `def test_` lines, which come to fewer, because a parametrised case is
@@ -54,7 +54,9 @@ uv run pytest tests/test_dependencies.py -k private   # one area
 
 The tree mirrors `backend/`: the tests for `routers/books.py` are at
 `tests/routers/test_books.py`. Support files that mirror nothing (`conftest.py`,
-`helpers.py`) sit at the root of the tree.
+`helpers.py`, `strategies.py`) sit at the root of the tree. `strategies.py` holds the
+generators more than one property based test draws from, and the witness that proves a
+generator still reaches the class its property is about.
 
 Nothing here touches the network or a real database. Every catalogue is intercepted with
 `respx` through `tests.helpers.silence_catalogues`, and each test gets a throwaway SQLite file.
@@ -77,14 +79,14 @@ why the helper uses regexes.
 |---|---:|---|
 | `test_dependencies.py` | 44 | **Authorization and pagination.** The regression suite for the access-control holes described below |
 | `test_config.py` | 52 | Settings resolution, the startup secret guard, upload limits, the frontend switch |
-| `test_isbn.py` | 60 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms |
+| `test_isbn.py` | 77 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms, and the same rules as properties over generated input: that a check digit is the only one that completes its body, that parsing is idempotent and answers None or thirteen ASCII Bookland digits, and that inserting any character `normalise` discards changes nothing |
 | `conformance/test_isbn.py` | 33 | **The Python half of the shared fixture set.** Holds no ISBN expectation of its own: `conformance/cases/isbn.json` is the specification, and this is a dispatch table plus the guards that stop the suite passing while testing nothing |
 | `test_ddc.py` | 29 | **Dewey headings.** That a number splits from its caption and a year does not, that the segmentation prime is stripped rather than rejected, that the projection reads the number |
 | `test_backup.py` | 159 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores. |
 | `test_lending.py` | 42 | **The loan clock.** Overdue, days overdue and days out, each arm of each; that a returned loan stops counting at its return; that `days_out`'s clamp is the reachable one |
 | `test_opds.py` | 94 | **The OPDS reader.** Which addresses this server will open, what one Atom entry becomes, the identifier the census says is not there, the doctype refusal, the decoder-on-a-file property, and the origin pin over paging. `TestNoResponseMovesTheOrigin` is the one to read first |
 | `routers/test_opds.py` | 44 | **The OPDS routes.** The admin gate on configuration against a member's right to sync, the credential lifecycle, and that deleting a server or moving it to another origin takes its login with it |
-| `test_bibliographic.py` | 65 | **What a bibliographic value means, with no record and no transport.** Every rule on its own, that the two language tables are one table inverted, and that only the four carrier aware doors reach the prose refusal, and that the catalogue order flip counts commas after the noise strip and takes a terminal full stop only on the branch that reorders a name |
+| `test_bibliographic.py` | 88 | **What a bibliographic value means, with no record and no transport.** Every rule on its own, that the two language tables are one table inverted, and that only the four carrier aware doors reach the prose refusal, and that the catalogue order flip counts commas after the noise strip and takes a terminal full stop only on the branch that reorders a name, and, over generated input, that every rule here answers for any string at all, that a title is quoted from the record rather than rewritten, and that the disc half and the not a book half are still one refusal |
 | `test_marc.py` | 63 | **The MARCXML reader and writer.** That MARC is read through `metadata.py`'s parser rather than a second one, what the importer refuses that a lookup does not, and that every column it writes out of a record is a fact about the work, so a name that is not one cannot be written on a create and skipped on a match |
 | `test_marc_fields.py` | 68 | **What a MARC21 datafield and subfield spell.** The subfield reader and its repeats, the vocabulary a heading declares and the kind it asserts, the authority identifier, which added entry wrote the book, the component part refusal, and the carrier codes that decide a book from a recording. Seven classes moved out of `test_metadata.py` with the module, plus the namespace having one definition, `Fields` carrying the record it parsed, the 245 field picked in one place, and an absent tag reading as no fields |
 | `test_metadata.py` | 437 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache, that a stored login reaches the request it was stored for and no other, that every door needing one declares it, and which transport actually carries one |
@@ -97,7 +99,7 @@ why the helper uses regexes.
 | `test_sources.py` | 98 | **The provider roster.** That off means not asked rather than deprioritised, that the stored order is the order sources are asked and not which is believed, and the catalogue remit: a remit may only be declared for a source the committed sample measures, the Argentine frame cannot give that catalogue one, and the derived table holds the rows' own objects |
 | `test_targets.py` | 71 | **A catalogue as a row.** The seeded roster field by field, what a row may carry, and the two query builders |
 | `test_decoders.py` | 36 | **What a decoder is, and what it is never told.** The contract, a catalogue decoder reading a record off a file with no `Target`, and the two family refusal and that the catalogue family's published table covers every reader a search can name |
-| `test_sru.py` | 205 | **The SRU server: the protocol, driven as a function over a query string.** That no index reaches a private or a trashed book |
+| `test_sru.py` | 218 | **The SRU server: the protocol, driven as a function over a query string.** That no index reaches a private or a trashed book, that parsing any string at all answers with a tree or a diagnostic and never a third thing, and that an escaped term matches its own characters and nothing else, judged by SQLite itself |
 | `test_settings_store.py` | 119 | Typed reads and writes over the key/value table, and that a setting the environment pins is read where it is pinned: every reader the corpus spells, including one reached as an attribute on a module that imported it |
 | `test_credentials.py` | 265 | **Somebody else's login, sealed.** The envelope and its key generation, the three key sources, the recovery phrase and its checksum, the origin a credential is bound to, and the upgrade path: which sources may still open the superseded scheme, and the three instruments that end that acceptance |
 | `test_auth.py` | 22 | Password hashing, JWT creation and the auth dependencies |
@@ -124,6 +126,7 @@ why the helper uses regexes.
 | `test_main.py` | 59 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan, what the built files say about being reused, the shell that has to answer a client route |
 | `test_house_rules.py`                      |   327 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter. Also the one decision of what vendored code is: each of the five walks over this tree driven against a constructed tree with each kind of vendored path planted in front of it, and no other test module allowed to define a walk of its own |
 | `test_scratch_report.py` | 4 | **The scratch report names the filesystem the databases landed on.** `conftest._fastest_scratch()` falls back from `/dev/shm` to disk silently |
+| `test_property_budget.py`                  |     6 | **What the generated tests are allowed to spend, measured rather than declared.** The examples that actually execute are counted against a floor, every registered profile is checked against it, and a generated test that neither carries the `property` marker nor keeps to the profile's budget is refused |
 | `test_roster_counts.py` | 78 | **A number spelled in prose, recomputed.** Every number written beside a roster noun is found by a census and must carry a verdict naming a cardinality computed from `sources.py`. The census walks the tree minus what a tool owns, so a new file is covered without anybody remembering, and it reads this register. |
 | `schemas/test_book.py` | 39 | **Two request bodies writing one column must agree about it.** `BookMatch` bounded four of its seventeen fields while `merge_into` wrote them all |
 | `schemas/test_settings.py` | 2 | **A row the router builds must carry every field the source describes.** The settings row is built by splatting the description into the response model |
@@ -169,7 +172,8 @@ why the helper uses regexes.
 | `routers/test_books_authors.py` | 110 | The author index and its privacy, the `?author=` filter, merging and reversing one, the library wide mapping against the filtered shelf, the flat map, and undoing a merge. |
 | `routers/test_books.py`                    |   143 | Listing, search, sorting, tagging, covers, notes, export, ownership, that every cell the export writes goes through the formula escape with no exemption, and that a login this deployment holds leaves with the request that needs it |
 | `routers/test_books_identifiers.py`        |    28 | The identifier a store knows a book by, over the API: written with the book, read back on it, refused where the scheme is not one this app names, bounded so a payload cannot carry an unbounded list, and removed by any member who may write the book, where an invisible book and one belonging to somebody else are both 404 |
-| `schemas/test_identifier.py`               |    17 | What a store identifier may contain, at the door: the character classes refused, which are whitespace and both invisible Unicode categories, checked as the same set the client filter refuses rather than against examples |
+| `schemas/test_identifier.py`               |    24 | What a store identifier may contain, at the door: the character classes refused, which are whitespace and both invisible Unicode categories, checked as the same set the client filter refuses rather than against examples, and as one rule over every string: the padding comes off and what is left is stored unless it is empty or holds any whitespace or anything invisible |
+| `schemas/test_classification.py`           |    10 | **What a classification number may hold, as a rule over every string.** The whitespace a catalogue's own formatting leaves is collapsed, both invisible Unicode categories are refused, and storing a stored number changes nothing |
 | `test_identifiers.py`                      |    10 | Writing identifiers onto a book: duplicates within one payload dropped rather than refused, because a client reading two of its own files may find one book in both, and the repoint a merge performs |
 | `routers/test_books_google.py` | 44 | Enrichment, the chosen-edition apply and that its body cannot overflow the database |
 | `routers/test_books_search.py` | 55 | **Free-text search.** That it works with no API key, that the six catalogues a reader would doubt answer do, how they merge |

@@ -6,12 +6,17 @@ What is pinned here is the model's own rule: an identifier is an opaque token,
 so the edges are trimmed and nothing invisible survives inside.
 """
 
+import unicodedata
+
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from enums import BookIdentifierScheme
 from models import BOOK_IDENTIFIER_MAX
 from schemas.identifier import BookIdentifierIn
+from tests.strategies import INVISIBLE_CATEGORIES, invisible_characters, text_around, witness
 
 
 class TestTheValueIsTrimmedAndThenTested:
@@ -112,3 +117,96 @@ class TestTheSchemeIsClosed:
     @pytest.mark.parametrize("scheme", list(BookIdentifierScheme))
     def test_every_member_is_accepted(self, scheme):
         assert BookIdentifierIn(scheme=scheme, value="B00J4YQKHY").scheme is scheme
+
+
+# ── The same rule as a property ───────────────────────────────────────────────
+#
+# **What the cases above pin is the three refusals a reader needs to recognise.**
+# What is below is the rule they are instances of, which is the one thing a case
+# cannot state: that there is no fourth string that gets through.
+#
+# The generator names the invisible characters by Unicode category. The narrower
+# rule this validator replaced reached the 24 ASCII controls and admitted the 41
+# C1 controls, SOFT HYPHEN, ZERO WIDTH SPACE and the byte order mark, and a
+# sweep written by hand is how that was found: one character at a time, after
+# the second one had already reached a unique index.
+
+_VALUES = st.one_of(
+    st.text(max_size=BOOK_IDENTIFIER_MAX),
+    text_around(invisible_characters(), padding=8),
+    text_around(st.text(alphabet=" \t\n", min_size=1, max_size=3), padding=8),
+).filter(lambda value: len(value) <= BOOK_IDENTIFIER_MAX)
+
+
+def _stored(value: str) -> str | None:
+    """The identifier this model would store, or None where it refuses."""
+    try:
+        return BookIdentifierIn(scheme=BookIdentifierScheme.ASIN, value=value).value
+    except ValidationError:
+        return None
+
+
+def _opaque(value: str) -> bool:
+    """Whether every character in this value is one an opaque token may hold."""
+    return not any(
+        character.isspace()
+        or unicodedata.category(character) in INVISIBLE_CATEGORIES
+        for character in value
+    )
+
+
+@pytest.mark.property
+class TestTheGeneratorStillReachesEveryAnswer:
+    def test_it_reaches_an_identifier_that_is_stored(self):
+        witness(_VALUES, lambda value: _stored(value) is not None, reaches="a stored identifier")
+
+    def test_it_reaches_one_that_is_refused(self):
+        witness(_VALUES, lambda value: _stored(value) is None, reaches="a refused identifier")
+
+    def test_it_reaches_one_whose_padding_is_trimmed(self):
+        witness(
+            _VALUES,
+            lambda value: _stored(value) not in (None, value),
+            reaches="an identifier with padding around it",
+        )
+
+    def test_it_reaches_an_invisible_character_that_is_not_a_control(self):
+        witness(
+            _VALUES,
+            lambda value: any(
+                unicodedata.category(character) == "Cf" for character in value
+            ),
+            reaches="a formatting character",
+        )
+
+
+@pytest.mark.property
+class TestAnOpaqueTokenIsTrimmedAndThenTakenWhole:
+    @given(value=_VALUES)
+    def test_the_rule_is_the_whole_rule(self, value):
+        """**Stated as one expression over every input**, which is what a case
+        cannot do: the padding comes off, and what is left is stored unless it
+        is empty or holds anything invisible or any whitespace at all.
+
+        Whitespace **inside** is refused rather than collapsed, and that is
+        where this parts company with `ClassificationIn.tidy_number`: a call
+        number legitimately contains spaces, and an identifier does not, so
+        whitespace inside one means the reader picked up something that is not
+        the identifier.
+        """
+        trimmed = value.strip()
+        expected = trimmed if trimmed and _opaque(trimmed) else None
+        assert _stored(value) == expected
+
+    @given(value=_VALUES)
+    def test_storing_a_stored_identifier_changes_nothing(self, value):
+        """The failure is `uq_book_identifiers_book_scheme_value`, which is on
+        the exact characters: a value that normalised to something new on a
+        second pass would be a second row for one identifier."""
+        stored = _stored(value)
+        assert stored is None or _stored(stored) == stored
+
+    @given(value=_VALUES)
+    def test_a_stored_identifier_has_no_edges_left_to_trim(self, value):
+        stored = _stored(value)
+        assert stored is None or (stored == stored.strip() and stored != "")

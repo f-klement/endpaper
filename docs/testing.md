@@ -33,14 +33,16 @@ work in them.
 ## Running
 
 ```bash
-cd backend  && uv run pytest        # 2223 tests
-cd frontend && bun run test         # 1453 tests, in 99 files
+cd backend  && uv run pytest        # 7780 tests, in 118 files
+cd frontend && bun run test         # 3885 tests, in 192 files
 ```
 
 | Command | Purpose |
 |---|---|
 | `uv run pytest --cov --cov-report=term-missing` | Backend coverage with unhit lines |
 | `uv run pytest tests/test_dependencies.py -k private` | One file, matching tests |
+| `uv run pytest -m property` | Only the tests whose inputs hypothesis generates |
+| `uv run pytest --hypothesis-profile thorough` | The same properties at ten times the examples |
 | `uv run mypy .` | Type check, strict |
 | `uv run ruff check .` | Backend lint. There is no formatter step: `ruff format` is not configured here and reformats 203 of the 256 files |
 | `bun run test:watch` | Re-run on change |
@@ -97,6 +99,36 @@ The configured production values are pinned separately in `TestLimitsAreSane`.
 - **`explicit_package_bases` + `mypy_path = "."`.** The same collision stops mypy dead:
   it aborts before checking anything at all. These two make it derive module names from the
   path instead.
+
+### Properties, and what they are allowed to spend
+
+Some rules are not a list of cases. The character classes two schema validators refuse, the
+strings an ISBN reader has to answer for, and the queries a CQL parser must answer with a
+tree or a diagnostic are all **complements of what anybody would think to write down**, and
+a sweep written by hand is a claim about its own bounds with nothing in it saying so. One in
+this tree read `range(0x11000)` as though it covered Unicode, which is a sixteenth of the
+codepoints.
+
+So `hypothesis` generates the inputs for those, marked `property` and running in the
+ordinary suite. Two rules hold over every one of them.
+
+**Derive the generator from the rule, never from a list of the ways the rule can break.**
+The invisible characters come from the Unicode categories. The catalogue wordings come from
+the patterns under test. A check digit comes from the arithmetic and never from the function
+being checked, which would agree with it whatever it did.
+
+**A property is only a claim about what its generator can reach**, so one about a hostile
+class carries a `strategies.witness` beside it: it searches the same strategy for a value in
+the class and fails by name when it cannot find one. Narrow a generator and the witness
+says so; without it the property stays green and stops testing anything.
+
+**A shrunk failure is pinned as its own deterministic test**, with what it shows attached.
+The example database is off, so nothing is cached: the defect is named in the tree or it is
+not recorded at all.
+
+`tests/test_property_budget.py` holds the floor under the example count and measures the
+examples that actually run, because a profile somebody lowers to one is a suite that passes
+in the usual time and tests nothing.
 
 ### Where the databases live, and how you know
 
@@ -250,3 +282,8 @@ rules, the measurements, and why the directory exists at all.
 - **A guard that inspects nothing is worse than no guard.** `assert_unique_operation_ids()`
   fails loudly if it finds zero routes, because its first version silently checked nothing
   and read as coverage.
+- **A property ships with the proof that its generator still reaches the interesting
+  input.** `strategies.witness` is that proof, and it is the same rule as the guard that
+  inspects nothing above, one level up: a property over a generator that cannot produce the
+  class it is about is green and empty, and nothing in the run distinguishes it from one
+  that holds.

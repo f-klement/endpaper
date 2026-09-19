@@ -4456,6 +4456,93 @@ are in [testing.md](testing.md). The rule is to opt out and say why rather than 
 file into the transaction: a test that passes alone and fails in a suite costs more than
 the seconds it saves.
 
+### Mutation testing is a tool a seat reaches for, and never a gate
+
+A mutation sweep is one suite run per mutant plus a baseline, and this backend's suite is
+7679 tests. A tree wide sweep is not affordable and is not the question anybody has: the
+question is always whether **this diff's** guard holds. So the wrapper takes a diff, or a
+ref pair, mutates only the Python that diff touched, and runs only the tests that diff
+touched.
+
+**Nothing in the pipeline calls it and nothing should.** Three separate arguments, and the
+first is the weakest: cost. The second is that a generator does not know which case a guard
+was written to cover, and the mutation that mattered was chosen by the **other** seat every
+time. The third is that a gate has to be right about every tree, where this is right about
+one diff.
+
+**What it does replace is a page of rules.** What a sweep must do was a list a seat had to
+hold in its head; it is now a set of refusals the tool makes, and the list itself has one
+home rather than a copy in every document that mentions it. The rules the tool does **not**
+enforce stayed written down in full, because a rule deleted because "the tool handles it",
+and a tool that does not, is worse than the page.
+
+### The baseline is an arm of the sweep, not a thing remembered from an earlier run
+
+A guard that is red on the shipped tree scores every mutation a catch it did not earn.
+Measured 2026-09-18: two new arms read a mock's calls where that file's idiom is the
+route's, so they failed on the shipped tree and appeared in the failure list of **all
+three** mutations, including one they had nothing to do with. Running the baseline first is
+what turned three false catches into a bug in the test.
+
+**Fatal rather than advisory**, and that is the whole decision. An advisory baseline prints
+a warning above a report full of catches nobody earned, and the report is what gets read. A
+red baseline now ends the run with nothing mutated and no verdict printed.
+
+### The mutant generator is a library, and the sweep engine is not
+
+`mutmut` supplies one thing: the list of single node mutations in a file. Its own sweep
+engine, its generated `mutants/` tree and its percentages are never used, because none of
+them can be made to satisfy the properties above.
+
+**The choice between the two Python mutation testers was settled by availability rather than
+by preference**, confirmed against the index on 2026-09-19 rather than taken on trust:
+`mutmut` 3.8.0 declares classifiers through 3.15, and `cosmic-ray` 8.7.0 declares none past
+3.13 while this backend is 3.14 only.
+
+**Diff scoping is expressed to the library rather than filtered afterwards.** The generator
+takes the set of lines it may consider, so the restriction is a property of how the mutants
+were made. A filter applied to a finished list would have to agree with the library about
+which line a multi line statement is anchored on, and a disagreement there is silent.
+
+### A verdict is read off the suite's own report, never off the words it printed
+
+Reading `N passed, M failed` means enumerating pytest's outcome vocabulary, which is a list
+somebody else controls, and an enumeration over something open is the shape this repository
+keeps paying for. The sweep asks for a JUnit report on standard output instead and parses
+that: it carries the number of tests that ran and the identity of every failing one, which
+is exactly what "a count is not a catch, a name is" needs, and it is written by the test
+runner rather than described by it.
+
+**Three shapes are invalid rather than caught**, each one a real run: a report that never
+arrived, which is what an out of memory kill looks like; a report declaring a failure it
+attributes to no test; and a status that the runner's own verdict line and the process exit
+code disagree about. Anything keying on a non zero exit code would have scored all three as
+a guard noticing something.
+
+**On standard output because the tree is deleted before anybody can read a file in it.** The
+suite runs in a pod whose repository is removed by the runner's cleanup, so a report written
+to a path inside it is gone by the time the sweep could look.
+
+### The frontend has no sweep, and the route to one is recorded rather than built
+
+Measured 2026-09-19 in the image the suite pod and the pipeline both run: Stryker 10.0.0
+with its vitest runner exits 1 under bun with a plugin loader error, while the identical
+configuration under real node v24.10.0 completes and kills mutants. The image's
+`node` is bun wearing node's name. The route settled the same day is to install real node on
+the mutation path only, which the image's Alpine carries as one musl linked package: no new
+image, no second digest to pin, no pipeline change.
+
+**It is not wired up, and that is a narrowing of the ticket rather than a finding about
+Stryker.** Stryker is a sweep engine of its own, with its own baseline, its own verdict
+vocabulary and a percentage as its headline, so putting it under the properties above is a
+second integration rather than a configuration file. A configuration file with no lockfile
+entry behind it would be a published claim that nothing can run.
+
+**The caveat that has to travel with the first frontend mutation figure**, whenever somebody
+does build it: Stryker spawns the test runner under node where this suite otherwise runs
+under bun, so the evidence comes from a runtime the suite does not normally use. That is
+acceptable for "did this guard notice" and is a second reason it must stay off the gate.
+
 ## Reference implementations: what may be read, and what may not be copied
 
 Endpaper's features were designed against prior art rather than invented, and
@@ -15171,3 +15258,240 @@ So a comment explaining a suppression starts with any word but that one. The sam
 a second way: text after a real directive is parsed as more rule codes until it stops looking
 like one, so `# noqa: RUF001  , 1819-1891` warns `expected rule code between commas` and the
 directive is then malformed rather than absent.
+
+## Property based tests run in the ordinary suite, and the budget is a test rather than a number
+
+Hypothesis costs per **example** where every other test here costs per **test**, so the
+example count is the one number that decides whether these fit. Two profiles are registered
+in `tests/conftest.py`: `suite` at 200 examples, which every run pays, and `thorough` at
+2,000, selected with `HYPOTHESIS_PROFILE=thorough` or `--hypothesis-profile thorough` for
+the run somebody starts on purpose.
+
+**Measured on the `builder` node at `-n 4`**, three figures rather than a difference: the
+whole backend suite is **168.70 s**, the same suite with `-m "not property"` is **163.39 s**,
+and the 68 generated tests on their own are **17.72 s**, which includes collecting all 7,755.
+`thorough` takes the same 68 to **46.62 s**. **The subtraction is deliberately not quoted as
+the cost**: two whole suite runs 3% apart on a shared node are not precise enough to support
+a figure to two decimals, and the direct measurement is the one that means anything. `-n` is
+unchanged and is not what pays for any of it.
+
+**They are not behind a marker in the sense of being skipped.** A property nobody runs is a
+property nobody knows the truth of. The `property` marker exists to cost them (`-m
+property`) and to give somebody chasing an unrelated failure one line of escape, and
+`tests/test_property_budget.py` refuses a generated test that does not carry it, so the two
+sets cannot drift.
+
+**The floor under the budget is measured from inside a running test, not read off the
+settings.** A profile someone lowers to one example is a suite that passes in the usual time
+and tests nothing, and nothing about a green run distinguishes the two. `max_examples` is
+also only an upper bound: a command line `--hypothesis-seed`, a `settings()` on one test, a
+phase list with generation removed, and an `assume` that rejects nearly everything all end
+in the same place. So the guard counts the examples that actually execute and asserts the
+count against a floor of 50, which is a different number from any profile's on purpose: the
+floor is what the suite refuses, the profile is what it spends.
+
+**`database=None` on both profiles.** Hypothesis's example database caches a failing case
+and replays it, and this tree's habit is the opposite: a shrunk failure is pinned as its own
+deterministic test with the incident attached, so the defect is named rather than cached.
+Turning it off also keeps the xdist workers from contending over one directory and keeps a
+generated artefact out of the tree.
+
+**`deadline=None`, and the consequence is named rather than hidden.** A per example wall
+clock deadline on a shared, CPU capped node is a flake: the same example passes at 40 ms and
+fails at 210 ms depending on what else the node is carrying. What bounds the cost here is
+the example count, which is a property of the run rather than of the machine. What it costs
+is that a performance regression inside a property is not what these catch.
+
+**Not derandomised**, which is the trade in the other direction. A fixed seed turns a
+property into the same sweep on every run, so it can never find anything it did not find the
+first time, which is the defect this whole ticket was opened for wearing different clothes.
+The cost is that a failure may not reproduce on a rerun, so `print_blob` is on and the
+shrunk example is in the output.
+
+## A generator is derived from the rule, and a witness beside it proves it still reaches the class
+
+**A property is only a claim about the inputs its generator can produce, and a weakened
+generator leaves the property green and empty.** That is the same failure as a hand written
+sweep, one level up: `range(0x11000)` read as though it covered Unicode and covered a
+sixteenth of the codepoints, and nothing about the sweep said which.
+
+So two rules hold across `tests/strategies.py` and every property in this tree.
+
+**Derive, never enumerate.** The invisible characters come from the Unicode categories `Cc`
+and `Cf` rather than from a list of the ones somebody has met. The characters `isbn.normalise`
+discards come from the complement of its own predicate rather than from "a hyphen and a
+space". The catalogue wordings for a disc, for an online resource and for a volume slot come
+from the very patterns under test through `from_regex`, which is correct precisely because
+the property there is an agreement between two functions: the disc alternation is half of
+the not a book one, and a generator built from the first is what notices if the halves stop
+agreeing. An ISBN check digit comes from the modulus arithmetic and never from the function
+being checked, because a generator that asked `isbn10_to_isbn13` what a valid ISBN-10 looks
+like would agree with it whatever it did.
+
+**Every property about a hostile class ships with a witness.** `strategies.witness` searches
+the same strategy object for a value in the class and fails with a message naming the class
+when it cannot find one. It found two real defects in its own tests before either property
+could go quiet: a generator whose long digit runs sat at the top of a wide size range
+produced them almost never, because hypothesis draws sizes from a distribution that reaches
+the maximum rarely; and a generator of initials drawn from every uppercase letter almost
+never produced the ASCII one `_TRAILING_INITIAL` is written against, so the harder half of
+`_drop_isbd_stop` was untouched. The witness searches with `Phase.generate` only: shrinking
+the hit to its minimum costs two orders of magnitude more and answers a question nobody
+asked.
+
+## The LIKE escaping has a property at one of its two sites, and the reason is the door in front of each
+
+The rule is stated twice on purpose, at its own site in `shelf.py` and again in `sru.py`,
+because a shared helper would put a search detail in a module neither owns. The property
+added for it, `TestAnEscapedTermMeansItsOwnCharacters` in `tests/test_sru.py`, judges
+`sru._pattern` against SQLite itself: it builds the pattern, asks the engine, and asserts the
+pattern matches the term's own characters and nothing else. **`shelf.py`'s copy keeps the
+two named cases it already had and gained no property**, so the coverage is uneven and
+saying so is the point of this entry.
+
+**What decides that is not effort, it is the door in front of each site.** The property's
+generator excludes the NUL character, for a reason that is true at one site and false at the
+other. Python's SQLite binding truncates a bound parameter at a NUL, so an oracle asked about
+one is answering about a shorter string and the property would be measuring the driver. That
+exclusion is sound in front of `sru._pattern` because `_tokenise` refuses every unprintable
+character before a `Term` exists, which `TestAControlCharacterNeverReachesTheTokeniser` pins
+in the same file, so no route reaches the pattern builder with a NUL at all.
+
+**There is no such refusal in front of `shelf.py`.** So a property written there would need
+either an oracle that can carry a NUL or an explicit statement of what it does not cover, and
+copying this one across without noticing that is how a test arrives asserting less than its
+name. Recorded here rather than left to be rediscovered.
+
+**What the uneven coverage exposes, bounded rather than left to be worked out.** A broken
+pattern at the `shelf.py` site can only fail to narrow: `filters.q` is ANDed onto a shelf
+that `visible_to` has already narrowed, so the worst answer is more of this viewer's own
+books and never somebody else's. The privacy rule is not what is standing on this.
+
+## `flip_catalogue_name` is stable on a name and not on a cell that is not one
+
+Found by the idempotence property over free text, and pinned in
+`tests/test_bibliographic.py` as `TestACellWhoseSurnameIsPunctuationIsNotAName`.
+
+`;,0` carries exactly one comma, so it takes the flipping branch and comes back as `0 ;`. On
+a second pass the semicolon is trailing, which is where `_strip_person_noise` rstrips it,
+and the cell changes again to `0`.
+
+**Recorded rather than fixed, and the bound is the reason.** Nothing reaches this but a cell
+whose surname is punctuation, and no catalogue and no importer produces one: a real cell
+ending in a semicolon is trimmed on the first pass before the comma is counted. What it
+costs is that this function is a reader of catalogue person strings and not a general
+normaliser, which is what the idempotence property is now scoped by: it is asserted over
+generated catalogue person cells, and the whitespace collapse and the "nothing is ever
+added" bound are asserted over any string at all.
+
+## The structural house rules stay in the test tree, and both contract tools are refused
+
+The proposal was to move the rules that are nothing but an import edge out of the two house
+rule test files and into `import-linter` for the backend and `dependency-cruiser` for the
+frontend, so that a structural rule is declared rather than walked. Its own condition was
+that the split between the two homes be statable in one sentence, because two homes are
+worse than one long home whenever the next author cannot tell which file a new rule goes in.
+
+The sentence is: **a house rule that is nothing but a static import edge between two modules
+lives in the contract file; every other house rule lives in the test tree.** It reads crisply
+and it does not survive the tree. It is refused on three measurements, taken 2026-09-19
+against `import-linter` 2.15 with `grimp` 3.17 and `dependency-cruiser` 18.3.1, which is that
+tool's current release.
+
+### It cuts three of the four rules in half
+
+Each of these keeps a sibling that is not an import edge, so the rule and the assertion that
+proves the rule still binds would sit in different files, in different languages, with
+nothing joining them:
+
+| Rule | The sibling that cannot move |
+|---|---|
+| `backend/tests/test_decoders.py::TestADecoderIsNeverToldHowTheBytesArrived` | two checks over the decoder registries' signatures, and the control that the exclusion set is non empty |
+| `backend/tests/test_recover.py::TestNothingImportsIt` | the control arm asserting the walk reached `routers` and `schemas`, in the same test body |
+| `frontend/tests/houseRules.test.ts`, the generated client rule | `it("reads the source tree at all")` |
+
+Only `backend/tests/test_deadline.py::TestTheModuleEveryoneTrustsImportsNothingOfOurs` is one
+import edge and nothing else. A rule about rules that partitions one rule in four is not a
+rule about rules.
+
+### A graph of this backend is very nearly edgeless
+
+`root_packages` takes packages and refuses a top level module: `'decoders' is a module, not a
+package`. 56 of the 137 modules the recover walk reads are top level ones, `decoders.py`,
+`deadline.py` and `recover.py` among them.
+
+Adding a `backend/__init__.py` puts them in a graph and does not put their imports in it.
+This tree imports its siblings absolutely, `import recover` rather than `from backend import
+recover`, because the backend directory is what is on the path. `lint-imports` over the whole
+tree that way reports `Analyzed 182 files, 603 dependencies`, and **not one of those 603 is an
+import from one module of the package to another**. A fixture of the same shape, a package
+whose `a.py` says `import b`, reports `Analyzed 3 files, 0 dependencies` and the contract
+`KEPT` on a tree that breaks it; spelled `from pkg import b` the identical contract breaks on
+it.
+
+So `layers` and `independence`, the two of the five contract types that express a direction of
+dependency, have almost nothing to read here. With `backend` as the single root they are
+vacuous: 0 of those 603 imports are internal, so a layering is `KEPT` by construction. With
+the tree on the path twice and `routers` made a root of its own they see **16 of 787**, the
+arbitrary slice where the importer and the importee happen to resolve under different root
+names. The slice grows with the root set and never approaches the tree: five roots on the
+doubled path see 113 of 1086. A layering kept on the 973 edges it still cannot see is a worse
+guard than one that cannot be written, so the layering the proposal hoped to pick up for free
+is not there either way.
+
+### What does work needs the tree changed to suit the tool, and two of its three shapes are silently blind
+
+Our own modules can still be matched as **external** names, which is enough for `forbidden`.
+Three configurations exist and they differ in what they read, not in what they say:
+
+| Configuration | What it does not read | On a break |
+|---|---|---|
+| rooted on the importable packages, run from `backend/` | the 56 top level modules | `import recover` in `accounts.py`, with a router importing `accounts`: reports `KEPT`. The walk reports `accounts.py` |
+| rooted on `backend` as a package, which needs a new `backend/__init__.py` | `routers`, which carries no `__init__.py` and so is not in the graph at all | a router importing `recover` directly, the shape the rule's docstring names: reports `KEPT`, on an unchanged dependency count, because the break adds no edge the graph holds |
+| both, with the tree on the path twice so every top level module exists under two names | nothing the walk reads | breaks correctly on both shapes |
+
+Two of the three are green on a break the rule exists to catch, each on a different one, and
+the tool prints `KEPT` for both. The third buys correctness with a package marker for a
+package nothing imports by that name and a doubled import path, and it still has no control
+arm: the test it would replace carries one in the same body because a mutation that shrank
+that walk once left it green.
+
+The two remaining rules need worse than that. No contract type expresses "imports nothing
+outside the standard library"; `forbidden` takes a list of names. Both tests derive that list
+from the tree so that a module added later is covered without anybody remembering, and the
+decoders test records what a set derived from too little already cost: taken over the top
+level `*.py` files alone, without the packages, 5 of 7 evasions passed. A list typed into a
+config file is that failure with nothing left to re-derive it.
+
+### The frontend half is refused because the contract is weaker, not because the tool will not run
+
+The rule it would replace matches the path as text, so a module carrying
+`"../api/generated/endpoints/settings/settings"` as a bare string is reported. The contract
+sees no import edge there and passes, over 471 modules cruised. This project declares no build
+aliases, so the text match has no spelling to miss and a resolver buys back nothing for what it
+gives up. The replacement is strictly weaker, and that reason does not expire.
+
+The version is a price rather than the refusal, and it is written down so a re-open does not
+have to re-measure it. `dependency-cruiser` 18.3.1, its current release, requires `typescript
+>=2.0.0 <7.0.0` and this project is on `^7.0.2`. Resolving the project's own compiler it
+cruises **0 modules, 0 dependencies** and exits 0 with `no dependency violations found`, which
+is a guard green because it read nothing. Installed beside a pinned TypeScript 6 of its own it
+cruises 471 modules and 1501 dependencies against that same TypeScript 7 project, and breaks
+correctly on a module level import, on a dynamic `import()` and on an `import type`. So the
+price is a second, older compiler carried so that one linter can read the sources the real
+compiler compiles.
+
+### The evasion everybody suspects is not the reason
+
+A function level import is seen by `grimp` and by the `ast` passes alike.
+`getattr(importlib.import_module("recover"), "main")` is seen by neither. On that dimension
+the two are at parity, and it decided nothing here.
+
+### What would change the answer
+
+Two things, independently. The frontend half needs a second structural frontend rule, to be
+worth a second home at all, and a contract that does not give up the bare string the text
+match catches; a release supporting TypeScript 7 changes the price and not the argument. The
+backend half needs the application to be a package imported by its own name, at which point a
+graph has internal edges and a layering becomes expressible. That is a change to every module
+in it, and it is not bought by three rules.

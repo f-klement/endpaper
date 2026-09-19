@@ -19,6 +19,54 @@ from typing import Any
 
 import pytest
 import respx
+from hypothesis import settings as hypothesis_settings
+
+# ── What the property based tests are allowed to spend ────────────────────────
+#
+# **The budget is the constraint the property tests were designed around, not a
+# detail of them.** Hypothesis costs per example where every other test here
+# costs per test, so the number below is what decides whether the suite stays
+# inside the time the rest of the tree was sized for.
+#
+# **Two profiles, and a bare run loads the smaller one.** `suite` is what every
+# run pays; `thorough` is for the run somebody starts on purpose when a property
+# is suspected to be false and the suite has not found it.
+# `HYPOTHESIS_PROFILE=thorough` selects it, and so does hypothesis's own
+# `--hypothesis-profile thorough`, which wins over this and is why the budget
+# guard counts what ran rather than reading the name below.
+#
+# **`database=None` is the one setting whose reason is local to this file.**
+# Hypothesis's example database is a directory, and every xdist worker here is a
+# separate process that would write to it, so turning it off is also what keeps
+# them from contending over one. What it costs, and why `deadline` and the seed
+# are set the way they are, is one decision with one home: see "Property based
+# tests run in the ordinary suite, and the budget is a test rather than a
+# number" in docs/decisions.md.
+#
+# The floor under these numbers, and the two guards that keep them honest, are
+# in `tests/test_property_budget.py`. A number here with no guard on it is a
+# number somebody can quietly drop to 1.
+
+#: Every profile this tree registers, and what one property costs under it.
+#:
+#: One table rather than a call per profile, so the guard can walk the names
+#: instead of being given a list of them that drifts.
+PROPERTY_PROFILES: dict[str, int] = {"suite": 200, "thorough": 2_000}
+
+for _profile, _examples in PROPERTY_PROFILES.items():
+    hypothesis_settings.register_profile(
+        _profile,
+        max_examples=_examples,
+        database=None,
+        deadline=None,
+        print_blob=True,
+    )
+
+#: Which of them this run is using. An unknown name is an error from
+#: `load_profile`, which is the right answer: a typo that silently ran the
+#: small profile would be a deep run nobody got.
+ACTIVE_PROPERTY_PROFILE = os.environ.get("HYPOTHESIS_PROFILE", "suite")
+hypothesis_settings.load_profile(ACTIVE_PROPERTY_PROFILE)
 
 # ── Environment must be set before the app is imported ────────────────────────
 

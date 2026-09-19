@@ -12,18 +12,22 @@ list that an index added later is not on.
 """
 
 import ast
+import sqlite3
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 from xml.etree import ElementTree
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 import marc
 import sru
 from enums import TagCategory
 from models import Book, Tag
 from schemas.public import PublicBookOut
+from tests.strategies import invisible_characters, text_around, witness
 
 #: The namespaces a response is read back through.
 SRW = "{http://www.loc.gov/zing/srw/}"
@@ -1517,3 +1521,292 @@ class TestTheResponseIsARecordAnotherSystemCanRead:
             ElementTree.tostring(collection, encoding="unicode").encode()
         )
         assert [entry.title for entry in parsed.records] == [SHARED["title"]]
+
+
+# ── The parser and the escaping as properties ─────────────────────────────────
+#
+# **Every class above drives one query somebody wrote down.** What is below is
+# the two claims the module makes about *every* query: that parsing one answers
+# with a tree or with a diagnostic and never with anything else, and that a term
+# put into a LIKE pattern matches the text the client asked for and nothing
+# else.
+#
+# Both are claims a case cannot make. The first is about the complement of every
+# query anybody thought of, and the complement is where a `ValueError` from
+# `int()`, an `OverflowError` from the driver and a `RecursionError` from the
+# descent have each already turned a refusal into a 500.
+
+#: Every index name a client might send: the ones this server has, the bare
+#: spellings, and names it does not have in both shapes a refusal distinguishes.
+_INDEX_NAMES = st.sampled_from(
+    [index.qualified for index in sru.INDEXES]
+    + list(sru.BARE_INDEXES)
+    + ["", "cql.nosuch", "nosuch.title", "nosuch", "9bad", "dc."]
+)
+
+#: Every relation, spelled as a symbol and as a word, including the three that
+#: are recognised in order to be refused by name.
+_RELATIONS = st.sampled_from(
+    [*sru._RELATION_SYMBOLS, " all ", " any ", " exact ", " within ", " adj ", ""]
+)
+
+#: A term as a client writes one: the masks, the escapes, the anchor, the
+#: quote and the space are all in the alphabet, because each of them is a
+#: branch of `_pieces` and none of them is a character a term may not contain.
+_TERM_TEXT = st.text(alphabet='abZ09*?\\"^ ', max_size=8)
+
+_SINGLE_CLAUSES = st.builds(
+    lambda index, relation, term: f"{index}{relation}{term}",
+    _INDEX_NAMES,
+    _RELATIONS,
+    _TERM_TEXT,
+)
+
+#: A whole query: clauses, the booleans between them, parentheses, and the
+#: `sortby` clause SRU 1.2 moved sorting into.
+_GRAMMAR = st.recursive(
+    _SINGLE_CLAUSES,
+    lambda inner: st.one_of(
+        st.builds(
+            lambda left, operator, right: f"{left} {operator} {right}",
+            inner,
+            st.sampled_from(["and", "or", "not", "prox", "AND", "Or"]),
+            inner,
+        ),
+        st.builds(lambda inner_query: f"({inner_query})", inner),
+        st.builds(lambda query, key: f"{query} sortby {key}", inner, _INDEX_NAMES),
+    ),
+    max_leaves=5,
+)
+
+#: The shapes that are about a bound rather than about a grammar. Each of the
+#: five bounds in this module refuses something a well formed query would
+#: otherwise walk straight into, and the depth one is the only thing between a
+#: nest of parentheses and a `RecursionError` the router would serve as a 500.
+_AT_THE_BOUNDS = st.one_of(
+    st.builds(lambda depth: "(" * depth + "a" + ")" * depth, st.integers(1, 400)),
+    st.builds(lambda count: " and ".join(["a"] * count), st.integers(1, 40)),
+    st.builds(lambda count: "a" + "*" * count, st.integers(1, 20)),
+    st.builds(lambda count: "dc.title=" + "w " * count, st.integers(1, 30)),
+    st.builds(lambda size: "a" * size, st.integers(1, 1_200)),
+    st.builds(lambda digits: f"rec.id={digits}", st.text("0123456789", max_size=40)),
+    st.builds(lambda digits: f"dc.date>{digits}", st.text("-0123456789", max_size=40)),
+)
+
+#: Everything that reaches `parse`, which is an unauthenticated query string.
+ANY_QUERY = st.one_of(st.text(max_size=60), _SINGLE_CLAUSES, _GRAMMAR, _AT_THE_BOUNDS)
+
+
+@pytest.mark.property
+class TestTheGeneratorStillReachesBothAnswers:
+    """The control. A generator that had stopped producing parseable queries
+    would leave the class below asserting only that refusals are refusals."""
+
+    def test_it_reaches_a_query_that_parses(self):
+        witness(ANY_QUERY, _parses, reaches="a query that parses")
+
+    def test_it_reaches_a_query_that_is_refused(self):
+        witness(ANY_QUERY, lambda query: not _parses(query), reaches="a refused query")
+
+    def test_it_reaches_a_nest_deep_enough_to_be_refused_for_its_depth(self):
+        """The bound that stands between a client and a `RecursionError`."""
+        witness(
+            ANY_QUERY,
+            lambda query: _diagnostic_of(query)
+            is sru.Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES,
+            reaches="a query refused for its parentheses",
+        )
+
+    def test_it_reaches_a_masked_term(self):
+        witness(
+            ANY_QUERY,
+            lambda query: _parses(query) and "*" in query,
+            reaches="a term carrying a wildcard",
+        )
+
+
+def _parses(query: str) -> bool:
+    try:
+        sru.parse(query)
+    except sru.SruError:
+        return False
+    return True
+
+
+def _diagnostic_of(query: str) -> sru.Diagnostic | None:
+    try:
+        sru.parse(query)
+    except sru.SruError as error:
+        return error.diagnostic
+    return None
+
+
+@pytest.mark.property
+class TestParsingAQueryHasTwoOutcomesAndNoThird:
+    @given(query=ANY_QUERY)
+    def test_it_is_a_tree_or_a_diagnostic(self, query):
+        """**Anything else is a 500 on an unauthenticated door**, which is the
+        distinction `respond` draws on purpose: every refusal this module
+        decides is a diagnostic inside an HTTP 200, and an exception that is not
+        an `SruError` stays a 500 so a bug is never dressed as a protocol
+        answer. Three of those have been real: a `ValueError` from `int()` on a
+        long digit run, an `OverflowError` from the driver on a term past
+        SQLite's integer range, and a `RecursionError` from the descent.
+        """
+        try:
+            node = sru.parse(query)
+        except sru.SruError as error:
+            assert isinstance(error.diagnostic, sru.Diagnostic)
+            return
+        assert isinstance(node, sru.Clause | sru.Boolean)
+
+    @given(query=ANY_QUERY)
+    def test_a_diagnostic_can_always_be_put_in_a_document(self, query):
+        """`details` is the only place client text is echoed, and the response
+        is XML: a control character copied out of the query produces a document
+        no client can parse, which is the one outcome worse than not refusing
+        the request at all."""
+        try:
+            sru.parse(query)
+        except sru.SruError as error:
+            assert error.details.isprintable() or error.details == ""
+            assert len(error.details) <= sru._DETAILS_CHARS
+
+    @given(query=ANY_QUERY)
+    def test_parsing_is_not_a_source_of_state(self, query):
+        """Twice in a row is twice the same answer. The parser carries two
+        counters that outlive a call, and a counter that outlived the *parse*
+        would make the second identical query answer differently."""
+        first, second = _diagnostic_of(query), _diagnostic_of(query)
+        assert first is second
+
+
+@pytest.mark.property
+class TestAControlCharacterNeverReachesTheTokeniser:
+    """One character, generated by category, and the refusal is by category too.
+
+    `_tokenise` asks `str.isprintable()` rather than naming a class of
+    characters, so this generates the class the same way: every `Cc` and `Cf`
+    codepoint, less the three whitespace characters CQL allows.
+    """
+
+    @given(query=text_around(invisible_characters(), padding=6))
+    def test_it_is_refused_rather_than_sanitised(self, query):
+        """**Refused rather than stripped**, because sanitising turns the query
+        somebody asked for into a different query and then answers that one."""
+        allowed = set("\t\r\n")
+        hostile = [
+            character
+            for character in query
+            if not character.isprintable() and character not in allowed
+        ]
+        if not hostile:
+            return
+        with pytest.raises(sru.SruError) as refusal:
+            sru.parse(query)
+        assert refusal.value.diagnostic is sru.Diagnostic.QUERY_SYNTAX_ERROR
+
+    def test_the_generator_still_reaches_a_character_cql_refuses(self):
+        witness(
+            text_around(invisible_characters(), padding=6),
+            lambda query: any(
+                not character.isprintable() and character not in "\t\r\n"
+                for character in query
+            ),
+            reaches="a control character CQL has no meaning for",
+        )
+
+
+#: One SQLite connection, used as the oracle for what a LIKE pattern means.
+#:
+#: **The real engine rather than a reimplementation of its matching.** A Python
+#: model of LIKE would be a second implementation of the thing under test, and
+#: the defect this property is about is precisely a disagreement between what
+#: the code believes a pattern means and what SQLite does with it.
+_ORACLE = sqlite3.connect(":memory:")
+
+
+def _like(text: str, pattern: str) -> bool:
+    """Whether SQLite's LIKE, with this module's escape, matches."""
+    matched = _ORACLE.execute(
+        "SELECT ? LIKE ? ESCAPE ?", (text, pattern, sru._LIKE_ESCAPE)
+    ).fetchone()[0]
+    return bool(matched)
+
+
+#: What a term may hold when the oracle above is the judge, and the two
+#: exclusions are the oracle's rather than this server's.
+#:
+#: **A NUL, because Python's SQLite binding cannot carry one through a
+#: parameter**: it truncates there, so `SELECT ? LIKE ?` answers about a
+#: shorter string than the one asked about, and the property would be measuring
+#: the driver. **It cannot arrive here anyway**, and that is asserted rather
+#: than assumed: `_tokenise` refuses every unprintable character before a term
+#: exists, which `TestAControlCharacterNeverReachesTheTokeniser` above pins.
+#:
+#: **A surrogate, because it is not text.** Nothing decodes a query string into
+#: one, and SQLite cannot store one either.
+_LIKE_ALPHABET = st.characters(codec="utf-8", exclude_characters="\x00")
+
+_LIKE_TEXT = st.text(_LIKE_ALPHABET, max_size=12)
+
+
+def _folded(value: str) -> str:
+    """What SQLite's LIKE treats as equal: ASCII case, and nothing else.
+
+    SQLite folds `A` against `a` and leaves every character outside ASCII
+    alone, so a comparison written with `str.lower()` would disagree with the
+    engine on the Turkish dotless i and on every other script that has a case.
+    """
+    return "".join(
+        character.lower() if character.isascii() else character for character in value
+    )
+
+
+@pytest.mark.property
+class TestAnEscapedTermMeansItsOwnCharacters:
+    """The rule stated at two sites in this repository, asked of every string.
+
+    A reader searching for `100%` means four characters, and an unescaped `%`
+    in a LIKE pattern means "anything": that search used to match every title
+    containing `100`. `_` is the same defect one character wide, and a
+    backslash with no `ESCAPE` declared is the same defect again with an extra
+    character, because SQLite has no default escape at all.
+
+    **The other site keeps its named cases and has no property**, deliberately.
+    `shelf.py` states the same rule at its own door, and the exclusion below is
+    what decides that: a NUL cannot reach this pattern builder because
+    `_tokenise` refuses it first, and nothing refuses one in front of the other
+    site. `docs/decisions.md` carries that argument under the entry naming the
+    two sites.
+    """
+
+    @given(text=_LIKE_TEXT)
+    def test_an_unmasked_term_matches_itself_and_only_itself(self, text):
+        pattern = sru._pattern(sru.Term((text,)), contains=False)
+        assert _like(text, pattern)
+
+    @given(text=_LIKE_TEXT, other=_LIKE_TEXT)
+    def test_nothing_else_of_the_same_kind_matches_it(self, other, text):
+        """**The half that fails when the escaping is dropped.** Without it a
+        term of `100%` is a pattern that matches `100` followed by anything, so
+        this is what turns the property from "the literal matches" into "and
+        nothing else does"."""
+        pattern = sru._pattern(sru.Term((text,)), contains=False)
+        assert _like(other, pattern) is (_folded(other) == _folded(text))
+
+    @given(
+        text=st.text(_LIKE_ALPHABET, max_size=8),
+        before=st.text(_LIKE_ALPHABET, max_size=4),
+        after=st.text(_LIKE_ALPHABET, max_size=4),
+    )
+    def test_a_contains_pattern_matches_the_term_anywhere_inside(self, text, before, after):
+        pattern = sru._pattern(sru.Term((text,)), contains=True)
+        assert _like(before + text + after, pattern)
+
+    def test_the_generator_still_reaches_a_term_carrying_a_wildcard_character(self):
+        witness(
+            _LIKE_TEXT,
+            lambda text: any(character in text for character in sru._LIKE_SPECIAL),
+            reaches="a term containing a LIKE wildcard or the escape itself",
+        )
