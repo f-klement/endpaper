@@ -843,7 +843,7 @@ def _parsed(body: str) -> ElementTree.Element:
     """
     if DOCTYPE in body:
         raise ElementTree.ParseError("Refused a catalogue response carrying a doctype.")
-    return ElementTree.fromstring(body)
+    return ElementTree.fromstring(body)  # noqa: S314  doctype refused above, bytes capped
 
 
 # ── MARC21, shared ────────────────────────────────────────────────────────────

@@ -42,7 +42,7 @@ cd frontend && bun run test         # 1453 tests, in 99 files
 | `uv run pytest --cov --cov-report=term-missing` | Backend coverage with unhit lines |
 | `uv run pytest tests/test_dependencies.py -k private` | One file, matching tests |
 | `uv run mypy .` | Type check, strict |
-| `uv run ruff check . && uv run ruff format .` | Lint / format |
+| `uv run ruff check .` | Backend lint. There is no formatter step: `ruff format` is not configured here and reformats 203 of the 256 files |
 | `bun run test:watch` | Re-run on change |
 | `bun run test:coverage` | Frontend coverage |
 | `bun run typecheck` | `tsc --noEmit`, includes the test tree |

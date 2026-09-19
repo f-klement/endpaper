@@ -1,3 +1,10 @@
+# ruff: noqa: RUF002
+#
+# This file's docstrings quote the digit spellings the reader has to tell
+# apart: the fullwidth and Arabic-Indic forms among them. A confusable in a
+# docstring here is the subject, not a typo. File level rather than per line
+# because a bare `noqa` comment inside a triple quoted string is text rather
+# than a directive, and would land in the docstring it was meant to annotate.
 """Tests for backend/isbn.py.
 
 Each class below pins one of the four defects the previous implementation had.

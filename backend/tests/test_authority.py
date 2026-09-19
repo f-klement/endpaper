@@ -74,7 +74,7 @@ _NATIONAL_CODES = ("BLBNB", "ARBABN", "BNE", "PTBNP", "ICCU", "BNCHL")
 #: embedded separator live. Production's narrower set is what
 #: `TestTheParserIsAskedForABoundedSetOfCodes` is for.
 _CODES_THE_FIXTURES_CARRY = frozenset(
-    _NATIONAL_CODES + ("DNB", "LC", "SUDOC", "WKP", "ISNI", "LNL", "EGAXA", "LIH")
+    (*_NATIONAL_CODES, "DNB", "LC", "SUDOC", "WKP", "ISNI", "LNL", "EGAXA", "LIH")
 )
 
 

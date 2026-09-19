@@ -604,6 +604,20 @@ class TestAMatchedBookNeverGainsAnIsbn:
         assert "isbn" not in _MARC_GAP_FIELDS
         assert "isbn" not in _MARC_RECORD_FIELDS
 
+    def test_the_gap_filter_drops_an_isbn_the_create_path_grew(self):
+        """The arm above reads today's tuples, so it goes red only after the
+        create path has already gained the name. This one asks the filter what
+        it would do with one: `book_columns.WORK_DETAIL` holds neither `isbn`
+        nor `title`, so the gap filler cannot inherit either however the
+        importer's own tuple grows. A filter naming `title` alone returns the
+        `isbn` here."""
+        from importing import _gap_fields
+
+        assert _gap_fields(("isbn", "title", "author", "publisher")) == (
+            "author",
+            "publisher",
+        )
+
     def test_a_record_matching_on_title_keeps_its_isbn_out_of_the_catalogue(
         self, client, admin, member, db, make_book
     ):

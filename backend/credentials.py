@@ -255,7 +255,7 @@ def _keyring() -> Any | None:
     """
     try:
         import keyring
-        import keyring.errors  # noqa: F401  bound for `module.errors` below
+        import keyring.errors  # bound for `module.errors` below
     except ImportError:
         return None
     return keyring

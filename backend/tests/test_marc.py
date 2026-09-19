@@ -1040,6 +1040,32 @@ class TestEveryColumnTheImporterWritesIsBounded:
             "tables rather than adding an arm here."
         )
 
+    def test_every_column_the_importer_writes_is_a_work_fact(self):
+        """The narrowing that feeds the gap filler has to be a narrowing.
+
+        `_MARC_GAP_FIELDS` is `_MARC_RECORD_FIELDS` filtered through
+        `book_columns.WORK_DETAIL`, so a name in the create tuple that is not a
+        work fact is written when a record creates a Book and silently skipped
+        when one matches an existing Book: `852 $c` is a shelving location and
+        adding it here is the plausible way in. Nothing else would notice,
+        because both writers would still be walking one list.
+
+        `WORK_FACTS` rather than `WORK_DETAIL`, because `title` is a work fact
+        the create path writes and the gap filler deliberately does not.
+        """
+        import book_columns
+        from importing import _MARC_RECORD_FIELDS
+
+        outside = [n for n in _MARC_RECORD_FIELDS if n not in book_columns.WORK_FACTS]
+
+        assert outside == [], (
+            f"{outside} are written out of every record the importer applies and "
+            "are not facts about the work, so a matched Book never gains them "
+            "while a created one does. Either the column is a work fact and "
+            "belongs in `book_columns.WORK_DETAIL`, or the importer should not "
+            "be writing it."
+        )
+
     def test_the_tuple_the_importer_walks_is_the_one_the_book_has(self):
         """A name in `_MARC_RECORD_FIELDS` that is not a column would be a
         `TypeError` at the first import, and a column missing from it is a field

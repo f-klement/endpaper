@@ -135,15 +135,13 @@ export default function ScanPage() {
           <RapidQueue
             entries={rapid.entries}
             isAdding={rapid.isAdding}
+            progress={rapid.addProgress}
             result={rapid.result}
             onRemove={rapid.remove}
             onAddAll={rapid.addAll}
             onDiscard={rapid.clear}
-            waiting={rapid.waiting}
-            deciding={rapid.deciding}
-            keptForNow={rapid.keptForNow}
-            paceMinutes={rapid.paceMinutes}
-            keptPaceMinutes={rapid.keptPaceMinutes}
+            onStopAdding={rapid.stopAdding}
+            figures={rapid.figures}
             isLookingUp={rapid.isLookingUp}
             onLookUp={rapid.lookUpTheNames}
             onStopLookUp={rapid.stopLookingUp}

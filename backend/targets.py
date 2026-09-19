@@ -707,7 +707,7 @@ class Target:
         once here and was wrong.
         """
         if self.query_language is QueryLanguage.PQF:
-            assert self.isbn_attribute is not None  # __post_init__
+            assert self.isbn_attribute is not None  # noqa: S101  narrowing, not validation; __post_init__
             return z3950.query(self.isbn_attribute, value)
         return f"{self.isbn_index}={cql_term(value)}"
 

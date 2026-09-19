@@ -119,7 +119,9 @@ class FakeClient:
 async def settle(predicate, seconds: float = 5.0) -> None:
     """Wait for work on an association's own thread, which the loop cannot await."""
     deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline and not predicate():
+    # The predicate is set on a worker thread, so there is no event this loop
+    # could await instead. That is what the suppression below is for.
+    while time.monotonic() < deadline and not predicate():  # noqa: ASYNC110
         await asyncio.sleep(0.01)
 
 

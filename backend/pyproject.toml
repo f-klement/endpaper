@@ -141,7 +141,7 @@ line-length = 110
 target-version = "py314"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "S", "ASYNC", "RUF"]
 # W605 is an invalid escape sequence, `\d` in a non raw string. CPython warns
 # about it today and has it scheduled to become a SyntaxError, at which point the
 # file stops importing. This is the fast path: a column and an autofix, in a job
@@ -159,6 +159,53 @@ ignore = [
     # argument, which B008 exists to forbid.
     "B008",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# ── The whole `S` family, off in the test tree ───────────────────────────────
+#
+# Its premise is production code handling a stranger's input, and a test tree is
+# neither. **Stated as the family, which is the exclusion**, rather than as the
+# codes it happens to fire today: a code list is an enumeration over something
+# the tool's authors control, so the next `S` rule ruff ships would arrive
+# loudly wrong here and somebody would add a thirteenth entry. `select` still
+# names `"S"`, so a new rule is on in application code either way.
+#
+# **What it silences is a command, not a number.** The figure was written here
+# three times and was stale all three, inside the single change that introduced
+# it, because every test arm added anywhere in the tree is another `assert` and
+# the count moves under its own feet. A number that cannot be kept true is worse
+# than no number: it is read as current. Run this, which is the instrument
+# because the ignore hides its own subject:
+#
+#   ruff check --config 'lint.per-file-ignores = {}' --select S --statistics tests
+#
+# Twelve codes fire, and essentially all of it is `S101`: the assertion each
+# test exists to make. The rest are fixture passwords, fixture XML, and the
+# subprocess calls that run the suite runner and the publish gate.
+#
+# **What still covers these files, stated as what it does rather than as a
+# ranking.** `TestNoFixtureLooksLikeACredential` catches a realistic Telegram
+# bot token and an address outside reserved space; the publish gate's own
+# forbidden string scan catches the GitLab and GitHub access token prefixes and
+# the private key header. Neither
+# is a superset of `S105`/`S106`: a plausible API key spelled `api_key = "..."`
+# fires the rule and matches neither. There is no such value in the tree today.
+#
+# ── RUF012, mutable class default ────────────────────────────────────────────
+#
+# In a test tree that is a table of cases hanging off the class that reads it.
+# 45 sites, no defect in any, and a `ClassVar` on each buys a reader nothing.
+#
+# ── RUF001, ambiguous unicode in a string ────────────────────────────────────
+#
+# A confusable here is the input under test: a fullwidth `c` in a Calibre host
+# name, Arabic-Indic digits against the ISBN reader, a Greek sigma in a MARC
+# extent field as the catalogue sends it. 7 sites in 5 files.
+#
+# **`RUF002` and `RUF003` stay on**, over docstrings and comments, because those
+# are prose. The one docstring that legitimately quotes a confusable carries a
+# file level directive at its own head, where a reader of that file sees it.
+"tests/**" = ["S", "RUF012", "RUF001"]
 
 [tool.mypy]
 python_version = "3.14"

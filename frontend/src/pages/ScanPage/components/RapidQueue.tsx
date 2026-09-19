@@ -2,7 +2,13 @@ import { useTranslation, type MessageKey, type Translate } from "../../../i18n";
 import type { BookMatch } from "../../../api/generated/model";
 import type { AudioFailure } from "../../../lib/audiobook";
 import type { FileFailure } from "../../../lib/fileReaders";
-import type { NamedScanReason, ScanReason, ScannedEntry } from "../hooks";
+import type {
+  NamedScanReason,
+  QueueFigures,
+  ScanReason,
+  ScannedEntry,
+} from "../hooks";
+import type { BulkProgress } from "../../../lib/bulkWrite";
 
 /**
  * What a member is told about a file that yielded nothing.
@@ -105,36 +111,28 @@ function recordLine(match: BookMatch): string {
 interface RapidQueueProps {
   entries: ScannedEntry[];
   isAdding: boolean;
-  result: { added: number; failed: number; unreferenced: number } | null;
+  /** How far the run that is going has got, and `null` when none is. */
+  progress: BulkProgress | null;
+  result: {
+    added: number;
+    failed: number;
+    unreferenced: number;
+    stopped: boolean;
+  } | null;
   onRemove: (key: string) => void;
   onAddAll: () => void;
   onDiscard: () => void;
-  /** How many entries have only their name left to go on. */
-  waiting: number;
+  /** Halt the batch after the book in flight, leaving the rest in the queue. */
+  onStopAdding: () => void;
   /**
-   * How many have records offered and neither taken nor refused.
+   * What the queue adds up to, which this component renders and never counts.
    *
-   * **Said, because the batch no longer takes these and that used to be
-   * silent**: a row still being decided keeps its file name draft, so adding it
-   * would throw away the records the catalogue found with nothing on screen.
-   *
-   * **Taken from the hook rather than counted here**, because the batch excludes
-   * exactly this set and a predicate written twice is a screen able to report
-   * something the page did not do.
+   * **Taken whole from the hook**, because the batch excludes exactly the rows
+   * one of these figures counts and a predicate written twice is a screen able
+   * to report something the page did not do. `QueueFigures` says what each one
+   * is; saying it a second time here is how the two come to disagree.
    */
-  deciding: number;
-  /**
-   * How many are standing under their file names in bulk, and can come back.
-   *
-   * Counted apart from `waiting` for the reason the hook counts it apart: the
-   * press that offers these names again names them, and the press that looks up
-   * files nobody has asked about does not quietly take them too.
-   */
-  keptForNow: number;
-  /** Roughly how long looking all of those up would take, in minutes. */
-  paceMinutes: number;
-  /** The same figure for a second pass over the names kept in bulk. */
-  keptPaceMinutes: number;
+  figures: QueueFigures;
   isLookingUp: boolean;
   onLookUp: () => void;
   onStopLookUp: () => void;
@@ -178,14 +176,12 @@ export default function RapidQueue({
   entries,
   isAdding,
   result,
+  progress,
   onRemove,
   onAddAll,
   onDiscard,
-  waiting,
-  deciding,
-  keptForNow,
-  paceMinutes,
-  keptPaceMinutes,
+  onStopAdding,
+  figures,
   isLookingUp,
   onLookUp,
   onStopLookUp,
@@ -196,6 +192,9 @@ export default function RapidQueue({
   onSplit,
 }: RapidQueueProps) {
   const { t } = useTranslation();
+  // Read out here so every figure below is spelled the way the hook spells it.
+  const { waiting, deciding, keptForNow, paceMinutes, keptPaceMinutes } =
+    figures;
 
   // **Said once, and only for the rows it is true of.** Explaining before the
   // fact would be a page apologising for something that may not happen, and
@@ -208,29 +207,49 @@ export default function RapidQueue({
   // the way. Read three times below, so it is named once.
   const showKept = keptForNow > 0 && !isLookingUp;
 
-  // The banner sits above whatever is left rather than replacing it. Anything
+  // The banner sits beside whatever is left rather than replacing it. Anything
   // still in the queue after a run is a book that did not go in.
-  const banner = result ? (
-    <p
-      role="status"
-      className={`text-sm rounded-xl px-3 py-2 mt-4 border ${
-        result.failed > 0
-          ? "text-amber-800 bg-amber-50 border-amber-100 dark:text-amber-200 dark:bg-amber-950 dark:border-amber-900"
-          : "text-green-700 bg-green-50 border-green-100 dark:text-green-300 dark:bg-green-950 dark:border-green-900"
-      }`}
-    >
-      {t("rapid.added", { count: result.added, failed: result.failed })}
-      {/* **A second sentence rather than a third number in the first.** A book
+  //
+  // **It is rendered below the controls, and that is a safety rule rather than
+  // a layout preference.** See the block that mounts it at the foot of this
+  // component.
+  //
+  // **Never while a run is going**, which the stop made the ordinary case: the
+  // rows a member keeps are kept in order to be added, so pressing Add all
+  // again is the way back, and the previous run's verdict would otherwise sit
+  // amber above a live progress figure saying those same rows are still in the
+  // queue while they are being written. The hook clears the verdict when a run
+  // starts; this refuses the pair whoever renders it.
+  const banner =
+    result && !isAdding ? (
+      <p
+        role="status"
+        className={`text-sm rounded-xl px-3 py-2 mt-4 border ${
+          // A stopped run reads amber for the reason a run with failures does:
+          // the queue is not empty and the number is not the number that was
+          // asked for. Green there would call a halt a completed batch.
+          result.failed > 0 || result.stopped
+            ? "text-amber-800 bg-amber-50 border-amber-100 dark:text-amber-200 dark:bg-amber-950 dark:border-amber-900"
+            : "text-green-700 bg-green-50 border-green-100 dark:text-green-300 dark:bg-green-950 dark:border-green-900"
+        }`}
+      >
+        {result.stopped
+          ? t("rapid.addedStopped", {
+              count: result.added,
+              failed: result.failed,
+            })
+          : t("rapid.added", { count: result.added, failed: result.failed })}
+        {/* **A second sentence rather than a third number in the first.** A book
           whose location was not recorded is in the catalogue and is not a
           failure, so saying it inside "N added, M below" would read as one.
           Absent at zero, which is every batch of barcodes. */}
-      {result.unreferenced > 0 && (
-        <span className="block mt-1">
-          {t("rapid.unreferenced", { count: result.unreferenced })}
-        </span>
-      )}
-    </p>
-  ) : null;
+        {result.unreferenced > 0 && (
+          <span className="block mt-1">
+            {t("rapid.unreferenced", { count: result.unreferenced })}
+          </span>
+        )}
+      </p>
+    ) : null;
 
   if (entries.length === 0) {
     if (banner) return banner;
@@ -243,7 +262,6 @@ export default function RapidQueue({
 
   return (
     <div className="mt-4 space-y-3">
-      {banner}
       <p className="text-sm font-medium text-paper-700 dark:text-paper-200">
         {t("rapid.queued", { count: entries.length })}
       </p>
@@ -536,6 +554,26 @@ export default function RapidQueue({
         )}
       </div>
 
+      {/* **A figure beside the way out of the run.** Stopping with nothing on
+          screen saying how far it had got is a button pressed blind, and this
+          is the same `{done} of {total}` the import cards on the settings page
+          have shown since they had a stop. It is the loop's own count rather
+          than a second one kept here.
+
+          **Not a live region, and not for the reason the block below is not
+          one.** That one is kept out of `role="status"` so the banner is the
+          only thing answering to the role. This one is a number that moves once
+          per book, so announcing it would read a three hundred book run out
+          loud a line at a time. */}
+      {isAdding && progress && (
+        <p className="text-xs text-paper-600 dark:text-paper-400">
+          {t("rapid.progress", {
+            done: progress.done,
+            total: progress.total,
+          })}
+        </p>
+      )}
+
       <div className="flex gap-2">
         <button
           type="button"
@@ -554,6 +592,56 @@ export default function RapidQueue({
           {isAdding ? t("rapid.adding") : t("rapid.addAll")}
         </button>
       </div>
+
+      {/* **The verdict and the stop are the last two children, and that is one
+          rule rather than two placements.**
+
+          A run ends in one commit: the stop unmounts, the progress figure
+          unmounts, the rows that were written are pruned, and the verdict
+          mounts. The member's finger is on the stop, which is the only control
+          a run leaves live, and the discard beside `Add all` clears a queue of
+          barcodes scanned one at a time with no confirmation and no undo.
+
+          **So the rule is that the commit which moves the discard may not make
+          it live, and the one that makes it live may not move it toward the
+          finger.** Both halves hold by document order rather than by
+          arithmetic, which is what makes them checkable without a layout
+          engine:
+
+          - Everything that commit removes sits **above** the row, so the
+            region above it only shrinks and the row can only move away from
+            the finger, never toward it. The progress figure alone guarantees
+            that: it is present for every run and goes at the end of every one.
+          - Everything that commit mounts sits **below** the row, and it is
+            text. The verdict takes the space the stop had, so what arrives
+            under a finger still tapping is a paragraph.
+
+          Drawing the verdict at the top of this container broke the second
+          half: the banner pushed the row down toward the finger by more than
+          the progress figure's removal lifted it, and `disabled={busy}` went
+          false in the same commit.
+
+          **The residue is outside this component and is a neighbour's
+          property**, so it is stated here rather than discovered: on the file
+          pick path `rapid.isActive` is false, `showQueue` and `showEntry` are
+          both true, and `ScanPage` opens that block with a full bleed
+          `aspect-[4/3]` panel, the camera or its dashed placeholder. Whatever
+          this container's foot does, the first control under it is the camera
+          button below that panel. Reordering that block is what would make
+          this false.
+
+          The `Stop` word and the full width are the paced lookup's stop, which
+          is the one this page has already taught. */}
+      {banner}
+      {isAdding && (
+        <button
+          type="button"
+          onClick={onStopAdding}
+          className="w-full py-2 rounded-xl border border-paper-200 text-sm font-medium text-paper-700 hover:bg-paper-50 dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800"
+        >
+          {t("rapid.stopAdding")}
+        </button>
+      )}
     </div>
   );
 }

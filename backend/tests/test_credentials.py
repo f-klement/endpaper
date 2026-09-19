@@ -161,8 +161,34 @@ class TestAMistypedPhraseFailsAtInput:
             credentials.phrase_to_key(" ".join([*words[:-1], "endpaper"]))
         assert "endpaper" not in str(refusal.value)
 
+    #: A phrase whose last two words, swapped, fail the checksum. It is a
+    #: fixture generated for this test and opens nothing.
+    #:
+    #: **Fixed rather than generated, and that is the whole point.** Swapping
+    #: two words breaks the checksum for most phrases, not for all, so asking
+    #: `generate_phrase()` for one asserted something untrue and reddened the
+    #: pipeline at random with a failure reading as a regression in recovery
+    #: phrase validation. Measured 2026-09-19 over 20,000 generated phrases:
+    #: the swap is still accepted 91 times, 1 run in 220, and 14 of the 20,000
+    #: draw the same word twice at positions 23 and 24, where the swap is a no
+    #: op and nothing is being tested at all.
+    SWAP_BREAKS_THE_CHECKSUM = (
+        "cry verb canal remove range near afraid hollow upgrade foam deputy "
+        "letter front aisle melody hammer donkey perfect eternal pledge cross "
+        "kidney cheap dolphin"
+    )
+
+    def test_the_swap_fixture_is_itself_a_valid_phrase(self):
+        """Otherwise the swap below is refused for the wrong reason.
+
+        A fixture that stopped being valid would leave the test green while it
+        asserted nothing, which is the failure a fixed phrase trades for the
+        flake it removes.
+        """
+        credentials.phrase_to_key(self.SWAP_BREAKS_THE_CHECKSUM)
+
     def test_two_swapped_words_fail_the_checksum(self):
-        words = credentials.generate_phrase().split()
+        words = self.SWAP_BREAKS_THE_CHECKSUM.split()
         swapped = [*words[:22], words[23], words[22]]
         with pytest.raises(credentials.BadRecoveryPhrase) as refusal:
             credentials.phrase_to_key(" ".join(swapped))

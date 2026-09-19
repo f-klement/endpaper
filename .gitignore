@@ -45,3 +45,10 @@ capacitor_viability.md
 # not a rule, so it is enforced here instead of stated anywhere.
 plan.md
 session/
+
+# **`.claude/skills/` is tracked on purpose; `.claude/worktrees/` is not.** The
+# skills are rules and are reviewed like any other file. The worktree directory
+# holds a full checkout per agent, and until the skills arrived nothing under
+# `.claude` was ever committed, so `git add -A` had no way in. It does now.
+# Stripping it at publish is the other backstop and does not cover a commit.
+.claude/worktrees/

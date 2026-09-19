@@ -462,7 +462,7 @@ def read_page(body: str, decoding: Decoding = DECODING) -> Page:
     if metadata.DOCTYPE in body:
         raise FeedUnreadable("Refused a feed carrying a document type declaration.")
     try:
-        root = ElementTree.fromstring(body)
+        root = ElementTree.fromstring(body)  # noqa: S314  doctype refused above, bytes capped
     except (ElementTree.ParseError, ValueError) as error:
         # `ValueError` as well, for `marc._parsed`'s measured reason:
         # `ElementTree.fromstring` raises it, not `ParseError`, for a declared

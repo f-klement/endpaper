@@ -21,6 +21,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, Final
 
+import book_columns
 import covers
 import fetch
 import targets
@@ -500,23 +501,21 @@ def merge_into(book: object, match: BookMatch, *, overwrite: bool) -> list[str]:
     dictionary without failing mypy, and at runtime a dictionary raises on the
     first `getattr` rather than writing twelve unchecked columns, so a third
     call site inherits the bound instead of having to remember it. Twelve, not
-    eleven: the loop names eleven and `cover_url` is assigned below it.
+    eleven: the loop walks `book_columns.WORK_DETAIL` and `cover_url` is
+    assigned below it.
+
+    **The loop's set is asked for, not written out.** These are the descriptive
+    facts about the work, which is the same set the merge absorbs off a losing
+    row and the same one the MARC importer narrows to what its records carry;
+    `book_columns` refuses to import when a column of `books` is classified
+    nowhere, so a column added to the schema cannot quietly miss all three. The
+    two work facts it leaves out are `isbn`, which is one printing rather than
+    this copy, and `title`, whose spelling in a catalogue is often not this
+    library's: both are `book_columns.WORK_IDENTITY`.
     """
     changed: list[str] = []
 
-    for name in (
-        "subtitle",
-        "author",
-        "publisher",
-        "year",
-        "description",
-        "page_count",
-        "language",
-        "categories",
-        "google_books_id",
-        "series_name",
-        "series_index",
-    ):
+    for name in book_columns.WORK_DETAIL:
         incoming = getattr(match, name)
         if incoming in (None, "", []):
             continue

@@ -2,6 +2,7 @@
 
 import ast
 import dataclasses
+import functools
 import re
 from typing import Final
 
@@ -688,6 +689,197 @@ def _store_aliases(tree: ast.Module) -> set[str]:
     return found
 
 
+def _store_aliases_here(tree: ast.Module, path: str) -> set[str]:
+    """`_store_aliases`, plus the module's own name when this IS the store.
+
+    **One home for the alias half of the store special case.** It was split
+    between `_reader_calls`, which added the name, and `_re_exported_readers`,
+    which passed a bare `_store_aliases(tree)` and did not: the two callers of
+    `_reader_bindings` differed in `aliases` as well as in `module_level_only`,
+    and nothing made that visible because `settings_store.py` has no module
+    scope `X = settings_store.get_bool` for the difference to act on.
+
+    `_spells_a_reader_call` deliberately keeps the bare one. It is the second
+    instrument and reads the characters rather than the syntax, and the symmetry
+    it feeds names `_STORE` itself.
+    """
+    aliases = _store_aliases(tree)
+    if path == _STORE:
+        aliases.add("settings_store")
+    return aliases
+
+
+#: Where the descent to module scope stops: a name bound inside one of these is
+#: not an attribute on the module.
+#:
+#: **Not a claim about which node types open a scope**, which is a larger set
+#: than this and is not what the refusal turns on. Both callers read statements
+#: and only statements: `ImportFrom`, `Assign` and `AnnAssign` in
+#: `_reader_bindings`; `Assign`, `AnnAssign`, `FunctionDef`, `AsyncFunctionDef`
+#: and `ClassDef` in `_defined_here`, which does not read `ImportFrom` because
+#: an imported reader is already carried by `bound` before that clause is
+#: reached. So the refusal has work to do exactly where a scope has a statement
+#: body, which is a `def`, an `async def` and a `class`,
+#: and `test_a_reader_bound_inside_a_scope_of_its_own_is_not_an_attribute_on_that_module`
+#: has one row per one of those: drop a member and its row goes red.
+#:
+#: `ast.Lambda` is a fourth member that can never fire, because a lambda holds
+#: an expression and no statement can sit in one. Every other expression scope,
+#: the four comprehensions and a PEP 695 type parameter list, is absent for
+#: exactly that reason, so the tuple is three live entries and one dead one
+#: rather than a set anybody should extend by category.
+_ITS_OWN_SCOPE: Final = (*_A_FUNCTION, ast.ClassDef, ast.Lambda)
+
+#: The `typing` flag whose block a type checker reads and the interpreter never
+#: runs. The test is asked whether it MENTIONS this, not what it evaluates to,
+#: so `if not TYPE_CHECKING:` is read backwards; nothing in this tree writes one.
+_ONLY_FOR_TYPES: Final = "TYPE_CHECKING"
+
+
+def _at_module_scope(tree: ast.Module) -> list[ast.AST]:
+    """Every node that runs when this module is imported, in source order.
+
+    **`tree.body` is not module scope, and the difference is not exotic.** A
+    `try:` around an import and a `with` block both bind a name on the module
+    and both sit a level below the body. Reading only `tree.body` meant a
+    subject that re exported a reader inside a `try:` handed out nothing, so a
+    pinned key read off the table through it was reported by nothing, while the
+    identical binding read by the subject's own calls was.
+
+    The descent stops at `_ITS_OWN_SCOPE` and nowhere else, which is why it is
+    written as a refusal to enter the node types that open a scope rather than
+    as a list of the statements it will walk through.
+
+    **An `if TYPE_CHECKING:` body is not entered, and that is the difference
+    between "runs at import" and "is written at this indent".** It is right for
+    both callers, which is why the function is defined by the first of those:
+    `_reader_bindings` asks what a subject hands out, and an attribute bound
+    only for a type checker raises at run time rather than reading a setting;
+    `_defined_here` asks whether a module defines a name itself, and one defined
+    only for a type checker does not, so a bare call to it came from a re export
+    and is the unreadable this rule exists to report. **Stating it as a trade
+    was wrong**: the direction reverses between the two callers, because the
+    first adds bindings and the second only ever suppresses a report. All five
+    of the corpus modules that bind below `tree.body` do it this way, so on this
+    tree the descent reaches nothing the body does not, measured.
+    """
+    found: list[ast.AST] = []
+    stack: list[ast.AST] = list(reversed(tree.body))
+    while stack:
+        node = stack.pop()
+        found.append(node)
+        if isinstance(node, _ITS_OWN_SCOPE):
+            continue
+        children = (
+            list(node.orelse)
+            if isinstance(node, ast.If) and _mentions(node.test, _ONLY_FOR_TYPES)
+            else list(ast.iter_child_nodes(node))
+        )
+        stack.extend(reversed(children))
+    return found
+
+
+@functools.cache
+def _rebound_here(source: str) -> frozenset[str]:
+    """Every name this module binds by anything other than an import.
+
+    **The caller side of the question `_re_exported_readers` asks of the
+    subject**, and it was missing. `subjects` is a flat name to module map with
+    no scope analysis, so a parameter or a local called `helpers` resolved as
+    the module `helpers` and a call on it was reported as a read of a pinned
+    key. That is a red on a clean tree against a call that cannot reach the
+    module at all, which is how a guard gets argued away by whoever meets it
+    next. The name clash it needs already exists twice in the corpus:
+    `metadata.py` binds `sources` both as a module and otherwise, and
+    `routers/books.py` does it for `catalogue` and `lending`.
+
+    **Read off the context the parser already assigned**, rather than off a list
+    of the statements that bind: every binding `Name` carries `Store` or `Del`,
+    which covers assignment, tuple unpacking, `for`, `with ... as`, `except*`,
+    a comprehension target and the walrus in one question. Parameters are
+    `ast.arg`. Everything else that binds carries its name as a plain string on
+    the node, so that is asked generically, with `ast.alias` excluded because an
+    import is the one binding this must not count.
+
+    **Cost, and it is the safe direction**: a module that imports `helpers` and
+    also has a parameter called `helpers` anywhere in it loses the resolution
+    for its genuine reads through that module, and goes silent rather than
+    wrong. `ast.MatchMapping`'s `rest` is spelled `rest` rather than `name` and
+    is not seen, which is the one binding form this misses.
+
+    Takes the source rather than the tree so it can be cached: it is a whole
+    tree walk per module, asked once per module per rule run, and the corpus is
+    re read for every one of them.
+    """
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            found.add(node.id)
+        elif isinstance(node, ast.arg):
+            found.add(node.arg)
+        elif not isinstance(node, ast.alias):
+            name = getattr(node, "name", None)
+            if isinstance(name, str):
+                found.add(name)
+    return frozenset(found)
+
+
+def _module_index(corpus: dict[str, str]) -> dict[str, str]:
+    """Dotted module name to corpus path, for every module the corpus holds.
+
+    **It states its exclusion by inheriting one.** The corpus is
+    `_source_modules()`, so whatever is not in it resolves to nothing: the test
+    tree, the migrations, anything vendored, and everything outside `backend/`,
+    the standard library and site-packages included. A reader re exported
+    through a module none of those walks reach leaves the call on it silent,
+    exactly as silent as it was before any of this resolution existed.
+    """
+    index: dict[str, str] = {}
+    for path in corpus:
+        parts = path.removesuffix(".py").split("/")
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        if parts:
+            index[".".join(parts)] = path
+    return index
+
+
+def _imported_modules(tree: ast.Module, path: str, index: dict[str, str]) -> dict[str, str]:
+    """Local names bound to another module of the corpus, and which module.
+
+    `import mailer`, `import routers.settings as rs`, `from routers import
+    settings` and `from . import settings_store` each bind a module to a name
+    here; `from config import auth_mode` binds a function. **The index is what
+    tells those apart**, rather than a rule about how the import is spelled, so
+    a name that resolves to no module of the corpus is simply absent.
+
+    Walked rather than read off `tree.body`, because an import inside a function
+    binds the module for that function's calls just as a top level one does.
+
+    `import a.b` with no `as` binds `a`, so the subject of `a.b.get_bool()` is an
+    attribute rather than a name and no caller ever asks about it.
+    """
+    package = path.rsplit("/", 1)[0].replace("/", ".") if "/" in path else ""
+    found: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                dotted = alias.name if alias.asname else alias.name.split(".", 1)[0]
+                if dotted in index:
+                    found[alias.asname or dotted] = index[dotted]
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level:
+                above = package.split(".") if package else []
+                above = above[: len(above) - node.level + 1]
+                base = ".".join([*above, base] if base else above)
+            for alias in node.names:
+                dotted = f"{base}.{alias.name}" if base else alias.name
+                if dotted in index:
+                    found[alias.asname or alias.name] = index[dotted]
+    return found
+
+
 def _readers_named(
     node: ast.expr,
     readers: frozenset[str],
@@ -755,10 +947,108 @@ def _names_the_door(
     )
 
 
+def _reader_bindings(
+    path: str,
+    tree: ast.Module,
+    readers: frozenset[str],
+    aliases: set[str],
+    *,
+    module_level_only: bool = False,
+) -> dict[str, frozenset[str]]:
+    """Which readers each name this module binds can hold.
+
+    Lifted out of `_reader_calls` because the cross module half asks the same
+    question of a different module, and a second copy of these rules is a second
+    place for the next spelling to go missing from one side only.
+
+    **`module_level_only` is now the only difference between the two callers,
+    and it is not a tuning knob.** A module's own calls reach a name bound
+    anywhere in it, including a `read = settings_store.get_bool` inside a
+    function, which is the cheapest spelling of this rule's evasion. Another
+    module reaches only what is an attribute on this one, which is what module
+    scope binds and a function body does not: counting a function local there
+    would report a caller that cannot reach it. **Module scope is
+    `_at_module_scope`, not `tree.body`**, and the two are not the same set.
+
+    The store's own readers are seeded here for both callers, and the store's
+    own name is added to `aliases` by `_store_aliases_here` before either calls
+    in, so the special case is not a third difference between them.
+
+    Either way the statements arrive in source order, so `_B = _A` resolves in
+    the same pass that bound `_A`.
+    """
+    statements: list[ast.AST] = (
+        _at_module_scope(tree) if module_level_only else list(ast.walk(tree))
+    )
+    bare = {
+        (alias.asname or alias.name): alias.name
+        for node in statements
+        if isinstance(node, ast.ImportFrom) and node.module == "settings_store"
+        for alias in node.names
+        if alias.name in readers
+    }
+    if path == _STORE:
+        bare |= {name: name for name in readers}
+
+    bound: dict[str, frozenset[str]] = {
+        name: frozenset({reader}) for name, reader in bare.items()
+    }
+    for statement in statements:
+        if isinstance(statement, ast.Assign):
+            targets: list[ast.expr] = list(statement.targets)
+        elif isinstance(statement, ast.AnnAssign):
+            targets = [statement.target]
+        else:
+            continue
+        if statement.value is None:
+            continue
+        held = _readers_named(statement.value, readers, aliases, bound)
+        for target in targets:
+            if isinstance(target, ast.Name) and held:
+                bound[target.id] = held
+    return bound
+
+
+@functools.cache
+def _re_exported_readers(
+    path: str, source: str, readers: frozenset[str]
+) -> dict[str, frozenset[str]]:
+    """Which readers this module hands out as attributes on itself.
+
+    **The cross module half, and the whole of what tells `helpers.get_bool` from
+    `sources.in_force`.** Both are an attribute call whose name is a reader's on
+    a subject that is not this module; the first is a reader because `helpers`
+    bound that name from `settings_store`, and the second is not because
+    `sources` defines an `in_force` of its own. The question is asked of what the
+    subject did, never of what it is called.
+
+    One hop. A module re exporting another module's re export is not followed,
+    and is silent rather than reported, which is the same trade the direct re
+    export through a bare name already makes. **No corpus module re exports a
+    reader at all**, so nothing on a clean tree can tell one hop from two and
+    `test_a_re_export_of_a_re_export_is_not_followed` is the whole of what pins
+    the bound.
+
+    Cached because a corpus of ninety one modules is read once per rule and only
+    the handful reached by an attribute call are ever asked. **The dict is read
+    and never mutated**: every caller is handed the same object.
+    """
+    tree = ast.parse(source)
+    return _reader_bindings(
+        path, tree, readers, _store_aliases_here(tree, path), module_level_only=True
+    )
+
+
 def _defined_here(tree: ast.Module) -> set[str]:
-    """Top level names this module binds itself, whatever they hold."""
+    """Module scope names this module binds itself, whatever they hold.
+
+    **`_at_module_scope`, for the reason it exists.** This read `tree.body`,
+    which is the same defect one function over: a `def get_bool` inside a `try:`
+    was not seen, so a bare call to it read as a re export and was reported
+    unreadable, which is red on a clean tree against a module that is correct.
+    """
     found = set()
-    for node in tree.body:
+    for node in _at_module_scope(tree):
         if isinstance(node, (*_A_FUNCTION, ast.ClassDef)):
             found.add(node.name)
         elif isinstance(node, ast.Assign):
@@ -769,7 +1059,7 @@ def _defined_here(tree: ast.Module) -> set[str]:
 
 
 def _reader_calls(
-    path: str, source: str, readers: frozenset[str]
+    path: str, source: str, readers: frozenset[str], corpus: dict[str, str]
 ) -> list[tuple[int, str, frozenset[str]]]:
     """Every call of one of `readers` here, with the keys it can name.
 
@@ -780,7 +1070,7 @@ def _reader_calls(
     import before: see
     `test_notifications.py::test_the_mode_arm_is_decided_in_exactly_one_place`.
 
-    **Four ways of reaching a reader, and the third and fourth are why this is
+    **Five ways of reaching a reader, and the third and fourth are why this is
     not a list of two.** A module level name bound to one (`_read =
     settings_store.get_bool`) is `notifications._ENABLED_KEY`'s own idiom one
     step over, and a table of them is that idiom exactly; both are read here the
@@ -797,46 +1087,38 @@ def _reader_calls(
     same reason. Measured over the corpus: no module is flagged today, and
     `sources.py` is not because it defines an `in_force` of its own.
 
+    **The fifth is an attribute on another module of the corpus**, and it is the
+    one that needs a second module read rather than a further clause: `helpers`
+    is not this module and not `settings_store`, so nothing in this file's own
+    syntax says whether `helpers.get_bool(db, key)` reads a setting. The subject
+    is resolved to a corpus module and asked what it hands out, which is what
+    separates it from `sources.in_force` at `settings_store.py:439`, where the
+    subject resolves and hands out nothing. `_module_index` states what the
+    resolution does not reach.
+
     The one shape dropped is `settings_store` handing its own `SettingKey`
     parameter down, which is the module's plumbing rather than a call site.
     """
     tree = ast.parse(source)
     tables = _key_tables(tree)
-    aliases = _store_aliases(tree)
+    aliases = _store_aliases_here(tree, path)
     defined = _defined_here(tree)
 
-    bare = {
-        (alias.asname or alias.name): alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module == "settings_store"
-        for alias in node.names
-        if alias.name in readers
-    }
-    if path == _STORE:
-        bare |= {name: name for name in readers}
-        aliases.add("settings_store")
+    # **Every assignment in the module, not only the top level ones.** A function
+    # local `read = settings_store.get_bool` is the cheapest spelling of the
+    # evasion this rule exists for, and reading only `tree.body` left it silent
+    # rather than reported.
+    bound = _reader_bindings(path, tree, readers, aliases)
 
-    # **Every assignment in the module, not only the top level ones**, and
-    # `ast.walk` visits them in source order so `_B = _A` resolves in the same
-    # pass that bound `_A`. A function local `read = settings_store.get_bool` is
-    # the cheapest spelling of the evasion this rule exists for, and reading
-    # only `tree.body` left it silent rather than reported.
-    bound: dict[str, frozenset[str]] = {
-        name: frozenset({reader}) for name, reader in bare.items()
+    # A name this module also binds itself is not the module it imported, so it
+    # is no longer a subject: `def send(db, helpers)` reaches a parameter, and
+    # resolving it as the module reports a call that cannot get there.
+    rebound = _rebound_here(source)
+    subjects = {
+        name: target
+        for name, target in _imported_modules(tree, path, _module_index(corpus)).items()
+        if name not in rebound
     }
-    for statement in ast.walk(tree):
-        if isinstance(statement, ast.Assign):
-            targets: list[ast.expr] = list(statement.targets)
-        elif isinstance(statement, ast.AnnAssign):
-            targets = [statement.target]
-        else:
-            continue
-        if statement.value is None:
-            continue
-        held = _readers_named(statement.value, readers, aliases, bound)
-        for target in targets:
-            if isinstance(target, ast.Name) and held:
-                bound[target.id] = held
 
     plumbing: dict[int, set[str]] = {}
     if path == _STORE:
@@ -857,9 +1139,15 @@ def _reader_calls(
             rooted = rooted.value
 
         if isinstance(node.func, ast.Attribute):
-            if ast.unparse(node.func.value) not in aliases:
+            subject = node.func.value
+            if ast.unparse(subject) in aliases:
+                reached = frozenset({node.func.attr} & readers)
+            elif isinstance(subject, ast.Name) and subject.id in subjects:
+                reached = _re_exported_readers(
+                    subjects[subject.id], corpus[subjects[subject.id]], readers
+                ).get(node.func.attr, frozenset())
+            else:
                 continue
-            reached = frozenset({node.func.attr} & readers)
         elif isinstance(rooted, ast.Name):
             if rooted.id in bound:
                 reached = bound[rooted.id]
@@ -902,7 +1190,9 @@ def _reads_of_a_pinned_key(
 
     `only` narrows the verdict to one module while the split is still derived
     from the whole of `settings_store`, which is what lets a planted module be
-    judged by this function rather than by a second copy of the rule.
+    judged by this function rather than by a second copy of the rule. It narrows
+    the verdict alone: every module stays in the corpus, because a cross module
+    read is resolved against modules no verdict is being asked about.
     """
     off_the_table, in_force = _keyed_readers(modules[_STORE])
     pinned = {key.name for key in config._ENV_OVERRIDES}
@@ -913,7 +1203,9 @@ def _reads_of_a_pinned_key(
     for path, source in sorted(modules.items()):
         if only is not None and path != only:
             continue
-        for line, reader, named in _reader_calls(path, source, off_the_table | in_force):
+        for line, reader, named in _reader_calls(
+            path, source, off_the_table | in_force, modules
+        ):
             examined += 1
             if not named:
                 unreadable.append(f"{path}:{line} {reader}")
@@ -943,15 +1235,34 @@ def _spells_a_reader_call(source: str, readers: frozenset[str]) -> bool:
     return any(re.search(pattern, source) for pattern in patterns)
 
 
-def _planted(source: str, store: str | None = None) -> tuple[list[str], list[str], int]:
+def _planted(
+    source: str,
+    store: str | None = None,
+    alongside: dict[str, str] | None = None,
+    path: str = "planted.py",
+) -> tuple[list[str], list[str], int]:
     """The rule run over one planted module, against the real store or a planted one.
 
     The verdict covers the planted module alone, so a count means what the
     plant did rather than what the store already does beside it.
+
+    `alongside` puts further modules in the corpus without putting them in the
+    verdict, which is what a read through another module needs: the module being
+    read through has to be resolvable, and what it does in its own right is not
+    what is being judged.
+
+    `path` is where the plant sits, and it is not decoration: a relative import
+    resolves against the package the reading module is in, so at the top level
+    `from . import helpers` and `helpers` are the same answer and a plant there
+    cannot tell a resolution that walks the package from one that ignores it.
     """
     return _reads_of_a_pinned_key(
-        {_STORE: store or _source_modules()[_STORE], "planted.py": source},
-        only="planted.py",
+        {
+            _STORE: store or _source_modules()[_STORE],
+            path: source,
+            **(alongside or {}),
+        },
+        only=path,
     )
 
 
@@ -1027,10 +1338,83 @@ _UNFOLLOWABLE_SPELLINGS: Final = (
     # `__dict__`, are carried by the alias half instead. Dropping that clause
     # leaves every other row of both tables green.
     #
-    # The direct form, `helpers.get_bool(db, key)`, stays silent and is the
-    # residue: telling it from `sources.in_force` needs cross module
-    # resolution.
+    # `helpers` is outside this corpus, so the direct form beside it is silent
+    # rather than reported and `_ATTRIBUTE_SPELLINGS` is where it is read. That
+    # is the difference between a door and a subject: a door is judged by what
+    # it mentions, and a subject by what the module it names hands out.
     "import helpers\n_pick(helpers.get_bool)(db, SettingKey.MAIL_USE_TLS)\n",
+)
+
+
+#: A reader reached as an attribute on another module of the corpus, paired with
+#: what that module had to do for it to be one.
+#:
+#: **Both halves are `{reader}`**, so the diagonal below is read off
+#: `settings_store` rather than listed: a reader added tomorrow is carried by
+#: every row at once. The left column is how the subject bound the name and the
+#: right is how this module reached the subject, because either half alone was
+#: silent before the resolution existed.
+_ATTRIBUTE_SPELLINGS: Final = (
+    (
+        "from settings_store import {reader}\n",
+        "import helpers\nhelpers.{reader}(db, SettingKey.MAIL_USE_TLS)\n",
+    ),
+    # The subject reached through an import alias, which is the spelling a name
+    # match on the subject would walk past.
+    (
+        "from settings_store import {reader}\n",
+        "import helpers as h\nh.{reader}(db, SettingKey.MAIL_USE_TLS)\n",
+    ),
+    # And through a relative import, as `_store_aliases` already reads for the
+    # module itself.
+    (
+        "from settings_store import {reader}\n",
+        "from . import helpers\nhelpers.{reader}(db, SettingKey.MAIL_USE_TLS)\n",
+    ),
+    # The same import with an alias on it, which is a different expression from
+    # the one `import helpers as h` reads and went missing from one of them.
+    (
+        "from settings_store import {reader}\n",
+        "from . import helpers as h\nh.{reader}(db, SettingKey.MAIL_USE_TLS)\n",
+    ),
+    # The subject re exporting by assignment rather than by import, which is the
+    # binding half of the rule asked of a module other than this one.
+    (
+        "import settings_store\n{reader} = settings_store.{reader}\n",
+        "import helpers\nhelpers.{reader}(db, SettingKey.MAIL_USE_TLS)\n",
+    ),
+    # The subject imported inside the function that reads through it, which is
+    # the cheapest way to write the first row and is what a top level read of
+    # this module's imports would walk past.
+    (
+        "from settings_store import {reader}\n",
+        "def send(db):\n"
+        "    import helpers\n"
+        "    return helpers.{reader}(db, SettingKey.MAIL_USE_TLS)\n",
+    ),
+    # The subject binding it a level below `tree.body` in a block that runs,
+    # which was the hole a reader of `tree.body` left: the name is an attribute
+    # on the module either way. Paired with
+    # `test_a_subject_binding_only_for_a_type_checker_hands_out_nothing`, which
+    # is the same indent and the opposite answer.
+    (
+        "try:\n"
+        "    from settings_store import {reader}\n"
+        "except ImportError:\n"
+        "    {reader} = None\n",
+        "import helpers\nhelpers.{reader}(db, SettingKey.MAIL_USE_TLS)\n",
+    ),
+    # The `else:` of an `if TYPE_CHECKING:`, which is the ordinary run time and
+    # typing split and so the likeliest way this file's newest clause is met.
+    # The clause refuses the body and takes this branch, and replacing that
+    # branch with nothing left every other row of both tables green.
+    (
+        "if TYPE_CHECKING:\n"
+        "    from settings_store import {reader}\n"
+        "else:\n"
+        "    from settings_store import {reader}\n",
+        "import helpers\nhelpers.{reader}(db, SettingKey.MAIL_USE_TLS)\n",
+    ),
 )
 
 
@@ -1059,19 +1443,33 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
     * Inside `settings_store` a call in a nested function inherits the outer
       function's keyed parameters, so the plumbing skip is wider there than the
       one call it exists for.
-    * A reader reached through a name this module never binds by an assignment
-      is followed no further. Two shapes: a class attribute read as `R.read(db,
-      key)`, where matching it means treating every attribute call whose name
-      collides with a bound one as a reader; and an attribute on another module,
-      `helpers.get_bool(db, key)` after that module imported it, where telling it
-      from `sources.in_force` means resolving the subject module in the corpus
-      and asking whether it binds that name from `settings_store`. That is a
-      layer rather than a line, and it has a ticket. Falling through to
-      `_names_the_door` instead is not the cheap version of it: measured, 15
-      unreadable entries at 71 examined on a clean tree, `sources.in_force`
-      among them. Naming this residue as "built at run time" was wrong in both
-      directions, since a function local alias is neither built at run time nor
-      was it followed.
+    * A class attribute read as `R.read(db, key)` is followed no further.
+      Matching it means treating every attribute call whose name collides with a
+      bound one as a reader, and the cross module resolution does not arrive at
+      it for free: that resolution asks what a **module** hands out, and a class
+      is not in the index it asks. Naming this residue as "built at run time"
+      was wrong in both directions, since a class attribute is neither built at
+      run time nor followed.
+    * The cross module resolution reaches the corpus and nothing else, and
+      within it only a subject this module does not also bind by some other
+      means. `helpers.get_bool(db, key)` is read when `helpers` is a module
+      `_source_modules()` returns and nothing here rebinds that name, and is
+      silent otherwise; `_module_index` and `_rebound_here` are where the two
+      halves of that are written down. Falling through to `_names_the_door`
+      rather than resolving was tried and refused: measured against the rule as
+      it stands, 14 unreadable entries at 70 examined on a clean tree. It was 15
+      at 71 before the resolution existed, and the entry that went is
+      `sources.in_force` at `settings_store.py:439`, which the subject branch
+      now answers before any fallthrough could reach it.
+    * It follows one hop. A module re exporting another module's re export hands
+      out nothing, and the call on it is silent rather than reported.
+    * A computed door on a resolvable subject is silent. `getattr(helpers,
+      "get_bool")(db, key)` and `helpers.__dict__["get_bool"](db, key)` are
+      examined by nothing, where the same two written on `settings_store` are
+      reported as unreadable: `_names_the_door` reads the store aliases and the
+      bound names, not `subjects`. Widening it to `subjects` pulls directly
+      against `_rebound_here`, which exists to take names out of that map, so it
+      is a decision rather than a line and is not taken here.
     * `functools.partial(settings_store.get_bool, db)` is silent, and it was an
       offender until the binding started reading an expression's shape rather
       than walking it. The same walk made a name holding a reader's **result** a
@@ -1147,7 +1545,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         contributed = {
             path
             for path, source in modules.items()
-            if _reader_calls(path, source, readers)
+            if _reader_calls(path, source, readers, modules)
         }
         assert spelled - {_STORE}, (
             "the text instrument matched nothing but the module that defines "
@@ -1251,6 +1649,261 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         the attribute name alone reports it, which is what binding the call to
         the import stops."""
         _, _, examined = _planted("import sources\nsources.in_force(plan, ready)\n")
+        assert examined == 0
+
+    @pytest.mark.parametrize("subject, spelling", _ATTRIBUTE_SPELLINGS)
+    def test_a_reader_reached_as_an_attribute_on_an_importing_module_is_reported(
+        self, subject, spelling
+    ):
+        """The spelling this resolution buys: a reader reached as an attribute
+        on a module that imported it.
+
+        **Not the last silent one.** The class docstring names every spelling
+        that is still silent after it. **No count here**: one was claimed and
+        was wrong, then a smaller one was claimed and was wrong the other way,
+        and a number in this docstring goes stale the next time a residue opens
+        or closes.
+
+        Delete the subject clause in `_reader_calls` and this is what goes red:
+        the call falls through to the same `continue` that keeps
+        `sources.in_force` out, and a pinned key read off the table through a
+        module that re exported the reader is reported by nothing.
+        """
+        offenders, unreadable, _ = _planted(
+            spelling.format(reader="get_bool"),
+            alongside={"helpers.py": subject.format(reader="get_bool")},
+        )
+        assert offenders, spelling
+        assert not unreadable
+
+    @pytest.mark.parametrize("subject, spelling", _ATTRIBUTE_SPELLINGS)
+    def test_the_same_read_through_a_re_exported_in_force_door_is_not_reported(
+        self, subject, spelling
+    ):
+        """The other half of that diagonal. Without it the resolution is
+        satisfied by one that reports every attribute call it can resolve."""
+        offenders, unreadable, examined = _planted(
+            spelling.format(reader="bool_in_force"),
+            alongside={"helpers.py": subject.format(reader="bool_in_force")},
+        )
+        assert not offenders, offenders
+        assert not unreadable
+        assert examined
+
+    def test_a_module_that_defines_the_name_itself_is_not_a_reader(self):
+        """`sources.in_force` with the subject in the corpus, which is the
+        sharper half of the test above it.
+
+        That one passes on a corpus holding no `sources.py` at all, so it says
+        nothing about a resolution that resolves. This one plants the module, so
+        the only thing keeping the call out is that `sources` defines `in_force`
+        rather than binding it from `settings_store`.
+        """
+        _, _, examined = _planted(
+            "import sources\nsources.in_force(plan, ready)\n",
+            alongside={"sources.py": "def in_force(plan, ready):\n    return plan\n"},
+        )
+        assert examined == 0
+
+    def test_a_module_that_binds_the_name_from_somewhere_else_is_not_a_reader(self):
+        """The same refusal where the subject imported the name rather than
+        defining it. A resolution asking only whether the subject binds the name
+        reports this; one asking where it bound it from does not."""
+        _, _, examined = _planted(
+            "import helpers\nhelpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
+            alongside={"helpers.py": "from flags import get_bool\n"},
+        )
+        assert examined == 0
+
+    @pytest.mark.parametrize(
+        "opener",
+        (
+            "def send(db):\n    read = settings_store.get_bool\n    return read\n",
+            "async def send(db):\n    read = settings_store.get_bool\n    return read\n",
+            "class R:\n    read = settings_store.get_bool\n",
+        ),
+    )
+    def test_a_reader_bound_inside_a_scope_of_its_own_is_not_an_attribute_on_that_module(
+        self, opener
+    ):
+        """Why the cross module read stops at module scope.
+
+        `helpers.read` does not exist: the binding is a local in `send` or an
+        attribute on `R`, and the module hands out nothing by that name.
+        Reading the subject the way this rule reads its own module would report
+        a caller that cannot reach it.
+
+        **One arm per member of `_ITS_OWN_SCOPE` that can hold a binding.** The
+        `def` arm was the only one for a round, and dropping either of the other
+        two from that tuple left every arm of this class green. `ast.Lambda` has
+        no arm because it has no body a binding can sit in.
+        """
+        _, _, examined = _planted(
+            "import helpers\nhelpers.read(db, SettingKey.MAIL_USE_TLS)\n",
+            alongside={"helpers.py": "import settings_store\n" + opener},
+        )
+        assert examined == 0
+
+    def test_a_subject_binding_only_for_a_type_checker_hands_out_nothing(self):
+        """`if TYPE_CHECKING:` is written at module scope and does not run there.
+
+        An attribute bound only for a type checker raises at run time, so a call
+        on it reads no setting. The `try:` row of the diagonal is the same
+        indent and the opposite answer, and the pair is what says the descent
+        asks what runs rather than what is written.
+        """
+        _, unreadable, examined = _planted(
+            "import helpers\nhelpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
+            alongside={
+                "helpers.py": "if TYPE_CHECKING:\n"
+                "    from settings_store import get_bool\n"
+            },
+        )
+        assert not unreadable
+        assert examined == 0
+
+    def test_a_name_defined_only_for_a_type_checker_does_not_hide_a_re_export(self):
+        """The same block read by the other caller, where the direction reverses.
+
+        `defined` only ever suppresses a report, so widening it with a name that
+        does not exist at run time hides exactly the case the unreadable label
+        is for: a bare call that must have reached its reader from somewhere
+        this module does not name.
+        """
+        _, unreadable, _ = _planted(
+            "if TYPE_CHECKING:\n"
+            "    def get_bool(db, key):\n"
+            "        return False\n"
+            "get_bool(db, SettingKey.MAIL_USE_TLS)\n"
+        )
+        assert unreadable
+
+    @pytest.mark.parametrize(
+        "shadow",
+        (
+            "def send(db, helpers):\n"
+            "    return helpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
+            "def send(db):\n"
+            "    helpers = Fake()\n"
+            "    return helpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
+            "try:\n"
+            "    helpers = Fake()\n"
+            "except NameError:\n"
+            "    pass\n"
+            "helpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
+            # The generic clause rather than a `Name` or an `arg`: a `def`, a
+            # `class`, an `except ... as` and a `TypeVar` all carry the name
+            # they bind as a plain string, and removing that clause left every
+            # other row of this table green.
+            "def helpers():\n"
+            "    return None\n"
+            "helpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
+        ),
+    )
+    def test_a_name_this_module_also_binds_itself_is_not_the_module_it_imported(
+        self, shadow
+    ):
+        """The caller side of the question the subject side already answered.
+
+        `subjects` carries no scope analysis, so a parameter or a local called
+        `helpers` resolved as the module `helpers` and its call was reported as
+        a read of a pinned key. That is a red on a clean tree against a call
+        that cannot reach the module, which is the shape that gets a guard
+        argued away rather than fixed. The third arm is the one the module scope
+        descent made reachable: a rebinding a level below `tree.body`.
+        """
+        _, unreadable, examined = _planted(
+            "import helpers\n" + shadow,
+            alongside={"helpers.py": "from settings_store import get_bool\n"},
+        )
+        assert not unreadable
+        assert examined == 0
+
+    def test_a_module_defining_a_readers_name_at_module_scope_is_not_a_re_export(self):
+        """The same `tree.body` defect, on the half that decides a re export.
+
+        A bare call to a reader's name is a re export only when this module
+        neither imports the name from `settings_store` nor defines it. Reading
+        `tree.body` for the second half missed a `def` a level below it, so a
+        module holding its own `get_bool` was reported unreadable: red on a
+        clean tree against code with nothing wrong with it, which is the
+        direction `_rebound_here` exists for on the other side.
+        """
+        _, unreadable, _ = _planted(
+            "try:\n"
+            "    def get_bool(db, key):\n"
+            "        return False\n"
+            "except NameError:\n"
+            "    pass\n"
+            "get_bool(db, SettingKey.MAIL_USE_TLS)\n"
+        )
+        assert not unreadable, unreadable
+
+    def test_the_store_naming_itself_reaches_its_own_readers(self):
+        """The alias half of the store special case, which nothing else reaches.
+
+        `settings_store.py` calls its own readers bare, so the name it binds for
+        itself does no work on the tree as it stands: removing it left every arm
+        of this class green. This is what stops it being free to delete, and it
+        is the only arm that asks a verdict of the store rather than of a plant
+        beside it.
+        """
+        store = _source_modules()[_STORE] + (
+            "\n\ndef get_flag(db: Session, key: SettingKey) -> bool:\n"
+            "    return settings_store.get_bool(db, SettingKey.MAIL_USE_TLS)\n"
+        )
+        offenders, _, _ = _reads_of_a_pinned_key({_STORE: store}, only=_STORE)
+        assert offenders, "the store no longer reaches a reader through its own name"
+
+    def test_a_re_export_of_a_re_export_is_not_followed(self):
+        """The one hop bound, which nothing on a clean tree can see.
+
+        No corpus module re exports a reader at all, so a two hop resolution
+        and this one agree on every module in the tree: both give `([], [], 56)`.
+        The nearest arm beside this one puts the second module outside the
+        corpus, where one hop and two agree as well. This is the only plant
+        where they differ.
+        """
+        _, unreadable, examined = _planted(
+            "import helpers\nhelpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
+            alongside={
+                "helpers.py": "from mid import get_bool\n",
+                "mid.py": "from settings_store import get_bool\n",
+            },
+        )
+        assert not unreadable
+        assert examined == 0
+
+    def test_a_subject_reached_by_a_relative_import_is_resolved_against_the_package(
+        self,
+    ):
+        """The relative arm, which needs the reading module to be inside a
+        package to say anything.
+
+        At the top level `from . import helpers` and `import helpers` reach the
+        same name, so the rows above pass whether the package is walked or
+        ignored. Here the plant is in `routers/` and the subject is its sibling,
+        which is the only shape where the two answers differ.
+        """
+        offenders, _, _ = _planted(
+            "from . import helpers\nhelpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
+            alongside={"routers/helpers.py": "from settings_store import get_bool\n"},
+            path="routers/planted.py",
+        )
+        assert offenders
+
+    def test_a_subject_the_corpus_does_not_hold_is_left_alone(self):
+        """The exclusion, asserted rather than described.
+
+        Same source as the first row of the diagonal with the subject module
+        taken out of the corpus. Nothing in the tree says what a module
+        `_source_modules()` never returns hands out, so the call is silent, and
+        that is the boundary this resolution stops at.
+        """
+        _, unreadable, examined = _planted(
+            "import helpers\nhelpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n"
+        )
+        assert not unreadable
         assert examined == 0
 
     def test_a_reader_added_later_is_classified_by_what_it_reaches(self):

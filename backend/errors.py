@@ -109,7 +109,7 @@ def _json_error(status_code: int, detail: object) -> JSONResponse:
 
 
 async def http_exception_handler(request: Request, exc: Exception) -> Response:
-    assert isinstance(exc, StarletteHTTPException)
+    assert isinstance(exc, StarletteHTTPException)  # noqa: S101  narrowing, not validation
     if wants_html(request):
         return render_error_page(exc.status_code)
     response = _json_error(exc.status_code, exc.detail)
@@ -121,7 +121,7 @@ async def http_exception_handler(request: Request, exc: Exception) -> Response:
 
 
 async def validation_exception_handler(request: Request, exc: Exception) -> Response:
-    assert isinstance(exc, RequestValidationError)
+    assert isinstance(exc, RequestValidationError)  # noqa: S101  narrowing, not validation
     if wants_html(request):
         return render_error_page(status.HTTP_422_UNPROCESSABLE_CONTENT)
     # Keep FastAPI's per-field array: the client flattens it into a message.

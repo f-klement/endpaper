@@ -487,7 +487,7 @@ def _catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credenti
     Written for the set rather than for its members because the next source to
     declare that capability is the reason this plumbing exists.
     """
-    import metadata  # noqa: PLC0415  the cycle above
+    import metadata  # function level, for the cycle above
 
     doors = [
         targets.SEEDED[source]
@@ -536,7 +536,7 @@ def library_access(db: Session) -> metadata.Access:
     `tests/routers/test_books_identifier_backfill.py::TestWhatABatchCostsTheDatabase`
     and `tests/test_settings_store.py::TestTheKeyIsResolvedOncePerRequest`.
     """
-    import metadata  # noqa: PLC0415  the cycle above
+    import metadata  # function level, for the cycle above
 
     return metadata.Access(
         plan=catalogue_sources(db),

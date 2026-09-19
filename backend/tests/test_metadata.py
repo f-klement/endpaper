@@ -30,6 +30,7 @@ import ast
 import asyncio
 import dataclasses
 import inspect
+import itertools
 import logging
 import math
 import random
@@ -6175,7 +6176,7 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         beside: set[tuple[CatalogueSource, CatalogueSource]] = set()
         for order in _rotations(sources.DEFAULT_ORDER):
             chain = self._plan(order).lookup_chain
-            beside.update(zip(chain, chain[1:], strict=False))
+            beside.update(itertools.pairwise(chain))
         assert len(beside) == len(sources.LOOKUP_SOURCES)
         assert beside < self._every_ordered_pair()
 
@@ -6199,7 +6200,7 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         beside: set[tuple[CatalogueSource, CatalogueSource]] = set()
         for order in ORDERS_UNDER_TEST:
             chain = self._plan(order).lookup_chain
-            beside.update(zip(chain, chain[1:], strict=False))
+            beside.update(itertools.pairwise(chain))
         assert beside == self._every_ordered_pair()
 
     def test_the_orders_asked_hold_every_rotation(self):

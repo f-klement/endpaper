@@ -28,7 +28,7 @@ from sqlalchemy import CheckConstraint
 
 import marc_fields
 import metadata
-import models as orm  # noqa: F401  (registers the tables on Base.metadata)
+import models as orm  # registers the tables on Base.metadata
 import sources
 import targets
 from database import Base
@@ -114,6 +114,36 @@ def _python_sources(root: Path = BACKEND) -> list[Path]:
 def _test_sources(root: Path = BACKEND) -> list[Path]:
     """Every file in the test tree. `_python_sources` deliberately excludes it."""
     return [path for path in (root / "tests").rglob("*.py") if not _is_vendored(path, root)]
+
+
+def _every_module_but_the_tests(root: Path = BACKEND) -> list[Path]:
+    """The application and its migrations, excluding the tests and anything vendored.
+
+    Wider than `_python_sources` by the migrations and narrower than
+    `_every_python_file` by the test tree. The rules that use it are about what
+    ships in the image, where a generated revision ships and a test does not.
+
+    **It exists because two rules that needed this walk each wrote their own**,
+    one a method on its test class and one inline in its loop, spelled
+    `"tests" not in path.parts and ".venv" not in path.parts` and its negation.
+    That is the enumeration the module level walks here replaced, one name short
+    in the same direction: it read the cache the pipeline creates under
+    `backend/` and reported `jeepney/bindgen.py` for parsing XML. Green on every
+    developer checkout and red in CI, which is the environment difference
+    `_python_sources` already records. The second copy held the `S101` census
+    and was latent rather than red, because nothing vendored here carries that
+    suppression; it was found by reading for the shape rather than by a failure.
+
+    **A method could not be reached by `_walk_names`**, which reads module
+    level functions, so the diagonal that drives every walk against a
+    constructed tree never saw it. Being a module level walk that reaches
+    `_is_vendored` is what puts it under that guard rather than beside it.
+    """
+    return [
+        path
+        for path in root.rglob("*.py")
+        if "tests" not in path.relative_to(root).parts and not _is_vendored(path, root)
+    ]
 
 
 def _every_python_file(root: Path = BACKEND) -> list[Path]:
@@ -253,6 +283,11 @@ WHAT_EACH_WALK_REACHES: Final = {
     "_python_sources": {"shelf.py", "routers/loans.py"},
     "_source_modules": {"shelf.py", "routers/loans.py"},
     "_test_sources": {"tests/test_shelf.py"},
+    "_every_module_but_the_tests": {
+        "shelf.py",
+        "routers/loans.py",
+        "migrations/versions/a1.py",
+    },
     "_every_python_file": {
         "shelf.py",
         "routers/loans.py",
@@ -644,7 +679,7 @@ class TestTheSourceWalkSeesOnlyThisProject:
         root = tmp_path / "tests" / "backend"
         _a_backend_with_vendored_code_in_it(root, VENDORED_KINDS[kind])
         walks, _ = _walk_names()
-        assert len(walks) >= 5, f"the walks went missing from this file: {walks}"
+        assert len(walks) >= 6, f"the walks went missing from this file: {walks}"
 
         # Stated as "anything that is not one of ours", so a walk reaching a
         # second file in that directory, or a directory above it, is reported
@@ -705,7 +740,7 @@ class TestTheSourceWalkSeesOnlyThisProject:
         catches the class it cannot see.
         """
         _, names = _walk_names()
-        assert len(names) >= 6, f"the walks went missing from this file: {names}"
+        assert len(names) >= 7, f"the walks went missing from this file: {names}"
         mine = Path(__file__).resolve()
 
         copies = sorted(
@@ -3500,7 +3535,7 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
                     model.model_json_schema(mode=mode)
                     for mode in ("validation", "serialization")
                 ]
-            except Exception as error:  # noqa: BLE001  (reported, never skipped)
+            except Exception as error:  # reported, never skipped
                 unreadable.append(f"{name}: {type(error).__name__}: {error}")
                 continue
             if any(self._serves_an_address(schema) for schema in schemas):
@@ -5394,7 +5429,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         drops a versioned file in silence. A negation is the form that would do
         the second, so it raises rather than being approximated."""
         (tmp_path / ".gitignore").write_text("docs/\n!docs/keep.md\n")
-        with pytest.raises(AssertionError, match="unsupported .gitignore form"):
+        with pytest.raises(AssertionError, match=re.escape("unsupported .gitignore form")):
             _markdown_sources(tmp_path)
 
     def test_an_unbalanced_fence_is_reported(self, tmp_path: Path) -> None:
@@ -5469,7 +5504,7 @@ class TestAOneTimeCodeIsServedOnlyWhereItIsNamed:
                     model.model_json_schema(mode=mode)
                     for mode in ("validation", "serialization")
                 ]
-            except Exception as error:  # noqa: BLE001  (reported, never skipped)
+            except Exception as error:  # reported, never skipped
                 unreadable.append(f"{name}: {type(error).__name__}: {error}")
                 continue
             if any(self._serves_a_code(schema) for schema in schemas):
@@ -7336,6 +7371,753 @@ class TestTheShippedImageCarriesThePostgresDriver:
         )
         assert not any(spec.startswith("pg8000") for spec in dev), (
             "pg8000 is declared twice; the runtime entry already covers the suite."
+        )
+
+
+#: Directives naming the process a container runs. Lowercased on both sides:
+#: Dockerfile instructions are case insensitive, and `entrypoint` in lower case
+#: beside an upper case `CMD` was one of the four evasions that got past the
+#: first draft of this rule.
+_START_DIRECTIVES = ("cmd", "entrypoint", "command:", "entrypoint:")
+
+#: Compose keys naming a file this rule never opens. Refused outright.
+#:
+#: Spelled once because it was spelled three times for one round and one of the
+#: three was already stale: a key added to the production arm went untested until
+#: somebody also found the diagonal.
+_KEYS_REACHING_ANOTHER_FILE = ("env_file:", "extends:", "include:")
+
+#: What a compose `build:` block may say, and it is an allowlist because every
+#: other shape of this rule has been evaded by naming a key it did not know.
+#:
+#: **Four rounds went `env_file:`, then `extends:` and `include:`, then
+#: `dockerfile:`, then `context:`**, each one a real escape and each fix an arm
+#: rather than a shape. `context: ./deploy` with `dockerfile: Dockerfile`
+#: unchanged reaches `deploy/Dockerfile`, because compose resolves the second
+#: against the first, so even a value check on `dockerfile:` alone reads clean.
+#: The Compose Specification decides that key set and can grow it, so a list of
+#: keys to refuse is an enumeration over something somebody else controls.
+#:
+#: So the block is read the other way round: **a key inside `build:` that is not
+#: in here fails**, and the two that are in here are checked on their values.
+#: `_container_surfaces` reads one directory and never descends, so a context
+#: other than this directory puts the image somewhere this rule cannot see.
+_BUILD_KEYS_UNDERSTOOD = {
+    "context": {".", "./"},
+    # The value is checked against the surfaces actually read, rather than
+    # against a literal, so renaming the image file does not silently pass.
+    "dockerfile": None,
+}
+
+
+def _build_entry_is_readable(key: str, value: str, readable: set[str]) -> bool:
+    """Whether one `build:` entry keeps the image inside what this rule reads.
+
+    Fails shut on an unknown key: `additional_contexts:` and `ssh:` are real
+    Compose keys nobody here has thought about, and the day one appears it goes
+    red rather than passing because it was not on a list of things to refuse.
+    """
+    if key not in _BUILD_KEYS_UNDERSTOOD:
+        return False
+    allowed = _BUILD_KEYS_UNDERSTOOD[key]
+    if allowed is not None:
+        return value in allowed
+    # `dockerfile:`, checked against the files actually globbed rather than
+    # against a literal, so renaming the image file cannot silently pass.
+    return "/" not in value.removeprefix("./") and Path(value).name in readable
+
+
+def _build_block(text: str) -> list[tuple[int, str, str]]:
+    """`(line, key, value)` for every entry inside a compose `build:` block.
+
+    Indentation delimits the block, which is what YAML gives without a parser:
+    the entries are the lines more deeply indented than the `build:` that opened
+    it. Comments and surrounding quotes come off the value here, because parsing
+    it back out of a formatted site string put three ordinary spellings of the
+    image file, `./Dockerfile`, `"Dockerfile"` and one with a trailing comment,
+    into the failure list.
+
+    **The bound, stated rather than left to be discovered.** This is a line
+    oriented reader, so it sees `build` only where that key opens a line. Two
+    Compose styles put it elsewhere and evade every arm here: a flow style
+    service, `api: {build: ./deploy}`, and the same nested,
+    `services: {api: {build: ./deploy}}`. The block form, the flow **mapping**
+    form, the shorthand, and an anchor merge are all covered.
+
+    **A quoted key, `"build": ./deploy`, is caught, and by the floor rather
+    than here**: the floor strips quotes before comparing and this does not, so
+    the key is seen, no entries come back, and the arm fails on the parser
+    rather than on the value. Said explicitly because an earlier draft of this
+    paragraph listed it as evading, and a reader trusts the sentence over the
+    code.
+
+    **Why that is stated and not fixed.** Closing it means parsing the file as
+    YAML, and PyYAML is not declared in `backend/pyproject.toml`: it is present
+    only transitively, so a guard resting on it is its own trap. Measured across
+    four review rounds on this one rule, the shapes are getting rarer and the
+    arms are not getting cheaper. A known bound beats an unknown one.
+    """
+    def clean(value: str) -> str:
+        return value.split("#")[0].strip().strip("\"'")
+
+    found: list[tuple[int, str, str]] = []
+    depth: int | None = None
+    for number, raw in enumerate(text.splitlines(), 1):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        if depth is not None and indent <= depth:
+            depth = None
+        key, _, rest = raw.strip().partition(":")
+        if key.strip() == "build":
+            inline = clean(rest)
+            if not inline:
+                depth = indent          # the block form, entries follow below
+            elif inline.startswith("{"):
+                # The flow mapping. `build: {context: ., dockerfile: x}` starts
+                # the line with `build:`, so a rule reading keys never sees one.
+                for pair in inline.strip("{}").split(","):
+                    k, _, v = pair.partition(":")
+                    if k.strip():
+                        found.append((number, k.strip(), clean(v)))
+            else:
+                # The shorthand. `build: ./deploy` is a context and no key at
+                # all, and compose then implies `<context>/Dockerfile`.
+                found.append((number, "context", inline))
+            continue
+        if depth is None:
+            continue
+        found.append((number, key.strip(), clean(rest)))
+    return found
+
+#: Programs this rule can reason about, as the first word of a start command.
+#:
+#: **A closed set on purpose, and it fails shut.** `CMD ["/app/start.sh"]` moves
+#: the question into a file this rule does not open, and a start command naming
+#: anything else does the same. Refusing the unknown shape is what keeps the
+#: scan below complete; enumerating the ways a script could reach `-O` would
+#: not, and could not.
+_PROGRAMS_THIS_RULE_CAN_READ = frozenset({"uvicorn", "python", "python3"})
+
+
+def _container_surfaces(root: Path) -> list[Path]:
+    """Every file in a tree that says how the container is started.
+
+    **Takes the tree as an argument** so the arms below can drive it against one
+    they build. A rule that only ever runs against the real repository is one
+    nobody can plant a counterexample for.
+
+    Matched by shape rather than by name: anything beginning `Dockerfile`, and
+    any YAML carrying `compose`. The Compose Specification's own default is
+    `compose.yaml`, and `compose.yml` and `docker-compose.yaml` are read too, so
+    a list of filenames here is an enumeration over something the tool's authors
+    control rather than this repository. The first draft of this rule globbed
+    `docker-compose*.yml` and was blind to the other three spellings.
+
+    What it reads is those files, line by line. It does not read the cluster
+    manifests that run the published image, a file a start command names, or an
+    environment an operator exports by hand.
+    """
+    return sorted(
+        path
+        for path in root.iterdir()
+        if path.is_file()
+        and (
+            path.name.startswith("Dockerfile")
+            or (path.suffix in {".yml", ".yaml"} and "compose" in path.name)
+        )
+    )
+
+
+def _logical_lines(text: str) -> list[tuple[int, str]]:
+    """Physical lines joined across a trailing backslash, keyed by the first one.
+
+    A `CMD` continued onto the next line is one instruction to Docker and two
+    lines to a scanner reading physically, which is how `-O` on a continuation
+    got past the first draft.
+    """
+    joined: list[tuple[int, str]] = []
+    buffer, first = "", 0
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.rstrip()
+        if not buffer:
+            first = number
+        if stripped.endswith("\\"):
+            buffer += stripped[:-1] + " "
+            continue
+        joined.append((first, (buffer + stripped).strip()))
+        buffer = ""
+    if buffer:
+        joined.append((first, buffer.strip()))
+    return joined
+
+
+def _sites(root: Path, predicate) -> list[str]:
+    """`file:line: text` for every logical line of every surface the predicate takes."""
+    return [
+        f"{path.name}:{number}: {line}"
+        for path in _container_surfaces(root)
+        for number, line in _logical_lines(path.read_text())
+        if predicate(line)
+    ]
+
+
+def _has_optimise_flag(line: str) -> bool:
+    return any(re.fullmatch(r"-O+", token) for token in re.findall(r"[-\w./:@+]+", line))
+
+
+def _start_commands(root: Path) -> list[tuple[str, str]]:
+    """`(site, program)` for the program each surface actually starts.
+
+    **An exec form `CMD` beside an `ENTRYPOINT` is arguments, not a program.**
+    Docker appends the one to the other, so `ENTRYPOINT ["uvicorn"]` with
+    `CMD ["main:app", "--port", "8000"]` starts `uvicorn` and the `CMD` line
+    names nothing. Reading each directive as its own start command failed that
+    idiom with "runs something this rule cannot read", which is a false refusal
+    on a shape the previous version accepted correctly.
+
+    So the entrypoint wins per file where there is one. An empty argument list,
+    which is how `CMD []` resets an inherited entrypoint, names no program and
+    is skipped; the floor arm is what stops a file naming nothing at all from
+    passing quietly.
+    """
+    found: list[tuple[str, str]] = []
+    for path in _container_surfaces(root):
+        entrypoints: list[tuple[str, str]] = []
+        commands: list[tuple[str, str]] = []
+        for number, line in _logical_lines(path.read_text()):
+            lowered = line.lower()
+            if not lowered.startswith(_START_DIRECTIVES):
+                continue
+            words = re.findall(r"[-\w./:@+]+", line)
+            argv = [word for word in words[1:] if not word.startswith("-")]
+            if not argv:
+                continue
+            entry = (f"{path.name}:{number}", argv[0].rsplit("/", 1)[-1])
+            (entrypoints if lowered.startswith("entrypoint") else commands).append(entry)
+        found.extend(entrypoints or commands)
+    return found
+
+
+#: `ElementTree` entry points that turn bytes into a tree.
+#:
+#: `fromstring`, `parse` and `iterparse` are the three `S314` reports. `XML`,
+#: `XMLID` and `fromstringlist` are documented aliases of them that it does not,
+#: measured on ruff 0.16.7 with a six line probe, and `XML` is CPython's own
+#: documented alias of `fromstring`.
+_XML_PARSERS = frozenset(
+    {
+        "fromstring",
+        "parse",
+        "iterparse",
+        "XML",
+        "XMLID",
+        "fromstringlist",
+        # Three more routes to the same expat, all public and documented, added
+        # after a seat probed them: a parser object fed bytes and its pull
+        # variant, both of which reach expat with identical entity expansion.
+        #
+        # **`ElementTree` is the class, and this matches its construction rather
+        # than the `.parse` on the instance that actually reads.** Say that
+        # rather than the other thing: a comment naming one rule where the code
+        # implements another is the tell this repository keeps paying for, and a
+        # reader who checks the comment agrees with the wrong half.
+        #
+        # Matching the construction costs a false refusal on
+        # `ElementTree.ElementTree(root).write(f)`, the serialisation idiom,
+        # which nothing in the tree uses. That is deliberate, and the narrower
+        # alternative was measured and refused: matching `.parse` on a
+        # constructed instance sees `ElementTree.ElementTree().parse(f)` and
+        # misses both spellings somebody actually writes, `t = ElementTree()`
+        # with `t.parse(f)` a statement later, and `ElementTree(file=f)`, which
+        # parses inside the constructor. One false refusal on a spelling nobody
+        # uses beats two silent misses on the two that get written.
+        #
+        # A module that wraps an Element only to `.write()` it is therefore red
+        # here, and should say so at its own site.
+        "XMLParser",
+        "XMLPullParser",
+        "ElementTree",
+    }
+)
+
+#: What `S314` reports, so the rest is what this file adds. Four, not three:
+#: ruff reports `XMLParser` as well, which a first draft of this constant missed.
+_PARSERS_THE_LINTER_SEES = frozenset({"fromstring", "parse", "iterparse", "XMLParser"})
+
+#: The modules allowed to turn outside XML into a tree, each refusing a document
+#: type declaration first and capped on the bytes it reads. Every one says why in
+#: its own docstring.
+_MODULES_THAT_PARSE_XML = ("marc.py", "metadata.py", "opds.py")
+
+
+#: The module whose parse entry points this rule is about.
+_ELEMENTTREE = ("xml", "etree", "ElementTree")
+
+
+def _elementtree_names(tree: ast.Module) -> tuple[set[str], set[str]]:
+    """`(receivers, bare)`: every expression in one file that denotes `ElementTree`.
+
+    **Resolved by prefix rather than enumerated.** A first draft asked whether
+    `"ElementTree"` appeared in the unparsed receiver, which is false of `ET.XML`
+    after `import xml.etree.ElementTree as ET`, the form CPython's own
+    documentation uses; a second listed four import spellings and called that all
+    of them, and missed `from xml import etree` reaching `etree.ElementTree.XML`.
+    Both rounds were the same defect, which is the one this whole file exists to
+    stop: **a rule that enumerates the ways a thing can be written.**
+
+    So an import is read as the pair (the name it binds, the module that name
+    denotes), and any import binding a **prefix** of `xml.etree.ElementTree`
+    yields a receiver: the bound name plus whatever segments are left. That
+    covers every spelling at once, including ones nobody has written here.
+
+    `from xml.etree.ElementTree import fromstring` binds the function rather than
+    the module, which is the second return value.
+    """
+    receivers: set[str] = set()
+    bare: set[str] = set()
+
+    def offer(bound: str, denotes: tuple[str, ...]) -> None:
+        if _ELEMENTTREE[: len(denotes)] == denotes:
+            receivers.add(".".join((bound, *_ELEMENTTREE[len(denotes) :])).rstrip("."))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = tuple(alias.name.split("."))
+                if alias.asname:
+                    offer(alias.asname, parts)
+                else:
+                    # `import a.b.c` binds `a`, and the usable expression is the
+                    # whole dotted path.
+                    offer(parts[0], parts[:1])
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            module = tuple(node.module.split("."))
+            for alias in node.names:
+                if module == _ELEMENTTREE and alias.name in _XML_PARSERS:
+                    bare.add(alias.asname or alias.name)
+                else:
+                    offer(alias.asname or alias.name, (*module, alias.name))
+    return receivers, bare
+
+
+def _xml_parse_calls(source: str) -> list[tuple[int, str]]:
+    """`(line, name)` for every call of an `ElementTree` parse entry point.
+
+    Both shapes a call can take, with the receiver resolved by
+    `_elementtree_names` rather than spelled: `<receiver>.fromstring(b)`, and a
+    bare `fromstring(b)` where the file imported the function itself.
+    """
+    tree = ast.parse(source)
+    receivers, bare = _elementtree_names(tree)
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in _XML_PARSERS:
+            if ast.unparse(func.value) in receivers:
+                found.append((node.lineno, func.attr))
+        elif isinstance(func, ast.Name) and func.id in bare:
+            found.append((node.lineno, func.id))
+    return sorted(found)
+
+
+class TestOnlyThreeModulesTurnOutsideXmlIntoATree:
+    """`S314` is suppressed at three sites, and this is what makes that honest.
+
+    Each of the three refuses a document type declaration before parsing and is
+    capped on the bytes it reads, which is the work `defusedxml` would have been
+    adopted for. The suppression is per site rather than per family so that a
+    **fourth** parse written without that refusal is loud.
+
+    **That holds only while `S314` sees every spelling, and it does not.** So the
+    first arm asks which modules parse, over every spelling including the three
+    the linter is blind to, and the second keeps the three honest modules using
+    only spellings it can report.
+
+    **Importing `ElementTree` is not parsing, and is not what this reads.**
+    `marc_fields.py` imports it for the `Element` annotation and `sru.py` to
+    build and serialise the SRU response; neither turns a stranger's bytes into
+    a tree. An import based version of this rule named both and was wrong.
+    """
+
+    def test_the_corpus_it_walks_is_present(self) -> None:
+        """The floor. An empty corpus, or a walk that reads no parse, passes below."""
+        modules = _every_module_but_the_tests()
+        assert len(modules) > 50, f"walked {len(modules)} application modules, expected many"
+        parsing = sorted(
+            path.name
+            for path in modules
+            if path.name in _MODULES_THAT_PARSE_XML and _xml_parse_calls(path.read_text())
+        )
+        assert parsing == sorted(_MODULES_THAT_PARSE_XML), (
+            f"the walk found parses in {parsing}, so it is not reading the three "
+            "modules this rule is about and would pass on a fourth."
+        )
+
+    def test_no_other_module_parses_xml_by_any_spelling(self) -> None:
+        parsing = sorted(
+            {
+                str(path.relative_to(BACKEND))
+                for path in _every_module_but_the_tests()
+                if _xml_parse_calls(path.read_text())
+            }
+        )
+        assert parsing == sorted(_MODULES_THAT_PARSE_XML), (
+            f"the set of modules parsing XML moved to {parsing}. Each one has to refuse "
+            "a doctype before it parses and cap the bytes it reads, and say so at its "
+            "own site; that is what the S314 suppressions there stand on."
+        )
+
+    def test_it_resolves_every_way_a_file_can_reach_the_parser(self) -> None:
+        """The diagonal, and the reason the resolver is a prefix walk.
+
+        Two rounds of this rule enumerated import spellings and two rounds
+        missed one. Each row is a whole file, so a miss names the spelling that
+        was missed rather than reporting a count.
+        """
+        seen = {
+            "import ... as ET": "import xml.etree.ElementTree as ET\nET.XML(b)\n",
+            "import ..., dotted call": (
+                "import xml.etree.ElementTree\nxml.etree.ElementTree.XML(b)\n"
+            ),
+            "from xml.etree import ElementTree as ET": (
+                "from xml.etree import ElementTree as ET\nET.XML(b)\n"
+            ),
+            "from xml.etree import ElementTree": (
+                "from xml.etree import ElementTree\nElementTree.XML(b)\n"
+            ),
+            "from xml import etree": "from xml import etree\netree.ElementTree.XML(b)\n",
+            "import xml.etree": "import xml.etree\nxml.etree.ElementTree.XML(b)\n",
+            "import xml.etree as e": "import xml.etree as e\ne.ElementTree.XML(b)\n",
+            "the function imported directly": (
+                "from xml.etree.ElementTree import XML\nXML(b)\n"
+            ),
+        }
+        missed = [name for name, source in seen.items() if not _xml_parse_calls(source)]
+        assert not missed, f"a spelling of the parser is invisible to this rule: {missed}"
+
+        # The other direction. A module of somebody else's that happens to export
+        # the same name is not this one, and a rule that matched the name alone
+        # would say it was.
+        assert not _xml_parse_calls("from other import ElementTree\nElementTree.XML(b)\n")
+
+    def test_the_three_use_only_spellings_the_linter_can_report(self) -> None:
+        """The alias arm, which is the one `S314` does not give you."""
+        offenders = [
+            f"{path.relative_to(BACKEND)}:{line}: {name}"
+            for path in _every_module_but_the_tests()
+            for line, name in _xml_parse_calls(path.read_text())
+            if name not in _PARSERS_THE_LINTER_SEES
+        ]
+        assert not offenders, (
+            f"an XML parse is spelled so that S314 cannot report it: {offenders}. Use "
+            f"one of {sorted(_PARSERS_THE_LINTER_SEES)}, which ruff sees, so the "
+            "suppression at that site stays the thing a reader is told to check."
+        )
+
+
+class TestNothingStripsAnAssertOutOfTheImage:
+    """The narrowing asserts in application code are narrowing only if they run.
+
+    Eight `assert` statements in `errors.py`, `routers/books.py`,
+    `routers/users.py` and `targets.py` carry `# noqa: S101  narrowing, not
+    validation`. Each restates a condition the branch above it already
+    established, so that the type checker can see it; none is a check on a value
+    from outside.
+
+    **`python -O` and the `PYTHONOPTIMIZE` environment variable both delete
+    them**, and that is what makes the eight suppressions a claim rather than a
+    note. Under either, `assert result.record is not None` compiles away and the
+    `None` the branch above ruled out reaches `.as_match()` instead: an
+    `AttributeError`, and a 500 on a lookup that succeeded. The annotation still
+    says the value is there, so mypy reports nothing either.
+
+    **The first draft of this rule was wrong in four ways and passed**, which is
+    why the shape below is what it is. It globbed one compose spelling of four,
+    read physical lines so a continuation hid the flag, matched `CMD` case
+    sensitively so a lower case `entrypoint` beside it was invisible, and let a
+    start command name a shell script it never opened. Three of the four were
+    found by a second seat writing the mutation the author had not.
+
+    So this does not enumerate the ways a flag can be written. It reads every
+    line of every surface, and **refuses any start command or environment it
+    cannot read**, which is the half that closes rather than widens.
+    """
+
+    def test_the_surfaces_it_reads_are_present(self) -> None:
+        """The floor. A rule over an empty file set passes for the wrong reason."""
+        surfaces = _container_surfaces(BACKEND.parent)
+        names = [path.name for path in surfaces]
+        assert "Dockerfile" in names, (
+            f"no file named Dockerfile among {names}, so the two arms below read "
+            "nothing about the image and pass."
+        )
+        assert any("compose" in name for name in names), (
+            f"no compose file among {names}, so an environment set there is unread."
+        )
+
+    def test_no_container_surface_asks_for_optimised_bytecode(self) -> None:
+        offenders = _sites(BACKEND.parent, lambda line: "PYTHONOPTIMIZE" in line)
+        assert not offenders, (
+            f"PYTHONOPTIMIZE is set at {offenders}. It strips every `assert`, and the "
+            "eight in application code are the narrowings the type checker reads."
+        )
+
+    def test_no_line_of_a_container_surface_carries_an_optimise_flag(self) -> None:
+        """Every line, not only the start commands.
+
+        The first draft scoped this to `CMD` and `ENTRYPOINT` on the stated
+        ground that `-O` is also `curl`'s remote-name flag. That reason is false
+        of this tree: there is no `curl` in the Dockerfile and no `-O` token in
+        any surface, so the narrowing bought nothing and cost two evasions.
+        """
+        offenders = _sites(BACKEND.parent, _has_optimise_flag)
+        assert not offenders, (
+            f"a container surface carries a bare -O token: {offenders}. If it is Python's "
+            "optimise flag, every `assert` in application code disappears and the "
+            "narrowings go with them; `RUN PYTHONOPTIMIZE=1 uv sync` bakes the same thing "
+            "into the compiled bytecode. If it is a fetch tool's output flag, move it into "
+            "a script under the build directory, which this rule does not read, and say so "
+            "here."
+        )
+
+    def test_every_start_command_names_a_program_this_rule_can_read(self) -> None:
+        """The arm that keeps the two above complete.
+
+        A start command naming a script moves the question into a file this rule
+        does not open. It fails here rather than passing quietly, so whoever
+        changes the shape has to come back and say how the property still holds.
+        """
+        commands = _start_commands(BACKEND.parent)
+        assert commands, (
+            "found no start command in any container surface, so this rule read "
+            "nothing and would pass on an image that runs optimised."
+        )
+        unreadable = [
+            site for site, program in commands if program not in _PROGRAMS_THIS_RULE_CAN_READ
+        ]
+        assert not unreadable, (
+            f"a start command runs something this rule cannot read: {unreadable}. "
+            f"It knows {sorted(_PROGRAMS_THIS_RULE_CAN_READ)}; anything else may reach "
+            "`python -O` in a file nothing here opens."
+        )
+
+    def test_no_compose_file_reaches_a_file_this_rule_cannot_read(self) -> None:
+        """The three keys refused outright, and `dockerfile:` judged on its value."""
+        offenders = _sites(
+            BACKEND.parent,
+            lambda line: line.lower().startswith(_KEYS_REACHING_ANOTHER_FILE),
+        )
+        assert not offenders, (
+            f"a compose file takes configuration from a file this rule does not open: "
+            f"{offenders}. PYTHONOPTIMIZE set there is invisible to every arm here."
+        )
+        readable = {path.name for path in _container_surfaces(BACKEND.parent)}
+        # **The floor, and this arm is the one that went four rounds without
+        # one.** A `build:` the reader failed to parse yields no entries and
+        # reports clean, which is "nothing to refuse" and "read nothing" wearing
+        # the same verdict. Every other arm in this class has a floor; this is
+        # where four rounds of findings landed.
+        # **Per build key, not per file.** The first draft asked whether the
+        # file yielded anything, so a second service whose block the reader
+        # cannot parse rode in on the first service's entries and passed.
+        blind = []
+        for path in _container_surfaces(BACKEND.parent):
+            text = path.read_text()
+            keys = [
+                line
+                for line, logical in _logical_lines(text)
+                if logical.partition(":")[0].strip().strip('"\'') == "build"
+            ]
+            entries = [line for line, _, _ in _build_block(text)]
+            for position, line in enumerate(keys):
+                nextkey = keys[position + 1] if position + 1 < len(keys) else None
+                own = [
+                    entry
+                    for entry in entries
+                    if entry >= line and (nextkey is None or entry < nextkey)
+                ]
+                if not own:
+                    blind.append(f"{path.name}:{line}")
+        assert not blind, (
+            f"a build key is there and the reader produced no entries for it: {blind}. "
+            "That is the parser failing, not the file being clean."
+        )
+        built = [
+            f"{path.name}:{line}: {key}: {value}"
+            for path in _container_surfaces(BACKEND.parent)
+            for line, key, value in _build_block(path.read_text())
+            if not _build_entry_is_readable(key, value, readable)
+        ]
+        assert not built, (
+            f"a compose build block says something this rule cannot verify: {built}. "
+            f"It understands {sorted(_BUILD_KEYS_UNDERSTOOD)} and reads {sorted(readable)}, "
+            "one directory, never descending."
+        )
+
+    def test_it_reads_every_spelling_of_a_compose_file(self, tmp_path: Path) -> None:
+        """The diagonal. Each name in turn, and a decoy that must not be read."""
+        carried = [
+            "Dockerfile",
+            "Dockerfile.dev",
+            "compose.yaml",
+            "compose.yml",
+            "docker-compose.yml",
+            "docker-compose.yaml",
+        ]
+        for name in [*carried, "compose-notes.md", "README.md"]:
+            (tmp_path / name).write_text("")
+        assert [path.name for path in _container_surfaces(tmp_path)] == sorted(carried)
+
+    def test_it_finds_the_flag_wherever_a_start_command_can_hide_it(
+        self, tmp_path: Path
+    ) -> None:
+        """One spelling per file, so a miss names the spelling that was missed."""
+        written = {
+            "Dockerfile": 'CMD ["uvicorn", \\\n  "-O", "main:app"]',
+            "Dockerfile.lower": 'entrypoint ["python", "-O", "-m", "uvicorn"]',
+            "compose.yaml": '    command: ["python", "-OO", "-m", "uvicorn"]',
+            "docker-compose.env.yml": "    env_file: ./optimise.env",
+
+            "compose.override.yml": "    environment:\n      PYTHONOPTIMIZE: 1",
+        }
+        for name, body in written.items():
+            (tmp_path / name).write_text(body + "\n")
+
+        seen = {
+            site.split(":", 1)[0]
+            for site in _sites(tmp_path, _has_optimise_flag)
+            + _sites(tmp_path, lambda line: "PYTHONOPTIMIZE" in line)
+            + _sites(
+                tmp_path, lambda line: line.lower().startswith(_KEYS_REACHING_ANOTHER_FILE)
+            )
+        }
+        assert seen == set(written), f"unseen: {sorted(set(written) - seen)}"
+
+    def test_an_entrypoint_takes_its_arguments_from_the_cmd_beside_it(
+        self, tmp_path: Path
+    ) -> None:
+        """The idiom the first refusal arm failed, so it stays accepted.
+
+        Docker appends an exec form `CMD` to an exec form `ENTRYPOINT`, so the
+        `CMD` line names arguments rather than a program.
+        """
+        (tmp_path / "Dockerfile").write_text(
+            'ENTRYPOINT ["uvicorn"]\nCMD ["main:app", "--host", "0.0.0.0"]\n'
+        )
+        assert [program for _, program in _start_commands(tmp_path)] == ["uvicorn"]
+
+    def test_a_compose_file_reaching_another_file_is_refused(self, tmp_path: Path) -> None:
+        """Every key, one per file, so a miss names the key that was missed."""
+        written = {
+            "compose.env.yml": "    env_file: ./optimise.env",
+            "compose.extends.yml": "    extends:\n      file: ./base.yml",
+            "compose.include.yml": "include:\n  - path: ./base.yml",
+        }
+        for name, body in written.items():
+            (tmp_path / name).write_text(body + "\n")
+        seen = {
+            site.split(":", 1)[0]
+            for site in _sites(
+                tmp_path, lambda line: line.lower().startswith(_KEYS_REACHING_ANOTHER_FILE)
+            )
+        }
+        assert seen == set(written), f"unseen: {sorted(set(written) - seen)}"
+
+    def test_a_build_block_is_refused_unless_every_entry_is_understood(
+        self, tmp_path: Path
+    ) -> None:
+        """One row per escape four rounds of this rule were opened by."""
+        readable = {"Dockerfile"}
+        accepted = [("context", "."), ("context", "./"), ("dockerfile", "Dockerfile"),
+                    ("dockerfile", "./Dockerfile"), ("dockerfile", '"Dockerfile"')]
+        refused = [("context", "./deploy"), ("dockerfile", "deploy/Dockerfile.prod"),
+                   ("additional_contexts", "base=../base"), ("ssh", "default")]
+        # The two shapes that carry no key for a rule to read. `_build_block`
+        # turns both into entries; this asserts it does.
+        shapes = {
+            "shorthand": "services:\n  a:\n    build: ./deploy\n",
+            "flow mapping": (
+                "services:\n  a:\n    build: {context: ., dockerfile: deploy/D.prod}\n"
+            ),
+        }
+        for label, text in shapes.items():
+            entries = _build_block(text)
+            assert entries, f"{label}: no build entry seen at all"
+            assert any(
+                not _build_entry_is_readable(k, v, readable) for _, k, v in entries
+            ), f"{label}: every entry read as safe, {entries}"
+        wrong = [f"{k}: {v}" for k, v in accepted
+                 if not _build_entry_is_readable(k, v.strip('"'), readable)]
+        assert not wrong, f"refused a build entry it reads perfectly well: {wrong}"
+        wrong = [f"{k}: {v}" for k, v in refused
+                 if _build_entry_is_readable(k, v, readable)]
+        assert not wrong, f"accepted a build entry reaching outside what it reads: {wrong}"
+
+    def test_the_build_block_is_read_by_indentation(self, tmp_path: Path) -> None:
+        """The block ends where the indentation does, so a sibling key is not in it."""
+        (tmp_path / "compose.yaml").write_text(
+            "services:\n"
+            "  api:\n"
+            "    build:\n"
+            "      context: .\n"
+            "      dockerfile: Dockerfile  # the only one\n"
+            "    ports:\n"
+            '      - "8000:8000"\n'
+        )
+        entries = _build_block((tmp_path / "compose.yaml").read_text())
+        assert [(key, value) for _, key, value in entries] == [
+            ("context", "."),
+            ("dockerfile", "Dockerfile"),
+        ], entries
+
+    def test_a_start_command_naming_a_script_is_refused(self, tmp_path: Path) -> None:
+        (tmp_path / "Dockerfile").write_text('CMD ["/app/start.sh"]\n')
+        commands = _start_commands(tmp_path)
+        assert commands, "the scanner did not see the start command at all"
+        assert all(
+            program not in _PROGRAMS_THIS_RULE_CAN_READ for _, program in commands
+        ), f"a shell script was accepted as readable: {commands}"
+
+    def test_the_suppressed_asserts_are_the_eight_this_rule_was_written_for(self) -> None:
+        """The arm the others do not give you, and it counts rather than names.
+
+        Nothing above looks at an `assert`. Without this, `assert user.is_admin
+        # noqa: S101  narrowing, not validation` ships green and the comment is
+        the only thing saying it is a narrowing.
+
+        **A set of file names was the first draft and it was the covered case.**
+        A ninth suppression in a fifth module failed it; a ninth inside
+        `routers/books.py`, which already carries four and is exactly where the
+        next lookup handler would add one, passed. Counts per file rather than
+        names, so a suppression added anywhere has to be read first. The eight
+        this comment and `docs/decisions.md` both cite is asserted against the
+        tree below rather than against the table above it.
+        """
+        expected = {
+            "errors.py": 2,
+            "routers/books.py": 4,
+            "routers/users.py": 1,
+            "targets.py": 1,
+        }
+        counted: dict[str, int] = {}
+        for path in _every_module_but_the_tests():
+            hits = sum(1 for line in path.read_text().splitlines() if "# noqa: S101" in line)
+            if hits:
+                counted[str(path.relative_to(BACKEND))] = hits
+        assert counted == expected, (
+            f"the S101 suppressions moved to {counted}, from {expected}. Each one claims "
+            "its assert narrows a type the branch above already established, and that "
+            "claim is read by a person rather than checked by anything."
+        )
+        # Read off the tree, never off `expected`: comparing the literal to a
+        # literal can only fail on the same edit that changes the number, which
+        # is a stated bound wearing a measurement's clothes.
+        assert sum(counted.values()) == 8, (
+            f"the prose in this docstring and in `docs/decisions.md` says eight, and the "
+            f"tree carries {sum(counted.values())}."
         )
 
 def _names_returned_at(source: str) -> list[int]:

@@ -41,6 +41,7 @@ import type {
   TagOut,
 } from "../../api/generated/model";
 import { QUERY_FLOOR } from "../../lib/bookBounds";
+import { writeOneAtATime, type BulkProgress } from "../../lib/bulkWrite";
 import { referenceFor } from "../../lib/digitalReference";
 import { useTranslation } from "../../i18n";
 import type { FileFailure } from "../../lib/fileReaders";
@@ -1017,6 +1018,51 @@ function canBeAskedAgain(entry: ScannedEntry): boolean {
   );
 }
 
+/**
+ * What the queue adds up to, counted once and read everywhere.
+ *
+ * **One value rather than five members, because they are one reading of one
+ * array.** Every figure here is derived from `entries` by a predicate this
+ * module owns, and the screen's rule is that it may render them and may not
+ * recompute them: a predicate written twice is a button offering to look up
+ * twelve beside a run that looks up nine. Passed as a group so that a sixth
+ * figure reaches the component without a sixth prop, and so the docstring
+ * saying what each one counts has one home.
+ *
+ * **Two of the five are minutes and not counts**, which is why this is not
+ * named for counting. They are derived from the counts beside them by one
+ * arithmetic, so carrying them apart is how a figure on a button comes to quote
+ * a pace the run it starts does not keep.
+ */
+export interface QueueFigures {
+  /** Files whose name is all that is left to ask the catalogue about. */
+  readonly waiting: number;
+  /**
+   * Files with records offered and neither taken nor refused.
+   *
+   * **Derived from the predicate `addAll` excludes, not from a second one
+   * spelled the same.** The screen says how many rows the batch is going to
+   * leave where they are, so a predicate written twice is a screen that can
+   * report something the page did not do. Same reason `needsALookup` is one
+   * function rather than a filter at each site.
+   */
+  readonly deciding: number;
+  /**
+   * Files kept under their names in bulk, which the catalogues may be asked
+   * about again.
+   *
+   * **Not part of `waiting`, and that is the point of counting it separately.**
+   * A member who clears a queue of two hundred and fifty and then picks ten more
+   * files presses a button that says ten. These come back through a press of
+   * their own, which names them.
+   */
+  readonly keptForNow: number;
+  /** Roughly how long looking all of them up would take, in minutes. */
+  readonly paceMinutes: number;
+  /** The same figure for a second pass over the names kept in bulk. */
+  readonly keptPaceMinutes: number;
+}
+
 export interface UseRapidIntakeResult {
   isActive: boolean;
   start: () => void;
@@ -1056,32 +1102,8 @@ export interface UseRapidIntakeResult {
    * the same folder twice does not count it twice.
    */
   skipped: number;
-  /** Files whose name is all that is left to ask the catalogue about. */
-  waiting: number;
-  /**
-   * Files with records offered and neither taken nor refused.
-   *
-   * **Derived from the predicate `addAll` excludes, not from a second one
-   * spelled the same.** The screen says how many rows the batch is going to
-   * leave where they are, so a predicate written twice is a screen that can
-   * report something the page did not do. Same reason `needsALookup` is one
-   * function rather than a filter at each site.
-   */
-  deciding: number;
-  /**
-   * Files kept under their names in bulk, which the catalogues may be asked
-   * about again.
-   *
-   * **Not part of `waiting`, and that is the point of counting it separately.**
-   * A member who clears a queue of two hundred and fifty and then picks ten more
-   * files presses a button that says ten. These come back through a press of
-   * their own, which names them.
-   */
-  keptForNow: number;
-  /** Roughly how long looking all of them up would take, in minutes. */
-  paceMinutes: number;
-  /** The same figure for a second pass over the names kept in bulk. */
-  keptPaceMinutes: number;
+  /** What the queue adds up to, for every control that quotes a figure. */
+  figures: QueueFigures;
   /**
    * Ask the catalogue about every file that has only its name.
    *
@@ -1141,6 +1163,27 @@ export interface UseRapidIntakeResult {
   addAll: () => void;
   isAdding: boolean;
   /**
+   * Stop the batch after the book in flight.
+   *
+   * **The same stop the camera and the paced lookup each already had**, and the
+   * one this page shipped without: a three hundred row queue is up to six
+   * hundred sequential requests, because a row carrying a location is a book
+   * and then a sighting. Read between books rather than inside one, so the book
+   * being written is finished and recorded rather than abandoned half made.
+   *
+   * Every row the run did not reach stays in the queue exactly as it was, which
+   * is what a member pressing this is asking for.
+   */
+  stopAdding: () => void;
+  /**
+   * How far the batch has got, or `null` when none is running.
+   *
+   * A stop with no figure beside it is a button a member presses blind. The
+   * import cards on the settings page have said `{done} of {total}` since they
+   * had a stop, and this is the same value from the same loop.
+   */
+  addProgress: BulkProgress | null;
+  /**
    * What the batch did, once it has run.
    *
    * `unreferenced` is books that were added and whose location was not
@@ -1155,8 +1198,17 @@ export interface UseRapidIntakeResult {
    * nothing, and an audiobook has nothing a second pick would change.
    * `file.explain` scopes what it promises to a book that is one file for that
    * reason.
+   *
+   * `stopped` says the run ended because the member ended it, so a count far
+   * short of the queue is not read as damage. The rows it never reached are
+   * still in the queue, which is the other half of the same sentence.
    */
-  result: { added: number; failed: number; unreferenced: number } | null;
+  result: {
+    added: number;
+    failed: number;
+    unreferenced: number;
+    stopped: boolean;
+  } | null;
 }
 
 /**
@@ -1186,6 +1238,11 @@ export function useRapidIntake(): UseRapidIntakeResult {
   // A ref rather than state: the paced run reads it between calls, and a state
   // read inside a running loop is the value it started with.
   const stopRequested = useRef(false);
+  // The batch's own stop, for the same reason and not the same flag: the paced
+  // lookup and the write are two runs with two buttons, and one flag would let
+  // stopping either halt the other.
+  const stopAddingRequested = useRef(false);
+  const [addProgress, setAddProgress] = useState<BulkProgress | null>(null);
   // How to end the wait between two calls early. Null whenever the run is not
   // waiting, which is every moment a stop has nothing to interrupt.
   const endTheWait = useRef<(() => void) | null>(null);
@@ -1194,6 +1251,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
     added: number;
     failed: number;
     unreferenced: number;
+    stopped: boolean;
   } | null>(null);
 
   const queryClient = useQueryClient();
@@ -1760,6 +1818,15 @@ export function useRapidIntake(): UseRapidIntakeResult {
     }
   }
 
+  /**
+   * Write the whole queue, one book at a time, until a member stops it.
+   *
+   * **The loop is `lib/bulkWrite.ts`**, which the two import cards on the
+   * settings page walk too: the concurrency rule, the stop between books, the
+   * progress report and the short count that is not damage are one set of rules
+   * with one home. What stays here is what a scanned row is, which is a book
+   * and possibly a sighting.
+   */
   async function addAll() {
     // **A row still being decided is not offered**, for the reason a row with no
     // draft is not: it is exactly what somebody still has to decide about, and
@@ -1770,19 +1837,26 @@ export function useRapidIntake(): UseRapidIntakeResult {
     );
     if (ready.length === 0) return;
 
+    stopAddingRequested.current = false;
     setIsAdding(true);
+    // **The previous run's verdict goes when this one starts.** A stop leaves
+    // rows in the queue precisely so they can be added, so a second press is
+    // the ordinary path now, and the banner saying what the last run did not
+    // reach would stand over those rows while they are being written.
+    setResult(null);
     const shelf = normaliseLocation(location);
-    let added = 0;
     let unreferenced = 0;
-    const failures: ScannedEntry[] = [];
 
-    for (const entry of ready) {
+    /**
+     * One row: the book, and then where its file is.
+     *
+     * **One item of the shared loop's work and up to three requests**, which is
+     * why the loop takes an item rather than a body: only the outermost throw
+     * makes this row a failure.
+     */
+    async function addOne(entry: ScannedEntry) {
       const draft = entry.draft!;
       try {
-        // Sequential rather than Promise.all: a 300-book batch would otherwise
-        // open 300 concurrent requests against one SQLite writer, and a
-        // duplicate ISBN 409 needs to be attributed to a specific book.
-        //
         // The same request builder as the one-book flow, so a field added
         // there cannot quietly go missing from a rapid run. Everything a rapid
         // run does not offer takes its blank value: no cover, no tags, not
@@ -1795,20 +1869,20 @@ export function useRapidIntake(): UseRapidIntakeResult {
             draft,
           }),
         });
-        added += 1;
         if (entry.reference) {
-          // **Its own `try`, outside the book's, and that placement is the
-          // whole of it.** The book exists by the time this runs, so a throw
-          // caught by the arm below would report a created book as failed and
-          // a member would add it again into a duplicate. Same shape as the
-          // cover and the tags in `useScanFlow.confirm`, for the same reason.
+          // **Its own `try`, inside this function and outside the book's, and
+          // that placement is the whole of it.** The book exists by the time
+          // this runs, so a throw caught by the arm below would report a
+          // created book as failed and a member would add it again into a
+          // duplicate. Same shape as the cover and the tags in
+          // `useScanFlow.confirm`, for the same reason.
           //
           // **A second request per book, sequential with the first.** There is
           // no batched route: the contract is one sighting per location, and a
           // sighting is idempotent on the pair, so a folder imported twice
           // refreshes rows rather than doubling them. A three hundred book
           // pick is six hundred requests against one SQLite writer, which is
-          // the reason this loop was already sequential.
+          // the reason the loop this runs in is sequential.
           try {
             await reportReference.mutateAsync({
               bookId: book.id,
@@ -1842,37 +1916,61 @@ export function useRapidIntake(): UseRapidIntakeResult {
             .mutateAsync({ bookId: holder, data: entry.reference })
             .catch(() => undefined);
         }
-        // Kept, with its reason, rather than counted. "6 could not be added"
-        // after scanning a shelf of thirty is unrecoverable: nothing says
-        // which six, and the queue that knew has just been cleared.
-        failures.push({
-          ...entry,
-          state: "failed",
-          reason: reasonForError(error),
-        });
+        // Rethrown rather than reported here: the row is the loop's to record,
+        // and swallowing it would count a book that is not in the catalogue.
+        throw error;
       }
     }
 
-    if (added > 0) rememberLastLocation(shelf);
+    const outcome = await writeOneAtATime(ready, {
+      post: addOne,
+      onProgress: setAddProgress,
+      stopped: () => stopAddingRequested.current,
+    });
+
+    // **On any book at all, including a run the member stopped.** The shelf is
+    // where those books physically went, so the next run should offer it; a
+    // member who stopped because the shelf was wrong changes one field, and one
+    // who stopped for any other reason would otherwise type it again.
+    if (outcome.added > 0) rememberLastLocation(shelf);
     // Once for the batch rather than once per book, and the catalogue rather
     // than everything: a rapid run leaves the scanner open, so a keyless
     // invalidate re-spent the search quota in the middle of a shelf.
     invalidate.catalogue();
+    // Kept, with their reason, rather than counted. "6 could not be added"
+    // after scanning a shelf of thirty is unrecoverable: nothing says which
+    // six, and the queue that knew has just been cleared.
+    const failed = new Map(
+      outcome.failures.map(({ item, thrown }) => [
+        item.key,
+        { ...item, state: "failed" as const, reason: reasonForError(thrown) },
+      ]),
+    );
     // **Only the ones that landed leave the queue, and that means the ones that
     // were never offered stay too.** This used to keep the failures alone,
     // which silently dropped every entry with no draft: a barcode whose lookup
     // was still in flight when the button was pressed vanished between the
     // shelf and the catalogue, and a file that could not be read would vanish
     // the same way. Both are exactly what somebody still has to decide about.
-    const offered = new Set(ready.map((entry) => entry.key));
-    const failed = new Map(failures.map((entry) => [entry.key, entry]));
+    //
+    // **Walked rather than offered, and that is what a stop costs.** The two
+    // sets are equal for a run that finished, so the distinction was invisible
+    // until there was a stop; pruning by what was offered clears the rows a
+    // member pressed stop in order to keep.
+    const walked = new Set(outcome.attempted.map((entry) => entry.key));
     setEntries((current) =>
       current
-        .filter((entry) => !offered.has(entry.key) || failed.has(entry.key))
+        .filter((entry) => !walked.has(entry.key) || failed.has(entry.key))
         .map((entry) => failed.get(entry.key) ?? entry),
     );
     setIsAdding(false);
-    setResult({ added, failed: failures.length, unreferenced });
+    setAddProgress(null);
+    setResult({
+      added: outcome.added,
+      failed: outcome.failures.length,
+      unreferenced,
+      stopped: outcome.stopped,
+    });
   }
 
   // One filter, read twice. Two would let the count on the button and the
@@ -1893,6 +1991,17 @@ export function useRapidIntake(): UseRapidIntakeResult {
     return Math.max(1, Math.ceil((count * FALLBACK_INTERVAL_MS) / 60_000));
   }
 
+  // Assembled once, here, rather than as five members of the return: the pace
+  // figures are derived from the counts beside them, so a screen cannot be
+  // handed one without the other.
+  const figures: QueueFigures = {
+    waiting,
+    deciding,
+    keptForNow,
+    paceMinutes: paceFor(waiting),
+    keptPaceMinutes: paceFor(keptForNow),
+  };
+
   return {
     isActive,
     start: () => {
@@ -1911,13 +2020,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
     // it; the queue already says which entries are still being read.
     isReading: entries.some((entry) => entry.state === "reading"),
     skipped,
-    waiting,
-    deciding,
-    keptForNow,
-    // Derived from the pace rather than carried beside it, so the figure on the
-    // button cannot say one thing while the run does another.
-    paceMinutes: paceFor(waiting),
-    keptPaceMinutes: paceFor(keptForNow),
+    figures,
     lookUpTheNames: () => void runTheLookups(needsALookup),
     lookUpTheKeptNames: () => void runTheLookups(canBeAskedAgain),
     stopLookingUp: () => {
@@ -1982,6 +2085,12 @@ export function useRapidIntake(): UseRapidIntakeResult {
     },
     addAll: () => void addAll(),
     isAdding,
+    stopAdding: () => {
+      // No wait to interrupt, unlike the paced lookup: the write has no floor
+      // between books, so the next check is one request away.
+      stopAddingRequested.current = true;
+    },
+    addProgress,
     result,
   };
 }

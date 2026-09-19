@@ -2,6 +2,81 @@
 
 ## Unreleased
 
+- **The working notes every agent session loads are 68% smaller, and what left them is
+  reachable by name.** `CLAUDE.md` was 7,420 words on every turn, of which one section was
+  48% and fired on a minority of them. It is 2,294 now, and six skills under `.claude/skills/`
+  carry what fires on some turns: the three seat workflow, the guard and mutation rules, how
+  to run a suite, the backend and frontend traps, and what the mirror publishes. Each costs
+  only its description while it is not in use. Five rules keep their whole text in the always
+  loaded file because a pointer that fires one turn late has already lost: a suite never runs
+  on the control plane machine, a published file never names a stripped path, the owner is
+  paged whenever work stops, a live security tooling change is confirmed first, and work is
+  named to the owner rather than numbered. The file now carries the rule that keeps it this size, and every
+  skill is self contained so this tree can be lifted out of the checkout it grew in.
+- **Three more ruff families, and the one suppression that is now a test.** `S` (flake8-bandit),
+  `ASYNC` (flake8-async) and `RUF` (ruff's own rules) join the seven already selected, so the
+  application's own Python gets a static security check it did not have. **`ruff` runs from
+  `backend/`, so this covers the application and not the twelve Python files in the pipeline
+  directory**, which are plumbing and are stripped from the mirror. 24 findings in application
+  code, none of them a defect: each is fixed or suppressed at its site with the reason. Two
+  suppressions are worth naming. `S314` is refused per XML parse site rather than per family,
+  because all three sites already refuse a doctype and cap the bytes off the wire. That argument
+  only holds while the rule sees every spelling and it does not, so
+  `TestOnlyThreeModulesTurnOutsideXmlIntoATree` carries the half ruff cannot: which modules may
+  parse at all, over every entry point and every way a file can bind the module. And the eight
+  `assert` statements that exist to narrow a type for the checker are only narrowing while
+  CPython keeps them, so `TestNothingStripsAnAssertOutOfTheImage` reads every container surface
+  and fails on `python -O` or `PYTHONOPTIMIZE`, refusing any start command or build block it
+  cannot read rather than listing the ways one could hide. The `S` family is off in the test
+  tree, stated as the family rather than as the twelve codes it fires, since a test tree is
+  nothing but assertions and fixture credentials. No behaviour changed.
+- **A linter, as a ratchet.** `bun run lint` is oxlint, called by the same script name
+  locally and in CI. Three categories are errors and every rule in them is on unless
+  `frontend/.oxlintrc.json` names it, so a rule a future version adds arrives enforced. The
+  suppression list separates a permanent refusal, carrying the reason the rule is wrong about
+  this codebase, from a backlog entry, carrying its count. A test re-derives that list on
+  every run and fails when a suppressed rule no longer has a finding, so an entry cannot
+  outlive its reason. No existing code changed.
+- **A rapid scan can be stopped, and the loop that writes a shelf has one home.** Three
+  screens wrote a shelf in bulk, two through `writeBooks` and the third in its own words, and
+  the third was the one with no way out: a three hundred row queue is up to six hundred
+  sequential requests, against a page that already stops the camera and stops the paced
+  lookup. The loop is `lib/bulkWrite.ts` now, taking the write as a callback, so the
+  concurrency rule, the stop between books, the progress report and the short count that is
+  not damage are one set of rules rather than two sets of words pointing at each other across
+  a page folder wall. The rapid queue gains the stop, a `{done} of {total}` beside it, and a
+  banner saying a stopped run was stopped and that everything it did not reach is still in the
+  queue. A stopped run prunes the rows it walked rather than the rows it offered, which is the
+  difference a stop makes and nothing else did. The queue's five figures reach the screen as
+  one value.
+- **Which columns of `books` mean what is asked for, not written out four times.** The merge's
+  absorb, the copy route, Google enrichment and the MARC gap filler each carried their own
+  tuple of column names, related to `Book` by nothing, so a column added to the schema joined
+  none of them and no diagnostic said so: completeness held by accident of nullability.
+  `backend/book_columns.py` partitions all thirty columns into six cells, refuses to import
+  when a column is classified nowhere or twice, and the four writers take their sets from it.
+  Five of the six cells are checked against a source that is not the cell as well as counted,
+  so a column filed one cell over goes red too: the copy facts against `CopyCreate`, the two
+  cells an enrichment writes against `BookMatch` in both directions, the row keeping cell
+  against the compiled visibility predicate and the foreign key graph, and the cover against
+  the one column the copy route cannot carry in its constructor. The border nothing covers,
+  `COPY_STANDING` against `ROW_KEEPING`, is named in the tests. No behaviour change: all four
+  sets are the same names they were.
+- **A pinned setting read through a module that re exported the reader is reported.** The
+  guard classified every reader it could reach through the reading module's own bindings and
+  walked past `helpers.get_bool(db, key)`, where `helpers` is another module that imported the
+  reader. The subject of an attribute call is now resolved to a module of the corpus and asked
+  what that module hands out at module scope, which is what separates it from
+  `sources.in_force`, a different function of the same name on a subject that hands out
+  nothing. A name the reading module also binds itself is not that module and is left alone.
+  No application behaviour changes and the clean tree is unchanged at 56 examined calls with
+  no unreadable entries.
+- **A swapped pair breaks a recovery phrase's checksum for most phrases, not for all.** The
+  test asserting it drew a phrase from `generate_phrase()`, so it reddened the pipeline at
+  random, 1 run in 220 measured over 20,000 phrases, with a failure reading as a regression in
+  recovery phrase validation. It uses a fixed phrase now, and a second arm holds the edge that
+  a fixture which stopped being valid would leave the swap refused for the wrong reason.
+
 - **A queued scan carries the name of what happened, not the sentence.** The scan queue
   stored rendered, translated prose in twelve places, so nothing made the next reason have a
   sentence at all and a row was fixed in the language in force when the file failed.

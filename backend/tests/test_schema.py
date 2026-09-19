@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 
 import credentials
 import filing
-import models  # noqa: F401  (registers the tables on Base.metadata)
+import models  # registers the tables on Base.metadata
 import schema
 import targets
 from database import Base, engine
@@ -2188,7 +2188,8 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
         with engine.connect() as connection, pytest.raises(IntegrityError):
             connection.execute(
                 text(
-                    f"UPDATE catalogue_targets SET {column} = :value "  # noqa: S608
+                    # The interpolation is a column name chosen by this loop, never a request value.
+                    f"UPDATE catalogue_targets SET {column} = :value "
                     "WHERE source = 'oenb'"
                 ),
                 {"value": value},
@@ -3591,7 +3592,8 @@ class TestTheGlobRulesThatLearnedAboutNul:
         build from it the day a row is read.
         """
         smuggled = (
-            f"UPDATE catalogue_targets SET {column} = {value} "  # noqa: S608
+            # The interpolation is a column name chosen by this loop, never a request value.
+            f"UPDATE catalogue_targets SET {column} = {value} "
             "WHERE source = 'oenb'"
         )
 
@@ -3600,7 +3602,8 @@ class TestTheGlobRulesThatLearnedAboutNul:
             connection.execute(text(smuggled))
             connection.commit()
             stored = connection.execute(
-                text(f"SELECT length(CAST({column} AS BLOB)) FROM catalogue_targets "  # noqa: S608
+                # The interpolation is a column name chosen by this loop, never a request value.
+                text(f"SELECT length(CAST({column} AS BLOB)) FROM catalogue_targets "
                      "WHERE source = 'oenb'")
             ).scalar()
         assert stored == bytes_stored
@@ -3780,7 +3783,8 @@ class TestTheGlobRulesThatLearnedAboutNul:
         probe = create_engine("sqlite://")
         with probe.connect() as connection:
             connection.execute(
-                text(f"CREATE TABLE probe (base_url TEXT CHECK ({without_the_arm}))")  # noqa: S608
+                # The interpolation is a constraint text read off the live schema, never a request value.
+                text(f"CREATE TABLE probe (base_url TEXT CHECK ({without_the_arm}))")
             )
             connection.execute(
                 text("INSERT INTO probe VALUES (CAST(:raw AS TEXT))"),

@@ -590,7 +590,7 @@ class Association:
         def close_it(done: Future[Session]) -> None:
             try:
                 session = done.result()
-            except BaseException:
+            except BaseException:  # noqa: S110  an open that failed left nothing to close
                 pass
             else:
                 try:

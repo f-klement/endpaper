@@ -55,6 +55,7 @@ from typing import Any, Final
 import annotated_types
 from sqlalchemy.orm import Session
 
+import book_columns
 import csv_import
 import marc
 from catalogue import Record
@@ -867,17 +868,43 @@ _MARC_RECORD_FIELDS: Final = (
     "series_index",
 )
 
+
+def _gap_fields(written: Sequence[str]) -> tuple[str, ...]:
+    """Of the columns the create path writes, the ones a gap filler may write.
+
+    A function rather than the filter inline, so a test can drive it against a
+    tuple it builds: with the names as they stand this filter and `!= "title"`
+    return the same nine, and the difference between them only appears on an
+    argument this module does not currently produce.
+
+    **It drops silently, which is the trap.** A name added above that is not a
+    work fact, a shelving location off `852 $c` being the plausible one, is
+    written when a record creates a Book and skipped when one matches an
+    existing Book, with both writers still walking one list.
+    `tests/test_marc.py::TestEveryColumnTheImporterWritesIsBounded` refuses that
+    tuple where it holds a name `book_columns.WORK_FACTS` does not.
+    """
+    return tuple(name for name in written if name in book_columns.WORK_DETAIL)
+
+
 #: The columns a matched Book takes from an incoming record.
 #:
 #: **Fill the gaps, never overwrite.** An import may add what a row is missing
 #: and may not replace what somebody here already wrote, because the person who
 #: typed a value knows more about this copy than a stranger's record does.
 #:
+#: **What the create path writes, narrowed to what any gap filler may write**,
+#: rather than to everything but the title. The two the narrowing drops are
+#: `book_columns.WORK_IDENTITY`: `title`, which a matched Book has by definition
+#: since it is half of what matched it, and `isbn`, which is unique and whose
+#: failure `tests/routers/test_imports_marc.py::TestAMatchedBookNeverGainsAnIsbn`
+#: names. Naming `title` alone refuses one of the two and passes the other the
+#: day it is added above; asking which columns a gap filler may write refuses
+#: both, and refuses the next one without an arm.
+#:
 #: The column by column reasoning, and what each one costs if it is wrong, is in
 #: `docs/decisions.md`.
-_MARC_GAP_FIELDS: Final = tuple(
-    name for name in _MARC_RECORD_FIELDS if name != "title"
-)
+_MARC_GAP_FIELDS: Final = _gap_fields(_MARC_RECORD_FIELDS)
 
 
 class MarcImport:
@@ -993,7 +1020,8 @@ class MarcImport:
         **`ownership=UNKNOWN`, exactly as the CSV path does it**, and the reason
         is the same one said differently: another institution's record says that
         institution holds the book, not that this one does. Confirmed in bulk
-        afterwards, which is what `POST /api/books/bulk/ownership` is for.
+        afterwards, which is what `POST /api/books/bulk` with `SET_OWNERSHIP`
+        is for.
 
         **No cover is fetched**, for `Import._create`'s reason: a fetch per
         record over a whole catalogue is thousands of round trips holding one

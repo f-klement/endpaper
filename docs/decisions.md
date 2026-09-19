@@ -1738,8 +1738,8 @@ whose card reads 2. The alternative, scoping the count to the current filter, wo
 same book report different numbers on different screens and would require `BookOut` to know
 what was being asked, which it deliberately does not.
 
-A **merge** does absorb it, unlike `copy_group`. `collection_id` is in `_MERGEABLE_FIELDS`
-for the same reason `location` is: merging two entries for one book, one of them filed,
+A **merge** does absorb it, unlike `copy_group`. `collection_id` is in
+`book_columns.COPY_DETAIL`, so a merge fills it, for the same reason `location` is: merging two entries for one book, one of them filed,
 should leave the survivor on that shelf. It fills a gap and never overrides, so a keeper
 already in a collection stays where its owner put it. That is safe in a way absorbing
 `copy_group` is not, because a collection makes no claim about other rows.
@@ -1819,8 +1819,9 @@ copy is a thing a person says they own, one press at a time.
 
 Three places read it. `uq_books_isbn_single_copy` skips grouped rows. `/duplicates` collapses
 each group to one row before matching, so a group can never be reported against itself.
-`_MERGEABLE_FIELDS` deliberately omits it: absorbing a loser's group would make the survivor
-a copy of the loser's siblings, which the survivor's owner never agreed to.
+`book_columns.COPY_STANDING` holds it rather than a fillable cell, so a merge cannot absorb
+it: absorbing a loser's group would make the survivor a copy of the loser's siblings, which
+the survivor's owner never agreed to.
 
 ### The copy group is a shared label, not a self-referencing foreign key
 
@@ -9623,9 +9624,12 @@ who had it in their hands, and an uploaded file did not.
 Wider than the CSV importer's four, because a MARC record carries more and
 because the fields it adds are the ones a cataloguer would otherwise retype.
 Derived from `_MARC_RECORD_FIELDS` rather than written out again: the gap
-filler takes everything the create path writes **except the title**, which a
-matched Book already has by definition, since the title is half of what
-matched it.
+filler takes everything the create path writes **that a gap filler may write at
+all**, which is `book_columns.WORK_DETAIL`. That excludes `title`, which a
+matched Book already has by definition since the title is half of what matched
+it, and `isbn`, which the paragraph below is about. The rule was written as
+"except the title", which returns the same nine names today and refuses only
+one of the two.
 
 **`isbn` is in neither tuple, and that is what stops a 500 rather than an
 economy.** It is written once, on the create path, and never filled in on a
@@ -14593,3 +14597,577 @@ Following a local binding is a dataflow pass, and a rule reporting clean over ha
 class it names is worse than no rule. Both seats agree on the refusal.
 
 Rung: the instance is tested for both halves, the class is stated.
+
+## The column partition covers all thirty columns, not the twenty five that are nullable
+
+Nullability is what completeness ran on before, by accident: `books` has 25 nullable columns,
+21 were mergeable, and the 4 out were deliberate with a comment on two of them. Nothing said
+so, so a 26th nullable column would have been silently unmergeable and uncopyable with no
+diagnostic.
+
+Partitioning only the nullable 25 would have kept that accident and added a rule to it: the
+five that are not nullable would sit outside the partition by a property of the schema rather
+than by a decision, and a column that later became nullable would join it without anybody
+classifying it. `catalogue.py:334` states the same argument about its own upload sets: a set
+that is exhaustive by assertion cannot acquire a field by default. So `id`, `added_at`,
+`deleted_at`, `is_private` and `ownership` are classified like everything else, into cells
+named for what they refuse.
+
+**There is no default side and deliberately none.** The arrangement being replaced failed
+closed by accident: a column in nobody's tuple was written by nobody. A derived partition
+defaulting a new column to a side would fail open instead. A column classified nowhere raises
+at import.
+
+**What the partition does not see, measured rather than claimed**, because a presence check
+reads like a correctness check. Five of the six cells carry a check derived from a source that
+is not the cell: `COPY_DETAIL` against `CopyCreate`, `WORK_DETAIL` and `WORK_COVER` against
+`BookMatch` in both directions, `WORK_COVER` again against what `routers/books.add_copy` must
+write after the insert, and `ROW_KEEPING` against the compiled visibility predicate and the
+foreign key graph. One border has nothing on it, `COPY_STANDING` against `ROW_KEEPING`, and
+`WORK_IDENTITY` is bounded by neither neighbour.
+
+Every column moved into every cell it is not in, 150 moves, and **the instrument matters more
+than the number**. Against `backend/tests/test_book_columns.py` alone, 21 stay green. Adding
+one arm from another file, `test_google_books.py::TestTheSignatureIsTheBound`, takes it to 10:
+a guard rather than a behaviour test, and it sees every column leaving `WORK_DETAIL` and every
+one arriving except `cover_url`, which `merge_into` reads off the match below its loop. Adding
+`tests/routers/test_books_copies.py` and the rest of `test_google_books.py` takes it to 5.
+
+**Against the whole backend suite**, exactly one of those five is green and has a consequence:
+`added_at` into `WORK_IDENTITY` puts it in `WORK_FACTS`, so a new copy carries the parent's
+added at date, and the suite reports the same total with and without the move. The other four
+change none of the three doors, and the only `book_columns` names any module outside the tests
+reads are `WORK_DETAIL`, `WORK_FACTS` and `FILLABLE_FROM_ANOTHER_ROW`, over a corpus of 137
+files, so nothing can observe them. That is a derivation rather than a sample, and its premise
+is held by an arm rather than by a date. No move reaching `is_private`, `added_by_user_id` or
+`deleted_at` is among them; all fifteen are caught by one arm.
+
+**A three file figure is not a "caught by nothing" figure**, and the two are stated separately
+for that reason. Recompute rather than copying either.
+
+## The pinned key guard resolves an attribute call's subject across modules
+
+`helpers.get_bool(db, key)` after `helpers` imported the reader was a route into a reader that
+`TestAnOverriddenSettingIsReadWhereItIsPinned` could not see. Nothing in the reading module's
+syntax says whether that call reads a setting, so telling it from `sources.in_force` at
+`settings_store.py:439`, a different function of the same name, is a second module read rather
+than a further clause.
+
+**What was refused, before this work rather than in it**: falling through to `_names_the_door`.
+Re measured against the rule as it now stands, that leaves the class red on a clean tree with
+14 unreadable entries at 70 examined. It was 15 at 71 before the resolution existed; the entry
+that went is `sources.in_force`, which the subject branch now answers first.
+
+**What the resolution asks is what the subject module binds, never what it is called.**
+`sources` defines an `in_force` of its own and hands out nothing; `helpers` bound the name from
+`settings_store` and hands out a reader. The binding rules are the ones the reading module's
+own calls already use, so a spelling covered on one side is covered on the other with no
+second list.
+
+**Two symmetrical refusals, and the second was missing for a round.** The subject side asks
+what a module hands out, so a binding inside a function is not counted: it is not an attribute
+on the module and a caller cannot reach it. The caller side has to ask the same of itself,
+because `subjects` carries no scope analysis: a parameter or local named after an imported
+module resolved as that module, and the call on it was reported as a read of a pinned key.
+That is a red on a clean tree against a call that cannot reach the module, which is how a
+guard gets argued away rather than fixed.
+
+**Module scope is what runs at import, not what is written at that indent.** A `try:` around
+an import and a `with` block both bind an attribute on the module a level below `tree.body`,
+so a subject re exporting inside a `try:` handed out nothing while the identical binding read
+by its own calls was seen. `_at_module_scope` descends through everything except a node that
+opens a scope, and **does not enter an `if TYPE_CHECKING:` body**.
+
+That last clause shipped the other way round first, argued as a trade: over report a name that
+cannot be called, because a false offender gets answered and a leak does not. **The trade was
+wrong because it has two callers and the direction reverses between them.** `_reader_bindings`
+adds bindings, so entering over reports; `_defined_here` only ever suppresses a report, so
+entering widens the set of names that stop a bare call being read as a re export, hiding
+exactly the case the unreadable label exists for. Not entering is right for both: a name bound
+only for a type checker is not handed out and is not defined, because at run time it is not
+there. All five corpus modules that bind below `tree.body` do it in a `TYPE_CHECKING` block,
+so on this tree the descent reaches nothing the body does not.
+
+**Three bounds, each stated at its site and each with an arm**, the third only from this round:
+the corpus and nothing else, stated as an exclusion in `_module_index`; module scope only; and
+one hop, where no corpus module re exports a reader at all, so a two hop resolution and this
+one agree on every module in the tree and the bound is visible only in a plant.
+
+**Still silent, and named in the class docstring rather than discovered**: a two hop re export;
+a computed door on a resolvable subject, where `getattr(helpers, "get_bool")` is examined by
+nothing although the same written on `settings_store` is reported unreadable; and a class
+attribute read as `R.read(db, key)`. The computed door is not closed because widening
+`_names_the_door` to consult `subjects` pulls directly against the rule whose whole job is to
+take names out of that map.
+
+## A guard's prose is written so that one member can be dropped alone
+
+**A sentence about a set is at the stated rung until each member's presence is individually
+droppable.** That is the part worth carrying: what moved `_ITS_OWN_SCOPE`'s comment from
+stated to tested was not that it names a rule rather than a category, it was that the rule made
+each live member separately observable, so one sentence became one arm per member. A rule
+phrased so that no member can be dropped on its own is no better off than the category it
+replaced.
+
+**What a category claim resists is the instrument this loop runs**, not falsification. "Every
+node type that opens a scope" was falsified, by enumerating the language's scope openers and
+finding the four comprehension types absent. But that took a language reference, and the review
+loop's instrument is a mutation of the code beside the sentence, which a claim about a category
+is untouched by. A claim about the code is not.
+
+**Both wrong versions of that one comment were wrong in opposite directions**, which is what a
+reviewer has to watch for: the first understated the tuple, saying `ast.Lambda` "is here for the
+same reason as the other three" when it can never fire; the second overstated it, "every node
+type that opens a scope", when four are absent. Agreeing with either would have been agreeing
+with a different error, so agreement with the sentence was worth nothing in both directions.
+
+**Two trios hit this independently**, which is why it is a rule and not a note about one file:
+the column partition work promoted "green against my three file instrument" to "caught by
+nothing at all", one paragraph below the fix meant to remove exactly that inference, and it
+took a third instrument to see it.
+
+## The bulk write is a loop over items, and the follow up stays in the caller's `post`
+
+`lib/bulkWrite.ts` walks `T` and calls one `post` per item. The alternative was a loop that
+grew an `after` and a `recover` arm, which widens the shared door to six members and names two
+of them after one caller's needs.
+
+**What decided it is the placement of one `try`.** The rapid scan writes a book and then
+reports where its file is, and the second request has its own `try` **inside** the first's arm:
+the book exists by then, so a throw caught by the outer arm reports a created book as failed
+and a member adds it again into a duplicate. A shared loop running the follow up itself, under
+the loop's one `try`, accepts exactly that bug. With the whole item written by the caller's
+`post`, the inner `try` stays where it was and the loop cannot be given it.
+
+It is the shape `lib/bookRequest.ts` took for the request building half of the same problem.
+
+## `stopped` is a stop that ended the run early, and both halves are asserted
+
+`BulkOutcome.stopped` is `hooks.stopped() && attempted.length < items.length`. The flag alone
+reports a full shelf as stopped, because a member pressing stop while the last item is in
+flight gets every item written and every row pruned, under a banner saying what the run did not
+reach is still in the queue, over an empty queue. The count alone would name a member as the
+reason for any other way out of that loop. There is one way out today, so the two are equal
+now, and the next break condition would inherit the wrong word for itself.
+
+## A stopped bulk write prunes what it walked, never what it offered
+
+`BulkOutcome.attempted` exists for one caller: the scan queue clears the rows the run wrote and
+keeps everything else. It pruned by the eligible set, which equals the walked set for a run
+that finishes, so the distinction was invisible until there was a stop. With a stop, an
+unnarrowed prune clears rows the run never attempted, which are exactly the books a member
+pressed stop in order to keep.
+
+## A run stopped after one book still remembers the shelf
+
+`rememberLastLocation(shelf)` fires on `added > 0`, which a stopped run can now reach and could
+not before. Kept, deliberately: the shelf is where those books physically went, so the next run
+should offer it. A member who stopped because the shelf was wrong changes one field; a member
+who stopped for any other reason would otherwise type it again.
+
+## The stop is its own button, and the discard keeps its place
+
+A control reading Stop for one round trip and Discard for every one after it is one node a
+member taps twice. The flip is invisible on a phone held at a shelf, and the second tap clears
+a queue of barcodes scanned one at a time, with no confirmation and no undo, which is exactly
+the set of rows the stop was pressed to keep. The Calibre card overloads its own cancel and
+that is not the same trade: what it drops is a preview a member re-derives by picking the file
+again.
+
+So the stop is the shape the paced lookup's stop already has, a full width button present while
+the run is, and the discard stays where it was, disabled while any run is going.
+
+## The commit that ends a run may not move the discard toward the finger
+
+Two seats measured the displacement at that commit and reached opposite answers, because it is
+the sum of a banner mounting, a progress figure unmounting and rows being pruned, and neither
+sign nor magnitude can be observed in a test environment with no layout engine. The rule that
+removes the measurement is document order, and the queue's last two children hold it:
+
+* everything that commit **removes** is above the button row, so the region above only shrinks
+  and the row can only move away from the one finger position a run permits. The progress
+  figure alone guarantees it: present for every run, gone at the end of every one.
+* everything it **mounts** is below the row and is text. The verdict takes the space the stop
+  had, so what arrives under a finger still tapping is a paragraph.
+
+That second half is asserted twice, because one assertion cannot see what the other sees: a
+selector over the verdict's subtree catches an inert control of a spelling it names, and a
+click over every node in that subtree catches a live handler on anything at all, a
+`<span role="button" onClick>` included. The selector is not to be extended; what the pair
+misses is stated beside it instead, an inert control of a spelling it does not name and a
+handler driven by anything but a click.
+
+Drawing the verdict at the top of the container broke the second half, which is where it was
+drawn before: the banner pushed the row down toward the finger by more than the progress
+figure's removal lifted it, and the discard's `disabled` went false in the same commit.
+
+A confirmation on the discard would close the whole class and is a member facing change nobody
+asked for. It is the owner's call.
+
+**The residue is a neighbour's property and is stated at the site**: on the file pick path
+`rapid.isActive` is false, `showQueue` and `showEntry` are both true, and `ScanPage` opens that
+block with a full bleed `aspect-[4/3]` panel, so the first control under the queue is the
+camera button below that panel. Reordering that block is what would make this false.
+
+## The result banner is never drawn over a run
+
+A stop leaves rows in the queue in order that they can be added, so pressing Add all again is
+the ordinary path rather than an edge case. The hook clears the verdict when a run starts, and
+the component refuses the combination at the render in both directions: no verdict while a run
+is going, and no figure while none is. The second half is not belt: without it the whole rule
+rested on four setters staying in one batch, which is a property no test names and which a
+clear deferred by one microtask would break silently.
+
+## The rapid add's progress is not a live region
+
+The queue already has two: the result banner answers to `role="status"` and the kept for now
+count is an `aria-live` of its own, because a second element answering to the role makes "the
+status" of this queue ambiguous to anything asking by role. The progress figure is neither, and
+for a second reason: it moves once per book, so announcing it reads a three hundred book run
+out loud a line at a time.
+
+## The rule that one module writes a shelf in bulk is two assertions, not one
+
+`tests/lib/bulkWrite.test.ts` holds both, over every `.ts` and `.tsx` under `src/` less
+`src/api/generated/`: no awaited write sits anywhere that runs more than once, where a write is
+a mutation call or a call to a helper in the same file that reaches one; and exactly one module
+walks work handed to it, where work handed in is a parameter or one alias of one.
+
+The first alone is evaded by reaching the write through the callback the second watches; the
+second alone is evaded by writing the loop with the mutation named in it. Run against the tree
+as it stood before this work, the first names the two sites inside `addAll` and the second
+names the loop's old home, which is the whole of the ticket.
+
+**Repetition is a loop statement or a function handed to a member call**, because the collection
+is the receiver: `items.reduce(fn)`, `items.map(fn)` and `items.forEach(fn)` all call `fn` once
+per item, and `useCallback(fn)` has a bare identifier callee and does not. A list of method
+names was the alternative, and a list is what somebody has to think to add to.
+
+**It over-matches in one direction, stated rather than discovered**:
+`promise.then(async () => await x.mutateAsync())` writes once and would be reported. There is
+no such site in the tree, and the remedy is to await the promise, which every other write here
+does.
+
+**One hop of indirection is covered and two are not, on both assertions**, and neither is the
+other's backstop. A loop over a helper defined three lines above it walked past the first draft
+of the write rule, so a name in the same file that reaches a write counts as a write. A name
+destructured or aliased off an injected value walked past the first draft of the singleton
+rule, so an alias of injected work is injected work. What is left uncovered is left uncovered
+by both: a helper calling a helper, and a helper imported from another module. What stands
+there is a reviewer.
+
+## oxlint is adopted as a ratchet, and the suppression list is two lists
+
+**What it buys that the existing gate does not.** `tsc` decides whether the program is
+well typed and prettier decides how it is laid out. Neither asks whether a correct,
+well formatted line is a bug. That band was unchecked: measured the day this landed, over
+`src` and `tests`, oxlint's `correctness` category alone found seven.
+
+**Why oxlint and not the alternatives.** Biome wants the formatter too, and prettier is
+already the one script name both the local gate and CI call, which is the only arrangement
+where the two cannot drift. ESLint's one unique asset is type aware rules, and that
+discipline is currently held by a comment at each call site rather than being broken, so it
+would buy a second toolchain for a problem this tree does not have. oxlint is one binary,
+151 ms over the whole tree, and needs no config to be useful.
+
+**Three categories are errors and the rest are not.** `correctness`, `suspicious` and `perf`.
+`pedantic`, `style` and `restriction` produce 2053, 25604 and 6291 findings, which is a
+rewrite rather than a ratchet. The three enforced categories are enabled **as categories**,
+so a rule a future version adds arrives on. Enabling a list of rule names would have meant
+the opposite, and a list of names is what goes stale when the tool grows.
+
+**The suppression list has two halves and conflating them is the failure mode.** A refusal
+is permanent and carries the reason the rule is wrong about this codebase. `no-await-in-loop`
+is the clearest: every bulk write here is sequential by design, because a 300 book batch
+would otherwise open 300 concurrent requests against one SQLite writer, and that rule fires
+on 47 sites that are all correct. `no-control-regex` fires on `lib/safeHref.ts`, where the
+character class **is** the URL sanitisation. A backlog entry is different: a rule this tree
+would pass if somebody did the work, and it carries its count.
+
+**One refusal records that the rule is right.** `no-loss-of-precision` on
+`lib/bookBounds.ts` is correct: `9223372036854775807` is SQLite's max int64 and JavaScript
+rounds it to `...808`. It stays off because the value is a declaration mirroring the
+backend's bound rather than arithmetic, and no collection id can reach it. That is a
+different thing from the other three and is written down as such, because a reader who
+thinks it is a false positive will eventually delete the note.
+
+**The backlog was not triaged, deliberately.** Turning a noisy rule on produces findings in
+files that open tickets rewrite, so the counts are recorded and the work is not done here.
+
+**What stops the list outliving its reasons.** `frontend/tests/oxlintRatchet.test.ts` reads
+the config, enables every suppressed rule, and fails when one of them no longer has a
+finding. The rule is stated as an exclusion, so a rule added to or removed from the config is
+covered with no edit to the test. Rung: tested. A planted suppression of `no-var`, which this
+TypeScript tree does not break, fails it by name.
+
+
+## Three more ruff families, and what each suppression is standing on
+
+`select` gained `S` (flake8-bandit), `ASYNC` (flake8-async) and `RUF` (ruff's own). Measured
+at `ab44e42` with the whole select set, which matters: a narrow `--select RUF` reports
+`RUF100` against every `noqa` naming a rule that run did not enable, so it invents dead
+directives. Reproducible on the finished tree: `ruff check --select RUF --exclude tests`
+reports **19** findings over application code and the configured set reports **0**, and all
+19 are the instrument rather than the tree.
+
+**Source: 24 findings, no defect among them.** Eight narrowing asserts, five setting key
+names read as passwords, three XML parses, one migration building SQL from its own constant,
+one `except BaseException: pass` whose `else` is the work, two deliberate en dashes, three
+dead `noqa` directives and an unsorted `__all__`. Every one is suppressed at its site with
+the reason, or fixed.
+
+**`ASYNC` found nothing in application code**, which is the result worth recording: the
+blocking call in an async route is the classic FastAPI defect and this tree does not have
+one. It is enabled as the check that keeps that true, not as a cleanup.
+
+**`S314` is the one that argues for the family.** All three sites parse XML that arrived from
+outside, and all three already refuse a doctype before parsing and cap the bytes off the
+wire, which is what `defusedxml` would have been adopted for. So the rule is suppressed per
+site rather than per family: a **fourth** parse site written without the doctype refusal is
+the defect this catches, and a blanket ignore would have been the one shape that cannot.
+
+**That argument was half true when it was written, and the half that was false is why there
+is now a test beside it.** Measured on ruff 0.16.7: `S314` reports `fromstring`, `parse` and
+`iterparse`, and does **not** report `XML`, `XMLID` or `fromstringlist`, though `XML` is
+CPython's own documented alias of `fromstring`. So a fourth site spelled `ElementTree.XML(b)`
+would have been silent, and the per site suppression would have been resting on a rule that
+could not see it. `TestOnlyThreeModulesTurnOutsideXmlIntoATree` closes that: one arm asks
+which modules parse, over all six spellings and over both receiver forms, and one keeps the
+three honest modules using only spellings ruff can report.
+
+**Its first draft asked the wrong question and the arm caught it.** Written as "which modules
+import an XML parser", it named five: `marc_fields.py` imports `ElementTree` for the
+`Element` annotation and `sru.py` to build and serialise the SRU response, and neither turns
+a stranger's bytes into a tree. An import is a declaration and a parse is a call, and the
+rule is about the call.
+
+**`S101` in application code is suppressed against a guard rather than against a sentence.**
+The eight asserts restate a condition the branch above already established so the type
+checker can see it. They are narrowing only while CPython keeps them, and `python -O` or
+`PYTHONOPTIMIZE` deletes every one, at which point `assert result.record is not None`
+compiles away and the `None` the branch ruled out reaches `.as_match()`: an `AttributeError`
+and a 500 on a lookup that found the book, with mypy silent because the annotation still
+claims what the assert claimed. `TestNothingStripsAnAssertOutOfTheImage` holds it.
+
+**Its first draft was wrong in five ways and passed every one of them**, which is the whole
+value of the two critic seats on this change and is why the shipped shape is what it is:
+
+| the draft | what got past it |
+|---|---|
+| globbed `docker-compose*.yml` | `compose.yaml` is the Compose Specification's own default, and `compose.yml` and `docker-compose.yaml` are read too |
+| hard named `Dockerfile` while globbing compose | a second image file was outside the rule, asymmetrically and silently |
+| read physical lines | `CMD` continued over a backslash with `-O` on the continuation |
+| matched `CMD` case sensitively | Dockerfile instructions are case insensitive, so a lower case `entrypoint` beside the real `CMD` was invisible, and the floor arm was satisfied by the `CMD` that remained |
+| scoped the flag scan to start directives | on the stated ground that `-O` is also `curl`'s remote name flag, which is **false of this tree**: there is no `curl` in the Dockerfile and no `-O` token in any surface, so the narrowing bought nothing and cost two of the rows above |
+
+Every one is the same defect: **a rule that enumerates the ways a thing can be written**, in
+five dimensions at once. So the shipped version does not enumerate. It matches surfaces by
+shape rather than by filename, joins continuations, lowercases both sides, scans every line,
+and then **refuses any start command or environment it cannot read**: a `CMD` naming a shell
+script and a compose `env_file:` both fail rather than pass, because either moves the
+question into a file the rule does not open. Refusing the unknown shape is what makes the
+scan complete; no further arm could have.
+
+**And a sixth hole that none of the above would have closed.** Nothing in a rule that reads
+the Dockerfile looks at an `assert`, so a ninth suppression ships green and the comment on it
+is the only thing claiming it is a narrowing.
+
+**The second round found the same class one rung further in, three times**, which is this
+repository's recorded shape for a fix round and is worth the space:
+
+| the fix | what still got past it |
+|---|---|
+| the `S101` arm pinned the **set of files** carrying a suppression | a ninth suppression **inside** one of the four passed. `routers/books.py` already carries four and is exactly where the next lookup handler adds one. The author's own mutation planted it in a fifth module, which is the covered case |
+| the XML rule matched the receiver as the string `"ElementTree"` | `import xml.etree.ElementTree as ET` makes the receiver `ET`, and the form is the one CPython's documentation uses. `ET.XML` was then invisible to the guard **and** to ruff at once, which is the precise hole the class exists to close |
+| the compose refusal covered `env_file:` | `extends:` and `include:` reach another compose file the same way, and a file named `base.yml` carries no `compose` and is never opened. The arm was named for the claim rather than for the check |
+
+The first two were found by both critic seats independently, which is the strongest signal
+this process produces. The fixes: counts per file rather than a set of names, with the eight
+cited in prose asserted as the sum; the receiver resolved from the file's own imports across
+all four bindings; and all three reaching keys refused at one site.
+
+**Two false refusals came with the new arms, and both were the other seat's finding.**
+`ENTRYPOINT ["uvicorn"]` with `CMD ["main:app", ...]` is how Docker composes a program with
+its arguments, and reading each directive as a start command in its own right refused it; the
+entrypoint now wins per file and the `CMD` beside it is argv. And a `RUN wget -q -O ...`,
+which is what the build already does in a script, fails the flag scan with a message that was
+simply false about it; the scope is right, because `RUN PYTHONOPTIMIZE=1 uv sync` bakes
+optimised bytecode under `UV_COMPILE_BYTECODE=1`, so the message names both readings instead.
+
+Rung: tested, at fourteen arms. Two sweeps on an isolated copy carrying no `.git`, each
+mutation changing one thing, each against a green baseline arm run first, and read as failing
+test names rather than as a fraction: eight in the first round, five in the second replaying
+the evasions the seats wrote, one of which asserts a shape must **pass**. Every mutation in
+both was chosen by a seat other than the author, which is the arrangement this repository
+buys two critic seats for.
+
+| mutation | failed |
+|---|---|
+| baseline, unmutated | none, 12 passed |
+| `PYTHONOPTIMIZE` in a new `compose.yaml` | `test_no_container_surface_asks_for_optimised_bytecode` |
+| `-O` on a backslash continuation of `CMD` | `test_no_line_of_a_container_surface_carries_an_optimise_flag` |
+| lower case `entrypoint` beside the real `CMD` | `test_no_line_of_a_container_surface_carries_an_optimise_flag` |
+| `CMD ["/app/start.sh"]` | `test_every_start_command_names_a_program_this_rule_can_read` |
+| `env_file:` in a compose file | `test_no_compose_file_loads_an_environment_this_rule_cannot_read` |
+| a ninth `# noqa: S101` in a fifth module | `test_the_suppressed_asserts_are_the_four_files_this_rule_was_written_for` |
+| `ElementTree.XML` in a module that does not parse | both XML arms |
+| `ElementTree.XML` inside a module that already parses | `test_the_three_use_only_spellings_the_linter_can_report` |
+
+**The last two rows are one mutation split in half, deliberately.** The first changes two
+things at once, a fourth parsing module and a spelling the linter cannot see, so a verdict on
+two arms says nothing about which arm watched which change. The second changes only the
+spelling, inside a module already allowed to parse, and isolates the alias arm by itself.
+
+**The test tree gets the `S` family off, stated as the family.** Its premise is production
+code handling a stranger's input, and a test tree is neither. Twelve codes fire there and
+essentially all of it is `S101`, the assertion each test exists to make; the rest are fixture
+passwords, fixture XML, and the subprocess calls that run the suite runner and the publish
+gate. **The count is deliberately not written down here.** It was, three times, and was stale
+all three inside this one change, because every arm added anywhere in the tree is another
+`assert`. The instrument is
+`ruff check --config 'lint.per-file-ignores = {}' --select S --statistics tests`, which has
+to be run with the ignore cleared because otherwise it hides its own subject. Stated
+as `"S"` rather than as the twelve codes it currently fires, because a code list is an
+enumeration over something the tool's authors control: the next `S` rule ruff ships would
+arrive loudly wrong here and somebody would add a thirteenth entry. `select` still names the
+family, so a new rule is on in application code either way; only the test tree differs.
+
+**What still covers those files, stated as what it does rather than as a ranking.**
+`TestNoFixtureLooksLikeACredential` catches a realistic Telegram bot token and an address
+outside reserved space; the publish gate's own forbidden string scan catches the GitLab and
+GitHub access token prefixes and the private key header. **Neither is a superset of `S105`/`S106`**: a plausible API key spelled
+`api_key = "..."` fires the rule and matches neither arm. There is no such value in the tree
+today, and the first draft of this paragraph called the pair "sharper than the rule", which
+is the claim a reader would have relied on.
+
+**`RUF001` and `RUF002` are off in the test tree and `RUF003` is not.** A confusable in a
+string or a docstring there is the input under test: a fullwidth `c` in a Calibre host name,
+Arabic-Indic digits against the ISBN reader, a Greek sigma in a MARC extent field as the
+catalogue sends it. A confusable in a comment is prose, and prose is prose here as anywhere.
+
+**`RUF003` turns out to enforce half of the house dash rule on the backend**, which until now
+was enforced on the frontend source and the i18n catalogues only. It reports an en dash in a
+comment and says nothing about one in a string, so it is a partial instrument and is not a
+replacement for the rule; it is recorded because the first draft of this change put two en
+dashes into `bibliographic.py`'s comments and `RUF003` is what found them.
+
+## The working notes are split by how often a rule fires, not by how important it is
+
+`CLAUDE.md` is loaded on every turn of every session, so a line in it is paid for by every
+turn that does not need it. It reached 7,420 words, and one section, the three seat
+implementation workflow, was 3,617 of them and fired only when a trio was running.
+
+**The split is frequency, and stating it that way is what makes it decidable.** The privacy
+rule is among the most important things in the repository and stays in the always loaded file
+because any query can break it. The mutation harness rules are just as hard won and moved to
+a skill because most turns never mutate anything. Importance would have kept both.
+
+**Five rules keep their whole text resident even though they fire rarely**, because the cost
+of missing one is paid before a pointer could load. A suite run on the control plane machine
+has already raised an alert; the public mirror does not unpublish; a missed page is silent on
+both sides; a live change to the security tooling that watches these machines is how an alert
+stops arriving with nobody learning it stopped; and naming a ticket by its bare number is
+paid in the message to the owner that breaks it. The last two are the ones a first pass got
+wrong in opposite directions: the security rule was carried in from the surrounding
+checkout's notes and then left out of this register, and the ticket rule was disclosed behind
+a pointer that only an implementation turn fires, where the turns it governs are the ones
+that report. Each carries one imperative line, with the procedure in a skill. That is the
+difference between disclosing reference and hiding a guardrail.
+
+**What the split cost, measured rather than assumed.** A paragraph level diff of the old file
+against the new one and the six skills, splitting on blank lines and keeping blocks of twelve
+words or more, which is the instrument and not an aside: without that filter the same split
+gives 147 blocks and 25 unmatched, almost all of them headings and one line table rows.
+**115 blocks, 108 carried verbatim.** The other
+seven were rewritten, and checking them **found three genuine losses that were about to
+ship**: the backtick command substitution trap, the rule that a fix in a file another seat
+owns is raised rather than taken, and the instruction that this file holds rules and not
+history. None of the three was in the surrounding repository's own notes, which is what the
+deduplication had assumed.
+
+**The skills name nothing outside this repository**, so a checkout of this tree alone carries
+every rule it runs on. The one rule that genuinely depends on something outside, the pager,
+names the dependency and says what to do when it is absent.
+
+**Three of the six skill files would not have loaded at all.** An unquoted colon inside a
+frontmatter description makes the YAML unparseable, and the check that said they were fine
+was a regex matching `key: value`, which is happy with a line YAML refuses. A regex that
+resembles a parser is not a parser, and it agreed with its author, which is the harness this
+register says to give a sensitivity check. `yaml.safe_load` is the instrument.
+
+## A claim about a file is verified by reading the file back, in the call that makes it
+
+Three times in one session a handoff described something that was not in the tree, each
+caught by a critic seat and none by the author: a step reported as changed and never touched,
+a width count from a sweep using `NR` across files where `FNR` was needed, so two of its rows
+were phantom and the real count was eleven, and a two row table introduced with the words
+"demonstrated rather than asserted" that existed only in the message.
+
+**The third is the dangerous one, for the reason the seat gave**: it reads as the strongest
+part of a report, so it is the least likely to be checked by anybody.
+
+All three share one shape. The handoff was written from what the author intended rather than
+from the tree. **So the fix is not more care**, which is what the first two would suggest on
+their own. It is that a claim about a file is verified by reading that file back, in the same
+call that makes the claim. Every figure in that session which survived review was one that
+had been re-derived; every one that did not was one that had been remembered.
+
+This sits beside the register's older rule that a number, once written down, stops being
+re-derived and starts being copied. That rule is about the number's second reader. This one
+is about its first.
+
+## The container rule took five review rounds, and four of them were one defect
+
+Every round, both critic seats found the fix of the round before evaded, and every time it
+was the same thing: **a rule that enumerates the ways something can be written.**
+
+| round | what got past the previous fix |
+|---|---|
+| 1 | one compose filename of four; `-O` on a line continuation; a lower case `entrypoint`; a `CMD` naming a script |
+| 2 | a ninth `S101` **inside** an already listed file; an aliased `ET.XML`, invisible to ruff and to the guard at once |
+| 3 | `dockerfile:` naming an image one directory down |
+| 4 | `context: ./deploy` with `dockerfile:` untouched; a `build: {...}` flow mapping; a `build: ./deploy` shorthand, the last two carrying no key to read |
+| 5 | the arm had no floor, so a `build:` the reader failed to parse reported clean |
+
+**Every fix that held stopped enumerating.** Refuse a start command the rule cannot read.
+Resolve the `ElementTree` receiver by walking imports for a prefix of the module rather than
+matching a name. Read the whole `build:` block and fail on any key it does not understand.
+**Every fix that did not hold added an arm.**
+
+**Both seats found the aliased receiver separately**, which is the strongest signal this
+process produces and the second time in two waves.
+
+### Two findings answered rather than fixed, with the reason
+
+**The build reader is line oriented, and three Compose styles put the key elsewhere.**
+`api: {build: ./deploy}`, the same nested, and a quoted `"build":` all evade it. Closing that
+means parsing the file as YAML, and PyYAML is **not declared** in `backend/pyproject.toml`; it
+is present only transitively, and a guard resting on a transitive dependency is its own trap.
+The bound is written into `_build_block`'s docstring instead, and a floor now separates
+"nothing to refuse" from "read nothing", which is what the arm could not tell apart for four
+rounds. A known bound beats an unknown one.
+
+**`_XML_PARSERS` matches the `ElementTree` construction, not the `.parse` that reads**, so
+`ElementTree.ElementTree(root).write(f)` is a false refusal. The seats disagreed and the
+crossing is why the right answer shipped: the design seat proposed narrowing to `.parse` on a
+constructed instance, then **withdrew it after measuring its own fix**, which sees
+`ElementTree.ElementTree().parse(f)` and misses both spellings anybody actually writes,
+`t = ElementTree()` with `t.parse(f)` a statement later, and `ElementTree(file=f)`, which
+parses inside the constructor. One false refusal on a spelling nothing uses beats two silent
+misses on the two that get written. What both seats agreed on was that the **comment** named
+`.parse` while the code matched the construction, which is the tell this repository keeps
+paying for: the code is defensible and the stated reason is wrong, so a reviewer agrees with
+the comment and the hole survives.
+
+
+## A comment beginning `# noqa` is a blanket suppression, whatever it goes on to say
+
+Hit twice while writing the above, in two files, and neither time did anything fail: ruff
+read `# noqa is on the interpolation: ...` and `# noqa on the sleep: ...` as bare `# noqa`
+directives suppressing every rule on that line. Both were caught by `RUF100` reporting an
+unused **blanket** directive, which is the only reason the wording is known to matter.
+
+So a comment explaining a suppression starts with any word but that one. The same shape bites
+a second way: text after a real directive is parsed as more rule codes until it stops looking
+like one, so `# noqa: RUF001  , 1819-1891` warns `expected rule code between commas` and the
+directive is then malformed rather than absent.

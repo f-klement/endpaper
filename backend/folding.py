@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 import custom_fields
 import lending
 import reading
+from book_columns import FILLABLE_FROM_ANOTHER_ROW
 from database import Base
 from enums import BookIdentifierScheme, ClassificationScheme
 from logvalues import clipped
@@ -397,26 +398,14 @@ if _UNDECLARED:
 
 
 # ── The survivor's own columns ────────────────────────────────────────────────
-
-_MERGEABLE_FIELDS = (
-    # `isbn` is absent deliberately: it is unique and handled separately, ahead
-    # of everything here. See `fold`.
-    #
-    # `copy_group` is absent for a different reason, and absorbing it would be
-    # a real bug rather than a missed field: it would make the survivor a copy
-    # of the loser's siblings, which nobody asked for and which the survivor's
-    # own owner never agreed to.
-    "subtitle", "author", "publisher", "year", "description", "cover_url",
-    "page_count", "language", "categories", "google_books_id",
-    "series_name", "series_index", "location",
-    # Present for the same reason `location` is: merging two entries for one
-    # book, one of them filed, should leave the survivor on that shelf rather
-    # than unfiled. It fills a gap and never overrides, so a keeper that is
-    # already in a collection stays where its owner put it.
-    "collection_id",
-    "format", "condition", "lending", "purchase_price_minor", "purchase_currency",
-    "purchased_at", "purchase_source",
-)
+#
+# Asked rather than listed, for the reason `TRANSFERS` is: a hand written tuple
+# of column names relates to `Book` through nothing, so a column added to the
+# schema joins it only if somebody remembers. `book_columns` refuses to import
+# when a column is classified nowhere, and its cells carry why each exclusion is
+# an exclusion: `isbn` because it is unique and `fold` releases it in its own
+# flush ahead of everything, `copy_group` because absorbing it would make the
+# survivor a copy of the loser's siblings.
 
 
 def _absorb_fields(keeper: Book, losers: Sequence[Book], isbn: str | None) -> None:
@@ -429,7 +418,7 @@ def _absorb_fields(keeper: Book, losers: Sequence[Book], isbn: str | None) -> No
     if keeper.isbn is None and isbn is not None:
         keeper.isbn = isbn
 
-    for field in _MERGEABLE_FIELDS:
+    for field in FILLABLE_FROM_ANOTHER_ROW:
         if getattr(keeper, field) is not None:
             continue
         for loser in losers:

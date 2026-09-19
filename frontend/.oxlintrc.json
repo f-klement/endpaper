@@ -1,0 +1,63 @@
+{
+  // oxlint, adopted as a RATCHET on 2026-09-19. Read this before adding a rule.
+  //
+  // Three categories are enforced as errors. Every rule in them is on unless it
+  // is listed below, so a rule oxlint adds in a future version arrives enforced
+  // rather than silently off. `pedantic`, `style` and `restriction` are not
+  // enforced: measured the day this landed, they produce 2053, 25604 and 6291
+  // findings over `src` and `tests`, which is a rewrite rather than a ratchet.
+  //
+  // THE LIST BELOW IS NOT ONE THING. It has two halves and they age differently:
+  // a refusal is permanent and carries the reason it is a refusal, and a backlog
+  // entry is a rule this tree would pass if somebody did the work. Adding to the
+  // backlog half is how this ratchet stops being one, so a new entry needs a
+  // count and a reason in the commit that adds it.
+  "ignorePatterns": ["src/api/generated/**"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "rules": {
+    // ---- Refused, permanently. The rule is wrong about this codebase. ----
+
+    // 47 sites. Every bulk write here is sequential BY DESIGN: a 300 book batch
+    // would otherwise open 300 concurrent requests against one SQLite writer.
+    // `lib/bulkWrite.ts` exists to own that rule and `docs/decisions.md` records
+    // it twice. Enabling this rule would flag the architecture.
+    "no-await-in-loop": "off",
+
+    // 1 site, `lib/safeHref.ts`, where the U+0000 to U+0020 character class IS
+    // the URL sanitisation logic. The rule fires on the security control itself.
+    "no-control-regex": "off",
+
+    // 1 site, `lib/sqlite.ts`: a zero width space inside a docstring's glob
+    // pattern, so that the star slash does not close the comment.
+    "no-irregular-whitespace": "off",
+
+    // 1 site, `lib/bookBounds.ts`. The rule is RIGHT: 9223372036854775807 is
+    // SQLite's max int64 and JS rounds it to ...808. It stays because the value
+    // is a declaration mirroring the backend's bound rather than arithmetic, and
+    // no collection id can reach it. If that stops being true this is a defect,
+    // not a suppression.
+    "no-loss-of-precision": "off",
+
+    // ---- Backlog. Counts measured 2026-09-19 over `src` and `tests`. ----
+    // Each is a rule this tree could pass. None was triaged, deliberately: the
+    // wave that adopted oxlint was told not to, because turning a noisy rule on
+    // produces findings in files other open tickets rewrite.
+    "unicorn/consistent-function-scoping": "off", // 110
+    "unicorn/no-array-sort": "off", // 91
+    "no-shadow": "off", // 25
+    "unicorn/no-array-reverse": "off", // 5
+    "oxc/no-map-spread": "off", // 5
+    "unicorn/prefer-set-has": "off", // 3
+    "unicorn/prefer-string-starts-ends-with": "off", // 2
+    "unicorn/no-useless-spread": "off", // 2
+    "no-underscore-dangle": "off", // 2
+    "typescript/no-extraneous-class": "off", // 1
+    "oxc/no-accumulating-spread": "off", // 1
+    "preserve-caught-error": "off", // 1
+    "no-useless-concat": "off" // 1
+  }
+}

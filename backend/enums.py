@@ -660,7 +660,7 @@ class SettingKey(StrEnum):
     GOOGLE_BOOKS_ENABLED = "google_books_enabled"
     GOODREADS_LOOKUP_ENABLED = "goodreads_lookup_enabled"
     DEFAULT_LOCALE = "default_locale"
-    TOKEN_EPOCH = "token_epoch"
+    TOKEN_EPOCH = "token_epoch"  # noqa: S105  a settings key name, not a secret
 
     # Where overdue reminders go, and how often. Settings rather than
     # environment variables because the library changes them: which channel
@@ -668,7 +668,7 @@ class SettingKey(StrEnum):
     # the container is running.
     OVERDUE_WEBHOOK_ENABLED = "overdue_webhook_enabled"
     OVERDUE_WEBHOOK_URL = "overdue_webhook_url"
-    OVERDUE_WEBHOOK_SECRET = "overdue_webhook_secret"
+    OVERDUE_WEBHOOK_SECRET = "overdue_webhook_secret"  # noqa: S105  a settings key name, not a secret
     OVERDUE_REMINDER_DAYS = "overdue_reminder_days"
 
     # Mail. The seven names match the standard `MAIL_*` environment variables a
@@ -682,7 +682,7 @@ class SettingKey(StrEnum):
     MAIL_SERVER = "mail_server"
     MAIL_PORT = "mail_port"
     MAIL_USERNAME = "mail_username"
-    MAIL_PASSWORD = "mail_password"
+    MAIL_PASSWORD = "mail_password"  # noqa: S105  a settings key name, not a secret
     MAIL_USE_TLS = "mail_use_tls"
     MAIL_USE_SSL = "mail_use_ssl"
     MAIL_DEFAULT_SENDER = "mail_default_sender"
@@ -691,7 +691,7 @@ class SettingKey(StrEnum):
     # `notifications.TELEGRAM_API` for why making it configurable would give
     # away the one property this sender has that the webhook does not.
     OVERDUE_TELEGRAM_ENABLED = "overdue_telegram_enabled"
-    TELEGRAM_BOT_TOKEN = "telegram_bot_token"
+    TELEGRAM_BOT_TOKEN = "telegram_bot_token"  # noqa: S105  a settings key name, not a secret
     TELEGRAM_CHAT_ID = "telegram_chat_id"
 
     # The in app notice. One toggle and nothing else: the channel is the app,

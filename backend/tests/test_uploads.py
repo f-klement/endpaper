@@ -169,7 +169,7 @@ class TestReplaceImage:
         def write(payload: bytes) -> None:
             try:
                 replace_image(tmp_path, "7", "png", payload)
-            except BaseException as error:  # noqa: BLE001
+            except BaseException as error:
                 failures.append(error)
 
         threads = [

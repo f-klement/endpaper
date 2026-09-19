@@ -300,7 +300,7 @@ def is_a_disc(extent: str | None) -> bool:
 #: `Zafón, Carlos (1964-2020). Auteur du texte`; MARC and MODS write
 #: `Melville, Herman, 1819-1891`. None of it is part of the name.
 _PERSON_NOISE: Final = re.compile(
-    r"\s*\(\s*\d{3,4}\s*[-–]?\s*\d{0,4}\s*\)"  # (1964-2020)
+    r"\s*\(\s*\d{3,4}\s*[-–]?\s*\d{0,4}\s*\)"  # noqa: RUF001  (1964-2020)
     r"|\s*\.\s*(Auteur|Autrice|Éditeur|Editeur|Traducteur|Traductrice|"
     r"Illustrateur|Illustratrice|Préfacier|Compilateur)[^.]*\.?\s*$"
     # The `\.?` before the anchor is what lets this arm fire on its own.
@@ -308,7 +308,7 @@ _PERSON_NOISE: Final = re.compile(
     # came off only because a caller removed the full stop first and ran the
     # substitution again, which is a coupling that put the stop removal in the
     # wrong function for six years.
-    r"|,\s*\d{4}\s*[-–]\s*\d{0,4}\s*\.?\s*$",  # , 1819-1891
+    r"|,\s*\d{4}\s*[-–]\s*\d{0,4}\s*\.?\s*$",  # noqa: RUF001  1819-1891
     re.IGNORECASE,
 )
 

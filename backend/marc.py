@@ -481,7 +481,7 @@ def _parsed(content: bytes) -> ElementTree.Element:
     if _DOCTYPE_BYTES in content:
         raise MarcError("That file carries a document type declaration, which is refused.")
     try:
-        return ElementTree.fromstring(content)
+        return ElementTree.fromstring(content)  # noqa: S314  doctype refused above, bytes capped
     except (ElementTree.ParseError, ValueError) as error:
         # **`ValueError` as well as `ParseError`, and it is not defensive.**
         # `ElementTree.fromstring` raises `ValueError("multi-byte encodings are

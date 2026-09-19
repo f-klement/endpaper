@@ -1071,8 +1071,12 @@ export const de: Messages = {
   "rapid.reviewTitle": "{count} Bücher prüfen",
   "rapid.addAll": "Alle hinzufügen",
   "rapid.adding": "Wird hinzugefügt...",
+  "rapid.progress": "{done} von {total}",
+  "rapid.stopAdding": "Anhalten",
   "rapid.discard": "Verwerfen",
   "rapid.added": "{count} hinzugefügt. {failed} stehen unten, mit dem Grund.",
+  "rapid.addedStopped":
+    "Angehalten. {count} hinzugefügt, {failed} nicht. Alles Übrige steht weiterhin in der Liste.",
   "rapid.unreferenced":
     "Bei {count} davon wurde nicht gespeichert, wo die Datei liegt. Den Ordner noch einmal auswählen speichert es.",
   "rapid.removeFromQueue": "{label} aus der Liste entfernen",

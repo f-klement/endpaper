@@ -327,10 +327,20 @@ class TestTheSignatureIsTheBound:
     def _names_read_off_the_match(self) -> set[str]:
         """Every field name `merge_into` takes off its argument, from the source.
 
-        Two shapes, because the function uses two: a `getattr` over a tuple of
-        literal names, and a direct attribute access for the cover. Reading
-        both is what makes this a second derivation rather than a re-reading of
-        the tuple, and the cover is the name only the second shape sees.
+        Two shapes, because the function uses two: a `getattr` over whatever the
+        loop walks, and a direct attribute access for the cover. Reading both is
+        what makes this a second derivation rather than a re-reading of the set,
+        and the cover is the name only the second shape sees.
+
+        **The loop's iterator is evaluated, not pattern matched.** A walk that
+        reads `loop.iter.elts` sees a literal and nothing else, so it returns the
+        empty set the moment the loop names a constant instead: the partition
+        below then goes short and fails, which is the right direction, but it
+        makes this a question about a spelling rather than about the columns.
+        Evaluating the expression in the module's own namespace follows any
+        spelling there is, for `test_the_model_is_the_only_channel_into_it`'s
+        reason about `ast.unparse`: enumerating the kinds is the shape this
+        repository keeps paying for.
         """
         import ast
         import inspect
@@ -351,11 +361,8 @@ class TestTheSignatureIsTheBound:
             and node.value.id == "match"
         }
         for loop in (node for node in ast.walk(fn) if isinstance(node, ast.For)):
-            names |= {
-                element.value
-                for element in getattr(loop.iter, "elts", [])
-                if isinstance(element, ast.Constant) and isinstance(element.value, str)
-            }
+            walked = eval(ast.unparse(loop.iter), vars(google_books))
+            names |= {name for name in walked if isinstance(name, str)}
         return names
 
     def test_every_column_it_writes_is_a_field_the_model_bounds(self):

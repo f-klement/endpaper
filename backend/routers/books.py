@@ -14,6 +14,7 @@ from sqlalchemy import func, nullslast
 from sqlalchemy.orm import Session, joinedload
 
 import authority
+import book_columns
 import catalogue
 import cover_store
 import covers
@@ -436,7 +437,7 @@ async def lookup_isbn(
     if not result.found:
         raise HTTPException(**_lookup_failure(result))
 
-    assert result.record is not None
+    assert result.record is not None  # noqa: S101  narrowing, not validation
     record = result.record
     # Built here rather than left to the schema so the same objects feed the tag
     # suggestion and the response, and the two cannot disagree about what the
@@ -3249,13 +3250,17 @@ def get_book(book: BookForRead, db: DbSession, current_user: CurrentUser) -> Boo
 #: copies of each other while naming different books is a state nothing else in
 #: this app knows how to render.
 #:
-#: `cover_url` is absent and handled separately, because a cover this app holds
-#: is a file named by book id: see the note in the handler.
-_WORK_FIELDS: Final = (
-    "isbn", "title", "subtitle", "author", "publisher", "year", "description",
-    "page_count", "language", "categories", "google_books_id",
-    "series_name", "series_index",
-)
+#: Which columns those are is `book_columns`', not this route's: a tuple written
+#: out here would relate to `Book` through nothing, and that module refuses to
+#: import when a column of `books` is classified nowhere. `cover_url` is absent
+#: there too and handled separately here, because a cover this app holds is a
+#: file named by book id: see the note in the handler.
+#:
+#: **A local name rather than the import at the call site**, because
+#: `enums.BookIdentifierScheme.GOOGLE_BOOKS` names this one in prose and that
+#: docstring is the column's description in `openapi.json`. Spelling it away is
+#: a client regeneration.
+_WORK_FIELDS: Final = book_columns.WORK_FACTS
 
 
 @router.get("/{book_id}/copies", response_model=list[BookOut])
@@ -3752,7 +3757,7 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
     if not result.found:
         raise HTTPException(**_lookup_failure(result))
 
-    assert result.record is not None
+    assert result.record is not None  # noqa: S101  narrowing, not validation
     record = result.record
 
     # Nine columns written straight off the record, and the ceiling on all of
@@ -4357,7 +4362,7 @@ async def enrich_book(
         # happened, so it is the one that must not decide on a different
         # question from its two siblings.
         if result.found:
-            assert result.record is not None
+            assert result.record is not None  # noqa: S101  narrowing, not validation
             fields = result.record.as_match()
             # **Only on this branch.** A record found by the Book's own ISBN
             # asserts who wrote *this* Book; the title and author search below
@@ -4386,7 +4391,7 @@ async def enrich_book(
                 volume_id, access.api_key, plan=access.plan
             )
             if volume.found:
-                assert volume.record is not None
+                assert volume.record is not None  # noqa: S101  narrowing, not validation
                 # No `assertions`, unlike the ISBN branch above. `Record.
                 # author_identifiers` is empty for every source but the DNB, so
                 # there is nothing here to record even by mistake, and

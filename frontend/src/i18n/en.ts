@@ -1210,8 +1210,16 @@ export const en = {
   "rapid.reviewTitle": "Review {count} books",
   "rapid.addAll": "Add all",
   "rapid.adding": "Adding...",
+  "rapid.progress": "{done} of {total}",
+  "rapid.stopAdding": "Stop",
   "rapid.discard": "Discard",
   "rapid.added": "{count} added. {failed} still below, with the reason.",
+  // **Says what is still there as well as what was done.** A member who stops
+  // a batch of three hundred at forty is asking to keep the other two hundred
+  // and sixty, and a sentence naming only the forty reads as a run that went
+  // wrong.
+  "rapid.addedStopped":
+    "Stopped. {count} added, and {failed} could not be. Everything it did not reach is still in the queue.",
   // **Says what was lost and what was not.** The books are in the catalogue;
   // what did not get recorded is where their files are, which is the one thing
   // a folder pick is for beyond the metadata. Named as a second pick rather
