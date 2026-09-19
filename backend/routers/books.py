@@ -1341,10 +1341,11 @@ def bulk_action(
 ) -> BulkResult:
     """Apply one verb to a selection of books.
 
-    One endpoint rather than six, because every verb shares the same three
-    steps: resolve the ids the caller may actually touch, apply, and report
-    updated/unchanged/skipped. Six handlers would be six copies of the
-    permission walk, and the fifth one added would be the one that forgot it.
+    One endpoint rather than one per verb, because every verb shares the same
+    three steps: resolve the ids the caller may actually touch, apply, and
+    report updated/unchanged/skipped. A route per verb would be a copy of the
+    permission walk per verb, and the next one added would be the one that
+    forgot it.
 
     A separate `/bulk/ownership` used to sit beside this with the same body,
     the same permission walk and an identical result shape. It was removed
@@ -1519,17 +1520,88 @@ def _require_tag(db: Session, value: str | int | None) -> Tag:
     return tag
 
 
-_BULK_HANDLERS: dict[
-    BulkAction, Callable[[Session, list[Book], str | int | None, User], tuple[int, int]]
-] = {
-    BulkAction.ADD_TAG: _bulk_add_tag,
-    BulkAction.REMOVE_TAG: _bulk_remove_tag,
-    BulkAction.SET_STATUS: _bulk_set_status,
-    BulkAction.SET_OWNERSHIP: _bulk_set_ownership,
-    BulkAction.SET_LOCATION: _bulk_set_location,
-    BulkAction.SET_COLLECTION: _bulk_set_collection,
-    BulkAction.DELETE: _bulk_delete,
-}
+#: What every bulk verb is: the books the caller may actually touch, the loose
+#: `value` out of the body, and the (updated, unchanged) it did.
+_BulkHandler = Callable[[Session, list[Book], str | int | None, User], tuple[int, int]]
+
+def _undispatched[Verb](dispatched: set[Verb], actions: set[Verb]) -> set[Verb]:
+    """The symmetric difference between the verbs dispatched and the verbs there are.
+
+    Symmetric rather than one sided: a member with no entry is a `KeyError` at
+    `bulk_action`'s subscript and a 500 to any member who picks that verb, and
+    an entry for a member the enum no longer carries is a handler nothing can
+    reach. Both are answered by editing the table below, so both belong in one
+    message.
+
+    Takes its two sides rather than reading them, so a test can drive it with a
+    synthetic enum.
+    """
+    return dispatched ^ actions
+
+
+def _dispatch_table[Verb, Handler](
+    handlers: dict[Verb, Handler], actions: set[Verb]
+) -> dict[Verb, Handler]:
+    """The verb table, or a refusal at import naming what disagrees.
+
+    **The table is built through this rather than checked beside it**, so the
+    refusal is not a statement standing on its own that can be deleted on its
+    own. That deletion is silent: measured, an `if undispatched: raise` beside
+    the table was removed with the tree otherwise intact and 7560 backend tests
+    still passed.
+
+    **The refusal holds exactly while the second argument is `set(BulkAction)`.**
+    State the condition rather than a list of edits, because the edits are not
+    deletions and there is more than one. Unwrapping the call and keeping the
+    dict literal is one. The smaller one keeps the call, the wrapper, the `raise`
+    and a message naming the right members, and compares the table against
+    itself: `_dispatch_table(t, set(t))`. Measured, whole gate green on it, 7563
+    passed and mypy clean, with the guard unable to refuse anything.
+
+    Either way the guard drops to test time, where
+    `tests/routers/test_books_bulk.py::TestEveryVerbHasAHandler` goes red the
+    moment a verb actually goes missing, and not before.
+
+    Deleting the `raise` below fails `::TestTheTableRefusesToBuild` by name, and
+    those four arms are the only thing that sees it go: with the `raise` and that
+    class both removed, 7559 passed.
+    """
+    undispatched = _undispatched(set(handlers), actions)
+    if undispatched:
+        raise RuntimeError(
+            "BulkAction and the bulk dispatch table disagree, so /books/bulk "
+            "either raises KeyError on a verb it accepts or carries a handler "
+            f"nothing reaches: {sorted(str(verb) for verb in undispatched)}. "
+            "Give a new member an entry in _BULK_HANDLERS, or drop the entry "
+            "whose member is gone."
+        )
+    return handlers
+
+
+#: Refused when this module loads, not at the first request that names the verb.
+#:
+#: `bulk_action` subscripts this table with an action pydantic has already
+#: validated, and mypy does not exhaustiveness check a `dict` literal the way it
+#: checks a `match`, so a member added to `BulkAction` and not here is a
+#: `KeyError` and a **500** with nothing in the tree red about it.
+#:
+#: The verb set is not the only hole: a verb added to both sides reading `value`
+#: its own way with no bound passes this untouched, which is how `_require_tag`
+#: answered `2**63` with a 500 for months. That one is held by
+#: `tests/routers/test_books_bulk.py::TestNoVerbTurnsAValueIntoA500`, which is
+#: parametrised over `BulkAction` rather than over a list of verb names.
+_BULK_HANDLERS: dict[BulkAction, _BulkHandler] = _dispatch_table(
+    {
+        BulkAction.ADD_TAG: _bulk_add_tag,
+        BulkAction.REMOVE_TAG: _bulk_remove_tag,
+        BulkAction.SET_STATUS: _bulk_set_status,
+        BulkAction.SET_OWNERSHIP: _bulk_set_ownership,
+        BulkAction.SET_LOCATION: _bulk_set_location,
+        BulkAction.SET_COLLECTION: _bulk_set_collection,
+        BulkAction.DELETE: _bulk_delete,
+    },
+    set(BulkAction),
+)
 
 
 # ── Browsing by series and by shelf ───────────────────────────────────────────

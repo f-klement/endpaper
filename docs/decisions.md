@@ -6669,8 +6669,10 @@ Organization Code, and this deployment has none.
 would accept, reading the `Ge`, `Le` and `MaxLen` off `BookCreate.model_fields`
 and the column widths off `Book.__table__` rather than retyping either. A list
 of arms would have been the enumerating shape this repository records as wrong
-on every first attempt, and a field added to the importer later inherits the
-bound without anybody remembering.
+on every first attempt. **What a field added later inherits is narrower than this
+once said**: `within_bounds` reads both declarations, but a column declaring no
+width whose field carries no `MaxLen` has neither to read, which is exactly the
+`description` defect that followed.
 
 It exists because the importer had no bound at all, and both the security seat
 and the implementer found that independently. Two measurements:
@@ -6687,6 +6689,36 @@ and the implementer found that independently. Two measurements:
 Strings truncate and numbers drop. Truncating a title keeps the record, which is
 what a batch wants; clamping a year of `9999`, MARC's own open ended date, to
 2200 would assert a date nobody supplied.
+
+**Amended 2026-09-19: the bound moved, and this function is now belt.**
+`catalogue.Record` bounds every scalar at construction against `_TEXT_CEILINGS`
+and `_NUMBER_RANGES`, and `Record.from_upload` truncates the cut set before that,
+so what a column the importer writes inherits comes from those two tables and from
+nothing else. Measured over 43 (field, value) pairs through both constructors, 86
+cases: `bounded_fields` differed from the record's own fields in 0. Over the whole
+reachable domain rather than the sample, each `catalogue` ceiling equals
+`min(column width, BookCreate MaxLen)` and each `_NUMBER_RANGES` bound equals the
+`Ge`/`Le`, so `within_bounds` is the identity there and no end to end test can
+distinguish it from `return value`: reducing it to that left the backend suite
+green. It is kept because it still refuses the one constructible bypass, a
+`Record` widened with `object.__setattr__` after construction, and that bypass is
+now driven over each side of every bound those columns have, asserting the value
+each comes back as rather than that it changed, by
+`tests/test_importing.py::TestTheSecondBoundHasOneConstructibleBypass`. The
+coverage question, whether a new column is bounded at all, is asked of
+`catalogue.py` by `tests/test_marc.py::TestEveryColumnTheImporterWritesIsBounded`.
+**The falsifier for keeping the call** is at `bounded_fields`: a `Record` producer
+that does not run `__post_init__` makes it load bearing again.
+
+**And the policy above now has a test.** This entry names `within_bounds` as the
+home of "strings truncate, numbers drop", and until 2026-09-19 nothing held it
+there: a critic seat flipped the string arm from truncate to drop and the whole
+backend suite stayed green, which on the one path the belt exists for is a
+`NOT NULL` title dropped, a 500 and a lost transfer. The probe that catches it has
+to be inhomogeneous, because `("x"*n)[:c]` and `("x"*n)[-c:]` are the same string,
+and the assertion holds that shape rather than a comment describing it: a check
+that a probe is on the right side is not a check that it can tell the two sides
+apart.
 
 ### A guard's fixture has to reference the thing the guard stops
 
@@ -14458,3 +14490,106 @@ fell from reported to silent, bought by removing a false offender on a clean tre
 Two prescribed fixes were themselves red on a clean tree and were narrowed with the
 measurement that forced it: one flagged eight framework instantiations, the other a
 module that spells a reader's name and calls none.
+
+### The bulk verb table is built through its check, not checked beside it
+
+`bulk_action` subscripts `_BULK_HANDLERS` with an action pydantic has already
+validated, and mypy does not exhaustiveness check a `dict` literal the way it checks
+a `match`. A member added to `BulkAction` and not to the table was a `KeyError` and a
+500 to any member, with nothing in the tree red about it: `grep` for either name over
+`backend/tests` returned zero lines while all seven verbs were exercised by their
+string literal.
+
+The check is `folding._undeclared`'s shape rather than `notifications.pushes_outward`'s.
+A `match` returning the handler is a second enumeration of the verbs beside the dict,
+or it replaces the dict and with it the noun this register names as the thing derived
+with `ast`. The symmetric difference is one enumeration and catches a handler whose
+member is gone as well as a member whose handler is missing.
+
+**Where it sits is the part that was wrong first, and it is the transferable half.**
+The first version computed the difference beside the table and raised on it, and three
+comments said that stopped every run. It did not: deleting the `raise` alone, tree
+otherwise intact, passed 7560 backend tests. A refusal standing next to the thing it
+guards is a statement that can be deleted on its own, and the deletion is silent.
+
+**The refusal now holds exactly while `_dispatch_table`'s second argument is
+`set(BulkAction)`**, and that is the condition to state rather than a list of edits,
+because the edits are not deletions and there is more than one. Unwrapping the call and
+keeping the dict literal is one. The smaller one keeps the call, the wrapper, the
+`raise` and a message naming the right members, and compares the table against itself:
+`_dispatch_table(t, set(t))`. Measured, whole gate green on it. Either way the guard
+drops to test time, where the pairing test goes red the moment a verb actually goes
+missing and not before.
+
+**The rung was not found by reading and was not found by the sweep written to find
+it.** The mutation that mattered, deleting the `raise` alone, was never run: one arm
+deleted the `raise` and added an eighth verb, which is two changes at once, and a
+second deleted the whole check and scored a catch on the `AttributeError` that
+followed. Both critic seats found it independently, by running the one arm the author
+had not.
+
+**Completeness is not the hole that cost money.** A verb added to both sides reading
+`value` its own way with no bound passes every completeness check, which is how
+`_require_tag` answered `2**63` with a 500 for months. The parametrised bound test is
+what sees that, and only because it is driven off `BulkAction` itself rather than off a
+list of verb names.
+
+The counts in `BulkAction.__doc__`, `BulkRequest.__doc__` and the route docstring were
+all stale against seven verbs and were removed rather than corrected: a number beside
+the list it counts goes stale in silence. **And the commit that removed them added a
+fourth of the same shape**, a per verb status landscape in a test docstring, wrong in
+four of its six clauses, measured over the same 35 route pairs by both seats. That is
+this register's own rule about a stale figure arriving in the commit that removes a
+fabricated one, recorded because reading did not catch it either time.
+
+### A stored reason is a name, guarded by a type for what a type can hold and by a test for the rest
+
+The scan queue's twelve stored sentences were the tree's only ones: the other four page
+hooks make nine `t(` calls between them and every one is transient, into a toast or a
+`confirm`. So the union that replaced them is guarded where it is declared rather than
+by a rule over the tree.
+
+**What the type catches, self enforcing**: a reason with no sentence. A name added to
+`NamedScanReason` with no entry in `RapidQueue.REASONS` is `TS2741`, and an arm added
+to `ScanReason` with no home there is `TS7053`. Both measured.
+
+**What the type does not catch.** Two moves compile clean and leave the whole suite
+green: a payload hung on an arm that is already a name, where the numbers reach
+nothing because the name resolves through `REASONS`; and a second free text arm added
+with its handler, the compiler refusing only the careless version, which is not how a
+second one arrives.
+
+Both are asserted in `frontend/tests/houseRules.test.ts`, over `ScanReason`'s
+declaration. **The rule is arity over named payloads**: each arm carrying anything
+besides `kind` is asserted as an equality against the three that may, **by arm and by
+the property each carries**. It took three attempts and every one was falsified by a
+measured evasion rather than by review:
+
+* asking whether a property was typed `string` held for the keyword and nothing else,
+  so `type ServerWords = string` and `detail: { message: string }` both went past it
+  with the suite green, and `string | null`, `string[]` and a template literal are the
+  same move again;
+* asking **which** arms carry a payload is blind to all of those at once, and misses a
+  second payload on an arm that already carries one, which is a second unnamed free
+  text store;
+* asking which arms carry **what** closes both, and being an equality it cannot weaken
+  in either direction.
+
+**Residues, stated where the rule is written**: an arm spelled as a type imported from
+another module cannot be resolved by a reader of one file and fails the pre-flight
+rather than the payload rule, naming the wrong defect; and the rule reads the
+declaration, so it says nothing about what `reasonText` does with a payload. A type
+swapped on a property the rule already names is outside it, **though the gate still
+refuses that**, because all three named payloads are consumed at a typed site.
+
+**A type level fix was checked and refused**: an exact object constraint is written by
+naming the other arms' payload keys, which is the open set enumeration this tree's
+guards keep paying for.
+
+**A tree wide house rule was also refused.** A rule matching a `t(` inside a state
+update expression would have caught **six** of the twelve sites as they were written:
+the other six assigned to a local first and reached the setter as an identifier.
+Following a local binding is a dataflow pass, and a rule reporting clean over half the
+class it names is worse than no rule. Both seats agree on the refusal.
+
+Rung: the instance is tested for both halves, the class is stated.

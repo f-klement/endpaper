@@ -1,6 +1,6 @@
 # Backend test coverage
 
-**7520 tests**, in 114 files, counted off a full run on 2026-09-18.
+**7591 tests**, in 114 files, counted off a full run on 2026-09-19.
 
 **Counted off a run rather than by `--collect-only` this time, because this project's own
 `addopts` carries `-q` and the suite runner adds `-n`, and the pair prints no node ids at
@@ -8,7 +8,7 @@ all**: a `--collect-only -q` through the wrapper answers a warnings summary and 
 count. Quote the instrument beside the number, since the two do not always agree.
 
 **The headline equals the passed count today, and that is a fact about the tree rather than
-a simplification.** The gate reports `7520 passed`, with no skip and no `xfail`: the strict
+a simplification.** The gate reports `7591 passed`, with no skip and no `xfail`: the strict
 `xfail` that recorded a defect in the CSV importer is gone, because the work that closed the
 defect closed it.
 
@@ -20,7 +20,7 @@ the skip once made the check undoable, and a rule rewritten as `collected == pas
 the tree happens to have neither is one that fails for the wrong reason the day somebody adds
 either.
 
-**The rows below sum to 7462, fifty eight short, and the shortfall is deliberate.** Those
+**The rows below sum to 7533, fifty eight short, and the shortfall is deliberate.** Those
 tests live in eight files on the publish gate's DENY list, which this published register may
 not name: a published file pointing at a stripped path fails the gate. **The number moves
 whenever one of those files gains a test, and so does the count of files, which was six until
@@ -101,7 +101,7 @@ why the helper uses regexes.
 | `test_logvalues.py` | 12 | **The bound on what an untrusted value logs.** That the clip is on the repr rather than the value, that a newline cannot forge a second line, and that a poisoned column read through a page logs one bounded record rather than its own length |
 | `test_models.py` | 173 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary |
 | `test_dialect_portability.py` | 58 | That the month bucket renders per dialect and refuses a third, that both statistics buckets reach Postgres as `to_char` with no `strftime` left, and that both dialects render the same predicate for every index in the schema |
-| `test_importing.py` | 39 | **Applying a parsed export to a library.** The private-book oracle: a row whose ISBN belongs to a book the member cannot see is counted, never named, writes nothing |
+| `test_importing.py` | 67 | **Applying a parsed export to a library.** The private-book oracle: a row whose ISBN belongs to a book the member cannot see is counted, never named, writes nothing, and that the second bound `bounded_fields` applies returns the documented value on each side of every bound, with the case generator asserting its own coverage so a lost branch is red rather than quietly narrower |
 | `test_import_readers.py` | 16 | **What a reader IS, and that the set of them is closed.** That a reader is handed decoded text and nothing about how the file arrived, that every registered one honours a column correction, and that a service fitting the candidate names is names alone and no code. |
 | `test_authority.py` | 121 | **The network half of author identity.** That the four cross references a GND record carries are read off it, that the record's own scheme is never among them |
 | `test_authorship.py` | 107 | **The database half of author identity.** That one read costs two statements and that a read after a write is not stale |
@@ -146,7 +146,7 @@ why the helper uses regexes.
 | `routers/test_books_copies.py` | 37 | Copy groups: creating, listing and the shared-edition rules |
 | `routers/test_books_covers.py` | 27 | Cover routes hung off a book |
 | `routers/test_books_lending.py` | 25 | Loans: lending, returning, the reminder interval and who may see a loan |
-| `routers/test_books_bulk.py` | 32 | One verb applied to a selection, the three-way count, and that a row id past the largest a row can carry is a 404 rather than an `OverflowError` out of the driver |
+| `routers/test_books_bulk.py` | 75 | One verb applied to a selection, the three-way count, that a row id past the largest a row can carry is a 404 rather than an `OverflowError` out of the driver, that the dispatch table and `BulkAction` agree with `_dispatch_table` driven by a synthetic enum in both directions, and that no member of `BulkAction` turns a hostile argument into a 500 |
 | `routers/test_collections.py` | 21 | **Shelving, never permission.** Naming a part of the shelf, the case-insensitive uniqueness the database enforces, in ASCII and outside it, counts filtered to the caller |
 | `routers/test_books_collections.py` | 33 | Filing a book, the two list parameters and the 422 for both at once, the bulk verb, the merge that absorbs a collection, and the export column |
 | `routers/test_books_duplicates.py` | 32 | Duplicate detection and the merge, incl. the ORM cascade trap |

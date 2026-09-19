@@ -3031,3 +3031,261 @@ describe("every wallpaper export is imported by name somewhere", () => {
     ).toThrow(/re-exports/);
   });
 });
+
+/**
+ * The module whose reason union this rule is about.
+ *
+ * One file rather than every union in the tree, and that is the honest scope:
+ * this is the only union in `src` whose members are stored in state and
+ * rendered later, which is what makes a payload on one of them reachable by
+ * nothing.
+ */
+const SCAN_REASONS = "pages/ScanPage/hooks.ts";
+
+/**
+ * What `name` is declared as in `source`, or null.
+ *
+ * An interface answers a `TSTypeLiteral` over its own body, so a caller reading
+ * properties does not have to know which of the two spellings it met. That is
+ * not a convenience: an arm spelled as an interface is one of the three ways
+ * measured past the first draft of this rule.
+ *
+ * **The last declaration of the name in the file wins, function bodies
+ * included**, which is a property of walking by name rather than by scope: a
+ * type declared inside a function and sharing an arm's name is the one
+ * resolved. Unreached by anything in this tree and cheap to say.
+ */
+function declaredIn(path: string, source: string, name: string): Node | null {
+  let found: Node | null = null;
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value as unknown[]) walk(item);
+      return;
+    }
+    if (!isNode(value)) return;
+    const named = isNode(value.id) && text(value.id.name) === name;
+    if (
+      named &&
+      value.type === "TSTypeAliasDeclaration" &&
+      isNode(value.typeAnnotation)
+    )
+      found = value.typeAnnotation;
+    if (named && value.type === "TSInterfaceDeclaration" && isNode(value.body))
+      found = { type: "TSTypeLiteral", members: value.body.body };
+    for (const key of Object.keys(value)) walk(value[key]);
+  };
+  walk(parseAst(source, { lang: langOf(path) }));
+  return found;
+}
+
+/**
+ * A type as its own declaration in this file spells it.
+ *
+ * A reference to a type declared elsewhere in the same module is followed;
+ * anything else, an import included, comes back as it was. The hop count is
+ * bounded rather than trusted, because `type A = B; type B = A` is a legal
+ * thing to write and a rule that hangs is a suite that has no verdict.
+ *
+ * **Eight is a ceiling and not a guarantee, and it fails safely.** A chain
+ * longer than this leaves the arm looking unresolved, which the pre-flight
+ * refuses rather than the payload rule: measured once at nine, red in 55ms.
+ * Nothing in either sweep covers the depth itself, so that is stated rather
+ * than tested, and no chain anybody writes comes near it.
+ */
+function resolvedIn(path: string, source: string, node: Node): Node {
+  let here = node;
+  for (let hops = 0; hops < 8; hops += 1) {
+    if (here.type !== "TSTypeReference" || !isNode(here.typeName)) return here;
+    const name = text(here.typeName.name);
+    const next = name === null ? null : declaredIn(path, source, name);
+    if (next === null) return here;
+    here = next;
+  }
+  return here;
+}
+
+/** The members of a union type, or the type itself where it is not one. */
+function armsOf(alias: Node): Node[] {
+  if (alias.type !== "TSUnionType") return [alias];
+  const types = alias.types;
+  return (Array.isArray(types) ? types : []).filter(isNode);
+}
+
+/** The string literals a union of literal types is made of. */
+function literalsOf(alias: Node): string[] {
+  return armsOf(alias).flatMap((arm) =>
+    arm.type === "TSLiteralType" &&
+    isNode(arm.literal) &&
+    typeof arm.literal.value === "string"
+      ? [arm.literal.value]
+      : [],
+  );
+}
+
+/** One `{ name: type }` pair per property of an object type. */
+function propertiesOf(arm: Node): { name: string; type: Node }[] {
+  const members = arm.members;
+  return (Array.isArray(members) ? members : []).flatMap((member) => {
+    if (!isNode(member) || member.type !== "TSPropertySignature") return [];
+    if (!isNode(member.key) || !isNode(member.typeAnnotation)) return [];
+    const name = text(member.key.name) ?? text(member.key.value);
+    const type = member.typeAnnotation.typeAnnotation;
+    return name !== null && isNode(type) ? [{ name, type }] : [];
+  });
+}
+
+/** The type of an arm's `kind`, which is what discriminates it. */
+function discriminantOf(arm: Node): Node | null {
+  return propertiesOf(arm).find((one) => one.name === "kind")?.type ?? null;
+}
+
+/** What an arm's `kind` says it is, for a failure message. */
+function kindOf(arm: Node): string {
+  const kind = discriminantOf(arm);
+  if (kind === null) return "an arm with no kind";
+  if (kind.type === "TSLiteralType" && isNode(kind.literal))
+    return text(kind.literal.value) ?? kind.type;
+  if (kind.type === "TSTypeReference" && isNode(kind.typeName))
+    return text(kind.typeName.name) ?? kind.type;
+  return kind.type;
+}
+
+/**
+ * A scan reason is a name, and three arms carry anything else.
+ *
+ * **What the type system was measured not to say.** A reason with no sentence
+ * is a compile error, which is the whole of why `ScanPage/hooks.ts` stores
+ * names instead of prose. Two things it does not refuse:
+ *
+ * - **A payload on an arm that is already a name reaches nothing.**
+ *   `{ kind: "unreadable"; at: number; of: number }` compiles clean, because
+ *   `reasonText`'s last line narrows to `NamedScanReason` and
+ *   `REASONS["unreadable"]` resolves whatever else the arm carries. The numbers
+ *   never reach a screen. Hanging a value on a name that is already there is
+ *   the shortest path for an author who needs one, which is why `ScanReason`'s
+ *   own docstring sends them to a kind of their own instead.
+ * - **A second free text arm**, added with its own branch in `reasonText`,
+ *   compiles clean too. One free text arm is a rule, and the first one is what
+ *   makes free text look ordinary.
+ *
+ * **The rule counts and names, and never reads a type, which is what closes
+ * the family.** It asserts the arms carrying anything besides `kind`, and what
+ * each of them carries, by name. A rule that asked whether a property is
+ * `string` held for the keyword and for nothing else: `type ServerWords =
+ * string` and `detail: { message: string }` both went past it with the suite
+ * green, and `string | null`, `string[]` and a template literal are the same
+ * move again. Reading no type at all is blind to every one of them at once.
+ *
+ * **The names and not only the arms**, because the first draft of this had
+ * exactly the weakness it was written to remove: it saw which arms carry a
+ * payload and never how many properties one carries, so `detail?: string`
+ * added beside `failure` on the `file` arm was a second free text store in
+ * queue state, compiling clean with the suite green. Being an equality it is
+ * red in both directions, so the interpolating arm the union anticipates is
+ * red too, whatever it carries.
+ *
+ * **An arm spelled as a local interface or alias is resolved first**, so the
+ * payload rule judges it rather than the pre-flight. Leaning on the pre-flight
+ * would be the fragile arrangement: it is the assertion somebody relaxes the
+ * day a legitimately named arm arrives.
+ *
+ * **The residues, stated rather than discovered.** A type swapped on a
+ * property this already names is outside the rule: `failure` may become
+ * anything at all and this stays green, which is the price of reading no type.
+ * **The gate still refuses it**, because all three named payloads are consumed
+ * at a typed site in `reasonText`: measured, `failure: string` is `TS7053` at
+ * the `FILE_FAILURES` lookup and `message: number` is `TS2322` there and at
+ * four writer sites. So this is a residue of the rule and not an open door, and
+ * the reason to say so is that a residue read as a door is the next person's
+ * excuse to widen something.
+ * And an arm the resolution cannot reach, which is one spelled as a type
+ * imported from another module, fails the pre-flight rather than this rule and
+ * so names the wrong defect; no read of this file alone can do better.
+ *
+ * **Its blind spot, which is the whole of the other half**: it reads the
+ * declaration. It says nothing about what `reasonText` does with a payload once
+ * one exists, and nothing about a reason rendered anywhere but there.
+ *
+ * A type could not do this half: refusing a payload needs an exact object
+ * constraint, which in TypeScript is written by naming the keys the other arms
+ * carry, and an enumeration of an open set is what this file's guards keep
+ * paying for.
+ */
+describe("a scan reason is a name, and three arms carry anything else", () => {
+  function union(): { names: string[]; named: Node; arms: Node[] } {
+    const source = SOURCES[`../src/${SCAN_REASONS}`];
+    if (source === undefined) throw new Error(`${SCAN_REASONS} is not here`);
+    const named = declaredIn(SCAN_REASONS, source, "NamedScanReason");
+    const reason = declaredIn(SCAN_REASONS, source, "ScanReason");
+    if (named === null || reason === null)
+      throw new Error(`${SCAN_REASONS} declares no ScanReason union`);
+    const resolve = (node: Node) => resolvedIn(SCAN_REASONS, source, node);
+    return {
+      names: literalsOf(named),
+      named,
+      arms: armsOf(resolve(reason)).map(resolve),
+    };
+  }
+
+  it("finds the union it is about", () => {
+    // **The rule reads two declarations by name**, so a rename or a move takes
+    // its subject away, and a guard with no subject passes over nothing. This
+    // is what fails instead.
+    const { names, named, arms } = union();
+    expect(names.length).toBeGreaterThan(0);
+    expect(arms.length).toBeGreaterThan(1);
+    // **Every name is a literal**, which is what makes the reference below
+    // worth checking: `type NamedScanReason = string` would leave the arm that
+    // points at it discriminated by nothing.
+    expect(names).toHaveLength(armsOf(named).length);
+    for (const arm of arms) {
+      expect(arm.type).toBe("TSTypeLiteral");
+      expect(propertiesOf(arm).map((one) => one.name)).toContain("kind");
+      // **The discriminant is closed**, here rather than inside the payload
+      // rule: a `kind` widened to `string` is a defect of its own, and the rule
+      // that goes red should be the one that names it. The compiler refuses it
+      // too, at the `REASONS` lookup.
+      const kind = discriminantOf(arm);
+      const closed =
+        (kind?.type === "TSLiteralType" &&
+          isNode(kind.literal) &&
+          typeof kind.literal.value === "string") ||
+        (kind?.type === "TSTypeReference" &&
+          isNode(kind.typeName) &&
+          text(kind.typeName.name) === "NamedScanReason");
+      expect(closed ? "closed" : `${kindOf(arm)} is not a closed kind`).toBe(
+        "closed",
+      );
+    }
+  });
+
+  it("lets three arms carry one named payload each and no others", () => {
+    const { arms } = union();
+    const carrying = arms.filter((arm) =>
+      propertiesOf(arm).some((one) => one.name !== "kind"),
+    );
+
+    // **What each arm carries, not only which arms carry something**, which is
+    // the dimension the shape before this was blind in: it read the set of arms
+    // and never how many properties one of them holds, so `detail?: string`
+    // beside `failure` on the `file` arm was a second free text store in queue
+    // state with the whole suite green. Optional is the spelling that got
+    // through; required is refused by the compiler at five sites.
+    //
+    // Sorted because the rule is which and not in what order, and an equality
+    // so it is red in both directions: a fourth arm, a second property on one
+    // of these three, and one of these three losing what it carries.
+    expect(
+      carrying
+        .map(
+          (arm) =>
+            `${kindOf(arm)}: ${propertiesOf(arm)
+              .map((one) => one.name)
+              .filter((name) => name !== "kind")
+              .sort()
+              .join(",")}`,
+        )
+        .sort(),
+    ).toEqual(["audio: failure", "file: failure", "server-said: message"]);
+  });
+});

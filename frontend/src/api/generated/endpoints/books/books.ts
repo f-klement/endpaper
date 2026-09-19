@@ -1949,10 +1949,11 @@ export const getBulkActionUrl = () => {
 /**
  * Apply one verb to a selection of books.
  *
- * One endpoint rather than six, because every verb shares the same three
- * steps: resolve the ids the caller may actually touch, apply, and report
- * updated/unchanged/skipped. Six handlers would be six copies of the
- * permission walk, and the fifth one added would be the one that forgot it.
+ * One endpoint rather than one per verb, because every verb shares the same
+ * three steps: resolve the ids the caller may actually touch, apply, and
+ * report updated/unchanged/skipped. A route per verb would be a copy of the
+ * permission walk per verb, and the next one added would be the one that
+ * forgot it.
  *
  * A separate `/bulk/ownership` used to sit beside this with the same body,
  * the same permission walk and an identical result shape. It was removed

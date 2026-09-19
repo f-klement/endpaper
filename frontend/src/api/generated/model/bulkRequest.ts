@@ -12,7 +12,7 @@ import type { BulkAction } from "./bulkAction.ts";
  *
  * `value` is deliberately loose: which field it fills depends on the action,
  * and the handler validates it against that action rather than the schema
- * carrying six mutually exclusive optional fields.
+ * carrying one mutually exclusive optional field per verb.
  */
 export interface BulkRequest {
   action: BulkAction;

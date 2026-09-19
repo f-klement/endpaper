@@ -944,9 +944,14 @@ The sharper one is `series_index`, which the API bounds at 1000: a ten character
 `245 $n` stored `1e9`, and `GET /api/books/series` computes
 `set(range(1, max(held) + 1))`, which at a measured 70.5 bytes and 0.624 seconds
 per million elements is roughly 70 GB and ten minutes, again on every request
-until the row is found. `importing.within_bounds` reads the bounds off
-`BookCreate.model_fields` and the column widths off `Book.__table__`, so a field
-added later inherits them.
+until the row is found. `catalogue.Record` holds every incoming scalar to
+`catalogue._TEXT_CEILINGS` and `_NUMBER_RANGES`, which are imported from the
+declarations they mirror, `models` for the text ceilings and the request body's
+own `Ge` and `Le` for the numeric ranges, so a field added later inherits the
+bound once it is named in one of those two tables, and
+`tests/test_marc.py::TestEveryColumnTheImporterWritesIsBounded` is what requires
+it to be. `importing.within_bounds` is the belt behind that, and applies nothing
+the tables have not already applied.
 
 **The MARC preview publishes an ISBN existence oracle, and it is accepted
 rather than closed.** `MarcPreviewOut.blocked` counts records whose ISBN belongs

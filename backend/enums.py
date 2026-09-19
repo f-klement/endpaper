@@ -846,11 +846,13 @@ class ThemeMode(StrEnum):
 class BulkAction(StrEnum):
     """What a bulk selection does to the books in it.
 
-    One endpoint per verb would be four near-identical handlers sharing the
-    same permission walk and the same three-way result. The verb is a field
-    instead.
+    One endpoint per verb would be a near-identical handler per member below,
+    each repeating the same permission walk and the same three-way result. The
+    verb is a field instead.
     """
 
+    # No count in the docstring above, deliberately: a number beside the list it
+    # counts goes stale in silence, and this one did.
     ADD_TAG = "add_tag"
     REMOVE_TAG = "remove_tag"
     SET_STATUS = "set_status"

@@ -9,7 +9,7 @@ import { useCallback, useRef, useState } from "react";
 
 import { useQueryClient } from "@tanstack/react-query";
 
-import { errorText } from "../../components/ErrorState";
+import { classifyError } from "../../components/ErrorState";
 import { useInvalidate } from "../../api/invalidate";
 import { ApiError } from "../../api/mutator";
 
@@ -42,7 +42,7 @@ import type {
 } from "../../api/generated/model";
 import { QUERY_FLOOR } from "../../lib/bookBounds";
 import { referenceFor } from "../../lib/digitalReference";
-import { useTranslation, type MessageKey } from "../../i18n";
+import { useTranslation } from "../../i18n";
 import type { FileFailure } from "../../lib/fileReaders";
 import type { AudioFailure, AudioTags } from "../../lib/audiobook";
 import type {
@@ -76,39 +76,6 @@ import {
   type BookDraft,
   type PendingBook,
 } from "./types";
-
-/**
- * What a member is told about a file that yielded nothing.
- *
- * A total mapping of `FileFailure` rather than a switch, so a reason added to
- * that closed union is a compile error here instead of a file reported with
- * whatever the last arm said.
- */
-const FILE_FAILURES: Record<FileFailure, MessageKey> = {
-  "not-an-epub": "file.notAnEpub",
-  "not-a-mobi": "file.notAMobi",
-  "not-an-fb2": "file.notAnFb2",
-  "not-a-comic": "file.notAComic",
-  "not-a-pdf": "file.notAPdf",
-  damaged: "file.damaged",
-  protected: "file.protected",
-  "too-large": "file.tooLarge",
-  unsupported: "file.unsupported",
-  "no-inflate": "file.noInflate",
-};
-
-/**
- * What a member is told about an audio file that said nothing about itself.
- *
- * Its own total mapping rather than an arm of `FILE_FAILURES`, because the two
- * unions are closed separately: an audio file that carries no tags is an
- * ordinary file rather than a broken one, and it still becomes a candidate
- * under whatever its folder is called.
- */
-const AUDIO_FAILURES: Record<AudioFailure, MessageKey> = {
-  "no-tags": "audio.noTags",
-  unreadable: "audio.unreadable",
-};
 
 /** Below this, a search is noise rather than a query. Matches the API bound. */
 const MIN_QUERY_LENGTH = QUERY_FLOOR;
@@ -615,6 +582,102 @@ export function useBookSearch(): UseBookSearchResult {
  */
 export type CatalogueAnswer = "nothing" | "records" | "records-for-now";
 
+/**
+ * The reasons a row can carry that are a name and nothing else.
+ *
+ * **Declared rather than derived from `ScanReason["kind"]`**, and not because
+ * one spelling catches more. Measured against a widened `kind`, the two produce
+ * the same six errors in the same six places and differ in the last one's code
+ * alone: `TS7053` on the `REASONS[reason.kind]` lookup, against `TS2345` in
+ * that same expression.
+ *
+ * **It is the unwidened case that decides it.**
+ * `Record<ScanReason["kind"], MessageKey>` demands a sentence for `file`,
+ * `audio` and `server-said`, three keys nothing ever looks up because those
+ * arms are answered before `REASONS` is reached. Measured: `TS2739` naming the
+ * three, plus the import that spelling leaves unused.
+ *
+ * **What a type cannot say about this union is said in
+ * `frontend/tests/houseRules.test.ts`**: three arms carry a payload and every
+ * other is a name, which is a rule about arity rather than about any type, so
+ * no spelling of a payload evades it.
+ */
+export type NamedScanReason =
+  | "no-title"
+  | "unreadable"
+  | "not-in-catalogues"
+  | "lookup-failed"
+  | "kept-the-name"
+  | "kept-for-now"
+  | "unreachable";
+
+/**
+ * Why a row is where it is, as a name rather than as a sentence.
+ *
+ * **The words are chosen where the row is drawn**, which is `REASONS` in
+ * `RapidQueue.tsx` and the two tables beside it. It is the discipline
+ * `lib/fileReaders.ts` and `lib/stores.ts` state for their own readers, and the
+ * one `OFFERED_AGAIN` keeps for `CatalogueAnswer` above: a reason with no
+ * sentence for a member is a compile error rather than a row that says nothing.
+ * Stored as a sentence it was also fixed in the locale in force at the moment
+ * the file failed, where a name re-renders in the language being read.
+ *
+ * **No arm interpolates, and that is the cost of the change rather than a
+ * property of it.** `string` took an interpolated sentence for free. The first
+ * reason to want one, "could not read chapter 12 of 40", takes a `kind` of its
+ * own outside `NamedScanReason`, carries the numbers, and is answered by its
+ * own branch in `reasonText`. **Never a field hung on a name that is already
+ * there**: `REASONS` is reached by the name alone, so the numbers would compile
+ * and reach nothing.
+ *
+ * **Exactly one arm carries free text, and it is named for what it carries.**
+ * That is `server-said`, and no type states it: a second free text arm compiles
+ * clean once it has a branch, the first having made free text ordinary. So
+ * `frontend/tests/houseRules.test.ts` states it, off this declaration, as the
+ * three arms that may carry anything besides a `kind`. It cannot resolve an arm
+ * spelled as a type from another module, and refuses that by a blunter rule.
+ */
+export type ScanReason =
+  /** What a reader said about a picked file, over `fileReaders.FileFailure`. */
+  | { kind: "file"; failure: FileFailure }
+  /** What the audio reader said about one audio file. */
+  | { kind: "audio"; failure: AudioFailure }
+  /**
+   * The server's own message, in whatever language it answered in.
+   *
+   * **The one free text arm.** `addAll` is its only site: a refused request
+   * carries a `detail` written for the reader, and nothing on this side can
+   * translate it.
+   */
+  | { kind: "server-said"; message: string }
+  | { kind: NamedScanReason };
+
+/**
+ * The reason a refused request leaves on the row it was refused for.
+ *
+ * **A mapping and not a second classification**, which is the whole of why
+ * `classifyError` is where it is: the branches that tell a transport failure
+ * from a server's own words are one copy, and this turns that answer into a
+ * name the queue can keep. Written out here, the two copies would diverge on
+ * the first branch added to either, with nothing red.
+ *
+ * **The split is why this is not `errorText` itself.** That answers a sentence
+ * now, in the locale now; a queued row is drawn later and possibly in the other
+ * language, so the half this page has words for becomes a name and the half it
+ * does not keeps the words.
+ *
+ * Nothing at all where the throw carried no message, which is what
+ * `errorText(error, "", t)` answered `""` for: a row with an empty reason and a
+ * row with none already rendered alike.
+ */
+function reasonForError(error: unknown): ScanReason | undefined {
+  const failure = classifyError(error);
+  if (failure === undefined) return undefined;
+  return failure.kind === "unreachable"
+    ? { kind: "unreachable" }
+    : { kind: "server-said", message: failure.message };
+}
+
 /** One book caught by the rapid scanner or picked as a file, and how it has gone so far. */
 export interface ScannedEntry {
   /**
@@ -659,8 +722,14 @@ export interface ScannedEntry {
     | "not-found"
     | "failed";
   draft: BookDraft | null;
-  /** Why it could not be read, or could not be added once the batch has run. */
-  reason?: string;
+  /**
+   * Why it could not be read, or could not be added once the batch has run.
+   *
+   * **A name, never a sentence**: see `ScanReason`. Absent is the absence, and
+   * it is what a row going back to `searching` is set to; a `"none"` arm would
+   * be a second spelling of the same thing.
+   */
+  reason?: ScanReason;
   /**
    * What to ask the catalogue about this file, derived from its name.
    *
@@ -703,6 +772,27 @@ export interface ScannedEntry {
    * folder twice queues nothing twice.
    */
   group?: AudiobookGroup;
+  /**
+   * Why each of this row's own files said nothing, keyed by the file key.
+   *
+   * **Present only while the row can still be split**, which is
+   * `splitTheGroup`'s own condition rather than a second rule: more than one
+   * file. A row of one file already states what its file said in `reason` and
+   * nothing can split it further, so a map there would be the same value twice,
+   * and the two would part company at the first patch of `reason`.
+   *
+   * A note from one file of forty describes that file rather than the book, so
+   * a grouped row shows none of them; the split is where each file becomes a
+   * row that has to state its own.
+   *
+   * **Not on the group's files**, which are `lib/audiobookGroups.ts`'s type:
+   * what a member is told is not a fact about a grouping, and a page's union
+   * has no business in `lib/`.
+   *
+   * Narrowed to the files this row claims rather than the whole pick, so one
+   * row does not hold the reasons belonging to every other row in the queue.
+   */
+  fileReasons?: ReadonlyMap<string, ScanReason>;
   /**
    * The picked files this row claims, where it came from files.
    *
@@ -1111,11 +1201,11 @@ export function useRapidIntake(): UseRapidIntakeResult {
   const scanAdd = useScanAdd();
   const reportReference = useReportDigitalReference();
   const locations = useKnownLocations();
-  // For the per-row failure reason: a rejected fetch has no message worth
-  // showing, so `errorText` needs the catalogue to supply one. The locale is
-  // for the paced lookup, which breaks ties towards the reader's own printing
-  // exactly as the search box does.
-  const { t, locale } = useTranslation();
+  // **The locale, and nothing else this hook says to a member.** Every reason a
+  // row carries is a name now, and the last `t` went with them; this is for the
+  // paced lookup, which breaks ties towards the reader's own printing exactly
+  // as the search box does.
+  const { locale } = useTranslation();
 
   /** Rewrite the one entry with this key, leaving every other alone. */
   function settle(key: string, patch: Partial<ScannedEntry>) {
@@ -1286,7 +1376,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
    */
   function fromTheName(
     naming: FileNaming,
-    note: string | undefined,
+    note: ScanReason | undefined,
     // **The state is in the return type rather than merely in both arms.** A
     // caller spreading this over a row has to end with one, and a `Partial`
     // says it might not, which is a row with no state and no compiler to say so.
@@ -1294,7 +1384,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
     const clues = readName(naming);
     const draft = draftFromName(clues);
     if (draft.title === "") {
-      return { state: "failed", reason: note ?? t("file.noTitle") };
+      return { state: "failed", reason: note ?? { kind: "no-title" } };
     }
     return {
       state: "derived",
@@ -1313,7 +1403,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
     const { readerFor } = await import("../../lib/fileReaders");
     for (const file of files) {
       const key = pickedKey(file);
-      let note: string | undefined;
+      let note: ScanReason | undefined;
       try {
         // **Which reader opens this is `lib/fileReaders.ts`'s question, not
         // this loop's.** An extension with no reader falls through to its name,
@@ -1322,7 +1412,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
         const reader = await readerFor(file.name);
         const reading = reader ? await reader(file) : null;
         if (reading && !reading.ok) {
-          note = t(FILE_FAILURES[reading.failure]);
+          note = { kind: "file", failure: reading.failure };
         } else if (reading) {
           const draft = draftFromFile(reading.metadata);
           if (draft.title !== "") {
@@ -1330,12 +1420,12 @@ export function useRapidIntake(): UseRapidIntakeResult {
             continue;
           }
           // The file opened and named no title, so what is left is its name.
-          note = t("file.noTitle");
+          note = { kind: "no-title" };
         }
       } catch {
         // A bug in the reader rather than anything the file did. Still one
         // entry, and the name is still a signal.
-        note = t("file.unreadable");
+        note = { kind: "unreadable" };
       }
       settle(
         key,
@@ -1367,6 +1457,10 @@ export function useRapidIntake(): UseRapidIntakeResult {
     ]);
 
     const read: AudioFileNaming[] = [];
+    // **Beside the namings rather than in them**, because what a member is told
+    // is not a fact about the grouping: see `ScannedEntry.fileReasons`, which is
+    // where these end up so a split can still say what each file said.
+    const reasons = new Map<string, ScanReason>();
     for (const { file, extension } of picked) {
       // **Nothing is dropped here, and the loop used to drop it.** A file the
       // reader has no arm for is still a file the member picked and still has a
@@ -1375,21 +1469,26 @@ export function useRapidIntake(): UseRapidIntakeResult {
       const audio = audiobook.isAudioExtension(extension) ? extension : null;
       let tags: AudioTags | null = null;
       // `file.unsupported`, not an audio reason: a file routed here that this
-      // has no arm for is not an audio file that said nothing.
-      let note: string | undefined = audio ? undefined : t("file.unsupported");
+      // has no arm for is not an audio file that said nothing. Spelled as the
+      // `FileFailure` it is, which is the name the picked file path gives it.
+      let note: ScanReason | undefined = audio
+        ? undefined
+        : { kind: "file", failure: "unsupported" };
       if (audio) {
         try {
           const reading = await audiobook.readAudioTags(file, audio);
           if (reading.ok) tags = reading.tags;
-          else note = t(AUDIO_FAILURES[reading.failure]);
+          else note = { kind: "audio", failure: reading.failure };
         } catch {
           // A bug in the reader rather than anything the file did. The file is
           // still one part of a book and its name still says something.
-          note = t("file.unreadable");
+          note = { kind: "unreadable" };
         }
       }
+      const key = pickedKey(file);
+      if (note) reasons.set(key, note);
       read.push({
-        key: pickedKey(file),
+        key,
         name: file.name,
         folders: foldersOf(file),
         tags,
@@ -1401,11 +1500,12 @@ export function useRapidIntake(): UseRapidIntakeResult {
         // while `tests/lib/fileName.test.ts` holds the two extension sets
         // equal, which is what makes this a defence rather than a path.
         whole: audio === null || audiobook.AUDIO_EXTENSIONS[audio] === "book",
-        note,
       });
     }
 
-    const candidates = groups.groupAudiobooks(read).map(entryForGroup);
+    const candidates = groups
+      .groupAudiobooks(read)
+      .map((group) => entryForGroup(group, reasons));
     // **In the pending row's place, and only if it is still there.** A member
     // who discarded the queue while this was reading gets an empty queue rather
     // than rows arriving into the one they just emptied, and nothing else has
@@ -1429,8 +1529,18 @@ export function useRapidIntake(): UseRapidIntakeResult {
    * where they said nothing does this fall to the folder name through the same
    * `fromTheName` every other picked file uses.
    */
-  function entryForGroup(group: AudiobookGroup): ScannedEntry {
+  function entryForGroup(
+    group: AudiobookGroup,
+    reasons: ReadonlyMap<string, ScanReason>,
+  ): ScannedEntry {
     const keys = group.files.map((file) => file.key);
+    // This row's own files, never the whole pick: see `ScannedEntry.fileReasons`.
+    const own = new Map(
+      keys.flatMap((key) => {
+        const reason = reasons.get(key);
+        return reason === undefined ? [] : [[key, reason] as const];
+      }),
+    );
     const base = {
       key: `audio:${[...keys].sort()[0]}:${keys.length}`,
       isbn: "",
@@ -1440,10 +1550,12 @@ export function useRapidIntake(): UseRapidIntakeResult {
       format: BookFormat.audiobook,
       group,
       draft: null,
+      // Only while this row can still be split: `ScannedEntry.fileReasons`.
+      fileReasons: group.files.length > 1 && own.size > 0 ? own : undefined,
     };
     // Only from a group of one. A note from one file of forty describes that
     // file and would read as though the whole book had failed.
-    const note = group.files.length === 1 ? group.files[0]!.note : undefined;
+    const note = group.files.length === 1 ? own.get(keys[0]!) : undefined;
 
     const draft = draftFromAudiobook(group);
     if (draft !== null) {
@@ -1489,7 +1601,12 @@ export function useRapidIntake(): UseRapidIntakeResult {
       current.flatMap((entry) => {
         if (entry.key !== key || !entry.group) return [entry];
         if (entry.group.files.length < 2) return [entry];
-        return groups.splitApart(entry.group).map(entryForGroup);
+        // The reasons the pick read are the row's, so each part gets back what
+        // its own file said: there is nothing left to read them from by now.
+        const reasons = entry.fileReasons ?? new Map<string, ScanReason>();
+        return groups
+          .splitApart(entry.group)
+          .map((group) => entryForGroup(group, reasons));
       }),
     );
   }
@@ -1555,7 +1672,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
         settle(entry.key, {
           state: "derived",
           answered: "nothing",
-          reason: t("fallback.notInCatalogues"),
+          reason: { kind: "not-in-catalogues" },
         });
         return;
       }
@@ -1571,9 +1688,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
       settle(entry.key, {
         state: "derived",
         answered: unknown ? "nothing" : undefined,
-        reason: t(
-          unknown ? "fallback.notInCatalogues" : "fallback.lookupFailed",
-        ),
+        reason: { kind: unknown ? "not-in-catalogues" : "lookup-failed" },
       });
     }
   }
@@ -1733,7 +1848,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
         failures.push({
           ...entry,
           state: "failed",
-          reason: errorText(error, "", t),
+          reason: reasonForError(error),
         });
       }
     }
@@ -1837,7 +1952,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
         state: "derived",
         answered: "records",
         matches: undefined,
-        reason: t("fallback.keptTheName"),
+        reason: { kind: "kept-the-name" },
       }),
     keepEveryNameForNow: () =>
       setEntries((current) =>
@@ -1851,7 +1966,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
                 // what the catalogue answers again, and holding them would be a
                 // second store of a record with no rule for how long it lives.
                 matches: undefined,
-                reason: t("fallback.keptForNow"),
+                reason: { kind: "kept-for-now" },
               }
             : entry,
         ),

@@ -5,12 +5,21 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import RapidQueue from "../../../../src/pages/ScanPage/components/RapidQueue";
-import { BookFormat } from "../../../../src/api/generated/model";
+import { BookFormat, Locale } from "../../../../src/api/generated/model";
 import type { ScannedEntry } from "../../../../src/pages/ScanPage/hooks";
 import { renderLocalised } from "../../../utils";
 
+/**
+ * The queue, in a locale.
+ *
+ * **The locale is a parameter here and nowhere else on this page**, and that is
+ * where the reasons moved to: a row carries the name of what happened, and the
+ * sentence is chosen in the language being read. The hook's own tests need no
+ * locale at all now, which is why `renderHookWithProviders` was never widened.
+ */
 function renderQueue(
   overrides: Partial<Parameters<typeof RapidQueue>[0]> = {},
+  { locale = Locale.en }: { locale?: Locale } = {},
 ) {
   const props = {
     entries: [] as ScannedEntry[],
@@ -34,7 +43,9 @@ function renderQueue(
     onSplit: vi.fn(),
     ...overrides,
   };
-  const { container, rerender } = renderLocalised(<RapidQueue {...props} />);
+  const { container, rerender } = renderLocalised(<RapidQueue {...props} />, {
+    locale,
+  });
   return {
     ...props,
     container,
@@ -239,7 +250,11 @@ describe("RapidQueue", () => {
     renderQueue({
       entries: [
         picked(
-          { state: "failed", draft: null, reason: "Not an EPUB file." },
+          {
+            state: "failed",
+            draft: null,
+            reason: { kind: "file", failure: "not-an-epub" },
+          },
           "broken.epub",
         ),
       ],
@@ -300,7 +315,12 @@ describe("RapidQueue", () => {
             title: "Dune",
             suggested_tag_ids: [],
           },
-          reason: "Book with this ISBN already in catalog",
+          // The one arm that carries words rather than a name: the server's
+          // own `detail`, which nothing on this side can translate.
+          reason: {
+            kind: "server-said",
+            message: "Book with this ISBN already in catalog",
+          },
         }),
       ],
       result: { added: 12, failed: 1, unreferenced: 0 },
@@ -317,7 +337,7 @@ describe("RapidQueue", () => {
           isbn: "9780441013593",
           state: "failed",
           draft: null,
-          reason: "Nope",
+          reason: { kind: "server-said", message: "Nope" },
         }),
       ],
       result: { added: 1, failed: 1, unreferenced: 0 },
@@ -368,7 +388,9 @@ describe("RapidQueue and a book taken from its file name", () => {
 
   it("says what the file itself could not say, beside it", () => {
     renderQueue({
-      entries: [{ ...derived, reason: "Not an EPUB file." }],
+      entries: [
+        { ...derived, reason: { kind: "file", failure: "not-an-epub" } },
+      ],
     });
 
     expect(screen.getByText(/Not an EPUB file/)).toBeInTheDocument();
@@ -574,7 +596,7 @@ describe("RapidQueue and a book taken from its file name", () => {
         {
           ...derived,
           answered: "nothing" as const,
-          reason: "Not in the catalogues.",
+          reason: { kind: "not-in-catalogues" },
         },
         {
           ...derived,
@@ -597,7 +619,7 @@ describe("RapidQueue and a book taken from its file name", () => {
         {
           ...derived,
           answered: "records" as const,
-          reason: "Kept under its file name.",
+          reason: { kind: "kept-the-name" },
         },
       ],
     });
@@ -832,20 +854,75 @@ describe("RapidQueue and a book taken from its file name", () => {
         {
           ...derived,
           answered: "records" as const,
-          reason: "Kept under its file name.",
+          reason: { kind: "kept-the-name" },
         },
         {
           ...derived,
           key: "file:other.pdf:10:0",
           answered: "records-for-now" as const,
-          reason:
-            "Kept under its file name for now, and can be looked up again.",
+          reason: { kind: "kept-for-now" },
         },
       ],
     });
 
     expect(screen.getByText(/Kept under its file name\./)).toBeInTheDocument();
     expect(screen.getByText(/can be looked up again/)).toBeInTheDocument();
+  });
+
+  it("tells a member in German what the file itself could not say", () => {
+    // **The arm the old arrangement could not reach at all.** The sentence used
+    // to be chosen in the hook, at the moment the file failed, and the hook's
+    // tests render in English with no way past it: no test anywhere exercised a
+    // German reason. It is chosen here now, so this one does.
+    renderQueue(
+      {
+        entries: [
+          { ...derived, reason: { kind: "file", failure: "not-an-epub" } },
+        ],
+      },
+      { locale: Locale.de },
+    );
+
+    expect(screen.getByText(/Keine EPUB-Datei/)).toBeInTheDocument();
+  });
+
+  it("tells a member in German why a book kept its file name", () => {
+    renderQueue(
+      {
+        entries: [
+          {
+            ...derived,
+            answered: "nothing" as const,
+            reason: { kind: "not-in-catalogues" },
+          },
+        ],
+      },
+      { locale: Locale.de },
+    );
+
+    expect(
+      screen.getByText(/In keinem Katalog gefunden, bleibt unter dem/),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the server's own words alone in either language", () => {
+    // The one free text arm. A `detail` written by the server is already a
+    // sentence for the reader, and there is no catalogue on this side to look
+    // it up in: what a German reader sees is what the server said.
+    renderQueue(
+      {
+        entries: [
+          {
+            ...derived,
+            state: "failed" as const,
+            reason: { kind: "server-said", message: "Shelf is full" },
+          },
+        ],
+      },
+      { locale: Locale.de },
+    );
+
+    expect(screen.getByText(/Shelf is full/)).toBeInTheDocument();
   });
 
   it("says nothing about deciding when nothing is being decided", () => {

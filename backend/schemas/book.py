@@ -912,7 +912,7 @@ class BulkRequest(BaseModel):
 
     `value` is deliberately loose: which field it fills depends on the action,
     and the handler validates it against that action rather than the schema
-    carrying six mutually exclusive optional fields.
+    carrying one mutually exclusive optional field per verb.
     """
 
     book_ids: list[RowIdField] = Field(min_length=1, max_length=500)

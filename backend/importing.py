@@ -654,6 +654,36 @@ def bounded_fields(record: Record) -> dict[str, Any]:
     than an optimisation: matching on the incoming value and storing the bounded
     one means the key a duplicate is looked up by is not the key that was stored,
     so the same record imported twice can fail to find itself.
+
+    **The `within_bounds` call no longer bounds anything, and is kept as belt.**
+    Every producer builds its record through `Record.__init__`, so
+    `catalogue.Record.__post_init__` has already held every scalar to
+    `_TEXT_CEILINGS` or `_NUMBER_RANGES`, and the upload path has truncated the
+    cut set in `Record.from_upload` before that. Measured over 86 (field, value,
+    constructor) cases, values at each bound, one past it and far past it,
+    through both constructors: this function differed from the record's own
+    fields in 0 of them. It is weaker than the sample suggests: for all ten
+    names the `catalogue` ceiling **equals** `min(column width, BookCreate
+    MaxLen)` and each range equals the `Ge` and `Le`, so `within_bounds` is the
+    identity over its whole reachable domain and no test driving a record end to
+    end can tell it from `return value`.
+
+    **What would make the second bound reachable**, stated so the belt is
+    checkable rather than assumed: a `Record` that never ran `__post_init__`.
+    That is an `object.__setattr__` outside `catalogue.py`'s own droppers, or a
+    record built through `__new__`, `copy` or unpickling. Nothing does either
+    today, **and that bypass is what observes this call**:
+    `tests/test_importing.py::TestTheSecondBoundHasOneConstructibleBypass`
+    pushes each of these columns past each side of its bound after construction,
+    a ceiling and, where the bound is a range, a floor, and asserts the value
+    that comes back rather than that something changed. Deleting that test leaves
+    this line with nothing that would notice it stopping, which is the state this
+    docstring described until 2026-09-19.
+
+    **Which is why this is not where a new column gets its bound.** The
+    ceilings live in `catalogue.py` and
+    `tests/test_marc.py::TestEveryColumnTheImporterWritesIsBounded` asserts that
+    every name in `_MARC_RECORD_FIELDS` has an entry in one of its two tables.
     """
     fields = {
         name: within_bounds(name, getattr(record, name))

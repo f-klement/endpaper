@@ -26,7 +26,6 @@ import marc
 import marc_fields
 from catalogue import Heading
 from enums import ClassificationScheme
-from schemas.book import BookCreate
 from tests.test_house_rules import _is_vendored
 
 #: The application's own directory.
@@ -980,41 +979,65 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
 
 
 class TestEveryColumnTheImporterWritesIsBounded:
-    """No field of a MARC record may be silently uncovered by the guard.
+    """No field of a MARC record may be silently uncovered by the bound.
 
-    **This exists because one was.** `within_bounds` reads the bound off
-    `BookCreate.model_fields` and the column width off `Book.__table__`, and
-    `description` had neither: a `Text` column reports no length and the field
-    carried no `max_length`, so the value came back whole while the docstring
-    said "strings truncate". Both critic seats found it independently, from
-    opposite ends.
+    **This exists because one was.** `description` sits in a `Text` column,
+    which reports no length, and carried no `max_length`, so the value came back
+    whole while the docstring said "strings truncate". Both critic seats found
+    it independently, from opposite ends.
 
     The lesson is not that `description` needed a bound, it is that **a field
     added later inherits the absence rather than the guard**. So the tuple the
-    importer walks is enumerated here and every entry is required to derive one,
-    which is a rule rather than a list: adding a field to `_MARC_RECORD_FIELDS`
-    without giving it a bound reddens this.
+    importer walks is checked against the tables that decide, and every entry
+    has to appear in one of them.
+
+    **It asks `catalogue.py`, because that is what decides.** Every record the
+    importer applies has been bounded by `Record.__post_init__`, and every
+    uploaded one by `Record.from_upload` first (`marc.py` routes the upload
+    through it), both against `_TEXT_CEILINGS` and `_NUMBER_RANGES`. Asking
+    `importing.within_bounds` instead, which this did until 2026-09-18, is the
+    wrong question in both directions. It reddens for a field bounded at the
+    `Record` layer that carries no `BookCreate` `MaxLen` **and sits in a column
+    declaring no width**, which is `description`'s own shape: measured over the
+    seven text names the importer writes, by stripping each field's `MaxLen` in
+    turn, that is 1 of 7, because for the other six the column width is there to
+    be read. And it passes a field carrying a `BookCreate` bound that
+    `catalogue.py` does not name, measured on `location`, for which the old
+    assertion was green.
+
+    **Tested rung, and it stays there rather than becoming self enforcing.** Not
+    because the import direction forbids it: `importing.py` reads
+    `from catalogue import Record` and `catalogue.py` imports nothing back, so a
+    module scope assertion would sit the right way round. What stops it is that
+    both tables are private and `TestNoModuleReadsAnotherModulesPrivateNames`
+    above forbids a module that is not a test reading another module's private
+    name. So the rung is reachable, at the price of publishing the union from
+    `catalogue.py` first, and that is the change to argue rather than a fact of
+    the layout. It enumerates nothing either way: `_MARC_RECORD_FIELDS` comes
+    from the module under test and both tables are read from `catalogue.py`, so
+    no field name is written down here.
+
+    **What it still cannot see** is a name moved out of `_TEXT_CEILINGS` and
+    into `catalogue._UNBOUNDED` in one gesture, if the name is not one the
+    importer writes. `test_catalogue.py::TestWhichScalarsAreBoundedAndWhichAreNamedInstead`
+    is where that is pinned, in a literal, for the reason its own docstring
+    gives.
     """
 
     def test_every_field_the_importer_writes_derives_a_bound(self):
-        from importing import _MARC_RECORD_FIELDS, within_bounds
+        import catalogue
+        from importing import _MARC_RECORD_FIELDS
 
-        unbounded = []
-        for name in _MARC_RECORD_FIELDS:
-            # A value no bound could leave alone: past every string width in the
-            # schema and past every numeric ceiling.
-            probe: object = "x" * 100_000
-            if BookCreate.model_fields[name].annotation in (int | None, float | None):
-                probe = 10**9
-            if within_bounds(name, probe) == probe:
-                unbounded.append(name)
+        bounded = set(catalogue._TEXT_CEILINGS) | set(catalogue._NUMBER_RANGES)
+        unbounded = [name for name in _MARC_RECORD_FIELDS if name not in bounded]
 
         assert unbounded == [], (
-            f"{unbounded} pass through `within_bounds` unchanged, so an uploaded "
-            "record can write whatever it likes into them. The guard reads the "
-            "bound off `BookCreate.model_fields` and the column width off "
-            "`Book.__table__`; give the field one of those rather than adding an "
-            "arm to the guard."
+            f"{unbounded} are written out of every record the importer applies "
+            "and nothing bounds them. `Record.__post_init__` bounds a scalar "
+            "only where `catalogue._TEXT_CEILINGS` or `catalogue._NUMBER_RANGES` "
+            "names it, so a column in neither table is stored at whatever width "
+            "a catalogue sent. Give the field an entry in one of those two "
+            "tables rather than adding an arm here."
         )
 
     def test_the_tuple_the_importer_walks_is_the_one_the_book_has(self):

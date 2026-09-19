@@ -1,6 +1,85 @@
-import { useTranslation } from "../../../i18n";
+import { useTranslation, type MessageKey, type Translate } from "../../../i18n";
 import type { BookMatch } from "../../../api/generated/model";
-import type { ScannedEntry } from "../hooks";
+import type { AudioFailure } from "../../../lib/audiobook";
+import type { FileFailure } from "../../../lib/fileReaders";
+import type { NamedScanReason, ScanReason, ScannedEntry } from "../hooks";
+
+/**
+ * What a member is told about a file that yielded nothing.
+ *
+ * A total mapping of `FileFailure` rather than a switch, so a reason added to
+ * that closed union is a compile error here instead of a file reported with
+ * whatever the last arm said.
+ */
+const FILE_FAILURES: Record<FileFailure, MessageKey> = {
+  "not-an-epub": "file.notAnEpub",
+  "not-a-mobi": "file.notAMobi",
+  "not-an-fb2": "file.notAnFb2",
+  "not-a-comic": "file.notAComic",
+  "not-a-pdf": "file.notAPdf",
+  damaged: "file.damaged",
+  protected: "file.protected",
+  "too-large": "file.tooLarge",
+  unsupported: "file.unsupported",
+  "no-inflate": "file.noInflate",
+};
+
+/**
+ * What a member is told about an audio file that said nothing about itself.
+ *
+ * Its own total mapping rather than an arm of `FILE_FAILURES`, because the two
+ * unions are closed separately: an audio file that carries no tags is an
+ * ordinary file rather than a broken one, and it still becomes a candidate
+ * under whatever its folder is called.
+ */
+const AUDIO_FAILURES: Record<AudioFailure, MessageKey> = {
+  "no-tags": "audio.noTags",
+  unreadable: "audio.unreadable",
+};
+
+/**
+ * One sentence per reason that is a name and nothing else.
+ *
+ * A total `Record` rather than a switch, which is `STORE_FAILURES`' rule and
+ * `OFFERED_AGAIN`'s: a reason added to `NamedScanReason` with no sentence here
+ * is a compile error rather than a row rendered blank. The two tables above are
+ * the same thing one level down, for the two arms that carry a reader's own
+ * closed union.
+ *
+ * **Keyed on `NamedScanReason` rather than on `ScanReason["kind"]`**, because
+ * three of the union's arms are answered above this table and never reach it:
+ * keyed on every kind, this would have to carry a sentence for `file`, `audio`
+ * and `server-said` that nothing would ever look up. `NamedScanReason` holds
+ * the rest of that reasoning.
+ */
+const REASONS: Record<NamedScanReason, MessageKey> = {
+  "no-title": "file.noTitle",
+  unreadable: "file.unreadable",
+  "not-in-catalogues": "fallback.notInCatalogues",
+  "lookup-failed": "fallback.lookupFailed",
+  "kept-the-name": "fallback.keptTheName",
+  "kept-for-now": "fallback.keptForNow",
+  unreachable: "common.cannotReachServer",
+};
+
+/**
+ * The sentence one reason is told in, in the locale being read now.
+ *
+ * **The whole point of the queue holding a name.** The row was rendered in the
+ * language in force when the file failed for as long as the sentence was what
+ * was stored.
+ *
+ * The three arms handled before the table are the three that are not a bare
+ * name: two carry a reader's own closed union, and `server-said` carries the
+ * server's own words, which are the one thing here no catalogue of ours can
+ * translate.
+ */
+function reasonText(reason: ScanReason, t: Translate): string {
+  if (reason.kind === "file") return t(FILE_FAILURES[reason.failure]);
+  if (reason.kind === "audio") return t(AUDIO_FAILURES[reason.failure]);
+  if (reason.kind === "server-said") return reason.message;
+  return t(REASONS[reason.kind]);
+}
 
 /**
  * One catalogue record as one line: what is shown, and what is announced.
@@ -246,7 +325,7 @@ export default function RapidQueue({
                     <span className="text-paper-600 dark:text-paper-400">
                       {" "}
                       {t("fallback.fromTheName")}
-                      {entry.reason ? ` ${entry.reason}` : ""}
+                      {entry.reason ? ` ${reasonText(entry.reason, t)}` : ""}
                     </span>
                   </span>
                 )}
@@ -259,7 +338,7 @@ export default function RapidQueue({
                     {entry.reason && (
                       <span className="text-paper-600 dark:text-paper-400">
                         {" "}
-                        {entry.reason}
+                        {reasonText(entry.reason, t)}
                       </span>
                     )}
                   </span>

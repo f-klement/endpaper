@@ -669,7 +669,10 @@ describe("useRapidIntake and a picked file", () => {
       label: "broken.epub",
       draft: { title: "broken" },
     });
-    expect(result.current.entries[0]?.reason).toBe("Not an EPUB file.");
+    expect(result.current.entries[0]?.reason).toEqual({
+      kind: "file",
+      failure: "not-an-epub",
+    });
   });
 
   it("reads the rest of a batch after one file fails", async () => {
@@ -702,9 +705,7 @@ describe("useRapidIntake and a picked file", () => {
     await settled(result);
 
     expect(result.current.entries[0]?.state).toBe("failed");
-    expect(result.current.entries[0]?.reason).toBe(
-      "This file carries no title.",
-    );
+    expect(result.current.entries[0]?.reason).toEqual({ kind: "no-title" });
   });
 
   it("ignores the same file picked twice", async () => {
@@ -1101,6 +1102,28 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     expect(result.current.entries).toHaveLength(0);
   });
 
+  it("names an unreachable server rather than repeating the browser", async () => {
+    // The one failed add whose reason is a name: nothing answered, so there are
+    // no words of the server's to keep, and "Failed to fetch" is the browser's
+    // own phrase in its own language. Every other failure keeps what the server
+    // wrote, which is already a sentence for the reader.
+    api.on("/api/books/scan", () => {
+      throw new TypeError("Failed to fetch");
+    });
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([new File(["%PDF"], "Dune.pdf")]));
+    await settled(result);
+
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    expect(result.current.entries[0]).toMatchObject({
+      state: "failed",
+      reason: { kind: "unreachable" },
+    });
+  });
+
   const DUPLICATE = {
     status: 409,
     body: {
@@ -1331,7 +1354,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
 
     expect(result.current.entries[0]).toMatchObject({
       state: "derived",
-      reason: "This file carries no title.",
+      reason: { kind: "no-title" },
       draft: { title: "Dune" },
     });
   });
@@ -1346,7 +1369,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
 
     expect(result.current.entries[0]).toMatchObject({
       state: "derived",
-      reason: "Not an EPUB file.",
+      reason: { kind: "file", failure: "not-an-epub" },
       draft: { title: "The Dispossessed" },
     });
   });
@@ -1477,6 +1500,42 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     ]);
   });
 
+  it("hands each part of a split back what its own file said", async () => {
+    // The reasons are read once, at the pick, and the grouped row shows none of
+    // them: a note from one file of forty describes that file. A split makes
+    // each file a row that has to state its own, and by then there is nothing
+    // left to read it from but the row.
+    const { result } = renderRapid();
+    const files = [0, 1].map((index) => {
+      const file = new File([mp3()], `${index}.mp3`);
+      Object.defineProperty(file, "webkitRelativePath", {
+        value: `The Hobbit/${index}.mp3`,
+      });
+      return file;
+    });
+
+    act(() => result.current.pickFiles(files));
+    await settled(result);
+    expect(result.current.entries[0]?.reason).toBeUndefined();
+    const key = result.current.entries[0]!.key;
+
+    act(() => result.current.splitApart(key));
+    await waitFor(() => expect(result.current.entries).toHaveLength(2));
+
+    expect(result.current.entries.map((entry) => entry.reason)).toEqual([
+      { kind: "audio", failure: "no-tags" },
+      { kind: "audio", failure: "no-tags" },
+    ]);
+    // **And they carry no map of their own.** Each is one file, so nothing can
+    // split it again and the reason above is the only copy: a second one would
+    // be the same value stored twice, parting company the first time anything
+    // patched the row.
+    expect(result.current.entries.map((entry) => entry.fileReasons)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
   it("queues nothing twice when the same folder is picked again", async () => {
     const chapters = [chapterFile(0, "Dune"), chapterFile(1, "Dune")];
     const { result } = renderRapid();
@@ -1579,9 +1638,9 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     act(() => result.current.lookUpTheNames());
 
     await waitFor(() =>
-      expect(result.current.entries[0]?.reason).toBe(
-        "Not in the catalogues, kept under its file name.",
-      ),
+      expect(result.current.entries[0]?.reason).toEqual({
+        kind: "not-in-catalogues",
+      }),
     );
     expect(result.current.entries[0]).toMatchObject({
       state: "derived",
@@ -1618,9 +1677,9 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     act(() => result.current.lookUpTheNames());
 
     await waitFor(() =>
-      expect(result.current.entries[0]?.reason).toBe(
-        "Not in the catalogues, kept under its file name.",
-      ),
+      expect(result.current.entries[0]?.reason).toEqual({
+        kind: "not-in-catalogues",
+      }),
     );
     expect(result.current.waiting).toBe(0);
   });
@@ -1703,9 +1762,9 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     act(() => result.current.lookUpTheNames());
 
     await waitFor(() =>
-      expect(result.current.entries[0]?.reason).toBe(
-        "The catalogues could not be reached, kept under its file name.",
-      ),
+      expect(result.current.entries[0]?.reason).toEqual({
+        kind: "lookup-failed",
+      }),
     );
     expect(result.current.waiting).toBe(1);
   });
@@ -1838,7 +1897,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       state: "derived",
       answered: "records-for-now",
       draft: { title: "dispossessed" },
-      reason: "Kept under its file name for now, and can be looked up again.",
+      reason: { kind: "kept-for-now" },
     });
     expect(result.current.entries[0]?.matches).toBeUndefined();
     // **Both counts, because either alone passes on a constant.** The row is
@@ -1920,7 +1979,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
 
       expect(result.current.entries[0]).toMatchObject({
         answered: "records",
-        reason: "Kept under its file name.",
+        reason: { kind: "kept-the-name" },
       });
       expect(result.current.entries[1]?.answered).toBe("records-for-now");
       // One of the two, which is the count that says which row came back.

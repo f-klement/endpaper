@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **A queued scan carries the name of what happened, not the sentence.** The scan queue
+  stored rendered, translated prose in twelve places, so nothing made the next reason have a
+  sentence at all and a row was fixed in the language in force when the file failed.
+  `ScannedEntry.reason` is a closed union now and `RapidQueue` chooses the words as it draws
+  the row, over a total `Record` per union: a reason with no sentence for a member is a compile
+  error. Exactly one arm carries free text, and it is named for what it carries, the server's
+  own message. What a thrown value turns out to be is classified once, in `classifyError`,
+  which the error line renders and the queue keeps as a name. No sentence a member is shown has
+  changed.
+- **A bulk verb with no handler is refused when the module loads, naming the verb.** An eighth
+  member of `BulkAction` without an entry in the dispatch table was a `KeyError` and a 500 to
+  whoever picked it, and no test walked the enum. The table is built through its own
+  completeness check now, so the check cannot be dropped on its own, and every verb is driven
+  against a hostile argument to assert a refusal rather than a 500.
+- **The guard on an imported column's bound asks the table that decides it, and the second
+  bound has an observer.** It probed `importing.within_bounds`, which by the time an import
+  runs has nothing left to bound: every record reaches it through `Record.__post_init__` and an
+  uploaded one through `Record.from_upload` first. The assertion is now that every column the
+  MARC importer writes has an entry in `catalogue._TEXT_CEILINGS` or `_NUMBER_RANGES`, which is
+  stronger in both directions: a field whose column declares no width no longer reddens it
+  falsely, and a field carrying a `BookCreate` bound but no catalogue entry no longer passes
+  it. `within_bounds` is kept and is now declared belt rather than policy, and the one bypass it
+  can still refuse is driven over each side of every bound those columns have, asserting the
+  value the policy says comes back rather than that something changed. No behaviour change.
 - **Folding two Books has one door and a declared policy per child.** The merge carried ten
   hand written transfer policies and nothing related them to Book's ten child collections, so
   an eleventh child table was cascade deleted on every merge with nothing red. The child set

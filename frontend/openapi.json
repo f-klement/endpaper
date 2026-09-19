@@ -2417,7 +2417,7 @@
         "type": "object"
       },
       "BulkAction": {
-        "description": "What a bulk selection does to the books in it.\n\nOne endpoint per verb would be four near-identical handlers sharing the\nsame permission walk and the same three-way result. The verb is a field\ninstead.",
+        "description": "What a bulk selection does to the books in it.\n\nOne endpoint per verb would be a near-identical handler per member below,\neach repeating the same permission walk and the same three-way result. The\nverb is a field instead.",
         "enum": [
           "add_tag",
           "remove_tag",
@@ -2431,7 +2431,7 @@
         "type": "string"
       },
       "BulkRequest": {
-        "description": "One verb applied to a selection.\n\n`value` is deliberately loose: which field it fills depends on the action,\nand the handler validates it against that action rather than the schema\ncarrying six mutually exclusive optional fields.",
+        "description": "One verb applied to a selection.\n\n`value` is deliberately loose: which field it fills depends on the action,\nand the handler validates it against that action rather than the schema\ncarrying one mutually exclusive optional field per verb.",
         "properties": {
           "action": {
             "$ref": "#/components/schemas/BulkAction"
@@ -7995,7 +7995,7 @@
     },
     "/api/books/bulk": {
       "post": {
-        "description": "Apply one verb to a selection of books.\n\nOne endpoint rather than six, because every verb shares the same three\nsteps: resolve the ids the caller may actually touch, apply, and report\nupdated/unchanged/skipped. Six handlers would be six copies of the\npermission walk, and the fifth one added would be the one that forgot it.\n\nA separate `/bulk/ownership` used to sit beside this with the same body,\nthe same permission walk and an identical result shape. It was removed\nrather than carried into the first tagged release: two endpoints for one\naction is two places for the next change to have to land, and dropping one\nafter a release is a breaking change rather than a tidy-up.",
+        "description": "Apply one verb to a selection of books.\n\nOne endpoint rather than one per verb, because every verb shares the same\nthree steps: resolve the ids the caller may actually touch, apply, and\nreport updated/unchanged/skipped. A route per verb would be a copy of the\npermission walk per verb, and the next one added would be the one that\nforgot it.\n\nA separate `/bulk/ownership` used to sit beside this with the same body,\nthe same permission walk and an identical result shape. It was removed\nrather than carried into the first tagged release: two endpoints for one\naction is two places for the next change to have to land, and dropping one\nafter a release is a breaking change rather than a tidy-up.",
         "operationId": "bulk_action",
         "requestBody": {
           "content": {

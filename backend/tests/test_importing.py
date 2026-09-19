@@ -22,13 +22,23 @@ caps, the truncate-before-the-cache-key ordering, and that the catalogue is
 read once rather than three times per row.
 """
 
+from collections import Counter
+from typing import Any
+
 import pytest
 from sqlalchemy import event
 
+import catalogue
 import csv_import
 from catalogue import Record
 from enums import OwnershipStatus, ReadStatus, TagCategory
-from importing import Import, OpdsImport, _CatalogueIndex
+from importing import (
+    _MARC_RECORD_FIELDS,
+    Import,
+    OpdsImport,
+    _CatalogueIndex,
+    bounded_fields,
+)
 from models import TITLE_MAX, Book, Note, Tag, User, UserBook
 from schemas.tag import MAX_TAG_NAME
 
@@ -683,3 +693,225 @@ class TestOpdsValuesAreBoundedBeforeTheyAreMatched:
         result = OpdsImport.for_member(db, member.id).apply([held("")])
 
         assert (result.created, result.matched, result.skipped) == (0, 0, 1)
+
+
+#: The two sides a bound can have: a range has both, a text ceiling has the one.
+#:
+#: Values rather than labels, because the sweep's own guard is keyed on them.
+CEILING, FLOOR = "ceiling", "floor"
+
+
+def _outside_each_bound() -> list[Any]:
+    """Every side of every bound the importer's columns have, with what it must become.
+
+    One case per **side**, not per field, and picked by which table names the
+    field rather than by its type or by a list of names, so a field moving
+    between the two tables gets the other probes and a table growing a name
+    grows this. A range gets its floor as well as its ceiling: measured by a
+    critic seat on 2026-09-19, deleting the `Ge` arm of `within_bounds` and
+    leaving `Le` left the whole backend suite green, and what the floor costs is
+    at `catalogue._NUMBER_RANGES`, a row `BookDetailsUpdate` answers 422 for and
+    nobody can edit back.
+
+    **Each case carries the value the belt must return, not merely that it must
+    differ.** `!=` separates the belt from the identity and from nothing else:
+    the same seat flipped the string arm from truncate to drop, which is the one
+    policy `docs/decisions.md` cites this function as the home of, and the suite
+    was green on all 7,540.
+
+    **The text probe is inhomogeneous** because a homogeneous one hides the end
+    a truncation was taken from: `("x" * n)[:c]` and `("x" * n)[-c:]` are the
+    same string. That shape is load bearing, so it is asserted rather than
+    described: `_is_outside` refuses a text probe whose two ends agree.
+    """
+    cases: list[Any] = []
+    for name in _MARC_RECORD_FIELDS:
+        if name in catalogue._NUMBER_RANGES:
+            low, high = catalogue._NUMBER_RANGES[name]
+            # Numbers drop rather than clamp: 2200 for a 9999 asserts a date
+            # nobody supplied.
+            cases.append(
+                pytest.param(name, CEILING, high + 1, None, id=f"{name}_above_its_range")
+            )
+            cases.append(
+                pytest.param(name, FLOOR, low - 1, None, id=f"{name}_below_its_range")
+            )
+        else:
+            ceiling = catalogue._TEXT_CEILINGS[name]
+            probe = "a" + "x" * ceiling
+            # Strings truncate, at the ceiling and from the front: half a title
+            # is still the book, and `books.title` is NOT NULL.
+            cases.append(
+                pytest.param(
+                    name, CEILING, probe, probe[:ceiling], id=f"{name}_past_its_ceiling"
+                )
+            )
+    return cases
+
+
+def _inside_each_bound() -> list[Any]:
+    """The same sides from within, for the diagonal: each has to survive whole.
+
+    The widest value that fits rather than a comfortable one, so a bound off by
+    one at either edge is a failure here rather than nowhere.
+    """
+    cases: list[Any] = []
+    for name in _MARC_RECORD_FIELDS:
+        if name in catalogue._NUMBER_RANGES:
+            low, high = catalogue._NUMBER_RANGES[name]
+            cases.append(pytest.param(name, CEILING, high, id=f"{name}_at_its_ceiling"))
+            cases.append(pytest.param(name, FLOOR, low, id=f"{name}_at_its_floor"))
+        else:
+            ceiling = catalogue._TEXT_CEILINGS[name]
+            cases.append(
+                pytest.param(
+                    name, CEILING, "a" + "x" * (ceiling - 1), id=f"{name}_at_its_ceiling"
+                )
+            )
+    return cases
+
+
+def _is_outside(name: str, side: str, probe: Any) -> bool:
+    """Does the probe actually sit past the side of the bound its case claims?
+
+    **The half of the sweep's shape a count cannot state.** A case counted
+    against one side while carrying the other side's probe keeps every count
+    intact and loses the arm it was named for. Both critic seats found that
+    independently on 2026-09-19 and each wrote a different mutation for it: one
+    changed `low - 1` to `high + 1` and left the id reading `_below_its_range`,
+    the other replaced the floor case with a second copy of the ceiling case,
+    id included. Both were green, and with the first in place deleting the `Ge`
+    arm of `within_bounds` was no longer caught.
+
+    Read off the same two tables as the probes, so it is a question about the
+    case rather than a second copy of the answer.
+
+    **A text probe has to be able to tell the two ends apart**, which is the
+    second clause below and not a refinement of the first. Being past the
+    ceiling is what makes a probe a probe; being inhomogeneous is what gives its
+    assertion any power, because `("x" * n)[:c]` and `("x" * n)[-c:]` are the
+    same string, so a truncation taken from the wrong end returns exactly what a
+    correct one would. Measured by a critic seat on 2026-09-19: with the probe
+    homogeneous, `len(probe) > ceiling` still held, every count and every
+    `(name, side)` pair was intact, and truncating from the wrong end passed the
+    whole backend suite, 7,548 tests.
+
+    **The family, because it outlives this guard**: where a fixture's *shape* is
+    what gives an assertion its discriminating power, the guard has to ask about
+    the shape. A check that a probe is on the right side is not a check that it
+    can tell the two sides apart, and the shape's reason otherwise lives in a
+    docstring, which is the stated rung.
+    """
+    if name in catalogue._NUMBER_RANGES:
+        low, high = catalogue._NUMBER_RANGES[name]
+        return probe > high if side == CEILING else probe < low
+    ceiling = catalogue._TEXT_CEILINGS[name]
+    return len(probe) > ceiling and probe[:ceiling] != probe[-ceiling:]
+
+
+def _is_at(name: str, side: str, probe: Any) -> bool:
+    """The same question for the diagonal: is this the widest value that fits?"""
+    if name in catalogue._NUMBER_RANGES:
+        low, high = catalogue._NUMBER_RANGES[name]
+        return probe == high if side == CEILING else probe == low
+    return len(probe) == catalogue._TEXT_CEILINGS[name]
+
+
+class TestTheSecondBoundHasOneConstructibleBypass:
+    """`bounded_fields` bounds a record again, and this is the only thing that sees it.
+
+    **The call changes nothing on any reachable path.** Every producer builds a
+    `Record` through `__init__`, so `catalogue.Record.__post_init__` has already
+    held every scalar to `_TEXT_CEILINGS` or `_NUMBER_RANGES`, and for all ten
+    names those tables equal what `within_bounds` reads: the column width, the
+    `BookCreate` `MaxLen` and the `Ge`/`Le`. So `within_bounds` is the identity
+    over its whole reachable domain, not merely over a sample, and **no end to
+    end test can tell it from `return value`**.
+
+    **Which is why this file has to drive the bypass directly.** Measured by both
+    critic seats on 2026-09-19, independently: with the coverage guard rewritten
+    to ask `catalogue.py` and nothing left asking `within_bounds`, reducing that
+    function to `return value` left the whole backend suite green. "Kept as belt"
+    and "dead code" were the same tree. `importing.bounded_fields` names
+    `object.__setattr__` on a built record as the constructible bypass; these are
+    it.
+
+    Driven over every side of every bound rather than over one field, because a
+    bound applied to nine columns and not the tenth is the shape this repository
+    keeps finding, and one side of a range and not the other is that argument
+    again.
+    """
+
+    @pytest.mark.parametrize(
+        "generate",
+        (
+            pytest.param(_outside_each_bound, id="outside"),
+            pytest.param(_inside_each_bound, id="inside"),
+        ),
+    )
+    def test_the_sweep_below_reaches_every_side_of_every_bound(self, generate):
+        """What the two tests below cannot say about themselves: which sides they
+        should have had, and how many of each.
+
+        **Both generators branch on which table names the field, and a lost
+        branch is green.** Measured by a critic seat on 2026-09-19: with the text
+        arm of `_outside_each_bound` commented out, this file ran 60 tests rather
+        than 67 and passed, seven ceilings gone, including every string the belt
+        exists for. A parametrised guard is only as wide as its generator, and
+        the generator was the one thing nothing asserted. The count lived in
+        `tests/COVERAGE.md`, which is a register rather than a check.
+
+        **Keyed on the side as well as the name, because a count is not a
+        coverage.** Keyed on the name alone this was green when a floor case was
+        replaced by a second ceiling case, and green when a floor case kept its
+        id and took the ceiling's probe, which between them are both seats'
+        mutations. The side is a case **value** rather than a label: the id
+        echoes it for a readable failure and nothing here reads the id, so an id
+        left behind by an edit misleads a person and not this test. What stops
+        the second mutation is `_is_outside`, asserted per case below.
+
+        Stated as the rule rather than as a number: a range has a ceiling and a
+        floor and a text bound has a ceiling, read off the same two tables the
+        generators read, so a field moving between them moves this too.
+        """
+        covered = Counter(case.values[:2] for case in generate())
+        sides = Counter(
+            (name, side)
+            for name in _MARC_RECORD_FIELDS
+            for side in (
+                (CEILING, FLOOR) if name in catalogue._NUMBER_RANGES else (CEILING,)
+            )
+        )
+
+        assert covered == sides
+
+    @pytest.mark.parametrize(("name", "side", "probe", "expected"), _outside_each_bound())
+    def test_a_field_widened_after_construction_is_held_to_its_bound(
+        self, name, side, probe, expected
+    ):
+        assert _is_outside(name, side, probe), (
+            f"{name}'s {side} case carries a probe that is not outside that side, "
+            "or that cannot tell one end of a truncation from the other, so it "
+            "cannot observe the arm it is counted as covering"
+        )
+
+        record = Record(source="dnb", title="A Title")
+        object.__setattr__(record, name, probe)
+
+        assert bounded_fields(record)[name] == expected
+
+    @pytest.mark.parametrize(("name", "side", "inside"), _inside_each_bound())
+    def test_a_field_inside_its_bound_is_projected_unchanged(self, name, side, inside):
+        """The other half of the diagonal, and it is what makes the test above
+        mean something: an equality against a derived value is still satisfied by
+        a belt that rewrites everything, if nothing asserts what a value that
+        fits comes back as."""
+        assert _is_at(name, side, inside), (
+            f"{name}'s {side} case is not the widest value that side admits, "
+            "so a bound off by one there would pass"
+        )
+
+        fields: dict[str, Any] = {"source": "dnb", "title": "A Title", name: inside}
+        record = Record(**fields)
+
+        assert bounded_fields(record)[name] == inside
