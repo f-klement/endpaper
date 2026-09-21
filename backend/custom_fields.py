@@ -281,7 +281,7 @@ def _stored_form(kind: CustomFieldKind, value: str) -> str | None:
     string and no reader has to wonder which of the two a browser would follow.
     A TEXT field stores what was typed.
 
-    None means refuse, and only a URL field can produce it. It is a **422 at
+    None means refuse, and only a URL field can produce it. It is a **400 at
     the write**, which is the half `link_target` cannot do: silently degrading
     a mistyped URL to text would leave somebody looking at a field they
     declared a link and cannot click, with nothing saying why.

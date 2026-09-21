@@ -368,8 +368,13 @@ class TestTheHostList:
 _BACKEND: Final = Path(__file__).resolve().parent.parent
 
 
-def _our_modules() -> list[Path]:
+def _our_modules(root: Path = _BACKEND) -> list[Path]:
     """Every module of ours but `covers.py`, which is the one that may.
+
+    **`root` is what lets the diagonal in `test_house_rules.py` drive this**,
+    against a tree with vendored code planted in it. Calling the shared
+    predicate is what makes the walk right; taking the tree is what lets
+    something check that it does.
 
     **What vendored means is `test_house_rules._is_vendored`.** This walk
     named `.venv` and `site-packages` for itself, which was right about
@@ -392,11 +397,11 @@ def _our_modules() -> list[Path]:
     """
     found = [
         path
-        for path in _BACKEND.rglob("*.py")
-        if not _is_vendored(path, _BACKEND)
+        for path in root.rglob("*.py")
+        if not _is_vendored(path, root)
         and not {"tests", "migrations"}
-        & set(path.relative_to(_BACKEND).parts)
-        and path.relative_to(_BACKEND).as_posix() != "covers.py"
+        & set(path.relative_to(root).parts)
+        and path.relative_to(root).as_posix() != "covers.py"
     ]
     # The packages it must cover rather than a number: a count is satisfied
     # by a walk that lost a whole directory. See `test_accounts._sources`.

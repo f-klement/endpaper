@@ -12,7 +12,10 @@ gets believed:
 * `TestTheRevisionsPostgresArmIsTheModelsPostgresArm` is the second engine's
   copy of a comparison that already existed for the first: a revision writes its
   SQL out rather than importing it, so the two copies are a fact stored twice.
-  It covers the two revisions that carry a table of rules and no others.
+  **The revisions it covers are found by type rather than listed**, so one that
+  carries a rule table is covered the moment it exists, and the comparison is a
+  **chain**: each revision's arm is the next one's starting point and the last is
+  the model.
 * `TestEveryCheckRendersWithoutASqliteOnlyIdiom` is parametrised over
   `Base.metadata`, so a constraint added to a model is covered the moment it
   exists. **It is a token scan, and a token scan is an enumeration of an open
@@ -28,6 +31,8 @@ gets believed:
   `test_backup.py` is for.
 """
 
+from itertools import pairwise
+
 import pytest
 from sqlalchemy import CheckConstraint, String, Text, create_engine, exc
 from sqlalchemy.dialects import mysql, postgresql, sqlite
@@ -36,10 +41,10 @@ from sqlalchemy.schema import CreateTable
 from database import Base
 from dialect import DialectSQL, SwappedRule
 from migrations.versions import (
-    a6d3f92c7b14_a_nul_clause_on_two_glob_rules as a_nul_clause_on_two_glob_rules,
+    b8f4c1a7e309_bound_the_bytes_three_columns_never_had as bound_the_bytes,
 )
-from migrations.versions import (
-    f4a1c62d0b97_bind_every_text_ceiling_on_bytes_too as bind_every_text_ceiling,
+from migrations.versions.b8f4c1a7e309_bound_the_bytes_three_columns_never_had import (
+    AddedRule,
 )
 from models import Book  # noqa: F401  registers every table on Base.metadata
 
@@ -131,6 +136,7 @@ class TestTheseAreTheConstraintsWithTwoSpellings:
             ("book_identifiers", "ck_book_identifiers_bounds"),
             ("catalogue_credentials", "ck_catalogue_credentials_envelope"),
             ("catalogue_credentials", "ck_catalogue_credentials_source"),
+            ("catalogue_targets", "ck_catalogue_targets_base_url"),
             ("catalogue_targets", "ck_catalogue_targets_indexes"),
             ("catalogue_targets", "ck_catalogue_targets_isbn_claim"),
             ("catalogue_targets", "ck_catalogue_targets_use_attribute"),
@@ -176,31 +182,149 @@ class TestTheStringifierIsNotAnEngine:
         assert name != "default"
 
 
+def _revisions_carrying_swapped_rules() -> dict[str, tuple[SwappedRule, ...]]:
+    """Every revision declaring a table of `SwappedRule`, by revision id.
+
+    **Found by type rather than by name, and the type is the fact.** A first
+    version of this was a list of three revisions and their tables, because they
+    are spelled `_CEILINGS`, `_GLOB_RULES` and `_SWAPPED` and a frozen revision
+    cannot be renamed. The spelling is not what makes one of these a rule table;
+    the element type is. So a revision carrying one is covered the moment it
+    exists, where a list was a line somebody had to remember, and the standing
+    rule says to derive rather than to add a case per spelling. Measured over
+    `migrations/versions/`: exactly the three, and nothing spurious.
+
+    **Keyed on `revision` rather than on the module name**, because that is what
+    `down_revision` points at and what the ordering below reads.
+    """
+    import importlib
+    import pkgutil
+
+    import migrations.versions as versions
+
+    carrying: dict[str, tuple[SwappedRule, ...]] = {}
+    for found in pkgutil.iter_modules(versions.__path__):
+        module = importlib.import_module(f"migrations.versions.{found.name}")
+        rules = tuple(
+            rule
+            for value in vars(module).values()
+            if isinstance(value, tuple)
+            and value
+            and all(isinstance(one, SwappedRule) for one in value)
+            for rule in value
+        )
+        if rules:
+            carrying[module.revision] = rules
+    return carrying
+
+
+def _in_chain_order(revisions: list[str]) -> list[str]:
+    """Those revisions, oldest first, according to Alembic's own chain.
+
+    **Derived rather than declared, because the comparison below is a chain.** A
+    constraint two revisions have rewritten has three texts to keep in step on
+    Postgres and only the last of them is the model's, so the order decides which
+    text is compared with which. A hand written order is a fact that can be wrong
+    silently; `down_revision` is the fact the migration runner itself uses, and
+    `pkgutil` hands the modules over in filename order, which is no order at all.
+    """
+    from alembic.script import ScriptDirectory
+
+    import schema
+
+    walked = [
+        revision.revision
+        for revision in ScriptDirectory.from_config(
+            schema._alembic_config()
+        ).walk_revisions()
+    ]
+    oldest_first = list(reversed(walked))
+    return sorted(revisions, key=oldest_first.index)
+
+
+def _pg_chain() -> dict[str, list[tuple[str, SwappedRule]]]:
+    """Each constraint's swaps, oldest first, with the revision that made each."""
+    tables = _revisions_carrying_swapped_rules()
+    chain: dict[str, list[tuple[str, SwappedRule]]] = {}
+    for name in _in_chain_order(list(tables)):
+        for rule in tables[name]:
+            chain.setdefault(rule.constraint, []).append((name, rule))
+    return chain
+
+
 class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
     """The second engine's half of a comparison that already existed.
 
     A revision spells its SQL out rather than importing a constant, for the
     reason every revision here gives, so each rule is a fact stored twice and
     `test_schema.py` stands between the SQLite copies. This stands between the
-    Postgres ones, which nothing else reads at all.
+    Postgres ones, which nothing else reads at all: there is no Postgres in this
+    suite, so a database cannot be asked.
+
+    **Two rules rather than one per revision, because the copies form a chain.**
+    What the model declares is the **last** revision's `after_pg`; what an
+    earlier revision owes is that its `after_pg` is the next one's `before_pg`.
+    Together those cover every text in every table with no gap, and neither can
+    be satisfied by a revision quietly agreeing with itself.
     """
 
+    def test_each_revisions_arm_is_the_next_ones_starting_point(self):
+        """The links, which is what a per revision comparison against the model
+        could not express.
+
+        `before_pg` is otherwise read by nothing at all on this engine: a
+        `downgrade()` installs it and no test here runs one, so a wrong value
+        would break only the way back, in the one situation nobody is watching.
+        """
+        broken = [
+            (constraint, earlier_name, later_name)
+            for constraint, swaps in _pg_chain().items()
+            for (earlier_name, earlier), (later_name, later) in pairwise(swaps)
+            if " ".join(earlier.after_pg.split())
+            != " ".join(later.before_pg.split())
+        ]
+
+        assert not broken, (
+            "a revision's Postgres arm is not what the next one says it found, "
+            f"so one of the two describes a schema nobody ran: {broken}"
+        )
+
+    def test_the_chain_has_a_link_to_check(self):
+        """Anti vacuity, and deliberately not a count. The rule above is empty
+        both when every link holds and when no constraint has been rewritten
+        twice, and a number here would go stale the first time one is.
+
+        **The walk's own emptiness is the other way this could go quiet**, since
+        a reader that stopped recognising a rule table would hand back nothing
+        and every rule here would pass over it. So the revisions are asserted
+        before the links are.
+        """
+        assert _revisions_carrying_swapped_rules(), (
+            "no revision was found to carry a table of swapped rules, so every "
+            "comparison in this class is over an empty chain"
+        )
+        assert [
+            constraint for constraint, swaps in _pg_chain().items() if len(swaps) > 1
+        ]
+
     @pytest.mark.parametrize(
-        "rule", bind_every_text_ceiling._CEILINGS, ids=lambda rule: rule.constraint
+        "constraint", sorted(_pg_chain()), ids=lambda constraint: constraint
     )
-    def test_every_byte_ceiling_agrees(self, rule: SwappedRule):
+    def test_the_last_revision_to_touch_a_rule_is_the_model(self, constraint: str):
+        _, rule = _pg_chain()[constraint][-1]
+
         assert " ".join(rule.after_pg.split()) == _declared(
             rule.table, rule.constraint, POSTGRESQL
         )
 
     @pytest.mark.parametrize(
-        "rule",
-        a_nul_clause_on_two_glob_rules._GLOB_RULES,
-        ids=lambda rule: rule.constraint,
+        "added", bound_the_bytes._ADDED, ids=lambda added: added.constraint
     )
-    def test_every_glob_rule_agrees(self, rule: SwappedRule):
-        assert " ".join(rule.after_pg.split()) == _declared(
-            rule.table, rule.constraint, POSTGRESQL
+    def test_every_rule_a_revision_added_agrees(self, added: AddedRule):
+        """A constraint added rather than swapped has no `after_pg`, because it
+        has no `before` either. It is the same fact stored twice all the same."""
+        assert " ".join(added.postgresql.split()) == _declared(
+            added.table, added.constraint, POSTGRESQL
         )
 
 
@@ -294,6 +418,7 @@ class TestEveryNulArmDroppedOnACharacterColumn:
         assert set(self._columns_losing_a_nul_arm()) == {
             ("book_identifiers", "ck_book_identifiers_bounds", "value"),
             ("catalogue_credentials", "ck_catalogue_credentials_source", "source"),
+            ("catalogue_targets", "ck_catalogue_targets_base_url", "base_url"),
             ("catalogue_targets", "ck_catalogue_targets_indexes", "isbn_index"),
             ("catalogue_targets", "ck_catalogue_targets_indexes", "title_index"),
             ("opds_servers", "ck_opds_servers_base_url", "base_url"),
@@ -313,10 +438,17 @@ class TestEveryNulArmDroppedOnACharacterColumn:
             )
 
     def test_the_envelope_keeps_its_asymmetry(self):
-        """One constraint deliberately has no NUL arm on **either** engine,
-        because its column has no ceiling for one to make exact. Regularising
-        the three so that all carry one is the shape this repository names, so
-        the exception is asserted rather than left to be tidied away."""
+        """One constraint deliberately has no NUL arm on **either** engine, and
+        `b8f4c1a7e309` gave it a ceiling without giving it one.
+
+        **The reason moved and the exception did not.** It was that the column
+        had no ceiling for a NUL clause to make readable; it is now that no
+        clause on the column is weakened by a NUL at all: the ceiling counts
+        bytes, the floor reads shorter past one and is therefore harder to
+        satisfy, and both `GLOB` patterns end in `*`, which truncation can only
+        make fail. Regularising the three so that all carry one is the shape this
+        repository names, so the exception is asserted rather than left to be
+        tidied away."""
         element = next(
             one
             for _, name, one in _dialect_checks()
@@ -390,6 +522,7 @@ class TestNoSqliteArmLostAClause:
             "ck_catalogue_targets_indexes": 2,
             # One NUL arm.
             "ck_book_identifiers_bounds": 1,
+            "ck_catalogue_targets_base_url": 1,
             "ck_catalogue_credentials_source": 1,
             "ck_opds_servers_credential_key": 1,
             "ck_opds_servers_base_url": 1,

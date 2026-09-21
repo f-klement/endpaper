@@ -46,6 +46,19 @@ class TestMakingOne:
     def test_a_name_of_only_spaces_is_refused(self, client, admin):
         assert make_collection(client, admin["headers"], "   ").status_code == 422
 
+    def test_a_control_character_is_removed_from_the_name(self, client, admin):
+        """The name is case-insensitively unique, so an invisible character is
+        a second shelf spelled like the first."""
+        res = make_collection(client, admin["headers"], "Read\u0000twice")
+
+        assert res.json()["name"] == "Readtwice"
+
+    def test_a_name_of_only_control_characters_is_refused(self, client, admin):
+        assert (
+            make_collection(client, admin["headers"], "\u0000\u0001").status_code
+            == 422
+        )
+
     def test_a_name_that_already_exists_returns_that_collection(self, client, admin):
         """Somebody typing a name that is there means that shelf, not an error."""
         first = make_collection(client, admin["headers"], "Ebooks").json()

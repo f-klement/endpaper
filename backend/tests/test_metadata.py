@@ -6995,9 +6995,9 @@ class TestSearchingHarder:
 
     @pytest.fixture
     def fan_out(self, monkeypatch):
-        """Records which catalogues were asked and under what deadline."""
+        """Records which catalogues were asked and under what budget."""
         asked: list[CatalogueSource] = []
-        deadlines: list[float] = []
+        budgets: list[float] = []
 
         def recorder(name: CatalogueSource):
             async def adapter(query: str, limit: int, *rest: str) -> list[Record]:
@@ -7018,12 +7018,12 @@ class TestSearchingHarder:
 
         real = metadata._within_deadline
 
-        async def spy(searches, deadline):
-            deadlines.append(deadline)
-            return await real(searches, deadline)
+        async def spy(searches, deadline_seconds):
+            budgets.append(deadline_seconds)
+            return await real(searches, deadline_seconds)
 
         monkeypatch.setattr(metadata, "_within_deadline", spy)
-        return asked, deadlines
+        return asked, budgets
 
     @pytest.fixture
     def slow_oenb(self, monkeypatch):
@@ -7035,25 +7035,25 @@ class TestSearchingHarder:
     async def test_the_default_search_asks_the_fast_roster_on_the_short_deadline(
         self, fan_out, slow_oenb
     ):
-        asked, deadlines = fan_out
+        asked, budgets = fan_out
         await metadata.search("moby dick", access=access(sources.DEFAULT_PLAN, "key"))
 
         assert CatalogueSource.OENB not in asked
         assert set(asked) == set(sources.DEFAULT_PLAN.searched)
-        assert deadlines == [metadata.SEARCH_DEADLINE_SECONDS]
+        assert budgets == [metadata.SEARCH_DEADLINE_SECONDS]
 
     @pytest.mark.asyncio
     async def test_searching_harder_asks_the_slow_one_on_the_long_deadline(
         self, fan_out, slow_oenb
     ):
-        asked, deadlines = fan_out
+        asked, budgets = fan_out
         await metadata.search(
             "moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True
         )
 
         assert CatalogueSource.OENB in asked
         assert set(asked) == set(sources.DEFAULT_PLAN.searched_harder)
-        assert deadlines == [metadata.SEARCH_HARDER_DEADLINE_SECONDS]
+        assert budgets == [metadata.SEARCH_HARDER_DEADLINE_SECONDS]
 
     @pytest.mark.asyncio
     async def test_the_two_deadlines_are_not_the_same_number(self):
@@ -7074,13 +7074,13 @@ class TestSearchingHarder:
         identical fan out is a cost with no benefit on every install that has no
         slow catalogue, which is every install today.
         """
-        asked, deadlines = fan_out
+        asked, budgets = fan_out
         await metadata.search(
             "moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True
         )
 
         assert set(asked) == set(sources.DEFAULT_PLAN.searched)
-        assert deadlines == [metadata.SEARCH_DEADLINE_SECONDS]
+        assert budgets == [metadata.SEARCH_DEADLINE_SECONDS]
 
     @pytest.mark.asyncio
     async def test_a_second_harder_search_runs_the_ordinary_one_instead(
@@ -7092,16 +7092,16 @@ class TestSearchingHarder:
         wait, so the second caller gets a true fast answer rather than a slow
         turn in a line.
         """
-        asked, deadlines = fan_out
+        asked, budgets = fan_out
         released = asyncio.Event()
         first_is_in = asyncio.Event()
         real = metadata._within_deadline
 
-        async def hold(searches, deadline):
-            deadlines.append(deadline)
+        async def hold(searches, deadline_seconds):
+            budgets.append(deadline_seconds)
             first_is_in.set()
             await released.wait()
-            return await real(searches, deadline)
+            return await real(searches, deadline_seconds)
 
         monkeypatch.setattr(metadata, "_within_deadline", hold)
         holding = asyncio.ensure_future(
@@ -7120,7 +7120,7 @@ class TestSearchingHarder:
         await second
 
         assert CatalogueSource.OENB not in asked
-        assert deadlines[-1] == metadata.SEARCH_DEADLINE_SECONDS
+        assert budgets[-1] == metadata.SEARCH_DEADLINE_SECONDS
 
         released.set()
         await holding
@@ -7136,7 +7136,7 @@ class TestSearchingHarder:
         a `finally` nothing exercises is a `finally` a later edit can drop.
         """
 
-        async def boom(searches, deadline):
+        async def boom(searches, deadline_seconds):
             for coroutine in searches:
                 coroutine.close()
             raise RuntimeError("the fan out fell over")

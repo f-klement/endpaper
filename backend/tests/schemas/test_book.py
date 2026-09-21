@@ -82,8 +82,12 @@ because a collector that finds one module finds no empty ones.
 
 from __future__ import annotations
 
+import ast
 import importlib
+import inspect
 import pkgutil
+import re
+import textwrap
 import typing
 from collections.abc import Collection
 from datetime import date, datetime
@@ -1312,3 +1316,199 @@ class TestAColumnRewrittenOnWriteIsBoundedAfterTheRewrite:
         ]
 
         assert refused == []
+
+
+def _writes_a_row_from_its_body(endpoint: Any) -> bool:
+    """Whether this handler puts what the caller sent onto a row.
+
+    Two shapes, and the second is the one the first version of this missed.
+    The loop, `model_dump(exclude_unset=True)` and `setattr`, which is what a
+    partial update is. And the single assignment, `book.ownership =
+    payload.ownership`, which is what every one field route does: no dump, same
+    value, same column. A rule that saw only the loop left `OwnershipUpdate`
+    outside it, safe by the annotation rather than by the rule, which is the
+    shape this repository keeps paying for. Found by the design seat.
+
+    **Found by the write rather than by the model's name.** A list of partial
+    update bodies would have to be extended by whoever adds the next one, which
+    is the enumeration this file replaced three times already.
+
+    **What it still cannot see is a write one call further down**, because
+    `inspect.getsource` reads the endpoint and not what the endpoint calls. That
+    direction over reports rather than under reports where it does reach: an
+    assignment to any attribute counts, so a handler that writes one field of
+    its own puts its whole body under the rule.
+    """
+    tree = ast.parse(textwrap.dedent(inspect.getsource(endpoint)))
+    return any(
+        (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "model_dump"
+            and any(
+                keyword.arg == "exclude_unset" and keyword.value.value is True
+                for keyword in node.keywords
+                if isinstance(keyword.value, ast.Constant)
+            )
+        )
+        or (
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Attribute) for target in node.targets)
+        )
+        for node in ast.walk(tree)
+    )
+
+
+def _bodies_written_onto_a_row() -> dict[str, type[BaseModel]]:
+    """The request bodies a route writes onto a row."""
+    found: dict[str, type[BaseModel]] = {}
+    for route in _api_routes():
+        if not _writes_a_row_from_its_body(route.endpoint):
+            continue
+        found.update(
+            _models_from(
+                [parameter.field_info.annotation for parameter in route.dependant.body_params]
+            )
+        )
+    return found
+
+
+def _fields_over_a_column_that_refuses_null(
+    models: dict[str, type[BaseModel]],
+) -> list[tuple[str, str, str]]:
+    """(model, field, column) wherever a body field names a NOT NULL column.
+
+    The pair is the defect and neither half is: a column may refuse null and a
+    field may accept one, and it is only a body whose route writes that field
+    onto that column that turns the two into `UPDATE books SET title=NULL`.
+    """
+    refuses_null = {
+        column.name for column in Book.__table__.columns if not column.nullable
+    }
+    return sorted(
+        (name, field_name, column)
+        for name, model in models.items()
+        for field_name in model.model_fields
+        if (column := _COLUMN_FOR_FIELD.get(field_name, field_name)) in refuses_null
+    )
+
+
+def _refuses_a_null(model: type[BaseModel], field_name: str) -> bool:
+    """Whether the model refuses an explicit null for this field.
+
+    **Wider than `_refuses` above, which asks whether the field was named in
+    the error.** A refusal derived from the table is raised by a model
+    validator, and pydantic reports one of those at `loc == ()`, so a rule
+    reading the field's own entry alone would call a refused null accepted.
+
+    **A model level error still has to name the field**, which is the half a
+    bare `loc == ()` does not have: any other model validator refusing for an
+    unrelated reason would otherwise read as this field being refused, and the
+    rule above would pass on a model that accepts the null. Raised by the
+    security seat. An error naming some **other** field is excluded for the
+    same reason in the other direction, so a required neighbour the probe
+    filled badly cannot be read as this field refusing.
+
+    **On a word boundary, because `title` is inside `subtitle`** and both are
+    fields of the one model in this rule with a live pair. A substring match
+    read a message about the subtitle as the title being refused, which fails
+    open on exactly the field the class exists for. Found by the design seat,
+    on the round that added the sentence above.
+    """
+    payload: dict[str, Any] = {field_name: None}
+    for other, field in model.model_fields.items():
+        if other != field_name and field.is_required():
+            payload[other] = "x"
+    try:
+        model(**payload)
+    except ValidationError as exc:
+        return any(
+            error["loc"] == (field_name,)
+            or (
+                error["loc"] == ()
+                and re.search(rf"\b{re.escape(field_name)}\b", str(error["msg"]))
+            )
+            for error in exc.errors()
+        )
+    return False
+
+
+class TestNoBodyWrittenOntoARowCanClearAColumnThatRefusesNull:
+    """A fifth rule, and the one the four above cannot ask.
+
+    They are about how **wide** a value may be. This is about whether the value
+    may be absent at all: `PATCH /api/books/{book_id}` with `{"title": null}`
+    reached `UPDATE books SET title=NULL`, SQLite refused on the constraint, and
+    `errors.unhandled_exception_handler` turned the `IntegrityError` into a
+    **500** over a value the edit form lets somebody type. Found 2026-09-20 by
+    the schema driven run in `tests/api_contract.py`.
+
+    **Derived from the table at one end and from the write at the other**, so
+    neither half is a list: a field added over a NOT NULL column joins the rule,
+    and so does the body of the next route that writes one onto a row. **Three
+    pairs, and the floor below is what pins that**: two of the three are reached
+    only by the assignment arm, so without it the arm could be deleted and every
+    assertion here would still pass on the one pair the dump arm finds. Found by
+    the design seat, on the round that added the arm.
+
+    `BookMatch.title` is the other field in the tree naming a NOT NULL column
+    and admitting null, and it is not here because nothing writes it:
+    `google_books.merge_into` walks `book_columns.WORK_DETAIL`, which holds the
+    descriptive facts, and `title` is `WORK_IDENTITY`. That is a property of the
+    writer rather than of the model, which is why this rule asks about the
+    writer.
+
+    **`books` and no other table**, which is the boundary this file already has
+    and the one to watch: a field named for a column of another table is matched
+    against `books` or not at all. The first body written onto a row of a
+    different table needs the walk to carry which table that is.
+    """
+
+    def test_the_rule_has_a_pair_to_be_about(self) -> None:
+        """A rule over an empty set passes and reads exactly like one that
+        holds, and so does a rule over a set that quietly shrank. Three ways
+        this one can: a walk that finds no partial update route, a column set
+        read off the wrong table, and an arm of the walk deleted."""
+        written = _bodies_written_onto_a_row()
+
+        assert "BookDetailsUpdate" in written, (
+            "the walk no longer finds the body PATCH /api/books/{book_id} "
+            f"writes; it found {sorted(written)}"
+        )
+        pairs = _fields_over_a_column_that_refuses_null(written)
+
+        assert pairs, (
+            "no field of a body written onto a row names a NOT NULL column, so "
+            "this rule is about nothing"
+        )
+        assert len(pairs) >= 3, (
+            f"only {len(pairs)} field of a body written onto a row names a NOT "
+            "NULL column. A floor rather than a count, because the number moves "
+            "with every route added: what it refuses is the assignment arm of "
+            "`_writes_a_row_from_its_body` going away, which takes two of the "
+            f"three with it and leaves every other assertion here green. {pairs}"
+        )
+
+    def test_every_such_field_refuses_an_explicit_null(self) -> None:
+        written = _bodies_written_onto_a_row()
+        accepted = [
+            f"{name}.{field_name} accepts null, books.{column} refuses one"
+            for name, field_name, column in _fields_over_a_column_that_refuses_null(written)
+            if not _refuses_a_null(written[name], field_name)
+        ]
+
+        assert accepted == [], (
+            "These request bodies let a caller clear a column the database "
+            "refuses to leave empty, which is an IntegrityError on the flush "
+            "and a 500 to whoever sent it:\n  " + "\n  ".join(accepted)
+        )
+
+    def test_the_probe_reports_a_field_that_takes_the_null(self) -> None:
+        """The diagonal. A probe that answered "refused" for everything would
+        satisfy the rule above while measuring nothing, and this is the shape
+        the rule exists to catch: optional, defaulted, and null means null."""
+
+        class _Clearable(BaseModel):
+            title: str | None = None
+
+        assert not _refuses_a_null(_Clearable, "title")

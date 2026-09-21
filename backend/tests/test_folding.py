@@ -348,9 +348,10 @@ READ_ROOTS = 11
 #: Calls the derived reading set matches that touch no table, and why.
 #:
 #: Keyed on the call as `ast.unparse` writes it and checked by **equality** in
-#: line order, which is a rung above the `in` test `BOOK_OWNED_READERS` uses:
-#: an entry cannot drift onto a neighbouring statement that happens to contain
-#: its fragment.
+#: line order, so an entry cannot drift onto a neighbouring statement.
+#: `BOOK_OWNED_READERS` keys on a whole statement and compares it the same way,
+#: and the comment above that table is where the reason and its measurement
+#: live.
 #:
 #: Both are here because `_READING_METHODS` is derived from `Query` and `Select`
 #: and is deliberately over broad. Neither is a session call.

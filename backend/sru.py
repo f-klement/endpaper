@@ -1591,7 +1591,7 @@ def _serialise(root: ElementTree.Element) -> str:
     """One response as a document.
 
     Namespaces are plain `xmlns` attributes rather than qualified tags, which is
-    what `marc.write` does and for the same reason: a MARC record built by
+    what `marc._wrapper` does and for the same reason: a MARC record built by
     `marc.py` carries unqualified tags, so appending it into a tree whose
     elements are qualified would silently put every MARC element into the SRU
     namespace.

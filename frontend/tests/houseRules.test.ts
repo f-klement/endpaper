@@ -35,6 +35,12 @@ import { COLUMN_SPECS } from "../src/lib/libraryColumns";
 // module says why it is not a copy per guard.
 import { CARRIES_A_BOOK } from "./carriesABook";
 
+// The comment stripper every rule below reads its sources through, and what
+// decides how a path is parsed. One home for the same reason: the tree had two
+// instruments for this, and the second was blind to the class this one had just
+// been fixed for. `withoutProse.test.ts` holds what it keeps and what it cuts.
+import { langOf, withoutProse } from "./withoutProse";
+
 // **This file's own source, which no glob here can supply.** The reason and
 // the measurement are at `SELF` in the address rule below, which is the one
 // place this tree states it: a rule reading a glob written here is exempt from
@@ -173,6 +179,188 @@ describe("the feature flags query has one owner", () => {
       configures("useQuery({ ...getGetFeatureFlagsQueryOptions(), retry: 5 })"),
     ).toBe(true);
     expect(configures("getFeatureFlags()")).toBe(true);
+  });
+});
+
+/** The generated model this tree is given for the public flags endpoint. */
+const FLAGS_MODEL = "api/generated/model/featureFlagsOut.ts";
+
+/** The hook that owns the query, and the type its answer is carried in. */
+const REACHES_THE_FLAGS = ["useFeatureFlagsState", "FeatureFlagsOut"];
+
+/**
+ * Every name a module writes, as identifiers and as string literals.
+ *
+ * **Read off the parse rather than the text**, so a field named only in a
+ * comment is not a reader. That is the whole difference between this and the
+ * rule above it, which says so in its own docstring and pays for it in three
+ * residuals.
+ *
+ * **Deliberately one flat set rather than member accesses alone.** A reader
+ * writes `flags?.library_mode`, `const { library_mode } = flags`,
+ * `const { library_mode: mode } = flags`, `flags["library_mode"]` and
+ * `flags[KEY]` with `KEY` a literal somewhere above, and every one of those
+ * puts the name in the parse as an identifier or a literal. Matching only the
+ * member expression would report four of the five as unread, and a guard that
+ * calls a real reader missing is the one somebody deletes.
+ */
+function namesIn(path: string, source: string): Set<string> {
+  const names = new Set<string>();
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value as unknown[]) walk(item);
+      return;
+    }
+    if (!isNode(value)) return;
+    if (value.type === "Identifier") {
+      const name = text(value.name);
+      if (name !== null) names.add(name);
+    }
+    const literal = text(value.value);
+    if (literal !== null) names.add(literal);
+    for (const key of Object.keys(value)) walk(value[key]);
+  };
+  walk(parseAst(source, { lang: langOf(path) }));
+  return names;
+}
+
+/**
+ * The flags a reader of this endpoint never names, given what it declares.
+ *
+ * **The scope is derived and so is the reading.** A module is asked only if it
+ * names the owning hook or the model's type, which is what keeps the rule from
+ * being satisfied by a coincidence: `google_books_enabled` is read off
+ * `SettingsOut` at `pages/SettingsPage/CatalogueSettingsPage/components/`, and
+ * counting that would have made this rule green on the exact field it was
+ * written for.
+ */
+function unreadAmong(
+  declared: string[],
+  modules: [string, string][],
+): string[] {
+  const read = new Set<string>();
+  for (const [path, source] of modules) {
+    const names = namesIn(path, source);
+    if (!REACHES_THE_FLAGS.some((one) => names.has(one))) continue;
+    for (const name of names) read.add(name);
+  }
+  return declared.filter((name) => !read.has(name));
+}
+
+/**
+ * Every field the public flags endpoint sends is read by this client.
+ *
+ * `GET /api/settings/features` is the one endpoint a caller with no token can
+ * read, so a field on it that nothing reads is disclosure bought for nothing.
+ * `FeatureFlagsOut` said exactly this in its comment on `library_mode`, and
+ * prose enforces nothing: `google_books_enabled` sat on the same model with no
+ * reader, and with `google_books_ready` beside it the pair told a stranger the
+ * toggle was on and no key was stored.
+ *
+ * **What this cannot see**, stated because a derivation that looks thorough is
+ * read as one:
+ *
+ * * **A read that never names the field.** `Object.keys(flags)`, a key built by
+ *   concatenation, a `Pick` passed through a generic. The field then reports as
+ *   unread, so the failure is loud and the fix is to name it: this is the safe
+ *   direction and the only one worth being wrong in.
+ * * **A collision inside a module that does reach the flags.** Any name that
+ *   module writes counts, so a same-named property of a different object there
+ *   would satisfy the rule. The scope filter is what keeps that rare; nothing
+ *   here makes it impossible.
+ * * **A field the backend added and nobody regenerated.** The subject is the
+ *   committed client, not the server. CI diffs the schema and the client it
+ *   generates from it against a fresh generation, and the backend pins the
+ *   sent field set by equality at `TestFeatureFlags`; this rule leans on both
+ *   and replaces neither. Retained as a residue rather than closed here,
+ *   because a rule about what the client reads cannot see the server at all.
+ * * **A client this repository does not contain.** The API is public, so
+ *   dropping a field is a contract change whatever this tree reads.
+ */
+describe("every feature flag has a reader", () => {
+  /** The fields the generated model declares, read off its own declaration. */
+  function declared(): string[] {
+    const source = SOURCES[`../src/${FLAGS_MODEL}`];
+    if (source === undefined) throw new Error(`${FLAGS_MODEL} is not here`);
+    const model = declaredIn(FLAGS_MODEL, source, "FeatureFlagsOut");
+    if (model === null)
+      throw new Error(`${FLAGS_MODEL} declares no FeatureFlagsOut`);
+    return propertiesOf(model).map((one) => one.name);
+  }
+
+  /** Every module that could hold a reader, the generated client aside. */
+  function candidates(): [string, string][] {
+    return entries().filter(([path]) => !path.startsWith("api/generated/"));
+  }
+
+  it("names every flag it is sent", () => {
+    expect(unreadAmong(declared(), candidates())).toEqual([]);
+  });
+
+  it("has a subject and a scope, so the rule above is not vacuous", () => {
+    // **The two ways this rule dies quietly.** A renamed or moved model leaves
+    // it judging an empty list of fields, and a renamed hook leaves every
+    // module out of scope, which reports every field unread and is loud. Only
+    // the first is silent, so it is the one asserted.
+    expect(declared().length).toBeGreaterThan(3);
+    expect(
+      candidates()
+        .filter(([path, source]) => {
+          const names = namesIn(path, source);
+          return REACHES_THE_FLAGS.some((one) => names.has(one));
+        })
+        .map(([path]) => path),
+    ).toContain("app/hooks.ts");
+  });
+
+  it("refuses a flag nothing in scope names", () => {
+    const reader: [string, string][] = [
+      ["app/hooks.ts", "useFeatureFlagsState().flags?.library_mode;"],
+    ];
+
+    expect(unreadAmong(["library_mode", "telemetry_enabled"], reader)).toEqual([
+      "telemetry_enabled",
+    ]);
+  });
+
+  it("does not take a flag named in a comment for a reader", () => {
+    // The claim `namesIn` is written on, asserted rather than trusted: this is
+    // the whole difference between this rule and the one above it, and it
+    // holds only for as long as the names come off the parse.
+    const mentions: [string, string][] = [
+      ["app/hooks.ts", "useFeatureFlagsState(); // library_mode"],
+      ["app/hooks.ts", "useFeatureFlagsState(); /* library_mode */"],
+    ];
+
+    for (const module of mentions)
+      expect(unreadAmong(["library_mode"], [module])).toEqual(["library_mode"]);
+  });
+
+  it("sees a reader that reaches the flag indirectly", () => {
+    // The false positive direction, which is the one that gets a guard turned
+    // off. Five spellings of one read, none of them a plain member access.
+    const spellings = [
+      "const { library_mode } = useFeatureFlagsState().flags ?? {};",
+      "const { library_mode: mode } = useFeatureFlagsState().flags ?? {};",
+      'useFeatureFlagsState().flags?.["library_mode"];',
+      'const KEY = "library_mode"; useFeatureFlagsState().flags?.[KEY];',
+      'function F(flags: FeatureFlagsOut) { return at(flags, "library_mode"); }',
+    ];
+
+    for (const source of spellings)
+      expect(unreadAmong(["library_mode"], [["x.ts", source]])).toEqual([]);
+  });
+
+  it("does not count a module that never reaches the flags", () => {
+    // The defect this was written for, driven through the rule: the admin
+    // screen reads the same name off a different model behind a token.
+    const settings: [string, string][] = [
+      ["pages/SettingsPage/x.tsx", "const on = settings.google_books_enabled;"],
+    ];
+
+    expect(unreadAmong(["google_books_enabled"], settings)).toEqual([
+      "google_books_enabled",
+    ]);
   });
 });
 
@@ -925,261 +1113,12 @@ function draftBuilders(): DraftBuilder[] {
         source.includes("draftFrom") || source.includes("BookDraft"),
     )
     .flatMap(([path, source]) =>
-      buildersIn(source, path.endsWith(".tsx") ? "tsx" : "ts").map((one) => ({
+      buildersIn(source, langOf(path)).map((one) => ({
         ...one,
         path,
       })),
     );
 }
-
-/**
- * The node kinds where a comment cannot begin, which is all a stripper needs
- * from a parser.
- *
- * `parseAst` hands back a Program carrying `type`, `body`, `sourceType`,
- * `hashbang`, `start` and `end`, and no list of comments: measured at vite 8.
- * So there is no comment range to delete and this takes the complement. Three
- * kinds are the places where a slash pair is characters rather than prose: a
- * string literal, one chunk of a template, and the text between two JSX tags.
- * A regex literal is a `Literal` too, so it needs no arm of its own.
- *
- * The walk stops at one of them rather than descending, which is what keeps a
- * template's interpolated expressions ordinary code: a comment written inside
- * one is still removed.
- */
-const NOT_PROSE = new Set(["Literal", "TemplateElement", "JSXText"]);
-
-/** Which offsets of `source` sit inside one of those. */
-function insideALiteral(source: string, lang: "ts" | "tsx"): Uint8Array {
-  const inside = new Uint8Array(source.length);
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(value)) return;
-    if (NOT_PROSE.has(value.type)) {
-      const { start, end } = value as { start?: unknown; end?: unknown };
-      if (typeof start === "number" && typeof end === "number")
-        inside.fill(1, start, end);
-      return;
-    }
-    for (const key of Object.keys(value)) walk(value[key]);
-  };
-  walk(parseAst(source, { lang }));
-  return inside;
-}
-
-/**
- * What ends a line comment, which is four characters and not one.
- *
- * **The set is closed**, so enumerating it is not the open set enumeration this
- * file's other guards keep paying for: ECMAScript defines exactly these four as
- * line terminators. The regex pair this replaced stopped at all four for free,
- * because JavaScript's `.` excludes them, and a scan that stopped at `\n` alone
- * deletes whatever follows a comment on a CR, LS or PS line from what all
- * fifteen readers below see. Measured by the security seat on a copy of the
- * tree: a `fetch` written after a `//` and a U+2028 in `lib/opf.ts` left
- * `keeps every reader out of reach of the network` green at 97 of 97 passing,
- * and the same line written with `\n` failed it.
- *
- * `prettier --check` rewrites all three to `\n` and CI runs it, which is a
- * mitigation and not the guard: it fails the format job, not the rule.
- *
- * **All four are in the fixture row, and the fourth is why that is said here.**
- * The row carried three, and dropping U+2029 from this string left the file
- * green at 98 of 98. Closed is what makes a set safe to enumerate; it is not
- * what makes a member tested. Check it by dropping each in turn.
- */
-const ENDS_A_LINE = "\n\r\u2028\u2029";
-
-/**
- * One stripped source per language, keyed on the text.
- *
- * A pure function of its two arguments, so this is a cache and not state. It
- * is here because parsing is not free where a regex was: fifteen readers over
- * the 456 modules under `src/` cost 4,672ms parsed against 91ms matched, and
- * 337ms parsed once per module. Measured on the control plane, bun 1.4.2; the
- * ratio is the point rather than the absolute.
- */
-const STRIPPED: Record<"ts" | "tsx", Map<string, string>> = {
-  ts: new Map(),
-  tsx: new Map(),
-};
-
-/**
- * The source with comments removed, so a rule cannot be satisfied by prose.
- *
- * **Stripped by parsed ranges, because a comment is not a line shape and a
- * slash pair is not a comment.** This was two regexes, and both of them edited
- * code. Measured over the 456 modules under `src/`, twice and by two routes:
- * the regex pair deleted 4,577 characters in 12 of them, of which 3,223 are not
- * whitespace. 1,532 of those sit inside a string literal, which is a truncated
- * URL; the other 1,691, on 114 lines in 10 modules, sit outside one, which is
- * an ordinary statement. Every rule below read the tree with all of it missing,
- * and three of the twelve modules are `lib/goodreads.ts`, `lib/opf.ts` and
- * `lib/pdf.ts`, which are subjects of the rule that keeps a file reader out of
- * reach of the network. The direction is a false negative, which is the one
- * this repository's guard rules call the dangerous one: a rule looks at less
- * than it says it does and passes.
- *
- * **The two ways it happened, neither of which a further regex closes.** A
- * `//` inside a string literal cut the line at the scheme, so a URL in an
- * attribute became `href="https:`. And an opening slash star inside a literal
- * or inside a line comment opened a block that ran to the next closing one:
- * `accept="image/*"` in `pages/ScanPage/components/LookupResult.tsx` swallowed
- * the next sixteen lines of JSX, and a line comment quoting a wildcard media
- * type in `api/mutator.ts` swallowed the `Accept` header the module sets.
- *
- * **What the swap changed, measured rather than argued.** Over `src/` the
- * parsed form removes nothing the regex form kept, zero characters, so every
- * reader sees at least as much as it did. Seventeen values derived by the
- * fifteen readers below were computed under both and none moved, so no rule
- * changed verdict on this tree; what changed is what they can see on the next.
- *
- * **What it newly refuses is a source that does not parse.** A regex returns
- * something for any text at all. All 456 modules parse, and
- * `strips every module the rules read` is the arm that keeps that a failure
- * naming the file rather than a stack inside whichever rule reached it first.
- */
-function withoutProse(source: string, lang: "ts" | "tsx"): string {
-  const cached = STRIPPED[lang].get(source);
-  if (cached !== undefined) return cached;
-
-  const inside = insideALiteral(source, lang);
-  let code = "";
-  let at = 0;
-  while (at < source.length) {
-    if (!inside[at]) {
-      if (source.startsWith("//", at)) {
-        let end = at + 2;
-        while (end < source.length && !ENDS_A_LINE.includes(source[end]!))
-          end += 1;
-        at = end;
-        continue;
-      }
-      if (source.startsWith("/*", at)) {
-        const close = source.indexOf("*/", at + 2);
-        at = close === -1 ? source.length : close + 2;
-        continue;
-      }
-    }
-    code += source[at];
-    at += 1;
-  }
-
-  STRIPPED[lang].set(source, code);
-  return code;
-}
-
-/**
- * What the stripper keeps and what it removes.
- *
- * **Every row is a source the regex pair this replaced got wrong**, and each
- * one is a shape rather than an instance: a slash pair in a string, in a
- * template chunk and in JSX text, and an opening block marker written inside a
- * string and inside a line comment. The last two are the expensive pair,
- * because they do not truncate a line, they delete every line up to the next
- * closing marker.
- *
- * The last row is the other direction, prose in every place a module can put
- * it, and it is the only row carrying a comment inside a template
- * interpolation and one trailing live code. Every row refuses a stripper that
- * returned its source unchanged, because every row states what must be cut.
- */
-const STRIPPING: [string, "ts" | "tsx", string, string[], string[]][] = [
-  [
-    "a slash pair inside a string literal",
-    "ts",
-    'const at = "https://example.com/a"; // the note\n',
-    ["https://example.com/a"],
-    ["the note"],
-  ],
-  [
-    "a slash pair inside a template chunk",
-    "ts",
-    "const at = `https://example.com/a`; // the note\n",
-    ["https://example.com/a"],
-    ["the note"],
-  ],
-  [
-    "a slash pair between two JSX tags",
-    "tsx",
-    "const el = <p>https://example.com/a</p>; // the note\n",
-    ["https://example.com/a"],
-    ["the note"],
-  ],
-  [
-    "an opening block marker inside a string literal",
-    "ts",
-    'const accept = "image/*";\nconst kept = 1;\n/* the note */\n',
-    ["const kept = 1;"],
-    ["the note"],
-  ],
-  [
-    "an opening block marker inside a line comment",
-    "ts",
-    "// a wildcard, */*\nconst kept = 2;\n/* the note */\n",
-    ["const kept = 2;"],
-    ["a wildcard", "the note"],
-  ],
-  [
-    "prose in every place a module can put it",
-    "ts",
-    "/**\n * the header\n */\n// the line\n" +
-      "const kept = `x${/* the interpolated */3}`; // the trailing\n",
-    ["const kept = `x${3}`;"],
-    ["the header", "the line", "the interpolated", "the trailing"],
-  ],
-  [
-    "a line comment ended by a terminator that is not a newline",
-    "ts",
-    // Written as escapes because `prettier --check` rewrites all three to a
-    // newline in source, which would quietly delete this row's subject.
-    "const kept = 1; // the note\u2028const alsoKept = 2;\n" +
-      "const third = 3; // the other note\rconst andFourth = 4;\n" +
-      "const fifth = 5; // a third note\u2029const andSixth = 6;\n",
-    [
-      "const kept = 1;",
-      "const alsoKept = 2;",
-      "const andFourth = 4;",
-      "const andSixth = 6;",
-    ],
-    ["the note", "the other note", "a third note"],
-  ],
-];
-
-describe("prose is stripped by the parser, not by a line shape", () => {
-  it.each(STRIPPING)("%s", (_label, lang, source, kept, cut) => {
-    const code = withoutProse(source, lang);
-
-    for (const survivor of kept) expect(code).toContain(survivor);
-    for (const gone of cut) expect(code).not.toContain(gone);
-  });
-
-  it("strips every module the rules read", () => {
-    // A parser refuses text a regex returns something for, so a module this
-    // throws on takes down whichever of the fifteen readers reached it first.
-    // This is where that arrives naming the file.
-    //
-    // That the glob is not empty is asserted once, in
-    // `the generated client stays behind hooks.ts::reads the source tree at
-    // all`. A second floor here would be a weaker copy of it, and a weaker
-    // inequality is how a bound stops guarding without ever failing.
-    const refused = entries()
-      .filter(([path, source]) => {
-        try {
-          withoutProse(source, langOf(path));
-          return false;
-        } catch {
-          return true;
-        }
-      })
-      .map(([path]) => path);
-
-    expect(refused).toEqual([]);
-  });
-});
 
 function sessionWrites(code: string): number {
   return [...code.matchAll(/\b(set|clear)Session\s*\(/g)].length;
@@ -1750,11 +1689,6 @@ function replacesAModule(source: string, lang: "ts" | "tsx"): boolean {
   return found;
 }
 
-/** What a path says about how to parse it. */
-function langOf(path: string): "ts" | "tsx" {
-  return path.endsWith(".tsx") ? "tsx" : "ts";
-}
-
 /**
  * Its own separate glob, because the one in the address rule above is scoped
  * inside that describe block.
@@ -2123,7 +2057,7 @@ function decoders(): [string, Construction][] {
       // files rather than constructions.
       .filter(([, source]) => source.includes("TextDecoder"))
       .flatMap(([path, source]) =>
-        decoderConstructions(source, path.endsWith(".tsx") ? "tsx" : "ts").map(
+        decoderConstructions(source, langOf(path)).map(
           (one): [string, Construction] => [path, one],
         ),
       )

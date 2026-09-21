@@ -20,8 +20,14 @@ from tests.test_house_rules import _is_vendored
 BACKEND = Path(__file__).resolve().parent.parent
 
 
-def _sources() -> list[Path]:
+def _sources(root: Path = BACKEND) -> list[Path]:
     """Every module of this app's own, migrations and the test tree excluded.
+
+    **`root` is what lets the diagonal in `test_house_rules.py` drive this.**
+    Calling the shared predicate is what makes this walk right; taking the tree
+    is what lets something check that it does, against a tree with vendored code
+    planted in it. Without it this walk was correct and exercised by nothing but
+    a pipeline, which is how the class it belongs to went red five times.
 
     **Stated as an exclusion.** An inclusion list is what goes stale the next
     time the backend grows a directory, which is the shape of guard defect this
@@ -41,9 +47,9 @@ def _sources() -> list[Path]:
     """
     found = [
         path
-        for path in BACKEND.rglob("*.py")
-        if not {"tests", "migrations"} & set(path.relative_to(BACKEND).parts)
-        and not _is_vendored(path, BACKEND)
+        for path in root.rglob("*.py")
+        if not {"tests", "migrations"} & set(path.relative_to(root).parts)
+        and not _is_vendored(path, root)
     ]
     # **The packages it must cover, not a number.** A floor of `> 30` does not
     # bind on a walk that reads 124 files: a mutation marking `routers` and

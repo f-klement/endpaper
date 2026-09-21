@@ -32,9 +32,15 @@ not. So the slack a NUL buys is bounded at four times the ceiling instead of
 being unbounded, which is the whole of what these constraints were written to
 stop.
 
-**`instr(x, char(0)) = 0` would make the character ceiling exact and is
-deliberately not taken.** The two credential columns carry it because a NUL is
-never a legitimate value there. These five hold text a member typed, `text` and
+**`instr(x, char(0)) = 0` would make the character count readable rather than
+exact, and is deliberately not taken.** It stops `length()` halting at a NUL; it
+does not stop `length()` counting one character per UTF-8 lead byte and skipping
+the continuation bytes after it, so a value carrying no NUL at all still reads
+short. See `docs/decisions.md`, *The house rule learned what the revision beside
+it already knew*. The decision here stands on its other reason, below.
+
+The two credential columns carry it because a NUL is never a legitimate
+value there. These five hold text a member typed, `text` and
 `note` above all, and the API stores a NUL in one today: `QuoteCreate` bounds
 the Python string and does not refuse the character.
 `tests/test_models.py::TestQuote::test_the_schema_admits_a_nul_which_is_why_this

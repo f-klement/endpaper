@@ -2,48 +2,10 @@ from pydantic import BaseModel, Field, field_validator
 
 from enums import CustomFieldKind
 from models import CUSTOM_FIELD_NAME_MAX, CUSTOM_FIELD_VALUE_MAX
-
-#: Every code point removed before a value or a name is stored.
-#:
-#: C0 (0x00 to 0x1F), DEL, and C1 (0x80 to 0x9F). None of them is visible in a
-#: text box and all of them survive a paste.
-#:
-#: **`str.split()` does not do this, which is what the paragraph here used to
-#: claim.** It splits on whitespace, and NUL is not whitespace: measured
-#: 2026-08-27, `"a\x00b"` survived unchanged through both fields, as did
-#: `\x01`, `\x07`, `\x08`, `\x1b` and `\x7f`. A NUL is stored by SQLite,
-#: serialised by JSON as `\\u0000`, and invisible everywhere a person could
-#: notice it.
-_CONTROL_CHARACTERS = dict.fromkeys(
-    [*range(0x00, 0x20), 0x7F, *range(0x80, 0xA0)]
+from schemas.common import (
+    one_line_without_any_control_character,
+    one_line_without_invisible_characters,
 )
-
-
-def _one_line(value: str) -> str:
-    """Whatever somebody pasted in, as the one line this is.
-
-    Both of these are fields on a single line beside a label, and both accept a
-    paste. Two things arrive that way and neither is visible in a text box.
-
-    **Control characters are removed**, not collapsed: see
-    `_CONTROL_CHARACTERS`, which also records why the sentence that used to be
-    here was wrong.
-
-    **A run of whitespace becomes one space**, for the reason `TagCreate.tidy`
-    collapses it: a name of nothing but spaces passes `min_length` and then
-    renders as an invisible row nobody can select or find again.
-
-    **A tab is a control character here and therefore vanishes rather than
-    becoming a space**, and that ordering is load bearing for a URL. Collapsing
-    first turned `https://a.example\t/x` into `https://a.example /x`, which
-    `urlsplit` accepts as a host of `"a.example "` while `new URL()` throws, so
-    the API answered **200 with an href no browser can follow**. Measured on
-    the live route before this changed. `custom_fields.link_target` refuses
-    whitespace outright as the second half of the same fix, because it also
-    sees values this function never touched: `backup.restore` writes through
-    Core.
-    """
-    return " ".join(value.translate(_CONTROL_CHARACTERS).split())
 
 
 class CustomFieldOut(BaseModel):
@@ -71,7 +33,16 @@ class CustomFieldCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def tidy(cls, value: str) -> str:
-        cleaned = _one_line(value)
+        """A name is one line, and a name of nothing is refused.
+
+        The invisible characters go as well as the whitespace, because this is
+        a label beside a value and it accepts a paste: a name of only invisible
+        characters passes `min_length` and then renders as a row nobody can
+        pick out of the list. **Not the value's rule**, which deletes a tab as
+        well: a name is read rather than followed, so a tab in one separates
+        two words like the space it is.
+        """
+        cleaned = one_line_without_invisible_characters(value)
         if not cleaned:
             raise ValueError("A custom field needs a name.")
         return cleaned
@@ -86,7 +57,8 @@ class CustomFieldRename(BaseModel):
     @field_validator("name")
     @classmethod
     def tidy(cls, value: str) -> str:
-        cleaned = _one_line(value)
+        """The same rule and the same reason as `CustomFieldCreate.tidy`."""
+        cleaned = one_line_without_invisible_characters(value)
         if not cleaned:
             raise ValueError("A custom field needs a name.")
         return cleaned
@@ -127,4 +99,16 @@ class CustomFieldValueUpdate(BaseModel):
     @field_validator("value")
     @classmethod
     def tidy(cls, value: str) -> str:
-        return _one_line(value)
+        r"""One line, with the control characters removed **before** the
+        collapse rather than after, which is load bearing here.
+
+        A tab is a control character, so it vanishes rather than becoming a
+        space. Collapsing first turned `https://a.example\t/x` into
+        `https://a.example /x`, which `urlsplit` accepts as a host of
+        `"a.example "` while `new URL()` throws, so the API answered **200 with
+        an href no browser can follow**. Measured on the live route before this
+        changed. `custom_fields.link_target` refuses whitespace outright as the
+        second half of the same fix, because it also sees values this validator
+        never touched: `backup.restore` writes through Core.
+        """
+        return one_line_without_any_control_character(value)

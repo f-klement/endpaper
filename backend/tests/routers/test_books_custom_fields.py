@@ -261,7 +261,7 @@ class TestAUrlRendersAsALink:
 
         res = _set(client, admin["headers"], book["id"], link_field["id"], value)
 
-        assert res.status_code == 422, res.text
+        assert res.status_code == 400, res.text
         assert client.get(
             f"/api/books/{book['id']}/custom-fields", headers=admin["headers"]
         ).json() == []

@@ -215,7 +215,7 @@ describe("CustomFieldsPanel", () => {
   });
 
   it("keeps what was typed when the server refuses it", async () => {
-    // The 422 on a url field exists so the member can be told; closing the
+    // The 400 on a url field exists so the member can be told; closing the
     // editor first threw away the half that makes the message actionable, and
     // the only way forward was to reopen and retype.
     const props = renderPanel({
@@ -245,7 +245,7 @@ describe("CustomFieldsPanel", () => {
 
   it("keeps every draft when only one of two writes is refused", async () => {
     // A partial failure is the case a per-field close would get wrong: one
-    // field lands, the other 422s, and reopening has to show both drafts.
+    // field lands, the other is refused, and reopening has to show both drafts.
     const props = renderPanel({
       onSave: vi.fn((id: number, _value: string, callbacks: Callbacks) =>
         id === 1 ? callbacks.onError() : callbacks.onSuccess(),

@@ -9,9 +9,35 @@ a database or a session: the library mode gate, the matching, what a second
 import of the same file does, and what a member may see in an export.
 """
 
+import ast
+import inspect
+from pathlib import Path
+from xml.etree import ElementTree
+
+import pytest
+from fastapi.responses import StreamingResponse
+from fastapi.testclient import TestClient
+
+import main
+import marc
 import settings_store
 from enums import SettingKey
-from models import Book
+from models import (
+    AUTHOR_LINE_MAX,
+    CLASSIFICATION_LABEL_MAX,
+    CLASSIFICATION_NUMBER_MAX,
+    DESCRIPTION_MAX,
+    ISBN_MAX,
+    PUBLISHER_MAX,
+    SERIES_NAME_MAX,
+    SUBTITLE_MAX,
+    TITLE_MAX,
+    Book,
+    Classification,
+)
+from routers import books as books_router
+from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
+from tests.test_house_rules import _python_sources
 
 MARCXML = "http://www.loc.gov/MARC21/slim"
 
@@ -154,6 +180,603 @@ class TestTheExport:
         )
         assert res.status_code == 200
         assert "<collection" in res.text
+
+
+class TestTheExportIsPagedRatherThanWhole:
+    """The shelf is never in memory whole, and the file is complete anyway.
+
+    The route used to ask a `Shelf` for every visible Book at once and hand the
+    list to a writer that built one `Element` tree over all of it. Nothing
+    bounded either, and the library in library mode is the instance with the
+    most books: this arm materialised every one of them for an ordinary
+    account, and the CSV arm beside it still does. What replaced it walks the
+    shelf a page at a time, so
+    what these tests are about is the two things paging can get wrong: a book
+    that falls between two pages while the shelf moves under the walk, and a
+    page that quietly holds the whole shelf again.
+    """
+
+    #: A page a test can build a shelf around. Every test here that uses it
+    #: patches the constant rather than building a production sized shelf,
+    #: because what is under test is that there is a page boundary and where
+    #: it is, not the number. `TestThePageSizeThatBoundsTheExport` is what
+    #: holds the number itself.
+    PAGE = 3
+
+    @pytest.fixture
+    def small_pages(self, monkeypatch):
+        monkeypatch.setattr(marc, "EXPORT_PAGE_RECORDS", self.PAGE)
+        return self.PAGE
+
+    def a_shelf(self, db, owner, count: int, title=None) -> list[str]:
+        """`count` public books, and the ISBNs that name them in the file.
+
+        The ISBN rather than the title, because the titles are deliberately
+        allowed to collide unless a test asks otherwise: the walk resumes on
+        the primary key and a shelf whose titles are all one string is what
+        shows it does not read the title at all.
+        """
+        isbns = [f"978000000{n:04d}" for n in range(count)]
+        db.add_all(
+            Book(
+                title=title(n) if title else "Ambiguous Title",
+                author="Ada Example",
+                isbn=isbns[n],
+                added_by_user_id=owner["user"]["id"],
+            )
+            for n in range(count)
+        )
+        db.commit()
+        return isbns
+
+    def export(self, client, headers):
+        return client.get(
+            "/api/books/export", params={"format": "marcxml"}, headers=headers
+        )
+
+    def test_every_book_is_written_exactly_once_when_the_shelf_outruns_a_page(
+        self, client, admin, db, small_pages
+    ):
+        """Seven books over pages of three, all sharing one title.
+
+        Exactly once is the assertion and not merely present: a walk that
+        resumes in the wrong place repeats a book as readily as it drops one,
+        and a MARCXML collection with a record twice is a catalogue exchange
+        that silently double counts.
+        """
+        library_mode(db)
+        isbns = self.a_shelf(db, admin, small_pages * 2 + 1)
+
+        text = self.export(client, admin["headers"]).text
+
+        for isbn in isbns:
+            assert text.count(f">{isbn}<") == 1, isbn
+        assert text.count("<record>") == len(isbns)
+
+    def test_the_writer_is_never_handed_more_than_one_page_of_books(
+        self, client, admin, db, monkeypatch, small_pages
+    ):
+        """The bound itself, watched at the seam it is applied on.
+
+        Counting the pages the route feeds the writer is what fails if the
+        route ever goes back to resolving the whole shelf and passing it as one
+        page: that reads identically from the outside, answers 200, and is the
+        defect this change exists for.
+        """
+        library_mode(db)
+        isbns = self.a_shelf(db, admin, small_pages * 2 + 1)
+        sizes: list[int] = []
+        chunks: list[str] = []
+        whole = marc.stream
+
+        def recording(pages):
+            def counted():
+                for page in pages:
+                    page = list(page)
+                    sizes.append(len(page))
+                    yield page
+
+            for chunk in whole(counted()):
+                chunks.append(chunk)
+                yield chunk
+
+        monkeypatch.setattr(marc, "stream", recording)
+
+        assert self.export(client, admin["headers"]).status_code == 200
+        assert sum(sizes) == len(isbns)
+        assert max(sizes) <= marc.EXPORT_PAGE_RECORDS
+        # One chunk per page, plus the two halves of the wrapper. That is a
+        # property of `marc.stream` and it is the dispatch cost this pins: one
+        # threadpool hop and one ASGI send a page rather than a record.
+        assert len(chunks) == len(sizes) + 2
+
+    def test_the_response_is_handed_a_walk_that_has_not_run(
+        self, client, admin, db, monkeypatch, small_pages
+    ):
+        """What reaches the transport, which is the half the counting misses.
+
+        A route that paged the query and then joined the pages into one string
+        satisfies every assertion above: the writer still saw pages, and the
+        chunks were still pulled one a page. The defect is what is handed over,
+        so that is what this reads.
+
+        **The walk is watched and not only the serialiser**, because the
+        serialiser's own state does not answer the question:
+        `marc.stream(list(_marcxml_pages(...)))` runs the whole walk, holds
+        every Book, and still hands over an unstarted generator. So the state
+        of the page generator is what is asserted, at the moment the response
+        is built. `GEN_CREATED` on it means not one page had been fetched.
+        """
+        library_mode(db)
+        self.a_shelf(db, admin, small_pages * 2 + 1)
+        walks: list[object] = []
+        states: list[tuple[str | None, str | None]] = []
+        pages = books_router._marcxml_pages
+
+        def watched(*args, **kwargs):
+            walk = pages(*args, **kwargs)
+            walks.append(walk)
+            return walk
+
+        def state(value: object) -> str | None:
+            # `None` is what a list or a string reports, which is the shape a
+            # route that materialised the walk would hand over.
+            return inspect.getgeneratorstate(value) if inspect.isgenerator(value) else None
+
+        def recording(content, *args, **kwargs):
+            # Read at the moment it is handed over, not afterwards: by the end
+            # of the request both generators are closed and say nothing about
+            # when they ran.
+            states.append((state(content), state(walks[-1]) if walks else None))
+            return StreamingResponse(content, *args, **kwargs)
+
+        # By name: both are module level names in that module rather than part
+        # of its declared surface, which mypy refuses to reach through.
+        monkeypatch.setattr("routers.books._marcxml_pages", watched)
+        monkeypatch.setattr("routers.books.StreamingResponse", recording)
+
+        assert self.export(client, admin["headers"]).status_code == 200
+        assert states == [(inspect.GEN_CREATED, inspect.GEN_CREATED)]
+
+    def test_a_book_deleted_behind_the_walk_does_not_take_a_later_one_with_it(
+        self, db, admin, small_pages
+    ):
+        """What an offset would have lost, and the reason the walk uses a key.
+
+        Pages of one export are separate reads: pysqlite leaves a `SELECT`
+        outside any transaction, so nothing holds a snapshot across them. Delete
+        a book that has already been written and every later row shifts one
+        place towards the start, so an offset of three lands one row past where
+        it left off and the book in between is in no page at all. Driving the
+        generator directly rather than through the route is what lets the
+        deletion happen between two pages.
+        """
+        expected = [f"Book {n:02d}" for n in range(small_pages * 2)]
+        self.a_shelf(db, admin, len(expected), title=lambda n: f"Book {n:02d}")
+
+        pages = books_router._marcxml_pages(db, admin["user"]["id"])
+        first = next(pages)
+        written = [book.title for book in first]
+        db.delete(db.get(Book, first[0].id))
+        db.commit()
+        written += [book.title for page in pages for book in page]
+
+        assert written == expected
+
+    def test_an_empty_shelf_yields_no_pages_at_all(self, db, admin, small_pages):
+        """The `if not books` arm, which the route level test cannot separate
+        from the wrapper being written for an empty collection. It says nothing
+        about how many times the walk asked."""
+        assert list(books_router._marcxml_pages(db, admin["user"]["id"])) == []
+
+    def test_a_shelf_of_exactly_one_page_yields_no_empty_page_after_it(
+        self, db, admin, small_pages
+    ):
+        """A last page that is exactly full is indistinguishable from a full
+        page with more behind it, so the walk asks again and the answer is
+        empty. What this pins is that the empty answer is not handed on as a
+        page: `marc.stream` would write an empty chunk for it, and a caller
+        counting chunks would see one page too many.
+        """
+        self.a_shelf(db, admin, small_pages)
+
+        pages = list(books_router._marcxml_pages(db, admin["user"]["id"]))
+
+        assert [len(page) for page in pages] == [small_pages]
+
+    def test_a_book_retitled_behind_the_walk_is_still_written(
+        self, db, admin, small_pages
+    ):
+        """What a walk resuming on the title would have lost.
+
+        `PATCH /api/books/{book_id}` can retitle a book, so a title is a key
+        that moves. Retitle a book that has not been written yet so that it
+        sorts before everything already written, and a walk asking for the
+        rows after that title skips it for good, silently and with a 200. The
+        primary key cannot move, so this is a book in the file.
+        """
+        expected = [f"Book {n:02d}" for n in range(small_pages * 2)]
+        self.a_shelf(db, admin, len(expected), title=lambda n: f"Book {n:02d}")
+
+        pages = books_router._marcxml_pages(db, admin["user"]["id"])
+        written = [book.title for book in next(pages)]
+        later = db.query(Book).filter(Book.title == expected[-1]).one()
+        later.title = "Aardvark"
+        db.commit()
+        written += [book.title for page in pages for book in page]
+
+        assert sorted(written) == sorted([*expected[:-1], "Aardvark"])
+
+    def test_a_failure_part_way_through_leaves_a_document_no_parser_accepts(
+        self, admin, db, monkeypatch, small_pages
+    ):
+        """The one thing streaming gives up, and what is left in its place.
+
+        The status line goes out before the first record, so a writer that
+        raises on page two cannot answer 500 any more. What it leaves instead
+        is a `<collection>` that is never closed, and no XML parser accepts
+        that, so a half written catalogue exchange is an error on the
+        cataloguer's side rather than a short file that reads as complete. That
+        is the silence `docs/decisions.md` refuses for an oversized upload,
+        answered on the export side.
+
+        Its own client, because the shared one re-raises a server exception
+        instead of handing back the bytes that reached the wire.
+        """
+        library_mode(db)
+        self.a_shelf(db, admin, small_pages * 2)
+        written = marc._record_element
+        calls = {"n": 0}
+
+        def failing(book):
+            calls["n"] += 1
+            if calls["n"] > small_pages:
+                raise RuntimeError("the writer gave out")
+            return written(book)
+
+        monkeypatch.setattr(marc, "_record_element", failing)
+
+        with TestClient(main.app, raise_server_exceptions=False) as client:
+            res = self.export(client, admin["headers"])
+
+        # The records that did reach the wire, and no closing tag: an empty
+        # body would fail to parse too and would say nothing about truncation.
+        assert res.text.count("<record>") == small_pages
+        assert "</collection>" not in res.text
+        with pytest.raises(ElementTree.ParseError):
+            ElementTree.fromstring(res.content)
+
+    def test_a_failure_before_the_first_page_is_also_a_200(
+        self, admin, db, monkeypatch, small_pages
+    ):
+        """The half of that property a failure on page two does not reach.
+
+        The opening tag is yielded before the walk is touched, so the status
+        line is already sent when the first query runs. There is no page to be
+        part of the way through: a database error on the very first one
+        answers 200 with a `<collection>` and nothing else, where before this
+        change it was a clean 500. Pinned rather than reasoned, because it is
+        the part of the trade that is easiest to assume away.
+        """
+        library_mode(db)
+        self.a_shelf(db, admin, small_pages)
+
+        def refusing(*_args, **_kwargs):
+            raise RuntimeError("the shelf could not be read")
+            # Unreachable, and it is what makes this a generator function
+            # rather than one that raises when it is called. The route has to
+            # get its walk and fail on the first `next`, which is where a
+            # failing query lands: a call that raised would be a 500 and would
+            # prove the opposite of what this test is for. Not a
+            # `# pragma: no cover`, which this tree treats as giving up on
+            # covering a line rather than as saying why one cannot run.
+            yield
+
+        monkeypatch.setattr("routers.books._marcxml_pages", refusing)
+
+        with TestClient(main.app, raise_server_exceptions=False) as client:
+            res = self.export(client, admin["headers"])
+
+        assert res.status_code == 200
+        # The opening tag **present**, first: without it every assertion below
+        # passes on an empty body, and an empty body is what a `stream` that
+        # pulled the first page before yielding the wrapper would produce,
+        # which is the arrangement this test exists to say is not the one.
+        assert "<collection" in res.text
+        assert "<record>" not in res.text
+        assert "</collection>" not in res.text
+        with pytest.raises(ElementTree.ParseError):
+            ElementTree.fromstring(res.content)
+
+    def test_a_shelf_smaller_than_a_page_is_still_one_document(
+        self, client, admin, db, make_book, small_pages
+    ):
+        """The wrapper is no longer serialised from a `<collection>` element,
+        so what it produces is re-derived from `ElementTree` here rather than
+        described in a comment."""
+        library_mode(db)
+        make_book(admin["headers"], title="Stoner")
+
+        res = self.export(client, admin["headers"])
+
+        probe = ElementTree.tostring(
+            ElementTree.Element("probe"), encoding="unicode", xml_declaration=True
+        )
+        assert res.text.startswith(probe[: probe.index("<probe")])
+        # Parsed from bytes: `ElementTree` refuses a `str` carrying an encoding
+        # declaration, which is the declaration asserted one line above.
+        assert ElementTree.fromstring(res.content).tag == f"{{{MARCXML}}}collection"
+
+
+class TestThePageSizeThatBoundsTheExport:
+    """What one page weighs at the widest a write through the API can produce.
+
+    This is what says whether `EXPORT_PAGE_RECORDS` is a page or the whole
+    shelf arriving under another name. `tests/test_sru.py` measures
+    `sru.MAX_RECORDS` the same way, against a 2,000 character description
+    rather than a declaration.
+
+    **Widest is two questions and this class exists because the second one was
+    missed twice.** The first is how wide a field may be, which is a
+    `max_length`, read here off its declaration rather than retyped, the way
+    `importing.within_bounds` reads every column it checks. The fill character
+    is the other half of that question: a `max_length` counts characters and a
+    page counts bytes, and `ElementTree` writes `&` as five of them.
+
+    **The second is how many fields a record has, and no length answers it.**
+    `700` repeats once per credited name, `marc._credited_names` splits
+    `author` on commas, and nothing bounds the count inside
+    `AUTHOR_LINE_MAX`, so the same 500 characters is one name or 250 of them
+    and each extra one costs its scaffolding rather than its bytes. A fixture
+    with one long name produces the fewest `700` fields there can be, which is
+    none, and is 36% under the real worst case.
+
+    **The line this fixture draws is what a write through the API can produce,
+    and it is drawn once.** `language`, `year`, `page_count` and
+    `series_index` are validated for shape as well as length, so filling them
+    would measure a record the API refuses; they carry a real value.
+    Everything bounded only by length is filled.
+
+    **What a restore can produce is wider, and it is outside that line on
+    purpose.** `backup.py` inserts through Core, so `@validates` never fires
+    and no schema bound applies: a restored archive can hold a description
+    past `DESCRIPTION_MAX`, an `isbn` of any 20 characters, and more than
+    `MAX_CLASSIFICATIONS_PER_BOOK` rows on one book. Measured, 32
+    classification rows on the otherwise widest record is 144,155 bytes, a
+    page of 13.75 MiB, past the ceiling below. None of it is built in here,
+    because a restore beats any number this class could name and the ceiling
+    is a claim about the writer's shape rather than a platform limit.
+    `models.py` records a 3,000,256 byte description that arrived that way.
+
+    **`isbn` is the one filled field that crosses the line**, and it is
+    deliberate: it costs 87 bytes of the widest record, it is the cheapest
+    demonstration that the two rules differ, and leaving it short would make
+    the ceiling read as if the restore path had been forgotten.
+
+    Driven against the writer, and the Books are never saved: bytes per record
+    is the writer's property alone, and a page of rows through the API would
+    be measuring the fixtures.
+    """
+
+    #: What a full page of the widest records may weigh.
+    #:
+    #: Twelve mebibytes against a measured 9.74, which is 102,107 bytes for one
+    #: such record. **A tripwire on the record's shape and not a platform
+    #: limit**: nothing enforces it at runtime and no deployment was measured
+    #: against it. What it does is fail when a field is added to the writer, or
+    #: made repeatable, or given a wider bound, so that the table at
+    #: `marc.EXPORT_PAGE_RECORDS` stops being quietly wrong.
+    CEILING_BYTES = 12_582_912
+
+    #: The fills, and what each is here to show. `w` is the number a careless
+    #: version of this class would have taken; `&` is what escaping does to the
+    #: same declared maximum.
+    FILLS = ("w", "ä", "&")
+
+    #: The most credited names `AUTHOR_LINE_MAX` characters can hold, as
+    #: `x,x,x,...`: one character a name and one separator.
+    MOST_CREDITS = AUTHOR_LINE_MAX // 2
+
+    def widest_book(self, n: int, fill: str, credits: int = 1) -> Book:
+        """Every length bounded field at its maximum, and `credits` names.
+
+        `credits` is separate from the fill because the two answer the two
+        questions this class is about, and a fixture that could not vary them
+        apart is the one that missed the second.
+
+        **Two values, and a third is refused rather than clamped.** The author
+        column is at its declared maximum at either end, 500 characters as one
+        name or as 250 of them, and nothing in between is: `x,` repeated three
+        times is six characters, so a fixture asked for three credits would
+        quietly measure a narrow record while reading as a wide one.
+        """
+        if credits not in (1, self.MOST_CREDITS):
+            raise ValueError(
+                f"credits is 1 or {self.MOST_CREDITS}: those are the two that "
+                "fill AUTHOR_LINE_MAX, and anything between them measures a "
+                "record narrower than this fixture claims to build"
+            )
+        author = (
+            fill * AUTHOR_LINE_MAX if credits == 1 else (fill + ",") * self.MOST_CREDITS
+        )
+        book = Book(
+            title=fill * TITLE_MAX,
+            subtitle=fill * SUBTITLE_MAX,
+            author=author,
+            publisher=fill * PUBLISHER_MAX,
+            year=1974,
+            language="de",
+            page_count=412,
+            isbn=fill * ISBN_MAX,
+            description=fill * DESCRIPTION_MAX,
+            series_name=fill * SERIES_NAME_MAX,
+            series_index=1.0,
+        )
+        book.classifications = [
+            Classification(
+                scheme="gnd",
+                number=fill * CLASSIFICATION_NUMBER_MAX,
+                label=fill * CLASSIFICATION_LABEL_MAX,
+            )
+            for _ in range(MAX_CLASSIFICATIONS_PER_BOOK)
+        ]
+        return book
+
+    def page_bytes(self, fill: str, credits: int = 1) -> int:
+        page = [
+            self.widest_book(n, fill, credits)
+            for n in range(marc.EXPORT_PAGE_RECORDS)
+        ]
+        written = "".join(marc.stream([page]))
+        assert written.count("<record>") == marc.EXPORT_PAGE_RECORDS
+        return len(written.encode())
+
+    def test_a_full_page_of_the_widest_records_stays_under_the_ceiling(self):
+        """The assertion is on the finished page, which is not the peak.
+
+        Building it holds every record's string and the joined result at once:
+        measured, 24.01 MiB for this 9.74 MiB page, 2.47 times. The route
+        level table at `marc.EXPORT_PAGE_RECORDS` is a typical page rather
+        than this one, so it is the shelf independence it demonstrates and not
+        the worst case. What this number bounds is the record's shape."""
+        assert self.page_bytes("&", self.MOST_CREDITS) < self.CEILING_BYTES
+
+    def test_the_fill_character_is_part_of_what_decides_the_page(self):
+        """The first of the two questions: a `max_length` is characters."""
+        one_byte, two_byte, escaped = (self.page_bytes(fill) for fill in self.FILLS)
+
+        assert one_byte < two_byte < escaped
+        assert escaped > 4 * one_byte
+
+    #: What one extra credited name costs a record, **net**.
+    #:
+    #: The `700` datafield and its two subfields are 114 bytes; the same name
+    #: leaving `100` takes that field from the whole 500 character fill down
+    #: to one, so the record gains 109. Measured at the widest fill. 100 is
+    #: the conservative figure the assertion uses, and neither number moves
+    #: when another field's bound does, which is the point of asserting the
+    #: difference rather than a ratio.
+    SCAFFOLDING_PER_CREDIT = 100
+
+    def test_the_number_of_credited_names_is_the_other_half(self):
+        """The second question, and the one a fixture of one long name cannot
+        see: same column, same declared length, more fields.
+
+        **Asserted as the difference the names are responsible for, not as a
+        ratio.** A ratio has the one name page underneath it, and that page
+        grows with every other bound in the record, so the ratio falls as the
+        description widens and the test fails with nothing wrong: measured,
+        the margin is gone by `DESCRIPTION_MAX` 13,200. The scaffolding a
+        `700` field costs does not move when another field does.
+        """
+        one_name = self.page_bytes("&")
+        many_names = self.page_bytes("&", self.MOST_CREDITS)
+
+        extra_names = self.MOST_CREDITS - 1
+        assert many_names - one_name > (
+            marc.EXPORT_PAGE_RECORDS * extra_names * self.SCAFFOLDING_PER_CREDIT
+        )
+
+
+class TestNoProductionModuleWritesAWholeCollection:
+    """`marc.write` materialises a document, so no route may reach for it.
+
+    That is how this ticket's defect was written: the export called it with a
+    shelf nothing bounded. The docstring on `write` says so and a docstring
+    stops nobody, so the rule is parsed rather than stated. `marc.stream` is
+    what a route wants.
+
+    **The corpus is `test_house_rules._python_sources`** and not a walk of this
+    module's own. That module records what a private walk costs, twice: one
+    spelled `"tests" not in path.parts and ".venv" not in path.parts` missed
+    the cache the pipeline builds under `backend/`, and one asked absolutely
+    returned nothing at all from a checkout under a directory called `tests`.
+    Both are this repository's standing rule about enumerating the spellings of
+    something derivable, and importing the walk is how a rule stops writing its
+    own.
+
+    **What it catches is a call to `write` and not the property behind it.**
+    Both names a module member can have, the attribute on the imported module
+    and the bare name an `import from` binds, read off the parse so that a
+    mention in prose is not a finding. It does not catch `import marc as m`,
+    `getattr`, or a route joining `marc.stream` into one string itself. The
+    property, that this route holds no whole document, is pinned behaviourally
+    by `TestTheExportIsPagedRatherThanWhole` instead.
+    """
+
+    #: The one module the rule cannot apply to, by resolved path rather than by
+    #: basename: a later `routers/marc.py` would otherwise be exempt too.
+    THE_WRITER = Path(marc.__file__).resolve()
+
+    def production_modules(self, root: Path | None = None) -> list[Path]:
+        """Every module the rule applies to: the app, minus the writer itself."""
+        sources = _python_sources(root) if root is not None else _python_sources()
+        return [path for path in sources if path.resolve() != self.THE_WRITER]
+
+    def calls_to_write(self, root: Path | None = None) -> list[str]:
+        offenders: list[str] = []
+        for path in self.production_modules(root):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            bound = {
+                alias.asname or alias.name
+                for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom) and node.module == "marc"
+                for alias in node.names
+                if alias.name == "write"
+            }
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                called = node.func
+                if (
+                    isinstance(called, ast.Attribute)
+                    and called.attr == "write"
+                    and isinstance(called.value, ast.Name)
+                    and called.value.id == "marc"
+                ) or (isinstance(called, ast.Name) and called.id in bound):
+                    offenders.append(f"{path.name}:{node.lineno}")
+        return offenders
+
+    def test_it_reads_the_modules_it_is_meant_to(self):
+        """A walk that stopped matching would report nothing, forever."""
+        names = {path.name for path in self.production_modules()}
+        assert {"sru.py", "shelf.py", "books.py"} <= names
+        assert "test_imports_marc.py" not in names
+        # **The exemption is live rather than dead.** Asserting the writer is
+        # absent from the filtered list only restates the filter. What can go
+        # wrong is the walk ceasing to return it, and then the exemption
+        # quietly guards nothing and this test still passes.
+        assert self.THE_WRITER in {path.resolve() for path in _python_sources()}
+
+    def test_a_planted_call_is_reported_in_both_spellings(self, tmp_path):
+        """The detector, driven against a tree built for it.
+
+        A rule asserted only against this checkout is a rule nobody has watched
+        fail, which `tests/test_marc.py` records paying for: three single anchor
+        mutations left every test in its class green while the rule reported
+        nothing. So the corpus takes a root and this plants both spellings in
+        one.
+        """
+        (tmp_path / "attribute_form.py").write_text(
+            "import marc\n\n\ndef go(books):\n    return marc.write(books)\n"
+        )
+        (tmp_path / "import_form.py").write_text(
+            "from marc import write\n\n\ndef go(books):\n    return write(books)\n"
+        )
+        (tmp_path / "innocent.py").write_text(
+            "import marc\n\n\ndef go(pages):\n    return marc.stream(pages)\n"
+        )
+
+        reported = self.calls_to_write(tmp_path)
+
+        assert sorted(reported) == ["attribute_form.py:5", "import_form.py:5"]
+
+    def test_nothing_outside_marc_py_calls_write(self):
+        offenders = self.calls_to_write()
+        assert not offenders, (
+            "marc.write materialises the whole document and no production "
+            f"module may call it; use marc.stream: {offenders}"
+        )
 
 
 class TestTheImport:

@@ -921,6 +921,18 @@ MARCXML records are small, so a body well inside the cap can still be tens of
 thousands of records, each of which costs a parse, a match against an in memory
 index and possibly an insert.
 
+**Nothing caps the MARCXML export, and what bounds it is the peak rather than the size.**
+A shelf of any size is exported in full: there is no cataloguer to split it and a short
+file is a silence. What is bounded is the server, which walks the shelf
+`marc.EXPORT_PAGE_RECORDS` rows at a time and writes one page of XML at a time, so one
+authenticated `GET /api/books/export?format=marcxml` costs a page of each rather than the
+whole catalogue in memory. Measured through the route with descriptions of 200 characters,
+`tracemalloc` peak above the baseline: 55.05 MiB against 1.02 at 10,000 books and 219.06
+against 1.05 at 40,000, where the first rises with the shelf and the second does not. The
+download and the wall clock are not bounded, and neither is the number of concurrent
+exports, which is the open item below. **The CSV arm of the same route still resolves the
+whole shelf**, is not gated by library mode, and carries the description too.
+
 **The writer drops what XML 1.0 cannot carry.** `ElementTree` serialises a
 control character verbatim, so one `\x0c` in a member typed description would
 produce an export no parser will read, this app's own included. Nothing upstream

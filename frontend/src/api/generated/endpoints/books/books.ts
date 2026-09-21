@@ -5496,8 +5496,11 @@ export const getUpdateBookDetailsUrl = (bookId: number) => {
  * Correct the catalogue entry by hand.
  *
  * `exclude_unset` is what makes a partial update partial: an absent field is
- * left alone and an explicit null clears. Without it every unsent field would
- * arrive as None and wipe the record, which is the classic PATCH bug.
+ * left alone and an explicit null clears where the column allows one. Without
+ * it every unsent field would arrive as None and wipe the record, which is the
+ * classic PATCH bug. A null for a column the database will not leave empty is
+ * refused by `BookDetailsUpdate` before it reaches here, because it used to
+ * reach the flush and answer 500.
  * @summary Update Book Details
  */
 export const updateBookDetails = async (
@@ -6313,7 +6316,7 @@ export const getSetCustomFieldUrl = (bookId: number, fieldId: number) => {
  * Returns the book's whole list rather than the one value, so a client that
  * has just written one is holding the same thing `GET` would give it.
  *
- * 422 when the field holds a link and the value is not one: an address with
+ * 400 when the field holds a link and the value is not one: an address with
  * no scheme, a `javascript:` or `data:` URL, or a host that is missing. See
  * `custom_fields.link_target` for the whole list and why it is re-checked on
  * every read as well as here.

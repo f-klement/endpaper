@@ -518,7 +518,7 @@ class TestTheTagFilterCannotBeUsedToBreakOrStallTheApp:
         _publish(db)
         ids = ",".join(str(n) for n in range(1, MAX_IDS_IN_A_FILTER + 2))
         response = client.get(f"{PUBLIC_PREFIX}/books?tags={ids}")
-        assert response.status_code == 422
+        assert response.status_code == 400
         assert str(MAX_IDS_IN_A_FILTER) in response.text
 
     def test_the_ceiling_itself_is_accepted(self, client, db, shelf):

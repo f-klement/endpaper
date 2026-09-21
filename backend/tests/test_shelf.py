@@ -154,9 +154,12 @@ caught would prove nothing about the new one. What is *still* not caught:
   with no predicate. Not caught by passes 1 to 3, and **the reason is a cost,
   measured**: `Book` in a narrowing clause is **14 statements across 5 modules**
   outside `shelf.py` and off a shelf-rooted chain, and **22 across 9** counting
-  those, against the **20 across 4** the fourth pass carries, re-measured
-  2026-09-17 by summing `BOOK_OWNED_READERS`. Extending the clause rule to
-  `Book` means classifying every one of them by hand.
+  those, measured 2026-09-17, against the **17 across 4** the fourth pass
+  carries, summed from `BOOK_OWNED_READERS` on 2026-09-20. That sum read 20
+  until `95693de`, where the three `.book_id.in_(loser_ids)` reads left
+  `routers/books.py` for `folding.py` and a shape rule took them, which is what
+  a count of hand classified statements does when the code moves. Extending the
+  clause rule to `Book` means classifying every one of them by hand.
 
   That last pair said **7 across 3** until 2026-09-10 and both halves were
   wrong: an `ast` walk over `BOOK_OWNED_READERS` answered 10 across 4 before a
@@ -567,21 +570,36 @@ BOOK_OWNED, UNNAMEABLE_BOOK_OWNED = _book_owned_entities()
 #    `insert` publishes nothing. Two entries below are writes.
 #
 # **Then add an entry**, in the module's list, saying what the statement does
-# and why that is safe. An entry is a pair: a fragment of the statement, and
-# the reason. **The fragment is checked**, so an entry cannot end up describing
-# a different statement than the one it was written for. The entries are in
-# line order, so a new statement goes in the position its line number puts it,
-# and moving a statement means moving its entry. **Pick a fragment that is
-# distinctive within the module**: the check is positional, so it cannot tell
-# two adjacent statements apart if both contain the fragment. `.one_or_none()`
-# is the weakest of them on that count and would need replacing if a second
-# statement in `custom_fields.py` grew one. Without that check the reasons
-# were a list beside a list, lined up by counting and verified by nothing,
-# which under this rule is the one fact stored twice with no enforcement left:
-# the reasons **are** the guarantee now. A reason, not a restatement: "narrowed to a Book the
-# route resolved" is a reason, "queries custom_field_values" is not. The
-# entries are what the next person reads to see where the bar is, so an entry
-# that does not carry an argument lowers it for everybody after you.
+# and why that is safe. An entry is a pair: **the whole statement**, as the
+# failure message prints it, which is its source with runs of whitespace
+# flattened to one space, and the reason. The entries are in line order, so a
+# new statement goes in the position its line number puts it, and moving a
+# statement means moving its entry.
+#
+# **The statement and not a fragment of it, because a fragment names a token
+# and the reason is about the query.** Keyed on a fragment, an entry could be
+# satisfied by a neighbour that happened to contain it, and an edit that kept
+# the token could drop the narrowing the reason rests on with nothing red.
+# Measured over this table on 2026-09-20: 1 of the 17 entries was ambiguous,
+# `func.count(DigitalReference.id)` in `routers/books.py`, which also matches
+# the flagged reference count five entries above it, so those two reasons were
+# interchangeable. `.one_or_none()`, the fragment that looks least distinctive,
+# was not: it matched one statement. **Write the check the reasons are
+# lined up by, rather than asking the next person to pick a good token.**
+# Equality is what `test_folding.NOT_A_DATABASE_READ` already keyed on, over a
+# **call** as `ast.unparse` writes it rather than over a statement, so the
+# precedent is the comparison and not the cost: a key here is up to six source
+# lines. What makes that affordable is that `_statement_at` flattens
+# whitespace, so rewrapping a statement changes no key, and that nothing in
+# this project runs `ruff format`.
+#
+# Without that check the reasons were a list beside a list, lined up by
+# counting and verified by nothing, which under this rule is the one fact
+# stored twice with no enforcement left: the reasons **are** the guarantee now.
+# A reason, not a restatement: "narrowed to a Book the route resolved" is a
+# reason, "queries custom_field_values" is not. The entries are what the next
+# person reads to see where the bar is, so an entry that does not carry an
+# argument lowers it for everybody after you.
 #
 # **If you cannot write that sentence, the query is the thing to change**, not
 # this list. Route it through `Shelf.select()` with a join to `books` and it is
@@ -601,7 +619,8 @@ BOOK_OWNED, UNNAMEABLE_BOOK_OWNED = _book_owned_entities()
 BOOK_OWNED_READERS = {
     "backup.py": [
         (
-            "book_tags.select()",
+            "manifest[\"tables\"][\"book_tags\"] = [ dict(row._mapping) for row in "
+            "db.execute(book_tags.select()) ]",
             "reads the whole `book_tags` table into the archive manifest. Not "
             "scoped to anything and deliberately so: an archive that omitted "
             "another member's rows would restore a library missing them. Admin "
@@ -611,38 +630,50 @@ BOOK_OWNED_READERS = {
     ],
     "custom_fields.py": [
         (
-            ".filter(CustomFieldValue.field_id == field.id).delete()",
+            "removed = ( db.query(CustomFieldValue).filter(CustomFieldValue.field_id == "
+            "field.id).delete() )",
             "deletes every value of a custom field the admin is removing, keyed "
             "on `field_id`. A write, and the count it returns describes rows "
             "that no longer exist.",
         ),
         (
-            "db.query(CustomFieldValue, CustomField)",
+            "rows = ( db.query(CustomFieldValue, CustomField) .join(CustomField, CustomField.id == "
+            "CustomFieldValue.field_id) .filter(CustomFieldValue.book_id == book.id) "
+            ".order_by(CustomFieldValue.field_id) .all() )",
             "reads one Book's values with their field definitions joined on. "
             "The function takes a `Book` object, never an id, which is the "
             "module's own privacy rule: a `Book` can only have come from "
             "`dependencies.py` or the Shelf.",
         ),
         (
-            ".one_or_none()",
+            "row = ( db.query(CustomFieldValue) .filter( CustomFieldValue.book_id == book.id, "
+            "CustomFieldValue.field_id == field.id, ) .one_or_none() )",
             "reads one `(book, field)` value to decide insert or update. Takes "
             "a `Book`, as above.",
         ),
         (
-            "CustomFieldValue.book_id == keeper_id",
+            "taken = { row.field_id for row in db.query(CustomFieldValue).filter( "
+            "CustomFieldValue.book_id == keeper_id ) }",
             "reads the keeper's field ids during a Book merge, to know which of "
             "the losers' values would collide. The ids came from a route that "
             "resolved every Book in the merge.",
         ),
         (
-            "CustomFieldValue.book_id.in_(ids)",
+            "for row in ( db.query(CustomFieldValue) .filter(CustomFieldValue.book_id.in_(ids)) "
+            ".order_by(CustomFieldValue.id) .all() ): if row.field_id in taken: db.delete(row) "
+            "else: row.book_id = keeper_id taken.add(row.field_id)",
             "reads the losing Books' values in the same merge, to move them "
-            "onto the keeper. Same ids, same route.",
+            "onto the keeper. Same ids, same route. **The loop body is part of "
+            "the argument and so part of the key**: every row it reads is "
+            "deleted or repointed on the spot, so this is a write that reads "
+            "its own targets rather than a query with an audience.",
         ),
     ],
     "routers/books.py": [
         (
-            "func.count(book_tags.c.book_id)",
+            "counts = dict( Shelf.seen_by(db, current_user.id) .select(book_tags.c.tag_id, "
+            "func.count(book_tags.c.book_id)) .join(book_tags, book_tags.c.book_id == Book.id) "
+            ".group_by(book_tags.c.tag_id) .all() )",
             "the Tag index: every Tag with a count of the Books carrying it, "
             "written through `Shelf.select()` and joined to `books`. "
             "**Correct, and reported anyway**, which is the cost this list pays "
@@ -651,12 +682,14 @@ BOOK_OWNED_READERS = {
             "`book_tags.book_id == books.id`.",
         ),
         (
-            "book_tags.delete()",
+            "db.execute(book_tags.delete().where(book_tags.c.tag_id == tag_id))",
             "deletes the association rows for a Tag being removed. A write, and "
             "reported for the `where` clause on it rather than for being one.",
         ),
         (
-            "Book.identifiers.any(",
+            "shelf = Shelf.seen_by(db, current_user.id).where( Book.id > after_id, "
+            "Book.isbn.is_(None), Book.google_books_id.is_(None), Book.identifiers.any( "
+            "BookIdentifier.scheme == BookIdentifierScheme.GOOGLE_BOOKS ), )",
             "narrows the identifier backfill to Books carrying a store "
             "identifier, as a correlated EXISTS inside `Shelf.where` rather "
             "than a query of its own: the FROM is the Shelf's filtered `books` "
@@ -667,7 +700,8 @@ BOOK_OWNED_READERS = {
             "paginated route here already answers with.",
         ),
         (
-            "shelf.select(func.count(DigitalReference.id))",
+            "total = ( shelf.select(func.count(DigitalReference.id)) .join(DigitalReference, "
+            "DigitalReference.book_id == Book.id) .filter(flagged) .scalar() or 0 )",
             "counts the flagged references on the Books the caller may see, for "
             "the shelf-wide listing. Written through `Shelf.select()` and joined "
             "outward to `books`, so the count is scoped by the same predicate as "
@@ -678,7 +712,10 @@ BOOK_OWNED_READERS = {
             "product and not an error.",
         ),
         (
-            "shelf.select(DigitalReference, Book.title, Book.author, Book.cover_url)",
+            "rows = ( shelf.select(DigitalReference, Book.title, Book.author, Book.cover_url) "
+            ".join(DigitalReference, DigitalReference.book_id == Book.id) .filter(flagged) "
+            ".order_by(DigitalReference.missing_since.desc(), DigitalReference.id.desc()) "
+            ".offset(paging.offset) .limit(paging.limit) .all() )",
             "the rows of that same listing: every reference a client reported "
             "missing, on a Book the caller may see, with the three Book scalars "
             "a row renders. Scoped by the Shelf and by nothing else, which is "
@@ -690,7 +727,8 @@ BOOK_OWNED_READERS = {
             "other many-book query here.",
         ),
         (
-            "DigitalReference.id == reference_id",
+            "reference = ( db.query(DigitalReference) .filter( DigitalReference.id == reference_id, "
+            "DigitalReference.book_id == book.id, ) .first() )",
             "reads one reference so the route can flag or forget it. Narrowed "
             "to a `Book` the dependency resolved **as well as** to the id, and "
             "the pairing is the point: without it a reference id belonging to "
@@ -698,27 +736,32 @@ BOOK_OWNED_READERS = {
             "hold.",
         ),
         (
-            "return ( db.query(DigitalReference)",
+            "return ( db.query(DigitalReference) .filter(DigitalReference.book_id == book.id) "
+            ".order_by(DigitalReference.id) .all() )",
             "reads one Book's references for the route that lists them. Takes "
             "a `Book` object and never an id, so `dependencies.book_for_read` "
             "has already applied the privacy rule; the same argument "
             "`custom_fields.py` makes twice above.",
         ),
         (
-            "DigitalReference.relative_path == payload.relative_path",
+            "existing = ( db.query(DigitalReference) .filter( DigitalReference.book_id == book.id, "
+            "DigitalReference.root_label == payload.root_label, DigitalReference.relative_path == "
+            "payload.relative_path, ) .first() )",
             "looks up the reference at the location a client has just reported, "
             "to decide whether that is a refresh or a new row. Narrowed to a "
             "`Book` the dependency resolved; the two payload values narrow it "
             "further and neither of them can widen it.",
         ),
         (
-            "func.count(DigitalReference.id)",
+            "held = ( db.query(func.count(DigitalReference.id)) .filter(DigitalReference.book_id == "
+            "book.id) .scalar() )",
             "counts one Book's references against the per book ceiling. "
             "Publishes no rows and no values, only how many that Book holds, "
             "and the Book is one the dependency resolved.",
         ),
         (
-            "BookIdentifier.id == identifier_id",
+            "identifier = ( db.query(BookIdentifier) .filter( BookIdentifier.id == identifier_id, "
+            "BookIdentifier.book_id == book.id, ) .first() )",
             "reads one store identifier so the route can remove it. Narrowed "
             "to a `Book` the dependency resolved **as well as** to the id, for "
             "the reason the digital reference entry above gives: without the "
@@ -729,7 +772,10 @@ BOOK_OWNED_READERS = {
     ],
     "routers/stats.py": [
         (
-            "Book.id == book_tags.c.book_id",
+            "by_tag = ( shelf.select( Tag.name, Tag.category, Tag.key, "
+            "func.count(book_tags.c.book_id).label(\"count\") ) .join(book_tags, Book.id == "
+            "book_tags.c.book_id) .join(Tag, Tag.id == book_tags.c.tag_id) .group_by(Tag.id) "
+            ".order_by(Tag.category, func.count(book_tags.c.book_id).desc(), Tag.name) .all() )",
             "Tag counts for the statistics page, written through "
             "`Shelf.select()` and joined to `books`. "
             # Kept on one line. The paragraph above points a grep at this
@@ -748,9 +794,19 @@ def _statement_at(source: str, line: int) -> str:
     """The source of the statement beginning at this line, whitespace flattened.
 
     So an entry in `BOOK_OWNED_READERS` can be tied to the statement it claims
-    to describe. Without that the reasons were a list beside a list, matched by
-    position and checked by nothing: the one fact stored twice with no
-    enforcement left.
+    to describe, by equality: the entries are keyed on what this returns.
+    Without that the reasons were a list beside a list, matched by position and
+    checked by nothing: the one fact stored twice with no enforcement left.
+
+    **The widest statement starting at that line**, so a query inside a `for`
+    carries the loop with it. That is the unit the rule reports and the unit an
+    entry is about: the one such entry in `custom_fields.py` says in its reason
+    that the body deletes or repoints every row it reads, which is half of why
+    that read is safe, so the key and the argument cover the same code.
+
+    **What this returns is a key rather than source**, and a compound statement
+    flattens to something no parser would take back. That costs nothing: it is
+    only ever compared.
     """
     tree = ast.parse(source)
     widest = None
@@ -764,6 +820,32 @@ def _statement_at(source: str, line: int) -> str:
     if widest is None:
         return ""
     return " ".join((ast.get_source_segment(source, widest) or "").split())
+
+
+def _entries_off_their_statements(
+    source: str, lines: list[int], entries: list[tuple[str, str]]
+) -> list[str]:
+    """Which allowlist entries are not keyed on the statement they sit against.
+
+    **The comparison `BOOK_OWNED_READERS` is enforced by, in one place**, so the
+    tree assertion and the witness below run the same rule: a fixture that
+    exercises its own copy reports on a rule the tree is not read against.
+
+    Equality and not containment. A fragment names a token and a reason is about
+    the query, so an edit that keeps the token and drops the narrowing the
+    reason rests on used to pass, and a fragment that is not distinctive could
+    be satisfied by a neighbour.
+    """
+    off = []
+    for line, (expected, _) in zip(lines, entries, strict=True):
+        statement = _statement_at(source, line)
+        if statement != expected:
+            off.append(
+                f"{line} is not the statement its allowlist entry is keyed on.\n"
+                f"      entry expects: {expected}\n"
+                f"      statement is:  {statement}"
+            )
+    return off
 
 
 def _entity_aliases(
@@ -1560,8 +1642,14 @@ class TestTheShelfIsTheOnlyWayIn:
             entries = BOOK_OWNED_READERS.get(name, [])
             body = sources.get(name, "").splitlines()
             if len(lines) != len(entries):
+                # **The statement as an entry has to carry it**, flattened, not
+                # the raw first line: this is the branch a new read arrives in,
+                # and what it prints is what the person has to paste into the
+                # table. A truncated source line was enough while an entry was a
+                # fragment somebody picked out of it.
                 shown = [
-                    f"      {name}:{line}  {body[line - 1].strip()[:70]}"
+                    f"      {name}:{line}  "
+                    f"{_statement_at(sources.get(name, ''), line)}"
                     for line in lines
                     if line - 1 < len(body)
                 ]
@@ -1570,25 +1658,23 @@ class TestTheShelfIsTheOnlyWayIn:
                     f"{len(entries)} allowed\n" + "\n".join(shown)
                 )
                 continue
-            # The entries are positional, in line order, so each one has to be
-            # tied to the statement it claims to describe or the reasons drift
-            # out from under the statements as the module is edited.
-            for line, (fragment, _) in zip(lines, entries, strict=True):
-                statement = _statement_at(sources.get(name, ""), line)
-                if fragment not in statement:
-                    report.append(
-                        f"  {name}:{line} does not contain the fragment its "
-                        f"allowlist entry is keyed on.\n"
-                        f"      entry expects: {fragment}\n"
-                        f"      statement is:  {statement[:100]}"
-                    )
+            # The entries are positional, in line order, and each is keyed on
+            # the whole statement rather than on a fragment of it, so a reason
+            # cannot drift out from under the statement it describes as the
+            # module is edited.
+            report += [
+                f"  {name}:{one}"
+                for one in _entries_off_their_statements(
+                    sources.get(name, ""), lines, entries
+                )
+            ]
         if not report and counted == allowed:
             return
 
         raise AssertionError(
             "A statement reads a table that belongs only to a Book, and either "
-            "is not on the allowlist or does not match the entry describing "
-            "it.\n\n"
+            "is not on the allowlist or is not the statement the entry "
+            "describing it was written for.\n\n"
             + "\n".join(report)
             + f"\n\n  The tables are {', '.join(sorted(BOOK_OWNED))}. They carry no "
             "member of their own, so nothing in a row says who may read it: the "
@@ -1602,13 +1688,50 @@ class TestTheShelfIsTheOnlyWayIn:
             "is recorded once.\n\n"
             "  If your query is genuinely safe, and the usual reason is that it "
             "is scoped to Books somebody already resolved, add an entry to "
-            "BOOK_OWNED_READERS in this file: a fragment of the statement, and "
-            "why it is safe. The entries are in line order and are keyed on that "
-            "fragment, so moving a statement means moving its entry. The comment "
+            "BOOK_OWNED_READERS in this file: the statement, exactly as printed "
+            "above, and why it is safe. The entries are in line order and are "
+            "keyed on the whole statement, so moving a statement means moving "
+            "its entry and editing one means re-reading its reason. The comment "
             "block above the list is the checklist, including the four join "
             "spellings that look correct and are not. If you cannot write the "
             "reason in a sentence, change the query rather than the list."
         )
+
+    def test_an_entry_is_keyed_on_its_whole_statement_and_not_a_token_in_it(self):
+        """Equality, asserted against the comparison rather than against the table.
+
+        The table is what the assertion above reads, so a fragment cannot be
+        demonstrated by editing it. This hands the comparison a statement and
+        two keys: the token a fragment would have been, and the statement.
+
+        **What the containment check accepted is the point.** The fixture drops
+        the narrowing and keeps the token, which is the shape a leak takes:
+        measured on `routers/books.py` by deleting
+        `.filter(DigitalReference.book_id == book.id)` from the per book
+        reference count, the old check stayed green and this one names the line.
+        Ambiguity was the smaller half: 1 of the 17 entries was a fragment of a
+        second statement as well as of its own, `func.count(DigitalReference.id)`.
+        """
+        narrowed = (
+            "def f(db, book):\n"
+            "    return (\n"
+            "        db.query(func.count(Reference.id))\n"
+            "        .filter(Reference.book_id == book.id)\n"
+            "        .scalar()\n"
+            "    )\n"
+        )
+        widened = (
+            "def f(db, book):\n"
+            "    return db.query(func.count(Reference.id)).scalar()\n"
+        )
+        token = "func.count(Reference.id)"
+        statement = _statement_at(narrowed, 2)
+        assert token in statement and token in _statement_at(widened, 2)
+
+        assert _entries_off_their_statements(narrowed, [2], [(token, "why")])
+        assert not _entries_off_their_statements(narrowed, [2], [(statement, "why")])
+        # The entry written for the narrowed statement, against the widened one.
+        assert _entries_off_their_statements(widened, [2], [(statement, "why")])
 
     #: Shapes that must be reported, and by which rule.
     #:
@@ -3130,6 +3253,40 @@ class TestFilters:
         body = source[source.index("def matching(") : source.index("def _with_read_status(")]
         unread = {name for name in names if f"filters.{name}" not in body}
         assert unread == set(), f"BookFilters fields nothing reads: {unread}"
+
+
+class TestASliceWithNoCount:
+    """`limited` beside `page`, for a caller that walks the whole shelf.
+
+    Driven through the route as well, by
+    `tests/routers/test_imports_marc.py::TestTheExportIsPagedRatherThanWhole`.
+    These are the unit cases beside `page`'s, and the refusal is the one nothing
+    else reaches.
+    """
+
+    def test_it_returns_at_most_the_limit_in_the_order_given(self, db, user):
+        db.add_all(Book(title=f"Book {n}", added_by_user_id=user.id) for n in range(5))
+        db.commit()
+
+        books = Shelf.seen_by(db, user.id).limited(2, Book.id.asc())
+
+        assert len(books) == 2
+        assert [book.id for book in books] == sorted(book.id for book in books)
+
+    def test_it_takes_the_whole_shelf_when_the_limit_is_larger(self, db, user):
+        """The other side, without which a method returning nothing passes the
+        case above."""
+        db.add_all(Book(title=f"Book {n}", added_by_user_id=user.id) for n in range(3))
+        db.commit()
+
+        assert len(Shelf.seen_by(db, user.id).limited(10, Book.id.asc())) == 3
+
+    def test_it_refuses_a_slice_with_no_ordering(self, db, user):
+        """A LIMIT with no ORDER BY is an unspecified subset rather than an
+        unsorted one, and a walk resuming from its last row resumes from
+        nowhere. Nothing else in the tree reaches this refusal."""
+        with pytest.raises(ValueError, match="needs an ordering"):
+            Shelf.seen_by(db, user.id).limited(2)
 
 
 class TestPaging:

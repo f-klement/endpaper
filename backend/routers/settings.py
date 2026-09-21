@@ -312,7 +312,8 @@ def get_feature_flags(db: DbSession) -> FeatureFlagsOut:
     has_key = bool(settings_store.google_books_api_key(db))
 
     return FeatureFlagsOut(
-        google_books_enabled=google_books_enabled,
+        # The conjunction alone. The raw toggle is admin-only on purpose: see
+        # `FeatureFlagsOut.google_books_ready`.
         google_books_ready=google_books_enabled and has_key,
         goodreads_lookup_enabled=settings_store.get_bool(
             db, SettingKey.GOODREADS_LOOKUP_ENABLED
@@ -607,10 +608,10 @@ def restore_credential_key(
     try:
         credentials.store_key(payload.phrase)
     except credentials.BadRecoveryPhrase as refusal:
-        # 422 rather than 409: a phrase somebody mistyped is a bad request, and
+        # 400 rather than 409: a phrase somebody mistyped is a bad request, and
         # a key the deployment pinned elsewhere is a conflict with the
         # deployment. One status for both told a client nothing it could act on.
-        raise HTTPException(status_code=422, detail=str(refusal)) from None
+        raise HTTPException(status_code=400, detail=str(refusal)) from None
     except credentials.KeyConfigurationError as refusal:
         raise HTTPException(status_code=409, detail=str(refusal)) from None
     return _read_credential_key(db)

@@ -331,7 +331,7 @@ describe("useLibrary collection filter", () => {
   });
 
   it("asks for the unfiled books with their own parameter", async () => {
-    // Never both: the API answers 422 to a request naming a collection and the
+    // Never both: the API answers 400 to a request naming a collection and the
     // unfiled books at once, so one field has to produce one or the other.
     const { result } = renderLibrary();
     await waitFor(() => expect(result.current.books).toHaveLength(1));
@@ -459,7 +459,6 @@ describe("useLibrary lending and discussion filters", () => {
 });
 
 const BASE_FLAGS = {
-  google_books_enabled: false,
   google_books_ready: false,
   goodreads_lookup_enabled: false,
   default_locale: "en",
@@ -882,7 +881,7 @@ describe("useBookSelection", () => {
     it("keeps the selection when the update fails", async () => {
       // Clearing it would make the reader tick every book again.
       api.on("/api/books/bulk", {
-        status: 422,
+        status: 400,
         body: { detail: "Too many" },
       });
       const { result } = renderSelection();

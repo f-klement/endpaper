@@ -80,7 +80,6 @@ describe("useExportLibrary", () => {
  */
 describe("useFeatureFlagsState", () => {
   const BODY = {
-    google_books_enabled: false,
     google_books_ready: false,
     goodreads_lookup_enabled: false,
     default_locale: "en",

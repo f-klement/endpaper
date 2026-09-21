@@ -1,7 +1,13 @@
 """Tests for backend/routers/auth.py: registration, login, /auth/me."""
 
-import pytest
+import typing
+from typing import Any
 
+import pytest
+from fastapi import FastAPI, Response
+from fastapi.utils import is_body_allowed_for_status_code
+
+import main
 from auth import COVER_COOKIE_NAME
 from models import User
 from tests.helpers import directory_with, proxy_headers
@@ -721,3 +727,105 @@ class TestSwitchInProxyMode:
         """The token is a session in its own right, not a modifier on a header."""
         res = client.get("/auth/me", headers={"Authorization": f"Bearer {switched}"})
         assert res.json()["username"] == "tester"
+
+
+def _routes_answering_with_a_bare_response() -> list[Any]:
+    """Every documented route whose handler builds a `Response` itself.
+
+    **Exactly the base class, not a subclass.** A `StreamingResponse` or a
+    `FileResponse` carries a body and a media type of its own, and the export
+    and cover routes return those. A bare `Response` in this API is the answer
+    that carries nothing, which is what this rule is about.
+
+    `main.iter_api_routes` rather than `app.routes`, because `include_router`
+    appends a wrapper rather than splicing the child's routes in, and filtering
+    `app.routes` on `APIRoute` finds the one route `main.py` declares itself.
+    """
+    return [
+        route
+        for route in main.iter_api_routes(main.app.routes)
+        if route.include_in_schema
+        and typing.get_type_hints(route.endpoint).get("return") is Response
+    ]
+
+
+def _declared_content(route: Any, schema: dict[str, Any]) -> dict[str, Any]:
+    method = next(iter(route.methods)).lower()
+    responses = schema["paths"][route.path][method]["responses"]
+    return responses[str(route.status_code)].get("content", {})
+
+
+class TestARouteThatSendsNoBodyDocumentsNone:
+    """The schema promised a body two routes never send.
+
+    `POST /auth/reset/request` and `POST /auth/verify/request` answer 202 with
+    nothing in it, deliberately: the answer is the same whether or not the
+    account exists, which is a privacy property rather than an omission. The
+    schema documented that 202 as `application/json`, so the committed
+    document, which the TypeScript client is generated from, described a body
+    that never arrives. Found 2026-09-20 by `tests/api_contract.py`, which
+    reported a missing content type and a JSON deserialisation error on an
+    empty body.
+
+    **The fix is a declaration and not a body**, which is what keeps the
+    privacy property untouched: `response_class=Response` tells FastAPI there
+    is no media type, and the bytes on the wire do not move.
+
+    **What this rule cannot see**, stated rather than left to be found: a route
+    that sends a body under a media type the schema does not declare.
+    `GET /api/books/export` and `GET /api/backup` both do, and both return a
+    `StreamingResponse`, whose media type is chosen at runtime from a query
+    parameter. `tests/api_contract.py` is blind to it too, because
+    schemathesis skips a response whose content type the definition does not
+    carry, so it is recorded here and in `docs/decisions.md` rather than
+    covered.
+    """
+
+    def test_some_such_route_could_have_carried_a_body(self) -> None:
+        """The vacuity arm, and 204 is why it is not simply "some route".
+
+        FastAPI already omits the content for a status that forbids a body, so
+        a rule satisfied only by the three 204s here would hold over a tree
+        where every 202 promised a body again."""
+        answerable = [
+            route
+            for route in _routes_answering_with_a_bare_response()
+            if is_body_allowed_for_status_code(route.status_code)
+        ]
+
+        assert answerable, (
+            "no documented route answers with a bare Response under a status "
+            "that allows a body, so this rule is about nothing"
+        )
+
+    def test_none_of_them_declares_content(self) -> None:
+        """Off `app.openapi()`, which CI diffs the committed
+        `frontend/openapi.json` against on every push, so this is that document
+        without a second copy of where it lives."""
+        schema = main.app.openapi()
+        promised = [
+            f"{sorted(route.methods)[0]} {route.path} declares "
+            f"{sorted(_declared_content(route, schema))} for {route.status_code}"
+            for route in _routes_answering_with_a_bare_response()
+            if _declared_content(route, schema)
+        ]
+
+        assert promised == [], (
+            "These routes answer with an empty body and the schema this API "
+            "publishes says otherwise, so a generated client and anything validating the "
+            "document are both wrong about them:\n  " + "\n  ".join(promised)
+        )
+
+    def test_the_default_is_what_this_rule_refuses(self) -> None:
+        """The diagonal. Without it the rule reads as a fact about FastAPI
+        rather than a choice each route makes, and a reader would delete the
+        argument as redundant."""
+        app = FastAPI()
+
+        @app.post("/quietly", status_code=202)
+        def _quietly() -> Response:
+            return Response(status_code=202)
+
+        declared = app.openapi()["paths"]["/quietly"]["post"]["responses"]["202"]
+
+        assert "content" in declared

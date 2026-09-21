@@ -274,16 +274,16 @@ class TestMergeRefusals:
 
         res = merge(client, admin["headers"], [first["id"], second["id"]], other["id"])
 
-        assert res.status_code == 422
+        assert res.status_code == 400
 
     def test_needs_at_least_two_books(self, client, admin, make_book):
         book = make_book(admin["headers"], title="Dune")
-        assert merge(client, admin["headers"], [book["id"], book["id"]], book["id"]).status_code == 422
+        assert merge(client, admin["headers"], [book["id"], book["id"]], book["id"]).status_code == 400
 
     def test_an_unknown_id_is_not_silently_dropped(self, client, admin, make_book):
         book = make_book(admin["headers"], title="Dune")
         res = merge(client, admin["headers"], [book["id"], 9999], book["id"])
-        assert res.status_code == 422
+        assert res.status_code == 400
 
     def test_another_members_private_book_cannot_be_merged_in(
         self, client, admin, member, make_book
@@ -293,7 +293,7 @@ class TestMergeRefusals:
 
         res = merge(client, member["headers"], [mine["id"], private["id"]], mine["id"])
 
-        assert res.status_code == 422
+        assert res.status_code == 400
 
     def test_requires_authentication(self, client):
         assert client.post("/api/books/merge", json={"book_ids": [1, 2], "keep_id": 1}).status_code == 401

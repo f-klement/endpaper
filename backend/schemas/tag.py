@@ -3,6 +3,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, BeforeValidator, Field, field_validator
 
 from enums import TagCategory, TagKey
+from schemas.common import one_line_without_invisible_characters
 
 MAX_TAG_NAME = 100
 
@@ -68,12 +69,16 @@ class TagCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def tidy(cls, value: str) -> str:
-        """Collapse the whitespace somebody pasted in.
+        r"""One line, and a name that normalises to nothing is refused.
 
         A name of only spaces passes `min_length` and then renders as an
-        invisible tag nobody can select or find again.
+        invisible tag nobody can select or find again. **A character with no
+        width goes for that same reason rather than a second one**: `name` is
+        unique, and `"Fiction\x00"` beside `"Fiction"` is two rows a member
+        reads as one. A tab is left to the collapse, which makes it the space
+        it looks like.
         """
-        cleaned = " ".join(value.split())
+        cleaned = one_line_without_invisible_characters(value)
         if not cleaned:
             raise ValueError("A tag needs a name.")
         return cleaned

@@ -101,6 +101,7 @@
 import { boundText } from "./bookBounds";
 import { readEpub, type EpubFailure } from "./epub";
 import type { FileMetadata } from "./fileReaders";
+import { producedValue } from "./stores";
 import {
   openZip,
   ZipError,
@@ -211,17 +212,6 @@ const EPUB_MIMETYPE = "application/epub+zip";
 
 /** Method 0, stored. Spelled here because the sniff is about the storage. */
 const METHOD_STORED = 0;
-
-/**
- * A Google Books volume id: twelve characters of the URL safe alphabet.
- *
- * Measured over all 24, every one twelve characters and every one distinct,
- * including the two pairs of titles that differ only by a `(1)` suffix. It is
- * a bound rather than a list of spellings, and it is what tells the volume id
- * line of the sidecar's metadata block from the reading state line beside it
- * without matching an English label that a German export does not carry.
- */
-const VOLUME_ID = /^[A-Za-z0-9_-]{12}$/;
 
 /**
  * The reading state, and this one is English only.
@@ -456,7 +446,19 @@ function readSidecar(html: string): Sidecar | null {
   for (const entry of document.querySelectorAll("div.meta-entry")) {
     const text = entry.textContent ?? "";
     const value = labelled(text);
-    if (value !== null && VOLUME_ID.test(value)) {
+    // **What tells the volume id line from the reading state line beside it is
+    // the shape**, rather than an English label a German export does not carry.
+    // Which shape that is belongs to the scheme, so it is asked of
+    // `lib/stores.ts` beside `StoreIdentifierScheme` rather than written here.
+    //
+    // **That makes this read a second consumer of a rule written for the first,
+    // and the cost is one character.** One more character admitted there is one
+    // more line admitted here, and a line that is not the id is a book filed
+    // under the reading state. `tests/lib/takeout.test.ts > reads no volume id
+    // out of a thirteen character metadata line` is where that turns red;
+    // `tests/lib/stores.test.ts` sweeps candidate lines through this read, so
+    // what is guarded is the call rather than the import.
+    if (value !== null && producedValue("google_books", value)) {
       volumeId ??= value;
       continue;
     }

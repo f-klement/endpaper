@@ -11,11 +11,8 @@ from typing import Annotated
 from pydantic import BaseModel, Field, StringConstraints
 
 from enums import CredentialProvenance
-from models import BASE_URL_MAX
+from models import BASE_URL_MAX, SERVER_NAME_MAX
 from schemas.imports import ImportResultOut
-
-#: Matches `models.OpdsServer.name` and `ck_opds_servers_name`.
-MAX_SERVER_NAME = 100
 
 
 class OpdsServerIn(BaseModel):
@@ -38,7 +35,7 @@ class OpdsServerIn(BaseModel):
     name: Annotated[
         str,
         StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=MAX_SERVER_NAME
+            strip_whitespace=True, min_length=1, max_length=SERVER_NAME_MAX
         ),
     ]
     base_url: Annotated[

@@ -8,6 +8,7 @@ ordinary round trips.
 """
 
 import dataclasses
+import hashlib
 from pathlib import Path
 from types import MappingProxyType
 
@@ -107,7 +108,25 @@ class TestAKeyIsNeverInvented:
         assert "CREDENTIAL_ENCRYPTION_KEY" in str(refusal.value)
 
 
+#: BIP-39's own SHA-256 of `english.txt`, as the specification publishes it.
+#:
+#: **The anchor is the standard rather than the package this build installed**,
+#: so this pins the list against being wrong as well as against changing.
+ENGLISH_WORDLIST_DIGEST = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"
+
+
 class TestARecoveryPhraseIsTheOnlyFormOfAKey:
+    def test_the_wordlist_is_the_one_the_standard_publishes(self):
+        """A permuted list is the silent failure nothing else here can see.
+
+        Every checksum stays self consistent under it, every word stays in the
+        list, and every phrase already written down derives a different key.
+        The membership check is word by word and the checksum arithmetic holds
+        for any 2,048 words in any order, so neither notices.
+        """
+        listed = "\n".join(credentials._WORDS.wordlist) + "\n"
+        assert hashlib.sha256(listed.encode()).hexdigest() == ENGLISH_WORDLIST_DIGEST
+
     def test_a_generated_phrase_is_twenty_four_words(self):
         assert len(credentials.generate_phrase().split()) == credentials.PHRASE_WORDS
 
@@ -131,6 +150,78 @@ class TestARecoveryPhraseIsTheOnlyFormOfAKey:
     def test_only_a_whole_key_can_be_written_as_a_phrase(self):
         with pytest.raises(credentials.KeyConfigurationError):
             credentials.key_to_phrase(b"too short")
+
+
+#: What a failed checksum says, whatever phrase produced it.
+#:
+#: **Asserted whole rather than by substring.** A fixed string cannot carry any
+#: part of the input, which is a stronger guarantee than any assertion about
+#: which words are absent from it.
+CHECKSUM_REFUSAL = (
+    "The recovery phrase failed its checksum, so at least one word is "
+    "wrong or two are swapped. Check it against what you wrote down."
+)
+
+
+def _the_checksum_holds(words: list[str]) -> bool:
+    """BIP-39's own rule, written out rather than asked of the module under test.
+
+    24 words are 264 bits: 256 of entropy, then the first 8 bits of that
+    entropy's SHA-256. **A test that asks `phrase_to_key` which inputs it
+    refuses agrees with it by construction**, so it cannot notice the function
+    refusing the wrong set. The swaps below are chosen against this instead.
+
+    The wordlist is the module's own deliberately. The disagreement this exists
+    to find is about the checksum, and a second list from elsewhere would
+    surface a changed wordlist as a checksum failure, which reads as a bug in
+    the wrong place. Sharing it leaves this blind to the list itself, which is
+    why `test_the_wordlist_is_the_one_the_standard_publishes` pins that
+    separately: word by word membership does not, and neither does any checksum.
+    """
+    bits = "".join(f"{credentials._WORDS.wordlist.index(word):011b}" for word in words)
+    entropy_bits = credentials.KEY_BYTES * 8
+    material = int(bits[:entropy_bits], 2).to_bytes(credentials.KEY_BYTES, "big")
+    return hashlib.sha256(material).digest()[0] == int(bits[entropy_bits:], 2)
+
+
+def _a_swap_the_checksum_rejects(
+    words: list[str], pairs: list[tuple[int, int]], *, among: str
+) -> list[str]:
+    """The first of `pairs` whose swap BIP-39 refuses, as the swapped words.
+
+    **Derived rather than drawn.** Swapping two words of a valid phrase leaves a
+    valid phrase about 1 time in 226, measured on 2026-09-20 over 200,000
+    generated phrases, against 1 in 228 derived: 1 in 256 that the moved bits
+    still match the checksum, plus 1 in 2,048 that the two words are the same
+    word and the swap does nothing. So a test that swapped one pair and asserted
+    a refusal was a claim about its draw rather than about the checksum, and it
+    reddened the pipeline at random with a failure reading as a regression in
+    recovery phrase validation. Asking the rule which pairs it rejects makes the
+    assertion true of every phrase without pinning the phrase.
+
+    **Both directions of the rule going wrong are refused here**, and only one
+    of them is loud on its own. A rule that accepted everything would exhaust
+    `pairs`, which takes about `228 ** len(pairs)` draws to happen honestly. A
+    rule that refused everything would hand back the first candidate with no
+    signal at all, and for the test below that candidate is the last two words:
+    the flake this replaced, restored in silence. So the phrase is put to the
+    rule first, where the answer is known.
+    """
+    if not _the_checksum_holds(words):
+        raise AssertionError(
+            "the rule above refuses a phrase this build generated, so the "
+            "search below would hand back its first candidate and assert "
+            "nothing about the checksum"
+        )
+    for first, second in pairs:
+        swapped = list(words)
+        swapped[first], swapped[second] = swapped[second], swapped[first]
+        if not _the_checksum_holds(swapped):
+            return swapped
+    raise AssertionError(
+        f"no swap {among} is refused by the checksum, so the assertion beside "
+        f"this one would hold for a reason that is not the one it names"
+    )
 
 
 class TestAMistypedPhraseFailsAtInput:
@@ -164,14 +255,11 @@ class TestAMistypedPhraseFailsAtInput:
     #: A phrase whose last two words, swapped, fail the checksum. It is a
     #: fixture generated for this test and opens nothing.
     #:
-    #: **Fixed rather than generated, and that is the whole point.** Swapping
-    #: two words breaks the checksum for most phrases, not for all, so asking
-    #: `generate_phrase()` for one asserted something untrue and reddened the
-    #: pipeline at random with a failure reading as a regression in recovery
-    #: phrase validation. Measured 2026-09-19 over 20,000 generated phrases:
-    #: the swap is still accepted 91 times, 1 run in 220, and 14 of the 20,000
-    #: draw the same word twice at positions 23 and 24, where the swap is a no
-    #: op and nothing is being tested at all.
+    #: **Fixed, so that one case of this is reproducible.** Swapping two words
+    #: breaks the checksum for most phrases and not for all, at the rate
+    #: `_a_swap_the_checksum_rejects` records, so asking `generate_phrase()`
+    #: for one asserted something untrue of 1 draw in 226. The two tests after
+    #: this one keep the fresh phrase and derive the swap from the rule.
     SWAP_BREAKS_THE_CHECKSUM = (
         "cry verb canal remove range near afraid hollow upgrade foam deputy "
         "letter front aisle melody hammer donkey perfect eternal pledge cross "
@@ -192,13 +280,43 @@ class TestAMistypedPhraseFailsAtInput:
         swapped = [*words[:22], words[23], words[22]]
         with pytest.raises(credentials.BadRecoveryPhrase) as refusal:
             credentials.phrase_to_key(" ".join(swapped))
-        # The whole message, not a substring: a fixed string cannot carry any
-        # part of the input, which is a stronger guarantee than any assertion
-        # about which words are absent from it.
-        assert str(refusal.value) == (
-            "The recovery phrase failed its checksum, so at least one word is "
-            "wrong or two are swapped. Check it against what you wrote down."
+        assert str(refusal.value) == CHECKSUM_REFUSAL
+
+    def test_a_swap_that_moves_the_checksum_bearing_word_is_refused(self):
+        """The fixed phrase's class again, over a phrase drawn fresh each run.
+
+        The last word carries the 8 checksum bits as well as 3 of entropy, so a
+        swap touching it moves bits across that boundary. The last two words
+        are the first pair offered, which is the case the fixture above pins.
+        """
+        words = credentials.generate_phrase().split()
+        last = credentials.PHRASE_WORDS - 1
+        swapped = _a_swap_the_checksum_rejects(
+            words,
+            [(position, last) for position in reversed(range(last))],
+            among="of the last word with an earlier one",
         )
+        with pytest.raises(credentials.BadRecoveryPhrase) as refusal:
+            credentials.phrase_to_key(" ".join(swapped))
+        assert str(refusal.value) == CHECKSUM_REFUSAL
+
+    def test_a_swap_before_the_last_word_is_refused_too(self):
+        """The class no test here reached, fixed phrase or generated.
+
+        Every pair before the last leaves the checksum byte exactly where it
+        is and changes only the entropy it is computed over, which is the other
+        side of the boundary the test above crosses.
+        """
+        words = credentials.generate_phrase().split()
+        last = credentials.PHRASE_WORDS - 1
+        swapped = _a_swap_the_checksum_rejects(
+            words,
+            [(first, second) for first in range(last) for second in range(first + 1, last)],
+            among="of two words before the last",
+        )
+        with pytest.raises(credentials.BadRecoveryPhrase) as refusal:
+            credentials.phrase_to_key(" ".join(swapped))
+        assert str(refusal.value) == CHECKSUM_REFUSAL
 
 
 class TestOneKeyInTwoStoresIsFineAndTwoKeysIsNot:

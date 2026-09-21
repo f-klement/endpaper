@@ -156,7 +156,7 @@ flow is built around.
 answered for: null is not one of the three.
 
 `collection_id` and `unfiled` are **two parameters for two questions**, and sending both is
-a **422** rather than one silently winning. "Books in collection 3" and "books in no
+a **400** rather than one silently winning. "Books in collection 3" and "books in no
 collection" are alternatives, and a caller that asked for both has made a mistake worth
 being told about: choosing one for them is how a filter quietly shows the wrong shelf. An
 id no collection has selects nothing, rather than answering 404: this is a filter, not a
@@ -171,8 +171,10 @@ against for the same reason `unrated` does.
 ### Editing, rating and reading dates
 
 `PATCH /{id}` is a partial update: an absent field is left alone and an explicit null
-clears. That distinction is the whole point, and it is why the handler uses
-`exclude_unset` rather than dumping the model.
+clears where the column allows one. That distinction is the whole point, and it is why the
+handler uses `exclude_unset` rather than dumping the model. A null for a column the
+database will not leave empty, which is `title` and nothing else today, is a **422** from
+the body schema: it used to reach the flush and answer 500.
 
 `PATCH /{id}/rating` needs only **read** access, like status, because a rating is one
 person's opinion and changes nothing for anyone else. It deliberately does not touch the
@@ -621,7 +623,7 @@ whoever is on call looking at the wrong service.
 
 | Method | Path | Access | Notes |
 |---|---|---|---|
-| POST | `/api/imports/goodreads?create_missing=` | user | multipart CSV; **422** if it is not an export |
+| POST | `/api/imports/goodreads?create_missing=` | user | multipart CSV; **400** if it is not an export |
 
 There is no Goodreads API to connect to: they stopped issuing developer keys in December
 2020. A CSV export is the only route in, and linking out to their search is the only other
@@ -921,7 +923,7 @@ schema.
 `CustomFieldValueOut.href` is what a client points an `<a>` at, and it is decided
 on **this read** rather than trusted from storage: a `url` field whose value is
 not an `http` or `https` URL with a real host comes back with `href` null and is
-rendered as text. A write that fails the same test answers **422** rather than
+rendered as text. A write that fails the same test answers **400** rather than
 degrading silently, because a field somebody declared a link and cannot click,
 with nothing saying why, is worse than an error. See [security.md](security.md).
 
@@ -1508,7 +1510,7 @@ than the corner. A client should ask before removing one and should not promise 
 | GET | `/api/settings/sender-health` | **admin** | What each switched-on reminder channel last did. See the Loans section |
 | GET | `/api/settings/credential-key` | **admin** | Whether an encryption key is in place, and where from. Never the key |
 | POST | `/api/settings/credential-key` | **admin** | Makes one and returns the recovery phrase. **409** when one already exists |
-| PUT | `/api/settings/credential-key` | **admin** | Takes a recovery phrase back in. **422** on a phrase that fails its checksum |
+| PUT | `/api/settings/credential-key` | **admin** | Takes a recovery phrase back in. **400** on a phrase that fails its checksum |
 | DELETE | `/api/settings/credential-key` | **admin** | Discards the key, so a new one can be made. Reports how many logins it stranded |
 | PUT | `/api/settings/catalogue-sources/{source}/credential` | **admin** | Stores one catalogue's login, sealed |
 | DELETE | `/api/settings/catalogue-sources/{source}/credential` | **admin** | Drops it. Succeeds whether or not one was stored |
@@ -1536,8 +1538,14 @@ secrets and nothing about the catalogue. Since the public catalogue it also carr
 `public_catalogue_published`, which is what tells a browser holding no token whether there
 is a catalogue to offer. It is the **server's conjunction** of library mode and the publish
 switch, never either row, so a client cannot get the nesting rule wrong. `library_mode` is
-deliberately **not** on this model: the cataloguer column set it changes is a later ticket,
-so it would be an unread field on the one endpoint a stranger can call.
+on it too, as the raw row rather than a conjunction, because the server gates every MARC
+route on that row and a client with no admin session still has to decide whether to offer a
+MARC control the server would answer 403 to.
+
+**Every field on this model has a reader in the client, and one with none is refused**,
+which is why the raw `google_books_enabled` toggle is not here and `google_books_ready`,
+that toggle conjoined with a stored key, is. Each field says at its own site in
+`backend/schemas/settings.py` what it discloses to a caller holding nothing.
 
 #### The provider list
 
@@ -1662,11 +1670,11 @@ exist and no key does, which is a restore onto a new machine: ciphertext is proo
 existed, so the answer there is the phrase rather than a second key.
 
 `PUT` on the same path takes a phrase back in, absorbing capitals and stray whitespace, and
-answers **422** on one that fails its checksum rather than storing a key that would open
-nothing. 422 rather than 409 because a mistyped phrase is a bad request while a key the
+answers **400** on one that fails its checksum rather than storing a key that would open
+nothing. 400 rather than 409 because a mistyped phrase is a bad request while a key the
 deployment pinned elsewhere is a conflict with the deployment, and one status for both told
-a client nothing it could act on differently. **A 422 body carries no `input`**, so the
-rejected phrase is not echoed back.
+a client nothing it could act on differently. **The refusal names a word position or a
+count and never the phrase**, so nothing is echoed back.
 
 `DELETE` discards the key. It is the way back from closing the tab without writing the words
 down, and it strands whatever the key was opening, which the response names rather than
@@ -1822,8 +1830,8 @@ shelves, which the payload withholds.
 
 `sort` is a **subset** of the signed in listing's, so `sort=newest` is a **422**: it orders
 by `added_at`, a withheld column, and an ordering returns the whole ordering of its column
-in one request. `tags` is bounded at 400 characters and 32 ids, and a longer list is a 422
-rather than a truncation.
+in one request. `tags` is bounded at 400 characters and 32 ids: a longer string is a 422
+from the parameter's own bound and more than 32 ids is a 400, and neither is a truncation.
 
 **`id` is published and discloses more than an identifier.** It is the insert order, so the
 catalogue comes back in acquisition order with no `sort` at all, and `max(id)` against the
@@ -1971,13 +1979,13 @@ A browser navigating to a non-API path gets a styled HTML page instead; anything
 
 | Code | Means |
 |---|---|
-| 400 | Understood but not allowed in this state (no ISBN to refresh, already returned) |
+| 400 | Understood and refused: not allowed in this state (no ISBN to refresh, already returned), or a value the route itself judged (an ISBN that is not one, a filter asking two questions at once) |
 | 401 | No usable token, or from `/auth/login` wrong credentials |
 | 403 | Authenticated but not permitted (non-admin, non-owner) |
 | 404 | Absent, **or** invisible to this account |
 | 409 | Conflicts with existing data (duplicate ISBN, book already on loan) |
 | 413 | Upload over the size cap |
-| 422 | Request body or query failed validation |
+| 422 | Request body or query failed validation. `detail` is the array of per-field objects, and this is the only status that sends one |
 | 429 | Rate-limited; carries `Retry-After` |
 | 500 | A bug. Generic message only; the traceback is logged, never returned |
 

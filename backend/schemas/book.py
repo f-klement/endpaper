@@ -33,6 +33,7 @@ from models import (
     SERIES_NAME_MAX,
     SUBTITLE_MAX,
     TITLE_MAX,
+    Book,
 )
 from schemas.author import RefusedAssertionOut
 from schemas.classification import (
@@ -817,12 +818,27 @@ class BookDiscussUpdate(BaseModel):
     wants_to_discuss: bool
 
 
+#: The `books` columns a row is never allowed to be missing.
+#:
+#: Read off the table rather than written out, because the defect is a **pair**
+#: and not either half: a field that accepts `null` in a partial update, over a
+#: column that refuses one, is `UPDATE books SET title=NULL`, an `IntegrityError`
+#: out of the flush, and a 500 from `errors.unhandled_exception_handler`. One
+#: field is enough, and `title` was it. Derived, the next optional field added
+#: over a NOT NULL column is covered on the day it is added rather than on the
+#: day somebody sends it a null.
+COLUMNS_THAT_REFUSE_NULL = frozenset(
+    name for name, column in Book.__table__.columns.items() if not column.nullable
+)
+
+
 class BookDetailsUpdate(BaseModel):
     """The fields a person edits by hand after a book exists.
 
     Every field is optional and absent means "leave alone", so the form can
     send only what changed. An explicit `null` clears, which is how a series is
-    unset; the two cases are distinguished with `model_fields_set`.
+    unset; the two cases are distinguished with `model_fields_set`. A column
+    that refuses null refuses the clear too: see the validator at the foot.
     """
 
     title: str | None = Field(default=None, min_length=1, max_length=TITLE_MAX)
@@ -853,6 +869,35 @@ class BookDetailsUpdate(BaseModel):
     def upper_case_currency(cls, value: str | None) -> str | None:
         """`eur` and `EUR` are the same currency and must not sort apart."""
         return value.upper() if value else value
+
+    @model_validator(mode="after")
+    def refuse_to_clear_a_column_that_cannot_be_null(self) -> BookDetailsUpdate:
+        """An explicit `null` is refused where the column behind it refuses one.
+
+        `routers/books.update_book_details` writes every field the caller sent,
+        so a null for such a column reached SQLite and came back as a 500. See
+        `COLUMNS_THAT_REFUSE_NULL` for why this is derived from the table.
+
+        **Absent still means "leave alone".** This reads `model_fields_set`, so
+        it fires on a null somebody wrote and never on a field left out, which
+        is the whole of what makes the update partial.
+
+        Raising `ValueError` rather than `HTTPException`: this is body
+        validation, so FastAPI answers 422 with the array of entries the schema
+        declares for that status, where a hand raised refusal would send a
+        sentence the schema says is an array.
+        """
+        cleared = sorted(
+            field
+            for field in self.model_fields_set
+            if field in COLUMNS_THAT_REFUSE_NULL and getattr(self, field, None) is None
+        )
+        if cleared:
+            raise ValueError(
+                f"{', '.join(cleared)} cannot be cleared: send a value, or leave the "
+                "field out to keep the one already stored"
+            )
+        return self
 
 
 class SeriesOut(BaseModel):

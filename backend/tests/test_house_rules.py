@@ -9,6 +9,7 @@ again".
 import ast
 import copy
 import dataclasses
+import functools
 import importlib
 import inspect
 import os
@@ -267,9 +268,24 @@ VENDORED_KINDS: Final = {
 FIRST_PARTY: Final = (
     "shelf.py",
     "routers/loans.py",
+    # **Two packages and not one**, because four of the driven walks end in a
+    # floor asserting they reached `routers` and `schemas` rather than asserting
+    # a count: a count is satisfied by a walk that lost a whole directory. With
+    # one package planted those walks fail their own floor on this tree and
+    # cannot be driven at all, which would have left them out of the diagonal
+    # for a reason that reads as a property of the walk rather than of the
+    # fixture. See `test_accounts._sources` for the mutation behind the floor.
+    "schemas/book.py",
     "tests/test_shelf.py",
     "migrations/versions/a1.py",
     "README.md",
+    # **A repository has one, and two of the driven walks refuse a tree with no
+    # ignore rule at all** rather than reading "no file" as "nothing ignored".
+    # It is a member here rather than a file the fixture plants quietly, because
+    # a walk reaching it is reaching something this tree owns: the refusal below
+    # reports anything outside this tuple, so a file the fixture creates and the
+    # tuple omits is reported as vendored code.
+    ".gitignore",
 )
 
 #: What each walk must reach out of that, keyed by the name it is called here.
@@ -279,22 +295,38 @@ FIRST_PARTY: Final = (
 #: refusal test was written to avoid, and a vacuity check that quietly skipped the new
 #: walk would leave the refusal above as the only thing driving it, which is the half
 #: that a walk returning nothing passes.
+_THE_APP: Final = {"shelf.py", "routers/loans.py", "schemas/book.py"}
+
 WHAT_EACH_WALK_REACHES: Final = {
-    "_python_sources": {"shelf.py", "routers/loans.py"},
-    "_source_modules": {"shelf.py", "routers/loans.py"},
-    "_test_sources": {"tests/test_shelf.py"},
-    "_every_module_but_the_tests": {
-        "shelf.py",
-        "routers/loans.py",
-        "migrations/versions/a1.py",
-    },
-    "_every_python_file": {
-        "shelf.py",
-        "routers/loans.py",
-        "tests/test_shelf.py",
-        "migrations/versions/a1.py",
-    },
-    "_every_file_a_tool_does_not_own": set(FIRST_PARTY),
+    "test_house_rules::_python_sources": _THE_APP,
+    "test_house_rules::_source_modules": _THE_APP,
+    "test_house_rules::_test_sources": {"tests/test_shelf.py"},
+    "test_house_rules::_every_module_but_the_tests": _THE_APP
+    | {"migrations/versions/a1.py"},
+    "test_house_rules::_every_python_file": _THE_APP
+    | {"tests/test_shelf.py", "migrations/versions/a1.py"},
+    "test_house_rules::_every_file_a_tool_does_not_own": set(FIRST_PARTY),
+    # The four modules that own a walk of their own. Each reaches the shared
+    # predicate and none of them could be driven against a constructed tree
+    # until they took a root, which is what this table now says out loud: two
+    # of them answer exactly what `_python_sources` answers and are a second
+    # walk over one corpus, and that is visible here rather than only to
+    # somebody reading four files.
+    "test_accounts::_sources": _THE_APP,
+    "test_covers::_our_modules": _THE_APP,
+    "test_classifications::_modules": _THE_APP,
+    "test_decoders::_production_sources": _THE_APP | {"migrations/versions/a1.py"},
+    # The census's two, which walk the repository rather than `backend/` and are
+    # driven here for the same reason as the rest: `.uv-cache` is under
+    # `backend/` and the census reaches it. They answer alike on this tree
+    # because `scope` is `candidates` minus what declares itself internal, and
+    # nothing the fixture plants declares anything. The ignore file is out
+    # because its suffix is not one the census reads, which is that walk's own
+    # filter running before the predicate rather than the dot rule answering.
+    # The dot rule is still driven for these two by the planted environment and
+    # dependency directories, which they do reach.
+    "test_roster_counts::candidates": set(FIRST_PARTY) - {".gitignore"},
+    "test_roster_counts::scope": set(FIRST_PARTY) - {".gitignore"},
 }
 
 
@@ -309,6 +341,96 @@ WHAT_EACH_WALK_REACHES: Final = {
 _A_FUNCTION: Final = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
+def _names_for_the_tree(tree: ast.Module) -> set[str]:
+    """Every module level name in one module that holds a path.
+
+    A default of one of these is what says a function takes the tree even where
+    the parameter is not called `root`, which is the second half of the rule
+    `_walk_names` documents.
+
+    **Read off the module, never listed.** The first version of this was a
+    frozenset of the five spellings somebody had seen, and it was short on the
+    day it was written: `_REPO` is the tree constant in five guard modules and
+    was not in it. A helper there spelling its parameter `base` and defaulting
+    it to `_REPO` matched neither arm of the closure, so it never entered
+    `reaches` and was neither driven nor reported as undrivable. That is
+    verbatim the silent drop the default name clause exists to stop, one
+    spelling further out, and an inclusion list is what goes stale when the
+    repository grows a directory.
+
+    **Two passes, because one tree constant is derived from another and the
+    first pass could not see it.** `test_roster_counts.REPO` is `BACKEND.parent`
+    and holds no `Path(` call at all, so the `Path(` pass alone reported that
+    module's `BACKEND` and not its repository root, which is the root its two
+    driven walks default to. Both review seats found this independently, on a
+    rule whose whole subject is that a list goes stale: the same failure one
+    derivation out rather than one spelling out. So a name whose value is built
+    from a name already found joins it, to a fixed point.
+
+    **Over matching is the safe direction and is deliberate.** A name bound to
+    anything containing a `Path(` call counts, and so does anything derived
+    from one, so a constant that is not the tree still counts. The cost is that
+    a function defaulting to it joins `reaches` and must then be drivable or be
+    reported, which is louder than the rule needs rather than quieter.
+
+    **This whole function is stated rather than driven, and that is measured
+    rather than assumed.** Killing the `pathlib.Path` arm outright, so that
+    `test_decoders.BACKEND` is not found, leaves the suite green: every
+    function that reaches the predicate today spells its parameter `root`, so
+    the first arm of the closure carries all of them and the default name arm
+    decides nothing. It is here for the helper spelled `base`, which the tree
+    does not contain yet and has contained before. **Do not read a green run
+    over this as evidence it works**; the arm that has evidence behind it is
+    the parameter name.
+    """
+    bindings: list[tuple[set[str], ast.expr]] = []
+    for node in tree.body:
+        if not isinstance(node, ast.Assign | ast.AnnAssign) or node.value is None:
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        bindings.append(
+            ({one.id for one in targets if isinstance(one, ast.Name)}, node.value)
+        )
+
+    found: set[str] = set()
+    for names, value in bindings:
+        if any(
+            isinstance(call, ast.Call)
+            and (
+                (isinstance(call.func, ast.Name) and call.func.id == "Path")
+                or (isinstance(call.func, ast.Attribute) and call.func.attr == "Path")
+            )
+            for call in ast.walk(value)
+        ):
+            found |= names
+
+    growing = True
+    while growing:
+        growing = False
+        for names, value in bindings:
+            if names <= found:
+                continue
+            if any(
+                isinstance(inner, ast.Name) and inner.id in found
+                for inner in ast.walk(value)
+            ):
+                found |= names
+                growing = True
+    return found
+
+
+def _defines_walk(tree: ast.Module) -> bool:
+    """Whether this module defines a `walk` of its own, which is never the filesystem's.
+
+    One home, because the change that widened the diagonal across the test tree
+    wrote the same four line expression beside the one that was already here.
+    `_is_a_walk` takes the answer as a parameter, so the seam already existed.
+    """
+    return any(
+        isinstance(node, _A_FUNCTION) and node.name == "walk" for node in ast.walk(tree)
+    )
+
+
 def _a_backend_with_vendored_code_in_it(root: Path, vendored: str) -> None:
     """Write a tree shaped like `backend/`, with one kind of vendored code in it.
 
@@ -320,6 +442,11 @@ def _a_backend_with_vendored_code_in_it(root: Path, vendored: str) -> None:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("x = 1\n")
+    # **Emptied after the loop above wrote `x = 1` into it.** The fixture is
+    # about vendored directories a walk has to refuse on its own, and an ignore
+    # file with entries in it would let a walk pass by reading the file instead
+    # of by applying the rule.
+    (root / ".gitignore").write_text("")
     for directory in (root / vendored, root / "tests" / vendored):
         for name in ("mod.py", "notes.md"):
             path = directory / name
@@ -327,7 +454,8 @@ def _a_backend_with_vendored_code_in_it(root: Path, vendored: str) -> None:
             path.write_text("x = 1\n")
 
 
-def _walk_names() -> tuple[set[str], set[str]]:
+@functools.cache
+def _walk_names() -> tuple[frozenset[str], frozenset[str]]:
     """The names in this module that decide what a walk reaches, as `(walks, all)`.
 
     **Read off this file rather than listed**, which is the same rule the walks
@@ -358,24 +486,51 @@ def _walk_names() -> tuple[set[str], set[str]]:
     never driving it. In it, that walk reads this checkout instead of the
     constructed tree and every kind is reported against it.
 
-    **Taking the tree is a parameter called `root` or a default of `BACKEND`,
-    and the second is there because the first is one spelling.** The parameter
-    name is the caller's choice and open, so a helper spelling it `base` and
-    calling a walk with no argument satisfied neither arm and dropped out
-    silently, which is the failure this clause exists to stop, one name over.
-    `BACKEND` is this module's only name for the tree under test: measured on
-    this file, it is the only path constant at module level and exactly the
-    functions here that decide vendored code carry it as a default.
+    **Taking the tree is a parameter called `root` or a default that names the
+    tree, and the second is there because the first is one spelling.** The
+    parameter name is the caller's choice and open, so a helper spelling it
+    `base` and calling a walk with no argument satisfied neither arm and
+    dropped out silently, which is the failure this clause exists to stop, one
+    name over. Which names mean the tree is `_names_for_the_tree`, read off the
+    module rather than listed here: this file calls it `BACKEND` and is the
+    only module this function is asked about, but the same closure serves the
+    whole test tree, where five guard modules call it `_REPO`.
 
     The cost is stated rather than discovered: a helper taking the tree and only
     reading a corpus fires too. That is the same side as the rest of this rule,
     and being told about it is cheaper than the walk nothing drives.
     """
-    reaches: set[str] = {"_is_vendored"}
+    walks, reaches = _walks_reaching(
+        ast.parse(Path(__file__).read_text()), {"_is_vendored"}
+    )
+    assert walks == reaches, (
+        "these reach the vendored rule and cannot be driven against a tree, so "
+        f"nothing below covers them: {sorted(reaches - walks)}"
+    )
+    # **Frozen because this is cached**, so every caller holds the same object.
+    # Both review seats raised it on the same round: one `|=` or `discard` on a
+    # returned value would shrink the walk set for every later test in the run,
+    # silently, which is the failure this whole file exists to prevent. Nothing
+    # mutates them today and a word is cheaper than noticing when something does.
+    return frozenset(walks), frozenset(reaches | {"_is_vendored"})
+
+
+def _walks_reaching(tree: ast.Module, seed: set[str]) -> tuple[set[str], set[str]]:
+    """The closure of `seed` over one module, as `(drivable, all)`.
+
+    The body of `_walk_names` lifted so the same rule can be asked of a module
+    that is not this one. What counts as reaching is documented there. **What
+    counts as taking the tree is the one thing the lift changed**: the name a
+    module gives the tree is read off that module by `_names_for_the_tree`
+    rather than compared against `BACKEND`, which was this file's only spelling
+    and is not the test tree's.
+    """
+    for_the_tree = _names_for_the_tree(tree)
+    reaches = set(seed)
     growing = True
     while growing:
         growing = False
-        for node in ast.parse(Path(__file__).read_text()).body:
+        for node in tree.body:
             if not isinstance(node, _A_FUNCTION) or node.name in reaches:
                 continue
             parameters = [
@@ -386,7 +541,7 @@ def _walk_names() -> tuple[set[str], set[str]]:
             takes_the_tree = any(
                 argument.arg == "root" for argument in parameters
             ) or any(
-                isinstance(default, ast.Name) and default.id == "BACKEND"
+                isinstance(default, ast.Name) and default.id in for_the_tree
                 for default in [
                     *node.args.defaults,
                     *(one for one in node.args.kw_defaults if one is not None),
@@ -408,18 +563,123 @@ def _walk_names() -> tuple[set[str], set[str]]:
             ):
                 reaches.add(node.name)
                 growing = True
-    walks = {
+    drivable = {
         node.name
-        for node in ast.parse(Path(__file__).read_text()).body
+        for node in tree.body
         if isinstance(node, _A_FUNCTION)
         and node.name in reaches
         and [argument.arg for argument in node.args.args] == ["root"]
     }
-    assert walks | {"_is_vendored"} == reaches, (
-        "these reach the vendored rule and cannot be driven against a tree, so "
-        f"nothing below covers them: {sorted(reaches - walks - {'_is_vendored'})}"
+    return drivable, reaches - set(seed)
+
+
+def _module_of(path: Path) -> str:
+    """One test module's import name under `tests`, dotted, `.py` dropped.
+
+    **The key is the path and not the basename.** Spelled `path.stem` this
+    collapsed a nested module into its top level namesake: seven stems are
+    duplicated under `backend/tests/` today, one of them `test_covers`, whose
+    top level module owns the walk behind "only `covers.py` may know an image
+    host". `found` is a set, so a walk of the same name in `routers/` would
+    have collapsed into that key, left the expectation table matching, and gone
+    undriven, which is the state this whole rule exists to end.
+    """
+    return ".".join(path.resolve().relative_to(BACKEND / "tests").with_suffix("").parts)
+
+
+@functools.cache
+def _every_walk() -> frozenset[str]:
+    """Every walk in the **test tree** that reaches the vendored rule, `module::name`.
+
+    **The diagonal below drove one file, and the class it is for has gone red in
+    five.** `_walk_names` reads `Path(__file__)`, so a walk written in any other
+    test module was covered by its author calling `_is_vendored` and by nothing
+    that checks the call. Measured 2026-09-21 across the last 300 pipelines: of
+    37 failures, 13 were this class, repaired once per file over five separate
+    days, and 5 walks in 4 modules were structurally right and undriven at the
+    end of it.
+
+    **A module joins by importing from this file**, which is the same convention
+    the walks already follow and is what the two rules below, on a copy of a
+    walk and on a module walking without the shared rule, already enforce from the other
+    side. So the seed is what a module imports, and the closure from there is
+    this file's own rule asked of that module.
+
+    **A name that reaches the rule, walks, and takes no root is reported by
+    name** rather than being the quiet reason a walk is missing from the
+    diagonal. Undrivable is the state that produced the residue this was
+    written for.
+
+    **The rule here is not the rule this file applies to itself, and the
+    difference is stated rather than left to be found.** `_walk_names` asserts
+    that everything reaching the predicate is drivable, with no exemption. Here
+    a name that reaches it and contains no walk call is treated as a predicate:
+    neither driven nor reported, and covered only where a drivable walk in the
+    same module calls it. `test_classifications._is_this_app` is that shape and
+    is covered, because `_modules` calls it. **A predicate no drivable walk
+    calls is covered by nothing**, and deciding what vendored means against the
+    wrong root inside one is exactly the family this change claims to buy.
+    Separated by `_is_a_walk` rather than by a list, so the line is the one the
+    rest of this file draws between walking and deciding.
+
+    **Three things it does not see, none of which is loud.** A module reaching
+    this file by `import tests.test_house_rules` and attribute access yields an
+    empty seed and is skipped in silence, because the seed is read off
+    `ImportFrom` alone. A walk written as a method or inside another function
+    is invisible, because the closure reads `tree.body`: that is the same
+    limitation `_every_module_but_the_tests` records for this file, widened
+    here to every module. And a module that walks the tree without importing
+    from this file at all is out of scope by construction, which is what
+    `test_no_other_test_module_walks_the_backend_without_the_shared_rule`
+    covers from the other side for a walk that could yield a `.py` file, and
+    what nothing covers for one that could not.
+    """
+    mine = Path(__file__).resolve()
+    drivable, _ = _walk_names()
+    found = {f"{_module_of(mine)}::{name}" for name in drivable}
+
+    undrivable: list[str] = []
+    for path in sorted(_test_sources()):
+        if path.resolve() == mine:
+            continue
+        tree = ast.parse(path.read_text())
+        seed = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module == f"tests.{_module_of(mine)}"
+            for alias in node.names
+        } & (drivable | {"_is_vendored"})
+        if not seed:
+            continue
+        theirs, reaches = _walks_reaching(tree, seed)
+        found |= {f"{_module_of(path)}::{name}" for name in theirs}
+        bodies = {
+            node.name: node
+            for node in tree.body
+            if isinstance(node, _A_FUNCTION) and node.name in reaches - theirs
+        }
+        # Hoisted, because it walks the whole module: asked inside the
+        # comprehension below it ran once per node of each body examined rather
+        # than once per module, which measured 0.134s on the one module with an
+        # undrivable body today and is quadratic in the next one.
+        defines = _defines_walk(tree)
+        undrivable += [
+            f"{_module_of(path)}::{name}"
+            for name, node in sorted(bodies.items())
+            if any(
+                isinstance(inner, ast.Call) and _is_a_walk(inner, defines)
+                for inner in ast.walk(node)
+            )
+        ]
+
+    assert not undrivable, (
+        "these reach the vendored rule and take no root, so the diagonal cannot "
+        f"drive them against a constructed tree: {sorted(undrivable)}"
     )
-    return walks, reaches
+    # Frozen for the reason `_walk_names` gives: this is cached, so the caller
+    # that mutates it mutates every later caller's answer.
+    return frozenset(found)
 
 
 def _is_a_walk(node: ast.AST, defines_walk: bool = False) -> bool:
@@ -494,14 +754,20 @@ def _is_a_walk(node: ast.AST, defines_walk: bool = False) -> bool:
     return could_be_python and (name == "rglob" or "**" in pattern.value)
 
 
-def _reached(name: str, root: Path) -> set[str]:
+def _reached(qualified: str, root: Path) -> set[str]:
     """One walk's answer over `root`, as paths relative to it.
 
     `_source_modules` hands back its corpus keyed by that same relative path and
     the rest hand back paths, so the two shapes are levelled here rather than in
     the caller, where levelling them would mean naming which walk is which.
+
+    **Keyed `module::name` because the walks are no longer all in this file.**
+    Resolved through `importlib` rather than through `globals()`, which reaches
+    this module and nothing else: a walk in `test_covers.py` was structurally
+    right and driven by nothing, because the diagonal could not name it.
     """
-    found = globals()[name](root)
+    module, _, name = qualified.partition("::")
+    found = getattr(importlib.import_module(f"tests.{module}"), name)(root)
     if isinstance(found, dict):
         return set(found)
     return {str(path.relative_to(root)) for path in found}
@@ -678,8 +944,10 @@ class TestTheSourceWalkSeesOnlyThisProject:
         """
         root = tmp_path / "tests" / "backend"
         _a_backend_with_vendored_code_in_it(root, VENDORED_KINDS[kind])
-        walks, _ = _walk_names()
-        assert len(walks) >= 6, f"the walks went missing from this file: {walks}"
+        walks = _every_walk()
+        assert len(walks) >= len(WHAT_EACH_WALK_REACHES), (
+            f"the walks went missing from the tests: {walks}"
+        )
 
         # Stated as "anything that is not one of ours", so a walk reaching a
         # second file in that directory, or a directory above it, is reported
@@ -711,7 +979,7 @@ class TestTheSourceWalkSeesOnlyThisProject:
         root = tmp_path / "tests" / "backend"
         for vendored in VENDORED_KINDS.values():
             _a_backend_with_vendored_code_in_it(root, vendored)
-        walks, _ = _walk_names()
+        walks = _every_walk()
 
         assert walks == set(WHAT_EACH_WALK_REACHES), (
             "a walk was added or renamed and nothing here says what it is for: "
@@ -798,10 +1066,7 @@ class TestTheSourceWalkSeesOnlyThisProject:
             if path.resolve() == mine:
                 continue
             tree = ast.parse(path.read_text())
-            defines_walk = any(
-                isinstance(node, _A_FUNCTION) and node.name == "walk"
-                for node in ast.walk(tree)
-            )
+            defines_walk = _defines_walk(tree)
             walks = [
                 node.lineno
                 for node in ast.walk(tree)
@@ -2610,9 +2875,11 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         construction. A guard whose premise is prose is a guard at the weakest
         rung this repository has a name for.
 
-        One of three arms, and the one that sees the database at run time. The
-        other two are the assertion in `conftest._schema_once` and the test
-        below.
+        One of four arms, and the one that sees the database at run time. The
+        others are the assertion in `conftest._schema_once`, the test below, and
+        `tests/test_schema.py::TestTheSchemaTheApplicationBootsIsTheRevisions`,
+        which compares the schema two boots end up with and is the arm a module
+        executing its own DDL was outside.
         """
         _require_a_migrated_database()
 
@@ -6248,11 +6515,20 @@ class TestEveryTextCeilingBindsOnBytesToo:
     no Pydantic model, and that is exactly the path where the character
     inequality does not bind.
 
-    **Two arms close it and this accepts either.** A byte budget of four times
-    the character budget, four bytes being UTF-8's widest character. Or a clause
-    refusing a NUL outright, `instr(col, char(0)) = 0`, which
-    `catalogue_credentials` and `opds_servers` already carry beside a charset
-    rule. Naming one of the two would have made the other a violation.
+    **Two arms close it and a NUL refusal on its own is neither.** A byte
+    budget of four times the character budget, four bytes being UTF-8's widest
+    character. Or `instr(col, char(0)) = 0` **beside a charset rule confining
+    the value to characters SQLite stores in one byte**, which is the pair
+    `catalogue_credentials.source` and `opds_servers.credential_key` carry and
+    the reason `models.py` records those two as needing no budget.
+
+    **The NUL clause alone closes one of the two leaks and reads as though it
+    closed both.** It shuts the tail a NUL hides. It says nothing about a lead
+    byte, which `length()` counts as one character before skipping continuation
+    bytes without limit, so a single counted character carries as many bytes as
+    somebody writes and there is no NUL in the value for `instr` to find.
+    `test_a_lead_byte_carries_unbounded_bytes_into_one_character` measures that
+    on the engine this suite runs, rather than a figure here that nobody re-runs.
 
     **Floors are not in the class.** A NUL shortens the count, so `length(x) > 0`
     and `length(x) >= 40` become stricter on the same value rather than weaker,
@@ -6269,12 +6545,13 @@ class TestEveryTextCeilingBindsOnBytesToo:
     than passed over. The operator list is still here and is now load bearing in
     the other direction: getting it wrong fails loudly.
 
-    **`GLOB` charset rules are a different class and are deliberately outside
-    this rule**, stated so the boundary is a decision rather than a gap: GLOB is
-    a C string operation and stops at the first NUL too, but the threat is a
-    smuggled suffix in a value that reaches a query or a URL rather than an
-    unbounded write, and the arm is the `instr` one rather than a budget. The
-    ones that carry it bare are in the tracker.
+    **A `GLOB` charset rule is read here, and only as half of that second
+    arm.** What it contributes is that every character is one byte. What it
+    cannot contribute is anything past a NUL, `GLOB` being a C string operation
+    that stops at one exactly as `length()` does, which is why the pair is the
+    arm and neither half is. The other thing a NUL does to a `GLOB` rule, cut a
+    claim about the whole value down to a claim about a prefix, is a different
+    rule and is `TestEveryGlobRuleIsToldAboutTheNul`.
 
     **A ceiling written as a negated floor is outside it too, and that one is a
     gap rather than a class.** `NOT (length(a) > 60)` is a real ceiling and this
@@ -6500,6 +6777,51 @@ class TestEveryTextCeilingBindsOnBytesToo:
         terms = " + ".join(f"length(CAST({column} AS BLOB))" for column in columns)
         return f"{terms} <= {4 * ceiling}"
 
+    #: A charset rule that admits only characters SQLite stores in one byte.
+    #:
+    #: **Read rather than listed**, so the next column confined this way clears
+    #: without an edit here. Every property below is load bearing and each has
+    #: its own row in `CLEARANCES`: it is this **column**; the rule is a
+    #: **refusal**, so what it admits is the class it names; the class is
+    #: non empty and is **one** class and nothing else, which is what excluding
+    #: a bracket from the body buys; it is anchored at neither end,
+    #: `*[^...]*`, so it is about every character rather than the first or the
+    #: last; and **every character the class names is ASCII**, because a class
+    #: naming one wider character admits one and the bytes stop equalling the
+    #: characters.
+    #:
+    #: **The bracket exclusion is the whole of the soundness argument.** With a
+    #: greedy body, `*[^a-z]x[^a-z]*` reads as a single class: measured, one
+    #: counted character at 1,001 bytes with no NUL cleared its ceiling, which
+    #: is the defect this arm exists to refuse.
+    #:
+    #: **Asking the engine instead is unsound and is why the class text is read
+    #: rather than probed.** No finite set of wide probe characters separates
+    #: `[^a-z]` from a class naming one two byte character: that class refuses
+    #: every probe and admits the character it names. Reading the text is what
+    #: makes `.isascii()` a proof rather than a sample.
+    #:
+    #: **There is no third answer here and the default is the safe one**: a
+    #: conjunct this cannot read is not a confinement, so the ceiling is
+    #: reported, wanting the byte arm.
+    AN_ASCII_CONFINEMENT: Final = re.compile(
+        r"^(\w+) NOT GLOB '\*\[\^([^'\[\]]+)\]\*'$", re.IGNORECASE
+    )
+
+    @classmethod
+    def _confined_to_single_bytes(cls, column: str, conjuncts: list[str]) -> bool:
+        """Whether a conjunct here bounds this column's bytes by its characters.
+
+        **A conjunct, for the reason the NUL clause is one**: a charset rule
+        inside a disjunction binds on some rows and would clear a ceiling that
+        binds on all of them.
+        """
+        for conjunct in conjuncts:
+            read = cls.AN_ASCII_CONFINEMENT.match(conjunct.strip())
+            if read and read.group(1) == column and read.group(2).isascii():
+                return True
+        return False
+
     @staticmethod
     def _declared() -> dict[str, str]:
         constraints: dict[str, str] = {}
@@ -6540,10 +6862,15 @@ class TestEveryTextCeilingBindsOnBytesToo:
             ]
         conjuncts = cls._conjuncts(declared)
         for columns, ceiling in ceilings:
-            # **A conjunct, not a substring.** A NUL clause inside a disjunction
+            # **A conjunct, not a substring.** A clause inside a disjunction
             # binds on some rows and reads as a rule about all of them.
+            #
+            # **Both clauses, because each closes one leak and neither
+            # closes the other.** See this class's docstring.
             if all(
-                f"instr({column}, char(0)) = 0" in conjuncts for column in columns
+                f"instr({column}, char(0)) = 0" in conjuncts
+                and cls._confined_to_single_bytes(column, conjuncts)
+                for column in columns
             ):
                 continue
             # **`(?!\d)`, because containment prefix matches a number.**
@@ -6567,7 +6894,87 @@ class TestEveryTextCeilingBindsOnBytesToo:
     #: clean there for ever.
     CLEARANCES: Final = (
         ("length(text) <= 500", True),
-        ("length(text) <= 500 AND instr(text, char(0)) = 0", False),
+        # The NUL clause shuts the tail and leaves the lead byte, so on its
+        # own it clears nothing.
+        ("length(text) <= 500 AND instr(text, char(0)) = 0", True),
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text NOT GLOB '*[^a-z0-9_-]*'",
+            False,
+        ),
+        # The charset rule without the NUL clause: `GLOB` stops at the first
+        # NUL, so it is a rule about a prefix and the bytes past it are free.
+        ("length(text) <= 500 AND text NOT GLOB '*[^a-z0-9_-]*'", True),
+        # A class naming one character wider than ASCII admits one, and the
+        # bytes stop equalling the characters.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text NOT GLOB '*[^a-z\u00e4]*'",
+            True,
+        ),
+        # Anchored at the start, so it is a rule about the first character
+        # rather than about every one.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text NOT GLOB '[^a-z]*'",
+            True,
+        ),
+        # Inside a disjunction, so it binds on some rows and clears none.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND (page IS NULL OR text NOT GLOB '*[^a-z]*')",
+            True,
+        ),
+        # Two classes with pattern between them, which a greedy body read as
+        # one class. Measured on the engine: one counted character at 1,001
+        # bytes satisfies it, so it confines nothing.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text NOT GLOB '*[^a-z]x[^a-z]*'",
+            True,
+        ),
+        # A positive rule admits what it matches rather than what it names, so
+        # the class says nothing about what the column may hold.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text GLOB '*[^a-z]*'",
+            True,
+        ),
+        # A confinement on some other column.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND other NOT GLOB '*[^a-z]*'",
+            True,
+        ),
+        # Anchored at the end, so it is a rule about the last character.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text NOT GLOB '*[^a-z]'",
+            True,
+        ),
+        # There is no empty class in GLOB: a `]` straight after the `^` is a
+        # literal member and the class is then unterminated, so the pattern
+        # matches nothing and the refusal admits every value. Either way this
+        # is not a confinement, and the reader must not take it for one.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text NOT GLOB '*[^]*'",
+            True,
+        ),
+        # A bound on a **pair** wants both halves confined, the shape
+        # `digital_references` has. Only one of these is.
+        (
+            "length(a) + length(b) <= 100 "
+            "AND instr(a, char(0)) = 0 AND instr(b, char(0)) = 0 "
+            "AND a NOT GLOB '*[^a-z]*'",
+            True,
+        ),
+        (
+            "length(a) + length(b) <= 100 "
+            "AND instr(a, char(0)) = 0 AND instr(b, char(0)) = 0 "
+            "AND a NOT GLOB '*[^a-z]*' AND b NOT GLOB '*[^a-z]*'",
+            False,
+        ),
         # Binds on no row carrying a page, and cleared the ceiling anyway.
         ("length(text) <= 500 AND (page IS NULL OR instr(text, char(0)) = 0)", True),
         ("length(text) <= 500 AND length(CAST(text AS BLOB)) <= 2000", False),
@@ -6651,17 +7058,111 @@ class TestEveryTextCeilingBindsOnBytesToo:
         assert not self._has_a_top_level_or("(a = 1 OR b = 2) AND c = 3")
         assert not self._has_a_top_level_or("length(a) <= 60")
 
-    def test_every_character_ceiling_carries_a_byte_arm_or_refuses_a_nul(self) -> None:
-        offenders: list[str] = []
+    #: What this rule reports today, written out as it reports it.
+    #:
+    #: **A register of open defects, not an exemption list**, and the equality
+    #: below is the difference: a constraint given its arm fails this until its
+    #: row is deleted, and a constraint that starts offending fails on arrival.
+    #: Nothing here is skipped, and the offence is compared rather than the
+    #: name, so a second defect on the same constraint fails too.
+    #:
+    #: **Empty, which is the state it is meant to reach.** The rule is
+    #: unconditional while it stays that way, and a constraint that starts
+    #: offending fails on arrival rather than being added here: a row is written
+    #: only where the defect is understood and the fix has an owner.
+    STILL_OPEN: Final[dict[str, list[str]]] = {}
 
-        for name, raw in self._declared().items():
-            offenders += self._offences(name, raw)
+    def test_every_character_ceiling_binds_on_bytes(self) -> None:
+        offences = {
+            name: found
+            for name, raw in self._declared().items()
+            if (found := self._offences(name, raw))
+        }
 
-        assert not offenders, (
-            "these bound a text column by characters, which SQLite counts only "
-            "up to the first NUL, so a Core insert walks past them: "
-            + "; ".join(offenders)
+        assert offences == self.STILL_OPEN, (
+            "these bound a text column by characters, which SQLite counts one "
+            "per lead byte and only as far as the first NUL, so a Core insert "
+            "walks past them. A constraint here and not in STILL_OPEN is new; "
+            "one in STILL_OPEN and not here is fixed and loses its row: "
+            + "; ".join(one for found in offences.values() for one in found)
         )
+
+    def test_a_lead_byte_carries_unbounded_bytes_into_one_character(self) -> None:
+        """Why a NUL clause is not a byte arm, asked of the engine.
+
+        `length()` counts the lead byte and then skips continuation bytes with
+        no limit, so the character count is 9 whatever follows and `instr` has
+        no NUL to find. The value is built as bytes and cast, because this one
+        cannot be written as a Python string: it is not valid UTF-8, which is
+        the whole of the point.
+
+        **Measured here rather than written into a docstring**, the form this
+        claim took while it was the opposite of true.
+        """
+        import sqlite3
+
+        smuggled = b"http://x" + b"\xc0" + b"\xbf" * 10000
+        value = f"CAST(x'{smuggled.hex()}' AS TEXT)"
+        connection = sqlite3.connect(":memory:")
+
+        try:
+            counted, stored, nul = connection.execute(
+                f"SELECT length({value}), length(CAST({value} AS BLOB)), "
+                f"instr({value}, char(0))"
+            ).fetchone()
+        finally:
+            connection.close()
+
+        assert (counted, stored, nul) == (9, 10009, 0)
+
+    #: One character each, and each **decoding** to a codepoint at or above
+    #: 0x80: a two, three and four byte character, an overlong sequence, and a
+    #: stray continuation byte.
+    #:
+    #: **The last is one byte on disk and is here for the decode rather than
+    #: for its width**, which is the property an ASCII class actually refuses.
+    #: Naming the tuple for the width would have made one of its five rows a
+    #: lie.
+    DECODING_ABOVE_ASCII: Final = (
+        b"\xc3\xa4",
+        b"\xe2\x82\xac",
+        b"\xf0\x9f\x98\x80",
+        b"\xc0\xbf",
+        b"\xbf",
+    )
+
+    def test_an_ascii_charset_rule_refuses_what_decodes_above_ascii(self) -> None:
+        """The engine end of the second arm, under the reader's own argument.
+
+        **This is a sanity check and not the proof**, and saying so is the
+        point: a finite set of characters cannot stand in for every value,
+        which is the same reason `AN_ASCII_CONFINEMENT` reads the class text
+        rather than probing it. What this pins is the decode a byte bound rests
+        on, that a wide character, an overlong sequence and a stray
+        continuation byte alike land at or above 0x80 and so outside an ASCII
+        class.
+
+        **The admitted case is what stops it passing against a rule that
+        refuses everything**, `NOT GLOB '*'` included.
+        """
+        import sqlite3
+
+        def admits(raw: bytes) -> bool:
+            return bool(
+                connection.execute(
+                    f"SELECT CAST(x'{raw.hex()}' AS TEXT) NOT GLOB '*[^a-z0-9_-]*'"
+                ).fetchone()[0]
+            )
+
+        connection = sqlite3.connect(":memory:")
+
+        try:
+            admitted = [raw for raw in self.DECODING_ABOVE_ASCII if admits(raw)]
+            ascii_passes = admits(b"abc-9_")
+        finally:
+            connection.close()
+
+        assert (admitted, ascii_passes) == ([], True)
 
     #: One spelling per row, and what this rule must make of it.
     #:
@@ -6738,6 +7239,212 @@ class TestEveryTextCeilingBindsOnBytesToo:
         assert self._wanted(["a", "b"], 10) == (
             "length(CAST(a AS BLOB)) + length(CAST(b AS BLOB)) <= 40"
         )
+
+
+class TestEveryGlobRuleIsToldAboutTheNul:
+    """`GLOB` reads a value as far as its first NUL, so a rule resting on one
+    may be a rule about a prefix.
+
+    Measured in `test_a_smuggled_suffix_satisfies_a_charset_rule`: `'abc'`, a
+    NUL and `'ZZZ!!'` satisfies `NOT GLOB '*[^a-z0-9_-]*'`, and what lands on
+    disk carries the exclamation marks. `ck_catalogue_targets_indexes` was
+    defeated exactly that way, and `ck_opds_servers_credential_key` records the
+    same value reaching a URL path a client builds.
+
+    **What is defeated is derived from the pattern rather than listed, and the
+    property is a trailing `*` rather than a prefix.** A trailing `*` absorbs
+    any suffix, so a positive pattern carrying one matches the whole value
+    whenever it matches a prefix of it: truncation can only make such a clause
+    fail, never pass. `*.pdf*` is a containment claim rather than a prefix claim
+    and is exempt for that same reason, which is why the rule is written on the
+    `*` and not on the word prefix. Anything else, a refusal above all, claims
+    something about the whole value that a NUL falsifies in silence, so it needs
+    `instr(col, char(0)) = 0` as a top level conjunct of the same constraint.
+
+    **A clause that wants a NUL clause and sits in a constraint with a top
+    level `OR` is reported and cannot be cleared**, because no clause in such a
+    constraint binds on every row, the NUL clause included. The answer is to
+    parenthesise it, which is what makes it readable to a person too. **An
+    exempt clause stays exempt there**, claiming nothing a NUL can falsify
+    whichever rows it binds on, which is why the exemption is read first.
+
+    **A clause this cannot read is reported**, which is the armour
+    `TestEveryTextCeilingBindsOnBytesToo` has for the same reason: without a
+    third answer, the next spelling of a `GLOB` clause is a silent pass. The
+    count is taken off the word rather than off the parse, so a clause the
+    pattern misses is a clause this knows it missed. Counting the word also
+    finds one inside a string literal and reports it, which is loud rather than
+    wrong. The one mis reading left errs towards reporting: a qualified column
+    name reads as its last segment and asks for a NUL clause on that.
+
+    **`LIKE` is the same C string operation with the same truncation and is
+    outside this rule**, stated so the boundary is a decision rather than a
+    gap. Nothing in this schema uses it, and neither the word count nor the
+    clause pattern would see one if it did.
+
+    **This is about what a `GLOB` rule claims. Whether it bounds bytes is the
+    other rule**, which reads the same clauses for a different property and is
+    the one that clears a ceiling.
+    """
+
+    #: `<column> [NOT] GLOB '<pattern>'`, the only shape this schema writes.
+    #:
+    #: **A doubled quote is read rather than stopped at**, and the difference
+    #: was a silent clearance: with the body `[^']*`, `col GLOB 'a*''b'`
+    #: captured `a*`, which ends in `*` and was exempted, while the real
+    #: pattern ends in `b` and is exactly the shape a NUL can smuggle past.
+    #: That was the one mis reading that erred towards clearing.
+    A_GLOB_CLAUSE: Final = re.compile(
+        r"(\w+)\s+(NOT\s+)?GLOB\s+'((?:[^']|'')*)'", re.IGNORECASE
+    )
+
+    #: The word itself, which is how many clauses there are to read.
+    THE_WORD: Final = re.compile(r"\bGLOB\b", re.IGNORECASE)
+
+    @classmethod
+    def _offences(cls, name: str, raw: str) -> list[str]:
+        """What one constraint's text is doing wrong, if anything.
+
+        Driven against text rather than only over `Base.metadata`, for the
+        reason the ceiling rule is: every constraint in the tree passes, so a
+        branch that cleared too readily would read clean there for ever.
+        """
+        declared = TestEveryTextCeilingBindsOnBytesToo._canonical(raw)
+        clauses = cls.A_GLOB_CLAUSE.findall(declared)
+        unread = len(cls.THE_WORD.findall(declared)) - len(clauses)
+        offences: list[str] = []
+        if unread:
+            offences.append(
+                f"{name}: this rule cannot read {unread} of its GLOB clauses, so "
+                "it is skipping them rather than clearing them"
+            )
+
+        conjuncts = TestEveryTextCeilingBindsOnBytesToo._conjuncts(declared)
+        conditional = TestEveryTextCeilingBindsOnBytesToo._has_a_top_level_or(declared)
+        for column, negated, quoted in clauses:
+            pattern = quoted.replace("''", "'")
+            if not negated and pattern.endswith("*"):
+                continue
+            if conditional:
+                # Nothing in such a constraint is a rule about every row, so no
+                # clause in it can be the NUL clause this one wants.
+                offences.append(
+                    f"{name}: `{column}` is bounded by a GLOB rule sharing a "
+                    "constraint with a top level OR, so nothing in it binds on "
+                    "every row"
+                )
+                continue
+            if f"instr({column}, char(0)) = 0" in conjuncts:
+                continue
+            # **The clause is quoted back as it is written**, doubled quote and
+            # all, rather than as this rule read it: a reader pastes that back
+            # into a constraint, and `'a*'b'` is not SQL.
+            offences.append(
+                f"{name}: `{column} {'NOT ' if negated else ''}GLOB '{quoted}'` "
+                "claims something a NUL cuts short, so it wants "
+                f"`instr({column}, char(0)) = 0`"
+            )
+        return offences
+
+    #: One constraint's text, and whether this rule must object to it.
+    CLAUSES: Final = (
+        ("source NOT GLOB '*[^a-z]*'", True),
+        ("source NOT GLOB '*[^a-z]*' AND instr(source, char(0)) = 0", False),
+        # A prefix claim, which truncation can only make fail.
+        ("base_url GLOB 'http://?*'", False),
+        # Positive and anchored at the end, so a NUL smuggles the suffix past
+        # it. Nothing in this schema is spelled this way yet.
+        ("name GLOB '*.pdf'", True),
+        ("name GLOB '*.pdf' AND instr(name, char(0)) = 0", False),
+        # The NUL clause inside a disjunction binds on some rows only.
+        (
+            "name NOT GLOB '*[^a-z]*' AND (page IS NULL OR instr(name, char(0)) = 0)",
+            True,
+        ),
+        # `AND` binds tighter than `OR`, so neither clause is about every row.
+        ("page = 1 OR name NOT GLOB '*[^a-z]*' AND instr(name, char(0)) = 0", True),
+        # The shape this cannot read. Reported rather than passed over.
+        ("name NOT GLOB other_column", True),
+        # A doubled quote inside the pattern. The real pattern ends in `b`, so
+        # a NUL can smuggle a suffix past it; reading the capture short made it
+        # end in `*` and exempted it.
+        ("name GLOB 'a*''b'", True),
+        ("name GLOB 'a*''b' AND instr(name, char(0)) = 0", False),
+        # An exempt clause in a constraint with a top level OR. The exemption
+        # is about the pattern rather than about which rows it binds on, so
+        # reading the OR first would report this.
+        ("page = 1 OR base_url GLOB 'http://?*'", False),
+        # Two clauses, one of them a prefix claim: the refusal still wants one.
+        (
+            "name GLOB 'opds-*' AND name NOT GLOB '*[^a-z]*'",
+            True,
+        ),
+    )
+
+    @pytest.mark.parametrize(("declared", "objects"), CLAUSES)
+    def test_what_a_glob_rule_needs_beside_it(
+        self, declared: str, objects: bool
+    ) -> None:
+        """Both answers and the third one, against text this builds.
+
+        Over `Base.metadata` every constraint passes, so a branch that exempted
+        too readily would read clean there for ever. Two of these shapes are
+        ones this schema does not hold: an end anchored positive pattern, and a
+        clause naming a column where a pattern should be.
+        """
+        assert bool(self._offences("ck_under_test", declared)) is objects
+
+    def test_every_glob_rule_reads_the_whole_value_it_claims_to(self) -> None:
+        """The sweep, and it cannot go vacuous in silence.
+
+        A pattern that stopped matching does not empty this: the unread counter
+        is taken off the word, so every clause it stopped reading is reported
+        here instead. Both detectors failing at once is what `CLAUSES` holds,
+        where one row needs the count and the rest need the parse. **A literal
+        floor over the live constraints is deliberately not the instrument**:
+        `docs/decisions.md` records one going stale in the direction that still
+        passes.
+
+        **What neither covers is `_declared()` going empty**, which would empty
+        this and every rule in both classes. The ceiling floor in
+        `test_the_rule_is_reading_the_constraints_it_thinks_it_is` is what fails
+        then, and it is the only thing that does.
+        `test_every_character_ceiling_binds_on_bytes` compares against
+        `STILL_OPEN`, which is empty now that the last open constraint was
+        closed, so an empty `_declared()` satisfies it rather than failing it.
+        """
+        offenders: list[str] = []
+
+        for name, raw in TestEveryTextCeilingBindsOnBytesToo._declared().items():
+            offenders += self._offences(name, raw)
+
+        assert not offenders, (
+            "SQLite's GLOB stops at the first NUL, so these claim something "
+            "about a value that a Core insert can make false past the NUL: "
+            + "; ".join(offenders)
+        )
+
+    def test_a_smuggled_suffix_satisfies_a_charset_rule(self) -> None:
+        """The measurement the rule rests on, asked of the engine.
+
+        A refusal of every character outside a set is satisfied by a value
+        carrying two of them, because the rule never reads that far.
+        """
+        import sqlite3
+
+        smuggled = b"abc\x00ZZZ!!"
+        value = f"CAST(x'{smuggled.hex()}' AS TEXT)"
+        connection = sqlite3.connect(":memory:")
+
+        try:
+            passes, counted, stored = connection.execute(
+                f"SELECT {value} NOT GLOB '*[^a-z0-9_-]*', length({value}), "
+                f"length(CAST({value} AS BLOB))"
+            ).fetchone()
+        finally:
+            connection.close()
+
+        assert (passes, counted, stored) == (1, 3, 9)
 
 
 class TestEveryTableIsInTheDataModelDocument:

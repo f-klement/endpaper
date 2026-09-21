@@ -219,7 +219,7 @@ class TestFilteringTheLibrary:
             headers=admin["headers"],
         )
 
-        assert res.status_code == 422
+        assert res.status_code == 400
 
     def test_the_filter_still_hides_private_books(self, client, admin, member, make_book):
         """A collection filter that forgot `visible_to` would be the same leak
@@ -352,7 +352,7 @@ class TestTheBulkVerb:
             headers=admin["headers"],
         )
 
-        assert res.status_code == 422
+        assert res.status_code == 400
 
     def test_somebody_elses_private_book_is_skipped(self, client, admin, member, make_book):
         shelf = make_collection(client, admin["headers"], "Ebooks")

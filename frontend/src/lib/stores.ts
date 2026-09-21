@@ -146,10 +146,10 @@ export interface StoreIdentifier {
 /**
  * What each scheme's own producers write, as the shape of a value.
  *
- * **A property of the scheme, so it lives beside the scheme.** It was spelled
- * twice, in `lib/calibre.ts` and in `pages/ScanPage/types.ts`, and the two were
- * held in agreement by tests that read each other's source text. Neither
- * module owns `StoreIdentifierScheme`; this one does.
+ * **A property of the scheme, so it lives beside the scheme.** Three modules
+ * spelled it and none of them owns `StoreIdentifierScheme`; this one does.
+ * What held the copies together was tests reading each other's source text,
+ * which can say two spellings match and can never say either is reached.
  *
  * **What it refuses is a value that is not the scheme's shape**, which is
  * narrower than it sounds and is worth saying plainly: it does not adjudicate
@@ -178,13 +178,25 @@ export interface StoreIdentifier {
  * this app invented rather than one the file carried.
  *
  * **The two rules are not grounded the same way, which is worth knowing before
- * either is widened.** `takeout.ts` enforces a volume id shape of its own, so
- * the Google half is the same rule twice and `tests/lib/stores.test.ts` sweeps
- * that reader against this table rather than restating it. `kindle.ts` enforces
- * nothing: it takes the `ASIN` element's text as written, so the ASIN bound
- * rests on that module's measurement over 1,032 catalogue entries and on
+ * either is widened.** The Google half is a measurement over a real export,
+ * taken by the reader that asks this table. The ASIN half is enforced by no
+ * reader at all: `kindle.ts` takes the `ASIN` element's text as written, so
+ * that bound rests on its measurement over 1,032 catalogue entries and on
  * calibre's own regression fixtures, and a test can only pin the corpus rather
  * than another rule.
+ *
+ * **An import cannot say the rule is reached, so a test asks the reader.**
+ * `tests/lib/stores.test.ts` sweeps candidate sidecar lines through a real
+ * Takeout read and compares what came back against this table: a reader that
+ * kept the import and stopped consulting it is what that arm refuses, and it is
+ * the arm that survived the spelling being folded away.
+ *
+ * **The Google rule has a second job that widening it would widen silently.**
+ * It is what tells the volume id line of a Takeout sidecar from the other lines
+ * in that block, so one more character admitted here is one more line that read
+ * takes for an identifier. `tests/lib/takeout.test.ts > reads no volume id out
+ * of a thirteen character metadata line` is where that turns red, and it is the
+ * prompt to decide about the discriminator before widening the scheme.
  *
  * Wider files a wrong row; narrower drops an identifier the endpoint would have
  * taken, silently. Neither is free.
@@ -236,9 +248,11 @@ export const PRODUCED_VALUE: Record<StoreIdentifierScheme, RegExp> = {
   // `lib/bookRequest.CANONICAL_VALUE` is the one door every reader's
   // value passes through.
   asin: /^[A-Za-z0-9]{10}$/,
-  // Twelve characters of the URL safe alphabet, `takeout.ts`'s `VOLUME_ID` and
-  // its measurement over 24 sidecars. Calibre's own `google` fixture,
-  // `s7NIrgEACAAJ`, is one.
+  // Twelve characters of the URL safe alphabet, measured by `takeout.ts` over
+  // all 24 sidecars in that export: every one twelve characters and every one
+  // distinct, including the two pairs of titles that differ only by a `(1)`
+  // suffix. A bound rather than a list of spellings. Calibre's own `google`
+  // fixture, `s7NIrgEACAAJ`, is one.
   google_books: /^[A-Za-z0-9_-]{12}$/,
 };
 
@@ -246,9 +260,9 @@ export const PRODUCED_VALUE: Record<StoreIdentifierScheme, RegExp> = {
  * Would this scheme's own producers have written this value?
  *
  * The rule, asked as a question. `storeIdentifier` is the same rule asked for a
- * row, and is what a reader walking a file calls; this is for a caller that
- * has only the question, which is the agreement sweep against `takeout.ts`'s
- * own line discriminator.
+ * row, and is what a reader walking a file calls; this is for a caller that has
+ * only the question. `takeout.ts` is that caller: it is deciding which line of
+ * a sidecar's metadata block the volume id is, and has no row to build yet.
  */
 export function producedValue(
   scheme: StoreIdentifierScheme,

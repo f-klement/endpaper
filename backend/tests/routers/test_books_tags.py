@@ -117,6 +117,42 @@ class TestCreating:
         )
         assert res.status_code == 422
 
+    def test_a_control_character_is_removed_from_the_name(self, client, admin):
+        """`name` is unique, so an invisible character is a second tag spelled
+        like the first. It is not whitespace, so the collapse alone left it."""
+        res = client.post(
+            "/api/books/tags",
+            json={"name": "Holiday\u0000reads"},
+            headers=admin["headers"],
+        )
+
+        assert res.json()["name"] == "Holidayreads"
+
+    def test_a_name_pasted_out_of_two_lines_keeps_the_break_as_a_space(
+        self, client, admin
+    ):
+        """The half a strip of every control character would take silently. A
+        newline is whitespace, so it separates the words rather than welding
+        them: only a value that may be followed as a link wants the weld."""
+        res = client.post(
+            "/api/books/tags",
+            json={"name": "Holiday\nreads"},
+            headers=admin["headers"],
+        )
+
+        assert res.json()["name"] == "Holiday reads"
+
+    def test_a_name_of_only_control_characters_is_refused(self, client, admin):
+        """The same refusal a name of only spaces gets, and for the same
+        reason: what it leaves is a row nobody can see or find again."""
+        res = client.post(
+            "/api/books/tags",
+            json={"name": "\u0000\u0001"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422
+
     def test_an_empty_name_is_refused(self, client, admin):
         res = client.post("/api/books/tags", json={"name": ""}, headers=admin["headers"])
         assert res.status_code == 422

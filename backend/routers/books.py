@@ -2,7 +2,7 @@ import asyncio
 import csv
 import io
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from typing import Annotated, Any, Final
@@ -159,6 +159,7 @@ from schemas import (
     TagCreate,
     TagOut,
 )
+from schemas.common import one_line
 from serialisation import book_to_out, books_to_out, suggested_tag_ids
 from shelf import (
     BookFilters,
@@ -427,7 +428,7 @@ async def lookup_isbn(
     canonical = isbn_utils.parse(isbn)
     if canonical is None:
         raise HTTPException(
-            status_code=422,
+            status_code=400,
             detail="Not a valid ISBN. Check the digits and try again.",
         )
 
@@ -692,6 +693,93 @@ async def search_books(
 _EXPORT_EXTENSIONS: Final[dict[ExportFormat, str]] = {ExportFormat.MARCXML: "xml"}
 
 
+def _marcxml_pages(db: Session, viewer_id: int) -> Iterator[list[Book]]:
+    """This viewer's whole shelf, in pages `marc.stream` can serialise and drop.
+
+    **Every page is a fresh `Shelf.seen_by`**, so the privacy rule is applied
+    by construction on each one rather than once on a list that is then sliced.
+    A book made private while this runs is gone from every later page.
+
+    **Walked by `Book.id`, which is unique and immutable, and both of those
+    are load bearing.** An export is many reads where it used to be one, so
+    the shelf moves underneath it, and what decides whether that is visible is
+    the key the walk resumes on:
+
+    * An **offset** counts from the start of a list that has moved. A row
+      deleted behind the cursor pulls every later row back one, so the offset
+      lands a place past where it left off and the book in between is in no
+      page at all.
+    * A **mutable** key loses the same book a second way. `PATCH
+      /api/books/{book_id}` can retitle a book, so a walk resuming on the
+      title writes a book twice when it is retitled behind the cursor and not
+      at all when it is retitled ahead of it.
+
+    Both are silent, both answer 200, and a short catalogue exchange that
+    nobody can notice is what `docs/decisions.md` refuses under §An oversized
+    MARC file is refused. A primary key can do neither: a row that existed
+    when the export began and still exists is written exactly once.
+
+    **So the file is in catalogued order rather than title order**, which is
+    what it was. Nothing is owed the other one: a MARCXML `<collection>` has
+    no ordering contract, and a receiving system files by its own rules. The
+    order was never asserted and is not what this route is for.
+
+    **No count, which is `Shelf.limited` rather than `Shelf.page`.** The
+    measurement and the quadratic it avoids are in that method.
+
+    **The session is still open when this runs, and that is FastAPI's
+    arrangement rather than luck.** A `StreamingResponse` body is consumed
+    after the route function has returned, and a dependency with `yield` and
+    no `dependency_scope` is exited from the request's `AsyncExitStack`, which
+    FastAPI closes after the response has been sent rather than before. Making
+    `get_db` function scoped would close the session before the first page and
+    the second would raise mid body, after a 200.
+    `tests/routers/test_imports_marc.py::TestTheExportIsPagedRatherThanWhole`
+    drives more than one page through the real ASGI stack, which is what
+    covers it.
+
+    **`Loading.PUBLISHED` rather than `EXPORTED`**, and the name is about the
+    payload rather than the audience: it is the one option that eagerly loads
+    `classifications`, which is the half of a MARC record that makes it worth
+    exchanging, and it omits `added_by` and `collection`, which are household
+    facts a catalogue record does not carry. Reading them lazily instead would
+    be one statement per book, and it would be a lazy load firing after the
+    response had begun.
+
+    **`PUBLISHED` also loads `tags`, which `marc.py` never reads**, so that is
+    one statement a page doing nothing. Stated rather than fixed: the narrower
+    option would be another member of `shelf.Loading`, and that enum is not
+    this change's to extend.
+    """
+    after: int | None = None
+    while True:
+        shelf = Shelf.seen_by(db, viewer_id)
+        # Narrowed only once there is a row to resume after. A sentinel id
+        # standing for "before the first row" would be relying on the primary
+        # key never reaching it rather than saying so.
+        if after is not None:
+            shelf = shelf.where(Book.id > after)
+        books = shelf.limited(
+            marc.EXPORT_PAGE_RECORDS, Book.id.asc(), load=Loading.PUBLISHED
+        )
+        if not books:
+            return
+        # Read **before** the page is handed over rather than after it comes
+        # back, because the consumer streams and an unknown time passes inside
+        # that `yield`. Nothing commits on this session during a response, so
+        # nothing expires and the read is safe either way today; this costs a
+        # line and stops depending on that.
+        cursor = books[-1].id
+        short = len(books) < marc.EXPORT_PAGE_RECORDS
+        yield books
+        # A short page is the last page. A full one costs one more query that
+        # comes back empty, which is what a walk with no count pays instead of
+        # counting the shelf on every page.
+        if short:
+            return
+        after = cursor
+
+
 @router.get("/export")
 def export_books(
     db: DbSession,
@@ -722,17 +810,19 @@ def export_books(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="MARC export is a library mode feature.",
             )
-        # `Loading.PUBLISHED` rather than `EXPORTED`, and the name is about the
-        # payload rather than the audience: it is the one option that eagerly
-        # loads `classifications`, which is the half of a MARC record that
-        # makes it worth exchanging, and it omits `added_by` and `collection`,
-        # which are household facts a catalogue record does not carry. Reading
-        # them lazily instead would be one statement per book.
-        catalogued = Shelf.seen_by(db, current_user.id).all(
-            Book.title.asc(), load=Loading.PUBLISHED
-        )
         return StreamingResponse(
-            iter([marc.write(catalogued)]),
+            # **Paged, and the page is what bounds this route.** The shelf
+            # is never in memory whole: `_marcxml_pages` fetches
+            # `marc.EXPORT_PAGE_RECORDS` rows at a time and `marc.stream`
+            # writes one page of XML at a time, so the peak is a page of each
+            # at any shelf size. The library in library mode is the instance
+            # with the most books, and this arm used to materialise every one
+            # of them for an ordinary account. **The CSV arm below still
+            # does**, and is not gated by library mode either; it is a
+            # separate ticket and not a thing this comment has fixed. What
+            # this constant is, and what refusing and truncating would each
+            # have cost, is at `marc.EXPORT_PAGE_RECORDS`.
+            marc.stream(_marcxml_pages(db, current_user.id)),
             # The registered media type for MARCXML, per the Library of
             # Congress. A cataloguer's tools dispatch on it.
             media_type="application/marcxml+xml; charset=utf-8",
@@ -902,7 +992,7 @@ def _csv_safe(value: object) -> str:
 
 
 def _one_line(value: object) -> str:
-    """Flatten a value onto the one line the `txt` export gives it.
+    r"""Flatten a value onto the one line the `txt` export gives it.
 
     **The record separator in that format is a newline**, and a line is
     `Label: value`, so a value carrying a newline opens a line of its own and an
@@ -917,30 +1007,47 @@ def _one_line(value: object) -> str:
     start of the **value**, and the character that matters here is at the start
     of a line **inside** it.
 
-    `str.split()` with no argument splits on every run of whitespace, so the
-    carriage return, the tab, the form feed, the vertical tab and Unicode's own
-    line separators go with the newline and the result is one line whatever the
-    value held. Measured: `str.split()` breaks on 29 code points and
-    `str.splitlines()`, which is what reads the file back, on 10, and the second
-    set is a subset of the first, swept over `range(0x110000)`. Chosen over
-    replacing `\n` alone because a CR-only line break is a line break to a
-    Windows editor and to Excel, and
-    `test_books.py::TestTheTextExportCannotBeMadeToForgeALine` drives five of
-    those characters rather than the one the newline case would have proved.
+    The collapse itself is `schemas.common.one_line`, which the fields that
+    have to be one line go through on the way in; this is the same rule applied
+    on the way out, with a `None` and a non string to absorb. What it rests on is
+    wider than what the validators rest on: `str.split()` with no argument
+    splits on every run of whitespace, and whitespace is a **superset** of what
+    a reader breaks a line on, so the carriage return, the form feed, the
+    vertical tab, the file and record separators and Unicode's own line
+    separators go with the newline and the result is one line whatever the value
+    held. Chosen over replacing `\n` alone because a CR-only line break is a
+    line break to a Windows editor and to Excel.
+
+    **The set is derived from what a line break is, never listed**, and so is
+    the guard over it: `test_books.py::TestTheTextExportCannotBeMadeToForgeALine`
+    sweeps the whole of Unicode on every run for the code points
+    `str.splitlines()` breaks on, asserts this function removes each of them,
+    and drives one HTTP arm per break. **No count is written here on purpose.**
+    The version of this docstring that named five characters had five arms
+    behind it naming the same five: measured, a rewrite flattening exactly those
+    five was caught by nothing, and by six named arms once the sweep replaced
+    them.
+
+    One list survives that, `_BREAKS_AS_MEASURED` beside the sweep, and it is a
+    floor rather than the rule. Arms parametrised off a derived set shrink with
+    it in silence, so something has to hold what the sweep found when somebody
+    last looked. It is the only thing a narrowed sweep goes red against.
 
     **It changes what the export contains, and the owner approved that on
     2026-09-17.** A multi line description already rendered as an
     indistinguishable block in this format, since nothing indents or quotes a
     continuation, so what is lost is a paragraph break in a value a reader
     could not parse anyway. What is gained is that the file cannot be made to
-    say something the library never recorded.
+    say something the library never recorded. Nothing reads this format back:
+    `import_readers` has no `txt` reader and the CSV arm is the round tripping
+    one, which is what makes flattening affordable here and not there.
 
     Applied to the typed values too, for the reason the CSV arm states at its
     own call site: the argument that a column's validator makes this impossible
     names the validator at the API, and `backup._parse_row` inserts a restored
     archive through Core, which coerces the temporal columns and nothing else.
     """
-    return "" if value is None else " ".join(str(value).split())
+    return "" if value is None else one_line(str(value))
 
 
 def _added_on(book: Book) -> str:
@@ -1026,12 +1133,12 @@ def list_books(
     # filter quietly shows the wrong shelf.
     #
     # Refused here rather than in `BookFilters`, because it is a fact about
-    # this request and the answer is a 422 with a sentence in it. A filter
+    # this request and the answer is a 400 with a sentence in it. A filter
     # value object that raised HTTP exceptions would be a schema wearing a
     # router's hat.
     if collection_id is not None and unfiled:
         raise HTTPException(
-            status_code=422,
+            status_code=400,
             detail="Ask for one collection or for the unfiled books, not both.",
         )
 
@@ -1403,7 +1510,7 @@ def _bulk_set_status(
     try:
         new_status = ReadStatus(str(value))
     except ValueError:
-        raise HTTPException(status_code=422, detail=f"{value!r} is not a reading status") from None
+        raise HTTPException(status_code=400, detail=f"{value!r} is not a reading status") from None
 
     # One statement for the selection, the same stamping the single-book route
     # uses, and the unchanged rule: all three on `Reading.mark_each`.
@@ -1419,7 +1526,7 @@ def _bulk_set_ownership(
         new_ownership = OwnershipStatus(str(value))
     except ValueError:
         raise HTTPException(
-            status_code=422, detail=f"{value!r} is not an ownership status"
+            status_code=400, detail=f"{value!r} is not an ownership status"
         ) from None
 
     updated = unchanged = 0
@@ -1438,7 +1545,7 @@ def _bulk_set_location(
     # An empty string clears the location, which is how a box gets unpacked.
     location = str(value).strip() if value is not None else ""
     if len(location) > LOCATION_MAX:
-        raise HTTPException(status_code=422, detail="Location is too long")
+        raise HTTPException(status_code=400, detail="Location is too long")
     new_location = location or None
 
     updated = unchanged = 0
@@ -1468,7 +1575,7 @@ def _bulk_set_collection(
             new_collection = int(str(value))
         except ValueError:
             raise HTTPException(
-                status_code=422, detail="A collection id is required"
+                status_code=400, detail="A collection id is required"
             ) from None
         _checked_collection(db, new_collection)
 
@@ -1512,7 +1619,7 @@ def _require_tag(db: Session, value: str | int | None) -> Tag:
     try:
         tag_id = int(str(value))
     except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="A tag id is required") from None
+        raise HTTPException(status_code=400, detail="A tag id is required") from None
     if not 1 <= tag_id <= MAX_ROW_ID:
         raise HTTPException(status_code=404, detail="Tag not found")
     tag = db.get(Tag, tag_id)
@@ -2395,14 +2502,14 @@ def merge_books(
     satisfy a unique index is not an acceptable way to resolve it.
     """
     if payload.keep_id not in payload.book_ids:
-        raise HTTPException(status_code=422, detail="keep_id must be one of book_ids")
+        raise HTTPException(status_code=400, detail="keep_id must be one of book_ids")
 
     books = Shelf.seen_by(db, current_user.id).where(Book.id.in_(payload.book_ids)).all()
     found = {book.id: book for book in books}
     if payload.keep_id not in found:
         raise HTTPException(status_code=404, detail="Book not found")
     if len(found) < 2:
-        raise HTTPException(status_code=422, detail="Nothing to merge into that book")
+        raise HTTPException(status_code=400, detail="Nothing to merge into that book")
 
     keeper = found[payload.keep_id]
     losers = [book for book in books if book.id != keeper.id]
@@ -3703,7 +3810,7 @@ def set_custom_field(
     Returns the book's whole list rather than the one value, so a client that
     has just written one is holding the same thing `GET` would give it.
 
-    422 when the field holds a link and the value is not one: an address with
+    400 when the field holds a link and the value is not one: an address with
     no scheme, a `javascript:` or `data:` URL, or a host that is missing. See
     `custom_fields.link_target` for the whole list and why it is re-checked on
     every read as well as here.
@@ -3713,7 +3820,7 @@ def set_custom_field(
         custom_fields.write(db, book, field, payload.value)
     except custom_fields.Refused as refusal:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(refusal)
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(refusal)
         ) from refusal
     db.commit()
     return _custom_fields_out(book, db)
@@ -4607,8 +4714,11 @@ def update_book_details(
     """Correct the catalogue entry by hand.
 
     `exclude_unset` is what makes a partial update partial: an absent field is
-    left alone and an explicit null clears. Without it every unsent field would
-    arrive as None and wipe the record, which is the classic PATCH bug.
+    left alone and an explicit null clears where the column allows one. Without
+    it every unsent field would arrive as None and wipe the record, which is the
+    classic PATCH bug. A null for a column the database will not leave empty is
+    refused by `BookDetailsUpdate` before it reaches here, because it used to
+    reach the flush and answer 500.
     """
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(book, field, value)

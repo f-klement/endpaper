@@ -2,6 +2,331 @@
 
 ## Unreleased
 
+- **A single interrupt to the mutation sweep did nothing, and the reason was that the signal
+  had no handler to run.** An ignored SIGINT survives `exec` and CPython installs its own
+  handler only over `SIG_DFL`, so a sweep launched from a parent that ignores SIGINT, which is
+  what POSIX has a shell do to a background job, discarded every interrupt with nothing to
+  see: not blocked, not slow, not mishandled. Measured on one node, the same scenario twice
+  differing only in the spawning parent: 3.01s to unwind from the default disposition against
+  121.10s from an ignoring one, where 121s is the stub arm's own sleep finishing. The tool
+  takes SIGINT back at startup, from an inherited ignore and from an inherited block, and says
+  which it found. A second stop can no longer unwind the escalation between the TERM and the
+  KILL. **The remaining window, a stop arriving before the escalation is entered, is not
+  closed**: an arm asserting it was written, measured and deleted rather than shipped green,
+  and `docs/decisions.md` records what is covered and what is not.
+
+- **The rule deciding what a test walk may read is driven over every walk in the test tree,
+  not over the six in the file that owns it.** A walk that recurses `backend/` reads the cache
+  the pipeline creates there and reports third party code for breaking a rule it has never
+  heard of, green on a developer checkout and red only in CI. Of 37 failed pipelines in the
+  300 to 2026-09-21, 13 were that one class, repaired once per file across five days. Five
+  walks in four modules reached the shared decision and were exercised by nothing; they take
+  the tree as a parameter now and are driven against one with each kind of vendored directory
+  planted in it, which catches a walk that asks the rule and asks it wrongly. No behaviour
+  changes and no test is added: `docs/decisions.md` records what the driving buys and what it
+  still does not see.
+
+- **Every operation in the committed schema is now askable by a generator, not only the
+  one route a hand written class covers.** `tests/routers/test_books_bulk.py::TestNoVerb
+  TurnsAValueIntoA500` crosses every bulk verb with five hostile values and asserts none
+  of them is a 500; the same sentence is true of every route that parses a value, and
+  there are 139. `backend/tests/api_contract.py` drives `schemathesis` over the committed
+  `frontend/openapi.json` and asserts two properties and no third: no generated request is
+  a server error, and every response matches the schema that declares it.
+  `status_code_conformance` is deliberately not among them, because it would accept either
+  a 404 or a 403 for an invisible book and read as though that rule were covered. It runs
+  as an ordinary member rather than as an admin, because an admin token answers 200 where
+  a member is refused. It is a tool rather than a gate: the collector takes `test_*.py`
+  and this is `api_contract.py`, so it runs when somebody names it. What it finds today,
+  one server error and thirty operations across three divergence classes, is recorded in
+  `docs/decisions.md` rather than fixed here.
+- **The first findings of the run above, fixed: one server error and six operations whose
+  responses contradicted the schema that declares them.** `PATCH /api/books/{book_id}` with
+  `{"title": null}` reached `UPDATE books SET title=NULL`, SQLite refused on the NOT NULL
+  constraint, and the unhandled exception handler turned the `IntegrityError` into a **500**
+  over a value the edit form lets somebody type. **The defect is the pair and not either
+  half**, so the fix is derived from both: `BookDetailsUpdate` reads the NOT NULL columns
+  off `Book.__table__` and refuses an explicit null for any field naming one, which is
+  `title` and nothing else of its sixteen today. The answer is now a 422 naming the field
+  and the row is untouched. `tests/schemas/test_book.py` holds the rule over every request
+  body a route writes onto a row, found by the write rather than by the model's name, so
+  the next such field is covered on the day it is added rather than on the day somebody
+  sends it a null.
+- **Fourteen refusals moved off 422, which is the one status this schema declares with a
+  body they do not send.** `HTTPValidationError.detail` is an array of validation entries,
+  because that is what FastAPI's own body validation sends, and a hand raised
+  `HTTPException(detail="...")` sends a sentence: a client generated from the published
+  schema was told the wrong shape. The refusals themselves, their wording and what they
+  disclose are unchanged, and nothing in the browser reads either status. **The whole class
+  moved rather than the four the generator happened to reach**, ten sites in the books
+  routes, three in the shared filter parameters and one in the credential key route, and
+  `tests/test_errors.py` now refuses the next one: which status is typed as an array is read
+  off the schema, and which number a call was given is resolved in the module that wrote it,
+  so a rename of the envelope and a new spelling of the constant both fail rather than slip
+  past.
+- **Two routes that answer with nothing now say so.** `POST /auth/reset/request` and
+  `POST /auth/verify/request` answer 202 with an empty body, and the schema documented that
+  202 as `application/json`. **The fix is a declaration and not a body**, which is what
+  keeps the property those routes exist for: both still answer identically whether or not
+  the account exists, and not one byte on the wire moved.
+- **The one line a member types has one home, and the two rules it was spelled under are now
+  three named ones.** A whitespace collapse written as a join over a split appeared at nine
+  sites across seven modules of the API layer, two of them the bodies of private functions
+  both called `_one_line` with different post conditions: the custom field one removed every
+  control character before collapsing, because a tab inside a stored URL had produced a 200
+  with an href no browser can follow, and the export one collapsed alone. Three validators
+  cited a sibling's docstring for the rule rather than sharing it. `schemas/common.py` now
+  holds `one_line`, `one_line_without_invisible_characters` and
+  `one_line_without_any_control_character`, and which one a field takes is stated at the
+  field as a decision about what the API accepts.
+  **Four fields accept less than they did, all four in the same direction**: a tag name, a
+  collection name, the name an author merge keeps and a confirmed authority identifier now
+  have the characters that have no width removed before the value is stored, so a name of
+  nothing but those is refused with a 422 where it used to be stored as a row nobody could
+  see or select. The identifier arm closes a 500: `ck_author_identifiers_bounds` is
+  `length(identifier) > 0` and SQLite's `length()` counts up to the first NUL, so an
+  identifier led by one was a value to look at and no value to the check, and it reached the
+  client as a 500 rather than the 422 that validator exists to answer.
+  **A tab is still a word break in all six name fields**, which is the half a single rule
+  would have taken silently: only a value that may be rendered as a link wants a tab deleted
+  rather than collapsed, and the two sets are derived from `str.isspace`, the predicate the
+  collapse itself breaks on, so they cannot overlap or leave a gap. What the custom field
+  value accepts is unchanged, measured over the whole C0, DEL and C1 range plus eight
+  whitespace and invisible code points outside it, at zero differences against the code this
+  replaced. The classification number keeps its own wider refusal at its own site, the
+  heading query filter and the `txt` export keep the collapse alone, and each of those three
+  carries the reason it is not the others.
+- **A CHECK's expression was compared for two tables, and every enum list in the schema was
+  outside every rule that reads one.** `TestTheMigrationsAndTheModelsAgree` compared columns,
+  nullability and type; the expression, which is what decides whether a row is refused, was
+  compared where somebody had written a class for the table or where a token scan picked the
+  constraint up on `AS BLOB` or `char(0)`. Measured on the head schema: 30 named CHECKs
+  across 14 of the 22 tables, of which those four rules read 14. The house rule on enum
+  columns asks only whether both copies bound the column, so a member added to
+  `ck_books_ownership` with no revision behind it left all 12 of that class's tests green.
+  Both copies are now read in the shape `_declared_checks` already had, the installed one by
+  reflection, and compared as an equality in both directions over every named CHECK there is.
+  It enumerates nothing, so a constraint added to a model is compared the day it exists, and
+  an unnamed one, which neither copy could address, is refused where the schema is read. No
+  behaviour changed.
+- **The premise under every comparison between `models.py` and a database had three arms and
+  a module writing its own DDL was outside all three.** A table count either side of one
+  `create_all` call, a stamp against the script directory's head, and a source walk for a
+  call named `create_all`: none watches for a raw `execute` of a `CREATE`. The fourth arm
+  asks the artefact rather than the source, because a scan for a statement has to enumerate
+  what one looks like. Two children report the schema they end up with, one importing the
+  application the way uvicorn does and one running the revisions alone, and the two are
+  compared as reflected objects. Measured: `init_db` executing
+  `CREATE INDEX IF NOT EXISTS ix_books_probe ON books(title)` after the chain reddens the new
+  arm alone, with the other three and every column comparison green. No behaviour changed.
+- **The MARCXML export stopped loading the whole shelf into memory.** The route resolved
+  every visible book at once and handed the list to a writer that built one XML tree over
+  all of it, with no cap, no page and no test saying otherwise, while every stated MARC
+  bound in the tree was on the import side. The library in library mode is the deployment
+  with the most books and this arm materialised all of them for an ordinary account. The
+  shelf is now walked 100 rows at a time and written one page at a time: measured through
+  the route with descriptions of 200 characters, the peak goes from 55.05 MiB to 1.02 MiB
+  at 10,000 books and from 219.06 MiB to 1.05 MiB at 40,000, where the first figure rises
+  with the shelf and the second does not, and the wall clock is unchanged to within a few
+  percent.
+  **The file is complete and its records are unchanged**, which is why paging was taken
+  over the cap the import side carries: a cataloguer can split an oversized upload and
+  nobody can split their own shelf. **What a page costs at the worst is measured**, with
+  every bound read off its declaration rather than guessed, and the worst case is not the
+  long description anybody pictures: `ElementTree` writes `&` as `&amp;`, and the `700`
+  field repeats once per credited name with nothing bounding the count inside the author
+  column's 500 characters, so the same declared maximums are 16,611 bytes a record in ASCII
+  and 102,107 with escaping and 250 names. The walk
+  resumes on the primary key, because pages of one export are separate reads and both an
+  offset and a title lose a book silently when the shelf moves behind the walk; the file
+  is therefore in catalogued order where it was in title order. The one thing given up is
+  that no failure can be a 500 any more: the opening tag is written before the walk is
+  touched, so every failure from there answers 200, the walk's first query included, and
+  what it leaves is an unclosed `<collection>` that no parser accepts. Both halves are
+  pinned by a test, so a half written exchange is an error at the receiver rather than a
+  short file that reads as complete. The guard is what
+  reaches the writer, watched at the seam, plus a parse of every production module that
+  fails on a call to the whole document writer at all.
+- **The Google volume id rule has one home in the browser, and the second job it does is
+  pinned where that job is.** `lib/takeout.ts` bound the same twelve character rule as
+  `lib/stores.ts` and used it to tell a Play Books sidecar's volume id line from the lines
+  beside it; it asks `stores.producedValue` now. The duplicate was deliberate, on the
+  argument that folding it would let a widening of the identifier rule widen a line
+  discriminator with nothing red. That argument is answered rather than ignored: an arm in
+  `tests/lib/takeout.test.ts` says a thirteen character metadata line yields no volume id,
+  and widening the rule to thirteen characters now fails 2 of 106 arms, the table's own
+  length arm and that one, where the agreement sweep between the two modules stays green.
+  The backend guard that held the browser's spelling in step with the server's stopped
+  naming files: it censuses every module under `frontend/src` and requires the rule to be
+  written in exactly one of them, so a fold is not a failure and a second spelling is. No
+  behaviour changed: the two regular expressions were identical.
+- **The allowlist for every query reading a table that belongs only to a Book is keyed on
+  the statement rather than on a fragment of it.** `BOOK_OWNED_READERS` entries paired a
+  substring with the reason that statement is safe, checked with `in` in line order, so an
+  edit that kept the substring and dropped the narrowing the reason rests on passed. 1 of
+  the 17 entries was ambiguous on the day it was changed, `func.count(DigitalReference.id)`
+  in `routers/books.py`, which also matches the flagged reference count four statements
+  above it. Entries now carry the whole statement and are compared by equality, which is
+  what the folding rules' own table already did.
+- **A NUL refusal was accepted as a byte bound and is not one.** Every character ceiling in
+  the schema exists for a restore, which inserts through Core and runs no validation, and the
+  house rule holding those ceilings cleared one on `instr(col, char(0)) = 0` alone. SQLite's
+  `length()` stops at the first NUL, which that clause closes, and also counts one character
+  per UTF-8 lead byte while skipping continuation bytes without limit, which it does not:
+  measured, `'http://x'` followed by one `0xC0` and a million continuation bytes reports nine
+  characters, stores 1,000,009 bytes and carries no NUL at all. The rule now clears a ceiling
+  on a byte budget, or on the NUL clause **beside** a charset rule confining the value to one
+  byte per character, which is the pair two credential columns already carry and the reason
+  `models.py` records for them needing no budget. Three comments stating the old belief are
+  corrected at their sites, and four more, in a revision and two test modules this change did
+  not own, are recorded in `docs/decisions.md` instead. **One constraint is reported rather
+  than cleared and the rule carries it**: `book_identifiers.value` is bounded at sixty
+  characters with a NUL clause and no charset rule, so the constraint admits 60 counted
+  characters at 1,000,020 bytes. No writer reaches that, an archive's manifest being JSON and
+  every value it inserts a string of at most four bytes per character, so the reachable
+  maximum is 240 and the gap is what the constraint promises rather than what it lets
+  through. Closing it is a schema revision. No behaviour changed.
+- **Three text columns had no bound on what reaches the disk, and one address column had no
+  rule at all.** `length()` counts one character per UTF-8 lead byte and skips continuation
+  bytes without limit, so a character ceiling bounds no bytes and a charset rule bounds no
+  size. `book_identifiers.value` admitted 60 counted characters at 1,000,020 bytes;
+  `catalogue_targets.isbn_index` and `title_index` were confined to `[A-Za-z0-9._]` with no
+  bound of any kind, so the same trick stored a megabyte in either; and
+  `catalogue_credentials.envelope` was `Text` with a shape and a floor, which is the ceiling
+  the revision before this one recorded as somebody else's question. Each now carries a byte
+  bound: 240 on an identifier, 64 on an index name, and **2,825** on an envelope, derived from
+  what the two routes that can fill one are allowed to hand `credentials.seal`. That figure is
+  recomputed by a test rather than written down twice, and the routes it reads are **found**
+  rather than listed: an `ast` pass over the routers takes every handler that calls
+  `credentials.put` and reads its own annotated body, so a third route widens the ceiling
+  instead of overflowing it. A second case holds the arithmetic against a real `seal` call, so
+  a field added to an envelope cannot leave the derivation and the constant agreeing with each
+  other and both wrong. **`catalogue_targets.base_url`
+  gains the four arms its sibling `opds_servers.base_url` has carried since `b7d4e6f01a95`**,
+  where it had none: an archive could put a `file://` address, an address of unbounded length
+  or a megabyte behind one lead byte in the column a sync reads. **None of it was reachable
+  today** and the revision says so rather than implying otherwise: every writer but
+  `backup.restore` binds a Python string, an archive's manifest is JSON, and
+  `main.seed_catalogue_targets` overwrites every seeded row on every boot. **No row this
+  application could have written can fail the upgrade**, checked per bound rather than
+  assumed. The two columns holding a sealed credential's key gain the behavioural probe and
+  the DDL comparison that a byte arm gets for free and their own arm never got, and the house
+  rule's register of open ceiling defects is now empty.
+- **A `GLOB` rule now has to say what a NUL lets it read.** `GLOB` is a C string operation
+  and stops at the first NUL exactly as `length()` does, so a refusal of every character
+  outside a set is satisfied by `'abc'` followed by a NUL and `'ZZZ!!'`. A new house rule
+  requires `instr(col, char(0)) = 0` beside any `GLOB` clause whose pattern does not end in
+  `*`, derived from the pattern rather than from the nine clauses the schema has today: a
+  trailing `*` absorbs any suffix, so such a clause matches the whole value whenever it
+  matches a prefix and truncation can only make it fail, which is why one constraint carries
+  no NUL clause on purpose and still passes. A clause the rule cannot parse is reported
+  rather than skipped. No behaviour changed.
+- **Every command the published documents offer is now checked against the project, and the
+  one that told a reader to reformat most of the backend is gone.** `docs/testing.md`
+  offered `ruff format` beside the lint step, in the same cell. Nothing here configures that
+  verb and no job runs it, so a reader following a published document rewrote 203 of the
+  backend's 256 files. `README.md` named the same job correctly and neither document
+  pointed at the other. A test now reads every command a published document offers and
+  refuses one the project does not run: a `bun run` script against the scripts
+  `frontend/package.json` declares, a program under `uv run` against the distributions
+  `backend/pyproject.toml` declares or a command this repository invokes, and a verb after
+  such a program against the invocation itself. A shape no arm claims fails rather than
+  passing. 53 offers across nine documents, all of them real. Naming a command in prose
+  stays writable: an offer is a code span headed by a runner, which is what lets a document
+  say a command is wrong. `README.md` now points at `docs/testing.md` for the rest.
+- **Comment stripping has one home, and a second instrument is refused.** Every rule that
+  reads the source tree and asks about code rather than prose now strips it with one
+  parser backed function, `frontend/tests/withoutProse.ts`. The tree held a hand written
+  character scanner beside it, which was blind to a regex literal and to JSX text, the
+  exact class the parser backed one had just been fixed for. It refused nothing the parser
+  accepts: measured over the 461 modules under `frontend/src/`, the parser keeps zero
+  characters the scanner cut, and the scanner left 728 characters of prose standing in
+  three modules that the parser removes, because it tracked strings by quote character and
+  a quote inside a regex literal, or a backtick inside a comment, opens one it never
+  leaves. A ratchet re-derives on every run which modules match a comment for
+  themselves, by running each regex they write against text that is a comment and text
+  that is not, so a new one fails by name rather than by inheriting a gap. Ten modules are
+  on that list: three strip CSS or JSONC, which this parser cannot read, and seven strip
+  TypeScript with the regex pair the home replaced and are a backlog with their
+  measurement attached. No application behaviour changed.
+- **The unauthenticated feature endpoint stopped sending a flag nothing read.**
+  `GET /api/settings/features` is the one endpoint a caller holding no token can read, and it
+  carried a Google Books toggle beside that same toggle conjoined with a stored key, so the
+  pair told a stranger the toggle was on and no key was stored, which is strictly more than
+  the conjunction alone says. Nothing in the client read the raw toggle, and the screen that
+  edits it reads the admin record. **Breaking for any client reading that field off this
+  endpoint**: it is gone from the response and from the OpenAPI schema, so a regenerated
+  client will not compile against it and a hand written one reads `undefined`, which is falsy
+  and so behaves as off. `GET /api/settings` is unchanged and still carries the toggle. The
+  deliverable is the guard rather than the removal, and it is two guards because neither holds
+  alone: one derives every flag's readers from the parse of every module naming the owning
+  hook or the generated model, the other is an equality on what the route actually sends,
+  which no regeneration can talk out of. Every field now says at its own site what it
+  discloses to a caller holding nothing.
+- **Both test coverage registers are derived from the run that reads them.** They were
+  maintained by retyping figures, so the one document whose whole purpose is to be checkable
+  was the one thing in the tree nothing checked. The counts come from the run now: the backend
+  census reads the collection the process is already executing rather than starting a second
+  one, and the frontend half is a reporter, because no test file there can see another file's
+  tasks and the static listing disagrees with the run, 7 against 16. A setup step fails any
+  run whose reporters a command line flag replaced, which a pipeline had been doing. The hand
+  written descriptions, which are the register's value, are untouched, and nine were added.
+  The headline, the rows and the shortfall for the files a published register may not name now
+  agree by construction rather than by somebody checking.
+- **An OPDS server name's limit has one home.** 100 was written four ways: both arms of the
+  check constraint, the column's own width, and the schema constant the route validates
+  against. Three of them read the model's constant now, the way the neighbouring address bound
+  already did. No migration, because the rendered SQL is byte identical on both dialects, so
+  the constraint a deployment carries does not move. The guard is behavioural and runs against
+  a migrated database, inserting the widest value the route accepts and the first one it
+  refuses for every bounded field, walked off the model's own fields rather than listed:
+  comparing a constant with itself proves nothing, and comparing constraint text refuses only
+  the spellings it enumerates.
+- **The plain text export's line breaks are derived rather than listed.** The flattening was
+  right and the guard over it was one enumeration checked against itself: a docstring named
+  five line break characters and the five test arms drove the same five, so the one rewrite
+  anybody would make, flattening the breaks it can name instead of the whitespace it cannot,
+  satisfied both. Measured, that rewrite was caught by nothing. The test sweeps Unicode for
+  the code points a line break splits on, parametrises every arm off the result, and plants a
+  forged line in eight of the record's ten lines rather than in one.
+- **One parameter stopped calling a duration a deadline.** Since the deadline work that word
+  has one meaning in the backend, an absolute moment, and one private helper took a length of
+  time under it. Renamed rather than converted, because the value goes straight into a slot
+  that takes a duration and a conversion would spread the type through a module for no change
+  in behaviour. Both are floats, so no type checker can report the swap: a test classifies a
+  parameter or argument name as a moment or a duration and reports any call binding one to the
+  other's slot, catching it from the body and from the call site alike.
+- **The linter ratchet's verdict is evidence rather than an absence.** The test that fails when
+  a suppression no longer has a finding read that finding's absence out of a parsed output, and
+  an absence has two causes it could not tell apart: on one unchanged tree it returned three
+  different answers across four runs, and its failure text tells the reader to delete the
+  entry, so acting on a red run deleted live suppressions. Four refusals stand between a run
+  and a verdict now, the report is JSON so a document cut short fails to parse rather than
+  reading as fewer findings, and a rule that still looks clean is confirmed by a second run
+  denying it alone, which errs toward keeping a suppression rather than toward accusing one.
+  Which entries count as suppressed is derived from the linter's own printed configuration
+  rather than from the one severity spelling the test knew of eleven. Reading the rendered
+  output had been finding 20 rule names among 17 rules, three of them quoted source.
+- **The publish gate catches an internal directory named through a relative path.** The guard
+  refusing a published file that points at a stripped one builds two patterns, and the
+  directory arm excluded the path separator from what may sit in front of a name, which is
+  what stops a bare word firing on an unrelated directory ending in the same element. Every
+  relative reference to one of the five directory shaped entries published. What may precede a
+  name is now exactly the segments that name nothing, the empty one and the two dot segments,
+  a set closed by how a path resolves rather than by which spellings have been seen, so no arm
+  has to be added for the next depth. Two defects found beside it and taken: any published line
+  quoting the ignore file's own name exempted itself from the guard, because the exemption
+  matched the whole line rather than its path field; and a list entry carrying a bracket built
+  its own pattern out of a character class.
+- **A mutation sweep, and its grace is a seam.** The harness that checks a guard by breaking
+  the code under it is a script now rather than a page of working notes rewritten per review.
+  It refuses to report a catch it did not earn, asks its container for a name instead of
+  assuming one, and asserts a mutant as byte preservation rather than as a diff alignment:
+  deleting `not ` and deleting ` not` yield the identical string, so a diff may align the
+  change either side of a shared token and name a span one character outside the node it
+  mutated. The wait before a hung mutant is killed is a seam the suite can shorten, clamped so
+  the environment can never lengthen it, since an unbounded value turns an escalation into a
+  wait and rebuilds the orphan the escalation exists to prevent.
 - **The working notes every agent session loads are 68% smaller, and what left them is
   reachable by name.** `CLAUDE.md` was 7,420 words on every turn, of which one section was
   48% and fired on a minority of them. It is 2,294 now, and six skills under `.claude/skills/`
@@ -75,7 +400,13 @@
   test asserting it drew a phrase from `generate_phrase()`, so it reddened the pipeline at
   random, 1 run in 220 measured over 20,000 phrases, with a failure reading as a regression in
   recovery phrase validation. It uses a fixed phrase now, and a second arm holds the edge that
-  a fixture which stopped being valid would leave the swap refused for the wrong reason.
+  a fixture which stopped being valid would leave the swap refused for the wrong reason. Beside the pin, BIP-39's
+  checksum is written out from the specification, so two tests ask that rule which swap to
+  make before asserting the refusal, and the assertion is true of every phrase rather than
+  of most draws. The wordlist is anchored to the published SHA-256 of the standard's own
+  file, because membership word by word pins one literal and not the list, and a permuted
+  wordlist keeps every checksum self consistent while deriving a different key from every
+  phrase already written down.
 
 - **A queued scan carries the name of what happened, not the sentence.** The scan queue
   stored rendered, translated prose in twelve places, so nothing made the next reason have a

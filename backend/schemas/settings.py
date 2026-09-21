@@ -216,16 +216,51 @@ class FeatureFlagsOut(BaseModel):
     Readable by anyone, deliberately: the login page is localised, so the
     default language has to be known before a token exists. It carries no
     secrets and nothing about the catalogue.
+
+    **Two of these are read before a token exists and three are not.** The
+    other three are read behind a session and are here because the shell takes
+    one query for every flag it renders, and because a member holds no admin
+    token to read `SettingsOut` with. So the test a field passes is that
+    something reads it, never that nothing else could serve it, and each says
+    below what it tells a caller holding nothing.
+
+    **Every field here has a reader in the client, and one with none is
+    refused.** An unread field on the one endpoint a stranger can call is
+    disclosure with nothing on the other end of it. Two guards hold it, because
+    neither is enough alone: `frontend/tests/houseRules.test.ts`, "every feature
+    flag has a reader", derives the readers and carries what it cannot see, and
+    `tests/routers/test_settings.py::TestFeatureFlags` pins what the route
+    actually sends, which no regeneration can talk out of.
     """
 
-    google_books_enabled: bool
-    # Whether the lookup will actually work: the toggle is on AND a key is
-    # stored. `google_books_enabled` alone is not enough to decide what to
-    # render, because a toggle with no key behind it produces a button that
-    # can only ever 400. Not a secret: any member could learn the same thing
-    # by pressing that button once.
+    #: Whether the lookup will actually work: the toggle is on AND a key is
+    #: stored. Not a secret: any member could learn the same thing by pressing
+    #: that button once.
+    #:
+    #: **The conjunction, and the raw toggle is not published beside it.** The
+    #: pair let a caller with no token read `enabled and not ready`, which says
+    #: the toggle is on and no key is stored, and is strictly more than this
+    #: field alone says. Nothing in the client asks the toggle, and it lives on
+    #: `SettingsOut`, behind an admin token, which is where the screen that
+    #: edits it reads it.
     google_books_ready: bool = False
+    #: Whether a book page offers a Goodreads lookup link. Read behind a
+    #: session, at `pages/BookDetail/BookDetail.tsx`, and one of the three that
+    #: is: a member cannot read `SettingsOut`, so there is no other endpoint
+    #: this answer could come from.
+    #:
+    #: What it tells a caller with no token is that this library offers links
+    #: to Goodreads. That is a preference about an outbound link: it names no
+    #: book, no member and no catalogue, and nothing else on this model
+    #: sharpens it.
     goodreads_lookup_enabled: bool
+    #: The language a browser falls back to when its own is not one this app
+    #: speaks. **The field this endpoint is public for**: the login page is
+    #: localised, so it has to be readable before a token exists.
+    #:
+    #: It tells a caller with no token which language this library chose, and
+    #: the login page is drawn in that language, so asking for the page
+    #: discloses the same thing.
     default_locale: Locale
 
     # ── Library mode ─────────────────────────────────────────────────────

@@ -157,9 +157,29 @@ class TestFeatureFlags:
 
     def test_reports_the_defaults(self, client):
         body = client.get("/api/settings/features").json()
-        assert body["google_books_enabled"] is False
         assert body["goodreads_lookup_enabled"] is True
         assert body["default_locale"] == "en"
+
+    def test_carries_no_field_the_client_does_not_read(self, client):
+        """The wire, which is the only thing a stranger sees.
+
+        The rule is held by `frontend/tests/houseRules.test.ts`, which reads
+        the committed client and is therefore blind to a field the backend
+        added and nobody regenerated. This is the half that is not: it is an
+        equality on what the route actually sends, so a field added to the
+        model is red here whatever the client holds.
+
+        **An equality and not a subset**, so a field joining this response is a
+        decision somebody takes rather than an edit nobody sees, which is what
+        `tests/test_nothing_private_leaves.py` does for the route set itself.
+        """
+        assert set(client.get("/api/settings/features").json()) == {
+            "google_books_ready",
+            "goodreads_lookup_enabled",
+            "default_locale",
+            "library_mode",
+            "public_catalogue_published",
+        }
 
     def test_carries_no_secrets(self, client, admin):
         client.put(
@@ -298,10 +318,14 @@ class TestUpdateSettings:
 
 
 class TestReadinessFlag:
-    """`google_books_enabled` is the toggle; `google_books_ready` is whether it
-    will actually work. The UI needs the second one to decide between offering a
-    control and greying it out, because a toggle with no key behind it produces
-    a button that can only ever 400."""
+    """`google_books_ready` is whether the lookup will actually work: the
+    admin's toggle is on and a key is stored. The UI needs it to decide between
+    offering a control and greying it out, because a toggle with no key behind
+    it produces a button that can only ever 400.
+
+    The toggle itself is on `SettingsOut` and reaches nobody without an admin
+    token, so every assertion here reads the conjunction: the four rows below
+    are the truth table, and the unauthenticated caller sees only the answer."""
 
     def features(self, client) -> dict:
         return client.get("/api/settings/features").json()
@@ -316,8 +340,10 @@ class TestReadinessFlag:
 
         body = self.features(client)
 
-        assert body["google_books_enabled"] is True
         assert body["google_books_ready"] is False
+        # The toggle being on is what this caller must NOT be able to read:
+        # with `ready` false beside it, the pair says a key is missing.
+        assert "google_books_enabled" not in body
 
     def test_a_key_without_the_toggle_is_not_ready(self, client, admin):
         client.put(
@@ -1665,7 +1691,7 @@ class TestTheKeyRoutesReportAboutTheKeyAndNeverTheKey:
         assert response.status_code == 200
         assert response.json()["configured"] is True
 
-    def test_a_mistyped_phrase_is_a_422_rather_than_a_conflict(self, client, admin):
+    def test_a_mistyped_phrase_is_a_400_rather_than_a_conflict(self, client, admin):
         """A phrase somebody mistyped is a bad request; a pinned key is a conflict."""
         words = credentials.generate_phrase().split()
         response = client.put(
@@ -1673,18 +1699,18 @@ class TestTheKeyRoutesReportAboutTheKeyAndNeverTheKey:
             json={"phrase": " ".join([*words[:-1], "endpaper"])},
             headers=admin["headers"],
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
         assert "endpaper" not in response.text
 
     def test_and_the_rejected_phrase_is_not_echoed_back(self, client, admin):
-        """pydantic puts the submitted value in the 422 body unless it is dropped."""
+        """A refusal says what is wrong with the phrase and never repeats it."""
         phrase = credentials.generate_phrase()
         response = client.put(
             "/api/settings/credential-key",
             json={"phrase": phrase + " " + phrase},
             headers=admin["headers"],
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
         assert phrase not in response.text
 
     def test_a_key_the_environment_pins_is_a_409(self, client, admin, monkeypatch):

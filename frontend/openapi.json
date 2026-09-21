@@ -1224,7 +1224,7 @@
         "type": "object"
       },
       "BookDetailsUpdate": {
-        "description": "The fields a person edits by hand after a book exists.\n\nEvery field is optional and absent means \"leave alone\", so the form can\nsend only what changed. An explicit `null` clears, which is how a series is\nunset; the two cases are distinguished with `model_fields_set`.",
+        "description": "The fields a person edits by hand after a book exists.\n\nEvery field is optional and absent means \"leave alone\", so the form can\nsend only what changed. An explicit `null` clears, which is how a series is\nunset; the two cases are distinguished with `model_fields_set`. A column\nthat refuses null refuses the clear too: see the validator at the foot.",
         "properties": {
           "author": {
             "anyOf": [
@@ -3390,17 +3390,13 @@
         "type": "string"
       },
       "FeatureFlagsOut": {
-        "description": "What the frontend needs in order to decide what to render.\n\nReadable by anyone, deliberately: the login page is localised, so the\ndefault language has to be known before a token exists. It carries no\nsecrets and nothing about the catalogue.",
+        "description": "What the frontend needs in order to decide what to render.\n\nReadable by anyone, deliberately: the login page is localised, so the\ndefault language has to be known before a token exists. It carries no\nsecrets and nothing about the catalogue.\n\n**Two of these are read before a token exists and three are not.** The\nother three are read behind a session and are here because the shell takes\none query for every flag it renders, and because a member holds no admin\ntoken to read `SettingsOut` with. So the test a field passes is that\nsomething reads it, never that nothing else could serve it, and each says\nbelow what it tells a caller holding nothing.\n\n**Every field here has a reader in the client, and one with none is\nrefused.** An unread field on the one endpoint a stranger can call is\ndisclosure with nothing on the other end of it. Two guards hold it, because\nneither is enough alone: `frontend/tests/houseRules.test.ts`, \"every feature\nflag has a reader\", derives the readers and carries what it cannot see, and\n`tests/routers/test_settings.py::TestFeatureFlags` pins what the route\nactually sends, which no regeneration can talk out of.",
         "properties": {
           "default_locale": {
             "$ref": "#/components/schemas/Locale"
           },
           "goodreads_lookup_enabled": {
             "title": "Goodreads Lookup Enabled",
-            "type": "boolean"
-          },
-          "google_books_enabled": {
-            "title": "Google Books Enabled",
             "type": "boolean"
           },
           "google_books_ready": {
@@ -3420,7 +3416,6 @@
           }
         },
         "required": [
-          "google_books_enabled",
           "goodreads_lookup_enabled",
           "default_locale"
         ],
@@ -9161,7 +9156,7 @@
         ]
       },
       "patch": {
-        "description": "Correct the catalogue entry by hand.\n\n`exclude_unset` is what makes a partial update partial: an absent field is\nleft alone and an explicit null clears. Without it every unsent field would\narrive as None and wipe the record, which is the classic PATCH bug.",
+        "description": "Correct the catalogue entry by hand.\n\n`exclude_unset` is what makes a partial update partial: an absent field is\nleft alone and an explicit null clears where the column allows one. Without\nit every unsent field would arrive as None and wipe the record, which is the\nclassic PATCH bug. A null for a column the database will not leave empty is\nrefused by `BookDetailsUpdate` before it reaches here, because it used to\nreach the flush and answer 500.",
         "operationId": "update_book_details",
         "parameters": [
           {
@@ -9506,7 +9501,7 @@
     },
     "/api/books/{book_id}/custom-fields/{field_id}": {
       "put": {
-        "description": "Fill in a field on this book, or clear it with an empty value.\n\nOne verb for both, because emptying the box and saving is what a person\ndoes and a client should not have to decide which of two verbs that means.\n\nReturns the book's whole list rather than the one value, so a client that\nhas just written one is holding the same thing `GET` would give it.\n\n422 when the field holds a link and the value is not one: an address with\nno scheme, a `javascript:` or `data:` URL, or a host that is missing. See\n`custom_fields.link_target` for the whole list and why it is re-checked on\nevery read as well as here.",
+        "description": "Fill in a field on this book, or clear it with an empty value.\n\nOne verb for both, because emptying the box and saving is what a person\ndoes and a client should not have to decide which of two verbs that means.\n\nReturns the book's whole list rather than the one value, so a client that\nhas just written one is holding the same thing `GET` would give it.\n\n400 when the field holds a link and the value is not one: an address with\nno scheme, a `javascript:` or `data:` URL, or a host that is missing. See\n`custom_fields.link_target` for the whole list and why it is re-checked on\nevery read as well as here.",
         "operationId": "set_custom_field",
         "parameters": [
           {
@@ -13821,11 +13816,6 @@
         },
         "responses": {
           "202": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
             "description": "Successful Response"
           },
           "422": {
@@ -13943,11 +13933,6 @@
         },
         "responses": {
           "202": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
             "description": "Successful Response"
           },
           "422": {

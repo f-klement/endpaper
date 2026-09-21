@@ -915,23 +915,104 @@ describe("what a scheme's own producers write", () => {
   });
 });
 
+describe("the store seam reaches its readers and they do not reach back", () => {
+  // **`import.meta.glob` and not `node:fs`**, and its own copy rather than the
+  // one further down this file, for the reason that one states: a rule keeps
+  // the helper it reads with, and this file runs under happy-dom, where
+  // `import.meta.url` is not a `file:` URL and `fileURLToPath` throws before an
+  // assertion runs.
+  const SOURCE = import.meta.glob("../../src/lib/stores.ts", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+
+  /** An import or export with a `from` clause, and whether it is type only. */
+  const FROM_CLAUSE =
+    /\b(?:import|export)\b\s*(type\b\s*)?[^;]*?from\s*"([^"]+)"/g;
+
+  it("has no eager relative import of its own", () => {
+    // **What keeps this graph acyclic, asserted because today it is an
+    // accident**, which is `tests/lib/fileReaders.test.ts`'s rule for the file
+    // seam and its wording: every edge out of this module is erased or
+    // deferred, the failure and library types being `import type` and each
+    // reader loaded with `await import`, so a reader importing it back costs
+    // nothing. `takeout.ts` is the first that does, and one ordinary import
+    // added here closes a cycle with it.
+    //
+    // **Stated as the file's own property and not as a list of readers**, for
+    // that rule's reason: a module that never joins the table is covered too.
+    // Zero rather than one, because this seam has no `./fileName` to except.
+    //
+    // **The edge is refused whatever it carries**, because what a cycle costs
+    // is decided by the binding: `producedValue` is a hoisted declaration and
+    // survives one, while this module's `PRODUCED_VALUE` read from inside the
+    // same cycle is in its temporal dead zone. So an inline `import { type X }`
+    // counts as eager here, which is the safe direction and is what the file
+    // seam's version of this rule states too.
+    const source = SOURCE["../../src/lib/stores.ts"];
+    expect(source).toBeDefined();
+    const statements = [...source!.matchAll(FROM_CLAUSE)];
+    // A pattern that stopped matching would make the assertion below pass for
+    // ever, so what it found is anchored first.
+    expect(statements.length).toBeGreaterThan(0);
+
+    expect(
+      statements
+        .filter(
+          ([, isType, from]) => isType === undefined && from!.startsWith("."),
+        )
+        .map(([, , from]) => from),
+    ).toEqual([]);
+    // **And the two eager edges a `from` clause never carries**: a side effect
+    // import, and an `await import` at module scope rather than inside a
+    // reader. Every dynamic import here is deferred because it sits in a
+    // function, which is a fact about where it is written: a top level
+    // statement in this module starts at column 0 and a function body does not,
+    // so that is what the anchor asks. **Column 0 and not a list of keywords**:
+    // a first version matched `await` or a `const`, `let` or `var` binding it,
+    // and `export const reader = await import("./x")` begins with neither and
+    // walked past, measured by the security seat. What is left unmatched is a
+    // statement whose `await import` lands on an indented continuation line,
+    // and one inside a top level block or after a label; neither is written
+    // here and prettier produces neither at this width.
+    expect([...source!.matchAll(/^\s*import\s*"[^"]+"/gm)]).toEqual([]);
+    const dynamic = [...source!.matchAll(/await\s+import\s*\(/g)];
+    expect(dynamic.length).toBeGreaterThan(0);
+    expect([...source!.matchAll(/^\S.*await\s+import\s*\(/gm)]).toEqual([]);
+  });
+});
+
 /**
- * The Google half is one rule and `takeout.ts` holds a second copy of it, on
- * purpose.
+ * The Google half is one rule doing two jobs, and it is written once.
  *
- * That module's `VOLUME_ID` is the same regex doing a different job: it tells
- * the volume id line of a sidecar's metadata block from the reading state line
- * beside it, without matching an English label a German export does not carry.
- * Folding it into `PRODUCED_VALUE` would mean that widening the identifier rule
- * to thirteen characters silently widens a line discriminator, and a reading
- * state line of thirteen safe characters would be read as a volume id.
+ * `takeout.ts` asks `producedValue` to tell the volume id line of a sidecar's
+ * metadata block from the other lines in it, without matching an English label
+ * a German export does not carry. That is a second job the identifier rule does
+ * not know it has, so widening the rule by one character widens a line
+ * discriminator too.
  *
- * **So the two stay apart and their agreement is this sweep.** It replaces one
- * that read `takeout.ts`'s source for the constant, which could say the two
- * spellings matched and could not say the constant was reached: a reader that
- * kept the literal and stopped consulting it passed. This asks the reader.
+ * **What that costs is pinned where the job is**, by `tests/lib/takeout.test.ts
+ * > reads no volume id out of a thirteen character metadata line`, which goes
+ * red on exactly that widening. A second copy of the regex in `takeout.ts`
+ * bought the same prompt by having two literals to keep in step, and cost a
+ * second place for the rule to be widened alone.
+ *
+ * **This sweep is not that prompt, and the difference is worth knowing.** It
+ * compares the reader against the rule the reader calls, so a widening keeps
+ * the two in agreement and this stays green by construction, where the second
+ * copy made it red. Measured: `{12}` widened to `{12,13}` fails 2 of the 106
+ * arms in this file and `takeout.test.ts`, the value rule's own length arm and
+ * the one named above, and a backend census over `src` fails as well because
+ * the literal it looks for is gone. Found by the security seat.
+ *
+ * **So what this sweep defends is the call and not the agreement**, which is
+ * what it is named for: an import says a module can reach the rule and cannot
+ * say it does, and a reader that kept the call site and stopped consulting it
+ * is what goes red here. It refused the same evasion when the rule was a
+ * constant of that module's own.
  */
-describe("the Takeout reader and the value rule admit the same volume ids", () => {
+describe("the Takeout reader asks the value rule rather than one of its own", () => {
   /**
    * Nine sidecar lines: two real shapes, two lengths either side, two
    * characters outside the alphabet and three that are nothing but one

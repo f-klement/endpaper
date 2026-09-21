@@ -85,9 +85,9 @@ function stubLoad({
   api.on("/api/users", { body: users });
   api.on("/api/settings/features", {
     body: {
-      google_books_enabled: googleBooks,
-      // Toggled on and a key stored. The two are separate flags because a
-      // toggle with no key produces a button that can only ever 400.
+      // Toggled on and a key stored, which is the conjunction the server
+      // sends: a toggle with no key produces a button that can only ever 400,
+      // so the client is told the answer rather than the two rows.
       google_books_ready: googleBooks,
       goodreads_lookup_enabled: goodreads,
       default_locale: "en",

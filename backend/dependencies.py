@@ -32,7 +32,7 @@ from auth import get_current_user, get_current_user_for_cover
 from database import get_db
 from enums import ClassificationScheme
 from models import CLASSIFICATION_NUMBER_MAX, Book, User
-from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_ROW_ID
+from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_ROW_ID, one_line
 from shelf import Loading, Shelf
 
 #: A row id read out of the URL path, bounded at both ends.
@@ -80,7 +80,7 @@ MAX_ID_LIST_CHARS = 400
 #: 32 against a seeded vocabulary of 105 tags, and the filter is a conjunction,
 #: so a query naming 32 tags returns nothing on any real library. Measured after
 #: the bound, on the same one book catalogue: 1 id 10.8ms, 32 ids **23.7ms**, 33
-#: ids a 422 in 9.4ms. So the ceiling costs about 13ms over an unfiltered
+#: ids a 400 in 9.4ms. So the ceiling costs about 13ms over an unfiltered
 #: request, against the 900ms one request could spend before it.
 MAX_IDS_IN_A_FILTER = 32
 
@@ -106,7 +106,7 @@ def row_ids(raw: str | None, *, field: str) -> list[int]:
       contract: `?tags=abc` has always been ignored rather than refused. An id
       past `MAX_ROW_ID` is dropped by the same rule, because it is not a row id
       either, and dropping it is what stops it reaching the driver.
-    * **Too many ids is refused**, with a 422 naming the ceiling. Truncating
+    * **Too many ids is refused**, with a 400 naming the ceiling. Truncating
       instead would answer a different question from the one asked and say
       nothing about it, and this is a filter: a wrong answer looks like a
       correct one.
@@ -127,7 +127,7 @@ def row_ids(raw: str | None, *, field: str) -> list[int]:
     ]
     if len(found) > MAX_IDS_IN_A_FILTER:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 f"Name at most {MAX_IDS_IN_A_FILTER} ids in `{field}`; "
                 f"this asked for {len(found)}."
@@ -210,9 +210,13 @@ def headings(raw: list[str] | None) -> list[tuple[ClassificationScheme, str]]:
     length bound at all. See `MAX_HEADING_VALUES`.
 
     **Interior whitespace is collapsed**, because `ClassificationIn.tidy_number`
-    collapses it on the way in. Without the same collapse here,
-    `?classification=lcsh:Mental  health` never matches the stored
-    `Mental health`, and nothing says why.
+    collapses it on the way in: the same call, so the two cannot drift. Without
+    it, `?classification=lcsh:Mental  health` never matches the stored
+    `Mental health`, and nothing says why. The other half of that validator, the
+    refusal of an invisible character, is deliberately **not** mirrored: the
+    validator is not the only writer of that column, since `backup.restore`
+    inserts through Core, and rows predate the refusal. A filter value is
+    carried through as typed and matches whatever the column holds.
 
     Deduplicated, keeping the order asked for. Each one adds a separate
     correlated EXISTS, so a repeated heading is a repeated subquery that cannot
@@ -232,12 +236,12 @@ def headings(raw: list[str] | None) -> list[tuple[ClassificationScheme, str]]:
             scheme = ClassificationScheme(scheme_name.strip().lower())
         except ValueError:
             continue
-        collapsed = " ".join(number.split())
+        collapsed = one_line(number)
         if collapsed:
             found.setdefault((scheme, collapsed), None)
     if len(found) > MAX_IDS_IN_A_FILTER:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 f"Name at most {MAX_IDS_IN_A_FILTER} headings in `classification`; "
                 f"this asked for {len(found)}."
@@ -264,7 +268,7 @@ def divisions(raw: str | None) -> list[str]:
             found.setdefault(division, None)
     if len(found) > MAX_IDS_IN_A_FILTER:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 f"Name at most {MAX_IDS_IN_A_FILTER} divisions in `ddc`; "
                 f"this asked for {len(found)}."

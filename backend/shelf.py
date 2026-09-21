@@ -434,7 +434,7 @@ class Outbound:
     `PublicBookOut` with nothing red anywhere. Only a reviewer stood between
     that and a deployment.
 
-    **`marc.write` deliberately still takes a plain iterable**, because it
+    **`marc.stream` deliberately still takes plain iterables**, because it
     serialises a member's own shelf for that member. This type does not mean
     "serialised", it means "addressed to somebody this instance cannot name".
     `docs/data-model.md` §A private book never leaves the instance argues it.
@@ -849,6 +849,63 @@ class Shelf:
         if order:
             query = query.order_by(*order)
         return query.all()
+
+    def limited(
+        self,
+        limit: int,
+        *order: UnaryExpression[Any],
+        load: Loading = Loading.NOTHING,
+    ) -> list[Book]:
+        """At most `limit` Books from this shelf, and **no count**.
+
+        `page` beside this takes one, because a client rendering page 3 of 40
+        has to be told there are 40. A caller walking the whole shelf to write
+        it out has nothing to do with the number and pays for it once per page,
+        over the rows still ahead of it, which is quadratic in the shelf.
+
+        Measured on one node, single process, SQLite, `Loading.PUBLISHED`,
+        database work only with the rows discarded, **at the page size the
+        caller actually walks**, which is 100:
+
+        | books | walk | walk with the discarded count |
+        |---|---|---|
+        | 40,000 | 6.03s | 12.67s |
+        | 100,000 | 15.37s | 58.88s |
+
+        So the count alone is 6.6 seconds at the first and 43.5 at the second:
+        six and a half times the cost for two and a half times the rows. At
+        pages of 500 the same walk pays 1.5 and 9.2, which is the shape of the
+        thing rather than the size of it.
+
+        **No offset either, deliberately.** A caller that wants the next slice
+        narrows this shelf by the row it stopped at and asks again. An offset
+        over a moving table is the other half of the same defect: it counts
+        from the start of a list that has changed, so a row deleted behind the
+        cursor puts a book in no page at all.
+
+        **An ordering is required and an empty one is refused.** `all` tolerates
+        none because it returns every row and the caller sorts or does not. A
+        LIMIT with no ORDER BY is an unspecified subset of the shelf, which is
+        a wrong answer rather than an unsorted one, and a walk resuming from
+        the last row of it resumes from nowhere.
+
+        **`page` has the same hazard and is not guarded**, which is a fact
+        about when each was written rather than an argument that an offset is
+        safer. It is left alone because every one of its callers is a client
+        asking for a numbered page and passes an ordering, and because that
+        method is older than this one and changing it is not this change's to
+        make.
+
+        `routers/books.py::_marcxml_pages` is the caller and states the rest.
+        """
+        if not order:
+            raise ValueError(
+                "limited() needs an ordering: a LIMIT with no ORDER BY is an "
+                "unspecified subset of this shelf rather than an unsorted one"
+            )
+        return (
+            self._query.options(*_LOADING_OPTIONS[load]).order_by(*order).limit(limit).all()
+        )
 
     def first(self, *, load: Loading = Loading.NOTHING) -> Book | None:
         """One Book from this shelf, or None.

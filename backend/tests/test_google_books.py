@@ -27,6 +27,7 @@ from google_books import (
 )
 from models import Book
 from schemas import BookMatch
+from tests.test_house_rules import _is_vendored
 
 VOLUMES = "https://www.googleapis.com/books/v1/volumes"
 
@@ -547,7 +548,7 @@ class TestTheVolumeIdBound:
 
         Python's `$` also matches immediately before a trailing newline, so
         `^[A-Za-z0-9_-]{12}$` would admit this and put a newline in a URL path.
-        `takeout.ts` spells the same rule with `^...$` and is right to, because
+        The browser spells the same rule with `^...$` and is right to, because
         JavaScript's `$` without the `m` flag is end of input.
         """
         assert not is_a_volume_id("abcdefghijkl\n")
@@ -560,79 +561,193 @@ class TestTheVolumeIdBound:
         assert route.call_count == 0
 
 
-class TestTheThreeSpellings:
-    """One rule, spelled in three files, and only this one is a security bound.
+class TestTheShapeIsSpelledOncePerTree:
+    """One rule, spelled once in each tree, and only the server's is a bound.
 
-    `takeout.ts` keeps a sidecar line that is not an id out of the browser's
-    parse and `stores.ts` keeps a plugin's invented value out of a stored row.
-    Neither runs on the server: `backup.restore` writes `book_identifiers`
-    through Core and runs no Pydantic model, so a restored row reaches
-    `lookup_by_volume_id` having passed neither. This test is what stops the
-    three drifting apart silently.
+    The browser's keeps a plugin's invented value out of a stored row, and
+    `takeout.ts` borrows the same rule to tell a sidecar's volume id line from
+    the lines beside it. Neither runs on the server: `backup.restore` writes
+    `book_identifiers` through Core and runs no Pydantic model, so a restored
+    row reaches `lookup_by_volume_id` having passed neither. This test is what
+    stops the two drifting apart silently.
+
+    **The browser half is a census and names no path.** What it replaced was a
+    map from file to the assignment that file had to contain, and a map of files
+    goes stale when one moves: the rule lived in `calibre.ts` and
+    `ScanPage/types.ts` before it was folded into `stores.ts`, and that fold was
+    a frontend change no frontend run could notice, since this is a backend test
+    reading frontend source. It failed on the merge instead, which is the
+    arrangement working and is not free. A census is indifferent to where the
+    rule lives and refuses what the map could not: a **second** spelling
+    arriving anywhere under `src`.
+
+    **What it reads is the literal a browser writes, so a second spelling that
+    is not that literal is outside it.** `new RegExp("^" + CLASS + "$")` builds
+    the same rule out of pieces this never sees, and no matcher closes that set:
+    the map it replaced had the same hole and covered two files as well.
+    Measured 2026-09-20 over the 461 modules under `src`, 200 of them
+    generated: one expression in that tree is built rather than written,
+    `fileName.ts`'s edge debris class, and it is built out of a character set
+    rather than a shape.
+
+    **The direction it is wrong in, written down rather than left to be met.**
+    It requires the literal to be bound inline, so
+    `const VOLUME_SHAPE = /.../;` with `google_books: VOLUME_SHAPE,` beside it is
+    one spelling in one module and fails this by name. That is a loud wrong
+    failure and it is a visit: the answer is to widen what this counts as a
+    binding, with the reason written here, rather than to spell the rule twice
+    to satisfy it. Found by the design seat.
+
+    **What no census can say is that the rule is reached.** A binding kept and
+    no longer consulted passes this, which is the half that was missing when
+    this was a map and is missing now. Two frontend arms ask the reader instead,
+    `tests/lib/stores.test.ts > the Takeout reader asks the value rule rather
+    than one of its own` and `tests/lib/takeout.test.ts > reads no volume id out
+    of a thirteen character metadata line`; only a frontend run sees them. What
+    this contributes is that there is exactly one rule for them to reach.
     """
 
     #: The character class and length.
     SHAPE = "[A-Za-z0-9_-]{12}"
 
-    #: The **assignment** each browser module makes, not the shape it mentions.
+    #: The rule as a browser writes it, anchors included.
+    #:
+    #: **Anchors are part of the shape, and JavaScript is where they can be.**
+    #: They were left out of the first version of this guard on an argument
+    #: about Python's `$` that is about the **server** pattern and was applied
+    #: to the wrong side: the browser spells `^...$`, where JavaScript's `$`
+    #: without the `m` flag is end of input.
+    LITERAL = f"/^{SHAPE}$/"
+
+    #: The **assignment** the browser makes, not the shape it mentions.
     #:
     #: **Both critic seats evaded the weaker version of this, independently,
     #: which is the strongest signal this process produces.** It asserted that
     #: `SHAPE` appeared anywhere in the file, so every widening that kept those
-    #: characters somewhere passed. The design seat rewrote `takeout.ts` to
+    #: characters somewhere passed. The design seat rewrote the browser rule to
     #: `/^([A-Za-z0-9_-]{12})+$/`, admitting any multiple of twelve; the
     #: security seat rewrote it to `/^[A-Za-z0-9_.~%-]{1,60}$/` and left the old
     #: class in a trailing comment. Backend 77 passed and frontend `tests/lib/`
     #: 1,185 passed in 42 files under the first; 3 passed under the second.
-    #:
-    #: **Anchors included, and matching where the value is bound.** A comment
-    #: cannot satisfy `const VOLUME_ID = ...`, and the anchors were left out of
-    #: the first version on an argument about Python's `$` that is about the
-    #: **backend** pattern and was applied to the wrong side: both browser
-    #: modules spell `^...$`, where JavaScript's `$` is end of input.
-    #: **This map names files, so it goes stale when one moves, and it did.**
-    #: The browser's half of the rule lived in `calibre.ts` and
-    #: `ScanPage/types.ts` until they were folded into `stores.ts`, beside the
-    #: type whose property the rule is. Nothing on the frontend broke and
-    #: nothing on the frontend could notice: this is a backend test reading
-    #: frontend source, so only a backend run sees it, and the branch that moved
-    #: the literal had no reason to make one. It failed loudly on the merge,
-    #: which is the arrangement working rather than a near miss.
-    ASSIGNMENTS = {
-        "frontend/src/lib/takeout.ts": f"const VOLUME_ID = /^{SHAPE}$/",
-        "frontend/src/lib/stores.ts": f"google_books: /^{SHAPE}$/",
-    }
+    BINDING = f"google_books: {LITERAL}"
 
-    @pytest.mark.parametrize("relative", sorted(ASSIGNMENTS))
-    def test_the_browser_spells_the_same_shape(self, relative):
-        source = (REPOSITORY / relative).read_text()
-        expected = self.ASSIGNMENTS[relative]
-        assert expected in source, (
-            f"{relative} no longer binds the volume id rule as `{expected}`, "
-            f"which is the literal this backend bound was derived from. Either "
-            f"all three move or none does: widening one alone files a row "
-            f"another refuses, and narrowing one alone drops an identifier "
-            f"another stores. Only the backend one is a security bound, because "
-            f"only it is between a stored value and a URL."
+    #: What counts as the browser's own source, and what that leaves out.
+    #:
+    #: `src` rather than the whole frontend: a test may quote a rule in order to
+    #: assert it, and `tests/lib/stores.test.ts` does, so a census over both
+    #: would count the guard as a second spelling. **The bound is stated rather
+    #: than left to be rediscovered**: a rule written in a `.mts`, `.cts`, `.js`
+    #: or `.jsx` under `src`, or in `frontend/public/`, is outside this. Neither
+    #: exists today, measured 2026-09-20: the only other files under `src` are
+    #: two stylesheets, and the only shipped script outside it is
+    #: `public/sw-cleanup.js`. Found by the security seat.
+    SUFFIXES = {".ts", ".tsx"}
+
+    @classmethod
+    def _browser_sources(cls) -> dict[str, str]:
+        """Every module of the browser's own source, keyed by path from here.
+
+        **`_is_vendored` decides what is ours, rather than a second answer
+        written here.** It is `test_house_rules.py`'s shared predicate and its
+        set already names `node_modules`, which is the one directory this walk
+        would have to learn about the day somebody points the root a level up at
+        `frontend/`. A walk that decides that for itself is what the rule
+        `test_no_other_test_module_walks_the_backend_without_the_shared_rule`
+        refuses, and it refuses it by shape rather than by which tree is walked.
+
+        **It narrows this corpus by nothing today**, measured 2026-09-20: 461
+        modules before the filter and 461 after. What it would narrow by is a
+        dot directory or a `node_modules` under `src`, and it is here for the
+        day the root moves rather than for a file it drops now.
+        """
+        root = REPOSITORY / "frontend" / "src"
+        return {
+            path.relative_to(REPOSITORY).as_posix(): path.read_text(encoding="utf-8")
+            for path in sorted(root.rglob("*"))
+            if path.suffix in cls.SUFFIXES and not _is_vendored(path, REPOSITORY)
+        }
+
+    def test_the_browser_binds_the_shape_in_one_module(self):
+        sources = self._browser_sources()
+        # **A named member and not a count**, which is the anchor
+        # `tests/lib/fileReaders.test.ts` uses for its own derivation: a corpus
+        # that failed to resolve reports nothing carrying the rule, and
+        # "nothing" is what a wrong root answers too. A count drifts against a
+        # tree that is 43% generated; this module is the reader that asks the
+        # rule, so it is in any corpus this test could be reading.
+        assert "frontend/src/lib/takeout.ts" in sources, (
+            f"read {len(sources)} browser modules and the Takeout reader was "
+            f"not among them, so this is not the browser's source tree"
+        )
+
+        carrying = {
+            path: source.count(self.LITERAL)
+            for path, source in sources.items()
+            if self.LITERAL in source
+        }
+        # **Three outcomes and three sentences**, because the message is what a
+        # person meets: gone, written twice, and written twice in one file are
+        # different things somebody did, and one sentence covering all three
+        # describes none of them. Found by the security seat.
+        if not carrying:
+            raise AssertionError(
+                f"The volume id rule `{self.LITERAL}` is written nowhere under "
+                f"`frontend/src`. The browser's copy is one half of a rule the "
+                f"server also spells, and the server's is a security bound "
+                f"between a stored value and a URL, so the two move together or "
+                f"neither does. Widening it here alone files a row the server "
+                f"refuses; narrowing it alone drops an identifier the server "
+                f"would take."
+            )
+        assert list(carrying.values()) == [1], (
+            f"The volume id rule `{self.LITERAL}` is written in "
+            f"{sorted(carrying)}, {sum(carrying.values())} times, rather than "
+            f"once in one browser module. A second copy is a second place it "
+            f"can be widened alone, which is what this guard exists for, and a "
+            f"prose mention of the literal counts as one: say what the rule is "
+            f"rather than writing it again. The reader that needs it asks "
+            f"`producedValue`."
+        )
+
+        [(path, _)] = carrying.items()
+        source = sources[path]
+        assert self.BINDING in source, (
+            f"{path} carries the volume id rule but does not bind it as "
+            f"`{self.BINDING}`, so what this guard compared may be a mention "
+            f"rather than the rule the browser runs."
         )
 
     def test_the_guard_is_not_satisfied_by_a_mention(self):
         """The evasion both critic seats found, pinned so it cannot return.
 
-        A file that spells a wider rule and names the old one in a comment must
-        fail. Asserted against the matcher rather than by editing a file,
-        because the thing under test is the string this class compares.
-        """
-        widened = (
-            "const VOLUME_ID = /^[A-Za-z0-9_.~%-]{1,60}$/; "
-            f"// was {self.SHAPE}\n"
-        )
-        assert self.ASSIGNMENTS["frontend/src/lib/takeout.ts"] not in widened
+        A module that spells a wider rule and names the old one beside it must
+        fail. Asserted against the matchers rather than by editing a file,
+        because the thing under test is what this class compares.
 
-    def test_the_backend_pattern_is_that_shape(self):
+        **Two fixtures, because `BINDING` contains `LITERAL` and one fixture
+        cannot tell the two matchers apart.** A mention of the shape leaves both
+        absent, so only the census speaks; a mention of the **literal** beside a
+        widened binding passes the census's count and is caught by the binding
+        alone, which is the arm that would otherwise never fail on its own.
+        Found by the design seat.
+        """
+        mentions_the_shape = (
+            f"  google_books: /^[A-Za-z0-9_.~%-]{{1,60}}$/, // was {self.SHAPE}\n"
+        )
+        assert self.LITERAL not in mentions_the_shape
+        assert self.BINDING not in mentions_the_shape
+
+        mentions_the_literal = (
+            f"  // the rule was {self.LITERAL}\n"
+            "  google_books: /^[A-Za-z0-9_.~%-]{1,60}$/,\n"
+        )
+        assert mentions_the_literal.count(self.LITERAL) == 1
+        assert self.BINDING not in mentions_the_literal
+
+    def test_the_server_pattern_is_that_shape(self):
         """`\\A` and `\\Z` where the browser has `^` and `$`, and that is the one
-        difference the comparison above may not make: Python's `$` also matches
-        before a trailing newline."""
+        difference the census may not make: Python's `$` also matches before a
+        trailing newline."""
         assert VOLUME_ID.pattern == rf"\A{self.SHAPE}\Z"
 
 

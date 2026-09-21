@@ -43,6 +43,14 @@ import { describe, expect, it } from "vitest";
 
 import { ZipError, zipFailureAs, type ZipFailure } from "../src/lib/zip";
 
+// The one comment stripper. This file carried a second, hand written one until
+// it was measured against this one: over the 461 modules under `src/` it
+// refused nothing this accepts, and left prose standing in three of them. How
+// it missed them is at the home rather than restated here. What it was, rather
+// than what it got wrong, is the reason it is gone: a second instrument, with a
+// blind spot of its own, where the tree had just paid to fix this one's.
+import { langOf, withoutProse } from "./withoutProse";
+
 // `import.meta.glob` and not `node:fs`, for the reason `houseRules.test.ts`
 // gives at its own: a guard test is a poor reason to add `@types/node` and
 // widen the global types.
@@ -60,60 +68,6 @@ function entries(): [string, string][] {
     path.replace("../src/", ""),
     source,
   ]);
-}
-
-/**
- * The source with its comments removed, because the prose here quotes the
- * vocabulary this file is about.
- *
- * A scanner rather than a regex pair: `//` inside a string literal is a URL and
- * not a comment, and stripping from there would delete the rest of a line of
- * code, which is a rule that quietly stops looking rather than one that fails.
- *
- * **The exclusion is a regular expression literal**, whose `\/\/` this reads as
- * the start of a comment and skips the rest of the line for. `src/` holds none
- * today, and what it would produce is a miss rather than a false report, so it
- * is stated rather than defended against: the fix is a parser, and this rule is
- * not worth a dependency.
- */
-function withoutComments(source: string): string {
-  let out = "";
-  let at = 0;
-  while (at < source.length) {
-    const here = source[at]!;
-    const next = source[at + 1];
-    if (here === "/" && next === "*") {
-      const end = source.indexOf("*/", at + 2);
-      at = end === -1 ? source.length : end + 2;
-      out += " ";
-      continue;
-    }
-    if (here === "/" && next === "/") {
-      const end = source.indexOf("\n", at);
-      at = end === -1 ? source.length : end;
-      out += " ";
-      continue;
-    }
-    if (here === '"' || here === "'" || here === "`") {
-      out += here;
-      at += 1;
-      while (at < source.length) {
-        const inner = source[at]!;
-        out += inner;
-        at += 1;
-        if (inner === "\\") {
-          out += source[at] ?? "";
-          at += 1;
-          continue;
-        }
-        if (inner === here) break;
-      }
-      continue;
-    }
-    out += here;
-    at += 1;
-  }
-  return out;
 }
 
 /**
@@ -136,7 +90,7 @@ function withoutComments(source: string): string {
  */
 function readZipFailureUnion(): { members: string[]; unread: string } {
   const declaration = /export type ZipFailure =([^;]*);/.exec(
-    withoutComments(SOURCES[`../src/${ZIP_MODULE}`] ?? ""),
+    withoutProse(SOURCES[`../src/${ZIP_MODULE}`] ?? "", langOf(ZIP_MODULE)),
   );
   const body = declaration?.[1] ?? "";
   return {
@@ -223,7 +177,10 @@ describe("the names this rule is derived from", () => {
 describe("a module that reads a zip does not map its failures itself", () => {
   const readers = entries()
     .filter(([path]) => path !== ZIP_MODULE && !path.startsWith(GENERATED))
-    .map(([path, source]): [string, string] => [path, withoutComments(source)]);
+    .map(([path, source]): [string, string] => [
+      path,
+      withoutProse(source, langOf(path)),
+    ]);
 
   function naming(needle: string): string[] {
     return readers
@@ -284,24 +241,5 @@ describe("a module that reads a zip does not map its failures itself", () => {
   it("reads the source tree at all", () => {
     // A glob that matched nothing would make the scans above pass for ever.
     expect(readers.length).toBeGreaterThan(50);
-  });
-});
-
-describe("the comment scanner", () => {
-  it("removes a comment", () => {
-    expect(withoutComments('a; // "zip64"\nb;')).not.toContain("zip64");
-  });
-
-  it("keeps the code after a string that holds the comment marker", () => {
-    // The line this exists for: stripping from the `//` inside a URL would
-    // delete the rest of that line, and a mapping written on it would go
-    // unread. A rule that stops looking passes, which is why it is asserted.
-    expect(
-      withoutComments('const at = "https://x/y"; const b = "zip64";'),
-    ).toContain('"zip64"');
-  });
-
-  it("keeps a string that is itself a comment", () => {
-    expect(withoutComments('const a = "// zip64";')).toContain("zip64");
   });
 });

@@ -8,6 +8,7 @@ import ast
 import csv
 import inspect
 import io
+import sys
 from base64 import b64encode
 from pathlib import Path
 
@@ -20,14 +21,16 @@ import covers
 import credentials
 import sources
 import targets
-from enums import CatalogueSource
+from enums import CatalogueSource, TagCategory
 from models import (
     DESCRIPTION_MAX,
     MAX_PAGE_NUMBER_IN_A_BOOK,
     PUBLISHER_MAX,
     SUBTITLE_MAX,
     TITLE_MAX,
+    Book,
     Tag,
+    User,
 )
 from routers import books as books_router
 from tests.helpers import (
@@ -405,7 +408,7 @@ class TestIsbnLookup:
             params={"isbn": "978" + "\u00b2" * 10},
             headers=member["headers"],
         )
-        assert res.status_code == 422
+        assert res.status_code == 400
 
 
 class TestAddBook:
@@ -1376,6 +1379,205 @@ class TestNoLineOfTheTextExportSkipsTheFlattening:
         )
 
 
+def _every_line_break_in_unicode() -> tuple[str, ...]:
+    """Every code point a reader of this file treats as the end of a line.
+
+    **Swept rather than listed**, and the ceiling is `sys.maxunicode` rather
+    than a literal, because both halves of that have already been paid for
+    elsewhere in this tree: a guard that enumerates the spellings somebody
+    thought of fails the round after, and a sweep written `range(0x11000)`
+    covers a sixteenth of Unicode and looks identical to one that does not.
+
+    It had been paid here too. The arms below named five characters and
+    `_one_line`'s docstring named the same five, so the one rewrite anybody
+    would actually make, flattening the breaks it can name instead of the
+    whitespace it cannot, satisfied the docstring and passed every arm while
+    letting the other five through.
+
+    `str.splitlines()` is the instrument because it is what reads the export
+    back: `_lines_opening` parses the file with it, and so does any reader
+    written in Python. It is deliberately **narrower** than the whitespace
+    `_one_line` removes, so every arm driven off it is an arm about a forged
+    line rather than about a collapsed space.
+
+    **Unicode's own answer is a different one, and the difference is not what
+    decides it.** Asking `unicodedata` for bidi class `B` plus categories `Zl`
+    and `Zp` returns eight, dropping U+000B and U+000C. Only one of those two is
+    among the five that a narrowed `_one_line` leaks, so arms derived that way
+    would have caught the same rewrite by four rather than five and the choice
+    of instrument cannot be argued from leak coverage. It rests on the sentence
+    above instead: the question is what the reader of the export breaks a line
+    on, not what Unicode calls a separator. Both sets sit inside the whitespace
+    `_one_line` removes, so the choice decides what the arms cover and not
+    whether the export is safe.
+
+    Surrogates are skipped: they are not characters, and no payload carries one.
+    """
+    return tuple(
+        chr(cp)
+        for cp in range(sys.maxunicode + 1)
+        if not 0xD800 <= cp < 0xE000 and len(f"a{chr(cp)}b".splitlines()) > 1
+    )
+
+
+#: Derived once per run, and every arm below that needs a line break takes it
+#: from here. A code point Python starts breaking on grows an arm by itself.
+_LINE_BREAKS = _every_line_break_in_unicode()
+
+#: The floor under that sweep, and the reason it is a floor rather than a count.
+#:
+#: `docs/decisions.md` records the arms over `_FORMULA_LEAD` needing an equality
+#: assertion beside them because they were parametrised off the very tuple they
+#: guarded: reducing that tuple reduced the test to one arm and was measured to
+#: be caught by nothing. Every arm in the class below is parametrised off
+#: `_LINE_BREAKS` the same way, so a predicate that narrowed the sweep would
+#: narrow the arms with it and stay green.
+#:
+#: A **floor** and not an equality, which is where this differs from
+#: `_FORMULA_LEAD`: that tuple is a decision somebody made, and this one is a
+#: fact about the interpreter. A Python that starts breaking on an eleventh code
+#: point should grow an arm, not go red. Measured on two CPython 3.14 builds,
+#: 3.14.0 and 3.14.7: these ten and no others.
+_BREAKS_AS_MEASURED = (
+    "\n",
+    "\x0b",
+    "\x0c",
+    "\r",
+    "\x1c",
+    "\x1d",
+    "\x1e",
+    "\x85",
+    "\u2028",
+    "\u2029",
+)
+
+
+def _plant_through_book_create(field: str):
+    """A payload into one `BookCreate` string field, over HTTP.
+
+    That schema bounds these four on length and does nothing else to them:
+    measured against it with no database, each stores all ten line breaks
+    unchanged.
+    """
+
+    def plant(admin, make_book, db, payload: str) -> None:
+        make_book(admin["headers"], **{field: payload})
+
+    return plant
+
+
+def _plant_past_the_door(column: str):
+    """A payload into one column of `books` through the ORM.
+
+    **The door is why this write exists rather than an HTTP one.** `isbn` is
+    check digited and rewritten to thirteen digits at the API and `year` is an
+    int the schema bounds, so an HTTP arm for either would be refused by that
+    door and would pass with `_one_line` deleted. `backup._parse_row` inserts a
+    restored archive through Core, where no Pydantic model and no `@validates`
+    hook fires and SQLite is dynamically typed, which is the write this
+    reproduces and the argument `docs/decisions.md` records for removing the
+    CSV export's exemption set entirely. `Year` was one of the four names in it.
+    """
+
+    def plant(admin, make_book, db, payload: str) -> None:
+        row = db.get(Book, make_book(admin["headers"])["id"])
+        setattr(row, column, payload)
+        db.commit()
+
+    return plant
+
+
+def _plant_in_a_tag_name(admin, make_book, db, payload: str) -> None:
+    """Through the ORM for the same reason, and a measured one.
+
+    `TagCreate.tidy` runs `" ".join(value.split())` on the name already, so a
+    tag invented through the API cannot carry a break: measured, all ten come
+    back flattened from that schema alone. `importing.Import` and
+    `backup._parse_row` are the writes that are not that door.
+    """
+    row = db.get(Book, make_book(admin["headers"])["id"])
+    row.tags.append(Tag(name=payload, category=TagCategory.CUSTOM))
+    db.commit()
+
+
+def _plant_in_the_name_of_whoever_added_it(admin, make_book, db, payload: str) -> None:
+    r"""The forged field is also a way in, which is the one the report missed.
+
+    `UserCreate` bounds the username at 50 and asks `^\S.*$` of it. That refuses
+    a newline, because `.` does not match one, and **admits the other nine**:
+    measured against the schema with no database, `mallory<break>Added By: x` is
+    accepted and stored unchanged for every break but `\n`. A directory sign in
+    mints a username from an attribute this app never sees at all. Written
+    through the ORM so the arm is about the export rather than about
+    registration's rate limiter.
+    """
+    db.get(User, admin["user"]["id"]).username = payload
+    db.commit()
+    make_book(admin["headers"])
+
+
+#: How each attacked line of the record is given an attacker's payload, keyed by
+#: the label the writer puts in front of it.
+#:
+#: **The arms are parametrised off this and the partition below reads its
+#: keys**, so deleting an arm takes its label out of the attacked set instead of
+#: leaving a literal behind that says the label is still covered. The first
+#: version of that partition held the six labels as a set literal, which is the
+#: enumeration this whole class exists to stop, one level up.
+_PLANTERS = {
+    "Title": _plant_through_book_create("title"),
+    "Author": _plant_through_book_create("author"),
+    "Publisher": _plant_through_book_create("publisher"),
+    "Description": _plant_through_book_create("description"),
+    "ISBN": _plant_past_the_door("isbn"),
+    "Year": _plant_past_the_door("year"),
+    "Tags": _plant_in_a_tag_name,
+    "Added By": _plant_in_the_name_of_whoever_added_it,
+}
+
+#: The lines of the record no arm here plants a break in, and what refuses the
+#: break rather than what makes it impossible.
+#:
+#: **Not a safety claim, and not the shape `docs/decisions.md` refused.** That
+#: register killed the CSV export's exempt set because it excused a **value**
+#: from the escape on a door a restored archive walks around. Nothing here is
+#: excused from `_one_line`: the `ast` guard above puts every one of the ten
+#: through it.
+#:
+#: **A Core write reaches both of these columns**, so "there is no column to
+#: put a break into" is the wrong reason and stating it would be the tell
+#: `guards-and-mutation` names: defensible code beside a reason a reviewer
+#: agrees with. `user_books.status` is a `String(20)` and `books.added_at` is a
+#: `DateTime` over dynamically typed SQLite, so a restored archive puts text in
+#: either. What stops a forged line is the **read** side: measured,
+#: `ReadStatus("x\nAdded By: mallory")` raises `ValueError` and so does the
+#: `DateTime` result processor, so such a row 500s the export instead of
+#: writing an attacker's line into it. A planter here would assert a traceback,
+#: which is a different test about a different failure.
+_NOT_DRIVEN_HERE = {
+    "My Status": "`ReadStatus(row.status)` raises on anything but a member",
+    "Date Added": "the `DateTime` result processor raises on a non-isoformat string",
+}
+
+#: What every arm below plants. Nineteen characters, which is inside every
+#: attacked column's declared width, `books.isbn` at `String(ISBN_MAX)` being
+#: the narrowest at 20.
+#:
+#: **Staying inside it is tidiness and not a guard**, which is worth saying
+#: because the obvious claim, that a wider payload would make the ISBN arm pass
+#: on the width, is false at both ends: SQLite does not enforce a VARCHAR
+#: length and `books.isbn` carries no `CheckConstraint` and no `@validates`, so
+#: a 28 character value stores and the arm still goes red for the right reason;
+#: and on the Postgres spelling the model also carries, an over-width insert
+#: raises rather than truncating, so it would go red loudly.
+_FORGERY = "x\nAdded By: mallory"
+
+#: `_FORGERY` as the export must render it: one line, one space where the break
+#: was. Asserted beside the "one `Added By:` line" check, because a fix that
+#: dropped the value, or truncated it at the break, satisfies that check alone.
+_FORGERY_FLATTENED = "x Added By: mallory"
+
+
 class TestTheTextExportCannotBeMadeToForgeALine:
     """The other half: what `_one_line` does, rather than where it is called.
 
@@ -1402,28 +1604,63 @@ class TestTheTextExportCannotBeMadeToForgeALine:
         """
         return [line for line in exported.splitlines() if line.startswith(label)]
 
+    def test_the_sweep_still_finds_every_break_it_found_when_it_was_measured(self):
+        r"""A sweep matching nothing parametrises every arm in this class into
+        no cases at all and reports green, which is the failure mode of driving
+        a test off a derived list.
+
+        A narrowed sweep is the same failure one step along and is the one
+        worth an assertion, because it looks like a simplification: a predicate
+        rewritten as `chr(cp) in "\n\r\x0b\x0c\x85\u2028\u2029"` returns seven
+        of the ten, drops the file, group and record separators, and narrows
+        every arm below with it. `_BREAKS_AS_MEASURED` is the floor that catches
+        that, for the reason recorded beside it.
+        """
+        missing = [
+            hex(ord(char)) for char in _BREAKS_AS_MEASURED if char not in _LINE_BREAKS
+        ]
+        assert missing == [], (
+            f"{missing} broke a line when this was measured and the sweep no "
+            "longer finds them, so every arm in this class just got narrower."
+        )
+
+    def test_one_line_removes_every_line_break_there_is(self):
+        """The claim `_one_line` rests on, re-derived on every run.
+
+        It removes whitespace, and every character that breaks a line is
+        whitespace, so this holds by construction rather than by coincidence.
+        It is still asserted, for two reasons that are not the same: both sets
+        belong to Python and can move under this code, and the rewrite that
+        narrows `_one_line` to the breaks it can name passes every HTTP arm
+        below whose character it happened to name. Measured: that rewrite,
+        naming the five characters this class used to drive, was caught by
+        nothing before this arm and by six arms after it.
+        """
+        survived = [
+            hex(ord(char))
+            for char in _LINE_BREAKS
+            if len(books_router._one_line(f"a{char}b").splitlines()) > 1
+        ]
+        assert survived == [], (
+            f"{survived} survive `_one_line`, so a value carrying one of them "
+            "still opens a line of its own in the export."
+        )
+
     @pytest.mark.parametrize(
-        "line_break",
-        ["\n", "\r", "\x0b", "\x85", "\u2028"],
-        ids=[
-            "newline",
-            "carriage return",
-            "vertical tab",
-            "next line",
-            "line separator",
-        ],
+        "line_break", _LINE_BREAKS, ids=[hex(ord(char)) for char in _LINE_BREAKS]
     )
     def test_no_line_break_can_open_a_second_added_by_line(
         self, client, admin, make_book, line_break
     ):
-        """Five characters, because `_one_line` says `str.split()` was chosen
-        over replacing the newline **for the other four**, and a claim with one
-        arm behind it is a claim nothing pins.
+        r"""One arm per break, derived, so the set the arms cover and the set
+        `_one_line` claims cannot drift apart.
 
-        `\r` alone is a line break to a Windows editor and to Excel, and
-        `str.splitlines()`, which is what reads this file back, breaks on all
-        five. `BookCreate` stores every one of them unchanged, so each really
-        does reach the writer.
+        This used to name five characters and so did `_one_line`'s docstring,
+        which is one enumeration checked against itself. `\r` alone is a line
+        break to a Windows editor and to Excel, U+2028 is one to
+        `str.splitlines()`, and `BookCreate` stores all ten unchanged: measured
+        against the schema with no database, title, author, publisher and
+        description are 10 of 10. So every arm really does reach the writer.
         """
         make_book(
             admin["headers"],
@@ -1449,14 +1686,59 @@ class TestTheTextExportCannotBeMadeToForgeALine:
 
         assert "Description: First. Second." in exported
 
-    def test_a_title_cannot_open_a_line_either(self, client, admin, make_book):
-        """Not only the description. Every value on the record is a value
-        somebody typed, and the guard above is what says so for all ten."""
-        make_book(admin["headers"], title="Dune\nAdded By: mallory")
+    @pytest.mark.parametrize("label", sorted(_PLANTERS))
+    def test_no_value_on_the_record_can_open_a_line(
+        self, client, admin, db, make_book, label
+    ):
+        """Not only the description, which is the one the report named.
+
+        Eight of the ten lines carry a stored value, and each is its own way in.
+        Four take a string straight off `BookCreate`; the other four are behind
+        a door that refuses the payload or rewrites it, so those are written the
+        way `backup._parse_row` writes a restored archive. `_PLANTERS` carries
+        which is which and why, one docstring per planter.
+
+        **One `Added By:` line, not one equal to `Added By: admin`.** The
+        `Added By` arm forges through the adding member's own name, so the line
+        that survives there is the flattened username rather than a fixed
+        string, and an assertion naming `admin` would have had to exempt the one
+        arm most worth driving.
+        """
+        _PLANTERS[label](admin, make_book, db, _FORGERY)
 
         exported = self._export(client, admin)
 
-        assert self._lines_opening(exported, "Added By:") == ["Added By: admin"]
+        assert len(self._lines_opening(exported, "Added By:")) == 1, exported
+        assert _FORGERY_FLATTENED in exported, (
+            f"the {label} arm planted nothing the export carries, so it would "
+            "pass with `_one_line` deleted."
+        )
+
+    def test_every_label_on_the_record_is_attacked_or_named_as_not_attacked(self):
+        """A partition over the writer's own labels, so a line added to that
+        record lands in neither set and fails here.
+
+        The arms above are a list of ways in, and a list written once against a
+        record that keeps growing is the shape that goes quietly short. This is
+        what stops it: the labels come from `_export_text_lines`, which reads
+        the handler, the attacked half is `_PLANTERS`, which the arms are
+        parametrised over, and `_NOT_DRIVEN_HERE` has to carry a reason for
+        every label left.
+
+        **Reading `_PLANTERS` rather than a set literal is the half that was
+        wrong first.** With the six labels written out here, deleting an arm
+        left its label in the literal and this stayed green, which is the same
+        enumeration the sweep above exists to remove, one level up.
+        """
+        labels = {label.removesuffix(": ") for label, _ in _export_text_lines()}
+
+        assert not (_PLANTERS.keys() & _NOT_DRIVEN_HERE.keys())
+        assert _PLANTERS.keys() | _NOT_DRIVEN_HERE.keys() == labels, (
+            f"{labels - _PLANTERS.keys() - _NOT_DRIVEN_HERE.keys()} are lines of "
+            "the txt record that no arm here plants a line break in and that "
+            "nothing says why. Give it a planter, or name it in "
+            "`_NOT_DRIVEN_HERE` with what refuses the break on the read side."
+        )
 
     def test_a_forged_line_cannot_begin_with_a_formula_lead(
         self, client, admin, make_book
@@ -1944,3 +2226,57 @@ class TestTheLookupRouteDoesNotPayPerSourceEither:
             "that moves together is a second resolution in the handler"
         )
 
+
+
+class TestAPatchCannotClearAColumnThatRefusesNull:
+    """`{"title": null}` was `UPDATE books SET title=NULL`, and a **500**.
+
+    SQLite refused on the NOT NULL constraint, the `IntegrityError` reached
+    `errors.unhandled_exception_handler`, and a member emptying a box was told
+    the application is broken over a value the form let them type.
+
+    The rule itself is `schemas/book.COLUMNS_THAT_REFUSE_NULL`, derived from the
+    table, and `tests/schemas/test_book.py` holds it over every field of every
+    body a route writes this way. These three are the end to end arms: that the
+    refusal arrives, that it arrives in the shape the schema declares for that
+    status, and that clearing a nullable column still works.
+    """
+
+    def test_clearing_the_title_is_refused_and_the_row_is_unchanged(
+        self, client, admin, make_book
+    ):
+        book = make_book(admin["headers"], title="Still Here")
+
+        res = client.patch(
+            f"/api/books/{book['id']}", json={"title": None}, headers=admin["headers"]
+        )
+
+        assert res.status_code == 422, res.text
+        after = client.get(f"/api/books/{book['id']}", headers=admin["headers"])
+        assert after.json()["title"] == "Still Here"
+
+    def test_the_refusal_carries_the_detail_the_schema_declares(
+        self, client, admin, make_book
+    ):
+        """`HTTPValidationError.detail` is an array of entries, and this refusal
+        is FastAPI's own rather than a hand raised one, so the body matches the
+        committed schema instead of contradicting it."""
+        book = make_book(admin["headers"])
+
+        res = client.patch(
+            f"/api/books/{book['id']}", json={"title": None}, headers=admin["headers"]
+        )
+
+        assert isinstance(res.json()["detail"], list), res.text
+
+    def test_a_nullable_column_still_clears(self, client, admin, make_book):
+        """The other half, without which a body that refused every null would
+        pass: an explicit null is still how a field gets emptied."""
+        book = make_book(admin["headers"], subtitle="Or, The Whale")
+
+        res = client.patch(
+            f"/api/books/{book['id']}", json={"subtitle": None}, headers=admin["headers"]
+        )
+
+        assert res.status_code == 200, res.text
+        assert res.json()["subtitle"] is None

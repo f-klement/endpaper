@@ -184,6 +184,9 @@ Useful variants:
 | `bun run test:coverage` | Frontend coverage report |
 | `bun run typecheck` | TypeScript, no emit |
 
+[`docs/testing.md`](docs/testing.md) holds the rest of them and how these suites are run.
+The table above is the short list.
+
 Neither suite touches the network or a real database. The backend tests run against a
 throwaway SQLite file and stub outbound calls; the frontend tests stub `fetch` outright.
 

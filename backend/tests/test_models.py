@@ -8,7 +8,9 @@ import ast
 import itertools
 import logging
 import os
+import re
 import sqlite3
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -298,8 +300,8 @@ class TestQuote:
         """The premise the byte arm rests on, at a rung above prose.
 
         `f4a1c62d0b97` refuses `instr(text, char(0)) = 0`, which would make the
-        character ceiling exact, and the whole reason is that this schema stores
-        a NUL today: adding that arm would turn an upgrade that cannot fail on
+        character count readable rather than exact, and the whole reason is that
+        this schema stores a NUL today: adding that arm would turn an upgrade that cannot fail on
         any row this application wrote into one that fails on a row a member
         could already have pasted in.
 
@@ -2146,3 +2148,264 @@ class TestADegradingEnumColumnReadsAStrayValue:
         column = Book.__table__.c.format
         assert isinstance(column.type, models.DegradingEnum)
         assert column.type.compile(engine.dialect) == "VARCHAR(20)"
+
+
+class TestAnEnumValueIsRefusedBeforeItReachesTheDDL:
+    """`models._enum_check` interpolates an enum's values into constraint text.
+
+    **Not an injection: these values are source literals and no request reaches
+    them.** What the refusal stops is an edit nobody would see. A value that
+    closes the string literal renders DDL that applies cleanly and permits every
+    value, so the constraint is gone with nothing red; the loud spelling, which
+    breaks the parse, needs no guard because the migration fails. Measured by
+    the security seat on SQLAlchemy and SQLite: a member closing the literal
+    left `subject` and `nonsense` both storable.
+
+    **The hostile member is second, and that is the whole shape of these
+    arms.** With one member a fixture cannot tell "checks every value" from
+    "checks the first", and the security seat evaded exactly that: the shipped
+    check reduced to `values[0]` passed a one member fixture and rendered the
+    constraint destroying DDL for an enum whose hostile value came second.
+    """
+
+    class _Hostile(StrEnum):
+        ORDINARY = "content"
+        CLOSES_THE_LITERAL = "a') OR ('1'='1"
+
+    class _Spaced(StrEnum):
+        ORDINARY = "content"
+        CARRIES_A_SPACE = "not owned"
+
+    class _Ordinary(StrEnum):
+        MEMBER = "not_owned"
+
+    @pytest.mark.parametrize("members", [_Hostile, _Spaced])
+    def test_a_value_outside_the_charset_is_refused(self, members) -> None:
+        """Two characters, because refusing the quote alone was the
+        enumeration: a space survives it and defeats the whitespace
+        normalisation `test_every_check_constraint_agrees_on_its_expression`
+        compares with, at every site this function renders."""
+        with pytest.raises(ValueError, match="cannot be spelled into DDL"):
+            models._enum_check("kind", members)
+
+    def test_an_ordinary_value_still_renders(self) -> None:
+        """Anti vacuity: a refusal that refused everything would pass the arms
+        above and take every constraint this renders with it."""
+        assert models._enum_check("kind", self._Ordinary) == "kind IN ('not_owned')"
+
+
+class TestNoConstraintSpellsAnEnumListOutByHand:
+    """The class behind the three constraints this branch derived, rather than
+    those three.
+
+    **Nothing else asks how a constraint's text was produced.**
+    `test_house_rules.py::TestEveryEnumColumnIsConstrainedOrExemptWithAReason`
+    asks whether a constraint exists on both copies;
+    `TestEverySchemeCheckListsItsOwnEnum` reads `scheme IN (...)` and covers
+    that one column name; and
+    `test_schema.py::TestTheMigrationsAndTheModelsAgree` catches an enum that
+    moved **after** a revision installed the text, never a seventh constraint
+    whose literal and whose fresh revision are written to agree on the same
+    day. So a hand written list was accepted by everything, which is how three
+    of them accumulated.
+
+    **The question is asked of the rendered text and answered at the call site,
+    and asking it of the argument's spelling instead is what this shape is
+    bought against.** A rule reading `args[0]` for a string holding a quoted
+    list enumerates one way of writing a constraint: measured against such a
+    predicate, it catches a positional literal and an implicit concatenation
+    and is evaded by `sqltext=`, an f string, `str.format`, an explicit `+` and
+    a call written `sa.CheckConstraint`. Two of those are live in `models.py`,
+    an f string at `ck_quotes_page_bounds` and a hoisted constant at
+    `ck_loans_one_borrower`, and such a rule reads a quarter of the schema's
+    constraints while reporting as though over all of them.
+
+    So nothing about the argument's spelling matters here. Every call carries a
+    `name=`, so the call sites join to `Base.metadata` on the name; the text
+    comes from what SQLAlchemy renders; and the only closed set left is the two
+    helpers, which live in the file being walked. A constraint whose rendered
+    text carries a quoted `IN` list has to have been handed one of them.
+
+    **On the shape rather than on a count.** This walk names no number and
+    counts no instances: it refuses the spelling, which is what lets
+    `_enum_check`'s docstring say "every enum list in this schema" without a
+    figure beside it that nothing recomputes.
+
+    **What it does not cover, stated here rather than left to be found.** The
+    population is what an enum list **renders** as, a quoted `IN` list, so a
+    membership test written as a disjunction, `provenance = 'catalogue' OR
+    provenance = 'member'`, is outside this rule. Nothing in this schema is
+    written that way and a two member enum is where somebody would, which is
+    why it is worth saying. Both critic seats reached that edge independently,
+    so it is the rule's boundary rather than an oversight in one version of it.
+    """
+
+    #: The one constraint that spells its values out, and the reason is at its
+    #: own site: the enum is not in `enums.py`, the column is not typed as it,
+    #: and the list is two of its three members on purpose.
+    _EXEMPT = frozenset({"ck_catalogue_targets_transport"})
+
+    #: The two helpers that derive a list from an enum. A closed set this rule
+    #: may hold, unlike a set of spellings: both are defined in the file it
+    #: walks, so a third arrives in the same edit as its callers.
+    _DERIVATIONS = frozenset({"_enum_check", "_scheme_check"})
+
+    #: An `IN` list of **quoted** values, which is what an enum list renders as.
+    #: `ck_catalogue_targets_isbn_claim` renders `isbn_attribute IN (7)` and is
+    #: not one: a number is not a member of anything this schema derives.
+    _A_QUOTED_IN_LIST = re.compile(r"\bIN\s*\(\s*'", re.IGNORECASE)
+
+    @staticmethod
+    def _rendered() -> dict[str, str]:
+        """Every named CHECK the models declare, as the text SQLAlchemy renders.
+
+        `str(sqltext)` compiles against SQLAlchemy's stringifier, which
+        `dialect.DialectSQL` answers with its SQLite arm, and that is how every
+        reader of a constraint's text in this tree asks what a bound says.
+        """
+        return {
+            constraint.name: str(constraint.sqltext)
+            for table in Base.metadata.tables.values()
+            for constraint in table.constraints
+            if isinstance(constraint, CheckConstraint)
+            and isinstance(constraint.name, str)
+        }
+
+    @staticmethod
+    def _call_sites() -> dict[str, ast.expr]:
+        """Every `CheckConstraint(...)` in `models.py`, keyed on the name it is
+        given, holding the expression it was handed.
+
+        The name is what joins this to `Base.metadata`, and taking it rather
+        than the argument's shape is the whole correction: a call written
+        `sa.CheckConstraint` or handed `sqltext=` is read here exactly as a bare
+        one is.
+        """
+        source = Path(models.__file__).read_text(encoding="utf-8")
+        sites: dict[str, ast.expr] = {}
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            called = (
+                func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            )
+            if called != "CheckConstraint":
+                continue
+            name = next(
+                (
+                    keyword.value.value
+                    for keyword in node.keywords
+                    if keyword.arg == "name"
+                    and isinstance(keyword.value, ast.Constant)
+                    and isinstance(keyword.value.value, str)
+                ),
+                None,
+            )
+            expression = next(
+                (keyword.value for keyword in node.keywords if keyword.arg == "sqltext"),
+                node.args[0] if node.args else None,
+            )
+            if name is not None and expression is not None:
+                sites[name] = expression
+        return sites
+
+    @classmethod
+    def _lists_an_enum(cls) -> dict[str, str]:
+        """The population this rule reads: every named CHECK whose rendered text
+        carries a quoted `IN` list, the exemption included."""
+        return {
+            name: text
+            for name, text in cls._rendered().items()
+            if cls._A_QUOTED_IN_LIST.search(text)
+        }
+
+    @classmethod
+    def _derived(cls, name: str, sites: dict[str, ast.expr]) -> bool:
+        """Whether this constraint was handed a call to one of the helpers.
+
+        **One predicate with two callers, and that is deliberate rather than
+        tidy.** The rule below asserts it of every constraint that is not
+        exempt, and the exemption arm asserts the negative of it, so the two
+        cannot drift into asking different questions: the version before this
+        one had them inline and apart, and the exemption arm stopped catching a
+        stale exemption without anything failing.
+
+        **`func.id` alone, so a call written `models._enum_check` is reported
+        as hand written.** That is a false positive rather than a miss, which
+        is the direction to fail in, and the asymmetry with `_call_sites`
+        reading `func.attr` is on purpose: there a missed call leaves a
+        constraint out of the population, here it only makes a red that a
+        person resolves.
+        """
+        handed = sites.get(name)
+        return (
+            isinstance(handed, ast.Call)
+            and getattr(handed.func, "id", "") in cls._DERIVATIONS
+        )
+
+    def test_every_quoted_in_list_is_derived_from_its_enum(self) -> None:
+        sites = self._call_sites()
+        wrong = [
+            f"{name}: spells its values out"
+            for name in sorted(set(self._lists_an_enum()) - self._EXEMPT)
+            if not self._derived(name, sites)
+        ]
+
+        assert wrong == [], (
+            "a constraint listing an enum's values by hand says nothing about "
+            "the enum it came from, and both copies of it agree with each "
+            "other while the enum moves past them. Call `_enum_check`:\n"
+            + "\n".join(wrong)
+        )
+
+    def test_the_rule_reads_the_population_it_reports_on(self) -> None:
+        """Anti vacuity, pointed at what the rule inspects rather than at what
+        the walk finds.
+
+        **Those are two different populations and the difference is the whole
+        of this arm.** An arm counting the `CheckConstraint` calls a walk finds
+        says nothing about how many of them the rule then reads: the inspected
+        set can fall to zero with such an arm green. And a count bounded by a
+        literal is the shape this tree has already watched keep passing while
+        the constant moved, a smaller count being a weaker inequality. So
+        nothing here is a literal or an inequality: the two readings of the
+        schema are compared to each other, and the population the rule reads is
+        asserted non empty.
+        """
+        declared = set(self._rendered())
+        walked = set(self._call_sites())
+
+        assert declared == walked, (
+            "the source walk and `Base.metadata` disagree about which named "
+            "CHECKs exist, so the rule is joining on a name one side does not "
+            f"have: {sorted(declared ^ walked)}"
+        )
+        assert self._lists_an_enum(), "no CHECK in this schema renders a quoted IN list"
+
+    def test_the_exemption_still_names_a_constraint_that_needs_it(self) -> None:
+        """An exemption nobody notices has gone stale would hide the next hand
+        written list filed under that name.
+
+        **Both directions, because the interesting one is invisible from the
+        population alone.** Deriving a constraint does not change its rendered
+        text, so an exempt name that started calling `_enum_check` is still in
+        the population and a rule asking only that would stay green with the
+        entry earning nothing. This asks the same predicate the rule above
+        asks, negated: an exempt constraint has to still be hand written, and
+        it has to still render a list at all, which is the other direction and
+        covers a constraint deleted or renamed.
+        """
+        sites = self._call_sites()
+        listing = set(self._lists_an_enum())
+        stale = [
+            f"{name}: {'derived now' if self._derived(name, sites) else 'renders no list'}"
+            for name in sorted(self._EXEMPT)
+            if name not in listing or self._derived(name, sites)
+        ]
+
+        assert stale == [], (
+            "these are exempt from the rule above and no longer need to be, so "
+            "the exemption is hiding whatever is next filed under that name. "
+            "Delete the entry:\n" + "\n".join(stale)
+        )

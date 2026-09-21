@@ -302,8 +302,10 @@ def _schema_once() -> None:
     rebuilt from the models keeps a stamp at head and reads as migrated: found
     by two review seats independently on 2026-09-11, each with a mutation the
     other had not written. `tests/test_house_rules.py::TestEveryEnumColumnIs
-    ConstrainedOrExemptWithAReason` holds the other two halves, the stamp and
-    the source shape, and no one of the three is the premise on its own.
+    ConstrainedOrExemptWithAReason` holds the stamp and the source shape, and
+    `tests/test_schema.py::TestTheSchemaTheApplicationBootsIsTheRevisions`
+    compares two boots, which is the arm a module writing its own DDL was
+    outside. No one of the four is the premise on its own.
 
     **What this one says is that THIS call built nothing.** It says nothing
     about a schema rebuilt from the models between the read above and the call

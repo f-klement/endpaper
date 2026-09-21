@@ -33,9 +33,13 @@ work in them.
 ## Running
 
 ```bash
-cd backend  && uv run pytest        # 7780 tests, in 118 files
-cd frontend && bun run test         # 3885 tests, in 192 files
+cd backend  && uv run pytest        # the whole suite
+cd frontend && bun run test         # the whole suite
 ```
+
+**Neither line quotes a size.** Both registers state theirs, and both are now recomputed
+by the run that reads them, so a count copied here would be a third home for a figure that
+has one. These two were 102 and 30 out against the tree they described.
 
 | Command | Purpose |
 |---|---|
@@ -44,12 +48,32 @@ cd frontend && bun run test         # 3885 tests, in 192 files
 | `uv run pytest -m property` | Only the tests whose inputs hypothesis generates |
 | `uv run pytest --hypothesis-profile thorough` | The same properties at ten times the examples |
 | `uv run mypy .` | Type check, strict |
-| `uv run ruff check .` | Backend lint. There is no formatter step: `ruff format` is not configured here and reformats 203 of the 256 files |
+| `uv run ruff check .` | Backend lint. There is no formatter step: nothing here configures or runs `ruff format` |
 | `bun run test:watch` | Re-run on change |
 | `bun run test:coverage` | Frontend coverage |
 | `bun run typecheck` | `tsc --noEmit`, includes the test tree |
 
 Neither suite touches the network. Both are safe to run alongside a live dev server.
+
+**A command these documents offer is checked against the project.** Offered means written
+in code, inline or fenced, headed by `uv`, `bun`, `uvx` or `bunx`. That prefix is what
+separates an instruction to run something from the row above, which names `ruff format` as
+the thing nothing here runs and has to stay writable. A `bun run` script has to be one
+`frontend/package.json` declares. A program under `uv run` has to be one
+`backend/pyproject.toml` declares or one this repository invokes, and a verb after it,
+`check` in `ruff check`, has to appear in a command this repository runs. A command
+satisfying none of those fails the suite by name.
+
+**What it does not reach**, so nobody reads it as more than it is: a command written with
+no runner in front of it, and a flag written before the verb, which drops the check back to
+the program alone. Checking flags means a copy of every tool's argument grammar.
+
+The row that bought this stood under "Lint / format" and ran the lint step and
+`ruff format` together, in one cell, while nothing here configured or ran the second half,
+so following it rewrote most of the backend. [`README.md`](../README.md) named the same job
+correctly and neither document pointed at the other. **Quoting that cell here would offer
+it again**, which is why this paragraph describes it instead: the check reads a document
+the way a reader does and cannot tell an example from an instruction.
 
 ## Backend
 
@@ -150,6 +174,26 @@ Read it before concluding a machine is slow.
 
 `respx` intercepts outbound HTTP, so Open Library and Google Books are never called for
 real and the suite works offline.
+
+### The schema driven run, which is a tool rather than part of the suite
+
+`tests/api_contract.py` reads the committed `frontend/openapi.json` and generates requests
+for every operation in it, asserting two things and no third: no generated request is a
+server error, and every response matches the schema that declares it. It runs as an
+ordinary member, against the suite's own throwaway database, through the in process
+application object, so there is no address at which it could reach a deployment.
+
+**The suite does not collect it.** The collector takes `test_*.py` and this is
+`api_contract.py`, so it runs only when the run names the file. `schemathesis` is
+declared in the dev group, so nothing else has to be supplied. Like every other suite
+here it goes to a worker node rather than to the development host.
+
+**The whole invocation is deliberately not written out** on this page, and the reason is
+the publish gate: the wrapper that takes a run to a worker node lives under a directory
+the mirror strips, and a published page may not name one.
+
+The module's docstring says what it covers, what it deliberately does not, and what would
+make it a gate. `docs/decisions.md` records what it finds today.
 
 ## Frontend
 

@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, field_validator
 
 from models import COLLECTION_NAME_MAX
-from schemas.common import RowIdField
+from schemas.common import RowIdField, one_line_without_invisible_characters
 
 
 class CollectionOut(BaseModel):
@@ -30,13 +30,16 @@ class CollectionCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def tidy(cls, value: str) -> str:
-        """Collapse the whitespace somebody pasted in.
+        """One line, and a name that normalises to nothing is refused.
 
         A name of only spaces passes `min_length` and then renders as an
-        invisible heading nobody can pick out of a list. Same rule as
-        `TagCreate.tidy`, and for the same reason.
+        invisible heading nobody can pick out of a list, and a name of only
+        characters with no width did the same until they went too. The name is
+        case-insensitively unique, so an invisible character is also a second
+        shelf spelled like the first. `TagCreate.tidy` is the same rule on the
+        same argument; both read it from one place now.
         """
-        cleaned = " ".join(value.split())
+        cleaned = one_line_without_invisible_characters(value)
         if not cleaned:
             raise ValueError("A collection needs a name.")
         return cleaned

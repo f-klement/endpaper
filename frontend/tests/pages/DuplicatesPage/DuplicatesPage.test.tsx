@@ -103,7 +103,7 @@ describe("DuplicatesPage", () => {
     const duplicates = group(["Dune", "Dune (paperback)"]);
     api.on("/api/books/duplicates", { body: [duplicates] });
     api.on("/api/books/merge", {
-      status: 422,
+      status: 400,
       body: { detail: "Nothing to merge" },
     });
     renderWithProviders(<DuplicatesPage />);

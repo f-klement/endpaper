@@ -362,20 +362,21 @@ async def lookup_by_isbn(isbn: str, api_key: str) -> dict[str, Any] | None:
 #:
 #: **`\A` and `\Z`, not `^` and `$`.** Python's `$` also matches immediately
 #: before a trailing newline, so `^[A-Za-z0-9_-]{12}$` admits
-#: `"abcdefghijkl\n"`, which is a newline in a URL path. `takeout.ts` spells the
+#: `"abcdefghijkl\n"`, which is a newline in a URL path. The browser spells the
 #: same rule with `^...$` and is right to: JavaScript's `$` without the `m` flag
 #: is end of input. `tests/test_google_books.py::TestTheVolumeIdBound` pins the
 #: newline directly rather than leaving it to the anchors being read correctly.
 #:
-#: **Three spellings of one rule, and the drift is guarded rather than
-#: regretted.** `takeout.ts`'s `VOLUME_ID` keeps a sidecar line that is not an
-#: id out of the browser's parse, `calibre.ts`'s `PRODUCED_VALUE.google_books`
-#: keeps a plugin's invented value out of a stored row, and this one keeps a
+#: **One rule spelled once in each tree, and the drift is guarded rather than
+#: regretted.** The browser's `stores.PRODUCED_VALUE.google_books` keeps a
+#: plugin's invented value out of a stored row, and `takeout.ts` asks it to keep
+#: a sidecar line that is not an id out of the browser's parse; this one keeps a
 #: stored row out of a URL. Only this one is a security bound, because only this
 #: one is on the server: `backup.restore` writes `book_identifiers` through Core
 #: and runs no Pydantic model, so a restored row reaches here having passed
-#: neither of the others. `tests/test_google_books.py::TestTheThreeSpellings`
-#: reads the two frontend files and fails if either has moved.
+#: neither. `tests/test_google_books.py::TestTheShapeIsSpelledOncePerTree` is a
+#: census over the browser's source rather than a map of files, so a rule that
+#: moves is not a failure and a second spelling of it is.
 VOLUME_ID: Final = re.compile(r"\A[A-Za-z0-9_-]{12}\Z")
 
 

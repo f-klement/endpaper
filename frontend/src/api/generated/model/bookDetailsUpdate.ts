@@ -14,7 +14,8 @@ import type { LendingWillingness } from "./lendingWillingness.ts";
  *
  * Every field is optional and absent means "leave alone", so the form can
  * send only what changed. An explicit `null` clears, which is how a series is
- * unset; the two cases are distinguished with `model_fields_set`.
+ * unset; the two cases are distinguished with `model_fields_set`. A column
+ * that refuses null refuses the clear too: see the validator at the foot.
  */
 export interface BookDetailsUpdate {
   author?: string | null;

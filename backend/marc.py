@@ -66,6 +66,88 @@ class MarcError(Exception):
 #: unbounded import by changing format.
 MAX_RECORDS: Final = 20_000
 
+#: How many Books the export holds at once.
+#:
+#: **A bound on the server's memory, not on the size of the shelf**, and that
+#: is the whole difference between this and `MAX_RECORDS` above. An upload is
+#: volume a stranger chose and the cataloguer can split the file. A shelf is
+#: the member's own and there is nothing for them to split, so refusing past a
+#: count would take the export away from exactly the deployment library mode
+#: exists for: the library in library mode is the instance with the most
+#: books.
+#:
+#: **100 is a query page, and what it costs at the worst is measured rather
+#: than assumed.**
+#: `tests/routers/test_imports_marc.py::TestThePageSizeThatBoundsTheExport`
+#: builds the widest record a write through the API can produce, reading every
+#: bound off its declaration rather than retyping it, and fails past 12 MiB a
+#: page:
+#:
+#: | a record of | one record | a page of 100 |
+#: |---|---|---|
+#: | `w`, one byte a character | 16,611 B | 1.58 MiB |
+#: | `ä`, two | 31,201 B | 2.98 MiB |
+#: | `&`, which `ElementTree` writes as five | 74,971 B | 7.15 MiB |
+#: | `&` and 250 credited names | 102,107 B | 9.74 MiB |
+#:
+#: **Widest is two questions, and the second is the one that bites.** How wide
+#: a field may be is a `max_length`, and a `max_length` counts characters
+#: where a page counts bytes, which is the first three rows. **How many fields
+#: a record has is not a length at all**: `700` repeats once per credited
+#: name, `_credited_names` splits `author` on commas, and nothing bounds the
+#: count inside `AUTHOR_LINE_MAX`, so 500 characters is up to 250 names and
+#: each one costs its scaffolding rather than its bytes. That is the last row,
+#: 36% over a ceiling taken on the third, and both critic seats found it
+#: independently in the round that had just fixed the first question.
+#:
+#: **The 12 MiB is a tripwire on the record's shape, not a platform limit.**
+#: Nothing enforces it at runtime and no deployment was measured against it.
+#: What it does is fail when a field is added to the writer, or made
+#: repeatable, or given a wider bound, so that the numbers above stop being
+#: quietly wrong. The room it leaves is **a quarter**, not a half: 12 MiB
+#: admits 123 of today's widest record against the 100 written here, which is
+#: the same 1.23 either way.
+#:
+#: **The page's bytes are not its peak.** Building it holds every record's
+#: string and the joined result at once, measured at 24.01 MiB for the 9.74
+#: MiB worst case, 2.47 times. The route table below is a typical page rather
+#: than this one, so the worst case for one export is of the order of 25 MB of
+#: strings plus its page of rows, and it does not move with the shelf, which
+#: is the property the paging is for.
+#:
+#: **A stored row beats all of it, and the bound is on writes.** Two of these
+#: numbers are ceilings the API applies and the restore path does not, because
+#: `backup.py` inserts through Core: `DESCRIPTION_MAX` is a `max_length` on
+#: the schema over a `Text` column, deliberately, so it needs no migration and
+#: cannot make a stored book uneditable, and `MAX_CLASSIFICATIONS_PER_BOOK` is
+#: checked on every API path and on no restored row. `models.py` records a
+#: 3,000,256 byte description that reached the table before its ceiling
+#: existed, and 32 classification rows on an otherwise widest record is 13.75
+#: MiB a page. Neither is a shape this number defends against, and no count
+#: would be.
+#:
+#: **What paging buys, measured through the route** on one node, single
+#: process, real ORM over SQLite, `Loading.PUBLISHED`, `tracemalloc` peak
+#: above the baseline, descriptions of 200 characters:
+#:
+#: | books | whole shelf | paged |
+#: |---|---|---|
+#: | 10,000 | 55.05 MiB | 1.02 MiB |
+#: | 20,000 | 109.67 MiB | 1.03 MiB |
+#: | 40,000 | 219.06 MiB | 1.05 MiB |
+#:
+#: One rises with the shelf and the other does not. **A smaller page costs
+#: queries and almost no wall clock**: over 40,000 books, database work only,
+#: the walk is 4.19 seconds in pages of 500 and 6.03 in pages of 100, against
+#: roughly 32 seconds of serialisation either way.
+#:
+#: **What it does not bound is the download and the time.** A shelf of any
+#: size still serialises in full, because the alternatives are a refusal and a
+#: silence. See `docs/decisions.md` §The MARCXML export is paged rather than
+#: capped for why that trade was taken and what each of the others would have
+#: cost.
+EXPORT_PAGE_RECORDS: Final = 100
+
 #: The leader every record this app writes carries, 24 characters.
 #:
 #: Positions, per the MARC21 Bibliographic specification, "Leader":
@@ -189,6 +271,13 @@ def _credited_names(author: str | None) -> list[str]:
     author case for everything the app itself wrote. A member who typed a name
     in catalogue order is split, and that is the cost of the column being one
     string rather than a table.
+
+    **Duplicates are kept where `authors.split_authors` drops them**, so a
+    stored `"Tolkien, Tolkien"` is one author on a card and two `700` fields
+    here. Left as it is: this serialises the column and the column says what
+    it says, and a writer quietly disagreeing with the card would be a second
+    answer to who wrote the book. It is also what makes the repeated field
+    `EXPORT_PAGE_RECORDS` is measured against reachable.
     """
     return [name.strip() for name in (author or "").split(",") if name.strip()]
 
@@ -393,22 +482,107 @@ def record_element(book: Book) -> ElementTree.Element:
     return record
 
 
-def write(books: Iterable[Book]) -> str:
-    """A shelf as one MARCXML `<collection>`.
+def _wrapper() -> tuple[str, str]:
+    """The two halves of the `<collection>` a streamed export is written into.
+
+    **Cut out of the empty document rather than spelled.** A streaming writer
+    never holds the whole element, which is the point of it, so the wrapper has
+    to be produced without one. Writing it as a literal would put the XML
+    declaration's quoting, the attribute's quoting and the namespace in a
+    second place to keep in step with `ElementTree`, and this repository has
+    paid repeatedly for a rule that lists the spellings of something it could
+    derive. So the empty collection is serialised once, at import, by the same
+    call that serialises every record, and split at its closing tag.
+
+    `short_empty_elements=False` is what makes that split exist: without it an
+    element with no children is written `<collection ... />` and there is no
+    closing tag to cut at. It is also why `write([])` now ends in an explicit
+    closing tag where it used to self close. The same document, and the only
+    difference this derivation makes to any output.
+    """
+    empty = ElementTree.tostring(
+        ElementTree.Element("collection", {"xmlns": NAMESPACE}),
+        encoding="unicode",
+        xml_declaration=True,
+        short_empty_elements=False,
+    )
+    cut = empty.rindex("</")
+    return empty[:cut], empty[cut:]
+
+
+_COLLECTION_OPEN, _COLLECTION_CLOSE = _wrapper()
+
+
+def stream(pages: Iterable[Iterable[Book]]) -> Iterator[str]:
+    """A shelf as one MARCXML `<collection>`, a page of Books at a time.
 
     Takes Books somebody else resolved, which for the export route means
     `Shelf.seen_by`. Nothing here filters, and nothing here may: a serialiser
     that decided visibility would be a second answer to the question
     `shelf.py` exists to answer once.
 
-    Written whole rather than streamed. The caller has the whole shelf in
-    memory already, since the query returned it, so an incremental writer would
-    save nothing and would put the namespace declaration in the caller.
+    **No `<collection>` element is ever built**, so the peak is one page of
+    XML rather than a tree over the whole shelf, which was the other half of
+    the cost: an `Element` tree is several times the size of the string it
+    prints to.
+
+    **Pages rather than a flat sequence of Books, because the page is the
+    chunk.** One string is yielded per page and not one per record: a
+    `StreamingResponse` over a sync iterator hands every chunk to
+    `anyio.to_thread.run_sync`, one ASGI `send` and two more hops through this
+    app's `SecurityHeadersMiddleware`. Measured over 20,000 records, that
+    dispatch is 3,064 ms in total when the chunk is a record against 5.7 ms
+    when it is a page. **Nothing here reads a page's length**, so this
+    signature asks the caller to have chosen one rather than enforcing a size:
+    `write` below hands over the whole shelf as a single page and is right to.
+
+    **Any failure is loud at the receiver, and that is a property of writing
+    the closing tag last.** The opening tag is yielded before `pages` is
+    touched at all, and a `StreamingResponse` sends its status line before it
+    pulls a chunk, so **every** failure from here on answers 200: not only one
+    part way through, but the walk's very first query coming back an error.
+    What each leaves is a `<collection>` that is never closed, which no XML
+    parser accepts, so a half written catalogue exchange is a parse error on
+    the cataloguer's side rather than a short file that reads as complete.
+    That is the silence `docs/decisions.md` refuses for an oversized upload,
+    and it is the trade streaming makes: a clean 500 for a body that cannot be
+    mistaken for a whole one. Anything watching this route has to read the
+    body rather than the status.
+
+    A record's tags are unqualified and the namespace is declared once on the
+    wrapper, so a record serialised on its own here is correct only inside
+    that wrapper. `record_element` is the function for a caller that needs a
+    record to stand alone.
     """
-    collection = ElementTree.Element("collection", {"xmlns": NAMESPACE})
-    for book in books:
-        collection.append(_record_element(book))
-    return ElementTree.tostring(collection, encoding="unicode", xml_declaration=True)
+    yield _COLLECTION_OPEN
+    for page in pages:
+        yield "".join(
+            ElementTree.tostring(_record_element(book), encoding="unicode")
+            for book in page
+        )
+    yield _COLLECTION_CLOSE
+
+
+def write(books: Iterable[Book]) -> str:
+    """A shelf as one MARCXML `<collection>`, whole.
+
+    **No production caller, and that is the state of it rather than an
+    omission.** The export route reached for this and was the defect: a
+    function that materialises a document has no bound, and the shelf it was
+    handed had none either. `sru.py` embeds one record at a time through
+    `record_element`. What is left is `tests/test_marc.py`, which exports a
+    Book and reads it back through the parser that reads live DNB and K10plus
+    answers, and needs a document to do it.
+
+    **A route wanting MARCXML wants `stream`.** That is not advice this
+    docstring can enforce, so it is enforced next to it:
+    `tests/routers/test_imports_marc.py::TestNoProductionModuleWritesAWholeCollection`
+    parses every module outside the tests and fails on a call to this.
+
+    One page handed to `stream`, so there is one serialisation of a collection
+    here and not two to keep in step.
+    """
+    return "".join(stream([books]))
 
 
 # ── Reading ───────────────────────────────────────────────────────────────────

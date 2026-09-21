@@ -424,7 +424,7 @@ export interface UseBookCustomFieldsResult {
  * `CustomFieldValueUpdate`.
  *
  * `save` reports per call, because the server refuses a url field that does not
- * hold a URL with a 422 and the panel has to keep what was typed when it does.
+ * hold a URL with a 400 and the panel has to keep what was typed when it does.
  */
 export function useBookCustomFields(bookId: number): UseBookCustomFieldsResult {
   const queryClient = useQueryClient();

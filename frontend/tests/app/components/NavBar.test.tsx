@@ -305,7 +305,6 @@ describe("export", () => {
   function stubFlags(libraryMode: boolean) {
     api.on("/api/settings/features", {
       body: {
-        google_books_enabled: false,
         google_books_ready: false,
         goodreads_lookup_enabled: false,
         default_locale: "en",

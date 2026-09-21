@@ -175,7 +175,7 @@ export default function CredentialKeySection({
 
       {/* Without this every refusal the server words carefully reaches nobody:
           the two create-key conflicts, the pinned-key discard, and above all
-          the 422 on a phrase that failed its checksum, which is the whole
+          the 400 on a phrase that failed its checksum, which is the whole
           reason the encoding carries one. */}
       {key.error != null && (
         <ErrorState error={key.error} fallback={t("settings.couldNotLoad")} />

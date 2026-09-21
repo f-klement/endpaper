@@ -3622,13 +3622,13 @@ async def title_search(
         harder_now = False
 
     try:
-        # **The roster and its deadline move together, in one branch.** Two
+        # **The roster and its budget move together, in one branch.** Two
         # conditionals on the same flag would admit the combination nothing
         # wants: the long roster under the short deadline, which asks the slow
         # catalogues and then cancels every one of them, spending the requests
         # and returning the same rows as before with nothing to say what
         # happened.
-        roster, deadline = (
+        roster, deadline_seconds = (
             (access.plan.searched_harder, SEARCH_HARDER_DEADLINE_SECONDS)
             if harder_now
             else (access.plan.searched, SEARCH_DEADLINE_SECONDS)
@@ -3644,7 +3644,7 @@ async def title_search(
                 )
                 for name in roster
             ],
-            deadline,
+            deadline_seconds,
         )
     finally:
         if harder_now:
@@ -3802,11 +3802,22 @@ _HARDER_AT_ONCE: Final = asyncio.Semaphore(1)
 
 
 async def _within_deadline(
-    searches: list[Coroutine[Any, Any, list[Record]]], deadline: float
+    searches: list[Coroutine[Any, Any, list[Record]]], deadline_seconds: float
 ) -> list[list[Record]]:
     """Run every search, keep what answers in time, drop the rest.
 
-    **The deadline is an argument and has no default**, which is what stops the
+    **A duration, and the name has to say so**, because `deadline.py` spends the
+    word on the other thing: a deadline there is an absolute `time.monotonic()`
+    moment, and this is how long from now. Both are `float` and this one goes
+    straight into `asyncio.wait(timeout=)`, so shortening the name to `deadline`
+    is not a typo anything reports: a real deadline handed here is read as its
+    own magnitude, the bound quietly becomes whatever the transports concede,
+    and the log line below stops firing. `opds.holdings` spells the same
+    argument the same way, and
+    `tests/test_deadline.py::TestTheTwoWordsDoNotMix` holds the measurement and
+    keeps the two names agreeing.
+
+    **The budget is an argument and has no default**, which is what stops the
     two from silently becoming one. A default would be whichever of them was
     written here, and the other would then be reached only by a caller that
     remembered to pass it; the failure mode is the long roster run under the
@@ -3822,7 +3833,7 @@ async def _within_deadline(
     if not searches:
         return []
     tasks = [asyncio.ensure_future(search) for search in searches]
-    done, pending = await asyncio.wait(tasks, timeout=deadline)
+    done, pending = await asyncio.wait(tasks, timeout=deadline_seconds)
 
     for task in pending:
         task.cancel()

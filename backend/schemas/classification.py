@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 import filing
 from enums import ClassificationScheme, HeadingKind
 from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
+from schemas.common import one_line
 
 #: The most headings one book may carry, full stop.
 #:
@@ -101,7 +102,7 @@ class ClassificationIn(BaseModel):
     @field_validator("number")
     @classmethod
     def tidy_number(cls, value: str) -> str:
-        """Collapse the whitespace a catalogue's own formatting leaves in.
+        r"""Collapse the whitespace a catalogue's own formatting leaves in.
 
         MARC pads subfields, so `"QA76.73.P98  V53 2021"` and
         `"QA76.73.P98 V53 2021"` arrive as two spellings of one call number and
@@ -143,7 +144,7 @@ class ClassificationIn(BaseModel):
         stored row is a catalogue assertion, and one this app has quietly
         rewritten is worse than one it declined.
         """
-        cleaned = " ".join(value.split())
+        cleaned = one_line(value)
         if not cleaned:
             raise ValueError("A classification needs a number.")
         if any(unicodedata.category(character) in _INVISIBLE for character in cleaned):
@@ -209,10 +210,17 @@ class ClassificationIn(BaseModel):
 
         Otherwise `null` and `""` are two spellings of "no caption" and every
         client has to test for both.
+
+        **The collapse and nothing else, unlike the number above.** A label is a
+        caption rendered as text: no key is taken from it, no uniqueness rule
+        names it, and it arrives with the number from a catalogue rather than
+        from a text box. Refusing an invisible character here would fail a whole
+        book over a soft hyphen a catalogue put in a heading, which is the cost
+        `tidy_number` accepted for a notation because a notation carries none.
         """
         if value is None:
             return None
-        return " ".join(value.split()) or None
+        return one_line(value) or None
 
 
 class ClassificationOut(BaseModel):

@@ -37,7 +37,14 @@ export interface SidecarSpec {
   author?: string;
   /** The line under `Volume ID`. `null` writes no such block at all. */
   volumeId?: string | null;
-  /** The reading state sentence, where the export carried one. */
+  /**
+   * The second metadata entry, where the export carried one.
+   *
+   * A reading state sentence in all 24 measured, which is one line and so
+   * carries no value `labelled` can read. A test pinning what the volume id
+   * rule refuses writes a label and a value here instead, which is the shape
+   * the volume id entry itself has.
+   */
   state?: string | null;
   /** One entry per annotation: the note the member wrote, often empty. */
   annotations?: string[];

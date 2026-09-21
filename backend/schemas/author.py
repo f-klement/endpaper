@@ -16,6 +16,7 @@ from authors import (
 )
 from enums import AuthorityProvenance, AuthorityScheme
 from models import AUTHOR_KEY_MAX, AUTHORITY_IDENTIFIER_MAX
+from schemas.common import one_line_without_invisible_characters
 
 #: An author key as it arrives from a caller.
 #:
@@ -239,13 +240,30 @@ class AuthorIdentifierRequest(BaseModel):
     @field_validator("identifier")
     @classmethod
     def tidy_identifier(cls, value: str) -> str:
-        """Collapse the whitespace, and refuse what is left if it is nothing.
+        r"""One line, and refuse what is left if it is nothing.
 
         A value of only spaces passes `min_length` and then violates
         `ck_author_identifiers_bounds` at the database, which is a 500 rather
         than a 422.
+
+        **A character with no width is removed by the same rule and closes the
+        same door**: that constraint is `length(identifier) > 0`, and SQLite's
+        `length()` counts up to the first NUL, so `"\x00118540238"` was a value
+        to look at, no value to the check, and the 500 this validator exists to
+        prevent. `LoanCreate` met the constraint half of this first.
+
+        **Removing one is not rewriting the catalogue's assertion**, which is
+        the rule `ClassificationIn.tidy_number` states for a notation: no
+        authority scheme spells an identifier with a character that has no
+        width, nothing renders one, and `authority.resolve` already refuses to
+        put a number it does not recognise in a URL. What a catalogue does
+        write, the space inside an ISNI, is whitespace and survives.
+
+        What a kept character buys is a stored fact that resolves to nothing
+        and a disagreement between two spellings that reads as a catalogue
+        conflict.
         """
-        cleaned = " ".join(value.split())
+        cleaned = one_line_without_invisible_characters(value)
         if not cleaned:
             raise ValueError("An identifier needs a value.")
         return cleaned
@@ -378,13 +396,20 @@ class AuthorMergeRequest(BaseModel):
     @field_validator("keep_name")
     @classmethod
     def tidy(cls, value: str) -> str:
-        """Collapse the whitespace, and refuse a name that normalises to nothing.
+        r"""One line, and refuse a name that normalises to nothing.
 
         A name of only punctuation passes `min_length` and then has an empty
         key, which no spelling can ever match: the merge would appear to work
         and fold every named author into an author nothing can reach.
+
+        **A character with no width goes before the key is taken**, because
+        `author_key` turns one into a space: `"Le\x00Guin"` reads as `LeGuin`
+        on every screen and keys as `le guin`, so the name a member typed and
+        the name they would have to type to reach it again are different
+        strings. The key rule is not the place to fix that: punctuation becomes
+        a space there on purpose, and it is `J.R.R. Tolkien` that buys it.
         """
-        cleaned = " ".join(value.split())
+        cleaned = one_line_without_invisible_characters(value)
         if not author_key(cleaned):
             raise ValueError("An author needs a name with a letter or a digit in it.")
         return cleaned

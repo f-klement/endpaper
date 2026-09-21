@@ -82,7 +82,7 @@ export default function CustomFieldsPanel({
   /**
    * Write what changed, and **keep the editor open if any write is refused**.
    *
-   * The server goes out of its way to answer 422 on a url field that does not
+   * The server goes out of its way to answer 400 on a url field that does not
    * hold a URL, rather than degrading it to text, so that the member can be
    * told. Closing the editor before the reply arrives threw away the half that
    * makes the message actionable: the error rendered above a closed panel

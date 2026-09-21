@@ -508,6 +508,39 @@ describe("a stored mimetype entry", () => {
 });
 
 describe("what the volume id has to look like", () => {
+  it("reads no volume id out of a thirteen character metadata line", async () => {
+    // **The discriminator's own job, pinned where the rule it asks is not.**
+    // `lib/stores.PRODUCED_VALUE` says what a Google producer writes, and this
+    // reader borrows it to tell the volume id line of the metadata block from
+    // the other lines in it, which is a second job the identifier rule does not
+    // know it has. Widening that rule by one character widens this read too,
+    // and the decoy below then becomes a book's identifier. That prompt is what
+    // a second copy of the regex in this module bought, and this arm replaces
+    // it, keyed on the job rather than on two literals agreeing.
+    //
+    // **Two books, and the first one is why this arm cannot pass by accident.**
+    // `labelled` drops a metadata entry's first line, so the `Status` line is
+    // what carries either decoy as far as the rule at all: written without it
+    // both books would be skipped, the rule would never be asked and every
+    // assertion here would hold under a widened rule as well. The two entries
+    // differ in one character of length and nothing else, so what separates
+    // them is the rule and only the rule.
+    const found = library(
+      await read([
+        {
+          name: "Twelve",
+          sidecar: { volumeId: null, state: `Status\n${A_VOLUME_ID}` },
+        },
+        {
+          name: "Thirteen",
+          sidecar: { volumeId: null, state: "Status\nabcdefghijklm" },
+        },
+      ]),
+    );
+    expect(found.books.map((book) => book.volumeId)).toEqual([A_VOLUME_ID]);
+    expect(found.skipped).toBe(1);
+  });
+
   it("does not take a twelve character run out of a longer line", async () => {
     // The anchors are the whole of the rule: the value under the label is the
     // id or it is not one. Unanchored, the line below yields `not-a-volume`

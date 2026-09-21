@@ -54,6 +54,18 @@ function appVersion(): string {
   }
 }
 
+/**
+ * The junit reporter, when the pipeline asks for one by naming its path.
+ *
+ * A function rather than an inline spread so the tuple keeps its mutable type:
+ * vitest's `reporters` refuses a `readonly` one, and `as const` is the obvious
+ * spelling that fails.
+ */
+function junit(): ["junit", { outputFile: string }][] {
+  const outputFile = process.env.ENDPAPER_JUNIT;
+  return outputFile ? [["junit", { outputFile }]] : [];
+}
+
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(appVersion()) },
   plugins: [
@@ -256,6 +268,27 @@ export default defineConfig({
     maxWorkers: Number(process.env.ENDPAPER_TEST_WORKERS) || 2,
     // The suite mirrors src/ rather than sitting beside it.
     include: ["tests/**/*.test.{ts,tsx}"],
+    // **`tests/COVERAGE.md` is checked by a reporter rather than by a test**,
+    // and `tests/coverageRegister.reporter.ts` says why: no test file here can
+    // see another file's tasks, and vitest's own `list` counts an `it.each` as
+    // one test. So the only instrument that can count this suite is the run,
+    // and a reporter is where a run's own figures are.
+    //
+    // `default` is repeated because naming any reporter replaces the set rather
+    // than adding to it, which is how a change here silences the output
+    // everything else reads.
+    //
+    // **That replacement is a command line one too, and it is why the junit
+    // output is configured here rather than passed as a flag.** The pipeline
+    // ran `bun run test -- --reporter=junit`, which replaced this whole list,
+    // so the register was checked nowhere in CI while the suite stayed green.
+    // Measured on vitest 5.0.0. The pipeline now sets `ENDPAPER_JUNIT` and
+    // names no reporter, and `globalSetup` below fails any run whose reporters
+    // were replaced, so the next flag that does this says so rather than
+    // disarming the guard.
+    reporters: ["default", "./tests/coverageRegister.reporter.ts", ...junit()],
+    // The other half of that, and the half a command line cannot take away.
+    globalSetup: ["./tests/coverageRegister.globalSetup.ts"],
     setupFiles: ["./tests/setup.ts"],
     // Not `false`, which is the usual answer for a suite that asserts on the
     // DOM rather than on paint. Under `false` Vite replaces every CSS module

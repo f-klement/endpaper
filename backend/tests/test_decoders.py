@@ -308,8 +308,12 @@ class TestADecodingIsValidatedWhereverItIsBuilt:
         ).requires_isbn_claim
 
 
-def _production_sources() -> list[pathlib.Path]:
+def _production_sources(root: pathlib.Path = BACKEND) -> list[pathlib.Path]:
     """Every module of this application that is not a test.
+
+    **`root` is what lets the diagonal in `test_house_rules.py` drive this**,
+    against a tree with vendored code planted in it, rather than leaving a walk
+    that is right by construction and exercised by nothing.
 
     Stated as the exclusion, so a package added later is read rather than
     skipped.
@@ -322,9 +326,9 @@ def _production_sources() -> list[pathlib.Path]:
     """
     found = [
         path
-        for path in BACKEND.rglob("*.py")
-        if "tests" not in path.relative_to(BACKEND).parts
-        and not _is_vendored(path, BACKEND)
+        for path in root.rglob("*.py")
+        if "tests" not in path.relative_to(root).parts
+        and not _is_vendored(path, root)
     ]
     # The packages it must cover rather than a number, so a walk that lost a
     # whole directory fails rather than passing on a smaller sweep. See

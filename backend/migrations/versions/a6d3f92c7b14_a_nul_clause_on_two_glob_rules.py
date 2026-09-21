@@ -18,7 +18,7 @@ which agree on every figure below.
 |---|---|---|
 | `ck_catalogue_targets_indexes` | negative charset `GLOB` | truncation hides the rest of the value |
 | `ck_opds_servers_base_url` | positive prefix `GLOB` | nothing bounds the text after the prefix |
-| `ck_catalogue_credentials_envelope` | positive shape `GLOB` | not here: no ceiling to make exact |
+| `ck_catalogue_credentials_envelope` | positive shape `GLOB` | not here: no ceiling to make readable |
 
 **`ck_catalogue_targets_indexes` is defeated.** A negative charset rule reads the
 text up to a NUL and never sees the rest, so `'bath.isbn or 1=1'` is refused and

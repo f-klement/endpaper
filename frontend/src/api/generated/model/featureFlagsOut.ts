@@ -13,11 +13,25 @@ import type { Locale } from "./locale.ts";
  * Readable by anyone, deliberately: the login page is localised, so the
  * default language has to be known before a token exists. It carries no
  * secrets and nothing about the catalogue.
+ *
+ * **Two of these are read before a token exists and three are not.** The
+ * other three are read behind a session and are here because the shell takes
+ * one query for every flag it renders, and because a member holds no admin
+ * token to read `SettingsOut` with. So the test a field passes is that
+ * something reads it, never that nothing else could serve it, and each says
+ * below what it tells a caller holding nothing.
+ *
+ * **Every field here has a reader in the client, and one with none is
+ * refused.** An unread field on the one endpoint a stranger can call is
+ * disclosure with nothing on the other end of it. Two guards hold it, because
+ * neither is enough alone: `frontend/tests/houseRules.test.ts`, "every feature
+ * flag has a reader", derives the readers and carries what it cannot see, and
+ * `tests/routers/test_settings.py::TestFeatureFlags` pins what the route
+ * actually sends, which no regeneration can talk out of.
  */
 export interface FeatureFlagsOut {
   default_locale: Locale;
   goodreads_lookup_enabled: boolean;
-  google_books_enabled: boolean;
   google_books_ready?: boolean;
   library_mode?: boolean;
   public_catalogue_published?: boolean;

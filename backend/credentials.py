@@ -147,7 +147,7 @@ class BadRecoveryPhrase(KeyConfigurationError):
     """The words are not a phrase: wrong count, unknown word, failed checksum.
 
     **A subclass, so every existing handler still catches it**, and separate so
-    a route can answer 422 rather than 409. They are different things: a phrase
+    a route can answer 400 rather than 409. They are different things: a phrase
     somebody mistyped is a bad request, and a key the deployment pinned
     elsewhere is a conflict with the deployment. One status for both told a
     client nothing it could act on differently.

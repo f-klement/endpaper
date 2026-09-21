@@ -786,7 +786,7 @@ export const getRequestPasswordResetUrl = () => {
 export const requestPasswordReset = async (
   resetRequest: ResetRequest,
   options?: Parameters<typeof customFetch>[1],
-): Promise<unknown> => {
+): Promise<void> => {
   const getHeaders = (
     h?: NonNullable<RequestInit["headers"]>,
   ): Record<string, string | readonly string[]> => {
@@ -808,7 +808,7 @@ export const requestPasswordReset = async (
     }
     return headers;
   };
-  return customFetch<unknown>(getRequestPasswordResetUrl(), {
+  return customFetch<void>(getRequestPasswordResetUrl(), {
     ...options,
     method: "POST",
     headers: {
@@ -1175,7 +1175,7 @@ export const getRequestVerificationUrl = () => {
 export const requestVerification = async (
   verificationRequest: VerificationRequest,
   options?: Parameters<typeof customFetch>[1],
-): Promise<unknown> => {
+): Promise<void> => {
   const getHeaders = (
     h?: NonNullable<RequestInit["headers"]>,
   ): Record<string, string | readonly string[]> => {
@@ -1197,7 +1197,7 @@ export const requestVerification = async (
     }
     return headers;
   };
-  return customFetch<unknown>(getRequestVerificationUrl(), {
+  return customFetch<void>(getRequestVerificationUrl(), {
     ...options,
     method: "POST",
     headers: {

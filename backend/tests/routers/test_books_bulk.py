@@ -69,9 +69,9 @@ class TestTagging:
         book = make_book(admin["headers"])
         assert bulk(client, admin["headers"], [book["id"]], "add_tag", 9999).status_code == 404
 
-    def test_a_missing_tag_id_is_a_422(self, client, admin, make_book):
+    def test_a_missing_tag_id_is_a_400(self, client, admin, make_book):
         book = make_book(admin["headers"])
-        assert bulk(client, admin["headers"], [book["id"]], "add_tag").status_code == 422
+        assert bulk(client, admin["headers"], [book["id"]], "add_tag").status_code == 400
 
 
 class TestATagIdPastTheDatabasesRangeIsRefused:
@@ -190,10 +190,10 @@ class TestStatus:
 
         assert seen_by_member.json()["my_status"] == "unread"
 
-    def test_an_unknown_status_is_a_422(self, client, admin, make_book):
+    def test_an_unknown_status_is_a_400(self, client, admin, make_book):
         book = make_book(admin["headers"])
         res = bulk(client, admin["headers"], [book["id"]], "set_status", "devoured")
-        assert res.status_code == 422
+        assert res.status_code == 400
 
 
 class TestOwnershipAndLocation:
@@ -215,10 +215,10 @@ class TestOwnershipAndLocation:
 
         assert res.json() == {"updated": 0, "unchanged": 1, "skipped": 0}
 
-    def test_an_unknown_ownership_is_a_422(self, client, admin, make_book):
+    def test_an_unknown_ownership_is_a_400(self, client, admin, make_book):
         book = make_book(admin["headers"])
         res = bulk(client, admin["headers"], [book["id"]], "set_ownership", "borrowed")
-        assert res.status_code == 422
+        assert res.status_code == 400
 
     def test_sets_a_location(self, client, admin, make_book):
         """The reason this verb exists: unpacking a box of books at once."""
