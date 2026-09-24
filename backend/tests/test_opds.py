@@ -125,7 +125,7 @@ class TestWhatOneEntryBecomes:
         ]
 
     def test_several_authors_arrive_as_one_credit_list(self):
-        """Joined with a comma, which is what `importing.identity_key` splits on."""
+        """Joined with a comma, which is what `books.author` is: see `authors.py`."""
         entry = (
             "<entry><title>Good Omens</title>"
             "<author><name>Terry Pratchett</name></author>"
@@ -136,6 +136,92 @@ class TestWhatOneEntryBecomes:
         page = opds.read_page(_feed(entry))
 
         assert page.records[0].author == "Terry Pratchett, Neil Gaiman"
+
+    def test_a_catalogue_order_name_is_flipped_into_direct_order(self):
+        """This was the one import path that left a name in catalogue order.
+
+        Every other writer of `books.author` flips first, and `authors.py`
+        states that as an invariant. Unflipped, the credit folds to a bare
+        surname, so `Herbert, Frank` and `Herbert, James` became one author at
+        the site where that merges two books.
+        """
+        entry = (
+            "<entry><title>Dune</title>"
+            "<author><name>Herbert, Frank</name></author>"
+            '<link rel="http://opds-spec.org/acquisition" href="/d/3"/></entry>'
+        )
+
+        page = opds.read_page(_feed(entry))
+
+        assert page.records[0].author == "Frank Herbert"
+
+    def test_each_name_is_flipped_before_the_join_and_not_after(self):
+        """A joined credit line has a comma of its own.
+
+        `flip_catalogue_name` turns exactly one comma around, so running it
+        over the joined string would mangle every two author book. Per name is
+        the only place it is legal.
+        """
+        entry = (
+            "<entry><title>Good Omens</title>"
+            "<author><name>Pratchett, Terry</name></author>"
+            "<author><name>Gaiman, Neil</name></author>"
+            '<link rel="http://opds-spec.org/acquisition" href="/d/4"/></entry>'
+        )
+
+        page = opds.read_page(_feed(entry))
+
+        assert page.records[0].author == "Terry Pratchett, Neil Gaiman"
+
+    def test_a_name_is_capped_before_the_flip_and_not_after(self):
+        """The cap is observable, so it is pinned rather than only measured.
+
+        The flip moves the text after the comma to the front. Cap first and the
+        surname survives; cap after and the same slice keeps the given name
+        instead. An unbounded name also costs 0.760 s in the flip against 0.009 s
+        to parse the page it arrived in, on the event loop.
+        """
+        long_given = "B" * 600
+        entry = (
+            "<entry><title>Long</title>"
+            f"<author><name>Surname, {long_given}</name></author>"
+            '<link rel="http://opds-spec.org/acquisition" href="/d/6"/></entry>'
+        )
+
+        page = opds.read_page(_feed(entry))
+
+        assert page.records[0].author is not None
+        assert page.records[0].author.startswith("B")
+        assert page.records[0].author.endswith("Surname")
+
+    def test_a_name_that_is_only_a_comma_contributes_no_segment(self):
+        """The flip is what empties it, so the filter has to run after the flip.
+
+        `flip_catalogue_name(",")` is the empty string while `","` itself is not
+        blank, so filtering the raw value lets the segment through and the credit
+        line grows a comma nobody wrote.
+        """
+        entry = (
+            "<entry><title>Odd</title>"
+            "<author><name>,</name></author>"
+            "<author><name>Real Person</name></author>"
+            '<link rel="http://opds-spec.org/acquisition" href="/d/7"/></entry>'
+        )
+
+        page = opds.read_page(_feed(entry))
+
+        assert page.records[0].author == "Real Person"
+
+    def test_a_corporate_name_carrying_no_comma_is_left_alone(self):
+        entry = (
+            "<entry><title>Annual Report</title>"
+            "<author><name>British Library</name></author>"
+            '<link rel="http://opds-spec.org/acquisition" href="/d/5"/></entry>'
+        )
+
+        page = opds.read_page(_feed(entry))
+
+        assert page.records[0].author == "British Library"
 
     def test_an_author_element_with_no_name_contributes_no_empty_segment(self):
         entry = (

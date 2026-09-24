@@ -1241,10 +1241,10 @@ the cluster works from then on.
 
 ### The candidates page deduplicates on the ISBN and on nothing else
 
-`_match_key` is a title and a first author, which is the right key for a search page where
-two catalogues describe the same book. It is the wrong key here: every row on this page is
-a printing of one book, so it collapsed a five row answer to one. Measured live before it
-was fixed.
+`identity.work_key` is a title and a first author, which is the right key for a search page
+where two catalogues describe the same book. It is the wrong key here: every row on this
+page is a printing of one book, so it collapsed a five row answer to one. Measured live
+before it was fixed.
 
 An ISBN identifies a printing, which is what this page lists. A row with no ISBN is always
 kept, because "no ISBN" is not an identity two rows can share.
@@ -2195,10 +2195,9 @@ testable as a rule about names rather than as a status code.
 ### Book duplicates are not author identity
 
 `GET /duplicates` and `POST /merge` were listed inside the author cluster's line range and
-are deliberately **not** in `authorship.py`. They share a normalisation, `_duplicate_key`
-folds a title and an author with the same `author_key`, and nothing else: they ask "is this
-the same **Book**", and the alias table answers "is this the same **person**". Neither reads
-nor writes `author_aliases`.
+are deliberately **not** in `authorship.py`. They share the credit fold,
+`authors.author_key`, and nothing else: they ask "is this the same **Book**", and the alias
+table answers "is this the same **person**". Neither reads nor writes `author_aliases`.
 
 Folding them in would have moved code without anything becoming deeper, which is the exact
 test the router split failed. If the duplicate scan ever earns its own module, the thing it
@@ -2976,9 +2975,12 @@ patch would have to compute the next tag list itself, at every call site.
 
 **`setFilters` is gone rather than kept.** Its only caller applies a saved search, and a
 saved search holds a complete `BookFilters`, so a patch naming every key is already a
-replacement. The one case where the two differ is a search stored before a field existed,
-and merging is the better answer there: the missing field keeps its current value instead
-of becoming undefined.
+replacement. A search stored before a field existed was the one case where the two differed, and merging
+was the better answer while a missing field meant `undefined` reaching `toParams`. Entries are
+rebuilt from `DEFAULT_FILTERS` outwards since the preference door was written, so every field
+is present with a real value, `undefined` cannot arise, and applying a saved search is a
+replacement in every case. That is also what it should always have meant: merging delivered a
+blend of the saved view and the reader's current one, and that is not the view they named.
 
 Reading filters out of a URL moved out with them, into `lib/bookFilters.ts`, which is pure
 and has no React in it, and so did turning a filter set into query parameters.
@@ -3009,6 +3011,97 @@ asserts that **every one of the twelve fields becomes a query parameter**, and i
 client-only allowlist is empty. Nothing in the shape is view state, so it is not a view
 model, and `lib/libraryView.ts` already holds `LibraryView` by the same logic. The page
 re-exports both, so no consumer changed.
+
+### A stored preference has one owner, and the subscription is what retired the counter
+
+Five modules under `lib/` each owned a storage key, a guard, a read and a write, and none was
+reactive. `pages/Home/hooks.ts` paid for that with an `edits` counter and a `writeForMode`
+wrapper whose only job was to make the next render re-read what a write had just stored, under a
+comment explaining the counter. A sixth preference would have got a sixth module and a seventh
+comment.
+
+**What actually regrew, since the ticket is half wrong about it and the wrong half is the one
+that matters.** ADR 0008 recorded `useLibrary` narrowed from 32 members to 21. Measured at that
+commit by a sorted set difference against today, **seven members arrived and two left**, and one
+of the arrivals is an API call. Five preference members, the saved searches and the view, were
+already inside the 21 the ADR accepted and argued for, so preferences in that interface were
+never what the ADR objected to. Five of the seven arrivals are one cluster that landed in a
+single ticket. The honest claim is not that preferences grow back: it is that **one preference
+arriving cost five members and the interface had no way to charge it one**.
+
+**`lib/preference.ts` owns the mechanism and each of the five keeps its meaning.** What was
+duplicated once per preference is narrow: the two failure paths, absence meaning the default, a
+value this version cannot read meaning the default, and a write no reader hears about. What is
+not duplicated is what a value is, how it validates and why its key is spelled as it is, so
+those stay in the module that declares the preference. Five rows inside one module was the shape
+the ticket suggested and it is refused: it moves the reasoning away from the value it explains.
+
+**The keys are declared literals, never a function that builds one.** A door taking
+`(scope) => string` would make producing any key in this origin a typed, exported capability of
+`lib/`, and the names beside these hold an identity and a token. A literal is checkable when the
+module loads, and a claim on a key that is not a preference's, or on one already claimed, throws
+there.
+
+**A snapshot is cached against the exact string it was decoded from, and frozen.** That is what
+`useSyncExternalStore` requires: a read building a fresh array every call redraws for ever. It
+replaced a rule that handed back a copy each time, and the comparison is not the simple one it
+first looked: a copy made a mutation harmless and could not make a read stable, while freezing
+refuses the mutation where it is made. **The freeze is shallow, and that is not free.** The one
+preference with a nested value, the saved searches, used to be re-parsed from JSON on every read,
+which is a fresh graph each time rather than a shallow copy of a shared one, and neither
+`SavedSearch` nor `BookFilters` carries a `readonly`, so the type refuses nothing below the top
+level. That codec therefore freezes its entries and their filters itself. The other four are
+strings, arrays of strings and a record of string literals, which a shallow freeze covers.
+
+**The write gate is the scope being absent, not a flag beside a value.** `writeForMode` refused
+every per mode write until the feature flags resolved by closing over the hook's own
+`modeIsKnown`, which no call site could supply. Modelling that as `{ value, settled }` would
+have made "this scope, and it is settled" constructible anywhere, so the scope is
+`CatalogueMode | undefined` instead and `useCatalogueScope` is the only thing that produces it.
+
+**A write whose value depends on the scope asks for the scope.** That is the one property the
+wrapper had and a plain setter does not: `writeForMode` handed the mode to its caller, so a value
+could not be computed under one scope and stored under another, where `set(value)` takes a value
+computed elsewhere. `setFromScope` restores it for the two callers that need it. What the skew
+would cost if the gate alone were holding it: a reset computed from a stale household mode and
+stored under the cataloguer's scope is not equal to the cataloguer's default, so it is stored
+rather than clearing the key, and the control offering the reset stays drawn and never resets.
+
+**`canSet` still reaches the controls, and that half is not optional.** The gate refuses the
+write either way; a control left looking live while its press does nothing teaches the reader
+the page lies.
+
+**One listener set for every preference rather than one each.** A write to one wakes the readers
+of the others, each re-reads, each is handed the value it already held, and React draws nothing.
+That is free only because the door is the only path to a snapshot: `usePreference` accepts no
+selector and offers no way to derive a value after the cache.
+
+**What a preference is not, stated as an exclusion because an inclusion list goes stale.** Not a
+cache of something the account owns, which is `theme/appearance.ts`. Not a token and not an
+identity. Not a per tab marker, whose whole point is a lifetime this does not model. The locale
+would fit and is deliberately outside, because its one reader and its one writer are the same
+provider. `tests/houseRules.test.ts` reads every storage call site under `src/` and requires each
+to be the door or a named exemption **together with the keys that file may touch**. Named by key
+and not by file, because a file level exemption is one a sixth preference walks straight through:
+four lines of `localStorage.setItem("librarySort", ...)` inside an already exempt module passes a
+file level rule, and the appearance cache is exactly where somebody would put a per device key.
+
+**There is deliberately no call that forgets every preference.** What survives a sign out on a
+shared browser profile is recorded and accepted elsewhere in this file, and the fix it prescribes
+is a named pair of keys cleared at one site. A door offering the sweep would make reversing that
+acceptance a one line change somebody makes without reading it.
+
+**Two conversions were refused.** `useBookSections` keeps its own copy beside storage, because
+that copy is what delivers the promise that a refused write still folds the section for this
+visit: subscribing instead would mean a tap doing nothing at all in a private window, and unlike
+the view's three labelled buttons a header that does not fold reads as broken rather than as
+refused. The scanner's last shelf is read once as the starting value of a field the member then
+edits, and stored only after a book is added, so a reactive read would overwrite what somebody is
+typing the moment another shelf committed. A seed is not a subscription.
+
+**`useLibrary` returns the library and nothing a browser remembered**, which is a rule with a
+guard rather than a tidy outcome: a preference read through that hook works, so no other test
+would see it grow back.
 
 ### The filter set is checked against the API's own schema
 
@@ -3218,6 +3311,10 @@ browser remembers where you were, and clearing them on sign-out would also clear
 the one person on their own laptop who is the common case. The cost is stated so the next
 reader can weigh it rather than discover it. If it is ever fixed, both stores have to be
 cleared in `clearSession()`, not in `signOut()`, or the edge path will keep them.
+
+Both paths above are unchanged: the keys are declared through `lib/preference.ts` and each
+module still owns its own. That door offers no call that forgets every preference, and the
+entry recording it says why.
 
 ### `--color-paper-0` exists, and its value is `#ffffff`
 
@@ -14542,7 +14639,7 @@ the other's.
 ## The key, the plan and the logins reach a catalogue as one value
 
 `metadata.Access` is frozen and carries the plan, the API key and the logins.
-The resolver is `settings_store.library_access`, and the split is not cosmetic:
+The resolver is `catalogue_access._resolved_access`, and the split is not cosmetic:
 `metadata.py` reaches no database and the resolver reads settings and opens the
 keychain.
 
@@ -14576,27 +14673,42 @@ and neither is constructed for a source the plan left out. Two of the six
 handlers never had the conjunction, so this is the other four adopting what they
 already did.
 
-**`Access.logins` has a default and that is deliberate.**
-`routers/books.py::_google_books_in_force` builds one for `lookup_volume`, whose
-one bespoke target keeps its secret in a query string and sends no login.
-Resolving a keychain there would be a round trip per request for a credential
-that path cannot send. What that default costs is that a hand built access type
-checks and sends nothing, so the ast walk in `tests/test_metadata.py` asks
-whether each router call's access came from `library_access`, scoped per
-function: the router binds the name `access` in six handlers and one of them
-binds it from a resolver that opens no keychain.
+**`Access.logins` has no default.** An empty one let a hand assembled access
+type check and send nothing, so "these logins were resolved" was a fact about
+where the value came from rather than about the value. Compulsory, the same
+question is a `mypy` error at the call site, and the field's own comment carries
+the rest.
 
-**The refusal stayed in the handler.** `access.plan.asked` and
-`access.plan.searched_harder` are read at the three sites that refuse, and
-`_no_sources` and `_lookup_failure` still turn the answer into a status code. A
-predicate on `Access` taking an argument that picks the roster would be a
-behaviour switch, which is the shape this file already records as the thing a
-reviewer agrees with and a hole survives behind.
+The default's reason bound on not resolving a keychain for `lookup_volume`,
+whose one bespoke target keeps its secret in a query string and sends no login.
+It never bound on not spelling the mapping, since `logins={}` resolves nothing
+either. That caller is `catalogue_access.GoogleVolumes` now, which holds a plan
+and a key and never reaches this type.
 
-**`Access` is resolved in the handler body and never as a sibling `Depends`.**
-FastAPI's `solve_dependencies` runs dependencies in declaration order and the
-first `HTTPException` propagates, so one declared before `CurrentUser` would
-answer an unauthenticated caller with this route's 409 instead of a 401.
+**The refusal is four named sentences in the door, one per door.**
+`catalogue_access` holds them as module level constants, reached through one
+`HTTPException` construction whose argument is always a name, so "no refusal is
+built from a value" is checkable by reading one function. A predicate on
+`Access` taking an argument that picks the roster would still be a behaviour
+switch, which is the shape this file already records as the thing a reviewer
+agrees with and a hole survives behind; four separately named doors are not that
+switch.
+
+**`Access` is resolved in the handler body and never as a `Depends`, and the
+reason is the budget rather than the status code.** A dependency runs before the
+handler body, so a route whose own validation refuses locally would spend a
+member's catalogue budget on a request that reaches no catalogue.
+`refresh_metadata` refuses a book with no ISBN, and that refusal has to come
+first.
+
+**The status code hazard is real, and it is removable, which is why it is not
+the reason.** FastAPI's `solve_dependencies` runs dependencies in declaration
+order and the first `HTTPException` propagates, so a gate declared as a
+**sibling** of `CurrentUser` answers an unauthenticated caller with this route's
+409 instead of a 401. Measured on a three route app under this project's own
+venv: the same gate taking `CurrentUser` as its own **sub dependency** answers
+401, whether declared first or alone. The hazard belongs to siblings, so a sub
+dependency would have escaped it and the budget is what still refuses it.
 
 **The key reaches a metered door and no other.** `metadata._lookup_one` used to
 hand `api_key` to every bespoke target, which is how the security seat's
@@ -14606,62 +14718,146 @@ deployment's key by arriving. It now passes it only where
 the other path. Nothing in force changes: Open Library is the other bespoke door
 and its adapter opens with `del api_key`.
 
-**A second resolution of the key inside a handler is a redundancy and not a
-defect, and the reason is the call site.** `ready_sources` resolves the key too,
-and there that resolution **is** the gate keeping a keyless Google out of the
-plan. A second read beside an already resolved `access` gates nothing, because
-the gate for that call is `access.plan`. It costs one settings row read. Written
-down because the shape, work done twice, reads as waste and gets refiled.
+**The key is resolved twice for one request, and that is a redundancy rather
+than a defect, for a reason that is at the call site.** `catalogue_sources` asks
+`ready_sources`, which resolves the key as the gate keeping a keyless Google out
+of the plan; `_resolved_access` then resolves it again to put it in the access,
+where it gates nothing, because the gate for that call is `access.plan`. Both
+reads are the door's own now and neither is in a handler. It costs one settings
+row read. Written down because the shape, work done twice, reads as waste and
+gets refiled.
 
-**The walk that says a login was resolved reads rebinds as well as
-bindings, and asks `symtable` what a binding is.** `frozen=True` refuses
-mutation of the object and not rebinding of the name, so `access =
-library_access(db)` followed by `access = metadata.Access(plan=access.plan,
-api_key=access.api_key)` sent no login and left every guard green. The walk now
-collects both halves per scope and subtracts.
+**The walk that policed which local a resolver had bound is gone, and two
+compulsory halves are what let it go.** `logins` has no default, so a hand built
+access is a `mypy` error at the call site, and one module reaches `metadata`'s
+outbound doors, which is `tests/test_catalogue_access.py`'s door rules beside
+`test_metadata.py::TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt`.
+Neither half would have done it alone: compulsory logins do not stop a handler
+resolving a correct access and then reaching a door by a route nothing watches.
 
-**Three drafts of that rule enumerated the spellings and each was short.** The
-first read `ast.Store` and missed `except ... as`; the second added that one
-field and called it the only exception, which was false by six, since the two
-`match` name fields, `MatchMapping.rest` and `ast.alias`'s two are plain strings
-as well. Each was caught by the other seat and each fix was one further arm. The
-rule is now `symtable`, which is the compiler's own answer and covers the
-spellings the grammar grows; what is enumerated is the diagonal, one arm per
-spelling, whose job is to report by name when the rule stops covering one.
+**A rule about which local a name was bound from is an enumeration over the
+grammar, and a type that refuses the value is not.** That is why the walk went
+rather than grew another arm. Three drafts of its rule enumerated the spellings
+that bind a name and each was short by at least one; the fourth asked
+`symtable`, which is the compiler's own answer; and the scope walk under it then
+had to subtract what a parameter, a comprehension target and a walrus bind for
+themselves, one language rule at a time.
 
-**The scope walk that decides which statements are asked was still an
-enumeration after the helper stopped being one.** A `def` binds its own name
-where it stands, and the walk skipped the statement to avoid its body, so a name
-shadowed by a `def` still read as carrying a login; `class` was caught, and that
-asymmetry was the tell. A nested function's **parameter** shadows it too, and
-that one cannot be fixed by refusing to descend, because a handler wrapping its
-outbound call in a nested function is a shape the router already has. Both seats
-reached the first independently.
+**A probe on this machine is not a measurement of the suite.** It runs Python
+3.13 and the suite pod runs 3.14, and that skew is what kept the walk's last
+defect, a symbol table block found by position where PEP 649 puts
+`__annotate__` first, invisible until it ran there.
 
-**A child scope binds names no statement declares, and they shadow.** A
-function's parameter and a comprehension's target are the two, and the walk
-subtracts what each child scope names for itself before descending. Refusing to
-descend is not the alternative: the router already wraps an outbound call in a
-nested function that reads what its handler resolved.
+## A locally refused catalogue request spends no rate limit budget
 
-**One member of that family was answered by a language change rather than by a
-rule.** PEP 709 inlined a list, set and dict comprehension into the enclosing
-scope in 3.12, so their targets reached the symbol table and read correctly
-before anything handled them; a generator expression kept its own scope and was
-open. The tell is the asymmetry, not the miss.
+Two routes disagreed and nothing said which was right. `refresh_metadata` answered 400 for a
+book with no ISBN before charging `metadata_limiter`; `lookup_isbn` charged and then answered
+400 for a malformed ISBN. Both refuse first now.
 
-**And a walrus inside a comprehension binds in the enclosing scope**, which is
-the same language rule from the other end and the direction a scope subtracting
-fix goes wrong in: `[x for x in rows if (access := build())]` has to read as a
-rebind of the handler's own name rather than be swallowed. Both seats took one
-rule apart from opposite ends without seeing each other's work.
+The limiter's subject is outbound catalogue traffic, so counting a request that makes none
+decouples the counter from what it bounds. What that cost a member was visible: scanning
+damaged barcodes and then being refused a good one, at sixty a minute each.
 
-**A symbol table block is found by name and never by position.** Under PEP 649
-a module's first child block is `__annotate__`, so `get_children()[0]` returned
-an annotation scope holding one symbol called `.format` and every binding read
-as a rebind. It reproduced only in the suite pod: the control plane runs Python
-3.13 and the pod runs 3.14.7, which is a reminder that a probe on this machine
-is not a measurement of the suite.
+Bounded rather than assumed. `check` is keyed on the caller's own username at every site, so
+nobody can spend another member's budget and the refuse at capacity path is not newly
+reachable. `tests/test_catalogue_access.py::TestALocallyRefusedRequestSpendsNoBudget` holds
+both routes. The first draft of that test used ten zeroes as its malformed ISBN, which is a
+**valid** ISBN-10, and passed for the wrong reason.
+
+## Two predicates decide whether a credentialled catalogue is asked, and they ask different questions
+
+`settings_store.ready_sources` admits a credentialled source on `credentials.is_held`, over
+`sources.NEEDS_A_KEY` minus the one source whose secret is a settings row.
+`settings_store.catalogue_logins` resolves a login on `metadata.carries_a_credential`, over
+`sources.NEEDS_A_KEY`. Different subjects, different readers. A source in the first and not
+the second sits in the plan with no entry in the mapping, and every request to it goes out
+with no credential and nothing saying so.
+
+**They agree today on a set of size one, by coincidence**, and `catalogue_logins`' docstring
+carries the measurement. `carries_a_credential` answers False for every transport but SRU, so
+the first catalogue that needs a key, keeps its secret sealed rather than in a settings row,
+and speaks anything else opens the gap.
+
+**Logged rather than refused, and the refusal of the refusal is the decision.** A raise would
+turn a silent unauthenticated request into a 500, on a case that cannot happen today, for a
+cause the caller cannot fix: `is_held` and `for_request` are two reads of the keychain, so a
+key rotated between them is a legitimate disagreement. The runtime half is
+`catalogue_access._warn_about_any_source_asked_with_no_login`, which makes the silent case
+audible, and it reads the resolved value rather than either predicate. The test half is
+`tests/test_settings_store.py::TestThePlanAndTheLoginsAgreeOnWhoNeedsOne`, which fails on the
+row that opens the gap rather than on the search that goes out bare.
+
+## One matcher serves both catalogue door rules, with a receiver exemption
+
+Two rules guard the door: nothing outside it reaches a `metadata` outbound door, and nothing
+outside it builds an asking type or an access. They were written as two matchers, one
+reference shaped and one call shaped, and that split is what carried the same defect twice.
+
+The reference shaped rule exists because a call shaped one is defeated by binding the name
+first: `d = metadata.lookup` then `await d(...)` puts no door in a call position. The
+construction rule kept a call shaped matcher, on the stated reason that a reference matcher
+would report the legitimate `catalogue_access.Enquiry.for_a_member_request(...)`, which
+mentions `Enquiry` too. **The reason was true and the conclusion was wrong**, because a third
+option excludes a reference that is the receiver of a named constructor access. Without it,
+`b = catalogue_access.Enquiry` then `b(_access=r(db))` reaches every door with no limiter
+charged, and it was clean.
+
+So both rules are one matcher, and the distinction it draws is the one the module draws: an
+asking type may be named to reach its constructor, and may not be named to be built. Measured
+over five spellings, two legitimate and three evasions: no false positive on either legitimate
+spelling, all three evasions reported. The five are parametrised arms in
+`tests/test_catalogue_access.py` rather than a measurement somebody ran once.
+
+**The alias hole was fixed on one rule and left on its sibling in the same commit**, which is
+this file's own rule about a stale figure arriving in the commit that removes a fabricated one,
+one level up: the correction is where the next instance hides. It was caught by the seat that
+had written neither matcher.
+
+## `sources.parse` returns the whole roster, so naming one source narrows nothing
+
+`sources.parse` handed a stored value naming one source does not give a plan that asks only
+that source. Every source the value failed to mention is appended in the default order and
+enabled, which is the degrade rule that keeps a hand edited or restored row askable, and
+`parse`'s own docstring is where it lives.
+
+Recorded because a test helper asserted the opposite in its own docstring, and a reader of
+that helper would have built the same wrong plan. The arm it served was sound anyway, for a
+reason worth keeping: it asserts that a warning fired, which requires the source to be in
+`plan.asked`, so a wider plan does not weaken it. Its diagonal was the fragile half, supplying
+a login for the first credentialled source where the roster holds exactly one today and is
+expected to grow. It supplies one for every such source now, so it stays silent for its own
+reason rather than for an accident of roster size.
+
+## The bound before a write that a review asked for was already there
+
+A review listed "a record is bounded before a write" as unowned, citing `refresh_metadata`'s
+own comment. Three seats read that comment independently and all three found it says the
+opposite: the ceiling on all nine columns is `catalogue.Record.__post_init__`, which clears a
+scalar the column cannot hold before the record leaves `metadata.lookup`, and a bound in the
+handler would be a fourth door beside `as_lookup`, `_match_rows` and `_bounded_match`.
+
+Refused, and recorded because the premise was wrong rather than because the fix was hard. What
+records it in the tree is that comment, which already says so.
+
+## Enrichment's cascade is not the access door's
+
+Proposed and refused: putting `enrich_book`'s three path cascade and `backfill`'s concurrency
+bound behind the door would have taken those two handlers to roughly fourteen and sixteen
+statements. The cascade is *how to ask*, which is `metadata.py`'s subject, and it carries ADR
+0006's rule that only a record found by the book's own ISBN asserts authorship. The door's
+subject is whether this library may ask, and what a member is told when it may not.
+`catalogue_access`'s module docstring records that under what the module does not own, so the
+next reader does not move it in.
+
+**The spread this was filed against is closed and the weight is not.** Six handlers rebuilding
+one decision is gone: outside the door, the book routes hold no resolver call, neither limiter,
+no API key and no `access=` argument. Measured by `ast` over non docstring statements,
+`enrich_book` stands at 32 and `backfill_from_identifiers` at 29, against 34 and 32 before,
+while `search_books` went 6 to 2 and `enrichment_candidates` 7 to 3. Those two large handlers
+are still the same spine written twice from `ask` onwards, `ask, bound, merge, count`, and the
+second copy says so in its own comment, naming the first. That remainder is what a catalogue
+answer does to a Book, which is a different concept and its own piece of work rather than an
+unstated shortfall against this one.
 
 ## Editing applied migrations was allowed, on one condition
 
@@ -16748,3 +16944,606 @@ later arm. **A stop arriving before the escalation is entered is not covered**: 
 gaps of 0.02s and 0.2s the sweep dies `rc=-15` with the arm still running, and at 2.5s, past
 the whole escalation, it passes. An arm asserting that property was written, measured and
 deleted rather than shipped green, and it has its own ticket.
+
+
+## The fold is one thing and the predicate is another
+
+**About identity keys, and not about ranking.** Four keys decided whether two books were the
+same, and the question asked was whether they collapse to one, to two, or not at all. They
+collapse to one **fold** and three **predicates**, which is the distinction none of the four
+drew. The same shape does not settle the two completeness lists, `catalogue._SCORED` and
+`metadata._COMPLETENESS_FIELDS`, which differ on which fields take part and are the other
+half of that work: see the entry they get when somebody does it.
+
+The fold is how text becomes comparable. It was written four times and the four differed by
+accident rather than by argument: one stripped a leading article and two did not, one
+composed accents and none of the others did, one collapsed internal whitespace. Nothing
+anywhere claimed those as choices.
+
+The predicate is how many fields take part, and there the differences are real and stay. A
+title alone, a title and the first credit, and a work plus its year. **No single direction is
+safe at every site**: at the two import sites and the edition picker a looser answer is the
+dangerous one, and at the preview that tells a member what an upload would skip a **stricter**
+answer raises the count of records it reports as refused, each of which is one bit about a
+Book the member cannot see. That disclosure is already accepted and measured; its size is not
+a free parameter of a refactor. A rule that moves in one direction everywhere cannot serve all
+three, so the direction is chosen once per site and stated there.
+
+**Refused: collapsing to one predicate.** `metadata.py` already records what that costs, in a
+comment written after it happened live: deduplicating the edition picker on title and author
+collapsed a five row answer to one, because five printings of one book are five rows the
+picker exists to show.
+
+**Refused: a strictness flag on one function.** A boolean makes the axis an adjective at the
+call site, and a reviewer reading a diff cannot see which caller got looser.
+
+**Refused: sharing the whole fold with the reading history rule.** Giving that one the
+*interior* punctuation fold, or the article strip, without giving it a credit buys more
+collisions and no more discrimination, at the one site that writes with no human present and
+takes its text from outside the household. It does share the composition, the case and the
+spacing, and since 2026-09-24 it shares the edge marks too; see the section on what it takes
+and what it refuses.
+
+## Whitespace is stripped after punctuation is removed, never before
+
+The fold stripped whitespace first, so a mark separated from the first word left its own space
+in the key: `Ulysses :` and `Ulysses` were two books, and `( The Dune )` no longer had its
+article at the start of the string to remove. MARC 245 carries that punctuation by convention,
+so this was the ordinary case.
+
+What holds it now is `test_a_mark_inside_the_title_leaves_nothing_behind_either`, in
+`backend/tests/test_identity.py::TestAMarkAtTheEdgeOfATitleLeavesNothingBehind`. The six arms
+beside it, five ISBD marks and the article behind leading punctuation, do **not**: every one
+puts the mark at a string edge, where the final `.strip()` absorbs the space the reordering
+leaves behind, so all six pass the swap. An interior mark has no `.strip()` to save it.
+
+**Found by an instrument disagreeing with a reading**, which is the part worth keeping. The
+claim under review was that the strict key folded strictly more than the loose one, and two
+careful readings had agreed on it. A one time sweep refuted it: every string up to length four
+over `{a, A, b, space, !, '}` plus each article prefix, 1,577 strings and 1,242,676 unordered
+pairs with the credit held constant, of which 30,116 folded under the loose key and not the
+strict one. Those figures are a one time measurement with no instrument left in the tree,
+deliberately: the class they found is pinned by the test class above, which is what a run
+recomputes.
+
+## The reading history title takes half the fold and refuses the other half
+
+`reading_history_title` was `title.lower()` and is now NFC composition after a casefold,
+whitespace collapsed and stripped, then a leading or trailing run of `: / ; . , ( ) [ ]`
+removed. Nothing else. Decided by the owner on 2026-09-24 over a scored table.
+
+**What the two halves are, and why the split is not taste.** Case, composition and spacing
+say nothing about which book a title names under any spelling, so the predicate takes them.
+Interior punctuation and a leading article do say something: two titles differing only there
+are usually one book, but *which* book is what a credit decides, and this predicate has no
+credit to decide it with. A mark at the **edge** of a title is one a catalogue put there; a
+mark **inside** it is one somebody meant.
+
+**The set is a residue of the measurement, not a subset of a standard, and the stronger claim
+was made first.** It is tempting to say the nine characters are provenanced to ISBD. That is
+over-stated in both directions, and the arithmetic has to be stated carefully, because the first
+correction of it was itself wrong by exactly two characters:
+
+- ISBD gives a meaning at a title's edge to **eight** characters: `: / ; . ,` and `[ ]`, plus `=`
+  for a parallel title.
+- **Seven** of those eight are in this set.
+- **`=` is refused**, because `C+` against `C-` is one of the titles whose punctuation is what the
+  title is about, and a rule admitting one of that family admits the rest.
+- **`+` is refused on the same measurement and was never in the eight.** It is ISBD punctuation
+  elsewhere, before accompanying material in the physical description area, so the standard does
+  not offer it at a title's edge at all. An earlier version of this entry counted it among the
+  title-edge marks, which inflated the standard's set to nine.
+- **Two are added** that the standard does not supply at all: round parentheses. ISBD prescribes
+  square brackets for data supplied from outside the source and uses parentheses elsewhere, for a
+  series and for qualifications. They are here on `(Dubliners)` against `Dubliners` alone.
+
+Seven from the standard's title edge, one refused from it, two added by measurement: nine.
+
+That matters because the provenanced version is the one a later reader finds more convincing, and
+it would license a tenth character on the standard's authority alone. **The one it would admit
+first is `=`, which the measurement refused**, and that is what makes the wrong framing dangerous
+rather than merely loose.
+
+### A provenance claim is the most quotable sentence in a module and the least checked
+
+**This paragraph was corrected three times, each time by a seat that had not written the previous
+version, and the decision it describes never moved once.** Every correction was arithmetic, not
+judgement:
+
+1. **The set is provenanced to a published standard.** Wrong: the standard does not supply two of
+   the nine.
+2. **The standard names eleven characters at a title's edge, of which `=` and `+` are refused.**
+   Wrong by two: parentheses were being counted inside the standard's set and outside it in
+   consecutive paragraphs, so the same text asserted eleven and nine.
+3. **`+` is one of the standard's title-edge marks.** Wrong: ISBD puts `+` before accompanying
+   material in the physical description area, so it is never offered at a title's edge at all.
+
+**The pattern, which is the part worth keeping.** Each version was more confident than the one
+before, each was written immediately after checking something adjacent to the claim, and none of
+them was caught by the person who wrote it. A citation to a named standard reads as already
+verified, so it is the sentence a reviewer nods past and a later editor quotes back. The damage is
+not the wrong count: it is that a provenance licenses **extension**. A reader holding "these are
+the ISBD title-edge marks" has a reason to add the tenth character, and the one they would reach
+for first is `=`, which the measurement refused.
+
+**So state what each source contributes and let the arithmetic be falsifiable**: seven from the
+standard's title edge, one refused from it, two added by measurement, nine. A reader can check
+every one of those against the standard and against the arms. "Provenanced to ISBD" cannot be
+checked at all, which is why it survived three rounds of review.
+
+**Measured over eleven beneficial merges and six harmful ones**, against the real
+transformations rather than against a description of them:
+
+| candidate | reaches | merges books that differ |
+|---|---|---|
+| `title.lower()` | 0 of 11 | 0 of 6 |
+| remove all punctuation, anywhere | 11 of 11 | **5 of 6** |
+| strip any edge run, whatever the character | 11 of 11 | **4 of 6** |
+| the ISBD marks `: / ; . ,` alone | 9 of 11 | 0 of 6 |
+| **those marks plus `( ) [ ]`** | **11 of 11** | **0 of 6** |
+
+The harmful six are `C++` against `C#`, against `C`, `C#` against `C`, `C+` against `C-`,
+`B#` against `Bb`, and `The C++ Programming Language` against `The C Programming Language`.
+Their punctuation is what the title is about. The last pair is the one that separates the two
+rejected candidates from each other: an edge rule spares it and a rule reaching inside a title
+does not. Brackets are in the subset on two measured cases, a cataloguer-supplied `[Hamlet]`
+and a parenthesised `(Dubliners)`, which is what took nine of eleven to eleven with the
+harmful column unchanged.
+
+**Refused: removing punctuation from inside a title.** It merges five of the six above. This
+supersedes the earlier decision that the whole fold was the right widening.
+
+**Refused: stripping a leading article.** `The Hobbit` and `Hobbit` stay two keys here, which
+is the difference `MarcIndex` relies on: the stricter index has a credit to tell them apart
+and this one does not.
+
+**Unchanged: author blindness**, by the owner's instruction of 2026-09-05. That instruction is
+amended rather than reversed; only the normalisation moved.
+
+**The enumeration stopped being one, and that is what answered the objection to it.** An
+enumeration is the shape that keeps failing in this repository, and the first three guards over
+this set all failed the same way: each derived its cases from the constant, so adding a
+character supplied its own blessing and removing one took its arm away. What closed the class
+was an arm that stops enumerating. It derives the **expectation** from the constant and takes
+the **behaviour** from the function, over every codepoint: a character comes off an edge exactly
+when casefolding and composing it leaves nothing but edge marks and whitespace. Over all
+1,114,112 codepoints the strip set is exactly **39** characters, the nine marks, 29 whitespace
+characters and the Greek question mark, with **zero** disagreements, and the rule names none of
+them.
+
+**An arm with no exclusion to state is the point.** Every sampled version had one and the
+exclusion was always where the hole was: the ASCII version excluded non-ASCII, and a guillemet,
+a fullwidth colon, an ideographic full stop and an em dash all sat in that exclusion. This is
+the resolution this repository keeps arriving at from different directions, a rule that held
+because it stopped enumerating rather than because somebody enumerated better.
+
+**Two cases the set still gets wrong, recorded rather than fixed.** `.hack` keys as `hack` at
+the leading edge and `V.` keys as `V` at the trailing one, so the two edges are not asymmetric
+and an earlier claim that they were is withdrawn. Neither discriminates between the two accepted
+candidates, since the ISBD marks alone merge both identically, so neither is an argument about
+brackets. They are the price of stripping an edge at all, and the alternative measured worse.
+
+**Refused: letting the strip reach the empty key.** A title of nothing but edge marks would
+strip to nothing, and the empty key is not inert. `create_missing` stores a Book titled `.` on
+the first sync that sees one, `Book.is_private` defaults false so that Book enters **every**
+member's `Shelf.seen_by`, and every later punctuation-only title from any source then matches
+it and takes the whole write set. Measured: 1,107 non-blank strings of three characters or
+fewer over these marks and a space reach one key without the guard, and 900 distinct keys with
+it. Under the `.lower()` this replaced, the empty key had no live source, because both call
+sites refuse a title that is genuinely empty, so the degeneracy would have been new rather than
+inherited. So the strip yields the collapsed text when it would otherwise empty it, which
+changes no real title and costs none of the eleven beneficial merges.
+
+**This is the one place the implementation goes beyond the rule as decided**, and it was found
+by the security seat after the implementer's own bound for it was wrong in both halves: the
+implementer had it needing two punctuation-only titles already on one shelf, where in fact one
+arrives in the feed and the run manufactures the other, and the Book it manufactures is visible
+to every member rather than to one.
+
+**The implementation departs from the decision's stated order and this is why.** The decision
+reads composition then casefold. The order shipped is casefold then compose, which
+`_casefolded` owns for both callers, and
+`test_case_is_folded_before_the_composition_here_as_well` holds it.
+
+**The first justification given for that departure was wrong and the correction is the
+interesting part.** It cited `J̌ules` against the precomposed `ǰules`, which key **together**
+under both orders, because U+01F0 casefolds to a `j` and a combining caron whichever side of the
+composition it sits on. Case folding preserves canonical equivalence, so for nearly every title
+the two orders agree. A design seat measured that the arm could not fail and concluded the
+ordering was inert at this caller; **that conclusion is also wrong**, and accepting it would have
+weakened the guard or reverted the order. A third sweep, which names the members that produced
+its answer, finds 8 single codepoints where the two orders disagree on key equality, all in one
+Greek family: U+0390, U+03B0, U+1FD2, U+1FD3, U+1FD7 among them. `ΐ` against `Ϊ́`, which render
+identically, key together under the shipped order and apart under the decided one. That pair is
+now the arm. Base-plus-mark sequences give zero disagreements, which is why a sweep over those
+alone returns nothing and reads as a proof.
+
+**What holds all of it** is
+`backend/tests/test_identity.py::TestTheReadingHistoryTitleTakesHalfTheFold`. Its two refused
+halves are pinned as a **relation against `fold_title`** rather than as literals: an arm
+asserting only that this key keeps a leading article passes on a fold that has stopped
+removing one, which is the single edit under which the two predicates agree and the class is
+still green.
+
+## A leading article is a title's, never a credit's
+
+The same normaliser ran over the title and over the author, article pass included, so
+`Das Gupta` folded to `gupta` and collided with a different person. The article list only ever
+described titles; that it reached the credit was never argued anywhere.
+
+`authors.py` already owned the right answer for a credit and the fold now borrows it rather
+than restating it: punctuation folds to a space rather than to nothing, which puts
+`J.R.R. Tolkien` with `J. R. R. Tolkien` instead of driving them apart.
+
+## `identity.py` is kept although the depth instrument argues against it
+
+Measured with ADR 0008's own generator on the merged tree: **5.8 statements behind each public
+name**. The shallowest row in that ADR's table is `custom_fields.py` at 10.2, so by the
+instrument the ADR is built on, this module is shallower than anything it argues about. **Stated first and plainly, because the
+next depth review will measure it and should meet the disagreement rather than a case built as
+though the number supported it.**
+
+Kept on two grounds the instrument does not measure. First, the one `book_columns.py` already
+won: a module whose value is being the single site where a partition is stated is not made
+better by having more statements behind it, and that module answers 21 statements behind zero
+public functions. Second, and decisive, the import direction. The fold's other home would be
+`importing.py`, and `metadata.py` does not import `importing.py`: giving it that edge points
+the outbound catalogue module at the importer, and a reader tracing those imports would find
+the edge and mistrust it.
+
+The thinness concentrates in the three predicates, each a line or two over a fold, and they
+stay, because a reader learning from one file that there are three predicates and why is worth
+more than the statement count costs.
+
+**Not added to that ADR's table**, because the generator reads its row set out of the document
+and that row set is the modules the ADR argues about, which this one is not. **The exclusion is
+recorded here because nothing detects it**: the depth test only checks rows that exist, so the
+table is equally green with the row and without it, and a reader who recomputes the table and
+finds a backend module missing should meet the reason rather than the gap.
+
+## An arm compared against itself survives every mutant, and the sweep cannot see it
+
+`test_it_has_no_credit_in_it_at_all` asserted
+`reading_history_title("Selected Poems") == reading_history_title("Selected Poems")`. Both
+sides call the same function on the same input, so both move together under any change to it.
+The arm passes on every mutant and on every future version of the rule, including one that
+deletes the body and returns a constant.
+
+**The mutation harness is blind to this by construction and no count reveals it.** A sweep
+reports which mutants an arm fails on. A tautology fails on none, which is indistinguishable
+in the report from a rule nothing mutated: a survivor is attributed to a missing arm, never to
+a present one that cannot fail. Measured here: fifteen mutants against the identity arms found
+five survivors and named none of them this, because the shape is not a survivor at all.
+
+**What caught it was a second seat reading the arm and asking what it would fail on**, which
+is the one instrument that sees a test with no failure mode. So the cheap check is that
+question, asked by somebody who did not write the arm.
+
+**The tell is both sides being the same call**: the same function over equal arguments, under
+`==`. Not merely sharing a term, which would flag `fold_title("Dune") != fold_title("Emma")`,
+a good arm.
+
+**The fix is not a stricter comparison, it is a second observer.** A predicate taking no credit
+argument has no input by which it alone can show what it ignores, so the claim is stated as a
+contrast with the predicate that does have one, over the same pair.
+
+## An arm that pins the wrong thing, and the seat that withdrew its own finding
+
+The other side of the entry above. That one is an arm that cannot fail; this one is an arm
+that fails for the wrong reason.
+
+A critic seat reported that changing the key separator from `|` to `:` escaped every arm, and
+asked for an arm to catch it. The arm that existed had pinned the literal `|`, which is why an
+earlier version of the separator rule had already passed while losing its property. **The right
+answer turned out to be neither arm**: once the real property was written down, that no fold
+can emit a separator so a work key carries one and a printing key two, changing the character
+is an **equivalent mutant**. It alters nothing the module claims. The seat withdrew that half
+of its own finding and said why.
+
+**So an escaping mutant that the stated property licenses is a better outcome than an arm
+pinning a spelling.** A sweep cannot tell the two apart: both show as a survivor, and the
+survivor that should be closed and the survivor that should be licensed look identical in the
+report. Only the property decides which, and the property has to be written down before the
+question can be asked.
+
+**A seat that withdraws a finding with a reason is worth more than one that never does.** The
+cost of the alternative is an arm added to satisfy a report, pinning a character nobody chose
+deliberately, which is how the enumerating guard this repository keeps rediscovering gets
+built one reasonable request at a time.
+
+One residual was found here, named, and deliberately left: a fold mutated to emit a separator
+only for an input the witness list does not carry escapes both arms, and no finite list of
+inputs closes it. The guard stops there rather than growing a list of spellings, which is the
+rung it would fall to.
+
+## A guard for the general components folder names no domain word
+
+The obvious rule greps the folder for a book, a loan and a tag. `Icon.tsx` names `book`,
+`bookmark` and `tag` as glyph names, so that rule is red on a drawing vocabulary the day it is
+written, and the fix that adds a fourth spelling is the shape this tree has watched fail
+before. The rule that ships asks two questions instead, neither of which knows what a book is:
+which message namespaces a module states, against how many page folders state the same ones;
+and what a general component is allowed to name, stated as an allowance because the refusals
+are open ended. Both are green on the shipped tree with no exemption, and the violation the
+ticket was opened for fails by name.
+
+## The generality half of the components bar is left to review, deliberately
+
+`src/components/index.ts` states two halves: useful to more than one page, and carrying no
+knowledge of the domain. Only the second is enforced.
+
+Measured: the predicate "reached by exactly one page folder" reports `CollapsibleSection`,
+which is correctly general and whose every other mention in the tree is a comment. A component
+useful to several pages and used by one is indistinguishable, by any reading of the tree, from
+a component that belongs to its only caller. Enforcing that half therefore requires a
+suppression list whose rows carry a judgement about intent that no later reader can check, and
+which nothing can ever retire.
+
+Two seats reached the `CollapsibleSection` result independently, from different instruments.
+The half that is a fact about the tree is enforced; the half that is a judgement is left to
+review.
+
+**The counter, recorded because it was argued rather than conceded**: the storage door rule
+beside it ships a four row exemption table, so a table with reasons is house style rather than
+a smell. The distinction drawn here is that each storage row states a *fact* about the module
+it names, which keys it touches, and an arm fails when that fact stops being true; a
+generality row would state an *opinion* about what a component could be useful for, which no
+arm can falsify.
+
+## A guard over a platform API derives the API rather than naming it
+
+The obvious rule refuses a bare `toLocaleDateString` outside `frontend/src/lib/date.ts`. That
+is the enumeration shape this tree has already watched fail: `toLocaleTimeString` was live in
+the tree, unlocalised, twice in one file, so the rule would have shipped green over two
+instances of the defect it was written for. Widening it to four names was proposed and is also
+wrong, for two reasons that are measurable rather than arguable. It is not closed:
+`Intl.RelativeTimeFormat` compiles under this `tsconfig`'s `lib` today and formats a point in
+time, and `LoanRow` already computes days overdue by hand, so it is the next component rather
+than a hypothetical. And it is not a partition: `toLocaleString` is published by `Date`,
+`Number`, `Array`, `BigInt` and `Object` prototypes, so naming it is `toLocaleLowerCase` one
+step over, which is the false refusal the components rule decision was written about.
+
+**The rule derives the surface instead.** Every `toLocale` prefixed member of the prototypes
+that publish one, plus every own name of `Intl`: 5 and 12, and all 17 are partitioned into the
+half that renders a date and the half that does not, refused when a name is classified nowhere
+or twice. That is `backend/book_columns.py`'s discipline rather than a new one.
+`toLocaleLowerCase` goes green by classification rather than by an exemption naming
+`AuthorsPage.tsx`, and the shipped tree needs one named path and zero exemption rows.
+
+**The runtime is the one the suite runs in, which is not the runtime the first version of this
+named.** It is a bun image pinned by digest where the pipeline declares it, and that image
+carries no node at all. Both runtimes answer 5 and 12, so the conclusion survived; the
+instrument did not, and a measurement attributed to the wrong instrument is the error this
+repository charges for most often.
+
+**What that buys on growth is a report rather than an admission, in one direction only.** A
+member arriving in a runtime bump fails the totality arm naming itself. A member a **browser**
+ships before the test runtime does is absent from the derived surface, classified nowhere, and
+fails nothing, because a short surface empties both of the arm's filters. The lag has always
+run browser first, `Intl.Segmenter` and `Intl.DurationFormat` both reaching Chrome months ahead
+of node, so this is the direction that matters for a rule about what a member sees. It is
+stated as a residual rather than closed, because closing it needs a list the browser agrees
+with and no arm reading the test runtime can have one.
+
+**A second watched list sits outside the partition, and the measurement that first excused it
+was taken on the wrong member.** `toDateString`, `toTimeString` and `toUTCString` render a date
+to a person with no locale consulted at all, at 0 sites each. The first version of this
+dismissed that whole class on a count taken over `toISOString`, which is the one member of the
+class with legitimate uses: 2 code sites, an API payload and a backup filename. So the
+measurement justifying the dismissal had been taken on exactly the case that could not be
+watched. The three are watched by the keep out arm and held out of the totality comparison,
+because none is `toLocale` prefixed or an `Intl` member and putting them in the partition would
+fail it as classified but unpublished.
+
+**`toLocaleString` is classified as rendering a date although it is ambiguous, and refusing it
+is the deliberate half.** A count's own `toLocaleString` would be refused although it formats
+no date; telling that from a `Date` receiver needs a type, which no walk over a parse has.
+There are zero of either in the tree, so the refusal costs nothing on arrival and lands in the
+diff of whoever writes the first one. **It must not be exempted for numbers**: it is the only
+name in the rule that would catch a `Temporal` value's own `toLocaleString`, and `Temporal` is
+a sibling global rather than an `Intl` member, so nothing else in the rule can see it.
+
+**Reading off the parse was claimed to close computed access and did not, and the gap was a
+whole spelling.** A `TemplateElement` keeps its text in `value.cooked`, an object with no
+`type`, so the node test refused it and the walk stopped one level above the text. Measured
+over nine ways to name a member: five were invisible, a template literal index, the same
+through a `const`, through an `as const` record, through a `call` on the prototype, and a
+template literal naming an `Intl` member, every one of them ordinary typechecked TypeScript
+because `as const` gives the template a literal type. `withoutProse.ts` in the same directory
+already counted `TemplateElement` among the node kinds carrying text, so the tree held the fact
+this was missing. The shared name walk reads it now, which strengthens every rule sharing that
+helper. What remains is concatenation, held by the type checker rather than by any arm, since
+neither `Date` nor `Intl` has an index signature.
+
+**The blind spots are a class and each is stated with its own count, one per line.** The first
+version put four in one sentence and offered a measurement for one of them, so a reader took
+the whole list as uniformly out of scope, and one of the four was live in the tree: a date
+input renders a date in the browser's locale at 2 sites, `CopyPanel.tsx` and `LoanPanel.tsx`,
+which is the same defect the door exists for, unreachable by any module level rule because the
+rendering belongs to the control. The others are a backend formatted date at 0 sites, a date
+reaching the translation door as a value, held by `TranslateParams` rather than by any arm, and
+the glob's own scope: `.ts` and `.tsx` under `src`, which leaves the service worker cleanup
+script and `index.html` outside at 1 file each, an inclusion list inside a rule whose argument
+is that inclusion lists go stale.
+
+**Two false refusals are accepted rather than exempted, and named so neither reads as a bug.**
+`Intl.DateTimeFormat` used only to read a resolved time zone is reported although it renders
+nothing: 0 sites today, one feature away, and exempting it would grow the door a function that
+renders no date. `toLocaleString` on a number is reported for the reason its own classification
+gives.
+
+**And the counting arm reaches only half the surface, which is stated because a reader will
+assume otherwise.** The storage rule can count every mention of `localStorage` because that is
+one named global. A `toLocaleDateString` call names its receiver, and a receiver is any
+expression, so there is nothing to count on the `Date.prototype` half. `Intl` is a named global
+and the arm applies there alone.
+
+## An arm that cannot fail the claim it was written for, and it is a family now
+
+**Three members in two days, so it is recorded as a class rather than as a third anecdote.** An
+arm comparing a function's output with itself, which has its own entry above. A storage guard
+that took five versions to stop naming spellings. And a threshold arm shipped with the date
+rule above: it existed to stop a docstring's claim going stale, the claim being that
+`toLocaleString` is published by all six prototypes in the list, and it asserted that the
+publisher count was greater than one. The claim was also **false**, five of six, `String`
+publishing the two case folding names and not this one. So the arm passed at five, would have
+passed at two, and could not have failed the sentence it was written to hold.
+
+**Neither a mutation sweep nor a green suite can see an arm that cannot fail.** It is not a
+mutant, it is a tautology, so nothing kills it and nothing reports it. That half was already
+written down; what the third member adds is the provenance.
+
+**The arm was written in the same commit as the claim, by the author of the claim, who had the
+correct figure in their own probe output at the time.** The probe had printed the six
+prototypes and their members, `String` plainly among them with no `toLocaleString`, and "all
+six" was written anyway. So the shape needs neither time nor a moved constant to appear: an
+author checking their own sentence in one sitting produced it.
+
+**And the fourth instance is the repair.** The first fix replaced the threshold with the
+publisher list's own length minus one, and claimed that made the prose and the assertion move
+together so neither could drift. It did not. That count is defined in terms of the list, so
+deleting an entry moves **both sides** together: measured by deleting each of the six in turn,
+it left `Number`, `Array`, `BigInt` and `Object` deletable with the whole block green, four of
+six, which is the original report unfixed. A threshold and a self relative count are the same
+failure wearing different clothes, and the seat that reported the first one had to report the
+second.
+
+**So the repair that generalises is comparing against the subject by identity**, naming the
+members rather than counting them. **And which arm catches which is stated, because a count of
+catches is not evidence**: that arm reddens on five of the six deletions and not on `String`'s,
+whose removal leaves the publisher list unchanged; `String` is caught instead by the totality
+arm, since it is the sole publisher of the two case folding names and losing it empties them
+from the derived surface. Six deletions, two named arms, no gap.
+
+**The same family from the other side, in the same block.** The arm explaining a bare `Intl` by
+a member name accepted any identifier prefixed with one, and `Intl.Locale` is a member while
+`Locale` is this app's own generated enum, with `LocaleProvider` and `LocaleContextValue`
+beside it. It was green for the reason it stated only by luck, because the three modules naming
+`Intl` in code each also name a real member; it was one import from passing for the wrong
+reason.
+
+**And a register draft reproduced, in prose, the publish gate violation the commit before it
+had just fixed in code.** An entry in this register publishes, so a draft for one is under the
+same rule as a module, and naming the file that pins the suite image put a stripped path and an
+internal machine name into it. The seats that had fixed exactly that in one place wrote it
+again in the other, which is the argument for checking the built tree rather than trusting that
+a lesson has been learned.
+
+## Four date formats are kept although two of them are drift
+
+`BookDetail` renders an abbreviated month in two panels and a written out month in a third, on
+one screen, and no decision produced that. The design seat recommended collapsing them and it
+is very likely right.
+
+**They are kept, and the ground is the scope rather than the merits.** Collapsing them changes
+what a member sees on a page nobody filed anything about, and the module's constraint is that
+every format renders exactly what the call site it replaced rendered: verified over five dates
+in both languages, fifty comparisons, zero differences. That constraint is what makes the
+change reviewable as a refactor with three locale fixes as the only visible movement, and
+spending it on an unrequested rendering change would cost more than the tidiness is worth.
+Dropping the seconds from a reset code's expiry, which reads to the second, was refused on the
+same ground and in the same breath. Both are in the tracker as the question of whether the book
+detail screen should spell a month three ways.
+
+## A supported language is an own property of the catalogue, not anything `in` it
+
+The test deciding whether a stored or browser offered language is one this app speaks asked
+whether the catalogue had the name at all. That question walks the prototype chain, and both
+readers take a string the viewer controls, so a stored locale of `toString` passed as supported
+and then indexed the catalogue to a function rather than to a message table. It asks for an own
+property now.
+
+**Bounded and pre-existing, and recorded for the shape rather than the severity.** The value
+comes from the viewer's own storage, so nobody but the viewer can set it, and the defect
+predates the date module work whose review seat found it. **That seat raised it rather than
+taking it**, because the file was outside what it owned, which is the behaviour this repository
+wants when a seat finds a live defect in somebody else's file.
+
+**The arm is parametrised over five names every object answers to rather than asserting
+`toString`.** A fix special casing the one name in the report passes a test naming only that
+name, and the class here is every inherited property, not the one a reviewer happened to
+stumble on.
+
+## The settings import hooks are folded at the contract, not at the runtime
+
+A ticket read four hooks in `LibrarySettingsPage/hooks.ts` as one shape repeated: the same
+sixty lines with two generated names changed. Recounted, they are **two families and two
+singletons**, and the ticket named the wrong four.
+
+`useLibraryImport` and `useMarcImport` are the real pair: 62 and 59 raw lines, 40 of 48 comment
+stripped code lines identical, both a generated preview mutation plus a generated write over
+one `File`. `useCoverBackfill` and `useStoreIdentifierBackfill` are a **tighter** pair the
+ticket did not see, and the latter's docstring already says so in prose.
+
+`useCalibreImport` and `useStoreImport` are not that shape and do not fold into each other.
+Calibre reads one SQLite index plus an optional per book cross check; the store hook reads
+several independent sources at once and owes each one its own outcome, which is what the fourth
+arm of `StoreSource` exists for. Folding their errors together would delete that rule. What
+they genuinely share, the write, **was folded before this ticket was written**, into
+`importing.ts` over `lib/bulkWrite.ts`, and `LibrarySettingsPage.tsx` already carries the
+refusal that there are two import cards and they are not merging.
+
+**So the fold taken here is at the type level and the runtime fold is refused.** Every shape a
+runtime fold can take puts a generated hook behind a parameter or a branch, and both success
+callbacks close over the state the shared hook would have to own; what comes back is a hook
+whose caller still supplies half the body. One generic interface with two aliases states each
+family once and has the compiler check membership, at no behaviour cost, which is the part of
+the ticket that was right.
+
+**And the two hooks that are genuinely near identical have no tests.** Nothing in the test tree
+references `useLibraryImport` or `useMarcImport`; the settings hooks test names
+`useCalibreImport` and `useStoreImport` as the only two it covers. That is the reason a runtime
+fold was refused rather than merely declined: it would be a behavioural change with no net
+under it. **A type level fold needs no net, which is the other half of why it is the one
+taken.**
+
+The held file harness the ticket priced as paid for four times is defined once and called three
+times, all three against `useStoreImport`. Retiring it was refused: it is a `File` shaped value
+handed to the **production** opener, so it is how this repository's ban on replacing a module
+is discharged here, and an injected opener would stop covering a reader that throws, which a
+comment at the site records as the one arm no test used to reach.
+
+## A generated `TError` is not the type of any error this app throws
+
+Orval gives every generated mutation a validation error type, so an unannotated hook that
+surfaces a mutation's error infers it. **That type is never true at runtime.** `api/mutator.ts`
+throws exactly `ApiError` and `NetworkError`, both extending `Error`; the generated
+`HTTPValidationError` is a plain interface carrying an optional detail list, and nothing
+outside the generated tree ever constructs one.
+
+It has been harmless because it stayed inferred and was erased at the component boundary: the
+cards declare the error as `unknown` and narrow it in `components/ErrorState.tsx`. **Writing a
+result interface is what would have published the fiction**, inviting a caller to read a detail
+that is absent for every failure this app can produce.
+
+So every error member of a declared hook result here is `unknown`, and the reason is written at
+the site rather than left to look like laziness. Nothing type level can catch this, because the
+generated default **is** the type; only a runtime assertion could, and the one test that
+mentions `ApiError` checks the mutator in isolation and never connects its real throw to the
+generated parameter.
+
+**Recorded because the first draft of this work did the opposite**, typing the member as the
+generated error with a docstring arguing for it, and the design critic caught it.
+
+## A contract derived from a measured pair survives review; one reasoned out from scratch did not
+
+Three shared contracts were proposed for the settings page hooks. **Two were derived from pairs
+whose bodies had been measured against each other and both survived**, on the numbers that
+justified them: 16 of 20 and 40 of 48 identical code lines, each parameterised on exactly the
+axis that varied. **The third was reasoned to from scratch and the critic killed it**: seven
+members of which only four meant the same thing in both hooks, and two of its docstrings were
+false as a consequence.
+
+**The asymmetry is the finding, not the deletion.** A contract derived from a measured pair is
+a description of something that already exists, so its members are the pair's agreements and
+nothing else. A contract reasoned to from the shape of the problem is a guess that looks like a
+description, and the members it invents read exactly like the members it observed.
+
+**So the cheap move is to attack the part you invented rather than the part you inherited**,
+which is what the implementer asked its critic to do, naming that base specifically. It was the
+only invented part of the design and the only part that was wrong.
+
+**And the ticket's own premise was the same error one level up.** It asked for duplicated lines
+to be removed. The work ends at 292 lines added and 13 removed over two files: only two lines
+could safely go, the dead members, and what was missing was a written contract rather than a
+shared body. A count of repeated lines reads like a measurement of the cost and is not one.

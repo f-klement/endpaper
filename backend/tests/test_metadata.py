@@ -35,8 +35,6 @@ import logging
 import math
 import random
 import re
-import symtable
-import textwrap
 from base64 import b64encode
 from pathlib import Path
 from typing import Any
@@ -145,14 +143,14 @@ def access(
 ) -> metadata.Access:
     """One `metadata.Access`, with the roster defaulted the way `ALL_SOURCES` is.
 
-    `logins` is `None` rather than an empty mapping so this never restates the
-    module's own default: a test that passes nothing gets whatever
-    `metadata.Access` ships, which is what the routes get for a library holding
-    no credential.
+    **`logins` has no module level default any more, so this helper supplies the
+    empty mapping rather than omitting the argument.** The default was what let a
+    hand assembled access type check and send nothing, which is the hole the
+    router walk existed to report; `metadata.Access` now refuses the omission at
+    the call site. An empty mapping here is a test saying "this library holds no
+    credential", which is a claim rather than a silence.
     """
-    if logins is None:
-        return metadata.Access(plan=plan, api_key=api_key)
-    return metadata.Access(plan=plan, api_key=api_key, logins=logins)
+    return metadata.Access(plan=plan, api_key=api_key, logins=logins or {})
 
 
 async def lookup(
@@ -3279,6 +3277,33 @@ def _open_library_routes(mock: respx.Router, **parts: httpx.Response) -> None:
 class TestMergingTwoSearchRows:
     """`_merge_matches` when one row has headings and the other does not."""
 
+    def test_two_answers_differing_by_a_leading_article_are_one_row(self):
+        """The picker got looser when it took `identity.printing_key`.
+
+        Its former key stripped no article, so `The Hobbit` and `Hobbit` were two
+        rows. Written down as an arm because the module that owns the key names
+        this site as one where looser is the dangerous direction, and a
+        loosening nothing asserts is one the next reader tightens back by
+        accident. What bounds it is that the year still discriminates and that
+        merging fills gaps rather than overwriting.
+        """
+        leading = Record(source="bnf", title="The Hobbit", author="Tolkien", year=1937)
+        following = Record(
+            source="loc", title="Hobbit", author="Tolkien", year=1937, publisher="Allen"
+        )
+
+        merged = metadata._merge_matches([leading, following])
+
+        assert len(merged) == 1
+        assert merged[0].publisher == "Allen"
+
+    def test_two_printings_of_one_work_stay_two_rows(self):
+        """The bound on the arm above, so it cannot read as a general fold."""
+        leading = Record(source="bnf", title="The Hobbit", author="Tolkien", year=1937)
+        following = Record(source="loc", title="Hobbit", author="Tolkien", year=1966)
+
+        assert len(metadata._merge_matches([leading, following])) == 2
+
     def test_a_populated_list_beats_an_empty_one(self):
         """The regression this was written for, measured live before fixing.
 
@@ -3900,9 +3925,9 @@ class TestTheCandidates:
 
     @pytest.mark.asyncio
     async def test_a_search_row_sharing_a_title_and_an_author_is_still_a_row(self):
-        """The bug a live run found. `_match_key` is title plus author, and
-        every row on this page shares both by construction, so deduplicating on
-        it collapsed a five row answer to one. Two printings of one book are
+        """The bug a live run found. `identity.work_key` is title plus author,
+        and every row on this page shares both by construction, so deduplicating
+        on it collapsed a five row answer to one. Two printings of one book are
         exactly what this endpoint exists to show."""
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock)
@@ -7332,299 +7357,6 @@ class TestACatalogueLoginReachesTheRequestItWasStoredFor:
         assert "authorization" not in k10plus.calls.last.request.headers
 
 
-#: The one resolver that opens the keychain, spelled as the walk below finds it.
-_RESOLVER = "library_access"
-
-#: The throwaway function `_bound_names` asks `symtable` about, named so the
-#: block can be found by name rather than by position.
-_SCOPE = "_scope"
-
-
-def _is_resolver(called: ast.expr) -> bool:
-    """`settings_store.library_access` however the module was named, or bare.
-
-    The attribute arm does not check what it hangs off, so any
-    `something.library_access(...)` counts. Lenient in the direction of a missed
-    report rather than a false one, which is the direction every blind spot in
-    this file is written to fail in.
-    """
-    if isinstance(called, ast.Attribute):
-        return called.attr == _RESOLVER
-    return isinstance(called, ast.Name) and called.id == _RESOLVER
-
-
-def _bindings_in(scope: ast.AST) -> tuple[set[str], set[str]]:
-    """Names bound in this scope's own body, split by whether a resolver bound them.
-
-    **Stops at a nested function**, so one handler's resolved local is never read
-    as another's. `routers/books.py` binds the name `access` in six handlers and
-    one of them binds it from `_google_books_in_force`, which resolves no
-    keychain: a walk collecting names across the whole module would report that
-    one as carrying the deployment's logins.
-
-    **Both halves, because a rebind is the cheap evasion.** `access =
-    library_access(db)` followed by `access = metadata.Access(plan=access.plan,
-    api_key=access.api_key)` sends no login and reads, to anything watching only
-    the first line, exactly like the handler that does. `frozen=True` does not
-    stand in the way: it refuses mutation of the object and not rebinding of the
-    name. Found by the security seat on 2026-09-17, one line inserted into
-    `enrich_book`, whole suite green.
-    """
-    resolved: set[str] = set()
-    rebound: set[str] = set()
-    stack: list[ast.AST] = list(ast.iter_child_nodes(scope))
-    while stack:
-        node = stack.pop()
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            # **A `def` is a statement and it binds its own name**, which the
-            # skip below used to take with the body. `class` was caught and
-            # `def` was not, and that asymmetry was the tell. Asked of
-            # `_bound_names` like any other statement rather than reading
-            # `node.name`, so the answer stays the compiler's. Both seats
-            # reached this independently, 2026-09-17.
-            rebound.update(_bound_names(node))
-            continue
-        if isinstance(node, ast.Lambda):
-            continue
-        # **Statements classify, expressions do not.** An assignment's own
-        # target is an `ast.Name` child, and a walk classifying every node put
-        # that name in both halves at once.
-        if isinstance(node, ast.stmt):
-            targets = _bound_names(node)
-            if targets:
-                by_resolver = (
-                    isinstance(node, ast.Assign | ast.AnnAssign)
-                    and isinstance(node.value, ast.Call)
-                    and _is_resolver(node.value.func)
-                )
-                (resolved if by_resolver else rebound).update(targets)
-        stack.extend(ast.iter_child_nodes(node))
-    return resolved, rebound
-
-
-def _bound_names(node: ast.stmt) -> set[str]:
-    """Every name this statement binds, asked of CPython's own symbol table.
-
-    **Not a list of binding spellings, because that list is open.** Three
-    versions of this enumerated: the first read `ast.Store`, which misses
-    `except ... as`; the second added that one field and called it the only
-    exception, which was false by six, since `ast.MatchAs.name`,
-    `ast.MatchStar.name`, `ast.MatchMapping.rest` and `ast.alias`'s two are
-    plain strings as well. Each round was caught by the other seat and each fix
-    was one further arm, which is the shape `CLAUDE.md` names as structural or
-    nothing. `symtable` answers for every spelling the grammar has and for the
-    ones it grows, because it is the compiler's own answer to this question.
-
-    **Imported counts as bound.** `import os as access` reports `is_imported`
-    and not `is_assigned`, so a walk reading only the second called it resolved.
-
-    **Nested statements are replaced by `pass` before the question is asked**, so
-    a compound statement claims only what it binds itself: a `for` loop holding
-    a resolution would otherwise own that name and lose it to the rebind set.
-    The replacement is generic, every field that is a list of statements, so a
-    statement kind added to the grammar shallows itself.
-    """
-    body = textwrap.indent(ast.unparse(_shallowed(node)), "    ")
-    try:
-        # **Asked inside an `async def`, which is the scope these statements
-        # really live in.** At module level `await` is a `SyntaxError`, and half
-        # the statements this walks are inside a coroutine.
-        #
-        # **Found by name and never by position.** Under PEP 649 a module's
-        # first child block is `__annotate__`, so `get_children()[0]` is an
-        # annotation scope holding one symbol called `.format`, and every
-        # binding looked like a rebind. It reproduced only in the suite pod,
-        # because the control plane runs 3.13 and the pod runs 3.14.7.
-        blocks = symtable.symtable(
-            f"async def {_SCOPE}():\n{body}\n", "<statement>", "exec"
-        ).get_children()
-        table = next(block for block in blocks if block.get_name() == _SCOPE)
-    except SyntaxError:
-        # The case this is for is `from x import *`, legal at module level and
-        # not inside a function, which binds no name this walk can name.
-        # **It does not claim to be the only one**, which is the claim this
-        # function has now made wrongly three times: a `nonlocal` is legal in
-        # neither scope and raises straight out of here. That is the right
-        # direction for a statement this cannot classify, loud rather than
-        # absorbed, and it is why the fallback catches rather than returns.
-        table = symtable.symtable(ast.unparse(_shallowed(node)), "<statement>", "exec")
-    return {
-        symbol.get_name()
-        for symbol in table.get_symbols()
-        if symbol.is_assigned() or symbol.is_imported()
-    }
-
-
-def _shallowed(node: ast.stmt) -> ast.stmt:
-    """A copy of this statement whose nested statement lists are a bare `pass`.
-
-    Copied through `ast.unparse` rather than mutated, because the node belongs to
-    the caller's tree and the walk reads it again.
-    """
-    clone = ast.parse(ast.unparse(node)).body[0]
-
-    def strip(inner: ast.AST) -> None:
-        for field, value in ast.iter_fields(inner):
-            if isinstance(value, list) and value and all(
-                isinstance(item, ast.stmt) for item in value
-            ):
-                setattr(inner, field, [ast.Pass()])
-            elif isinstance(value, list):
-                for item in value:
-                    if isinstance(item, ast.AST):
-                        strip(item)
-            elif isinstance(value, ast.AST):
-                strip(value)
-
-    strip(clone)
-    return clone
-
-
-def _own_names(node: ast.AST) -> set[str]:
-    """What this child scope binds for itself, which its parent must not read.
-
-    **Asked of the child rather than of the spelling, which is why this one is
-    not a fourth enumeration.** Python's scope opening nodes are a closed set:
-    a module, a function, a lambda, a class and the four comprehensions. The
-    grammar keeps growing ways to bind a name and has not grown a way to hold
-    one. A module is absent here because the walk starts at one, and a class
-    because its body is statements, which `_bindings_in` classifies where they
-    stand.
-
-    A parameter and a comprehension target are the two kinds of name a child
-    scope binds without a statement, so nothing in `_bindings_in` sees either.
-    Both shadow: an inner `def inner(access)` and a `(x for access in rows)`
-    each take the name over for the length of their own scope, and a parent
-    still calling it resolved is reporting a login that will not be sent.
-
-    **Three of the four comprehensions were caught before this existed, and for
-    a reason nothing here controls.** PEP 709 inlined a list, set and dict
-    comprehension into the enclosing scope in 3.12, so their target reaches the
-    symbol table `_bound_names` asks. A generator expression kept its own scope
-    and did not, which left the family covered by a language change rather than
-    by a rule. Measured by the design seat on 3.14.7, 2026-09-17: the three
-    reported and the generator did not.
-
-    `ast.walk` over the whole `arguments` node, the form
-    `TestNoDoorTakesTheKeyAndThePlanApart._doors` uses, so positional only,
-    `*args` and `**kwargs` are parameters too.
-    """
-    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
-        return {
-            argument.arg
-            for argument in ast.walk(node.args)
-            if isinstance(argument, ast.arg)
-        }
-    if isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
-        return {
-            name.id
-            for generator in node.generators
-            for name in ast.walk(generator.target)
-            if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store)
-        }
-    return set()
-
-
-def _metadata_calls(source: str, doors: frozenset[str]) -> list[tuple[str, int, bool]]:
-    """Every call to one of `doors` here, and whether its access was resolved.
-
-    **Resolved means `settings_store.library_access`**, which is the one thing
-    that opens the keychain. An `Access` built by hand carries `_NO_LOGINS` by
-    default and the door cannot tell: `metadata.Access` makes the three values
-    one, and it deliberately does not make the logins compulsory, because
-    `routers/books.py::_google_books_in_force` builds one for a door that sends
-    none. So the door being handed an access at all is mypy's job, and which
-    access it was handed is this walk's.
-
-    **Keyed on the module, never on the local binding.** `import metadata as m`
-    binds `m`, and a walk testing the spelling `metadata` walks past it. Same
-    reasoning, and the same recorded evasion, as `test_marc.py::_private_reads`.
-
-    **`from metadata import lookup` reaches the same door by the other route**,
-    where the call is a bare `ast.Name` and there is no attribute to match at
-    all. The first version of this saw neither shape.
-
-    `doors` is passed in rather than derived here, so this answers about a
-    subject somebody else pinned. Deriving it from the entry points that already
-    take the access is what made the first version green under the evasion it
-    exists to catch.
-    """
-    tree = ast.parse(source)
-    aliases = {
-        (alias.asname or alias.name.split(".")[0])
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-        if alias.name.split(".")[0] == "metadata"
-    }
-    bound = {
-        (alias.asname or alias.name): alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom)
-        and node.module
-        and node.module.split(".")[0] == "metadata"
-        for alias in node.names
-        if alias.name in doors
-    }
-
-    def door_of(node: ast.Call) -> str | None:
-        called = node.func
-        if (
-            isinstance(called, ast.Attribute)
-            and isinstance(called.value, ast.Name)
-            and called.value.id in aliases
-            and called.attr in doors
-        ):
-            return called.attr
-        if isinstance(called, ast.Name) and called.id in bound:
-            return bound[called.id]
-        return None
-
-    def carries(node: ast.Call, resolved: set[str]) -> bool:
-        return any(
-            word.arg == "access"
-            and (
-                (isinstance(word.value, ast.Name) and word.value.id in resolved)
-                or (isinstance(word.value, ast.Call) and _is_resolver(word.value.func))
-            )
-            for word in node.keywords
-        )
-
-    found: list[tuple[str, int, bool]] = []
-
-    def visit(node: ast.AST, resolved: set[str]) -> None:
-        # The set grows on the way down, so a nested function reads the local
-        # its enclosing handler resolved. `resolve` inside
-        # `backfill_from_identifiers` is the shape that needs it.
-        #
-        # **The rebinds come off before the resolutions go on**, so a name bound
-        # twice in one scope is resolved only if nothing else bound it. That is
-        # blunter than following the order of the statements and it is blunt in
-        # the safe direction: it reports rather than excuses.
-        if isinstance(node, ast.Module | ast.FunctionDef | ast.AsyncFunctionDef):
-            here, rebound = _bindings_in(node)
-            resolved = (resolved - rebound) | (here - rebound)
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.Call):
-                door = door_of(child)
-                if door is not None:
-                    found.append((door, child.lineno, carries(child, resolved)))
-            # **A child scope's own bindings shadow what the enclosing one
-            # resolved.** Not fixable by refusing to descend, because descending
-            # is what `resolve` inside `backfill_from_identifiers` relies on, so
-            # the inherited set loses the names the child names itself.
-            visit(child, resolved - _own_names(child))
-
-    visit(tree, set())
-    return sorted(found, key=lambda row: row[1])
-
-
-def _wrapped(body: str) -> str:
-    """An evasion as a module the parser accepts: `await` needs a coroutine."""
-    imports, _, call = body.partition("\n")
-    return f"{imports}\n\n\nasync def route(i, a, db):\n    {call.strip()}\n"
-
-
 class TestTheKeyReachesAMeteredDoorAndNoOther:
     """The API key is metered quota, so an unmetered door is handed nothing.
 
@@ -7747,19 +7479,28 @@ class TestWhichDoorCarriesALogin:
 class TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt:
     """A login cannot be forgotten at a door or at a call site.
 
-    **The access is compulsory and its logins are not, which is why this
-    exists.** `test_house_rules.py::TestEveryOutboundEntryPointTakesTheProviderList`
-    can lean on mypy: `access` is keyword only with no default, so a call site
-    that forgets it does not compile. What mypy cannot see is **which** access:
-    `metadata.Access` defaults `logins` to `_NO_LOGINS`, deliberately, because
-    `routers/books.py::_google_books_in_force` builds one for a door that sends
-    none. So a handler that built its own would type check and send nothing.
+    **Both halves are compulsory now, and that is what retired the walk.** The
+    access is keyword only with no default, so a call site that forgets it does
+    not compile, which is
+    `test_house_rules.py::TestEveryOutboundEntryPointTakesTheProviderList`. The
+    part mypy could not see used to be **which** access, because
+    `metadata.Access` defaulted `logins` to an empty mapping: a handler that
+    assembled its own type checked and sent nothing. That was checked by an `ast`
+    and `symtable` walk over the router, tracking which local a resolver had
+    bound and whether anything had rebound it. `logins` is compulsory, so the
+    same question is now a `mypy` error, and
+    `test_the_logins_cannot_become_optional_again` below is what keeps it one.
 
-    **The walk is not the only thing standing here, and this class used to read
-    as though it were.** `tests/routers/test_books.py::TestACatalogueLoginLeavesTheDeploymentWithItsRequest`
+    **Neither half would have been enough alone.** Compulsory logins stop a
+    silent hand built access; they do not stop a handler resolving a correct one
+    and reaching a door by a route nothing watches. That is
+    `TestOnlyTheAccessDoorAsksACatalogue`, and the two together are what let the
+    walk go.
+
+    **They are not the only thing standing here.**
+    `tests/routers/test_books.py::TestACatalogueLoginLeavesTheDeploymentWithItsRequest`
     puts a real login on the wire through `/lookup`, so a resolver gutted at its
-    own site fails by name. It covers that one route; the walk is what covers the
-    other four.
+    own site fails by name.
 
     **The subject is pinned, not derived from the fix.** The first version of
     this asked which entry points already take `logins` and checked those, which
@@ -7792,8 +7533,6 @@ class TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt:
         ),
     }
 
-    ROUTER = BACKEND / "routers" / "books.py"
-
     def _public_coroutines(self) -> set[str]:
         return {
             name
@@ -7821,281 +7560,28 @@ class TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt:
             parameter = inspect.signature(getattr(metadata, name)).parameters["access"]
             assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, name
 
-    def test_no_route_asks_a_catalogue_without_them(self):
-        found = _metadata_calls(self.ROUTER.read_text(), self.DOORS)
+    def test_the_logins_cannot_become_optional_again(self):
+        """A default on `logins` is what a hand built access used to hide behind.
 
-        # **Before the verdict, not after it.** Measured 2026-09-06: pointing
-        # this at a module that asks no catalogue passed green, because an empty
-        # walk has nothing to report. A guard that reads the wrong file has to
-        # fail, not abstain.
-        assert found, f"{self.ROUTER.name} asks no catalogue: the walk read nothing"
-
-        missing = [
-            f"metadata.{door} at line {line}" for door, line, carried in found if not carried
-        ]
-        assert not missing, (
-            f"{missing} ask a catalogue with an access nothing resolved the "
-            "deployment's logins into, so a stored login is never sent there"
-        )
-
-
-#: A call shape per import spelling, each carrying an access nothing resolved.
-#:
-#: **Parametrised so a shape is reported by name.** A single sample carrying every
-#: shape at once cannot say which of them a change stopped seeing, and dropping
-#: support for a shape is exactly the evasion this walk shipped with.
-_EVASIONS = {
-    "a plain module import": "import metadata\nawait metadata.lookup(i, access=a)\n",
-    "an aliased module import": "import metadata as m\nawait m.lookup(i, access=a)\n",
-    "a name imported directly": (
-        "from metadata import lookup as _lookup\nawait _lookup(i, access=a)\n"
-    ),
-}
-
-
-class TestTheWalkSeesEveryWayADoorIsReached:
-    """The walk finds a call however the module was imported.
-
-    **Found by attacking it, not by reading it.** The first version matched
-    `ast.Attribute` whose value was the bare name `metadata`, so rewriting any
-    one of the router's call sites as `import metadata as m` or as
-    `from metadata import title_search` walked straight past it and the guard
-    stayed green. That is the same blind spot `test_marc.py::_private_reads` and
-    `test_shelf.py` each record against their own first versions.
-
-    **The blind spots left, stated rather than left to be found.** A door reached
-    through a variable holding the function, or through `getattr`, is invisible;
-    so is a door re-exported by some other module and called through that. Each
-    fails in the direction of a missed report rather than a false one, which is
-    why they are written down. No such shape appears in this package.
-    """
-
-    DOORS = TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt.DOORS
-
-    @pytest.mark.parametrize("shape", sorted(_EVASIONS), ids=lambda shape: shape)
-    def test_a_call_omitting_them_is_reported(self, shape):
-        found = _metadata_calls(_wrapped(_EVASIONS[shape]), self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", False)]
-
-    @pytest.mark.parametrize("shape", sorted(_EVASIONS), ids=lambda shape: shape)
-    def test_the_same_call_carrying_a_resolved_access_is_not(self, shape):
-        """The diagonal: an arm that reported everything would pass the one above."""
-        supplied = _EVASIONS[shape].replace(
-            "access=a)", "access=settings_store.library_access(db))"
-        )
-        found = _metadata_calls(_wrapped(supplied), self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", True)]
-
-    @pytest.mark.parametrize("shape", sorted(_EVASIONS), ids=lambda shape: shape)
-    def test_an_access_resolved_into_a_local_first_is_seen(self, shape):
-        """Which is how five of the six handlers are written: resolve, then pass.
-
-        The diagonal above proves only the call shape. A walk that matched the
-        resolver at the call site alone would report every one of those handlers
-        as unresolved, and a reviewer reading a wall of red finds nothing.
+        The evasion itself is a `mypy` error, loudly, at every call site that
+        omits the argument. This arm is what stops somebody quieting those
+        errors by restoring the default, which is the one edit that would put
+        the walk's whole job back with nothing else going red.
         """
-        supplied = _EVASIONS[shape].replace(
-            "await", "a = settings_store.library_access(db)\n    await"
-        )
-        found = _metadata_calls(_wrapped(supplied), self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", True)]
-
-    @pytest.mark.parametrize("shape", sorted(_EVASIONS), ids=lambda shape: shape)
-    def test_an_access_rebuilt_over_a_resolved_one_is_reported(self, shape):
-        """The evasion `frozen=True` does not reach, because it rebinds the name
-        rather than mutating the object.
-
-        Found by the security seat on 2026-09-17: one line inserted into
-        `enrich_book` made the route send no `Authorization` to any SRU
-        catalogue, and every guard in this file stayed green.
-        """
-        supplied = _EVASIONS[shape].replace(
-            "await",
-            "a = settings_store.library_access(db)\n"
-            "    a = metadata.Access(plan=a.plan, api_key=a.api_key)\n"
-            "    await",
-        )
-        found = _metadata_calls(_wrapped(supplied), self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", False)]
-
-    def test_a_resolved_access_in_another_function_is_not_borrowed(self):
-        """Which is what the router looks like: six handlers, one name.
-
-        `backfill_from_identifiers` binds `access` from a resolver that opens no
-        keychain, and a walk collecting names module wide reports it as carrying
-        the deployment's logins.
-        """
-        source = (
-            "import metadata\n\n\n"
-            "async def resolved(db):\n"
-            "    access = settings_store.library_access(db)\n"
-            "    return access\n\n\n"
-            "async def borrowing(db):\n"
-            "    access = _google_books_in_force(db)\n"
-            "    await metadata.lookup(i, access=access)\n"
-        )
-        found = _metadata_calls(source, self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", False)]
-
-    def test_a_call_on_something_that_is_not_a_door_is_ignored(self):
-        """Or the walk reports every attribute call and its verdict means nothing."""
-        source = _wrapped("import metadata\nawait metadata.clear_cache()\n")
-
-        assert _metadata_calls(source, self.DOORS) == []
-
-
-#: One rebind per spelling the grammar has for binding a name, each one line.
-#:
-#: **The list is the diagonal and not the rule.** `_bound_names` asks
-#: `symtable`, so it answers for spellings nobody wrote down; these arms say
-#: that it does, one per spelling so a regression is reported by name. Six of
-#: them were reported as carrying a login until 2026-09-17, when the walk read
-#: `ast.Store` plus one hand added field.
-_REBINDS = {
-    "an assignment": "access = metadata.Access(plan=p, api_key=k)",
-    "an annotated assignment": "access: object = metadata.Access(plan=p, api_key=k)",
-    "an augmented assignment": "access += 1",
-    "a walrus": "print(access := build())",
-    "a for target": "for access in rows:\n        pass",
-    "a with clause": "with build() as access:\n        pass",
-    "an except clause": "try:\n        pass\n    except Exception as access:\n        pass",
-    "a match capture": "match v:\n        case access:\n            pass",
-    "a match as pattern": "match v:\n        case _ as access:\n            pass",
-    "a match star pattern": "match v:\n        case [1, *access]:\n            pass",
-    "a match rest pattern": "match v:\n        case {'a': 1, **access}:\n            pass",
-    "an aliased import": "import os as access",
-    "an aliased from import": "from os import path as access",
-    "a plain import": "import access",
-    "a def": "def access():\n        pass",
-    "an async def": "async def access():\n        pass",
-    "a class": "class access:\n        pass",
-    "a del": "del access",
-    "a type alias": "type access = int",
-}
-
-
-class TestEverySpellingThatRebindsAResolvedAccessIsReported:
-    """A name resolved once and bound again reaches a door carrying nothing.
-
-    **`_bound_names` asks `symtable` rather than naming the spellings**, because
-    the set is open: three drafts of that helper enumerated, and each was one
-    grammar feature short. What is enumerated here is the **diagonal**, which is
-    a list of samples rather than the rule, and its job is to report by name
-    when the rule stops covering one.
-    """
-
-    DOORS = TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt.DOORS
-
-    def _scope(self, rebind: str) -> str:
-        return (
-            "import metadata\n\n\n"
-            "async def route(db, v, rows, p, k):\n"
-            "    access = settings_store.library_access(db)\n"
-            f"    {rebind}\n"
-            "    await metadata.lookup(i, access=access)\n"
+        logins = next(
+            field
+            for field in dataclasses.fields(metadata.Access)
+            if field.name == "logins"
         )
 
-    @pytest.mark.parametrize("spelling", sorted(_REBINDS), ids=lambda name: name)
-    def test_a_rebound_access_is_not_called_resolved(self, spelling):
-        found = _metadata_calls(self._scope(_REBINDS[spelling]), self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", False)]
-
-    def test_the_same_scope_with_nothing_in_between_is_resolved(self):
-        """The diagonal's own diagonal: an arm reporting everything would pass
-        every case above and mean nothing."""
-        found = _metadata_calls(self._scope("pass"), self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", True)]
-
-    def test_a_nested_function_does_not_inherit_a_name_it_shadows(self):
-        """A parameter is not a statement, so nothing in the scope walk sees it.
-
-        It cannot be fixed by refusing to descend: `backfill_from_identifiers`
-        wraps its outbound call in a nested `resolve` that reads the enclosing
-        handler's value, so descending is the behaviour, and what has to narrow
-        is the set that descends.
-        """
-        scope = (
-            "import metadata\n\n\n"
-            "async def route(i, db):\n"
-            "    access = settings_store.library_access(db)\n"
-            "    async def inner(access):\n"
-            "        return await metadata.lookup(i, access=access)\n"
-            "    return inner\n"
+        assert logins.default is dataclasses.MISSING, (
+            "metadata.Access.logins has a default again, so an access assembled "
+            "by hand type checks and sends no login"
         )
-        found = _metadata_calls(scope, self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", False)]
-
-    def test_a_nested_function_naming_no_such_parameter_still_inherits(self):
-        """The diagonal, and it is the router's own shape: `resolve` inside
-        `backfill_from_identifiers` takes a volume id and reads the access its
-        handler resolved."""
-        scope = (
-            "import metadata\n\n\n"
-            "async def route(i, db):\n"
-            "    access = settings_store.library_access(db)\n"
-            "    async def inner(volume_id):\n"
-            "        return await metadata.lookup(volume_id, access=access)\n"
-            "    return inner\n"
+        assert logins.default_factory is dataclasses.MISSING, (
+            "metadata.Access.logins has a default factory, which is the same "
+            "hole spelled differently"
         )
-        found = _metadata_calls(scope, self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", True)]
-
-    #: One scope opening child per kind, each binding `access` for itself and
-    #: calling a door with it from inside.
-    #:
-    #: **The generator expression is why this exists.** PEP 709 inlined the
-    #: other three into the enclosing scope in 3.12, so their target reaches the
-    #: symbol table and they were reported before anything here handled them:
-    #: the family was covered by a language change rather than by a rule, and
-    #: the one member that kept its own scope was the one left open. Measured by
-    #: the design seat on 3.14.7, 2026-09-17.
-    CHILD_SCOPES = {
-        "a list comprehension": "[metadata.lookup(i, access=access) for access in rows]",
-        "a set comprehension": "{metadata.lookup(i, access=access) for access in rows}",
-        "a dict comprehension": "{metadata.lookup(i, access=access): 1 for access in rows}",
-        "a generator expression": "(metadata.lookup(i, access=access) for access in rows)",
-        "a lambda parameter": "lambda access: metadata.lookup(i, access=access)",
-    }
-
-    @pytest.mark.parametrize("kind", sorted(CHILD_SCOPES), ids=lambda name: name)
-    def test_a_child_scope_binding_the_name_does_not_read_the_resolved_one(self, kind):
-        """Called from inside the child, which is where its own binding wins.
-
-        After the child the enclosing resolution is what the name means again,
-        and there the answer should be, and is, the other one. That half is
-        `test_the_same_scope_with_nothing_in_between_is_resolved`.
-        """
-        scope = (
-            "import metadata\n\n\n"
-            "async def route(i, db, rows):\n"
-            "    access = settings_store.library_access(db)\n"
-            f"    result = {self.CHILD_SCOPES[kind]}\n"
-        )
-        found = _metadata_calls(scope, self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", False)]
-
-    def test_a_resolution_inside_a_compound_statement_still_counts(self):
-        """Or the shallowing in `_shallowed` would cost the name it protects."""
-        scope = (
-            "import metadata\n\n\n"
-            "async def route(db, rows):\n"
-            "    for row in rows:\n"
-            "        access = settings_store.library_access(db)\n"
-            "        await metadata.lookup(row, access=access)\n"
-        )
-        found = _metadata_calls(scope, self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", True)]
 
 
 class TestNoDoorTakesTheKeyAndThePlanApart:
@@ -8222,7 +7708,7 @@ class TestAResolvedAccessCannotBeChanged:
 
     @pytest.mark.parametrize("field", ["plan", "api_key", "logins"])
     def test_no_field_can_be_reassigned_after_it_is_resolved(self, field):
-        resolved = metadata.Access(plan=ALL_SOURCES, api_key="a-key")
+        resolved = metadata.Access(plan=ALL_SOURCES, api_key="a-key", logins={})
 
         with pytest.raises(dataclasses.FrozenInstanceError):
             setattr(resolved, field, getattr(resolved, field))

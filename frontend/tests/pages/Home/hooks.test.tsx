@@ -17,10 +17,16 @@ import {
 import {
   PAGE_SIZE,
   useBookSelection,
+  useColumnChoice,
   useLibrary,
   useUnconfirmedCount,
+  useViewChoice,
 } from "../../../src/pages/Home/hooks";
-import { DEFAULT_COLUMNS } from "../../../src/lib/libraryColumns";
+import {
+  DEFAULT_COLUMNS,
+  libraryColumnsPreference,
+} from "../../../src/lib/libraryColumns";
+import { libraryViewPreference } from "../../../src/lib/libraryView";
 import {
   makeBook,
   makeBookPage,
@@ -486,95 +492,144 @@ function heldFlags(): (libraryMode: boolean) => void {
   api.on("/api/settings/features", () => answered);
   return release;
 }
-
 /**
- * The column set, per mode.
+ * The remembered choices, which are no longer members of the library hook.
  *
- * The mode comes from `library_mode` on the feature flags, which is fetched,
- * so every assertion here waits for it rather than reading the first render.
+ * The mode comes from `library_mode` on the feature flags, which is fetched, so
+ * every assertion here waits for it rather than reading the first render.
  *
- * **A test that goes on to write waits on `modeIsKnown`, not on the mode.**
- * `mode` reads household before the flags have answered as well as after they
- * have answered false, so waiting for `"household"` passes on the first render
- * and lands inside the window where a write is refused. Waiting for the
- * cataloguer has no such ambiguity: only an answer produces it.
+ * **What a test waits on is the cataloguer's own column, not a mode.** There is
+ * no `mode` member to wait on any more and there should not be: it had no reader
+ * in the application at all, only the assertions in this file that used it as a
+ * way to know the flags had landed. `available` containing a call number is that
+ * signal and is strictly better, because household reads the same before the
+ * flags answer and after they answer false, so waiting for `"household"` passed
+ * on the first render and landed inside the window where a write is refused.
+ * Only an answer produces the cataloguer's set.
+ *
+ * **The keys are named through the preference rather than spelled again.** A
+ * test at a distance from the module that owns a key used to restate the string,
+ * so renaming one turned the assertions green while every browser holding it
+ * reset. The literals live in `tests/lib/preference.test.ts`, which exists to say
+ * they are a promise to browsers that already hold them.
  */
-describe("useLibrary, the column set", () => {
+const HOUSEHOLD_VIEW_KEY = libraryViewPreference.keyFor("household");
+const CATALOGUER_VIEW_KEY = libraryViewPreference.keyFor("cataloguer");
+const HOUSEHOLD_COLUMNS_KEY = libraryColumnsPreference.keyFor("household");
+const CATALOGUER_COLUMNS_KEY = libraryColumnsPreference.keyFor("cataloguer");
+
+/** Both choices at once, so one render can watch the view and the column set. */
+function renderChoices() {
+  return renderHookWithProviders(() => ({
+    view: useViewChoice(),
+    columns: useColumnChoice(),
+  }));
+}
+
+describe("useColumnChoice", () => {
   it("gives a household its own table and none of the cataloguer's columns", async () => {
     inLibraryMode(false);
-    const { result } = renderLibrary();
+    const { result } = renderChoices();
 
-    await waitFor(() => expect(result.current.mode).toBe("household"));
-    expect(result.current.columns).toEqual([...DEFAULT_COLUMNS.household]);
-    expect(result.current.availableColumns).not.toContain("callNumber");
+    await waitFor(() => expect(result.current.columns.canChange).toBe(true));
+    expect(result.current.columns.columns).toEqual([
+      ...DEFAULT_COLUMNS.household,
+    ]);
+    expect(result.current.columns.available).not.toContain("callNumber");
   });
 
   it("offers the cataloguer's set in library mode", async () => {
     inLibraryMode(true);
-    const { result } = renderLibrary();
+    const { result } = renderChoices();
 
-    await waitFor(() => expect(result.current.mode).toBe("cataloguer"));
-    expect(result.current.columns).toEqual([...DEFAULT_COLUMNS.cataloguer]);
-    for (const key of ["callNumber", "classification"]) {
-      expect(result.current.availableColumns).toContain(key);
-    }
+    await waitFor(() =>
+      expect(result.current.columns.available).toContain("callNumber"),
+    );
+    expect(result.current.columns.columns).toEqual([
+      ...DEFAULT_COLUMNS.cataloguer,
+    ]);
+    expect(result.current.columns.available).toContain("classification");
   });
 
   it("falls back to the household set when the flags never answer", async () => {
-    // The flags query is `retry: false` and the shell renders regardless, so
-    // a failure here has to mean the table every existing library already has.
+    // The flags query is `retry: false` and the shell renders regardless, so a
+    // failure here has to mean the table every existing library already has.
+    // Asserted on the set a reader sees rather than on a mode: this test used
+    // to assert the mode and nothing else, so it was the one arm here with no
+    // observable a reader shares.
     api.on("/api/settings/features", { status: 500, body: {} });
-    const { result } = renderLibrary();
+    const { result } = renderChoices();
 
-    await waitFor(() => expect(result.current.books).toHaveLength(1));
-    expect(result.current.mode).toBe("household");
+    await waitFor(() => expect(result.current.columns.canChange).toBe(true));
+    expect(result.current.columns.columns).toEqual([
+      ...DEFAULT_COLUMNS.household,
+    ]);
+    expect(result.current.columns.available).not.toContain("callNumber");
   });
 
   it("keeps a household's choice through a mode switch in both directions", async () => {
-    // The ticket's third testing decision. Two storage keys, so neither mode's
-    // choice is ever a merge of the other's.
+    // Two storage keys, so neither mode's choice is ever a merge of the other's.
     inLibraryMode(false);
-    const household = renderLibrary();
+    const household = renderChoices();
     await waitFor(() =>
-      expect(household.result.current.modeIsKnown).toBe(true),
+      expect(household.result.current.columns.canChange).toBe(true),
     );
-    expect(household.result.current.mode).toBe("household");
 
-    act(() => household.result.current.toggleColumn("price"));
-    const chosen = [...household.result.current.columns];
+    act(() => household.result.current.columns.toggle("price"));
+    const chosen = [...household.result.current.columns.columns];
     expect(chosen).not.toContain("price");
     household.unmount();
 
     inLibraryMode(true);
-    const cataloguer = renderLibrary();
+    const cataloguer = renderChoices();
     await waitFor(() =>
-      expect(cataloguer.result.current.mode).toBe("cataloguer"),
+      expect(cataloguer.result.current.columns.available).toContain(
+        "callNumber",
+      ),
     );
-    expect(cataloguer.result.current.columns).toEqual([
+    expect(cataloguer.result.current.columns.columns).toEqual([
       ...DEFAULT_COLUMNS.cataloguer,
     ]);
-    act(() => cataloguer.result.current.toggleColumn("classification"));
+    act(() => cataloguer.result.current.columns.toggle("classification"));
     cataloguer.unmount();
 
     inLibraryMode(false);
-    const back = renderLibrary();
-    await waitFor(() => expect(back.result.current.mode).toBe("household"));
-    expect(back.result.current.columns).toEqual(chosen);
+    const back = renderChoices();
+    await waitFor(() =>
+      expect(back.result.current.columns.canChange).toBe(true),
+    );
+    expect(back.result.current.columns.columns).toEqual(chosen);
   });
 
   it("hands the choice back and takes it away again", async () => {
     inLibraryMode(false);
-    const { result } = renderLibrary();
-    await waitFor(() => expect(result.current.modeIsKnown).toBe(true));
-    expect(result.current.mode).toBe("household");
+    const { result } = renderChoices();
+    await waitFor(() => expect(result.current.columns.canChange).toBe(true));
 
-    expect(result.current.canResetColumns).toBe(false);
-    act(() => result.current.toggleColumn("price"));
-    expect(result.current.canResetColumns).toBe(true);
+    expect(result.current.columns.isDefault).toBe(true);
+    act(() => result.current.columns.toggle("price"));
+    expect(result.current.columns.isDefault).toBe(false);
 
-    act(() => result.current.resetColumns());
-    expect(result.current.columns).toEqual([...DEFAULT_COLUMNS.household]);
-    expect(result.current.canResetColumns).toBe(false);
+    act(() => result.current.columns.reset());
+    expect(result.current.columns.columns).toEqual([
+      ...DEFAULT_COLUMNS.household,
+    ]);
+    expect(result.current.columns.isDefault).toBe(true);
+  });
+
+  it("resets by writing the default, which is what clears the key", async () => {
+    // Resetting and writing the set the mode starts with were two exported
+    // names for one operation, because the column preference clears its key on
+    // the default. This is the arm that says they are still the same thing.
+    inLibraryMode(false);
+    const { result } = renderChoices();
+    await waitFor(() => expect(result.current.columns.canChange).toBe(true));
+
+    act(() => result.current.columns.toggle("price"));
+    expect(localStorage.getItem(HOUSEHOLD_COLUMNS_KEY)).not.toBeNull();
+
+    act(() => result.current.columns.reset());
+    expect(localStorage.getItem(HOUSEHOLD_COLUMNS_KEY)).toBeNull();
   });
 });
 
@@ -586,91 +641,99 @@ describe("useLibrary, the column set", () => {
  * first render. A `useState` initialiser would read storage before the flag
  * arrives and hand a cataloguer the household's view for the session.
  */
-describe("useLibrary, the view", () => {
+describe("useViewChoice", () => {
   it("opens a household on the covers", async () => {
     inLibraryMode(false);
-    const { result } = renderLibrary();
+    const { result } = renderChoices();
 
-    await waitFor(() => expect(result.current.mode).toBe("household"));
-    expect(result.current.view).toBe("grid");
+    await waitFor(() => expect(result.current.view.canSet).toBe(true));
+    expect(result.current.view.value).toBe("grid");
   });
 
   it("opens library mode on the dense rows", async () => {
     // The first user story: a counter sees records without setting anything.
     inLibraryMode(true);
-    const { result } = renderLibrary();
+    const { result } = renderChoices();
 
-    await waitFor(() => expect(result.current.mode).toBe("cataloguer"));
-    expect(result.current.view).toBe("list");
+    await waitFor(() =>
+      expect(result.current.columns.available).toContain("callNumber"),
+    );
+    expect(result.current.view.value).toBe("list");
   });
 
   it("opens library mode on the dense rows despite the household's choice", async () => {
     // The flag arrives late, so the household's key is the one already read
     // when the mode flips. Reading it once into state is how a cataloguer ends
     // up on a table somebody else picked.
-    localStorage.setItem("libraryView", "table");
+    localStorage.setItem(HOUSEHOLD_VIEW_KEY, "table");
     inLibraryMode(true);
-    const { result } = renderLibrary();
+    const { result } = renderChoices();
 
-    await waitFor(() => expect(result.current.mode).toBe("cataloguer"));
-    expect(result.current.view).toBe("list");
+    await waitFor(() =>
+      expect(result.current.columns.available).toContain("callNumber"),
+    );
+    expect(result.current.view.value).toBe("list");
   });
 
   it("remembers a change made in library mode", async () => {
     // The second user story. A fresh render is the reload: nothing carries
     // between them but storage.
     inLibraryMode(true);
-    const first = renderLibrary();
-    await waitFor(() => expect(first.result.current.mode).toBe("cataloguer"));
+    const first = renderChoices();
+    await waitFor(() =>
+      expect(first.result.current.columns.available).toContain("callNumber"),
+    );
 
-    act(() => first.result.current.setView("table"));
-    expect(first.result.current.view).toBe("table");
+    act(() => first.result.current.view.set("table"));
+    expect(first.result.current.view.value).toBe("table");
     first.unmount();
 
-    const second = renderLibrary();
-    await waitFor(() => expect(second.result.current.mode).toBe("cataloguer"));
-    expect(second.result.current.view).toBe("table");
+    const second = renderChoices();
+    await waitFor(() =>
+      expect(second.result.current.columns.available).toContain("callNumber"),
+    );
+    expect(second.result.current.view.value).toBe("table");
   });
 
   it("keeps a household's view through a mode switch in both directions", async () => {
     // The property this item exists to protect. Two storage keys, so neither
     // mode's choice is ever a merge of the other's.
     inLibraryMode(false);
-    const household = renderLibrary();
+    const household = renderChoices();
     await waitFor(() =>
-      expect(household.result.current.modeIsKnown).toBe(true),
+      expect(household.result.current.view.canSet).toBe(true),
     );
-    expect(household.result.current.mode).toBe("household");
 
-    act(() => household.result.current.setView("table"));
-    expect(household.result.current.view).toBe("table");
+    act(() => household.result.current.view.set("table"));
+    expect(household.result.current.view.value).toBe("table");
     household.unmount();
 
     inLibraryMode(true);
-    const cataloguer = renderLibrary();
+    const cataloguer = renderChoices();
     await waitFor(() =>
-      expect(cataloguer.result.current.mode).toBe("cataloguer"),
+      expect(cataloguer.result.current.columns.available).toContain(
+        "callNumber",
+      ),
     );
-    expect(cataloguer.result.current.view).toBe("list");
-    act(() => cataloguer.result.current.setView("grid"));
+    expect(cataloguer.result.current.view.value).toBe("list");
+    act(() => cataloguer.result.current.view.set("grid"));
     cataloguer.unmount();
 
     inLibraryMode(false);
-    const back = renderLibrary();
-    await waitFor(() => expect(back.result.current.mode).toBe("household"));
-    expect(back.result.current.view).toBe("table");
+    const back = renderChoices();
+    await waitFor(() => expect(back.result.current.view.canSet).toBe(true));
+    expect(back.result.current.view.value).toBe("table");
   });
 
   it("falls back to the household's view when the flags never answer", async () => {
-    // The flags query is `retry: false` and the shell renders regardless, so
-    // a failure has to mean the view every existing library already has.
-    localStorage.setItem("libraryView", "table");
+    // A failure is a settled answer, and the documented one.
+    localStorage.setItem(HOUSEHOLD_VIEW_KEY, "table");
     api.on("/api/settings/features", { status: 500, body: {} });
-    const { result } = renderLibrary();
+    const { result } = renderChoices();
 
-    await waitFor(() => expect(result.current.books).toHaveLength(1));
-    expect(result.current.mode).toBe("household");
-    expect(result.current.view).toBe("table");
+    await waitFor(() => expect(result.current.view.canSet).toBe(true));
+    expect(result.current.view.value).toBe("table");
+    expect(result.current.columns.available).not.toContain("callNumber");
   });
 });
 
@@ -682,75 +745,80 @@ describe("useLibrary, the view", () => {
  * be filed under the household's key, overwriting the choice the two keys
  * exist to protect and leaving the cataloguer's key empty. A wrong read costs
  * one paint. This is permanent and silent, so it is refused.
+ *
+ * **The refusal is the scope being absent, not a flag beside it.** The gate
+ * used to be a wrapper inside the library hook that closed over its own
+ * settledness; it is now `useScopedPreference` being handed `undefined`, so a
+ * fourth preference keyed on the mode is refused in that window by
+ * construction rather than by remembering.
  */
-describe("useLibrary before the mode is known", () => {
+describe("before the mode is known", () => {
   it("refuses a view chosen in the window, and keeps the household's", async () => {
-    localStorage.setItem("libraryView", "table");
+    localStorage.setItem(HOUSEHOLD_VIEW_KEY, "table");
     const release = heldFlags();
-    const { result } = renderLibrary();
-    await waitFor(() => expect(result.current.books).toHaveLength(1));
-    expect(result.current.modeIsKnown).toBe(false);
+    const { result } = renderChoices();
+    await waitFor(() => expect(result.current.view.value).toBe("table"));
+    expect(result.current.view.canSet).toBe(false);
 
     // "grid" rather than "list", so the assertion after the release can tell a
     // refused pick from the cataloguer's default arriving.
-    act(() => result.current.setView("grid"));
-    expect(localStorage.getItem("libraryView")).toBe("table");
+    act(() => result.current.view.set("grid"));
+    expect(localStorage.getItem(HOUSEHOLD_VIEW_KEY)).toBe("table");
 
     await act(async () => release(true));
-    await waitFor(() => expect(result.current.mode).toBe("cataloguer"));
+    await waitFor(() =>
+      expect(result.current.columns.available).toContain("callNumber"),
+    );
 
-    expect(localStorage.getItem("libraryView")).toBe("table");
-    expect(localStorage.getItem("libraryView.cataloguer")).toBeNull();
-    expect(result.current.view).toBe("list");
+    expect(localStorage.getItem(HOUSEHOLD_VIEW_KEY)).toBe("table");
+    expect(localStorage.getItem(CATALOGUER_VIEW_KEY)).toBeNull();
+    expect(result.current.view.value).toBe("list");
   });
 
   it("refuses a column toggled in the window", async () => {
-    // The same hole through the same `mode`, and it shipped before the view
-    // had it. One gate covers both.
+    // The same hole through the same scope, and it shipped before the view had
+    // it. One gate covers both.
     const release = heldFlags();
-    const { result } = renderLibrary();
-    await waitFor(() => expect(result.current.books).toHaveLength(1));
+    const { result } = renderChoices();
+    await waitFor(() => expect(result.current.columns.canChange).toBe(false));
 
-    act(() => result.current.toggleColumn("price"));
-    expect(localStorage.getItem("libraryColumns.household")).toBeNull();
+    act(() => result.current.columns.toggle("price"));
+    expect(localStorage.getItem(HOUSEHOLD_COLUMNS_KEY)).toBeNull();
 
     await act(async () => release(true));
-    await waitFor(() => expect(result.current.mode).toBe("cataloguer"));
-    expect(localStorage.getItem("libraryColumns.household")).toBeNull();
-    expect(localStorage.getItem("libraryColumns.cataloguer")).toBeNull();
+    await waitFor(() =>
+      expect(result.current.columns.available).toContain("callNumber"),
+    );
+    expect(localStorage.getItem(HOUSEHOLD_COLUMNS_KEY)).toBeNull();
+    expect(localStorage.getItem(CATALOGUER_COLUMNS_KEY)).toBeNull();
   });
 
   it("refuses a reset in the window, which would clear the wrong key", async () => {
-    // `clearColumns` removes a key. Of the three writers this is the one whose
-    // damage needs no second step: it deletes a set somebody chose.
-    localStorage.setItem("libraryColumns.household", "title,author");
+    // Of the writers this is the one whose damage needs no second step: it
+    // deletes a set somebody chose.
+    localStorage.setItem(HOUSEHOLD_COLUMNS_KEY, "title,author");
     const release = heldFlags();
-    const { result } = renderLibrary();
-    await waitFor(() => expect(result.current.books).toHaveLength(1));
+    const { result } = renderChoices();
+    await waitFor(() => expect(result.current.columns.canChange).toBe(false));
 
-    act(() => result.current.resetColumns());
-    expect(localStorage.getItem("libraryColumns.household")).toBe(
-      "title,author",
-    );
+    act(() => result.current.columns.reset());
+    expect(localStorage.getItem(HOUSEHOLD_COLUMNS_KEY)).toBe("title,author");
 
     await act(async () => release(false));
-    await waitFor(() => expect(result.current.modeIsKnown).toBe(true));
-    expect(localStorage.getItem("libraryColumns.household")).toBe(
-      "title,author",
-    );
+    await waitFor(() => expect(result.current.columns.canChange).toBe(true));
+    expect(localStorage.getItem(HOUSEHOLD_COLUMNS_KEY)).toBe("title,author");
   });
 
   it("opens the gate the moment the flags answer, in either mode", async () => {
     const release = heldFlags();
-    const { result } = renderLibrary();
-    await waitFor(() => expect(result.current.books).toHaveLength(1));
-    expect(result.current.modeIsKnown).toBe(false);
+    const { result } = renderChoices();
+    await waitFor(() => expect(result.current.view.canSet).toBe(false));
 
     await act(async () => release(true));
-    await waitFor(() => expect(result.current.modeIsKnown).toBe(true));
+    await waitFor(() => expect(result.current.view.canSet).toBe(true));
 
-    act(() => result.current.setView("grid"));
-    expect(localStorage.getItem("libraryView.cataloguer")).toBe("grid");
+    act(() => result.current.view.set("grid"));
+    expect(localStorage.getItem(CATALOGUER_VIEW_KEY)).toBe("grid");
   });
 
   it("opens the gate on a failure too, rather than locking the controls", async () => {
@@ -760,16 +828,88 @@ describe("useLibrary before the mode is known", () => {
     // endpoint is down unable to change its view at all, for the whole
     // session, with the controls greyed and nothing saying why.
     api.on("/api/settings/features", { status: 500, body: {} });
-    const { result } = renderLibrary();
+    const { result } = renderChoices();
 
-    await waitFor(() => expect(result.current.modeIsKnown).toBe(true));
-    expect(result.current.mode).toBe("household");
+    await waitFor(() => expect(result.current.view.canSet).toBe(true));
 
-    act(() => result.current.setView("list"));
-    expect(localStorage.getItem("libraryView")).toBe("list");
+    act(() => result.current.view.set("list"));
+    expect(localStorage.getItem(HOUSEHOLD_VIEW_KEY)).toBe("list");
   });
 });
 
+/**
+ * What the counter used to buy, asserted as a property rather than a mechanism.
+ *
+ * A write did not tell a reader, so the library hook held a counter it bumped
+ * after every write to make its own next render read storage again. That only
+ * ever worked inside one hook instance: a second reader of the same preference
+ * elsewhere on the page went on drawing the old value until something else
+ * redrew it. These are the two arms the counter could not pass.
+ */
+describe("a write reaches every reader", () => {
+  it("reaches a reader that did not make it", async () => {
+    inLibraryMode(false);
+    const writer = renderChoices();
+    const reader = renderChoices();
+    await waitFor(() => expect(writer.result.current.view.canSet).toBe(true));
+    await waitFor(() => expect(reader.result.current.view.value).toBe("grid"));
+
+    act(() => writer.result.current.view.set("table"));
+
+    expect(reader.result.current.view.value).toBe("table");
+  });
+
+  it("leaves an untouched preference at the value it already held", async () => {
+    // One listener set for every preference, so a write to the view wakes the
+    // column reader too. That is free only because a snapshot is the same value
+    // until its own stored string changes, which is what this asserts: the
+    // identity, not the contents.
+    inLibraryMode(false);
+    const { result } = renderChoices();
+    await waitFor(() => expect(result.current.view.canSet).toBe(true));
+
+    const before = result.current.columns.columns;
+    act(() => result.current.view.set("table"));
+
+    expect(result.current.columns.columns).toBe(before);
+  });
+});
+
+/**
+ * The library hook returns the library and nothing a browser remembered.
+ *
+ * **Pinned as a set rather than counted**, so a member added to it fails by
+ * name and whoever reads the failure is told which one arrived. Every name here
+ * is a request or something derived from one. A remembered choice does not
+ * belong in this interface however convenient it is: ten of them grew here
+ * once, the page and two panels paid a prop each, and every one of them worked,
+ * so no other test saw them. They live behind `useViewChoice`,
+ * `useColumnChoice` and `useSavedSearches`, which is where a sixth goes too.
+ */
+describe("useLibrary returns the library and nothing a browser remembered", () => {
+  it("offers exactly the members that are requests or derived from one", async () => {
+    const { result } = renderLibrary();
+    await waitFor(() => expect(result.current.books).toHaveLength(1));
+
+    expect(Object.keys(result.current).sort()).toEqual([
+      "books",
+      "classifications",
+      "collections",
+      "error",
+      "filters",
+      "hasMore",
+      "isLoading",
+      "isLoadingMore",
+      "isStale",
+      "loadMore",
+      "locations",
+      "refetch",
+      "tags",
+      "total",
+      "update",
+    ]);
+  });
+});
 describe("useBookSelection", () => {
   function renderSelection() {
     return renderHookWithProviders(() => useBookSelection());

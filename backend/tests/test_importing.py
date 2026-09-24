@@ -35,6 +35,7 @@ from enums import OwnershipStatus, ReadStatus, TagCategory
 from importing import (
     _MARC_RECORD_FIELDS,
     Import,
+    MarcIndex,
     OpdsImport,
     _CatalogueIndex,
     bounded_fields,
@@ -184,6 +185,119 @@ class TestThePrivateBookOracle:
         assert result.matched == 1
         assert result.created == 0
         assert result.skipped == 0
+
+
+class TestATitleCollisionNeverReachesAnotherMembersPrivateBook:
+    """The title side of the oracle, which nothing pinned.
+
+    `TestThePrivateBookOracle` above pins the **ISBN** side, and both index
+    builders read `Shelf.seen_by`, so the property holds by construction today:
+    an invisible row is not in the dictionary, so no key can name it. That is
+    exactly why it is written down. The natural way to make matching "more
+    complete" is to widen the index past the viewer, and this is what refuses
+    that change rather than something that is failing now.
+    """
+
+    def test_the_reading_history_index_does_not_hold_one(self, db, member, other):
+        db.add(
+            Book(
+                title="Shared Title",
+                author="Ann Author",
+                added_by_user_id=other.id,
+                is_private=True,
+            )
+        )
+        db.commit()
+
+        index = _CatalogueIndex.build(db, member.id)
+
+        assert index.find_by(db, None, "Shared Title") is None
+
+    def test_the_catalogue_transfer_index_does_not_hold_one(self, db, member, other):
+        db.add(
+            Book(
+                title="Shared Title",
+                author="Ann Author",
+                added_by_user_id=other.id,
+                is_private=True,
+            )
+        )
+        db.commit()
+
+        index = MarcIndex.build(db, member.id)
+        fields = bounded_fields(Record(title="Shared Title", author="Ann Author"))
+
+        assert index.holds(fields) is False
+
+    def test_a_work_key_hit_keeps_an_invisibly_taken_isbn_out_of_the_refusals(
+        self, db, member, other
+    ):
+        """The conjunction that decides how much the upload preview discloses.
+
+        `would_refuse` is `not holds(...) and isbn_is_taken(...)`, and the two
+        halves read different populations: the identity index is the Shelf, the
+        ISBN set is the whole table. So a record whose ISBN an invisible Book
+        holds is reported as refused only when the work key misses too, and every
+        such report is one bit about a Book the member cannot see.
+
+        **That makes the count a function of the key**, which is why it is pinned
+        here: a future tightening of the fold moves records into this arm, and
+        the size of that disclosure is not a free parameter of a refactor.
+
+        **Its diagonal lives in another file**, which is worth saying because a
+        reader will not look for it there: the True branch is
+        `tests/routers/test_imports_marc.py::TestThePreviewCountsBothRefusals`,
+        over the complementary shape. Alone, this arm would pass for a
+        `would_refuse` that returned False unconditionally; the pair pins the
+        conjunction.
+        """
+        db.add(
+            Book(
+                title="Someone's Secret",
+                isbn="9780441013593",
+                added_by_user_id=other.id,
+                is_private=True,
+            )
+        )
+        db.add(
+            Book(
+                title="Shared Title",
+                author="Ann Author",
+                added_by_user_id=other.id,
+                is_private=False,
+            )
+        )
+        db.commit()
+
+        index = MarcIndex.build(db, member.id)
+        fields = bounded_fields(
+            Record(
+                title="The Shared Title", author="Ann Author", isbn="9780441013593"
+            )
+        )
+
+        assert index.would_refuse(fields) is False
+
+    def test_a_visible_book_with_the_same_title_is_still_matched(
+        self, db, member, other
+    ):
+        """The diagonal, so neither arm above passes by matching nothing at all."""
+        db.add(
+            Book(
+                title="Shared Title",
+                author="Ann Author",
+                added_by_user_id=other.id,
+                is_private=False,
+            )
+        )
+        db.commit()
+
+        fields = bounded_fields(Record(title="Shared Title", author="Ann Author"))
+
+        assert _CatalogueIndex.build(db, member.id).find_by(
+            db, None, "Shared Title"
+        ) is not None
+        assert MarcIndex.build(db, member.id).holds(fields) is True
 
 
 class TestReadingRecordsArePersonal:
@@ -519,7 +633,7 @@ class TestAnOpdsSyncAssertsOwnership:
 
 
 class TestTheOpdsMatchingRuleIsTheOneImportUses:
-    """ISBN where one exists, then lowercased title. Not `MarcIndex`'s rule."""
+    """ISBN where one exists, then the normalised title. Not `MarcIndex`'s rule."""
 
     def test_an_isbn_matches_before_a_title(self, db, member):
         db.add(Book(title="A different spelling", isbn="9780552152976",

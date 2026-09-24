@@ -40,7 +40,6 @@ import unicodedata
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
-from types import MappingProxyType
 from typing import Any, Final
 from xml.etree import ElementTree
 
@@ -52,6 +51,7 @@ import ddc
 import decoders
 import fetch
 import google_books
+import identity
 import marc_fields
 import sources
 import targets
@@ -91,13 +91,6 @@ logger = logging.getLogger("endpaper.metadata")
 #: catalogue does.
 Logins = Mapping[CatalogueSource, fetch.Credential]
 
-#: No login for any catalogue, and the default everywhere one is optional.
-#:
-#: A `MappingProxyType` rather than a literal, so a caller cannot mutate the
-#: shared default and leave another library's login on it for the next request.
-_NO_LOGINS: Final[Logins] = MappingProxyType({})
-
-
 @dataclass(frozen=True, slots=True)
 class Access:
     """What one request may ask of the catalogues, resolved once.
@@ -119,7 +112,7 @@ class Access:
     restated here. Every `logins` value already prints under that same rule, so
     without it the aggregate would be the one thing here that leaks.
 
-    **Resolved by `settings_store.library_access`, which lives there and not
+    **Resolved by `catalogue_access._resolved_access`, which lives there and not
     here.** This module makes every outbound catalogue request and reaches no
     database; the resolver reads settings and opens the keychain. That invariant
     is the reason, and it is the whole of it: a module level import the other
@@ -134,7 +127,20 @@ class Access:
     #: whether Google is asked at all.
     api_key: str = field(repr=False)
     #: The login each catalogue's request carries. See `Logins`.
-    logins: Logins = _NO_LOGINS
+    #:
+    #: **No default, and what that buys is the reason to keep it that way.** An
+    #: empty default made a hand assembled `Access` type check and then send
+    #: nothing, so "these logins were really resolved" was a fact about where the
+    #: value came from rather than about the value. It was checked by an `ast` and
+    #: `symtable` walk over the router, tracking which local a resolver had bound
+    #: and whether anything had rebound it since. Compulsory, the same question is
+    #: a `mypy` error at the call site, and a caller that genuinely sends none
+    #: says so in a word.
+    #:
+    #: `catalogue_access.GoogleVolumes` is the one path that sends no login, and
+    #: it does not reach this type at all: it holds a plan and a key, because the
+    #: door behind it takes those two apart.
+    logins: Logins
 
     def __str__(self) -> str:
         return f"<access to {len(self.plan.asked)} catalogue(s)>"
@@ -3455,19 +3461,6 @@ def _relevance(
     return (score, completeness, match.year or 0)
 
 
-def _match_key(match: Record) -> str:
-    """What makes two results from different sources the same book.
-
-    Deliberately lossy, and it only has to be good enough to stop the picker
-    showing the same book twice. `_duplicate_key` in the books router does the
-    same job for stored books and does it more carefully, because a wrong
-    answer there merges two records rather than hiding one row.
-    """
-    title = re.sub(r"[^\w\s]", "", (match.title or "").casefold()).strip()
-    author = (match.author or "").casefold().split(",")[0].strip()
-    return f"{title}|{author}"
-
-
 @dataclass(frozen=True)
 class Search:
     """What one title search asked, and what it found.
@@ -3917,7 +3910,7 @@ def _merge_matches(matches: list[Record]) -> list[Record]:
     by_work: dict[str, int] = {}
 
     def work_of(row: Record) -> str:
-        return f"{_match_key(row)}:{row.year or ''}"
+        return identity.printing_key(row.title, row.author, row.year)
 
     def register(slot: int) -> None:
         row = rows[slot]
@@ -4238,11 +4231,11 @@ async def candidates(
     )
     rows = list(cluster)
     # **Deduplicated on the ISBN and on nothing else**, which is the one thing
-    # that identifies a printing. `_match_key` is title plus author, and every
-    # row on this page shares both by construction: using it here collapsed a
-    # five row answer to one, live, because five printings of one book are
-    # five rows the picker exists to show. A row with no ISBN is always kept,
-    # for the same reason.
+    # that identifies a printing. `identity.work_key` is title plus author, and
+    # every row on this page shares both by construction: using it here
+    # collapsed a five row answer to one, live, because five printings of one
+    # book are five rows the picker exists to show. A row with no ISBN is
+    # always kept, for the same reason.
     seen = {row.isbn for row in rows if row.isbn}
     for row in searched:
         found = row.isbn

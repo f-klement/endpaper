@@ -30,6 +30,7 @@ import * as zxingDouble from "@zxing/library";
 // The subject of the column count rule at the foot of this file. Imported so
 // the figure it refuses is computed rather than written here.
 import { COLUMN_SPECS } from "../src/lib/libraryColumns";
+import { declarePreference } from "../src/lib/preference";
 
 // The refusal this file and the ScanPage guard both apply, in one home: the
 // module says why it is not a copy per guard.
@@ -203,6 +204,23 @@ const REACHES_THE_FLAGS = ["useFeatureFlagsState", "FeatureFlagsOut"];
  * puts the name in the parse as an identifier or a literal. Matching only the
  * member expression would report four of the five as unread, and a guard that
  * calls a real reader missing is the one somebody deletes.
+ *
+ * **A template literal needs its own arm, because its text is not a `value` this
+ * walk can read.** A `TemplateElement` holds `{ raw, cooked }`, an object with no
+ * `type`, so `isNode` refuses it and `text(value.value)` is handed an object and
+ * answers null. Measured against the parse: of nine ways to name a member,
+ * `d[\`x\`]()`, the same through a `const`, through an `as const` record, through
+ * `Date.prototype[K].call`, and `new Intl[\`x\`]()` were all invisible, five of
+ * nine, while the plain access and the string literal index were seen.
+ * `withoutProse.ts` in this directory already counted `TemplateElement` among the
+ * node kinds that carry text, so the tree held the fact this was missing.
+ * **Removing this arm silently unsees a whole spelling** in every rule that reads
+ * through here, which is why it is not folded into the line below it.
+ *
+ * **What is still open is concatenation**, `d["toLocale" + "DateString"]`, which
+ * needs constant folding. It is stated rather than chased: TypeScript refuses it
+ * on `Date` and on `Intl`, neither having an index signature, so the type checker
+ * is what holds it and no arm here does.
  */
 function namesIn(path: string, source: string): Set<string> {
   const names = new Set<string>();
@@ -215,6 +233,10 @@ function namesIn(path: string, source: string): Set<string> {
     if (value.type === "Identifier") {
       const name = text(value.name);
       if (name !== null) names.add(name);
+    }
+    if (value.type === "TemplateElement") {
+      const cooked = text((value.value as { cooked?: unknown })?.cooked);
+      if (cooked !== null) names.add(cooked);
     }
     const literal = text(value.value);
     if (literal !== null) names.add(literal);
@@ -3221,5 +3243,1548 @@ describe("a scan reason is a name, and three arms carry anything else", () => {
         )
         .sort(),
     ).toEqual(["audio: failure", "file: failure", "server-said: message"]);
+  });
+});
+
+/**
+ * Browser storage is reached through one door, and every other reader is named
+ * along with the keys it may touch.
+ *
+ * **Stated as an exclusion, because an inclusion list is what goes stale.** A
+ * guard that pinned the declared keys would say nothing about a sixth
+ * preference added beside the door instead of through it, which is the shape
+ * this rule exists for: five modules each spelled their own key, their own
+ * `try`, their own "absence means the default", and the page that read two of
+ * them carried a counter to make a write visible to its own next render.
+ *
+ * **Named by key and not by file**, and that is the difference between this
+ * rule and the one it replaced. A file level exemption is one a sixth
+ * preference walks straight through: four lines of
+ * `localStorage.setItem("librarySort", ...)` inside an already exempt module
+ * satisfies it, and `theme/appearance.ts` is exactly where somebody would put a
+ * per device wallpaper key. The exemption is file shaped where the rule is key
+ * shaped, so the keys are declared and the arguments are read back out.
+ *
+ * **What each exemption buys is written beside it**, so the list cannot outlive
+ * its reason: two arms below fail when a file named here stops reaching storage
+ * at all, or stops touching a key it declares, which is how a suppression list
+ * stops being one.
+ *
+ * Read off the stripped source, so a module that only mentions storage in a
+ * docstring is not a reader. That is what lets the prose above name
+ * `localStorage` freely, and it is why the match can be the bare identifier.
+ *
+ * **Its blind spots, stated rather than left to be discovered, and the list is
+ * shorter than it was because the first version of this sentence was
+ * reassuring about the case that was actually open.** It said what was left was
+ * an argument no literal resolves, and that such an argument is reported rather
+ * than dropped, which is true and was not the hole: a property access named no
+ * argument at all, so the key was absent rather than reported, and three
+ * spellings of it passed every arm. A comment defending the case that is covered
+ * is how a reviewer agrees with a guard and the hole survives.
+ *
+ * **This paragraph was wrong twice, in the same way both times**, which is why
+ * the rule no longer works by naming spellings. It said the alias needed a
+ * parser, then said bracket access did; each was one pattern, and each time the
+ * sentence defended the case that was covered while the open one went
+ * unmentioned. Three rounds produced four spellings, every one found by whichever
+ * seat had not written the previous fix, which is the tell for a guard
+ * enumerating something open.
+ *
+ * **So the last arm counts rather than enumerates.** Every mention of a storage
+ * object in the stripped source is either explained, by a member access or by a
+ * bracket holding a literal, or reported. A computed bracket, a reference passed
+ * on under another name, and a storage object handed to something else are all
+ * unexplained mentions, so all three fail without being named. Following a
+ * reference needs a parser; noticing one was taken does not.
+ *
+ * What is left, and is not bought here:
+ *
+ * * **A string literal in code naming the identifier**, such as an error
+ *   message. It reads as an unexplained mention and costs one row here. There is
+ *   none today, and the sentence near `pages/hooks.ts`'s own docstring is the
+ *   near miss: prose is stripped, so it does not count, and this rule's
+ *   correctness now rests on the stripper in a way the member pattern did not.
+ * * **Which key an unexplained reach names**, as opposed to that there is one.
+ *   This reports the reach and fails the declared set, so nothing passes; it
+ *   cannot tell you what was stored, and it is not trying to.
+ */
+describe("browser storage is reached through one door", () => {
+  const THE_DOOR = "lib/preference.ts";
+
+  const NOT_A_PREFERENCE: Record<string, { keys: string[]; because: string }> =
+    {
+      "api/mutator.ts": {
+        keys: ["endpaper.edge-reload", "token", "user"],
+        because:
+          "the token and the identity, which are not a choice anybody made, plus a per tab reload marker whose lifetime is the document",
+      },
+      "pages/hooks.ts": {
+        keys: ["user"],
+        because: "reads the identity the mutator owns, and writes none of it",
+      },
+      "i18n/index.tsx": {
+        keys: ["locale"],
+        because:
+          "the locale, whose one reader and one writer are the same provider, so a subscription would buy it nothing",
+      },
+      "theme/appearance.ts": {
+        keys: ["appearance", "theme"],
+        because:
+          "a cache of a value the account owns: one key holds a record over accounts and a pointer to the last one, and the server is the authority",
+      },
+    };
+
+  const REACHES_STORAGE = /\b(?:localStorage|sessionStorage)\b/;
+  const REACHES_STORAGE_ANYWHERE = /\b(?:localStorage|sessionStorage)\b/g;
+  // **The lookahead is what stops a built key resolving to its first token.**
+  // Without it `setItem(STORAGE_KEY + "." + id, value)` reads as the declared
+  // prefix and passes, and a key per account is the obvious next refactor of the
+  // appearance cache. An argument that continues into an expression is not
+  // bounded here, and `REACHES_AN_ITEM_CALL` below is what stops the tightening
+  // from quietly matching fewer calls instead of more.
+  const TOUCHES_A_KEY =
+    /\b(?:localStorage|sessionStorage)\s*\??\.\s*(?:get|set|remove)Item\s*\(\s*(?:(["'`])([^"'`]*)\1|([A-Za-z_$][\w$]*))(?=\s*[,)])/g;
+  const REACHES_AN_ITEM_CALL =
+    /\b(?:localStorage|sessionStorage)\s*\??\.\s*(?:get|set|remove)Item\s*\(/g;
+  const NAMES_A_LITERAL =
+    /\bconst\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*(["'`])([^"'`]*)\2/g;
+  const REACHES_A_MEMBER =
+    /\b(?:localStorage|sessionStorage)\s*\??\.\s*([A-Za-z_$][\w$]*)/g;
+  const REACHES_A_BRACKET =
+    /\b(?:localStorage|sessionStorage)\s*\??\[\s*(["'`])([^"'`]*)\1\s*\]/g;
+
+  function readers(): [string, string][] {
+    return entries()
+      .map(([path, source]) => [path, withoutProse(source, langOf(path))])
+      .filter(([, code]) => REACHES_STORAGE.test(code!)) as [string, string][];
+  }
+
+  function codeOf(path: string): string {
+    const found = readers().find(([one]) => one === path);
+    return found?.[1] ?? "";
+  }
+
+  /**
+   * The keys one file names, with `const X = "literal"` in the same file
+   * resolved, and anything else reported as itself rather than dropped.
+   *
+   * **Two passes, and the second one is the reason this rule works at all.**
+   * `Storage` is a proxy, so `localStorage.librarySort = value` and
+   * `delete localStorage.librarySort` store and remove a key without naming
+   * `setItem` at all. Reading only the method calls left the whole of that class
+   * open **inside an already exempt module**, which is precisely what a key
+   * shaped exemption exists to close: measured, three spellings of a sixth
+   * preference passed every arm against all four exempt files.
+   *
+   * So any member that is not one of the six `Storage` offers is a property
+   * access, which means a key, and it is reported rather than ignored. An
+   * exclusion over a closed interface rather than a list of the spellings
+   * somebody thought of.
+   */
+  /**
+   * The members that address a key, or address none and read nothing out.
+   *
+   * **`clear` is deliberately not here**, though it is part of the interface.
+   * The partition this rule wants is not "is it `Storage`", it is "can it change
+   * what is stored without naming a key", and `clear` is the only member that
+   * can: `getItem`, `setItem` and `removeItem` name one and the first pass reads
+   * it, `key` and `length` name none and change nothing, and `clear` removes
+   * every key in the origin, this application's eight preferences and the four
+   * the exempt modules own alike. Leaving it in the list made it invisible to
+   * both passes.
+   *
+   * There is a real path to somebody writing it: `docs/decisions.md` records
+   * that a sign out leaves the saved searches and the last location behind and
+   * prescribes clearing both stores in `clearSession()`, and the shortest
+   * reading of that is `localStorage.clear()` inside an exempt module. Reported
+   * rather than refused, so it needs a row and a reason here.
+   */
+  const THE_STORAGE_API = ["getItem", "setItem", "removeItem", "key", "length"];
+
+  function keysTouchedIn(code: string): string[] {
+    const literals = new Map<string, string>();
+    for (const match of code.matchAll(NAMES_A_LITERAL))
+      literals.set(match[1]!, match[3]!);
+
+    const keys = new Set<string>();
+    for (const match of code.matchAll(TOUCHES_A_KEY)) {
+      if (match[2] !== undefined) keys.add(match[2]);
+      else if (match[3] !== undefined)
+        keys.add(literals.get(match[3]) ?? `${match[3]} (unresolved)`);
+    }
+    for (const match of code.matchAll(REACHES_A_MEMBER)) {
+      const member = match[1]!;
+      if (!THE_STORAGE_API.includes(member))
+        keys.add(`${member} (property access)`);
+    }
+    // **Every bracket reach is reported, whichever half of the interface it
+    // names.** `localStorage["librarySort"] = v` is a key, and
+    // `localStorage["setItem"](…)` is a method whose key argument the patterns
+    // above cannot see, so neither may pass quietly: both fail the declared set
+    // rather than being absent from it.
+    for (const match of code.matchAll(REACHES_A_BRACKET))
+      keys.add(`${match[2]!} (bracket access)`);
+
+    // **A call the key pattern could not bound is reported rather than missing.**
+    // Tightening a pattern makes it match less, and a rule that reads fewer
+    // calls than a file makes looks cleaner while seeing less. Counting the
+    // calls and the reads against each other is what makes the tightening safe.
+    const calls = [...code.matchAll(REACHES_AN_ITEM_CALL)].length;
+    const read = [...code.matchAll(TOUCHES_A_KEY)].length;
+    if (read < calls) keys.add("a key this rule could not read");
+
+    // **Every mention of a storage object is accounted for, or reported.** This
+    // is the arm that stops the rule being a list of spellings. It went through
+    // four of them in three rounds, dotted member, property write, bracket
+    // literal and computed bracket, each found by whichever seat had not written
+    // the previous fix, which is the tell for a guard enumerating something open:
+    // the answer is structural, never a fifth alternative.
+    //
+    // So rather than naming the ways a key can be reached, this counts the ways
+    // this rule **explained** what it saw. A member access and a bracket with a
+    // literal each account for one mention; anything left over is a reach nobody
+    // here can read, which covers a computed bracket, a reference passed on under
+    // another name, and a storage object handed to something else, in one arm
+    // rather than three. Following a reference needs a parser; noticing that one
+    // was taken does not.
+    const mentions = [...code.matchAll(REACHES_STORAGE_ANYWHERE)].length;
+    const explained =
+      [...code.matchAll(REACHES_A_MEMBER)].length +
+      [...code.matchAll(REACHES_A_BRACKET)].length;
+    if (explained < mentions)
+      keys.add("a storage reach this rule could not read");
+    return [...keys].sort();
+  }
+
+  it("reads the source tree at all", () => {
+    // A glob that matched nothing would make every assertion below pass for
+    // ever, and this rule's whole subject is a module nobody noticed arriving.
+    expect(readers().length).toBeGreaterThan(0);
+  });
+
+  it("is reached by the door and by nothing that is not named here", () => {
+    const named = [THE_DOOR, ...Object.keys(NOT_A_PREFERENCE)];
+    expect(
+      readers()
+        .map(([path]) => path)
+        .filter((path) => !named.includes(path)),
+    ).toEqual([]);
+  });
+
+  it("names nothing that has stopped reaching storage", () => {
+    const reaching = readers().map(([path]) => path);
+    const named = [THE_DOOR, ...Object.keys(NOT_A_PREFERENCE)].sort();
+    expect(named.filter((path) => !reaching.includes(path))).toEqual([]);
+  });
+
+  it("lets an exempt file touch only the keys it declares", () => {
+    // The arm the file shaped version did not have. A sixth preference added
+    // inside an exempt module fails here by name.
+    for (const [path, { keys }] of Object.entries(NOT_A_PREFERENCE)) {
+      expect(keysTouchedIn(codeOf(path)), path).toEqual([...keys].sort());
+    }
+  });
+
+  it("keeps the door from spelling a key of its own", () => {
+    // Every key it touches arrives from a declaration. A literal here would be
+    // a preference the door had swallowed rather than published.
+    expect(
+      keysTouchedIn(codeOf(THE_DOOR)).filter(
+        (key) => !key.endsWith("(unresolved)"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("reaches storage by a member this rule can read", () => {
+    // The second pass, asserted on the shipped tree rather than only on the
+    // evasions it was written for: every member any reader names is one of the
+    // six, so no exempt file is already touching a key by property access and
+    // the arm above is comparing like with like.
+    const members = new Set<string>();
+    for (const [, code] of readers())
+      for (const match of code.matchAll(REACHES_A_MEMBER))
+        members.add(match[1]!);
+    expect(
+      [...members].filter((one) => !THE_STORAGE_API.includes(one)),
+    ).toEqual([]);
+  });
+
+  it("claims none of the keys an exempt module owns", () => {
+    // **The two lists tied together, because they were kept apart.** The door
+    // reserves the names a preference may not claim; this rule names the keys the
+    // exempt modules touch. A key on one list and not the other is a name a
+    // preference can claim with the collision refused nowhere, so every exempt
+    // key is offered to the door here and has to be refused.
+    for (const { keys } of Object.values(NOT_A_PREFERENCE)) {
+      for (const key of keys) {
+        expect(
+          () =>
+            declarePreference(key, {
+              decode: (raw) => raw,
+              encode: (value) => value,
+              fallback: () => "",
+            }),
+          key,
+        ).toThrow(/not a preference/);
+      }
+    }
+  });
+
+  it("gives every exemption a reason rather than a bare path", () => {
+    // A path with an empty reason is the entry somebody adds in a hurry, and it
+    // is indistinguishable from a considered one once it is in the list.
+    //
+    // **Non empty, and deliberately not a length.** A word count is a proxy for
+    // "was this thought about", which nothing can measure, and it was wrong on
+    // its first run: the door's own entry read "the door itself", which is the
+    // whole reason and three words long. A threshold that refused it would have
+    // been satisfied by padding.
+    for (const [path, { because }] of Object.entries(NOT_A_PREFERENCE)) {
+      expect(because.trim(), path).not.toBe("");
+    }
+  });
+});
+
+/**
+ * Every module specifier a file names, whichever construct named it.
+ *
+ * **Not `importedFrom`, and the difference is the question rather than the
+ * module.** That helper answers which *names* one module takes from another and
+ * refuses a nameless reach by throwing, a default import among them, because
+ * the rule it serves is about reaching a named export. Every component here is
+ * a default export, so asking it which names a page took from a component would
+ * refuse on the ordinary case. This asks which module was named at all, and to
+ * that question a default import is an answer.
+ *
+ * **Both are used in this block, on different subjects**, which is the thing to
+ * read before assuming one is redundant: this one is asked about a component,
+ * where a default import is the norm, and `importedFrom` is asked about the
+ * translation door, which exports only names. A refusal from it there is an
+ * answer rather than an error, and the arm that asks says so.
+ *
+ * **It reads a `source` node, so it sees every construct that carries one**:
+ * a plain, type only or side effect import, a re-export, an `export *`, and a
+ * dynamic `import()` in value or type position. **What carries no `source` node
+ * is outside it**, and the one such form reachable here is `import.meta.glob`,
+ * which is first class in this bundler and is how this very file reads the
+ * tree. A registry globbing its own assets would name no module this can see.
+ */
+function specifiersOf(path: string, source: string): string[] {
+  const out: string[] = [];
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value as unknown[]) walk(item);
+      return;
+    }
+    if (!isNode(value)) return;
+    if (isNode(value.source)) {
+      const from = text(value.source.value);
+      if (from !== null) out.push(from);
+    }
+    for (const key of Object.keys(value)) walk(value[key]);
+  };
+  walk(parseAst(source, { lang: langOf(path) }));
+  return out;
+}
+
+/**
+ * `src/components/` holds only components that belong to no one page.
+ *
+ * House rule 4, which until this rule existed was enforced by a reviewer
+ * noticing. The component it let through served a single page and said so in
+ * its own strings.
+ *
+ * **It names no domain word, and that is the whole design.** The obvious rule
+ * greps the folder for a book, a loan and a tag. `Icon.tsx` names `book`,
+ * `bookmark` and `tag` as glyph names, so the obvious rule is red on a drawing
+ * vocabulary the day it is written, and the fix that adds a fourth and fifth
+ * spelling is the shape this tree has watched fail repeatedly: the storage door
+ * rule went through four spellings in three rounds before it stopped naming
+ * them. A list of forbidden words is a list somebody has to think of.
+ *
+ * So neither arm below knows what a book is.
+ *
+ * **The vocabulary arm** asks a module which message namespaces it states, and
+ * then asks the tree how many page folders state the same ones. A namespace
+ * exactly one page speaks is that page's property, and a component speaking it
+ * is that page's component wherever the file happens to sit. This reaches a
+ * book, a loan and a tag for free, and reaches every other namespace nobody
+ * would have thought to list.
+ *
+ * **The reach arm** states what a general component is allowed to name, and
+ * reports everything else with the specifier it named. Stated as an allowance
+ * because the refusals are open ended: the next domain module to arrive is not
+ * on any list of forbidden ones. It is what catches a component that carries a
+ * page's knowledge in its *types* while saying nothing at all.
+ *
+ * **Their blind spots intersect rather than covering each other, and that is
+ * the first thing to know about this rule.** Both detect something a module
+ * *names*. A component that states no namespace and imports nothing but the
+ * framework and a sibling satisfies both unconditionally, whatever it is about,
+ * and most of this folder is green for that reason rather than by being
+ * general. Both still run, because each reaches a class the other does not: one
+ * speaking a page's language, one carrying a page's knowledge in its types.
+ *
+ * ## What it cannot see, as properties rather than as a list
+ *
+ * **A module that names nothing is outside both arms, and that is the largest
+ * hole rather than a residue.** Its knowledge then lives in prop names and in
+ * markup, where reaching it needs the word list this rule exists to avoid. A
+ * component one tier down, reached by one page and stating no namespace, passes
+ * on arrival if somebody moves it up; so does this rule's own motivating
+ * violation if its labels are lifted to props, which is an ordinary
+ * accessibility refactor rather than an evasion.
+ *
+ * **It reads what a module states, never what it renders.** A whole domain
+ * object arriving through a generic or untyped prop is outside both arms, and
+ * so is a component whose only domain knowledge is a convention its caller
+ * holds. Following a value needs a dataflow pass; noticing a name does not.
+ *
+ * **The vocabulary arm's verdict is a property of the whole tree rather than of
+ * this folder.** It goes red when a page folder changes and green when a page
+ * is copied, so a failure naming a component can have been caused where nobody
+ * touched it. That is why the message names the namespace and its speakers
+ * rather than the component alone.
+ *
+ * **Two consequences of counting page folders, both verdicts rather than
+ * definitions.** The shell is not a page, so a namespace it shares with exactly
+ * one page counts one and is reported. And the margin is thin where a namespace
+ * has exactly two speakers: retiring either one reports a component nobody
+ * edited. Both are the rule working, and both are why the message has to carry
+ * the cause.
+ *
+ * **A renamed translation binding is reached only indirectly.** Both patterns
+ * key on the local name, so a destructured rename empties the count and the
+ * shortfall check that is supposed to keep it honest, together. What closes it
+ * is the door, which cannot be renamed away: a module that opens the door and
+ * states nothing is reported.
+ *
+ * **Generality is deliberately not enforced here, and that is a refusal rather
+ * than a gap.** The bar at `src/components/index.ts` has a second half, that a
+ * component be useful to more than one page. Measured over this folder, the
+ * predicate "reached by fewer than two page folders", measured by which
+ * component a page folder names in its import from the barrel rather than by
+ * module reachability, reports four components,
+ * `CollapsibleSection` among them, which is correctly general and whose every
+ * other mention in the tree is a comment.
+ *
+ * **What refuses it is the exemption it would need, and the ground is churn
+ * rather than falsifiability.** A row could state the page folders that reach a
+ * component today, which is observable and could be pinned the way the storage
+ * rule pins a key set, so the first version of this paragraph was wrong to say
+ * no arm could falsify one. The cost is that a reach set moves on ordinary
+ * work: every new page that imports the button edits the table, so the table is
+ * rubber stamped within a month and a suppression nobody reads is worse than no
+ * arm at all. Refused on that, and not on any confidence in review: review is
+ * what let this rule's own violation through.
+ *
+ * **The naive form of that arm is worse than absent, which is worth keeping
+ * here because it is where somebody would start.** Computed module to module,
+ * rather than by the binding a page names, every component in the folder is
+ * imported by the barrel and the barrel is imported by every page folder
+ * without exception, so all of them reach all of them and the arm is vacuous
+ * rather than merely weak. Measured while this rule was being designed: the
+ * violation it exists for scored the full set while sitting in the wrong folder.
+ */
+describe("a general component carries no one page's knowledge", () => {
+  const FOLDER = "components/";
+
+  // **One module, and each arm derives the form it can ask in.** The allowance
+  // list matches a specifier as written; the door arm asks which names a module
+  // took, which needs the resolved module id instead. A regex only one of those
+  // two questions can be put with is the version that drifts, so the module is
+  // the constant and the spelling is derived from it.
+  //
+  // **One home for the module's identity, and no further than that.** The
+  // derived spelling also encodes this folder's depth, which the module id does
+  // not, so the two arms part company on the same module written from one tier
+  // down: the door arm resolves `../../i18n` correctly and the allowance list
+  // reports it. That is the already stated loud direction rather than a second
+  // defect, and the derivation is not to be trusted past the identity.
+  const THE_I18N_MODULE = "i18n";
+  const THE_TRANSLATION_DOOR = new RegExp(`^\\.\\./${THE_I18N_MODULE}$`);
+  /**
+   * Which names a general component may take from the translation door.
+   *
+   * **Module granularity is not enough here, and one export is the reason.**
+   * The door exports a function that renders a library tag, so a component
+   * importing it renders a tag wherever the file happens to sit, which is the
+   * thing this whole block exists to stop. Allowing the module allowed that
+   * name with it, and every arm here was silent on it.
+   *
+   * **It is the names the folder takes and nothing held in reserve.** The
+   * allowance list above has an arm refusing a permission no module uses, on the
+   * ground that it is a hole opened on a guess. A second standard for the same
+   * kind of list, thirty lines apart, would be the inconsistency rather than the
+   * exception, so `allows no name the folder does not already take` holds this
+   * one to it too.
+   *
+   * **A pre-authorised name is not free, and that is the measurement that
+   * settled the list rather than an argument about taste.** A message key type
+   * sat here for one round, admitted so that a component taking a key and
+   * letting its caller translate would not be refused on arrival. It made the
+   * **typed** spelling of the key literal shape green: a block of key literals
+   * typed against it, with no translation call anywhere in the file, passes
+   * every arm in this block while carrying the exact literal that makes the
+   * violation this rule exists for fail. Refusing on arrival costs one line in
+   * the diff of whoever writes that component, at the moment the trade is
+   * visible to a reviewer.
+   *
+   * **Refusing it does not close that family, and saying it did would be the
+   * claim this block keeps removing.** Write the same literals as a plain
+   * constant naming nothing, and the module passes every arm with this list or
+   * without it, under the blind spot stated first in the docstring above: a
+   * module that names nothing is outside all of this. What the refusal buys is
+   * narrower and still worth having, that the typed spelling no longer rides in
+   * free on a permission granted for something else.
+   *
+   * **Why an inclusion is safe here, and it is not the reason it resembles.**
+   * The storage rule partitions an interface this repository cannot change, so
+   * closedness is a property of the specification and is what makes the
+   * enumeration safe there. This partitions a module the repository edits
+   * whenever anybody touches translation, so closedness does none of that work.
+   * What makes it safe is the direction of failure on growth, a new export of
+   * the door arriving reported and named rather than admitted, together with the
+   * arm that recomputes this list against the door's own exports.
+   *
+   * **Everything else the door publishes is refused, the tag renderer among
+   * them.** The refused half is deliberately not accounted for name by name: an
+   * accounting of it goes stale against the door's export clause and is then
+   * read as current, and a reader who agrees with a list that is one member
+   * short leaves that member unexamined. The arm below recomputes the allowed
+   * half against the door instead.
+   */
+  const THE_TRANSLATION_API = ["Translate", "useTranslation"];
+
+  /**
+   * Is this the helper's own refusal of a nameless reach, about this file?
+   *
+   * **Anchored and bound to the path**, because the alternative is a substring
+   * test against a stringified unknown: anything whose text happened to carry
+   * the phrase would then read as an opened door, a wrapper or a nested frame
+   * included. The helper writes `${path} reaches ${subject} by ${what}`, so both
+   * halves of the prefix are already known here and there is no reason to match
+   * on less than the whole of it.
+   */
+  function takesTheDoorWhole(path: string, refusal: unknown): boolean {
+    return (
+      refusal instanceof Error &&
+      refusal.message.startsWith(`${path} reaches ${THE_I18N_MODULE} by `)
+    );
+  }
+
+  // **Stated as what is allowed.** A general component needs the framework, a
+  // sibling in its own folder, the translation door, and the transport error
+  // that names no entity. Anything else is reported by name, so a generated
+  // model, a page module or a domain helper fails the day it is imported
+  // without this rule having to know that any of them exist.
+  //
+  // **These are spellings, and that is the one enumeration in this block.** The
+  // comparison is against the specifier as written rather than the module it
+  // resolves to, so a second spelling of an allowed module is refused: `../i18n`
+  // passes and `../i18n/index` does not. That direction is a report rather than
+  // an admission, which is the safe half, but the failure arrives reading
+  // `reaches ../i18n/index` and will look like a bug in the rule unless this
+  // says otherwise.
+  //
+  // **The known collision, written here so the first refusal does not become a
+  // widening.** A component that remembered its own open state would have to
+  // name the preference door that the storage rule requires of every stored
+  // choice, and this arm reports it. The resolution is to move that component
+  // into a page folder, not to widen this list: the widening that reaches one
+  // general helper admits every domain helper beside it in the same stroke.
+  const MAY_REACH = [
+    /^react$/,
+    /^\.\/[A-Za-z]+$/,
+    THE_TRANSLATION_DOOR,
+    /^\.\.\/api\/mutator$/,
+  ];
+
+  const STATES_A_NAMESPACE = /\bt\(\s*"([a-z][A-Za-z0-9]*)\./g;
+  // The denominator for the shortfall arm below. `\b` is what keeps this off
+  // the `t(` inside `errorText(`, which is a call to something else entirely.
+  const CALLS_TRANSLATE = /\bt\(/g;
+
+  function code(): [string, string][] {
+    return entries().map(([path, source]) => [
+      path,
+      withoutProse(source, langOf(path)),
+    ]);
+  }
+
+  /**
+   * The page a module belongs to, or nothing.
+   *
+   * `pages/components/` is the middle tier, shared by several pages and a page
+   * itself. It owns no vocabulary, so it neither fails this rule nor counts
+   * toward the sharing that clears it.
+   */
+  function pageOf(path: string): string | null {
+    const parts = path.split("/");
+    if (parts[0] !== "pages" || parts.length < 3) return null;
+    return parts[1] === "components" ? null : parts[1]!;
+  }
+
+  function namespacesIn(source: string): string[] {
+    return [...source.matchAll(STATES_A_NAMESPACE)].map((match) => match[1]!);
+  }
+
+  /**
+   * Who states each namespace: the page folders, and the modules outside this
+   * folder that are not a page.
+   *
+   * **The second half exists so the failure can name a cause.** The count that
+   * decides the verdict is the page folders alone, and when that count is zero
+   * the speaker is the middle tier or the shell, which is exactly the case this
+   * rule was widened to catch. Reporting "no page" and stopping there names the
+   * component and nothing about why, and the component is the one part of the
+   * message the reader already knows.
+   */
+  function speakers(): Map<
+    string,
+    { pages: Set<string>; elsewhere: Set<string> }
+  > {
+    const out = new Map<
+      string,
+      { pages: Set<string>; elsewhere: Set<string> }
+    >();
+    for (const [path, source] of code()) {
+      if (path.startsWith(FOLDER)) continue;
+      const page = pageOf(path);
+      for (const namespace of namespacesIn(source)) {
+        const found = out.get(namespace) ?? {
+          pages: new Set<string>(),
+          elsewhere: new Set<string>(),
+        };
+        if (page === null) found.elsewhere.add(path);
+        else found.pages.add(page);
+        out.set(namespace, found);
+      }
+    }
+    return out;
+  }
+
+  function theFolder(): [string, string][] {
+    return code().filter(([path]) => path.startsWith(FOLDER));
+  }
+
+  it("reads the folder and the tree it compares against", () => {
+    // A glob that matched nothing, or a tree that stated no namespace, would
+    // make every arm below pass for ever. This rule's whole subject is a
+    // component nobody noticed was in the wrong folder.
+    expect(theFolder().length).toBeGreaterThan(0);
+    expect(speakers().size).toBeGreaterThan(0);
+  });
+
+  it("states no vocabulary that belongs to one page", () => {
+    const spoken = speakers();
+    const reported: string[] = [];
+    for (const [path, source] of theFolder()) {
+      for (const namespace of new Set(namespacesIn(source))) {
+        const found = spoken.get(namespace);
+        const pages = [...(found?.pages ?? [])].sort();
+        const elsewhere = [...(found?.elsewhere ?? [])].sort();
+        // **Fewer than two, and zero is the case that matters.** A namespace no
+        // page folder speaks is not unowned: it belongs to the middle tier or
+        // to the component itself, and both are the domain case. Every
+        // namespace minted for a new component lands at zero by construction,
+        // so "exactly one" would clear the shape somebody reaches for first.
+        if (pages.length < 2)
+          reported.push(
+            // **Naming a cause on both branches, not just the informative one.**
+            // The verdict is a property of the whole tree, so the component this
+            // message opens with is rarely where the cause is. One page folder
+            // names that page; no page folder names whatever does speak it,
+            // which is the middle tier or the shell, and saying only "no page"
+            // there would leave the reader the one fact they already had.
+            `${path} states ${namespace}., spoken by ${
+              pages.length > 0
+                ? pages.join(", ")
+                : elsewhere.length > 0
+                  ? `no page folder, only ${elsewhere.join(", ")}`
+                  : "nothing else in the tree"
+            }`,
+          );
+      }
+    }
+    expect(reported).toEqual([]);
+  });
+
+  it("reaches nothing a general component has no business naming", () => {
+    const reported: string[] = [];
+    for (const [path, source] of theFolder())
+      for (const specifier of specifiersOf(path, source))
+        if (!MAY_REACH.some((allowed) => allowed.test(specifier)))
+          reported.push(`${path} reaches ${specifier}`);
+    expect(reported).toEqual([]);
+  });
+
+  it("allows nothing the folder does not already name", () => {
+    // An allowance covering nothing is one waiting to cover something. Each of
+    // these is a permission, and a permission no module in the folder uses is
+    // a hole that was opened on a guess.
+    //
+    // **It is also what stops the reach arm passing on an empty read.** If the
+    // specifier walk ever returned nothing, the arm above would report nothing
+    // and look clean; this one goes red on every pattern at once. A rule that
+    // reads less than it did is the failure a green arm cannot show you.
+    const named = theFolder().flatMap(([path, source]) =>
+      specifiersOf(path, source),
+    );
+    expect(
+      MAY_REACH.filter(
+        (allowed) => !named.some((specifier) => allowed.test(specifier)),
+      ).map(String),
+    ).toEqual([]);
+  });
+
+  it("states a namespace wherever it opens the translation door", () => {
+    // **The denominator the vocabulary arm cannot have.** Both of its patterns
+    // key on the local name `t`, so `const { t: label } = useTranslation()`
+    // empties the namespaces it reads and the shortfall check that is meant to
+    // notice, in one edit: a renamed binding is invisible to a rule and to its
+    // own honesty check at the same time. The storage rule above does not have
+    // this weakness only because `localStorage` is a global that cannot be
+    // renamed without the module failing to resolve, and a destructured `t` can.
+    //
+    // **It asks which name the module took, not which module it named**, and
+    // that is what keeps it off the most general design this folder can hold: a
+    // component whose prop is a `MessageKey` and whose caller does the
+    // translating imports a type from the door and calls nothing. That shape is
+    // live one tier down, so an arm keyed on the specifier would refuse the
+    // thing `src/components/` is for, on arrival. Asking for the name is also
+    // the stronger reading of the rename: a specifier carries what was
+    // imported rather than what it was bound to, so an alias at the import site
+    // still answers `useTranslation`, and the door cannot rename its own export
+    // without breaking every caller loudly.
+    //
+    // **One class uniquely, not three, and the earlier wording of this claimed
+    // three.** It fires only where no readable namespace is left, so: a renamed
+    // binding is caught here and nowhere else, which is the whole reason it
+    // exists; a key built from a template and a key held in a prop are the
+    // shortfall arm's, which counts calls against reads and sees both. And a
+    // module that states one namespace honestly can still hold a second under a
+    // renamed binding or a translator threaded into a helper, which this arm
+    // does not reach, because the count it tests is not zero. Following a
+    // binding there needs the AST rather than a count.
+    const reported: string[] = [];
+    for (const [path, source] of theFolder()) {
+      // **A reach with no name is the strongest yes this arm can get, and the
+      // helper refuses it.** `importedFrom` throws on a namespace, default,
+      // dynamic or star reach, because the rule it serves asks which name was
+      // taken and a nameless reach would turn such a rule off with every arm
+      // green. This arm asks only whether the door was opened, and taking the
+      // module whole is taking the door, so the refusal is an answer of yes.
+      // Left to propagate it would fail this arm on
+      // `import * as i18n from "../i18n"` beside an honest key, which nothing
+      // in this block forbids, and it would report one file per run where every
+      // other arm here reports all of them.
+      //
+      // **It over matches a type only namespace reach, and that is the loud
+      // direction rather than a second defect.** `import type * as i18n` is an
+      // ordinary spelling for reaching a message key type, carries no
+      // translator and opens nothing, and it refuses here all the same, so a
+      // component whose prop is one is reported for a door it never opened.
+      // That is the type only case arriving by the namespace spelling, narrow
+      // enough to state rather than to build machinery for, and unstated it is
+      // a failure with nothing attached to explain it.
+      //
+      // **The re-throw is the half not to drop.** A bare catch would read a
+      // parse failure inside the helper as an opened door, and that then passes
+      // silently on every file that states a namespace. A matched refusal
+      // leaves the loop running, so every offender is reported; an unmatched one
+      // still leaves the loop and names the first file only, which is the right
+      // way round for something nobody predicted.
+      let opened: boolean;
+      try {
+        opened = importedFrom(path, source, THE_I18N_MODULE).includes(
+          "useTranslation",
+        );
+      } catch (refusal) {
+        if (!takesTheDoorWhole(path, refusal)) throw refusal;
+        opened = true;
+      }
+      if (opened && namespacesIn(source).length === 0)
+        reported.push(`${path} opens the translation door and states nothing`);
+    }
+    expect(reported).toEqual([]);
+  });
+
+  it("takes only translation machinery from the door", () => {
+    // The arm the allowance list cannot be, because that one is keyed on a
+    // module and the domain sits on a name inside it.
+    const reported: string[] = [];
+    for (const [path, source] of theFolder()) {
+      let names: string[];
+      try {
+        names = importedFrom(path, source, THE_I18N_MODULE);
+      } catch (refusal) {
+        if (!takesTheDoorWhole(path, refusal)) throw refusal;
+        // **The same refusal, read the opposite way from the door arm, and the
+        // question is what makes the difference.** That arm asks whether the
+        // door was opened, which taking the module whole answers yes. This one
+        // asks which names came through, and taking it whole takes every name
+        // in it, the domain one included. So a nameless reach is reported here
+        // rather than treated as an answer.
+        //
+        // **The type only namespace spelling is reported here too, and here
+        // with no escape.** It cannot take the tag renderer as a value at all,
+        // so this reasoning does not cover it, and where the door arm lets such
+        // a module pass once it states a namespace, this arm reports
+        // unconditionally. One class with two messages: it is the same defect
+        // the door arm's own comment states, and it wants one fix rather than
+        // two.
+        reported.push(`${path} takes the whole door, domain names included`);
+        continue;
+      }
+      for (const name of names)
+        if (!THE_TRANSLATION_API.includes(name))
+          reported.push(`${path} takes ${name} from the door`);
+    }
+    expect(reported).toEqual([]);
+  });
+
+  it("allows no name the folder does not already take", () => {
+    // The standard the allowance list above already holds, applied to this list
+    // rather than left to it: a permission no module uses is a hole opened on a
+    // guess, and a name admitted against a design nobody has written yet is
+    // exactly that. A component that turns out to need one fails by name, and
+    // the list edit that admits it is reviewed beside the component.
+    const taken = new Set<string>();
+    for (const [path, source] of theFolder()) {
+      try {
+        for (const name of importedFrom(path, source, THE_I18N_MODULE))
+          taken.add(name);
+      } catch (refusal) {
+        if (!takesTheDoorWhole(path, refusal)) throw refusal;
+      }
+    }
+    expect(THE_TRANSLATION_API.filter((name) => !taken.has(name))).toEqual([]);
+  });
+
+  it("names only what the door actually exports", () => {
+    // **An allowance for a name the door does not publish is one waiting to
+    // cover something**, and a typo here would silently widen the arm above by
+    // permitting a name nothing can refuse. Recomputed from the door's own
+    // export clause so the list cannot outlive it.
+    //
+    // **What this arm and the one above it buy together is equality**, which is
+    // more than either states alone. The partition arm gives every name the
+    // folder takes an allowance; the arm above gives every allowance a taker;
+    // this one gives every allowance an export. So the list cannot drift from
+    // what the folder imports in either direction, and a name held in reserve
+    // is impossible rather than merely discouraged.
+    //
+    // **What none of the three reaches** is a name added to silence a component
+    // that already takes it: import the tag renderer, watch the partition arm
+    // name it, then add it here. That is a deliberate act in a reviewable diff
+    // rather than the typo or the reserved guess these arms are for. And
+    // nothing ties this machinery to the export that motivated it, so retiring
+    // that export would leave all of it standing with its reason gone.
+    const door = code().find(([path]) =>
+      path.startsWith(`${THE_I18N_MODULE}/index`),
+    );
+    expect(
+      door,
+      "the translation door is not where this rule expects",
+    ).toBeDefined();
+    const exported = exportedBy(door![0], door![1]);
+    expect(
+      THE_TRANSLATION_API.filter((name) => !exported.includes(name)),
+    ).toEqual([]);
+  });
+
+  it("still recognises the refusal it reads as an opened door", () => {
+    // **The branch above is an allowance covering nothing on this tree.** No
+    // module in the folder takes the door whole, so nothing exercises the catch
+    // and its only other evidence was a mutant that was inverted away. That
+    // leaves it resting on prose another function writes: reword the refusal and
+    // nothing goes red, because with no nameless reach the branch is never
+    // entered. It stays invisible until somebody writes the construct, and then
+    // the arm turns red on an honest file with a message about a construct.
+    //
+    // So the coupling is pinned here instead, in the shape the allowance arm
+    // above already uses for the same reason. This exercises it on every run
+    // rather than once, and it fails the day either side moves: the helper
+    // giving up its refusal, or its wording drifting past the prefix.
+    const path = "components/Probe.ts";
+    let refusal: unknown;
+    try {
+      importedFrom(
+        path,
+        `import * as door from "../${THE_I18N_MODULE}";`,
+        THE_I18N_MODULE,
+      );
+    } catch (thrown) {
+      refusal = thrown;
+    }
+    expect(refusal, "a nameless reach is no longer refused").toBeDefined();
+    expect(takesTheDoorWhole(path, refusal)).toBe(true);
+    // **The negative half, because the path binding is the whole reason the
+    // anchor beats a substring test.** Without these two the `startsWith` could
+    // be reduced to ignore the path, or to match any error at all, and this arm
+    // would stay green on both.
+    expect(takesTheDoorWhole("components/Other.ts", refusal)).toBe(false);
+    expect(takesTheDoorWhole(path, new Error("something else"))).toBe(false);
+  });
+
+  it("reads every namespace the folder states", () => {
+    // **The arm that keeps the vocabulary arm honest.** A key built rather than
+    // written, `t(`help.${topic}`)` among them, is a namespace this rule cannot
+    // read, and a rule that silently reads fewer keys than a file states looks
+    // cleaner while seeing less. Counting the calls against the reads is what
+    // makes the pattern above safe to tighten.
+    const reported: string[] = [];
+    for (const [path, source] of theFolder()) {
+      const calls = [...source.matchAll(CALLS_TRANSLATE)].length;
+      const read = [...source.matchAll(STATES_A_NAMESPACE)].length;
+      if (read < calls)
+        reported.push(`${path} states a namespace this rule could not read`);
+    }
+    expect(reported).toEqual([]);
+  });
+});
+
+/**
+ * The module every rendered date goes through, as a path this rule holds once.
+ *
+ * Spelled as a `SOURCES` key because `unreferenced` resolves importers'
+ * specifiers against it, and stripped separately for the arms that walk
+ * `entries()`.
+ */
+const THE_DATE_DOOR = "../src/lib/date.ts";
+const THE_DATE_DOOR_MODULE = "lib/date.ts";
+
+/**
+ * Every name the platform publishes for formatting something in a locale.
+ *
+ * **Derived rather than written, and that is the whole design of this rule.**
+ * The obvious version greps for `toLocaleDateString`, which is the shape
+ * `docs/decisions.md` records failing here twice: a guard that enumerates
+ * spellings this repository writes is walked around by the next equivalent
+ * spelling, and the fix that adds a fourth spelling is the tell. This asks the
+ * runtime what it publishes instead, so a member arriving in a node bump is
+ * reported by name rather than silently admitted.
+ *
+ * **`toLocale` is a prefix the specification owns, across every prototype that
+ * publishes one.** Five names, and `toLocaleString` is published by five of these
+ * six, every one but `String`, which is the fact that sinks the tempting version
+ * of this rule: a partition of "the date formatting API" that names
+ * `toLocaleString` has named a method `Number`, `Array`, `BigInt` and `Object`
+ * publish too. **This sentence said "all six" until a seat counted it**, which is
+ * the failure this repository charges for most often and which the arm below now
+ * makes impossible to repeat: it compares against the list's own length rather
+ * than against a threshold, so the prose and the assertion move together.
+ * `String` earns its place in the list by publishing the two case folding names,
+ * not this one.
+ *
+ * **The runtime this is measured under is bun 1.4.2, not the node on the
+ * machine somebody reads this on.** The suite runs in `oven/bun:1.4.2-alpine`,
+ * pinned by digest where the pipeline declares its image, and that image carries
+ * no node at all. Both runtimes answer 5 and 12 here, so the conclusion does not
+ * turn on it; the instrument is named because the first version of this comment
+ * named the wrong one, which is the error this repository charges for most often.
+ *
+ * **And the derivation asks the test runtime while the code runs in a browser,
+ * which is a hole no arm here can close.** A locale aware member a browser ships
+ * before bun does is absent from the surface, is classified nowhere, and fails
+ * nothing, because a short surface empties both of the totality arm's filters.
+ * That is not hypothetical and the lag has always run browser first:
+ * `Intl.Segmenter` reached Chrome months before node, and `Intl.DurationFormat`
+ * likewise. So "growth is a report" holds for a runtime bump and not for a
+ * browser gaining a member, which is the direction that matters for a rule about
+ * what a member sees. Closing it needs a list the browser agrees with, which this
+ * arm cannot have, so the extent is refused rather than overstated.
+ */
+const PUBLISHES_A_LOCALE_MEMBER: { prototype: object }[] = [
+  Date,
+  String,
+  Number,
+  Array,
+  BigInt,
+  Object,
+];
+
+function localeMembers(): string[] {
+  const names = new Set<string>();
+  for (const publisher of PUBLISHES_A_LOCALE_MEMBER)
+    for (const name of Object.getOwnPropertyNames(publisher.prototype))
+      if (name.startsWith("toLocale")) names.add(name);
+  return [...names];
+}
+
+function intlMembers(): string[] {
+  return Object.getOwnPropertyNames(Intl);
+}
+
+function theLocaleSurface(): string[] {
+  return [...localeMembers(), ...intlMembers()];
+}
+
+/**
+ * The half of that surface which puts a date or a time in front of a person.
+ *
+ * **One partition over the whole derived surface, refused when a name is
+ * classified nowhere or twice**, which is `backend/book_columns.py`'s discipline
+ * rather than a new one. The point of a partition over an inclusion list is that
+ * growth is a report: a name this tree has never heard of fails the totality arm
+ * naming itself, and the cost is one classified line in the diff of whoever
+ * bumped the runtime.
+ *
+ * **`toLocaleString` is here because it is ambiguous by name and refusing it is
+ * cheaper than attributing it.** `Date` publishes it, so it renders a date;
+ * `Number` publishes it too, so `count.toLocaleString(locale)` would be refused
+ * by this rule although it formats no date. Telling those apart needs the
+ * receiver's type, which no walk over a parse has. There are zero of either in
+ * the tree, so the refusal costs nothing on arrival and lands in the diff of
+ * whoever writes the first one, which is where the trade is visible to a
+ * reviewer. **Do not exempt it for numbers**: it is also the only name here that
+ * would catch a `Temporal` value's own `toLocaleString`, and `Temporal` is a
+ * sibling global rather than an `Intl` member, so nothing else in this rule can
+ * see it at all.
+ *
+ * **`RelativeTimeFormat` and `DurationFormat` are here although the tree uses
+ * neither.** They format a point and a span of time for a locale, so they are
+ * the door's subject by any reading, and `LoanRow` already computes "days
+ * overdue" by hand, which is the component that reaches for the first of them.
+ * A rule forbidding only what somebody has already written is the enumeration
+ * failure one level up.
+ *
+ * **`DurationFormat` puts a floor under the runtime, which is worth knowing
+ * before somebody hits it.** It is classified here, so the totality arm needs a
+ * runtime that publishes it; on an older one the arm goes red saying
+ * `DurationFormat` is classified but not published, which reads as a mistake in
+ * this list and is really a runtime downgrade. bun 1.4.2 publishes it. Note also
+ * that `tsconfig.json` sets `lib: ["ES2022", "DOM", "DOM.Iterable"]`, under which
+ * `Intl.DurationFormat` has no types at all, so the name is watched before it can
+ * be written. That is the right direction to be wrong in and it is not what the
+ * paragraph above claims to buy.
+ */
+const RENDERS_A_DATE = [
+  // `Date.prototype`, and nothing else publishes these two.
+  "toLocaleDateString",
+  "toLocaleTimeString",
+  // Ambiguous by name, refused rather than attributed. See above.
+  "toLocaleString",
+  // The constructors that format an instant, a relative instant and a span.
+  "DateTimeFormat",
+  "RelativeTimeFormat",
+  "DurationFormat",
+];
+
+/**
+ * The rest of it, each with the reason it is not this rule's business.
+ *
+ * `toLocaleLowerCase` is the row that matters: it is why this rule is a
+ * partition and not a pattern. A guard matching `/toLocale\w+/` is red on
+ * `pages/AuthorsPage/AuthorsPage.tsx` the day it is written, and it goes green
+ * by classification here rather than by an exemption naming that file, which is
+ * the distinction `docs/decisions.md` draws in "A guard for the general
+ * components folder names no domain word".
+ */
+const RENDERS_SOMETHING_ELSE = [
+  // `String.prototype`. Case folding, not dates.
+  "toLocaleLowerCase",
+  "toLocaleUpperCase",
+  // `Intl` members that format or inspect something other than a time.
+  "Collator",
+  "NumberFormat",
+  "ListFormat",
+  "PluralRules",
+  "DisplayNames",
+  "Segmenter",
+  "Locale",
+  "getCanonicalLocales",
+  "supportedValuesOf",
+];
+
+/**
+ * Names that render a date to a person without consulting a locale at all.
+ *
+ * **Outside the partition above, deliberately, because they are not on the
+ * surface it derives.** None is `toLocale` prefixed and none is an `Intl` member,
+ * so putting them in `RENDERS_A_DATE` would fail the totality arm as classified
+ * but unpublished. They are watched by the keep out arm and excluded from the
+ * comparison, which is the honest shape: two lists with different grounds rather
+ * than one list with an exception.
+ *
+ * **Measured at 0 sites each under `src`, so they cost nothing on arrival.**
+ * `new Date(iso).toDateString()` renders `Wed Aug 19 2026` to a member, which is
+ * the same defect the door exists for wearing different clothes, and the earlier
+ * version of this rule dismissed the whole locale insensitive class on a
+ * measurement taken over `toISOString` alone. That was the one member of the
+ * class with legitimate uses, so the measurement that justified leaving the class
+ * alone was taken on exactly the case that could not be watched.
+ *
+ * **`toISOString` is the one that stays out, and the reason is not squeamishness.**
+ * It has 2 code sites, `lib/digitalReference.ts` building an API payload and
+ * `pages/SettingsPage/DataSettingsPage/hooks.ts` building a backup filename, and
+ * both are serialisations rather than renderings. A third mention is prose in a
+ * docstring, which a parse does not see. Watching it would redden two correct
+ * sites, one of them in a file this change does not own.
+ *
+ * **`getFullYear`, `getMonth` and `getDate` are out too**, at 0 sites each: a
+ * concatenated date needs several of them plus the joining, and an arm on any one
+ * name would report arithmetic on a date that renders nothing.
+ */
+const RENDERS_A_DATE_WITHOUT_A_LOCALE = [
+  "toDateString",
+  "toTimeString",
+  "toUTCString",
+];
+
+/**
+ * `Intl` members that cannot do the explaining, because this app spells them too.
+ *
+ * `Intl.Locale` is a member, and `Locale` is also the generated enum imported
+ * across this tree, with `LocaleProvider`, `LocaleGate`, `LocaleContext`,
+ * `LocaleContextValue` and `LocaleProviderProps` beside it. Left in, any module
+ * that named `Intl` while importing the app's enum would be explained whatever it
+ * did with `Intl`. Measured over the modules under `src`: 5 identifiers are `Intl`
+ * member prefixed without being the member, every one of the five is one of those
+ * `Locale` names, and 0 literals and 0 template chunks are among them.
+ *
+ * **Measured once, and nothing re derives it**, so the next collision of this kind
+ * arrives silently. Stated rather than closed: an arm re deriving the collision set
+ * would make it self enforcing, and it is not written because the set it guards has
+ * one member and the cost of being wrong about it is a report.
+ *
+ * That cost is a genuine `Intl.Locale` being reported. 0 sites today, and a report
+ * is the safe direction.
+ */
+const EXPLAINS_NOTHING = ["Locale"];
+
+/**
+ * Does this module name `Intl` while naming nothing `Intl` publishes?
+ *
+ * **Extracted so a fixture can drive it.** Written inline, it left the `Intl` arm
+ * the only one in this block with no synthetic case, and both of its mechanisms,
+ * the `Locale` exclusion and the prefix match, survived being removed.
+ */
+function passesIntlOnUnexplained(path: string, source: string): boolean {
+  const named = namesIn(path, source);
+  const members = intlMembers().filter(
+    (member) => !EXPLAINS_NOTHING.includes(member),
+  );
+  const explained = [...named].some((name) =>
+    members.some((member) => name.startsWith(member)),
+  );
+  return named.has("Intl") && !explained;
+}
+
+/** Every watched name a module mentions in its code. */
+function rendersADateIn(path: string, source: string): string[] {
+  const named = namesIn(path, source);
+  return [...RENDERS_A_DATE, ...RENDERS_A_DATE_WITHOUT_A_LOCALE].filter(
+    (name) => named.has(name),
+  );
+}
+
+describe("a date reaches a reader through one module", () => {
+  /**
+   * **Read off the parse, which is what closes computed access.** `namesIn`
+   * collects identifiers and literals both, so `d.toLocaleDateString()`,
+   * `d["toLocaleDateString"]()`, `const { DateTimeFormat } = Intl` and
+   * `Intl["DateTimeFormat"]` all put a watched name in the parse. A regex over
+   * `\.toLocaleDateString` sees the first of those four. Comments are outside a
+   * parse, so this needs no `withoutProse` pass and a name left behind in a
+   * docstring is not a reach.
+   *
+   * **This rule reads `src` and deliberately not the test tree.** Two tests
+   * name the surface on purpose, to build an expected string by a path
+   * independent of the one the component takes, which is what lets an arm
+   * observe that a component used the app's locale rather than the host's.
+   * Extending this rule over `tests/` would buy nothing and cost two exemption
+   * rows for assertions that are correct.
+   *
+   * ## What this rule does not reach, measured rather than waved at
+   *
+   * Listed one per line with its own count, because the first version of this
+   * put four of them in one sentence and offered a measurement for one, and a
+   * reader then takes the whole list as uniformly out of scope. One of the four
+   * was live in the tree.
+   *
+   * **`<input type="date">` renders a date in the browser's locale, and there
+   * are 2 of them**, at `pages/BookDetail/components/CopyPanel.tsx` and
+   * `LoanPanel.tsx`. The rendering belongs to the control, so no module level
+   * rule can reach it and this one does not claim to; it is the same defect the
+   * door exists for, and it is in the tracker rather than here.
+   *
+   * **The glob is `.ts` and `.tsx` under `src`, and the browser runs more than
+   * that.** `public/sw-cleanup.js` is 1 file of shipped browser code outside it
+   * by both extension and directory, and `index.html` is 1 more. Neither renders
+   * a date today. This is an inclusion list inside a rule whose whole argument is
+   * that inclusion lists go stale, which is worth saying plainly rather than
+   * leaving for somebody to find.
+   *
+   * **A date the backend already formatted is outside any tree scan**, and is
+   * currently empty: the only `strftime` reaching a client is `%Y-%m` from the
+   * statistics route, which is what `monthLabel` takes.
+   *
+   * **A date reaching `t()` as a value**, `t("x", { when: someDate })`, is held
+   * by `TranslateParams` being `Record<string, string | number>` rather than by
+   * anything here. Widening that type reopens it silently.
+   *
+   * ## The false refusals this arm accepts, so neither is read as a bug
+   *
+   * **`Intl.DateTimeFormat` used to read rather than to render** is reported:
+   * `resolvedOptions().timeZone` is the only way to learn the reader's zone and
+   * renders no date. 0 sites today, and one feature away. It is accepted rather
+   * than exempted, because the alternative is `lib/date.ts` growing a function
+   * that renders nothing, and refusing on arrival puts the trade in front of a
+   * reviewer at the moment it is made.
+   *
+   * **`toLocaleString` on a number** is reported for the reason its own
+   * classification gives.
+   */
+  it("keeps every date bearing name out of every module but the door", () => {
+    const watched = entries().filter(([path]) => path !== THE_DATE_DOOR_MODULE);
+    // **The scope is asserted, not assumed.** Narrowing this arm to
+    // `startsWith("pages/")` leaves every other arm green, which makes the
+    // filter the cheapest place to defeat the whole rule. Stated as the
+    // relationship rather than as a number, so it cannot go stale: everything
+    // the glob reaches, less the door itself.
+    expect(watched.length).toBe(entries().length - 1);
+
+    const reported = watched.flatMap(([path, source]) =>
+      rendersADateIn(path, source).map((name) => `${path} names ${name}`),
+    );
+
+    expect(reported).toEqual([]);
+  });
+
+  it("classifies every name the platform publishes, exactly once", () => {
+    // **Totality, and the stale half with it.** A name the runtime publishes
+    // and nobody classified fails here rather than falling through one of the
+    // two lists silently; a name in a list that the runtime no longer publishes
+    // fails too, so an entry cannot outlive its reason, which is the rule
+    // `oxlintRatchet.test.ts` applies to its own suppressions.
+    const surface = theLocaleSurface();
+    const classified = [...RENDERS_A_DATE, ...RENDERS_SOMETHING_ELSE];
+
+    expect(surface.filter((name) => !classified.includes(name))).toEqual([]);
+    expect(classified.filter((name) => !surface.includes(name))).toEqual([]);
+    expect(
+      classified.filter(
+        (name) =>
+          RENDERS_A_DATE.includes(name) &&
+          RENDERS_SOMETHING_ELSE.includes(name),
+      ),
+    ).toEqual([]);
+
+    // The second watched list sits outside this partition by construction, and
+    // that is asserted so it cannot drift into the surface unnoticed: a name that
+    // became `toLocale` prefixed, or an `Intl` member, would belong in the
+    // partition and would then be classified in neither of its halves.
+    expect(
+      RENDERS_A_DATE_WITHOUT_A_LOCALE.filter((name) => surface.includes(name)),
+    ).toEqual([]);
+  });
+
+  it("keeps every publisher that earns its place, and counts them", () => {
+    // **Two things nothing checked, and the first version of this arm checked
+    // neither.** `[Date, String]` alone yields all five names, so four of the six
+    // could be deleted with every other arm in this block green. And the
+    // docstring said `toLocaleString` was published by all six when it is
+    // published by five, `String` being the exception, so an arm asserting "more
+    // than one" passed at five and would have passed at two: it did not check the
+    // sentence it was written for.
+    //
+    // **Compared by identity, and a count is what the first two attempts both
+    // got wrong.** `toBeGreaterThan(1)` could not fail a claim about six.
+    // Comparing against `PUBLISHES_A_LOCALE_MEMBER.length - 1` is defined in
+    // terms of the list, so deleting an entry moves both sides together:
+    // measured by deleting each of the six in turn, that version left `Number`,
+    // `Array`, `BigInt` and `Object` deletable with this whole block green, which
+    // is four of six and the original report unfixed. **A threshold and a
+    // self relative count are the same failure**, and only naming the members
+    // closes it.
+    //
+    // **Which arm catches which, because a count of catches is not evidence.**
+    // This arm reddens on the deletion of `Date`, `Number`, `Array`, `BigInt` or
+    // `Object`. It does **not** redden on deleting `String`, whose removal leaves
+    // this list unchanged; that one is caught by `classifies every name the
+    // platform publishes, exactly once`, because `String` is the sole publisher
+    // of the two case folding names and losing it empties them from the surface.
+    // Six deletions, two arms, no gap.
+    const publishers = PUBLISHES_A_LOCALE_MEMBER.filter((publisher) =>
+      Object.getOwnPropertyNames(publisher.prototype).includes(
+        "toLocaleString",
+      ),
+    );
+
+    expect(publishers).toEqual([Date, Number, Array, BigInt, Object]);
+    expect(localeMembers()).toContain("toLocaleLowerCase");
+  });
+
+  // **There is no separate vacuity arm here, and that is a removal rather than an
+  // omission.** One existed and was the sole catcher of nothing across eighteen
+  // single change mutants, because all three of its assertions live elsewhere in
+  // this block: a tree with no modules fails the keep out arm's own scope equality,
+  // since `0` is not `entries().length - 1` for an empty glob; its synthetic case
+  // was character for character the first assertion of `reports the shapes it
+  // exists for`; and `SOURCES[THE_DATE_DOOR]` is asserted by the door arm below.
+  // An arm whose every claim is made by a neighbour reads as coverage and is not.
+
+  it("leaves no export of the door unreached", () => {
+    // **Derived rather than a threshold**, which is the wallpaper rule's shape
+    // and is stronger than a written bound in the direction
+    // `guards-and-mutation` records: a stated `6` against a constant that had
+    // moved to seven passes, because a smaller count is a weaker claim. This
+    // writes no number. It fails if the door is renamed and if a format is added
+    // with no caller.
+    //
+    // **The application tree only, which is where this parts company with the
+    // wallpaper rule it copies.** That rule keeps the test tree in scope on
+    // purpose, because a test only export is legitimate there. Here it is not,
+    // and inheriting the scope without the reason cost the claim this comment
+    // used to make: `tests/lib/date.test.ts` imports all five exports by name, so
+    // with tests in scope every `src` caller could go away and this arm would
+    // stay green on the test file alone, which is exactly the dead door it said
+    // it caught. Measured per export under `src`: 5, 3, 2, 1, 1 importers, 11
+    // modules in all, so scoping this down costs nothing today and makes the
+    // sentence true.
+    const source = SOURCES[THE_DATE_DOOR];
+    expect(source).toBeDefined();
+
+    expect(
+      unreferenced(THE_DATE_DOOR, source ?? "", Object.entries(SOURCES)),
+    ).toEqual([]);
+  });
+
+  it("explains every bare Intl mention by a member the module names", () => {
+    // **The counting arm, and it reaches only half the surface.** The storage
+    // rule can count every mention of `localStorage` because that is one named
+    // global, so an unexplained one is reportable. Half of this surface has no
+    // named receiver at all: `d.toLocaleDateString()` names `d`, and `d` is any
+    // expression, so there is nothing to count. `Intl` is a named global and
+    // this is that idiom applied to the half where it works. The asymmetry is
+    // stated rather than papered over, because a reader who assumes the storage
+    // rule transferred whole will believe this rule closes more than it does.
+    //
+    // **A member name or a name built on one**, which is the difference between
+    // this arm and a false refusal waiting to happen. `Intl.DateTimeFormatOptions`
+    // and `Intl.NumberFormatOptions` are types whose names are not `Intl` members,
+    // so an exact comparison reports a module that named a member's own options
+    // type and rendered nothing. There are none in the tree today and the second
+    // is the likelier arrival, since a price formatter taking options needs it.
+    //
+    // **It is also defeated by a sibling**, which is the limit worth knowing:
+    // `new Intl[`DateTimeFormat`](l)` in a module that also names
+    // `Intl.NumberFormat` satisfies this arm. The keep out arm is what catches
+    // that shape now, since `namesIn` reads a template's text.
+    // **`Locale` cannot do the explaining, because this app has one of its own.**
+    // `Intl.Locale` is a member, and `Locale` is also the generated enum imported
+    // across this tree, with `LocaleProvider` and `LocaleContextValue` beside it,
+    // every one of which starts with the member's name. Left in, any module that
+    // named `Intl` while importing the app's enum would be explained whatever it
+    // did with `Intl`, which is this arm passing for a reason it does not state.
+    // It happens to be green either way today, since the three modules naming
+    // `Intl` in code each name a real member, so this is one import away rather
+    // than broken. The cost of taking it out is that a genuine `Intl.Locale` is
+    // reported: 0 sites, and a report is the safe direction.
+    const reported = entries()
+      .filter(([path, source]) => passesIntlOnUnexplained(path, source))
+      .map(([path]) => `${path} passes Intl on without naming a member`);
+
+    expect(reported).toEqual([]);
+  });
+
+  it("reports an Intl the app's own Locale names cannot account for", () => {
+    // **Both of this arm's mechanisms were on the rung "stated" until these two
+    // cases existed**: emptying `EXPLAINS_NOTHING` and reverting the prefix match
+    // to an exact comparison each survived every other arm, because the tree has
+    // no `Intl.*Options` type and the three modules naming `Intl` in code each
+    // name a real member. The arm was green for the reason it claims by luck.
+    //
+    // The first case is why `Locale` is excluded: a module naming `Intl` and the
+    // app's own enum has explained nothing.
+    expect(
+      passesIntlOnUnexplained("x.ts", 'const l: Locale = "en"; hand(Intl);'),
+    ).toBe(true);
+
+    // The second is why the comparison is a prefix: a member's own options type
+    // is not a member name, and reporting it would be a false refusal.
+    expect(
+      passesIntlOnUnexplained(
+        "x.ts",
+        "function f(o: Intl.NumberFormatOptions) { return o; }",
+      ),
+    ).toBe(false);
+
+    // And the ordinary case, so the two above are not the only thing it can say.
+    expect(
+      passesIntlOnUnexplained("x.ts", "new Intl.NumberFormat(l).format(n);"),
+    ).toBe(false);
+  });
+
+  it("classifies a toLocale name by its publisher wherever one prototype owns it", () => {
+    // **Four of the five `toLocale` names belong to a half by derivation rather
+    // than by judgement, and nothing said so.** The diagonal below pins a name
+    // only while that name has a row in its own case list, so reclassifying
+    // `toLocaleTimeString` **and deleting its row** survived everything: the set
+    // equality fails first and its message tells the next reader which line to
+    // delete. That catches the slip and not the decision.
+    //
+    // This is the decision. `toLocaleDateString` and `toLocaleTimeString` are
+    // published by `Date.prototype` alone, so they render a date by construction;
+    // `toLocaleLowerCase` and `toLocaleUpperCase` by `String.prototype` alone, so
+    // they do not. A sole publisher is the whole argument, and it holds the two
+    // names whose own defect motivated this door.
+    //
+    // **The `Intl` six cannot be pinned this way and that is said rather than
+    // implied.** Nothing mechanical separates `DateTimeFormat` from
+    // `NumberFormat`: both are `Intl` members and the split between them is a
+    // judgement about what a reader sees. `toLocaleString` is the fifth name and
+    // is excluded here for the same reason, having several publishers.
+    const publishersOf = (name: string) =>
+      PUBLISHES_A_LOCALE_MEMBER.filter((publisher) =>
+        Object.getOwnPropertyNames(publisher.prototype).includes(name),
+      );
+
+    const derived = localeMembers().filter(
+      (name) => publishersOf(name).length === 1,
+    );
+
+    for (const name of derived) {
+      if (publishersOf(name)[0] === Date) {
+        expect(RENDERS_A_DATE).toContain(name);
+      } else {
+        expect(RENDERS_SOMETHING_ELSE).toContain(name);
+      }
+    }
+
+    // Four of the five, and the fifth is the ambiguous one. Stated as the
+    // relationship so a name arriving with a sole publisher joins this by itself.
+    expect(derived.length).toBe(localeMembers().length - 1);
+    expect(derived).not.toContain("toLocaleString");
+  });
+
+  it("reports the shapes it exists for, and not the ones it does not", () => {
+    // The rule's own mutation, on synthetic input so nothing is written to the
+    // tree. The three refusals are the spellings a regex would miss; the three
+    // clean cases are the false refusals this rule is a partition to avoid.
+    //
+    // **It caught none of eighteen mutants and is kept anyway**, which is worth
+    // stating because the arm beside it was deleted for exactly that. Swap
+    // `rendersADateIn` from the parse to `source.includes(name)` and this is the
+    // **only** arm that reddens, on the comment fixture. The keep out arm cannot
+    // see that mutation: there are zero text mentions of any watched name anywhere
+    // under `src` outside the door, so abandoning the design's central claim is
+    // invisible everywhere else in this block. The three clean cases are its value,
+    // not the three refusals.
+    expect(rendersADateIn("x.ts", "d.toLocaleDateString(locale);")).toEqual([
+      "toLocaleDateString",
+    ]);
+    expect(rendersADateIn("x.ts", 'const f = Intl["DateTimeFormat"];')).toEqual(
+      ["DateTimeFormat"],
+    );
+    expect(
+      rendersADateIn(
+        "x.ts",
+        'new Intl.RelativeTimeFormat(l).format(-3, "day");',
+      ),
+    ).toEqual(["RelativeTimeFormat"]);
+
+    expect(rendersADateIn("x.ts", "s.toLocaleLowerCase();")).toEqual([]);
+    expect(
+      rendersADateIn("x.ts", "new Intl.NumberFormat(l).format(n);"),
+    ).toEqual([]);
+    expect(
+      rendersADateIn("x.ts", "// toLocaleDateString is how this used to work"),
+    ).toEqual([]);
+  });
+
+  it("sees a name carried by a template rather than by a literal", () => {
+    // **The spelling this rule was blind to, and the reason `namesIn` grew an
+    // arm.** A `TemplateElement` keeps its text in `value.cooked`, behind an
+    // object with no `type`, so five of nine access shapes were invisible while
+    // the plain access and the string literal index were seen. Every one below
+    // is ordinary typechecked TypeScript: `as const` gives the template a literal
+    // type, so the index needs no `any` and no suppression.
+    for (const source of [
+      "d[`toLocaleDateString`](l);",
+      "const K = `toLocaleDateString`; d[K](l);",
+      "const M = { a: `toLocaleDateString` } as const; d[M.a](l);",
+      "const K = `toLocaleDateString`; Date.prototype[K].call(d, l);",
+    ]) {
+      expect(rendersADateIn("x.ts", source)).toEqual(["toLocaleDateString"]);
+    }
+    expect(rendersADateIn("x.ts", "new Intl[`DateTimeFormat`](l);")).toEqual([
+      "DateTimeFormat",
+    ]);
+  });
+
+  it("reports a date rendered with no locale at all", () => {
+    // The second watched list, which the partition cannot hold. Each renders a
+    // date to a person in a fixed English form, and each is at 0 sites, so this
+    // arm is the only thing standing between them and the next component.
+    expect(rendersADateIn("x.ts", "new Date(iso).toDateString();")).toEqual([
+      "toDateString",
+    ]);
+    expect(rendersADateIn("x.ts", "new Date(iso).toTimeString();")).toEqual([
+      "toTimeString",
+    ]);
+    expect(rendersADateIn("x.ts", "new Date(iso).toUTCString();")).toEqual([
+      "toUTCString",
+    ]);
+
+    // And the serialisations that stay out, because watching them would report
+    // two correct sites, one of them in a file this change does not own.
+    expect(
+      rendersADateIn("x.ts", "new Date().toISOString().slice(0, 10);"),
+    ).toEqual([]);
+    expect(
+      rendersADateIn("x.ts", "d.getFullYear() + '-' + d.getMonth();"),
+    ).toEqual([]);
+  });
+
+  it("is watching each name for itself", () => {
+    // **The diagonal**, which is what separates a rule watching nine names from
+    // one watching a single name that several fixtures happen to trip. Drop each
+    // name in turn: its own fixture goes clean and every other stays reported. A
+    // mutation dropping two at once would show nothing.
+    //
+    // **Every watched name has a row, and the three that did not were the
+    // dangerous ones.** `toLocaleTimeString`, `toLocaleString` and
+    // `DurationFormat` could each be moved to the other half of the partition
+    // with every arm in this block green. `toLocaleTimeString` is the worst of
+    // the three, because it was live in this tree unlocalised, twice in one file,
+    // so the name whose own defect motivated the door could be unwatched without
+    // a single arm noticing. `toLocaleString` is the next most likely, because it
+    // is the one classification the prose argues hardest for, so the next reader
+    // to hit its refusal has the note in front of them and moving the name one
+    // list down is the cheapest green.
+    const CASES: [string, string][] = [
+      ["toLocaleDateString", "d.toLocaleDateString(locale);"],
+      ["toLocaleTimeString", "d.toLocaleTimeString(locale);"],
+      ["toLocaleString", "d.toLocaleString(locale);"],
+      ["DateTimeFormat", 'const f = Intl["DateTimeFormat"];'],
+      [
+        "RelativeTimeFormat",
+        'new Intl.RelativeTimeFormat(l).format(-3, "day");',
+      ],
+      ["DurationFormat", "new Intl.DurationFormat(l).format(d);"],
+      ["toDateString", "new Date(iso).toDateString();"],
+      ["toTimeString", "new Date(iso).toTimeString();"],
+      ["toUTCString", "new Date(iso).toUTCString();"],
+    ];
+
+    const watched = [...RENDERS_A_DATE, ...RENDERS_A_DATE_WITHOUT_A_LOCALE];
+    // Every watched name has a row above, so the diagonal covers the whole set
+    // rather than whichever part somebody thought of. Stated as the relationship,
+    // not as a count, so adding a name to either list fails here until it has one.
+    expect(CASES.map(([name]) => name).sort()).toEqual([...watched].sort());
+
+    for (const [dropped] of CASES) {
+      const narrowed = watched.filter((name) => name !== dropped);
+      for (const [name, source] of CASES) {
+        const named = namesIn("x.ts", source);
+        const found = narrowed.filter((one) => named.has(one));
+        if (name === dropped) expect(found).toEqual([]);
+        else expect(found).toContain(name);
+      }
+    }
   });
 });

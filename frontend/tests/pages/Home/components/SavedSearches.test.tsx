@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import SavedSearches from "../../../../src/pages/Home/components/SavedSearches";
+import type { SavedSearch } from "../../../../src/lib/savedSearches";
 import {
   DEFAULT_FILTERS,
   type BookFilters,
@@ -17,16 +18,22 @@ const LOFT = {
   filters: { ...DEFAULT_FILTERS, location: "Loft" } as BookFilters,
 };
 
+/**
+ * The kept views arrive as one value with their two verbs on it, so the spies
+ * live there rather than beside it. `onApply` stays a prop of its own: applying
+ * a saved view writes the filters, which are not a preference.
+ */
 function renderSaved(
-  overrides: Partial<React.ComponentProps<typeof SavedSearches>> = {},
+  overrides: { canSave?: boolean; searches?: SavedSearch[] } = {},
 ) {
   const props = {
-    searches: [LOFT],
-    canSave: true,
+    saved: {
+      searches: overrides.searches ?? [LOFT],
+      save: vi.fn(),
+      remove: vi.fn(),
+    },
+    canSave: overrides.canSave ?? true,
     onApply: vi.fn(),
-    onSave: vi.fn(),
-    onDelete: vi.fn(),
-    ...overrides,
   };
   renderLocalised(<SavedSearches {...props} />);
   return props;
@@ -48,7 +55,7 @@ describe("SavedSearches", () => {
       .setup()
       .click(screen.getByRole("button", { name: "Forget Loft" }));
 
-    expect(props.onDelete).toHaveBeenCalledWith("1");
+    expect(props.saved.remove).toHaveBeenCalledWith("1");
   });
 
   it("offers no save control until something is filtered", () => {
@@ -62,11 +69,9 @@ describe("SavedSearches", () => {
   it("renders nothing at all with no views and nothing to save", () => {
     const { container } = renderLocalised(
       <SavedSearches
-        searches={[]}
+        saved={{ searches: [], save: vi.fn(), remove: vi.fn() }}
         canSave={false}
         onApply={vi.fn()}
-        onSave={vi.fn()}
-        onDelete={vi.fn()}
       />,
     );
     expect(container).toBeEmptyDOMElement();
@@ -82,7 +87,7 @@ describe("SavedSearches", () => {
     });
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(props.onSave).toHaveBeenCalledWith("Kitchen");
+    expect(props.saved.save).toHaveBeenCalledWith("Kitchen");
   });
 
   it("saves on Enter as well as on the button", async () => {
@@ -95,7 +100,7 @@ describe("SavedSearches", () => {
       "Kitchen{Enter}",
     );
 
-    expect(props.onSave).toHaveBeenCalledWith("Kitchen");
+    expect(props.saved.save).toHaveBeenCalledWith("Kitchen");
   });
 
   it("will not save an empty name", async () => {
@@ -105,7 +110,7 @@ describe("SavedSearches", () => {
     await user.click(screen.getByRole("button", { name: "Save this view" }));
 
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    expect(props.onSave).not.toHaveBeenCalled();
+    expect(props.saved.save).not.toHaveBeenCalled();
   });
 
   it("abandons naming on Escape", async () => {

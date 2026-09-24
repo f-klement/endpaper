@@ -4,7 +4,12 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ExportFormat } from "../../src/api/generated/model";
-import { useExportLibrary, useFeatureFlagsState } from "../../src/app/hooks";
+import {
+  useExportLibrary,
+  useFeatureFlagsState,
+  useScopedPreference,
+} from "../../src/app/hooks";
+import { declareScopedPreference } from "../../src/lib/preference";
 import {
   mockApi,
   renderHookWithProviders,
@@ -111,5 +116,75 @@ describe("useFeatureFlagsState", () => {
     // Resolved and empty, which is the pair the flag exists to distinguish
     // from unresolved and empty.
     expect(result.current.flags).toBeUndefined();
+  });
+});
+
+/**
+ * The scoped preference binding: the gate, and the one property a plain setter
+ * cannot have.
+ *
+ * Driven against a preference declared here rather than one of the five, so
+ * these arms are about the binding and not about what any real key means.
+ */
+describe("useScopedPreference", () => {
+  const shelf = declareScopedPreference<"near" | "far", string>(
+    { near: "test.binding.near", far: "test.binding.far" },
+    "near",
+    {
+      decode: (raw) => raw,
+      encode: (value) => value,
+      fallback: (scope) => `default ${scope}`,
+    },
+  );
+
+  it("reads under the unknown scope before one arrives", () => {
+    const { result } = renderHook(() => useScopedPreference(shelf, undefined));
+    expect(result.current.value).toBe("default near");
+    expect(result.current.canSet).toBe(false);
+  });
+
+  it("refuses a write while no scope has arrived", () => {
+    const { result } = renderHook(() => useScopedPreference(shelf, undefined));
+
+    act(() => result.current.set("attic"));
+
+    expect(localStorage.getItem("test.binding.near")).toBeNull();
+    expect(result.current.value).toBe("default near");
+  });
+
+  it("writes under the scope it was given", () => {
+    const { result } = renderHook(() => useScopedPreference(shelf, "far"));
+
+    act(() => result.current.set("attic"));
+
+    expect(localStorage.getItem("test.binding.far")).toBe("attic");
+    expect(localStorage.getItem("test.binding.near")).toBeNull();
+  });
+
+  /**
+   * **The property the wrapper this replaced had, which a plain setter does
+   * not.** `writeForMode` handed the mode to its caller, so a value could not be
+   * computed under one scope and stored under another. `set(value)` takes a
+   * value computed elsewhere, so a caller deriving its value from the scope,
+   * which is every caller resetting to a default, asks for the scope instead.
+   */
+  it("computes the value from the scope it is writing under", () => {
+    const { result } = renderHook(() => useScopedPreference(shelf, "far"));
+
+    act(() => result.current.setFromScope((known) => `shelf ${known}`));
+
+    expect(localStorage.getItem("test.binding.far")).toBe("shelf far");
+  });
+
+  it("refuses that too, and calls nothing, while no scope has arrived", () => {
+    // Calls nothing, rather than calling it with the reading scope: a value
+    // computed under the unknown scope is exactly the wrong write this refuses.
+    const compute = vi.fn((known: "near" | "far") => `shelf ${known}`);
+    const { result } = renderHook(() => useScopedPreference(shelf, undefined));
+
+    act(() => result.current.setFromScope(compute));
+
+    expect(compute).not.toHaveBeenCalled();
+    expect(localStorage.getItem("test.binding.near")).toBeNull();
   });
 });

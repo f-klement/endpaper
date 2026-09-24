@@ -1,11 +1,11 @@
-/** Tests for src/components/StarRating.tsx. */
+/** Tests for src/pages/BookDetail/components/StarRating.tsx. */
 
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import StarRating from "../../src/components/StarRating";
-import { renderLocalised } from "../utils";
+import StarRating from "../../../../src/pages/BookDetail/components/StarRating";
+import { renderLocalised } from "../../../utils";
 
 describe("StarRating", () => {
   describe("as a control", () => {

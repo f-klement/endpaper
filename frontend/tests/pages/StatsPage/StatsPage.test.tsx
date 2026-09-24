@@ -4,7 +4,7 @@ import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { Locale, TagCategory, TagKey } from "../../../src/api/generated/model";
-import StatsPage, { formatMonth } from "../../../src/pages/StatsPage";
+import StatsPage from "../../../src/pages/StatsPage";
 import { makeStats, resetIds } from "../../factories";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
 
@@ -13,17 +13,6 @@ let api: MockApi;
 beforeEach(() => {
   resetIds();
   api = mockApi();
-});
-
-describe("formatMonth", () => {
-  it("turns a bucket key into a readable label", () => {
-    expect(formatMonth("2026-03")).toMatch(/2026/);
-  });
-
-  it("returns an empty string for a malformed key", () => {
-    expect(formatMonth("")).toBe("");
-    expect(formatMonth("2026")).toBe("");
-  });
 });
 
 describe("StatsPage", () => {

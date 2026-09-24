@@ -1,14 +1,39 @@
 /**
- * Data for the library grid.
+ * Data for the library grid, and the choices this browser remembers about it.
  *
  * This is the whole of Home's contact with the API. The page and its
  * components receive plain values and callbacks, so regenerating the client
  * changes this file and nothing else on the page.
+ *
+ * **`useLibrary` returns the library and nothing a browser remembered.** Every
+ * member of it is a request or something derived from one, and the remembered
+ * choices are the three hooks below it, each of which is one cluster behind one
+ * name. It had grown the other way: ten of its members were a view, a column
+ * set and a list of saved searches, and the interface, the page and two panels
+ * each paid a line per member. `tests/pages/Home/hooks.test.tsx` holds the rule
+ * as a guard, because a preference read through this hook works, so no other
+ * test would see it come back.
+ *
+ * **Where the counter went.** Two of those preferences were derived from the
+ * mode on every render and a counter was bumped by every write so the next
+ * render would re-read what had just been stored. `lib/preference.ts` notifies
+ * its readers instead, so the counter, the wrapper that bumped it and the
+ * comment explaining both are gone. What was load bearing in that comment did
+ * not go with it: that the mode is fetched and so a state initialiser would
+ * capture the household's answer, and that a fallback for reading is not one for
+ * writing, are now `useCatalogueScope` in `app/hooks.ts`.
  */
 
 import { keepPreviousData } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+
+import {
+  useCatalogueScope,
+  usePreference,
+  useScopedPreference,
+  type RememberedPerScope,
+} from "../../app/hooks";
 
 import {
   useBulkAction,
@@ -21,21 +46,16 @@ import {
 import { useListCollections } from "../../api/generated/endpoints/collections/collections";
 import { useMyOverdue as useMyOverdueQuery } from "../../api/generated/endpoints/loans/loans";
 import { useGetSenderHealth } from "../../api/generated/endpoints/settings/settings";
-import { catalogueMode, type CatalogueMode } from "../../lib/catalogueMode";
 import {
   AVAILABLE_COLUMNS,
-  clearColumns,
+  DEFAULT_COLUMNS,
   isDefaultColumns,
-  readColumns,
+  libraryColumnsPreference,
   toggledColumns,
-  writeColumns,
   type ColumnKey,
 } from "../../lib/libraryColumns";
-import {
-  readLibraryView,
-  writeLibraryView,
-  type LibraryView,
-} from "../../lib/libraryView";
+import type { CatalogueMode } from "../../lib/catalogueMode";
+import { libraryViewPreference, type LibraryView } from "../../lib/libraryView";
 import {
   BulkAction,
   OwnershipStatus,
@@ -51,12 +71,11 @@ import {
 import { useInvalidate } from "../../api/invalidate";
 import { readFilters, toParams } from "../../lib/bookFilters";
 import {
-  deleteSearch,
-  readSavedSearches,
-  saveSearch,
+  savedSearchesPreference,
+  withSearchDeleted,
+  withSearchSaved,
   type SavedSearch,
 } from "../../lib/savedSearches";
-import { useFeatureFlagsState } from "../../app/hooks";
 import { useToast } from "../../app/toast";
 import { useSortedByName, useTranslation } from "../../i18n";
 import type { BookFilters } from "./types";
@@ -75,52 +94,28 @@ export interface UseLibraryResult {
    *
    * Applying a saved search goes through the same door: a saved search holds a
    * complete `BookFilters`, so a patch naming every key is a replacement. That
-   * is why there is no separate whole-set setter. A stored search written
-   * before a field existed is the one case where the two would differ, and
-   * merging is the safer of the two answers there: the missing field keeps a
-   * real value rather than becoming undefined.
+   * is why there is no separate whole-set setter.
+   *
+   * **A search stored before a field existed is now a replacement too, where it
+   * used to be a merge, and the reason the merge was safer has gone.** The
+   * stored entry was parsed and cast, so a field a later version added was
+   * simply absent from the patch and the spread left whatever the reader
+   * currently had. That was chosen because the alternative was `undefined`
+   * reaching `toParams`. Entries are rebuilt from `DEFAULT_FILTERS` outwards
+   * now, so every field is present with a real value and `undefined` cannot
+   * arise; what the old behaviour actually delivered was a blend of the saved
+   * view and the reader's current one, which is not the view they named.
+   * Applying a saved search gives that search.
    *
    * A control that picks one value out of a list filter comes through here too,
    * with the patch `lib/bookFilters.ts` builds for it.
    */
   update: (patch: Partial<BookFilters>) => void;
 
-  /** Filter combinations somebody named and kept. Browser-local. */
-  savedSearches: SavedSearch<BookFilters>[];
-  saveCurrentSearch: (name: string) => void;
-  deleteSavedSearch: (id: string) => void;
   locations: LocationOut[];
   /** Every collection in the library, for the filter. */
   collections: CollectionOut[];
   classifications: ClassificationFacets | undefined;
-
-  /**
-   * Covers, dense rows or metadata. Remembered per mode, in this browser rather
-   * than on the account. Library mode opens on the dense rows.
-   */
-  view: LibraryView;
-  setView: (view: LibraryView) => void;
-
-  /** Whether this library is being catalogued or kept. See `libraryColumns`. */
-  mode: CatalogueMode;
-  /**
-   * Whether the mode is settled, and so whether a preference may be written.
-   *
-   * False only while the feature flags are in flight, which on a warm cache is
-   * no renders at all. Every control that writes a per-mode preference is
-   * disabled meanwhile, rather than left looking live: the write is refused
-   * either way, and a button that answers a press with nothing teaches the
-   * reader the page lies.
-   */
-  modeIsKnown: boolean;
-  /** Every column this mode offers, whether drawn or not. */
-  availableColumns: readonly ColumnKey[];
-  /** The columns the table draws. Remembered per mode, in this browser. */
-  columns: readonly ColumnKey[];
-  toggleColumn: (key: ColumnKey) => void;
-  resetColumns: () => void;
-  /** False while `columns` already is this mode's default set. */
-  canResetColumns: boolean;
 
   books: BookOut[];
   total: number;
@@ -150,66 +145,6 @@ export function useLibrary(): UseLibraryResult {
     (patch: Partial<BookFilters>) =>
       setFilters((current) => ({ ...current, ...patch })),
     [],
-  );
-
-  // Read once on mount. Nothing else in the tab writes them, so re-reading
-  // storage on every render would be work for no news.
-  const [savedSearches, setSavedSearches] = useState(() =>
-    readSavedSearches<BookFilters>(),
-  );
-
-  // **The view and the column set are derived from the mode, not held as state
-  // seeded from it.** The flags are fetched, so `library_mode` is undefined for
-  // the first render or two; a `useState` initialiser would capture the
-  // household's answer and a cataloguer would keep it for the rest of the
-  // session. Re-reading storage when the mode changes is one `getItem` each,
-  // and it is what makes the two modes' choices independent rather than merely
-  // separately stored.
-  //
-  // The cost is that a cataloguer sees the household's view and columns for a
-  // render or two. That is the trade `catalogueMode` already documents and the
-  // other way round is worse: every household would watch a cataloguer's
-  // catalogue flash past on every load.
-  //
-  // **`catalogueMode(undefined)` is a fallback for reading and is not one for
-  // writing**, which is `modeIsKnown` below. A cataloguer who picks a view in
-  // that window would otherwise have it filed under the household's key: the
-  // household loses the choice it made, the cataloguer's key stays empty, and
-  // nothing says so. A wrong read costs one paint; a wrong write is permanent
-  // and silent, which is the whole of what the two keys exist to prevent.
-  //
-  // `edits` is bumped by a write so the next render re-reads what was just
-  // stored. One counter for both preferences rather than one each, so a change
-  // to the columns re-reads the view as well. That is the whole cost: one
-  // `getItem` that returns what it returned before. Two counters would be
-  // accurate about which preference moved and nothing would read the
-  // difference. Storage is the single copy, and keeping a second one in state
-  // is how the two come to disagree.
-  const { flags, isResolved: modeIsKnown } = useFeatureFlagsState();
-  const mode = catalogueMode(flags?.library_mode);
-  const [edits, setEdits] = useState(0);
-  const columns = useMemo(
-    () => readColumns(mode),
-    // `edits` is the whole point of the dependency, not an accident.
-    [mode, edits],
-  );
-  const view = useMemo(() => readLibraryView(mode), [mode, edits]);
-
-  /**
-   * One door for every write keyed on the mode.
-   *
-   * The mode is handed to the caller rather than closed over, so a write
-   * cannot reach it without passing the gate, and the re-read bump happens
-   * here rather than at three call sites that each had to remember it. A
-   * fourth per-mode preference gets both properties by construction.
-   */
-  const writeForMode = useCallback(
-    (write: (mode: CatalogueMode) => void) => {
-      if (!modeIsKnown) return;
-      write(mode);
-      setEdits((count) => count + 1);
-    },
-    [mode, modeIsKnown],
   );
 
   const params = { ...toParams(filters), page_size: PAGE_SIZE };
@@ -268,34 +203,9 @@ export function useLibrary(): UseLibraryResult {
     filters,
     update,
 
-    savedSearches,
-    saveCurrentSearch: (name) => setSavedSearches(saveSearch(name, filters)),
-    deleteSavedSearch: (id) => setSavedSearches(deleteSearch(id)),
     locations: locations.data ?? [],
     collections: filed,
     classifications: classifications.data,
-
-    view,
-    // Written under this mode's own key, like the columns below and for the
-    // same reason: a household's view has to survive a switch into library
-    // mode and back out of it, unmodified.
-    setView: (next) => writeForMode((known) => writeLibraryView(known, next)),
-
-    mode,
-    modeIsKnown,
-    availableColumns: AVAILABLE_COLUMNS[mode],
-    columns,
-    // Written under this mode's own key, so a household's choice is untouched
-    // by anything a cataloguer does and the other way round. A toggle that
-    // lands back on the default clears the key instead of storing a copy of
-    // it, which `writeColumns` does rather than this call site: turning one
-    // column off and straight back on is the ordinary way to get there.
-    toggleColumn: (key) =>
-      writeForMode((known) =>
-        writeColumns(known, toggledColumns(known, columns, key)),
-      ),
-    resetColumns: () => writeForMode(clearColumns),
-    canResetColumns: !isDefaultColumns(mode, columns),
 
     books: flatBooks,
     total,
@@ -311,6 +221,105 @@ export function useLibrary(): UseLibraryResult {
     hasMore: books.hasNextPage,
     isLoadingMore: books.isFetchingNextPage,
     loadMore: () => void books.fetchNextPage(),
+  };
+}
+
+/**
+ * Covers, dense rows or metadata, remembered per mode in this browser.
+ *
+ * Handed to the filter panel as one value rather than as a value, a setter and a
+ * flag, which is three props for one choice. `canSet` is false only while the
+ * feature flags are in flight, and the panel draws the buttons disabled on it:
+ * the write is refused either way, and a control that answers a press with
+ * nothing teaches the reader the page lies.
+ */
+export function useViewChoice(): RememberedPerScope<
+  CatalogueMode,
+  LibraryView
+> {
+  return useScopedPreference(libraryViewPreference, useCatalogueScope());
+}
+
+/** Which columns the table draws, which it could draw, and how to change that. */
+export interface ColumnChoice {
+  /** The columns the table draws. */
+  columns: readonly ColumnKey[];
+  /** Every column this mode offers, whether drawn or not. */
+  available: readonly ColumnKey[];
+  /** Whether this already is the mode's default set, so no reset is offered. */
+  isDefault: boolean;
+  toggle: (key: ColumnKey) => void;
+  reset: () => void;
+  /** False while the mode is unsettled. See `useViewChoice`. */
+  canChange: boolean;
+}
+
+/**
+ * The column set for whichever reader this catalogue is being drawn for.
+ *
+ * **One name where the library hook offered five.** `available` and `isDefault`
+ * are derived from the set and the mode, so as members of a hook that also
+ * returned both they were lines a caller could have written. They are not
+ * deleted: the caller that needs them is the picker, which has no mode of its
+ * own, and handing it the mode so it could index a record would be making a
+ * caller learn something rather than stop knowing it.
+ *
+ * **`reset` writes the default rather than removing the key.** Those are the
+ * same operation, because the column preference clears its key on a set equal to
+ * the default, and they were two exported names saying so separately.
+ *
+ * **`mode` below is the reading mode**, which is the household before the flags
+ * land, and it is what `available` and `isDefault` are drawn from: a wrong read
+ * there costs one paint.
+ *
+ * **Both writers take the mode they are written under rather than that one**,
+ * through `setFromScope`. The gate would refuse a write in that window anyway,
+ * so this is not what makes it safe today; it is what stops the gate being the
+ * only thing that does. A reset computed from a stale household mode and stored
+ * under the cataloguer's scope is not equal to the cataloguer's default, so it
+ * would be stored rather than clear the key, and the reset control would stay
+ * drawn and never reset.
+ */
+export function useColumnChoice(): ColumnChoice {
+  const scope = useCatalogueScope();
+  const remembered = useScopedPreference(libraryColumnsPreference, scope);
+  const mode = scope ?? libraryColumnsPreference.whenUnknown;
+  const columns = remembered.value;
+  return {
+    columns,
+    available: AVAILABLE_COLUMNS[mode],
+    isDefault: isDefaultColumns(mode, columns),
+    toggle: (key) =>
+      remembered.setFromScope((known) => toggledColumns(known, columns, key)),
+    reset: () => remembered.setFromScope((known) => DEFAULT_COLUMNS[known]),
+    canChange: remembered.canSet,
+  };
+}
+
+/** Filter combinations somebody named and kept, and the two verbs for them. */
+export interface SavedSearchChoice {
+  searches: readonly SavedSearch[];
+  save: (name: string) => void;
+  remove: (id: string) => void;
+}
+
+/**
+ * The saved views, kept in this browser rather than on the account.
+ *
+ * Takes the filters rather than reading them, because what "save" means is the
+ * set currently on screen, and this hook has no view of that. The two verbs are
+ * pure functions over the list applied through one write, so the rules about
+ * names and the cap are testable without a browser.
+ *
+ * Not keyed on anything, so there is no window in which a write is refused.
+ */
+export function useSavedSearches(filters: BookFilters): SavedSearchChoice {
+  const remembered = usePreference(savedSearchesPreference);
+  const searches = remembered.value;
+  return {
+    searches,
+    save: (name) => remembered.set(withSearchSaved(searches, name, filters)),
+    remove: (id) => remembered.set(withSearchDeleted(searches, id)),
   };
 }
 

@@ -18,7 +18,10 @@ import UnconfirmedBanner from "./components/UnconfirmedBanner";
 import {
   useBookSelection,
   useBrokenSenders,
+  useColumnChoice,
   useLibrary,
+  useSavedSearches,
+  useViewChoice,
   useMyOverdue,
   useUnconfirmedCount,
 } from "./hooks";
@@ -34,6 +37,13 @@ import { hasActiveFilters, isWishlist } from "./types";
 export default function Home() {
   const { t } = useTranslation();
   const library = useLibrary();
+  // The three choices this browser remembers, each behind one name. They are
+  // not members of `useLibrary`, which returns the library and nothing a
+  // browser remembered, and they are read here rather than deeper because the
+  // view decides which body this page draws.
+  const view = useViewChoice();
+  const columns = useColumnChoice();
+  const saved = useSavedSearches(library.filters);
   const selection = useBookSelection();
   const unconfirmed = useUnconfirmedCount();
   const overdue = useMyOverdue();
@@ -111,19 +121,15 @@ export default function Home() {
         onFilterChange={library.update}
         locations={library.locations}
         collections={library.collections}
-        view={library.view}
-        onViewChange={library.setView}
-        canChangeView={library.modeIsKnown}
+        view={view}
       />
 
       <SavedSearches
-        searches={library.savedSearches}
+        saved={saved}
         canSave={filtered}
         // A saved search is a complete filter set, so applying one writes
         // every field. There is no separate whole-set door for that reason.
         onApply={library.update}
-        onSave={library.saveCurrentSearch}
-        onDelete={library.deleteSavedSearch}
       />
 
       <div className="mt-4">
@@ -165,7 +171,7 @@ export default function Home() {
                 Tested first for that reason: it wins over the remembered view
                 whichever one that is, so a third view could not reintroduce a
                 selection with nothing to tick. */}
-            {selection.isSelecting || library.view === "grid" ? (
+            {selection.isSelecting || view.value === "grid" ? (
               <BookGrid
                 books={library.books}
                 isLoading={library.isLoading}
@@ -176,23 +182,16 @@ export default function Home() {
                 isSelected={selection.isSelected}
                 onToggleSelect={selection.toggle}
               />
-            ) : library.view === "table" ? (
+            ) : view.value === "table" ? (
               <>
                 {/* Above the table rather than inside it. The table scrolls
                     sideways on a narrow screen, and a control that scrolls
                     away from the thing it configures is one the reader has to
                     go and find. */}
-                <ColumnPicker
-                  available={library.availableColumns}
-                  visible={library.columns}
-                  onToggle={library.toggleColumn}
-                  onReset={library.resetColumns}
-                  canReset={library.canResetColumns}
-                  canChange={library.modeIsKnown}
-                />
+                <ColumnPicker choice={columns} />
                 <BookTable
                   books={library.books}
-                  columns={library.columns}
+                  columns={columns.columns}
                   sort={library.filters.sort}
                   onSortChange={(sort) => library.update({ sort })}
                   isLoading={library.isLoading}

@@ -6,6 +6,8 @@ import type {
 } from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
 import { toggledFilter } from "../../../lib/bookFilters";
+import type { RememberedPerScope } from "../../../app/hooks";
+import type { CatalogueMode } from "../../../lib/catalogueMode";
 import type { LibraryView } from "../../../lib/libraryView";
 import { TagPicker } from "../../components";
 import ClassificationPicker from "./ClassificationPicker";
@@ -40,15 +42,16 @@ interface BookFiltersProps {
   classifications: ClassificationFacets | undefined;
   showClassificationPanel: boolean;
   onToggleClassificationPanel: () => void;
-  view: LibraryView;
-  onViewChange: (view: LibraryView) => void;
   /**
-   * False while the library cannot yet say which view a pick would be saved
-   * under, so the group is disabled rather than left looking live. The window
-   * is the feature flags being in flight, and `pages/Home/hooks.ts` says why a
-   * write in it cannot be allowed through.
+   * Which view is drawn, and the way to change it.
+   *
+   * One value rather than a value, a setter and a flag. `canSet` is false while
+   * the library cannot yet say which view a pick would be saved under, so the
+   * group is disabled rather than left looking live: the window is the feature
+   * flags being in flight, and `app/hooks.ts` says why a write in it cannot be
+   * allowed through.
    */
-  canChangeView: boolean;
+  view: RememberedPerScope<CatalogueMode, LibraryView>;
 }
 
 /**
@@ -67,8 +70,6 @@ export default function BookFilters({
   showClassificationPanel,
   onToggleClassificationPanel,
   view,
-  onViewChange,
-  canChangeView,
 }: BookFiltersProps) {
   const { t } = useTranslation();
   const activeTagCount = filters.tagIds.length;
@@ -123,12 +124,12 @@ export default function BookFilters({
             <button
               key={option.value}
               type="button"
-              onClick={() => onViewChange(option.value)}
-              aria-pressed={view === option.value}
+              onClick={() => view.set(option.value)}
+              aria-pressed={view.value === option.value}
               // `disabled` rather than a hidden group: the buttons say which
               // view is on, and taking them away for a paint would move the
               // strip under the reader's finger.
-              disabled={!canChangeView}
+              disabled={!view.canSet}
               // **The house `disabled:opacity` is on the unpressed arm only.**
               // `opacity` on a button composites its fill and its text
               // together, and on the pressed arm that pair is
@@ -138,7 +139,7 @@ export default function BookFilters({
               // wall. Leaving the pressed button undimmed also keeps the group
               // answering which view is on while it cannot be changed.
               className={`px-2.5 py-1 text-sm transition-colors first:rounded-l-md last:rounded-r-md disabled:cursor-not-allowed ${
-                view === option.value
+                view.value === option.value
                   ? "bg-accent-fill text-on-accent"
                   : "bg-paper-0 text-paper-600 hover:text-accent-700 " +
                     "disabled:opacity-50 " +

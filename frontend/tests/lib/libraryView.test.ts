@@ -18,47 +18,46 @@ import { CATALOGUE_MODES } from "../../src/lib/catalogueMode";
 import {
   DEFAULT_LIBRARY_VIEWS,
   LIBRARY_VIEWS,
-  readLibraryView,
-  writeLibraryView,
+  libraryViewPreference,
 } from "../../src/lib/libraryView";
 
 beforeEach(() => localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
 
-describe("readLibraryView", () => {
+describe("reading a remembered view", () => {
   it("starts a household on the covers", () => {
-    expect(readLibraryView("household")).toBe("grid");
+    expect(libraryViewPreference.read("household")).toBe("grid");
     expect(DEFAULT_LIBRARY_VIEWS.household).toBe("grid");
   });
 
   it("starts a cataloguer on the dense rows", () => {
     // The whole of the ticket: a counter sees records without setting anything.
-    expect(readLibraryView("cataloguer")).toBe("list");
+    expect(libraryViewPreference.read("cataloguer")).toBe("list");
     expect(DEFAULT_LIBRARY_VIEWS.cataloguer).toBe("list");
   });
 
   it("remembers a choice", () => {
-    writeLibraryView("household", "table");
-    expect(readLibraryView("household")).toBe("table");
+    libraryViewPreference.write("household", "table");
+    expect(libraryViewPreference.read("household")).toBe("table");
   });
 
   it("remembers the dense rows", () => {
     /** A third view was one entry in `LIBRARY_VIEWS`, and the type, the
      * validation and the storage followed from it. */
-    writeLibraryView("household", "list");
-    expect(readLibraryView("household")).toBe("list");
+    libraryViewPreference.write("household", "list");
+    expect(libraryViewPreference.read("household")).toBe("list");
   });
 
   it("remembers a cataloguer's move off the dense rows", () => {
     // The default is where library mode opens, not where it is pinned.
-    writeLibraryView("cataloguer", "grid");
-    expect(readLibraryView("cataloguer")).toBe("grid");
+    libraryViewPreference.write("cataloguer", "grid");
+    expect(libraryViewPreference.read("cataloguer")).toBe("grid");
   });
 
   it("ignores a value it does not know", () => {
     // A value written by a future version, or by hand.
     localStorage.setItem("libraryView", "carousel");
-    expect(readLibraryView("household")).toBe("grid");
+    expect(libraryViewPreference.read("household")).toBe("grid");
   });
 
   it("falls back to each mode's own default when storage refuses to answer", () => {
@@ -67,42 +66,44 @@ describe("readLibraryView", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("denied");
     });
-    expect(readLibraryView("household")).toBe("grid");
-    expect(readLibraryView("cataloguer")).toBe("list");
+    expect(libraryViewPreference.read("household")).toBe("grid");
+    expect(libraryViewPreference.read("cataloguer")).toBe("list");
   });
 });
 
-describe("writeLibraryView", () => {
+describe("writing one", () => {
   it("says nothing when storage refuses to keep it", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("quota");
     });
-    expect(() => writeLibraryView("household", "table")).not.toThrow();
+    expect(() =>
+      libraryViewPreference.write("household", "table"),
+    ).not.toThrow();
   });
 
   it("keeps a choice that happens to be the default", () => {
     // `writeColumns` clears its key here and this deliberately does not: there
     // is no reset control whose visibility turns on the answer, and a
     // cataloguer who picks the dense view has picked it.
-    writeLibraryView("cataloguer", "list");
+    libraryViewPreference.write("cataloguer", "list");
     expect(localStorage.getItem("libraryView.cataloguer")).toBe("list");
   });
 });
 
 describe("the two modes", () => {
   it("leaves the household's key alone when a cataloguer chooses", () => {
-    writeLibraryView("household", "table");
-    writeLibraryView("cataloguer", "grid");
+    libraryViewPreference.write("household", "table");
+    libraryViewPreference.write("cataloguer", "grid");
 
-    expect(readLibraryView("household")).toBe("table");
+    expect(libraryViewPreference.read("household")).toBe("table");
     expect(localStorage.getItem("libraryView")).toBe("table");
   });
 
   it("leaves the cataloguer's key alone when a household chooses", () => {
-    writeLibraryView("cataloguer", "grid");
-    writeLibraryView("household", "table");
+    libraryViewPreference.write("cataloguer", "grid");
+    libraryViewPreference.write("household", "table");
 
-    expect(readLibraryView("cataloguer")).toBe("grid");
+    expect(libraryViewPreference.read("cataloguer")).toBe("grid");
     expect(localStorage.getItem("libraryView.cataloguer")).toBe("grid");
   });
 
@@ -110,7 +111,8 @@ describe("the two modes", () => {
     // Two keys is the mechanism, so it is asserted rather than inferred from
     // the two reads above agreeing. Both write the same value, which is the
     // case a single shared key would survive.
-    for (const mode of CATALOGUE_MODES) writeLibraryView(mode, "table");
+    for (const mode of CATALOGUE_MODES)
+      libraryViewPreference.write(mode, "table");
 
     // Read through `key(i)` rather than `Object.keys`: happy-dom's `Storage` is
     // a Proxy that answers false to `hasOwnProperty` for a key it will return

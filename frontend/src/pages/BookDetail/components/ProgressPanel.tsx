@@ -7,6 +7,7 @@ import {
 } from "../../../api/generated/model";
 import { Icon } from "../../../components";
 import { useTranslation } from "../../../i18n";
+import { shortMonthDate } from "../../../lib/date";
 
 /** Which unit a new entry is recorded in. */
 type Unit = "page" | "percent";
@@ -62,13 +63,6 @@ export default function ProgressPanel({
   const [unit, setUnit] = useState<Unit>(() => defaultUnit(book));
   const [position, setPosition] = useState("");
   const [minutes, setMinutes] = useState("");
-
-  const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString(locale, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -220,7 +214,7 @@ export default function ProgressPanel({
                   entry.minutes != null
                     ? t("progress.minutesRead", { minutes: entry.minutes })
                     : null,
-                  formatDate(entry.recorded_at),
+                  shortMonthDate(entry.recorded_at, locale),
                 ]
                   .filter(Boolean)
                   .join(" · ")}

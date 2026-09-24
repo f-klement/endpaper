@@ -490,6 +490,9 @@ class Record:
     isbn: str | None = None
     title: str | None = None
     subtitle: str | None = None
+    #: A **comma separated** credit line in direct order, the same value
+    #: `books.author` holds. `authors.py` owns what a comma means here and what
+    #: a producer owes before writing one.
     author: str | None = None
     publisher: str | None = None
     year: int | None = None

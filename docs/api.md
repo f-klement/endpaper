@@ -1052,12 +1052,15 @@ in three places from a lookup's:
   sends: they are the Library of Congress call number and subject heading, and
   both have columns here.
 
-**Matching is ISBN, then author and title together, never title alone.** The CSV
-importer matches on title alone, which is right for a reading history: the worst
-case is a status on the wrong edition of a book somebody read. The worst case
-for a catalogue is two different books folded into one record, and every library
-holds more than one *Selected poems*. Both use `importing.identity_key`, which
-is also what the duplicate finder computes.
+**Matching is ISBN, then author and title together, never title alone.** It uses
+`identity.work_key`, which is also what the duplicate finder computes. The worst
+case for a catalogue transfer is two different books folded into one record, and
+every library holds more than one *Selected poems*.
+
+The CSV importer uses `identity.reading_history_title`, and it differs in two
+ways rather than one: no credit in the key, **and** the title is matched as
+written rather than folded. That is right for a reading history, where the worst
+case is a status on the wrong edition of a book somebody read.
 
 **One unreadable record costs one record.** A catalogue export is the product of
 years and is not uniformly clean, so a record with no `245 $a` is counted in

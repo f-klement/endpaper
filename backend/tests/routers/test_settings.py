@@ -1482,10 +1482,19 @@ class TestARouteRefusesRatherThanAnsweringNothing:
     an empty result page reads as "no such book" just as loudly. The refusal
     names the screen that fixes it, because the library did this to itself.
 
-    Three routes rather than one, and that is the finding: the first version
-    taught `lookup` to say it and left the two search paths to raise
-    `ValueError` out of an empty `asyncio.wait`. One enrich request answered 409
-    for its ISBN half and then failed for its search half.
+    More than one route, and that is the finding: the first version taught
+    `lookup` to say it and left the two search paths to raise `ValueError` out of
+    an empty `asyncio.wait`. One enrich request answered 409 for its ISBN half and
+    then failed for its search half.
+
+    **On the enrich route this class is now the only thing standing.** The refusal
+    there is `catalogue_access.Enquiry.refuse_if_nothing_is_asked`, a call the
+    handler makes by hand, and the search half no longer raises: it returns an
+    empty list by design, so gutting that method drops the handler through to a
+    200 saying nothing was found. There is deliberately no second copy of this in
+    `tests/test_catalogue_access.py`, because one behaviour gets one home; what
+    that costs is that a reader of the new module cannot find its enforcement
+    without this sentence.
     """
 
     @pytest.fixture(autouse=True)

@@ -10,6 +10,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { Locale } from "../../../src/api/generated/model";
 import TrashPage from "../../../src/pages/TrashPage";
 import { makeBook, resetIds } from "../../factories";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
@@ -58,6 +59,22 @@ describe("TrashPage", () => {
     renderWithProviders(<TrashPage />);
 
     expect(await screen.findByText(/^Deleted \d/)).toBeInTheDocument();
+  });
+
+  it("says when in the app's locale, not the browser's", async () => {
+    // **The arm the defect survived.** This page rendered the date with a bare
+    // `toLocaleDateString()`, so it took whatever locale the host had rather
+    // than the one the member chose, and every existing assertion here was
+    // anchored loosely enough not to notice. The two locales spell this date
+    // differently, so asserting both is what observes it: `19.8.2026` against
+    // `8/19/2026`.
+    stubTrash([
+      makeBook({ id: 7, title: "Dune", deleted_at: "2026-08-19T10:00:00" }),
+    ]);
+    renderWithProviders(<TrashPage />, { locale: Locale.de });
+
+    expect(await screen.findByText(/19\.8\.2026/)).toBeInTheDocument();
+    expect(screen.queryByText(/8\/19\/2026/)).not.toBeInTheDocument();
   });
 
   it("says the trash does not empty itself", async () => {

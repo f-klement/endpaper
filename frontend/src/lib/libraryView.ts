@@ -23,7 +23,7 @@
  * writing one cannot touch the other, so there is no merge to get wrong.
  *
  * **Adding a view is this array and nothing else.** The type is derived from
- * it, `readLibraryView` validates against it, and a browser holding a value a
+ * it, the decode below validates against it, and a browser holding a value a
  * later version removed falls back to the default rather than breaking, so no
  * migration is possible or needed.
  */
@@ -31,6 +31,7 @@
 // Imported rather than re-declared: two spellings of "is this a cataloguer"
 // is exactly the fact-stored-twice this module's two keys exist to avoid.
 import type { CatalogueMode } from "./catalogueMode";
+import { declareScopedPreference } from "./preference";
 
 export const LIBRARY_VIEWS = ["grid", "table", "list"] as const;
 
@@ -66,29 +67,19 @@ function isLibraryView(value: string | null): value is LibraryView {
 }
 
 /**
- * This mode's remembered view, or its default.
+ * This mode's remembered view, behind the door every stored choice goes through.
  *
- * Every failure path returns the default rather than throwing: a private
- * window that refuses to answer, a value written by a future version, storage
- * that has been cleared. None of those is a reason to fail to render a library.
- */
-export function readLibraryView(mode: CatalogueMode): LibraryView {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEYS[mode]);
-    return isLibraryView(stored) ? stored : DEFAULT_LIBRARY_VIEWS[mode];
-  } catch {
-    return DEFAULT_LIBRARY_VIEWS[mode];
-  }
-}
-
-/**
- * Remember this mode's view. Silent on failure, for the reason above.
+ * What the door supplies, so that it is not restated here: neither reading nor
+ * writing throws, absence means this mode's default, and so does a value this
+ * version cannot read, whether it was written by a later version or by hand. A
+ * remembered view is a convenience and none of those is a reason to fail to
+ * draw a library.
  *
- * **A choice equal to the default is stored, where `writeColumns` clears its
- * key instead.** That rule has two halves: a stored copy of the default stops
- * following the default if a later version changes it, and a reader who turns
- * a column off and straight back on would be left holding that copy with no
- * control offered to clear it.
+ * **`encode` always returns a string, so a choice equal to the default is
+ * stored where the column preference clears its key instead.** That rule has two
+ * halves: a stored copy of the default stops following the default if a later
+ * version changes it, and a reader who turns a column off and straight back on
+ * would be left holding that copy with no control offered to clear it.
  *
  * The second half does not reach here, because there is no reset control for
  * the view. The first half does, and is **accepted rather than absent**: a
@@ -97,24 +88,24 @@ export function readLibraryView(mode: CatalogueMode): LibraryView {
  * clears the key. That is the intended trade, because the pick is one of three
  * named buttons rather than a set of twenty three, so choosing again is one
  * click and a reader can see which one is on. Add a reset control and this
- * should become `writeColumns`' rule instead.
+ * should become the column preference's rule instead.
+ *
+ * **The asymmetry lives in this declaration and not in the door**, so that
+ * teaching the door to clear a key on the default cannot reverse it here
+ * without anybody editing this file.
+ *
+ * `whenUnknown` is the household, which is the reading answer
+ * `catalogueMode()` already gives and the reason it is not a writing one.
+ * Storage is the single copy: a pick that storage refused reads back as
+ * whatever was there before, and the library still draws. That sentence said
+ * the opposite until 2026-09-05 and was true when it was written, because the
+ * view was React state then and the write was a side effect.
  */
-export function writeLibraryView(mode: CatalogueMode, view: LibraryView): void {
-  try {
-    localStorage.setItem(STORAGE_KEYS[mode], view);
-  } catch {
-    // Storage refused, and the choice goes with it. The view is derived from
-    // storage rather than held in state, and the counter bumped after this
-    // call re-reads it, so a pick that did not land reads back as whatever was
-    // there before. The library still renders, on the stored value or this
-    // mode's default.
-    //
-    // This said the opposite until 2026-09-05, and was true when it was
-    // written: the view was React state then and this write was a side effect.
-    // Deriving it removed the second source of truth and this failure path
-    // with it. Restoring the old promise means keeping the pick in state
-    // beside the stored value, and a second copy of a value is how the two
-    // come to disagree, which is the reason `pages/Home/hooks.ts` gives for
-    // storage being the only copy.
-  }
-}
+export const libraryViewPreference = declareScopedPreference<
+  CatalogueMode,
+  LibraryView
+>(STORAGE_KEYS, "household", {
+  decode: (raw) => (isLibraryView(raw) ? raw : undefined),
+  encode: (view) => view,
+  fallback: (mode) => DEFAULT_LIBRARY_VIEWS[mode],
+});

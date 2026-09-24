@@ -12,6 +12,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { Locale } from "../../../../../src/api/generated/model";
 import ResetRequests from "../../../../../src/pages/SettingsPage/DataSettingsPage/components/ResetRequests";
 import { renderLocalised } from "../../../../utils";
 
@@ -25,7 +26,10 @@ const request = {
   code_expires_at: null,
 };
 
-function draw(overrides: Record<string, unknown> = {}) {
+function draw(
+  overrides: Record<string, unknown> = {},
+  locale: Locale = Locale.en,
+) {
   return renderLocalised(
     <ResetRequests
       requests={[request]}
@@ -38,10 +42,44 @@ function draw(overrides: Record<string, unknown> = {}) {
       actionError={null}
       {...overrides}
     />,
+    { locale },
   );
 }
 
 describe("ResetRequests", () => {
+  it("renders its date and its time in the app's locale, not the browser's", () => {
+    // **The arm the defect survived, and this file is why it survived so long.**
+    // Three timestamps here were rendered with a bare call, one date and two
+    // times, and the two assertions that looked at a time built their expected
+    // string with the identical bare call, so both sides agreed in every locale.
+    // A named locale and a spelling that differs between the two is what makes
+    // this an observation: `19.8.2026` against `8/19/2026`, and a 24 hour clock
+    // against a 12 hour one.
+    const overrides = {
+      requests: [
+        {
+          ...request,
+          requested_at: "2026-08-19T14:05:00",
+          approved_by: "sam",
+          code_expires_at: "2026-08-19T15:05:00",
+        },
+      ],
+    };
+
+    // Unmounted between the two, because cleanup runs per test rather than per
+    // render and two mounted trees would put both spellings in one document.
+    const german = draw(overrides, Locale.de);
+    expect(screen.getByText(/19\.8\.2026/)).toBeInTheDocument();
+    expect(screen.getByText(/15:05:00/)).toBeInTheDocument();
+    german.unmount();
+
+    draw(overrides, Locale.en);
+    expect(screen.getByText(/8\/19\/2026/)).toBeInTheDocument();
+    // `\s` rather than a literal space: ICU 72 spells the separator before
+    // `PM` as U+202F, and which one a run gets is the runtime's business.
+    expect(screen.getByText(/3:05:00\sPM/)).toBeInTheDocument();
+  });
+
   it("offers no way to start a reset", () => {
     draw();
 
@@ -82,7 +120,13 @@ describe("ResetRequests", () => {
 
     const sentence = screen.getByText(/read this code to kim/i);
     expect(sentence.textContent).toContain(
-      new Date("2026-09-06T11:00:00").toLocaleTimeString(),
+      // **A named locale, and a path the component does not take.** This built
+      // its expectation with a bare `toLocaleTimeString()`, the identical
+      // expression the component ran, so both sides resolved in whatever locale
+      // the host picked, agreed in every locale, and could observe neither the
+      // defect nor its fix. `renderLocalised` defaults to English, so `"en"`
+      // here is the app's locale asserted rather than assumed.
+      new Date("2026-09-06T11:00:00").toLocaleTimeString("en"),
     );
   });
 
@@ -109,7 +153,7 @@ describe("ResetRequests", () => {
 
     expect(
       screen.getByText(
-        `The code stops working at ${new Date("2026-09-06T11:30:00").toLocaleTimeString()}.`,
+        `The code stops working at ${new Date("2026-09-06T11:30:00").toLocaleTimeString("en")}.`,
       ),
     ).toBeInTheDocument();
   });

@@ -62,6 +62,62 @@ import {
 } from "./types";
 
 /**
+ * What a two step import offers its card, over the two things that differ.
+ *
+ * **One declaration rather than two, because the contract is where these hooks
+ * are identical.** `useLibraryImport` and `useMarcImport` wire different
+ * generated mutations and take different confirm options; the eight members
+ * here, and what each of them means, are the same in both. Written once, a hook
+ * that drifts out of the family stops compiling. Written twice, or left
+ * inferred, the only thing saying they are a family is a comment.
+ *
+ * Deliberately not a shared *hook*. The seam a runtime fold needs runs through
+ * the React Query wiring, where each `onSuccess` closes over the state the
+ * shared hook would have to own, and every shape that reaches it either calls a
+ * hook through a callback or leaves half the body at the call site.
+ */
+export interface UseTwoStepImportResult<TPreview, TConfirmOptions> {
+  /** What the file turned out to hold. Null until the preview lands. */
+  preview: TPreview | null;
+  /** What the write did. Null until it finishes. */
+  result: ImportResultOut | null;
+  /** Preview a picked file. Writes nothing. */
+  choose: (chosen: File) => void;
+  /** Write the previewed file. Does nothing when no file is chosen. */
+  confirm: (options: TConfirmOptions) => void;
+  isPreviewing: boolean;
+  isImporting: boolean;
+  /**
+   * Whichever step failed, preview first.
+   *
+   * **`unknown`, and not because nobody looked.** The generated mutations behind
+   * this family declare `TError = HTTPValidationError`, so the inferred type of
+   * this member is `HTTPValidationError | null`, and that type is never true:
+   * `api/mutator.ts` throws `ApiError` and `NetworkError`, both real `Error`
+   * subclasses, and nothing in this tree ever constructs an
+   * `HTTPValidationError`. Writing the generated type here would publish a
+   * `detail` field that is `undefined` for every failure this app can produce.
+   * Narrow with `classifyError` in `components/ErrorState.tsx`, which every card
+   * already does.
+   */
+  error: unknown;
+  /** Forget the file, the preview and the result. */
+  reset: () => void;
+}
+
+/** A CSV import: every column is a guess, so both flags are offered. */
+export type UseLibraryImportResult = UseTwoStepImportResult<
+  ImportPreviewOut,
+  { createMissing: boolean; applyTags: boolean }
+>;
+
+/** A MARC import, which writes no reading record, so there are no tags to apply. */
+export type UseMarcImportResult = UseTwoStepImportResult<
+  MarcPreviewOut,
+  { createMissing: boolean }
+>;
+
+/**
  * Bringing a library across from another service.
  *
  * Two steps rather than one, and the first is the point: a column guessed
@@ -69,7 +125,7 @@ import {
  * finding and deleting a few hundred books. So the file is read and reported
  * on before anything is written.
  */
-export function useLibraryImport() {
+export function useLibraryImport(): UseLibraryImportResult {
   const invalidate = useInvalidate();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreviewOut | null>(null);
@@ -94,7 +150,6 @@ export function useLibraryImport() {
   });
 
   return {
-    file,
     preview,
     result,
 
@@ -133,6 +188,34 @@ export function useLibraryImport() {
 }
 
 /**
+ * A repair a person presses, batched server side and resumed by a cursor.
+ *
+ * **The second family in this file, and the one nothing named.**
+ * `useStoreIdentifierBackfill`'s docstring says it is "the same shape as
+ * `useCoverBackfill` above, deliberately", which is a comment doing a type's
+ * job: the two are identical but for the generated mutation and what its result
+ * is. The cursor is deliberately **not** a member. It is how pressing again
+ * makes progress and belongs to the hook; a caller that could read it is a
+ * caller that could be handed it.
+ */
+export interface UseBackfillResult<TResult> {
+  /** What the last run did. Null until one finishes. */
+  result: TResult | null;
+  /** Run the next batch, from wherever the last one stopped. */
+  run: () => void;
+  isRunning: boolean;
+  /** `unknown` for the reason `UseTwoStepImportResult.error` gives above. */
+  error: unknown;
+}
+
+/** Covers for books that arrived without one, mostly through a CSV import. */
+export type UseCoverBackfillResult = UseBackfillResult<CoverBackfillOut>;
+
+/** Fields for books a store import left holding an identifier and nothing else. */
+export type UseStoreIdentifierBackfillResult =
+  UseBackfillResult<IdentifierBackfillOut>;
+
+/**
  * Fetching the covers of books that have none.
  *
  * This is the repair for a library that already exists. Storing covers as
@@ -150,7 +233,7 @@ export function useLibraryImport() {
  * 0 at the end of the library, which starts the next press over and re-tries
  * the failures, since a service that was down may not be.
  */
-export function useCoverBackfill() {
+export function useCoverBackfill(): UseCoverBackfillResult {
   const invalidate = useInvalidate();
   const [result, setResult] = useState<CoverBackfillOut | null>(null);
   const [cursor, setCursor] = useState(0);
@@ -190,7 +273,7 @@ export function useCoverBackfill() {
  * a Google Books quota this household pays for, so every request has to be one
  * somebody asked for.
  */
-export function useStoreIdentifierBackfill() {
+export function useStoreIdentifierBackfill(): UseStoreIdentifierBackfillResult {
   const invalidate = useInvalidate();
   const [result, setResult] = useState<IdentifierBackfillOut | null>(null);
   const [cursor, setCursor] = useState(0);
@@ -293,7 +376,7 @@ export function useCustomFields(): UseCustomFieldsResult {
  * whose `statuses_updated` means something on one path and nothing on the
  * other.
  */
-export function useMarcImport() {
+export function useMarcImport(): UseMarcImportResult {
   const invalidate = useInvalidate();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<MarcPreviewOut | null>(null);
@@ -318,7 +401,6 @@ export function useMarcImport() {
   });
 
   return {
-    file,
     preview,
     result,
 
@@ -402,6 +484,70 @@ export type CalibreIntakeFailure = CalibreFailure | SqliteFailure;
 const PREVIEW_ROWS = 5;
 
 /**
+ * The Calibre card.
+ *
+ * Two picks and the second is optional, which is the shape the extra members
+ * are: `crossCheck` is the second pick and `failure` is what a file turned out
+ * not to be.
+ *
+ * **Flat, and not sharing a declared base with `UseStoreImportResult`.** The two
+ * hooks both drive `importing.ts::writeBooks`, so seven of their members coincide
+ * in type, and a base over those seven was written here and then removed. Three
+ * of the seven do not mean the same thing in the two hooks: `progress` here is
+ * also written by the cross check pass and not only by the write loop, `confirm`
+ * here refuses an empty library where the store card's runs and reports a result
+ * over nothing, and `isReading` is state here and derived there. What the base
+ * would have protected, that both spell `result` as `ImportOutcome`, is already
+ * pinned by `writeBooks`'s own return type. So the base bought a second
+ * enforcement of a settled rule at the price of two docstrings that were false
+ * of one member each, and it would have stood in the way of the resumption this
+ * file already defers.
+ */
+export interface UseCalibreImportResult {
+  /** What the write did. Null until it finishes. */
+  result: ImportOutcome | null;
+  /**
+   * What the index turned out to hold.
+   *
+   * Null before a pick, and after a write **that was not stopped**: a member who
+   * stops keeps the preview, so that pressing Import again does not mean picking
+   * the file a second time.
+   */
+  preview: CalibrePreview | null;
+  /** How far through the read, the cross check, or the write. Null when idle. */
+  progress: ImportProgress | null;
+  /** Reading or cross checking a picked file, both entirely in the browser. */
+  isReading: boolean;
+  isImporting: boolean;
+  /**
+   * The file was read and was not a Calibre library, with the reason.
+   *
+   * Separate from `error` below, and the split is the point: this is an answer
+   * about a file a member picked, and a reader returns it rather than throwing.
+   */
+  failure: CalibreIntakeFailure | null;
+  /**
+   * Something threw.
+   *
+   * **`unknown` rather than a type, and here that is the honest one**, unlike
+   * the two step family above whose `error` comes from a generated mutation with
+   * a declared shape. This one is whatever reached a `catch`, so a reader bug, a
+   * file that went away, and a WebAssembly engine that would not compile all
+   * arrive through it.
+   */
+  error: unknown;
+  /** Read a picked database file. Writes nothing. */
+  choose: (file: File) => void;
+  /** The optional second pick: the `metadata.opf` beside each book. */
+  crossCheck: (files: readonly File[]) => void;
+  /** Write what was read. Does nothing with no library read, or mid write. */
+  confirm: () => void;
+  /** Stop the write loop between requests. What it wrote stays written. */
+  stop: () => void;
+  reset: () => void;
+}
+
+/**
  * Bringing a Calibre library across, by the route that holds no lock on it.
  *
  * **The safety rule is the shape of this hook.** The household's library has
@@ -422,7 +568,7 @@ const PREVIEW_ROWS = 5;
  * read wrong is invisible until afterwards, and afterwards the fix is finding
  * and deleting nine hundred books.
  */
-export function useCalibreImport() {
+export function useCalibreImport(): UseCalibreImportResult {
   const invalidate = useInvalidate();
   const scanAdd = useScanAdd();
 
@@ -687,6 +833,45 @@ export interface StorePreview {
 }
 
 /**
+ * The store card.
+ *
+ * **Its failures are per source and there is no top level `error`.** One
+ * store's file that has moved, or that a firmware update changed, costs that one
+ * source, so what went wrong is a property of the row it went wrong on:
+ * `StoreSource` carries all four states, the reader bug case included, and says
+ * why that fourth one exists.
+ *
+ * Flat rather than sharing a base with `UseCalibreImportResult`, whose docstring
+ * carries the reason.
+ */
+export interface UseStoreImportResult {
+  /** What each picked store is doing, or turned out to be. */
+  sources: StoreSources;
+  /** What the sources that read hold together. Null while none has. */
+  preview: StorePreview | null;
+  /** How far through the write loop. Null when it is not running. */
+  progress: ImportProgress | null;
+  /** What the write did. Null until it finishes. */
+  result: ImportOutcome | null;
+  /** Any source is still reading. Derived from `sources`, not held. */
+  isReading: boolean;
+  isImporting: boolean;
+  /** Read a file picked for one store. Every other source is untouched. */
+  choose: (id: StoreId, file: File) => void;
+  /**
+   * Write every book that read.
+   *
+   * **Guarded only against a write already running.** With nothing read it still
+   * runs, and reports a result over zero books rather than refusing; the card
+   * decides whether to offer the button.
+   */
+  confirm: () => void;
+  /** Stop the write loop between requests. What it wrote stays written. */
+  stop: () => void;
+  reset: () => void;
+}
+
+/**
  * Importing from the stores a member's own devices and exports carry.
  *
  * **Several sources in one pass, and that is the shape of the rule.** A member
@@ -703,7 +888,7 @@ export interface StorePreview {
  * **Nothing is uploaded.** Every read happens in the browser, and the reader
  * modules that hold a member's bytes cannot reach the network at all.
  */
-export function useStoreImport() {
+export function useStoreImport(): UseStoreImportResult {
   const invalidate = useInvalidate();
   const scanAdd = useScanAdd();
 

@@ -1751,3 +1751,40 @@ class TestASlowCatalogueIsAskedOnlyWhenSomebodyAsks:
         ]
         assert row.enabled is False
         assert row.slow is True
+
+
+class TestEverySeededTargetAnswersSomething:
+    """No seeded catalogue answers neither an ISBN nor a title search.
+
+    **What rests on this is a predicate in another module.**
+    `catalogue_access.Enquiry.refuse_if_nothing_is_asked` tests `plan.asked`, which
+    asks whether anything at all is enabled, and it is the right question for a
+    caller with three fallback paths. It is equivalent to "no roster can answer" only
+    while every enabled source is in one roster or the other. Measured at the time of
+    writing: 11 seeded targets, 9 answering a lookup and 8 a search, and none in
+    neither.
+
+    A seed added to neither roster would make `plan.asked` non empty for a Library
+    that can in fact answer nothing, so enrichment would pass the up front refusal
+    and then fail three times. This arm is what turns that from a coincidence of the
+    seed data into something a change has to notice.
+    """
+
+    def test_no_seeded_target_is_outside_both_rosters(self):
+        stranded = sorted(
+            source.value
+            for source in targets.SEEDED
+            if source not in sources.LOOKUP_SOURCES
+            and source not in sources.SEARCH_SOURCES
+        )
+
+        assert not stranded, (
+            f"{stranded} answer neither a lookup nor a title search, so "
+            "`plan.asked` being non empty no longer means anything can be asked"
+        )
+
+    def test_both_rosters_are_populated(self):
+        """Two empty rosters would make the arm above pass on an empty universe."""
+        assert sources.LOOKUP_SOURCES
+        assert sources.SEARCH_SOURCES
+        assert targets.SEEDED

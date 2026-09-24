@@ -357,7 +357,7 @@ class TestTheKeyIsResolvedOncePerRequest:
         """
         tally = self._counted(monkeypatch)
 
-        resolved = settings_store._catalogue_logins(db)
+        resolved = settings_store.catalogue_logins(db)
 
         assert set(resolved) == sources.SHIPS_A_CREDENTIAL
         assert tally[0] == 1
@@ -371,7 +371,7 @@ class TestTheKeyIsResolvedOncePerRequest:
             sources, "NEEDS_A_KEY", frozenset({CatalogueSource.DNB})
         )
         tally = self._counted(monkeypatch)
-        assert len(settings_store._catalogue_logins(db)) == 1
+        assert len(settings_store.catalogue_logins(db)) == 1
         one = tally[0]
 
         credentials.put(
@@ -387,7 +387,7 @@ class TestTheKeyIsResolvedOncePerRequest:
             frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
         )
         tally[0] = 0
-        assert len(settings_store._catalogue_logins(db)) == 2
+        assert len(settings_store.catalogue_logins(db)) == 2
         two = tally[0]
 
         assert (one, two) == (1, 1), (
@@ -420,7 +420,7 @@ class TestTheKeyIsResolvedOncePerRequest:
         )
         tally = self._counted(monkeypatch)
 
-        assert settings_store._catalogue_logins(db) == {}
+        assert settings_store.catalogue_logins(db) == {}
 
         assert tally[0] == 1
 
@@ -441,7 +441,7 @@ class TestTheKeyIsResolvedOncePerRequest:
         )
         tally = self._counted(monkeypatch)
 
-        assert len(settings_store._catalogue_logins(db)) == 2
+        assert len(settings_store.catalogue_logins(db)) == 2
 
         assert tally[0] == 1
 
@@ -476,7 +476,7 @@ class TestTheKeyIsResolvedOncePerRequest:
             tuple(watching(source) for source in credentials.KEY_SOURCES),
         )
 
-        assert len(settings_store._catalogue_logins(db)) == 2
+        assert len(settings_store.catalogue_logins(db)) == 2
 
         assert reads == one_pass, (
             f"{reads} store reads for two sealed logins, where one pass over "
@@ -1933,3 +1933,86 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         off_the_table, in_force = _keyed_readers(_source_modules()[_STORE])
         assert "set_value" not in off_the_table | in_force
         assert "set_json" not in off_the_table | in_force
+
+
+class TestThePlanAndTheLoginsAgreeOnWhoNeedsOne:
+    """A source admitted to the plan has a login resolved for it, or goes out bare.
+
+    **Two predicates decide this and nothing made them agree.** `ready_sources`
+    admits a credentialled source through `_sources_with_a_credential`, which asks
+    `credentials.is_held` over `sources.NEEDS_A_KEY - _SECRET_IS_A_SETTINGS_ROW`.
+    `catalogue_logins` resolves a login over `sources.NEEDS_A_KEY` filtered by
+    `metadata.carries_a_credential`. Different subjects, different readers. A source
+    in the first and not the second sits in the plan with no entry in the mapping,
+    and `metadata` asks it with no credential.
+
+    **They agree on today's roster, on a set of size one, by coincidence.**
+    `carries_a_credential` answers False for every transport but SRU, so the first
+    catalogue that needs a key, keeps its secret sealed rather than in a settings
+    row, and speaks anything else opens the gap. This is the arm that fails on the
+    row that opens it, rather than a member's search going out bare and nothing
+    saying so.
+
+    **Why this is a test and not a refusal at the site.** A raise in
+    `catalogue_logins` would turn a silent unauthenticated request into a 500, on a
+    case that cannot happen today, for a cause the caller cannot fix: `is_held` and
+    `for_request` are two reads of the keychain, so a key rotated between them is a
+    legitimate disagreement. The runtime half is a `logger.warning`, which makes the
+    silent case audible without inventing a new failure.
+    """
+
+    def _needs_a_login(self) -> set[CatalogueSource]:
+        """What `catalogue_logins` will try to resolve, asked rather than restated."""
+        return set(settings_store.sources_whose_door_carries_a_login())
+
+    def _admitted_by_a_credential(self) -> set[CatalogueSource]:
+        """What `ready_sources` will admit on a held credential, read off its rule."""
+        return set(sources.NEEDS_A_KEY) - settings_store._SECRET_IS_A_SETTINGS_ROW
+
+    def test_every_source_admitted_on_a_credential_has_one_resolved_for_it(self):
+        gap = sorted(
+            source.value
+            for source in self._admitted_by_a_credential() - self._needs_a_login()
+        )
+
+        assert not gap, (
+            f"{gap} reach the plan on a held credential and have no login resolved, "
+            "so their requests go out unauthenticated"
+        )
+
+    def test_the_two_subjects_are_not_empty(self):
+        """Both sets empty would make the arm above pass on nothing at all."""
+        assert self._needs_a_login()
+        assert self._admitted_by_a_credential()
+
+    def test_a_sealed_non_sru_source_is_reported(self, monkeypatch):
+        """The diagonal, and it plants the defect in the predicate rather than the sets.
+
+        **The first version of this asserted that two literal sets subtract**, which
+        passes with the warning deleted, both helpers deleted and the whole production
+        rule gone. Its docstring claimed the rule fires and the rule was never invoked:
+        the covered case, chosen by the person who believed the guard.
+
+        This makes one real change, to the capability predicate `catalogue_logins` reads,
+        and then asks the first arm's own expression what it sees. A source that needs a
+        key and whose door stops carrying a credential is admitted by `ready_sources` and
+        skipped by the login resolver, which is the gap.
+        """
+        import metadata
+
+        admitted = self._admitted_by_a_credential()
+        assert admitted, "nothing is admitted on a credential, so this proves nothing"
+        stranded = sorted(admitted)[0]
+
+        monkeypatch.setattr(
+            metadata,
+            "carries_a_credential",
+            lambda target: target is not targets.SEEDED[stranded],
+        )
+
+        gap = self._admitted_by_a_credential() - self._needs_a_login()
+
+        assert stranded in gap, (
+            "the rule no longer notices a source admitted on a credential whose door "
+            "carries none, which is the whole of what it is for"
+        )

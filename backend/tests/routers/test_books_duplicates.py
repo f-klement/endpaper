@@ -46,6 +46,37 @@ class TestDetection:
 
         assert len(groups(client, admin["headers"])) == 1
 
+    def test_an_isbd_mark_left_by_a_catalogue_does_not_hide_a_duplicate(
+        self, client, admin, make_book
+    ):
+        """MARC 245 carries this punctuation, so it arrives on real rows.
+
+        The mark used to leave its own space in the key, so the pair was never
+        offered and the member kept two rows for one book.
+        """
+        make_book(admin["headers"], title="Ulysses :", author="James Joyce")
+        make_book(admin["headers"], title="Ulysses", author="James Joyce")
+
+        assert len(groups(client, admin["headers"])) == 1
+
+    def test_initials_spaced_two_ways_are_one_author(self, client, admin, make_book):
+        make_book(admin["headers"], title="The Hobbit", author="J.R.R. Tolkien")
+        make_book(admin["headers"], title="Hobbit", author="J. R. R. Tolkien")
+
+        assert len(groups(client, admin["headers"])) == 1
+
+    def test_two_surnames_differing_by_an_article_word_are_not_a_duplicate(
+        self, client, admin, make_book
+    ):
+        """`Das Gupta` is a surname and the fold used to eat the `Das`.
+
+        Offering these two for merge invites somebody to destroy one of them.
+        """
+        make_book(admin["headers"], title="Field Notes", author="Das Gupta")
+        make_book(admin["headers"], title="Field Notes", author="Gupta")
+
+        assert groups(client, admin["headers"]) == []
+
     def test_matches_on_the_first_author_only(self, client, admin, make_book):
         """Two editions credit a collaboration differently all the time."""
         make_book(admin["headers"], title="Good Omens", author="Terry Pratchett")

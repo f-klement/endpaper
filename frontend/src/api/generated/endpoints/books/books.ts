@@ -3496,9 +3496,8 @@ export const getBackfillFromIdentifiersUrl = (
  * operator action work.
  *
  * **Refuses with 409 when this library does not ask Google Books**, rather
- * than examining nothing and reporting a clean run. A source with no usable
- * key must say so: the cause is a switch and a key in Settings, and a zero
- * would send somebody hunting through their library instead.
+ * than examining nothing and reporting a clean run. The cause is a switch and
+ * a key in Settings, and the reply names both.
  *
  * Batched and resumable. `next_after_id` carries on past what this run tried,
  * and comes back as 0 at the end of the library so pressing again starts over

@@ -23,8 +23,9 @@ conjunction that must not be spelled twice.
 """
 
 import json
+import logging
 import secrets
-from typing import TYPE_CHECKING, Any, Final
+from typing import Any, Final
 
 from sqlalchemy.orm import Session
 
@@ -35,22 +36,19 @@ import targets
 from enums import CatalogueSource, Locale, SettingKey
 from models import Setting
 
-#: **`metadata` is imported inside the two functions that need it at run time,
-#: and here for the annotation alone.** A module level import is a cycle, and it
-#: is not the one the design round expected: the chain measured on 2026-09-17 is
+logger = logging.getLogger(__name__)
+
+#: **`metadata` is imported inside each function that needs it, never at module
+#: level.** A module level import is a cycle: the chain measured on 2026-09-17 is
 #: `mailer` -> this module -> `metadata` -> `catalogue` -> `schemas.book` ->
 #: `schemas` -> `schemas.user` -> `mailer`, which reaches `mailer.MAX_ADDRESS`
 #: before `mailer` has defined it and fails at collection with an
-#: `AttributeError`. The annotation costs nothing because PEP 649 never evaluates
-#: it, which is the same arrangement `schemas/book.py` already relies on.
+#: `AttributeError`.
 #:
-#: **What goes red if this block is deleted is `mypy`, not the suite.** Measured
-#: 2026-09-17 by neutralising it: collection succeeds and the targeted files
-#: pass, while `mypy .` reports `Name "metadata" is not defined`. The rung is
-#: tested rather than self enforcing, and the two function level imports below
-#: are what the run time depends on.
-if TYPE_CHECKING:
-    import metadata
+#: **Nothing here annotates a `metadata` type any more**, so the `TYPE_CHECKING`
+#: block this comment used to describe is gone with the resolver that needed it.
+#: `catalogue_access` owns that annotation now, and imports both modules at module
+#: level because nothing imports it back.
 
 # Defaults for anything never written. Stored as the same strings the table
 # holds, so there is one representation to reason about.
@@ -439,7 +437,30 @@ def catalogue_sources(db: Session) -> sources.Plan:
     return sources.in_force(stored_catalogue_sources(db), ready_sources(db))
 
 
-def _catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credential]:
+def sources_whose_door_carries_a_login() -> list[CatalogueSource]:
+    """Which catalogues a login is resolved for, in a stable order.
+
+    **One home for the predicate, because two readers of it disagreeing silently is the
+    gap `catalogue_logins` describes.** That function resolves the logins and
+    `catalogue_access._warn_about_any_source_asked_with_no_login` checks the plan against
+    them; when each spelled this itself, widening one left the other behind in the miss
+    direction, which is a request going out with no credential and nothing saying so.
+
+    **Pure, and that is what keeps it cheap to ask twice.** It reads the seed table and
+    the capability rule, takes no `Session`, and resolves no key, so asking it does not
+    move the one resolution per request that
+    `tests/test_settings_store.py::TestTheKeyIsResolvedOncePerRequest` holds.
+    """
+    import metadata  # function level, for the cycle above
+
+    return [
+        source
+        for source in sorted(sources.NEEDS_A_KEY)
+        if metadata.carries_a_credential(targets.SEEDED[source])
+    ]
+
+
+def catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credential]:
     """The login each catalogue's request will carry, resolved before it is made.
 
     **Resolved here rather than in `metadata`, and that is the same rule the
@@ -447,13 +468,48 @@ def _catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credenti
     request and reaches no database; opening a sealed row there would put the
     ORM behind every request to every catalogue. So this answers "what will the
     next request send", which is `credentials.for_request`'s own question, and
-    `library_access` below hands the answer over as an argument.
+    `catalogue_access._resolved_access` hands the answer over as an argument.
 
     **Only the targets whose door carries one**, which is
     `metadata.carries_a_credential` and is asked rather than restated here: the
     rule and this loop must not be able to disagree about which rows to resolve,
     because a row skipped here is a request that goes out unauthenticated with
     nothing saying so.
+
+    **That agreement is not the one that matters, and this paragraph is the
+    correction.** The sentence above buys agreement between this loop and
+    `carries_a_credential`. What decides whether a request goes out
+    unauthenticated is agreement between this loop and **`ready_sources`**, which
+    is what admits a credentialled source to the plan, and the two ask different
+    questions of different subjects: `ready_sources` asks `credentials.is_held`
+    over `sources.NEEDS_A_KEY - _SECRET_IS_A_SETTINGS_ROW`, and this asks
+    `credentials.for_request` over `sources.NEEDS_A_KEY` filtered by
+    `carries_a_credential`. A source admitted there and skipped here sits in the
+    plan with no entry in this mapping, and `metadata` asks it with no
+    credential.
+
+    **They agree on today's roster, on a set of size one, and nothing made them.**
+    Measured: `NEEDS_A_KEY` is Google Books and the Biblioteca Nacional
+    Argentina, `_SECRET_IS_A_SETTINGS_ROW` is Google Books, and both subjects come
+    out as the Argentina row alone. `carries_a_credential` answers False for every
+    transport but SRU, so the first catalogue that needs a key, keeps its secret
+    sealed rather than in a settings row, and speaks anything else falls in the
+    gap. `tests/test_settings_store.py::TestThePlanAndTheLoginsAgreeOnWhoNeedsOne`
+    fails on the row that opens it.
+
+    **The gap is logged and not refused, deliberately.** A raise here would turn a
+    silent unauthenticated request into a 500, and it would do so on a case that
+    cannot happen today for a cause the caller cannot fix: `is_held` and
+    `for_request` are two reads of the keychain, so a key rotated between them is
+    a legitimate disagreement. What the warning buys is that the silent case stops
+    being silent; what the test buys is that it is caught when the row is added
+    rather than when a member's search goes out bare.
+
+    **The warning lives in `catalogue_access._resolved_access` and not here**,
+    because it needs the plan beside these logins and this function holds only the
+    logins. Resolving the plan here to compare against would be a second resolution
+    of the key on every request, which is the cost
+    `TestTheKeyIsResolvedOncePerRequest` exists to hold at one.
 
     **The key is resolved once for the whole loop, never per source**, which is
     the rule `_sources_with_a_credential` above states over the same shape of
@@ -487,13 +543,7 @@ def _catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credenti
     Written for the set rather than for its members because the next source to
     declare that capability is the reason this plumbing exists.
     """
-    import metadata  # function level, for the cycle above
-
-    doors = [
-        targets.SEEDED[source]
-        for source in sorted(sources.NEEDS_A_KEY)
-        if metadata.carries_a_credential(targets.SEEDED[source])
-    ]
+    doors = [targets.SEEDED[source] for source in sources_whose_door_carries_a_login()]
     if not doors:
         return {}
     state = credentials.key_state()
@@ -505,44 +555,6 @@ def _catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credenti
         if login is not None:
             resolved[target.source] = login
     return resolved
-
-
-def library_access(db: Session) -> metadata.Access:
-    """Everything one request may ask of the catalogues, resolved once.
-
-    **One question, one mechanism.** Every one of the six handlers that reaches a
-    catalogue used to assemble these three by hand, and four of them guarded the
-    key with `GOOGLE_BOOKS_ENABLED` as well. That switch is already a condition of
-    `ready_sources` above, so the plan had dropped Google before the second test
-    ran: two mechanisms answering one question, with a paragraph per site saying
-    which of them covered it. The plan is the gate, here and at every door.
-
-    **The key is resolved whatever the provider list says**, which is what the
-    two handlers that never had the conjunction already did. It travels no
-    further than a source in the plan: `metadata._lookup_one` hands it to a
-    bespoke adapter and `_search_one` to a metered one, and neither is
-    constructed for a source the plan left out.
-
-    **Not a FastAPI dependency.** `solve_dependencies` runs them in declaration
-    order and the first `HTTPException` propagates, so one declared before
-    `CurrentUser` would answer an unauthenticated caller with this route's 409
-    instead of a 401. It is resolved in the handler body, below the limiter.
-
-    What it costs is a handful of settings row reads and, where the roster holds
-    a door that carries a login, one keychain round trip. The second is the one
-    that can grow with the roster and the one that is bounded, at
-    `_catalogue_logins` above; the first is not itemised here because a number
-    written down beside a function stops being re-derived. The instruments are
-    `tests/routers/test_books_identifier_backfill.py::TestWhatABatchCostsTheDatabase`
-    and `tests/test_settings_store.py::TestTheKeyIsResolvedOncePerRequest`.
-    """
-    import metadata  # function level, for the cycle above
-
-    return metadata.Access(
-        plan=catalogue_sources(db),
-        api_key=google_books_api_key(db),
-        logins=_catalogue_logins(db),
-    )
 
 
 def library_mode(db: Session) -> bool:

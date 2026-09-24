@@ -16,12 +16,14 @@ from sqlalchemy.orm import Session, joinedload
 import authority
 import book_columns
 import catalogue
+import catalogue_access
 import cover_store
 import covers
 import custom_fields
 import ddc
 import folding
 import google_books
+import identity
 import isbn as isbn_utils
 import lending
 import marc
@@ -59,7 +61,6 @@ from enums import (
     BookIdentifierScheme,
     BookSort,
     BulkAction,
-    CatalogueSource,
     ExportFormat,
     LendingWillingness,
     Locale,
@@ -68,7 +69,6 @@ from enums import (
     TagCategory,
 )
 from identifiers import add_identifiers
-from importing import identity_key
 from lending import Loans
 from logvalues import clipped
 from models import (
@@ -95,8 +95,6 @@ from models import (
 from ratelimit import (
     authority_limiter,
     cover_backfill_limiter,
-    identifier_backfill_limiter,
-    metadata_limiter,
 )
 from reading import Reading
 from schemas import (
@@ -424,7 +422,11 @@ async def lookup_isbn(
 ) -> BookLookup:
     # Validated before either upstream is called: a misread barcode would
     # otherwise cost two network round trips to learn nothing.
-    metadata_limiter.check(current_user.username)
+    #
+    # **And before the budget is charged, which is the ordering `refresh_metadata`
+    # already had and this route did not.** A value that reaches no catalogue must
+    # not spend a Member's metadata allowance: three barcodes misread in a row
+    # would otherwise leave them rate limited on the next one that was fine.
     canonical = isbn_utils.parse(isbn)
     if canonical is None:
         raise HTTPException(
@@ -432,11 +434,12 @@ async def lookup_isbn(
             detail="Not a valid ISBN. Check the digits and try again.",
         )
 
-    result = await metadata.lookup(
-        canonical, access=settings_store.library_access(db)
+    enquiry = catalogue_access.Enquiry.for_a_member_request(
+        db, member=current_user.username
     )
+    result = await enquiry.lookup(canonical)
     if not result.found:
-        raise HTTPException(**_lookup_failure(result))
+        raise _lookup_failure(result)
 
     assert result.record is not None  # noqa: S101  narrowing, not validation
     record = result.record
@@ -533,7 +536,7 @@ def _bounded_match(fields: dict[str, Any]) -> BookMatch:
     return BookMatch.model_construct()
 
 
-def _lookup_failure(result: metadata.Lookup) -> dict[str, Any]:
+def _lookup_failure(result: metadata.Lookup) -> HTTPException:
     """Turn a failed lookup into the status and wording it deserves.
 
     All three used to be "Book not found for this ISBN", which sends someone to
@@ -545,59 +548,35 @@ def _lookup_failure(result: metadata.Lookup) -> dict[str, Any]:
     library has switched off every catalogue that answers an ISBN. That is the
     same mistake one step further on: a 404 there reports a fact about the book
     from an app that asked nobody.
+
+    **Here rather than in `catalogue_access`, and the split is the outcome
+    set.** Three of these four are about what a catalogue answered, which is
+    this handler's business. Only `NO_SOURCES` is about whether this Library may
+    ask, so only that arm defers, and it defers to the sentence rather than
+    re-deciding the status.
     """
     if result.outcome is metadata.Outcome.RATE_LIMITED:
-        return {
-            "status_code": status.HTTP_503_SERVICE_UNAVAILABLE,
-            "detail": (
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
                 "The book catalogues are rate limiting us right now. Wait a minute "
                 "and scan again, or add the book by hand."
             ),
-        }
+        )
     if result.outcome is metadata.Outcome.UNAVAILABLE:
-        return {
-            "status_code": status.HTTP_503_SERVICE_UNAVAILABLE,
-            "detail": (
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
                 "Could not reach the book catalogues. Check the connection, or add "
                 "the book by hand."
             ),
-        }
+        )
     if result.outcome is metadata.Outcome.NO_SOURCES:
-        return _no_sources()
-    return {
-        "status_code": status.HTTP_404_NOT_FOUND,
-        "detail": "No catalogue has a record for this ISBN.",
-    }
-
-
-def _no_sources(what: str = "look up an ISBN") -> dict[str, Any]:
-    """Nothing was asked, because nothing capable is switched on.
-
-    **409 rather than 404**, and it is the one refusal here that is about this
-    library rather than about the book: nothing is wrong with the ISBN or the
-    query, and a 404 would be the app reporting a fact it never checked. The
-    sentence names the screen that fixes it, because the library did this to
-    itself and can undo it in one click.
-
-    Shared by three routes rather than written three times. The lookup path
-    reaches it through `_lookup_failure`, which has a `Lookup` to read the
-    outcome off; the two search paths have no `Lookup` and decide on the plan
-    before they call out, so they call this directly.
-
-    **`what` exists because the shared sentence was true on one of the three.**
-    It read "can look up an ISBN" and was raised from two title searches, which
-    is reachable with no slow catalogue involved: switch on the Czech National
-    Library alone, which answers an ISBN and answers no title search, and a
-    title search refuses by naming the one path that still works. The default is
-    the ISBN wording so the lookup path is unchanged.
-    """
-    return {
-        "status_code": status.HTTP_409_CONFLICT,
-        "detail": (
-            f"No catalogue is switched on that can {what}. Turn one "
-            "back on under Settings, Catalogue sources."
-        ),
-    }
+        return catalogue_access.nothing_answers_an_isbn()
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="No catalogue has a record for this ISBN.",
+    )
 
 
 @router.get("/search", response_model=BookSearchOut)
@@ -645,26 +624,12 @@ async def search_books(
     on the response say what actually happened, so a client never has to infer
     it from what it sent.
     """
-    metadata_limiter.check(current_user.username)
-    access = settings_store.library_access(db)
-    # A library that has switched every catalogue off is told so, rather than
-    # handed an empty result page that reads as "no such book". Same refusal a
-    # lookup gets, decided here because a search has no `Lookup` to carry it.
-    #
-    # **Keyed on the harder roster, not the default one**, and the difference is
-    # a library whose every enabled search catalogue is a slow one. Nothing is
-    # switched off there, so "turn one back on" would name the wrong cause; what
-    # that library gets is an empty page whose `unasked` lists what a second,
-    # longer search would reach.
-    if not access.plan.searched_harder:
-        raise HTTPException(**_no_sources("answer a title search"))
-
     # `lang` is the reader's own language, so a German library searching a
     # German title gets the German printing first. It breaks ties only: an
     # English title still returns the English book.
-    found = await metadata.title_search(
-        q, limit=limit, prefer_language=lang, access=access, harder=harder
-    )
+    found = await catalogue_access.Enquiry.for_a_member_request(
+        db, member=current_user.username
+    ).title_search(q, limit=limit, prefer_language=lang, harder=harder)
 
     # Both read off what the fan out did rather than off `harder`, which is only
     # what the reader wanted: a harder search runs the ordinary one when the two
@@ -2476,12 +2441,13 @@ def _one_per_copy_group(books: list[Book]) -> list[Book]:
 def _duplicate_key(book: Book) -> str:
     """Normalise a book to something two editions of it will share.
 
-    `importing.identity_key` is the implementation, and it is there rather than
-    here because the MARC importer matches on the same key: a title collision
-    costs a reading status on the wrong edition here and merges two different
-    books there, so one notion of "the same book" has to serve both.
+    `identity.work_key` is the implementation, and it is there rather than here
+    because the MARC importer matches on the same predicate: a wrong answer
+    costs a reading status on the wrong edition at the loosest site and merges
+    two different books at this one, so which sites share a predicate is that
+    module's subject rather than this route's.
     """
-    return identity_key(book.title, book.author)
+    return identity.work_key(book.title, book.author)
 
 
 @router.post("/merge", response_model=BookOut)
@@ -2821,27 +2787,6 @@ def _resolvable_volume_id(book: Book) -> str | None:
     return None
 
 
-def _google_books_in_force(db: Session) -> metadata.Access:
-    """The same value as `settings_store.library_access`, minus the keychain.
-
-    **The one handler that does not call that resolver, because its only
-    outbound door is `metadata.lookup_volume`**, which sends no login: Google
-    Books' secret is the key in the query string. Resolving the logins here
-    would open the keychain once per request for a credential this path cannot
-    send, and hand the door a mapping it drops without a word.
-
-    **The plan is still resolved, and it is a different gate from the key.**
-    `settings_store.ready_sources` puts Google Books in the plan only when its
-    section is on and a key is in force, and `catalogue_sources` then intersects
-    that with the household's provider list. So the plan answers "may this
-    library ask Google at all" and the key answers "with what".
-    """
-    return metadata.Access(
-        plan=settings_store.catalogue_sources(db),
-        api_key=settings_store.google_books_api_key(db),
-    )
-
-
 @router.post("/identifiers/backfill", response_model=IdentifierBackfillOut)
 async def backfill_from_identifiers(
     db: DbSession,
@@ -2884,26 +2829,18 @@ async def backfill_from_identifiers(
     operator action work.
 
     **Refuses with 409 when this library does not ask Google Books**, rather
-    than examining nothing and reporting a clean run. A source with no usable
-    key must say so: the cause is a switch and a key in Settings, and a zero
-    would send somebody hunting through their library instead.
+    than examining nothing and reporting a clean run. The cause is a switch and
+    a key in Settings, and the reply names both.
 
     Batched and resumable. `next_after_id` carries on past what this run tried,
     and comes back as 0 at the end of the library so pressing again starts over
     and re-tries whatever has since become resolvable.
     """
-    identifier_backfill_limiter.check(current_user.username)
-
-    access = _google_books_in_force(db)
-    if CatalogueSource.GOOGLE_BOOKS not in access.plan.asked:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "This library does not ask Google Books, so a Google volume id "
-                "cannot be resolved. Switch Google Books on in Settings and add "
-                "an API key."
-            ),
-        )
+    # Charges the batch's own limiter and refuses unless Google Books is asked,
+    # both behind the constructor. Holding one of these means the answer was yes.
+    google = catalogue_access.GoogleVolumes.for_a_batch_backfill(
+        db, member=current_user.username
+    )
 
     # `Book.identifiers.any(...)` is a correlated EXISTS over `books` rather
     # than a second table in the FROM, which is what `Shelf.where` admits: a
@@ -2935,9 +2872,7 @@ async def backfill_from_identifiers(
 
     async def resolve(volume_id: str) -> metadata.Lookup:
         async with gate:
-            return await metadata.lookup_volume(
-                volume_id, access.api_key, plan=access.plan
-            )
+            return await google.volume(volume_id)
 
     # `return_exceptions` is not set, for `metadata.lookup`'s reason: every
     # source turns its own failures into an outcome, so an exception escaping
@@ -3856,13 +3791,16 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
     if not book.isbn:
         raise HTTPException(status_code=400, detail="Book has no ISBN, cannot refresh metadata")
 
-    metadata_limiter.check(current_user.username)
-    lookup_key = isbn_utils.parse(book.isbn) or book.isbn
-    result = await metadata.lookup(
-        lookup_key, access=settings_store.library_access(db)
+    # Below the refusal above, so a book with no ISBN costs no budget. The
+    # constructor is what charges, which is why it is a statement here rather
+    # than a dependency: a dependency runs before this handler's own 400.
+    enquiry = catalogue_access.Enquiry.for_a_member_request(
+        db, member=current_user.username
     )
+    lookup_key = isbn_utils.parse(book.isbn) or book.isbn
+    result = await enquiry.lookup(lookup_key)
     if not result.found:
-        raise HTTPException(**_lookup_failure(result))
+        raise _lookup_failure(result)
 
     assert result.record is not None  # noqa: S101  narrowing, not validation
     record = result.record
@@ -4443,17 +4381,17 @@ async def enrich_book(
     adds what is missing, it does not overrule what somebody typed.
     Classifications need a selected candidate through `enrich/apply`.
     """
-    metadata_limiter.check(current_user.username)
-    # Resolved once, because this handler reaches outward up to three times and
-    # the three must not be able to ask different sets of catalogues or send a
-    # different login. `metadata.Access` is frozen so that holds by type.
-    access = settings_store.library_access(db)
+    # One `Enquiry` for all three paths below, because they must not be able to
+    # ask different sets of catalogues or send a different login. It holds the
+    # access privately, so there is nothing here to rebuild between them.
+    enquiry = catalogue_access.Enquiry.for_a_member_request(
+        db, member=current_user.username
+    )
     # **Refused up front rather than per half.** Both halves are optional on
     # their own, so without this a library with nothing switched on got the
     # lookup's 409 and then the search's failure from one request. Asking
     # nothing is one answer, not two.
-    if not access.plan.asked:
-        raise HTTPException(**_no_sources())
+    enquiry.refuse_if_nothing_is_asked()
 
     # `as_match()` on both paths, and it carries no Classifications by
     # construction. That is ADR 0006 held by the type rather than by this
@@ -4462,7 +4400,7 @@ async def enrich_book(
     assertions: tuple[catalogue.AuthorityAssertion, ...] = ()
     recorded = RecordedAssertions(stored=[], refused=[])
     if book.isbn:
-        result = await metadata.lookup(book.isbn, access=access)
+        result = await enquiry.lookup(book.isbn)
         # `found`, like `lookup_isbn` and `refresh_metadata`, rather than a bare
         # test for the record. This is the third consumer of a `Lookup` and the
         # only one that writes to a Book without telling the Member why nothing
@@ -4494,9 +4432,7 @@ async def enrich_book(
         # every book of an imported library is matched by its title.
         volume_id = _resolvable_volume_id(book)
         if volume_id is not None:
-            volume = await metadata.lookup_volume(
-                volume_id, access.api_key, plan=access.plan
-            )
+            volume = await enquiry.volume(volume_id)
             if volume.found:
                 assert volume.record is not None  # noqa: S101  narrowing, not validation
                 # No `assertions`, unlike the ISBN branch above. `Record.
@@ -4509,7 +4445,7 @@ async def enrich_book(
         # No ISBN, no resolvable store identifier, or nobody carries this
         # edition under either.
         query = " ".join(part for part in (book.title, book.author) if part)
-        matches = await metadata.search(query, limit=1, access=access)
+        matches = await enquiry.search(query, limit=1)
         if matches:
             fields = matches[0].as_match()
 
@@ -4616,34 +4552,15 @@ async def enrichment_candidates(
     else, and is ranked so a German edition of a German book is not buried
     under whatever Google happened to return first.
     """
-    metadata_limiter.check(current_user.username)
     query = " ".join(part for part in (book.title, book.author) if part)
 
-    access = settings_store.library_access(db)
-    # **The same two corrections the title search route took, applied here
-    # because this route runs a title search too.** `metadata.candidates` calls
-    # `search` internally, so it reaches the catalogues by the query above and
-    # not by an ISBN.
-    #
-    # `what`, because the shared sentence defaults to the ISBN wording and this
-    # path cannot look one up: refusing a title search by naming the ISBN route
-    # is the defect that argument was added for, fixed at one of its two sites.
-    #
-    # `searched_harder`, because `plan.searched` narrowed when the slow sources
-    # became opt in. A library whose every enabled search catalogue is slow has
-    # switched nothing off, so "turn one back on" names the wrong cause. It gets
-    # an empty candidate list instead, which is what a search that asked nobody
-    # honestly is.
-    if not access.plan.searched_harder:
-        raise HTTPException(**_no_sources("answer a title search"))
-
-    matches = await metadata.candidates(
-        query,
-        isbn=book.isbn,
-        limit=5,
-        prefer_language=book.language,
-        access=access,
-    )
+    # `candidates` refuses on the search roster rather than the lookup one,
+    # because it runs a title search internally: it reaches the catalogues by the
+    # query above and not by this book's ISBN. Both the roster and the wording are
+    # the door's.
+    matches = await catalogue_access.Enquiry.for_a_member_request(
+        db, member=current_user.username
+    ).candidates(query, isbn=book.isbn, limit=5, prefer_language=book.language)
     return _match_rows(matches, all_tags=None)
 
 

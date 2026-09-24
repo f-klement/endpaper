@@ -68,7 +68,11 @@ function isSupported(value: string | null | undefined): value is Locale {
   // used to mean editing this line too, and forgetting it fails quietly: the
   // language would be translated and still never selected, because both the
   // stored choice and the browser's own language are read through here.
-  return value != null && value in CATALOGUES;
+  //
+  // `Object.hasOwn` rather than `in`, because `in` walks the prototype chain and
+  // both readers below take a string the viewer controls: a stored locale of
+  // `toString` passed as supported and then indexed the catalogue to a function.
+  return value != null && Object.hasOwn(CATALOGUES, value);
 }
 
 export function readStoredLocale(): Locale | null {

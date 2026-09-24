@@ -1,6 +1,7 @@
 import { TagCategory } from "../../api/generated/model";
 import { ErrorState, Spinner } from "../../components";
 import { tagName, useTranslation, type MessageKey } from "../../i18n";
+import { monthLabel } from "../../lib/date";
 import { TAG_CATEGORY_ORDER } from "../types";
 import StatSection from "./components/StatSection";
 import { useStats } from "./hooks";
@@ -19,16 +20,6 @@ const CATEGORY_HEADINGS: Record<TagCategory, MessageKey> = {
   [TagCategory.age]: "stats.byAge",
   [TagCategory.custom]: "stats.byCustomTag",
 };
-
-/** Turn a "YYYY-MM" bucket key into a localised "Mon YYYY" label. */
-export function formatMonth(yearMonth: string, locale?: string): string {
-  const [year, month] = yearMonth.split("-");
-  if (!year || !month) return "";
-  return new Date(Number(year), Number(month) - 1).toLocaleDateString(locale, {
-    year: "numeric",
-    month: "short",
-  });
-}
 
 export default function StatsPage() {
   const { t, locale } = useTranslation();
@@ -93,7 +84,7 @@ export default function StatsPage() {
       <StatSection
         title={t("stats.finishedByMonth")}
         rows={(stats.finished_by_month ?? []).map((row) => ({
-          label: formatMonth(row.month, locale),
+          label: monthLabel(row.month, locale),
           count: row.count,
         }))}
         // Books finished is the one chart worth being pleased about, so it is
@@ -111,7 +102,7 @@ export default function StatsPage() {
       <StatSection
         title={t("stats.pagesByMonth")}
         rows={(stats.pages_by_month ?? []).map((row) => ({
-          label: formatMonth(row.month, locale),
+          label: monthLabel(row.month, locale),
           count: row.count,
         }))}
         colorClass="bg-accent-400"
@@ -160,7 +151,7 @@ export default function StatsPage() {
       <StatSection
         title={t("stats.overTime")}
         rows={stats.by_month.map((row) => ({
-          label: formatMonth(row.month, locale),
+          label: monthLabel(row.month, locale),
           count: row.count,
         }))}
         colorClass="bg-accent-400"

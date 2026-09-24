@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 
 import type { LoanOut } from "../../api/generated/model";
 import { useTranslation } from "../../i18n";
+import { numericDate } from "../../lib/date";
 import { Button } from "../../components";
 import CoverImage from "./CoverImage";
 
@@ -138,12 +139,12 @@ export default function LoanRow({
                       : "loans.overdueByDaysSince",
                     {
                       days: daysOverdue,
-                      date: new Date(loan.due_at).toLocaleDateString(locale),
+                      date: numericDate(loan.due_at, locale),
                     },
                   )
                 : loan.due_at
                   ? t("loans.overdueSince", {
-                      date: new Date(loan.due_at).toLocaleDateString(locale),
+                      date: numericDate(loan.due_at, locale),
                     })
                   : t("loans.overdue")}
             </span>
@@ -151,7 +152,7 @@ export default function LoanRow({
           {!loan.is_overdue && loan.due_at && !loan.returned_at && (
             <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
               {t("loans.dueOn", {
-                date: new Date(loan.due_at).toLocaleDateString(locale),
+                date: numericDate(loan.due_at, locale),
               })}
             </p>
           )}
@@ -173,11 +174,11 @@ export default function LoanRow({
             </p>
           )}
           <p className="text-xs text-paper-600 dark:text-paper-400">
-            {new Date(loan.loaned_at).toLocaleDateString(locale)}
+            {numericDate(loan.loaned_at, locale)}
             {loan.returned_at && (
               <span className="ml-2 text-green-800 dark:text-green-400">
                 {t("loans.returnedOn", {
-                  date: new Date(loan.returned_at).toLocaleDateString(locale),
+                  date: numericDate(loan.returned_at, locale),
                 })}
               </span>
             )}

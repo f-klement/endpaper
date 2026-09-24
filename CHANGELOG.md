@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **A catalogue's own punctuation no longer creates a second copy of a book.** A reading
+  history import and an OPDS sync fall back to matching on the title when there is no ISBN,
+  and they matched it exactly as the feed spelled it, so `Ulysses :` and `[Hamlet]`, which are
+  how MARC 245 and a cataloguer write `Ulysses` and `Hamlet`, each arrived as a new book
+  beside the one already on the shelf. The marks a catalogue puts at the edge of a title are
+  now ignored there, along with case, accent composition and spacing. Punctuation **inside** a
+  title is not: `C++` and `C#` are different books, and so are `The Hobbit` and `Hobbit`, so a
+  leading article is still kept. Measured over eleven spellings of one book and six pairs of
+  genuinely different ones; the wider rules that were considered merged four and five of those
+  six.
+
+- **Whether this library may ask an outside catalogue is now one module rather than six hand
+  written decisions in the book routes.** A rate limit is charged by the same thing that
+  resolves the access, so a route cannot be added with one and not the other, and a request
+  refused locally no longer spends a member's catalogue allowance.
+
+- **A stored preference has one owner.** The five browser preferences, the library view, the
+  table's column set, the saved searches, which sections a reader folded away and the last
+  shelf used, each carried their own key, their own failure handling and their own rule that
+  absence means the default; none of them told a reader when it changed, so the library page
+  kept a counter to make its own next render re-read what it had just written. They are
+  declared through one door now, a write reaches every reader, and the counter is gone.
+
+- **A saved search is applied as the view it names.** Its stored filters are rebuilt field by
+  field rather than trusted, which fixes applying one throwing while the page was drawing when
+  a stored list filter was not a list, and means a search saved before a filter existed now
+  sets that filter to its default instead of leaving whatever the reader happened to have.
+
 - **A single interrupt to the mutation sweep did nothing, and the reason was that the signal
   had no handler to run.** An ignored SIGINT survives `exec` and CPython installs its own
   handler only over `SIG_DFL`, so a sweep launched from a parent that ignores SIGINT, which is
@@ -501,6 +529,66 @@
   witness that fails loudly when the class stops being reachable, and the example budget has
   a floor that is measured from inside a running test rather than read off a settings
   object: a profile quietly dropped to one example is a suite that passes and tests nothing.
+
+- **What makes two books the same book is one rule now, and it was four.** A title and an
+  author were folded into a comparison key in four places with four accidental differences, so
+  the same pair of books could be a duplicate in one part of the app and two books in another.
+  Four defects came out of that, all fixed once rather than four times. A title carrying the
+  punctuation a catalogue puts on it, `Ulysses :`, did not match the same title without it,
+  which is the ordinary shape of a MARC record rather than an odd one. An accent that arrived
+  decomposed was deleted rather than composed, so one spelling of `Les Misérables` keyed two
+  ways and one of them collided with a different spelling. The rule that drops a leading
+  article from a title was applied to the author as well, folding the surnames `Das Gupta` and
+  `Gupta` into one person. Punctuation inside a credit was deleted rather than spaced, so
+  `J.R.R. Tolkien` and `J. R. R. Tolkien` were two authors here while an author page has always
+  treated them as one. The importer that reads somebody's reading history still matches on the
+  title alone and still does not fold it, which is deliberate and now says so.
+
+- **An OPDS feed's authors are stored the way every other import stores them.** It was the one
+  path that left a name in catalogue order, so `Herbert, Frank` was filed under the surname
+  alone and shared an identity with `Herbert, James`.
+
+- **A reading status now reaches every screen that offers one, or fails to compile.** The
+  status names were a `Record` the type could check and the library filter strip and the book's
+  status picker each restated the same five as a list it could not, so a sixth status added to
+  the backend would have compiled clean and appeared in neither. Both are built from one
+  ordered list whose completeness the compiler enforces, and the picker keeps only its icons.
+  The order the two screens render is unchanged and is deliberately still written out: taking
+  it from the generated enum, which happens to agree today, would let a regeneration reorder
+  two screens with nothing to review. The same guard went onto the condition list, which had
+  none at all, so a condition added to the backend was unreachable in the copy editor with
+  nothing failing.
+
+- **The star rating moved into the book page, which is the only page that uses it, and house
+  rule four gained a test.** `src/components/` is now asserted to hold nothing that speaks one
+  page's vocabulary or reaches past the framework, a sibling, the translation door and the
+  transport.
+
+- **A date is spelled the same way on every screen, in the language the reader chose.** Ten
+  components each decided their own date format and six of those calls passed no language at
+  all, so the trash page, the admin's reset queue and the account security record rendered
+  dates and times in whatever language the browser guessed while every other screen used the
+  app's. On this machine that browser guess was a third format belonging to neither catalogue.
+  Every rendered date now comes from one module, in four formats that are unchanged from what
+  each screen already showed, and a house rule refuses a new one written anywhere else. Two
+  tests that looked at a time had built their expected string with the same unlocalised call
+  the screen made, so they agreed in every language and were why a green suite never saw this.
+
+- **A language this app does not speak can no longer be stored as the one it renders in.** The
+  test for whether a language is supported asked whether the catalogue had the name at all,
+  and that question walks the prototype chain, so a stored choice of `toString` passed as
+  supported and then indexed the catalogue to a function rather than to a message table. Both
+  readers take a string the viewer controls: the stored choice, and the browser's own language
+  list. It asks for an own property now, and the arm is parametrised over five names every
+  object answers to, because a fix special casing `toString` passes a test naming only
+  `toString`. Bounded and self inflicted, since the value comes from the viewer's own storage,
+  and pre-existing rather than introduced by the date work whose review seat found it.
+
+- **What the settings hooks hand their cards is now written down.** Eleven hooks across the
+  library and data settings routes returned an object whose shape was inferred, which is how
+  one of them reached twelve members without anybody remarking on it and how two of them kept
+  returning a file nobody read. Each now declares what it returns, and the two pairs that are
+  the same shape declare it once between them.
 
 ## v0.17.2
 

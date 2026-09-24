@@ -25,6 +25,45 @@ import { sortByName } from "../lib/nameOrder";
 import type { ThemePreference } from "../theme";
 
 /**
+ * The list back, refused at compile time when it leaves a member out.
+ *
+ * A `readonly Union[]` cannot see a missing member, which is the hole every
+ * `*_ORDER` list in this file sits in: a value in the enum and not in the order
+ * is one nobody can choose and nobody can filter by, with nothing red anywhere.
+ * The argument is intersected with an object type that exists only while
+ * something is missing, so an incomplete list fails to typecheck and the error
+ * names the value left out as the type of `missingFromThisOrder`.
+ *
+ * **A list this wraps carries no type annotation, and that is load bearing.**
+ * Writing `: readonly Union[]` on the constant, which is the house style of the
+ * lists below, throws the members away again: what the constant level witness
+ * in `tests/pages/types.test.ts` reads is `typeof` the list, so an annotation
+ * would leave it checking nothing. That witness refuses an annotated list by
+ * name rather than trusting this sentence, and it stands whether or not a call
+ * site still has the wrapper. The `@ts-expect-error` beside it pins this helper
+ * and never a call of it.
+ *
+ * Curried because one type argument cannot be given while the other is
+ * inferred: the union is named, the list is read. It does **not** refuse a
+ * duplicate, since a list naming a member twice still excludes nothing, so that
+ * property stays a test.
+ *
+ * `FORMAT_ORDER`, `LENDING_ORDER` and `MODE_ORDER` are not wrapped: each already
+ * has a set equality test, so wrapping them buys the error earlier and retires
+ * three tests, which is worth reviewing on its own rather than inside a status
+ * fix.
+ */
+export const everyOneOf =
+  <Union extends string>() =>
+  <const Order extends readonly Union[]>(
+    order: Order &
+      ([Exclude<Union, Order[number]>] extends [never]
+        ? unknown
+        : { missingFromThisOrder: Exclude<Union, Order[number]> }),
+  ): Order =>
+    order;
+
+/**
  * The order tag categories are presented in, everywhere.
  *
  * The library's own tags come last, after the curated three. Interleaving
@@ -63,6 +102,26 @@ export const STATUS_LABELS: Record<ReadStatus, MessageKey> = {
   [ReadStatus.read]: "status.read",
   [ReadStatus.did_not_finish]: "status.did_not_finish",
 };
+
+/**
+ * The order the statuses are offered in, everywhere they are offered.
+ *
+ * A reading lifecycle rather than an alphabet: not started, means to, in
+ * progress, finished, gave up. The library filter strip and a book's own status
+ * picker both render it, and each used to write it out again.
+ *
+ * A literal rather than `Object.values(ReadStatus)`, which cannot be incomplete
+ * and is still the wrong source: the generated enum happens to declare these
+ * five in this sequence today, so a regen after somebody reorders the backend
+ * enum would reorder the strip and the picker with nothing red anywhere.
+ */
+export const STATUS_ORDER = everyOneOf<ReadStatus>()([
+  ReadStatus.unread,
+  ReadStatus.want_to_read,
+  ReadStatus.reading,
+  ReadStatus.read,
+  ReadStatus.did_not_finish,
+]);
 
 /**
  * What each ownership is called. Same reason, same shape.
@@ -120,15 +179,23 @@ export const CONDITION_LABELS: Record<BookCondition, MessageKey> = {
   [BookCondition.ex_library]: "copy.condition.ex_library",
 };
 
-/** Best to worst, with the provenance category last: it is not a point on the
- * scale, so sorting it into the middle would imply it is one. */
-export const CONDITION_ORDER: readonly BookCondition[] = [
+/**
+ * Best to worst, with the provenance category last: it is not a point on the
+ * scale, so sorting it into the middle would imply it is one.
+ *
+ * Wrapped alongside `STATUS_ORDER` rather than left as it was, because it was
+ * the one list here with no guard of any kind: the copy editor's condition
+ * select is built from it and nothing else reads it, so a condition added to
+ * the backend enum was unreachable in the editor with no compile error and no
+ * red test. That is the same defect the two status tables had, one enum over.
+ */
+export const CONDITION_ORDER = everyOneOf<BookCondition>()([
   BookCondition.new,
   BookCondition.good,
   BookCondition.fair,
   BookCondition.poor,
   BookCondition.ex_library,
-];
+]);
 
 /**
  * What each answer to "would you lend this" is called.

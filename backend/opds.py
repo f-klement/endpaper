@@ -122,10 +122,12 @@ import httpx
 import fetch
 import isbn as isbn_module
 import metadata
+from bibliographic import flip_catalogue_name
 from catalogue import Record
 from credentials import Credential, origin_of
 from deadline import in_, left
 from decoders import Decoding, Reader
+from models import AUTHOR_LINE_MAX
 
 logger = logging.getLogger("endpaper.opds")
 
@@ -290,18 +292,39 @@ def _text(node: ElementTree.Element | None) -> str | None:
 def _authors(entry: ElementTree.Element) -> str | None:
     """Every credited author, joined the way this application stores a credit list.
 
-    **Joined with a comma, which is what `importing.identity_key` splits on and
-    what `Book.author` holds elsewhere.** Atom gives each author its own
-    `<author><name>` element, so the join happens here or it happens at three
-    call sites.
+    **Joined with a comma because that is what `books.author` is**, which
+    `authors.py` states in full and is the rule every writer of that column
+    follows. Atom gives each author its own `<author><name>` element, so the
+    join happens here or it happens at three call sites.
+
+    **Each name is flipped before the join, never after.** A feed is free to
+    serve `Herbert, Frank` in catalogue order, and `flip_catalogue_name` turns
+    exactly one comma around, so a single `<name>` is the only place it is
+    legal to apply: over a joined credit line it would mangle every two author
+    book, which is why `authors.py` forbids that. Without the flip this was the
+    one import path leaving a catalogue order name in the column, and a bare
+    surname is what the credit then folds to, so `Herbert, Frank` and
+    `Herbert, James` became one author.
 
     An `<author>` with no usable `<name>` is dropped rather than contributing an
     empty segment, because `", , Jane Doe"` is a credit list nobody wrote.
+    **The flipped value is what gets tested for emptiness, not the raw one**:
+    `flip_catalogue_name(",")` is the empty string, so a `<name>` of `","` is
+    blank only after the flip, and filtering before it would let that segment
+    through.
+
+    **Each name is capped before the flip, not only after.** `_text` reads a
+    feed and caps nothing, so one `<name>` can carry a whole page: measured, a
+    2 MiB name costs 0.760 s in the flip against 0.009 s to parse the page it
+    came in, on the event loop. `Record.__post_init__` bounds the joined line to
+    `AUTHOR_LINE_MAX` anyway, so slicing here changes no value a credit line
+    under that ceiling would have had, and removes the term entirely.
     """
     names = [
-        name
+        flipped
         for author in entry.findall(f"{ATOM}author")
-        if (name := _text(author.find(f"{ATOM}name")))
+        if (raw := _text(author.find(f"{ATOM}name")))
+        if (flipped := flip_catalogue_name(raw[:AUTHOR_LINE_MAX]))
     ]
     return ", ".join(names) or None
 

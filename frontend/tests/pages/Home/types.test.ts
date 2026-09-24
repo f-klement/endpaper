@@ -84,12 +84,33 @@ describe("the sort options", () => {
 });
 
 describe("option lists", () => {
-  it("offers every reading status, plus All", () => {
-    const values = STATUS_FILTERS.map((option) => option.value);
-    expect(values).toContain(null);
-    for (const status of Object.values(ReadStatus)) {
-      expect(values).toContain(status);
-    }
+  it("offers the shared status order, behind one pill that narrows nothing", () => {
+    // This was a containment check over `Object.values(ReadStatus)`, which the
+    // strip now satisfies by construction: it is built from `STATUS_ORDER` and
+    // `STATUS_LABELS` rather than written out. Order and names are what the
+    // derivation could still lose, so both are asserted, and the five message
+    // keys are written out rather than read back from `STATUS_LABELS`:
+    // recomputing them from the table the strip is built from would restate the
+    // derivation and could not fail. `All` leads rather than sitting among
+    // them, being the absence of a filter and not a sixth status.
+    expect(STATUS_FILTERS).toEqual([
+      { label: "status.all", value: null },
+      { label: "status.unread", value: ReadStatus.unread },
+      { label: "status.want_to_read", value: ReadStatus.want_to_read },
+      { label: "status.reading", value: ReadStatus.reading },
+      { label: "status.read", value: ReadStatus.read },
+      { label: "status.did_not_finish", value: ReadStatus.did_not_finish },
+    ]);
+  });
+
+  it("gives every pill a label of its own", () => {
+    // `BookFilters` keys the pills on the label rather than on the value, so
+    // two statuses sharing a message key is a duplicate React key and a pill
+    // that presses the wrong one. Written out by hand the five were distinct by
+    // eye; read from a shared table it is a property somebody has to assert.
+    const labels = STATUS_FILTERS.map((option) => option.label);
+
+    expect(new Set(labels).size).toBe(labels.length);
   });
 
   it("offers only sorts the API accepts", () => {

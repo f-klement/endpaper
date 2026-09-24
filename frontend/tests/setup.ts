@@ -3,6 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, vi } from "vitest";
 
+import { forgetPreferences } from "../src/lib/preference";
 import { resetZxingDouble } from "./doubles/zxing";
 import { hadDecompressionStream } from "./lib/withoutDecompression";
 
@@ -211,6 +212,15 @@ beforeEach(() => {
   // its spies as part of installing it: a file that never opens a camera should
   // not have one.
   resetZxingDouble();
+  // **Centrally for the same reason.** `lib/preference.ts` holds its decoded
+  // snapshots and its listeners at module scope, because a snapshot has to be
+  // the same value until its stored string changes and a listener set has to
+  // outlive one component. The suite runs with `isolate: false`, so those live
+  // as long as the worker: a file that cleared storage and not this would be
+  // handed the previous file's snapshot for a key it believes is empty, and a
+  // listener left by an unmounted hook would be called by the next file's write.
+  // Clearing the storage alone is what makes that invisible rather than loud.
+  forgetPreferences();
   // Same guard as the matchMedia shim above, and for the same reason: this hook
   // runs for the `@vitest-environment node` files too, which have neither a
   // localStorage nor a document. The network stub below is installed either way,

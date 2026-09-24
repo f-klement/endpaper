@@ -10,23 +10,28 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
+  BookCondition,
   BookFormat,
   LendingWillingness,
   Locale,
+  ReadStatus,
   TagCategory,
 } from "../../src/api/generated/model";
 import {
+  CONDITION_ORDER,
   FORMAT_LABELS,
   FORMAT_ORDER,
   LENDING_LABELS,
   LENDING_ORDER,
   MODE_LABELS,
   MODE_ORDER,
+  STATUS_ORDER,
   TAG_CATEGORY_LABELS,
   TAG_CATEGORY_ORDER,
   TAG_CHIP_CLASSES,
   TAG_CHIP_SELECTED,
   TAG_PILL_CLASSES,
+  everyOneOf,
   groupTagsByCategory,
 } from "../../src/pages/types";
 import { makeTag, makeTagSet, resetIds } from "../factories";
@@ -77,6 +82,120 @@ describe("FORMAT_ORDER", () => {
     for (const format of FORMAT_ORDER) {
       expect(FORMAT_LABELS[format]).toBeTruthy();
     }
+  });
+});
+
+describe("the reading statuses", () => {
+  it("refuses a list that leaves one of them out", () => {
+    // Coverage is the compiler's job here rather than a runtime assertion's, so
+    // what has to be pinned is that the compiler still refuses.
+    // `@ts-expect-error` is itself an error when the line under it typechecks,
+    // and `tsconfig.json` includes `tests`, so a helper that stops refusing
+    // turns this directive unused and the typecheck red.
+    //
+    // **This pins the helper and not any call of it.** Deleting the wrapper
+    // from `STATUS_ORDER` leaves the helper here, still called, still
+    // refusing; the test below is the one that would notice. The first version
+    // of this comment claimed otherwise, which is the rung where a comment
+    // asserts a guard the code does not have.
+    // @ts-expect-error did_not_finish is missing from this list
+    const incomplete = everyOneOf<ReadStatus>()([
+      ReadStatus.unread,
+      ReadStatus.want_to_read,
+      ReadStatus.reading,
+      ReadStatus.read,
+    ]);
+
+    // The complete call carries no directive, so a signature that made **every**
+    // call an error would go red here rather than passing as a suppressed one:
+    // `@ts-expect-error` hides whatever error is on its line, not the error
+    // that was meant. Written out rather than spread from `STATUS_ORDER`, which
+    // would make this arm inherit whatever that constant's type had become.
+    const complete = everyOneOf<ReadStatus>()([
+      ReadStatus.unread,
+      ReadStatus.want_to_read,
+      ReadStatus.reading,
+      ReadStatus.read,
+      ReadStatus.did_not_finish,
+    ]);
+
+    // The refusal is entirely at compile time. At runtime both calls are the
+    // identity, which is what makes the check free at every call site.
+    expect(incomplete).toHaveLength(4);
+    expect(complete).toHaveLength(5);
+  });
+
+  it("keeps the order in a shape this check can still read", () => {
+    // **The guard on the constant rather than on the helper.** Two ways to
+    // lose the refusal silently, both of which leave every other test in this
+    // file passing: unwrap `STATUS_ORDER` back to a plain array literal, or
+    // widen its type. Widening is the quiet one, because it looks like
+    // consistency with the older lists in that file and it throws away the
+    // members the first arm reads.
+    //
+    // The probe is tuple-ness rather than any one spelling of the widening.
+    // `: readonly ReadStatus[]`, `: ReadStatus[]` and an `as ReadStatus[]`
+    // inside the call all erase the same fact, and a probe naming one of them
+    // is a guard enumerating something open.
+    type Uncovered = Exclude<ReadStatus, (typeof STATUS_ORDER)[number]>;
+    type Widened = typeof STATUS_ORDER extends readonly [
+      ReadStatus,
+      ...ReadStatus[],
+    ]
+      ? false
+      : true;
+
+    const offersEveryStatus: Widened extends true
+      ? "STATUS_ORDER has been widened, which erases what this test reads"
+      : [Uncovered] extends [never]
+        ? true
+        : Uncovered = true;
+
+    expect(offersEveryStatus).toBe(true);
+  });
+
+  it("offers each status once", () => {
+    // The type cannot see a duplicate: a list naming one status twice still
+    // excludes nothing. Two identical pills in the filter strip is what that
+    // would look like.
+    expect(STATUS_ORDER).toHaveLength(new Set(STATUS_ORDER).size);
+  });
+
+  it("offers them in the order somebody reads a book", () => {
+    // Not the alphabet and not the generated enum's declaration order, which
+    // agrees with this today and is not a decision anybody made. Asserted as
+    // the whole sequence, the way `TAG_CATEGORY_ORDER` is: the filter strip
+    // and the status picker both render this, so a reflow here is a visible
+    // change to two screens and should have to be argued for.
+    expect([...STATUS_ORDER]).toEqual([
+      ReadStatus.unread,
+      ReadStatus.want_to_read,
+      ReadStatus.reading,
+      ReadStatus.read,
+      ReadStatus.did_not_finish,
+    ]);
+  });
+});
+
+describe("the copy conditions", () => {
+  // `CONDITION_ORDER` was the one list in this file with no guard of any kind,
+  // and the wrapper it now carries closes only what the type can see. These are
+  // the two properties it cannot: the compiler has no opinion on a duplicate,
+  // and none at all on a sequence its docstring calls best to worst.
+  it("offers each condition once", () => {
+    expect(CONDITION_ORDER).toHaveLength(new Set(CONDITION_ORDER).size);
+  });
+
+  it("runs best to worst, with the provenance category last", () => {
+    // `ex_library` is not a point on the scale, so sorting it into the middle
+    // would imply it is one.
+    expect([...CONDITION_ORDER]).toEqual([
+      BookCondition.new,
+      BookCondition.good,
+      BookCondition.fair,
+      BookCondition.poor,
+      BookCondition.ex_library,
+    ]);
   });
 });
 

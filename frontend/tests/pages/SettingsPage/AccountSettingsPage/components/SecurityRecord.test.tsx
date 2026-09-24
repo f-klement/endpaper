@@ -9,17 +9,24 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { VerificationProvenance } from "../../../../../src/api/generated/model";
+import {
+  Locale,
+  VerificationProvenance,
+} from "../../../../../src/api/generated/model";
 import SecurityRecord from "../../../../../src/pages/SettingsPage/AccountSettingsPage/components/SecurityRecord";
 import { renderLocalised } from "../../../../utils";
 
-function draw(security: Record<string, unknown> | undefined) {
+function draw(
+  security: Record<string, unknown> | undefined,
+  locale: Locale = Locale.en,
+) {
   return renderLocalised(
     <SecurityRecord
       security={security as never}
       isLoading={false}
       error={null}
     />,
+    { locale },
   );
 }
 
@@ -34,6 +41,29 @@ describe("SecurityRecord", () => {
     });
 
     expect(screen.getByText(/approved by sam/i)).toBeInTheDocument();
+  });
+
+  it("dates the reset in the app's locale, not the browser's", () => {
+    // **The arm the defect survived.** Both dates on this record were rendered
+    // with a bare `toLocaleDateString()`, so they took the host's locale while
+    // the sentence around them took the app's. The two locales spell this date
+    // differently, which is what makes the pair an observation.
+    const record = {
+      password_reset_at: "2026-08-19T10:00:00",
+      password_reset_approved_by: "sam",
+      verified_at: null,
+      verification_source: null,
+      verified_by: null,
+    };
+
+    // Unmounted between the two, because cleanup runs per test rather than per
+    // render and two mounted trees would put both spellings in one document.
+    const german = draw(record, Locale.de);
+    expect(screen.getByText(/19\.8\.2026/)).toBeInTheDocument();
+    german.unmount();
+
+    draw(record, Locale.en);
+    expect(screen.getByText(/8\/19\/2026/)).toBeInTheDocument();
   });
 
   it("says so plainly when nothing has happened", () => {

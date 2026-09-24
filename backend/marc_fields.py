@@ -162,8 +162,9 @@ def _marc_text(raw: str | None) -> str:
       Dublin Core composed, so `Müller` arrives as `u` plus a combining
       diaeresis: 83 of the same 85 records are affected. It renders identically
       and compares unequal, which is enough to store two spellings of one
-      author and to defeat `_duplicate_key`, which casefolds and collapses
-      whitespace and does not normalise. Not enough to duplicate a
+      author. `identity.fold_title` composes to NFC before it folds, so this is
+      what keeps the second spelling out of the column rather than the only
+      thing standing between it and a duplicate Book. Not enough to duplicate a
       classification: `uq_classifications_book_scheme_number` is on `number`,
       which is digits in DDC and digits and hyphens in GND.
     """

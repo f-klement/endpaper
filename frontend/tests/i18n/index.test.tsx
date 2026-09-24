@@ -93,6 +93,27 @@ describe("readStoredLocale", () => {
   it("returns null when nothing is stored", () => {
     expect(readStoredLocale()).toBeNull();
   });
+
+  it.each([
+    "toString",
+    "constructor",
+    "valueOf",
+    "hasOwnProperty",
+    "__proto__",
+  ])("ignores %s, which every object answers to", (inherited) => {
+    // **The support test reads a value the viewer controls**, from storage
+    // here and from the browser's own language list in the sibling reader, so
+    // a membership test that walks the prototype chain accepts any name
+    // `Object.prototype` publishes. `toString` passed as a supported locale
+    // and then indexed the catalogue to a function, which is neither a
+    // language nor a `Messages`.
+    //
+    // Parametrised over the inherited names rather than asserting one, because
+    // a fix that special cases `toString` passes a test naming only
+    // `toString`.
+    localStorage.setItem("locale", inherited);
+    expect(readStoredLocale()).toBeNull();
+  });
 });
 
 describe("resolveLocale", () => {

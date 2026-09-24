@@ -835,6 +835,16 @@ export function useBookSections(
 ): UseBookSectionsResult {
   // Read once, on mount: storage is a starting point, and re-reading it on
   // every render would fight the state this component already holds.
+  //
+  // **This is the one place a second copy of a stored value is correct, and it
+  // was deliberately left alone when the preference door was written.** Every
+  // other reader of a preference subscribes to storage and holds nothing, which
+  // is what removed a counter from the library page. Here the copy is what
+  // delivers a promise `lib/sectionState.ts` makes: when storage refuses the
+  // write, the section still folds for this visit, which is the part the reader
+  // can see. Subscribing instead would mean a tap on a section header doing
+  // nothing at all in a private window, and unlike the view's three labelled
+  // buttons a header that does not fold reads as broken rather than as refused.
   const [choices, setChoices] = useState<SectionChoices>(() =>
     readSectionChoices(STORE),
   );

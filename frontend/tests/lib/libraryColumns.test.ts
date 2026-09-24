@@ -16,11 +16,9 @@ import {
   COLUMN_KEYS,
   COLUMN_SPECS,
   DEFAULT_COLUMNS,
-  clearColumns,
   isDefaultColumns,
-  readColumns,
+  libraryColumnsPreference,
   toggledColumns,
-  writeColumns,
   type ColumnKey,
 } from "../../src/lib/libraryColumns";
 
@@ -118,99 +116,180 @@ describe("the two column sets", () => {
   });
 });
 
-describe("readColumns and writeColumns", () => {
+describe("reading and writing a column set", () => {
   it("starts each mode on its own default", () => {
-    expect(readColumns("household")).toEqual([...DEFAULT_COLUMNS.household]);
-    expect(readColumns("cataloguer")).toEqual([...DEFAULT_COLUMNS.cataloguer]);
+    expect(libraryColumnsPreference.read("household")).toEqual([
+      ...DEFAULT_COLUMNS.household,
+    ]);
+    expect(libraryColumnsPreference.read("cataloguer")).toEqual([
+      ...DEFAULT_COLUMNS.cataloguer,
+    ]);
   });
 
   it("remembers a choice", () => {
-    writeColumns("household", ["title", "author", "location"]);
-    expect(readColumns("household")).toEqual(["title", "author", "location"]);
+    libraryColumnsPreference.write("household", [
+      "title",
+      "author",
+      "location",
+    ]);
+    expect(libraryColumnsPreference.read("household")).toEqual([
+      "title",
+      "author",
+      "location",
+    ]);
   });
 
   it("keeps a household's choice through a switch in both directions", () => {
     // The ticket's third testing decision, and the reason the two modes have
     // two storage keys rather than one record holding both.
-    writeColumns("household", ["title", "author", "location"]);
+    libraryColumnsPreference.write("household", [
+      "title",
+      "author",
+      "location",
+    ]);
 
     // Into library mode: the cataloguer starts on its own default and edits it.
-    expect(readColumns("cataloguer")).toEqual([...DEFAULT_COLUMNS.cataloguer]);
-    writeColumns("cataloguer", ["title", "callNumber"]);
+    expect(libraryColumnsPreference.read("cataloguer")).toEqual([
+      ...DEFAULT_COLUMNS.cataloguer,
+    ]);
+    libraryColumnsPreference.write("cataloguer", ["title", "callNumber"]);
 
     // And back out again.
-    expect(readColumns("household")).toEqual(["title", "author", "location"]);
+    expect(libraryColumnsPreference.read("household")).toEqual([
+      "title",
+      "author",
+      "location",
+    ]);
     // And back in, to prove the first read did not disturb it either.
-    expect(readColumns("cataloguer")).toEqual(["title", "callNumber"]);
+    expect(libraryColumnsPreference.read("cataloguer")).toEqual([
+      "title",
+      "callNumber",
+    ]);
   });
 
   it("drops a stored column the mode does not offer", () => {
     // Not reachable through the picker. Reachable by hand, by a shared
     // browser profile, or by a version that offered more.
-    writeColumns("household", ["title", "callNumber", "author"] as ColumnKey[]);
-    expect(readColumns("household")).toEqual(["title", "author"]);
+    libraryColumnsPreference.write("household", [
+      "title",
+      "callNumber",
+      "author",
+    ] as ColumnKey[]);
+    expect(libraryColumnsPreference.read("household")).toEqual([
+      "title",
+      "author",
+    ]);
   });
 
   it("draws the title even when the stored set leaves it out", () => {
-    writeColumns("household", ["author", "publisher"]);
-    expect(readColumns("household")).toEqual(["title", "author", "publisher"]);
+    libraryColumnsPreference.write("household", ["author", "publisher"]);
+    expect(libraryColumnsPreference.read("household")).toEqual([
+      "title",
+      "author",
+      "publisher",
+    ]);
   });
 
   it("puts the columns back in the table's order", () => {
-    writeColumns("household", ["publisher", "author", "title"]);
-    expect(readColumns("household")).toEqual(["title", "author", "publisher"]);
+    libraryColumnsPreference.write("household", [
+      "publisher",
+      "author",
+      "title",
+    ]);
+    expect(libraryColumnsPreference.read("household")).toEqual([
+      "title",
+      "author",
+      "publisher",
+    ]);
   });
 
   it("falls back to the default when the stored set names nothing it knows", () => {
     // A set written by a version whose columns were all called something else.
     // The forced title would otherwise leave a one column table.
     localStorage.setItem("libraryColumns.household", "spine,dustJacket");
-    expect(readColumns("household")).toEqual([...DEFAULT_COLUMNS.household]);
+    expect(libraryColumnsPreference.read("household")).toEqual([
+      ...DEFAULT_COLUMNS.household,
+    ]);
   });
 
   it("falls back to the default when storage refuses to answer", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("denied");
     });
-    expect(readColumns("cataloguer")).toEqual([...DEFAULT_COLUMNS.cataloguer]);
+    expect(libraryColumnsPreference.read("cataloguer")).toEqual([
+      ...DEFAULT_COLUMNS.cataloguer,
+    ]);
   });
 
   it("says nothing when storage refuses to keep a choice", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("quota");
     });
-    expect(() => writeColumns("household", ["title"])).not.toThrow();
+    expect(() =>
+      libraryColumnsPreference.write("household", ["title"]),
+    ).not.toThrow();
   });
 
-  it("hands back a copy, not the default set itself", () => {
-    // The defaults are exported and shared. A caller sorting or splicing what
-    // it was handed would edit them for every later reader.
-    const first = readColumns("household");
-    first.pop();
-    expect(readColumns("household")).toEqual([...DEFAULT_COLUMNS.household]);
+  it("never hands back the exported default itself", () => {
+    // The defaults are exported and shared, so handing one out by reference
+    // would let a caller edit them for every later reader.
+    expect(libraryColumnsPreference.read("household")).not.toBe(
+      DEFAULT_COLUMNS.household,
+    );
+  });
+
+  it("hands back the same set until the stored string changes", () => {
+    // **This replaced a rule that handed back a fresh copy on every call**, and
+    // it is stronger rather than weaker. A copy made a mutation harmless; it
+    // could not make a read stable, and a read building a new array every call
+    // redraws for ever once a component subscribes to it.
+    const first = libraryColumnsPreference.read("household");
+    expect(libraryColumnsPreference.read("household")).toBe(first);
+
+    libraryColumnsPreference.write("household", ["title", "author"]);
+    expect(libraryColumnsPreference.read("household")).not.toBe(first);
+  });
+
+  it("refuses a mutation rather than absorbing it", () => {
+    // The other half of what the copy used to buy. A shared value cannot be
+    // edited by one reader, so the edit is refused where it is made instead of
+    // surfacing later as somebody else's wrong table. The cast is what a caller
+    // would have to write to get here: the type already refuses it.
+    const columns = libraryColumnsPreference.read("household") as ColumnKey[];
+    expect(() => columns.pop()).toThrow();
+    expect(libraryColumnsPreference.read("household")).toEqual([
+      ...DEFAULT_COLUMNS.household,
+    ]);
   });
 });
 
-describe("clearColumns", () => {
+describe("going back to the default", () => {
   it("goes back to the default rather than storing a copy of it", () => {
-    writeColumns("cataloguer", ["title", "callNumber"]);
-    clearColumns("cataloguer");
+    libraryColumnsPreference.write("cataloguer", ["title", "callNumber"]);
+    libraryColumnsPreference.write("cataloguer", DEFAULT_COLUMNS.cataloguer);
 
-    expect(readColumns("cataloguer")).toEqual([...DEFAULT_COLUMNS.cataloguer]);
+    expect(libraryColumnsPreference.read("cataloguer")).toEqual([
+      ...DEFAULT_COLUMNS.cataloguer,
+    ]);
     expect(localStorage.getItem("libraryColumns.cataloguer")).toBeNull();
   });
 
   it("leaves the other mode alone", () => {
-    writeColumns("household", ["title", "author"]);
-    clearColumns("cataloguer");
-    expect(readColumns("household")).toEqual(["title", "author"]);
+    libraryColumnsPreference.write("household", ["title", "author"]);
+    libraryColumnsPreference.write("cataloguer", DEFAULT_COLUMNS.cataloguer);
+    expect(libraryColumnsPreference.read("household")).toEqual([
+      "title",
+      "author",
+    ]);
   });
 
   it("says nothing when storage refuses", () => {
     vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
       throw new Error("denied");
     });
-    expect(() => clearColumns("household")).not.toThrow();
+    expect(() =>
+      libraryColumnsPreference.write("household", DEFAULT_COLUMNS.household),
+    ).not.toThrow();
   });
 });
 
@@ -272,7 +351,7 @@ describe("the specs are the only place a mode is named", () => {
     // hands a cataloguer a table with no link to any book.
     for (const mode of CATALOGUE_MODES) {
       expect(AVAILABLE_COLUMNS[mode]).toContain(ALWAYS_SHOWN);
-      expect(readColumns(mode)).toContain(ALWAYS_SHOWN);
+      expect(libraryColumnsPreference.read(mode)).toContain(ALWAYS_SHOWN);
     }
     // The cause as well as the symptom, so a reader knows where to fix it.
     expect([...COLUMN_SPECS[ALWAYS_SHOWN].offeredTo]).toEqual([
@@ -302,8 +381,8 @@ describe("a title-only table", () => {
     // `readColumns` used to decide on its own result, which always carries the
     // forced title, so it could not tell this from a value naming nothing it
     // knows. It decides on the stored tokens.
-    writeColumns("household", ["title"]);
-    expect(readColumns("household")).toEqual(["title"]);
+    libraryColumnsPreference.write("household", ["title"]);
+    expect(libraryColumnsPreference.read("household")).toEqual(["title"]);
   });
 });
 
@@ -313,15 +392,17 @@ describe("storage never holds a copy of the default", () => {
     // here. Storing a frozen copy would stop the browser following the default
     // if a later version changed it, and would leave the reset control hidden
     // because there is nothing to reset from.
-    writeColumns(
+    libraryColumnsPreference.write(
       "household",
       toggledColumns("household", DEFAULT_COLUMNS.household, "price"),
     );
     expect(localStorage.getItem("libraryColumns.household")).not.toBeNull();
 
-    writeColumns("household", [...DEFAULT_COLUMNS.household]);
+    libraryColumnsPreference.write("household", [...DEFAULT_COLUMNS.household]);
     expect(localStorage.getItem("libraryColumns.household")).toBeNull();
-    expect(readColumns("household")).toEqual([...DEFAULT_COLUMNS.household]);
+    expect(libraryColumnsPreference.read("household")).toEqual([
+      ...DEFAULT_COLUMNS.household,
+    ]);
   });
 
   it("clears the key for a default set given in any order", () => {
@@ -331,14 +412,17 @@ describe("storage never holds a copy of the default", () => {
     // normalised set on screen reports itself as the default. `writeColumns`
     // normalises its input first, so the guard holds for any caller rather
     // than only for the one that happens to pass a canonical set.
-    writeColumns("household", [...DEFAULT_COLUMNS.household].reverse());
+    libraryColumnsPreference.write(
+      "household",
+      [...DEFAULT_COLUMNS.household].reverse(),
+    );
     expect(localStorage.getItem("libraryColumns.household")).toBeNull();
   });
 
   it("stores a set the mode does not fully offer in its normalised form", () => {
     // The same slip in its other shape: an extra key made the join differ from
     // the default's, so the guard read false.
-    writeColumns("household", [
+    libraryColumnsPreference.write("household", [
       ...DEFAULT_COLUMNS.household,
       "callNumber",
     ] as ColumnKey[]);

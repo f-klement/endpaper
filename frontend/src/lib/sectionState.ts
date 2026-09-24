@@ -37,11 +37,28 @@
  * delete that test with it.
  */
 
+import { declareScopedPreference } from "./preference";
+
 /** Bumped when the stored shape changes. Anything else is dropped, not read. */
 const VERSION = 1;
 
 /** One localStorage key per store. See the note above about `about`. */
 export type SectionStore = "bookDetailSections" | "settingsSections";
+
+/**
+ * The key each store is kept under, which is the store's own name.
+ *
+ * **Spelled out rather than used as the key directly**, because the door takes
+ * declared literals only: a preference built from a function that turns a scope
+ * into a key would make producing any name in this origin an exported
+ * capability, and the names beside these hold an identity and a token. Writing
+ * the pair also means renaming the union cannot silently rename a key that
+ * readers' browsers are already holding.
+ */
+const STORAGE_KEYS: Record<SectionStore, string> = {
+  bookDetailSections: "bookDetailSections",
+  settingsSections: "settingsSections",
+};
 
 /** What a reader said about one section. Absence is the third state. */
 export type SectionChoice = "open" | "closed";
@@ -72,21 +89,47 @@ function isChoice(value: unknown): value is SectionChoice {
  * what the reader last said. Only values that are not "open" or "closed" are
  * dropped, so a corrupt entry cannot make a section open itself.
  */
-export function readSectionChoices(store: SectionStore): SectionChoices {
-  try {
-    const raw = localStorage.getItem(store);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Stored;
-    if (parsed.version !== VERSION || typeof parsed.sections !== "object")
-      return {};
+export const sectionChoicesPreference = declareScopedPreference<
+  SectionStore,
+  SectionChoices
+>(STORAGE_KEYS, "bookDetailSections", {
+  decode: (raw) => {
+    const parsed = JSON.parse(raw) as Partial<Stored>;
+    // **The container's kind, not just `typeof`.** An array and `null` are both
+    // objects, and this used to admit them and rely on a `??` further down to
+    // make them harmless. Asking properly means the next edit cannot remove
+    // that guard without noticing it was the only one.
+    if (
+      parsed.version !== VERSION ||
+      parsed.sections === null ||
+      typeof parsed.sections !== "object" ||
+      Array.isArray(parsed.sections)
+    )
+      return undefined;
+    // **Rebuilt entry by entry, never cast.** A payload naming an inherited
+    // member would otherwise make a lookup answer with a function, which is
+    // neither undefined nor "open", so `resolveOpen` would read it as closed and
+    // the three states would quietly become two for that id.
     const choices: SectionChoices = {};
-    for (const [id, value] of Object.entries(parsed.sections ?? {})) {
+    for (const [id, value] of Object.entries(parsed.sections)) {
       if (isChoice(value)) choices[id] = value;
     }
     return choices;
-  } catch {
-    return {};
-  }
+  },
+  encode: (sections) =>
+    JSON.stringify({ version: VERSION, sections } satisfies Stored),
+  fallback: () => ({}),
+});
+
+/**
+ * The remembered choices for this store.
+ *
+ * `whenUnknown` above is never consulted, because every call site names its
+ * store as a module constant. It is required by the door so that a preference
+ * whose scope *is* fetched cannot forget to say what a reader sees meanwhile.
+ */
+export function readSectionChoices(store: SectionStore): SectionChoices {
+  return sectionChoicesPreference.read(store);
 }
 
 /**
@@ -102,16 +145,18 @@ export function writeSectionChoice(
   id: string,
   isOpen: boolean,
 ): void {
-  try {
-    const sections = { ...readSectionChoices(store), [id]: choiceFor(isOpen) };
-    localStorage.setItem(
-      store,
-      JSON.stringify({ version: VERSION, sections } satisfies Stored),
-    );
-  } catch {
-    // Storage full or refused. The choice still holds for this visit, which is
-    // the part the reader can see.
-  }
+  // A computed key in an object literal defines a property rather than
+  // assigning one, so an id spelling an inherited member makes an entry of its
+  // own and reaches no prototype. The rebuild on the reading side is what makes
+  // that entry harmless when it comes back.
+  sectionChoicesPreference.write(store, {
+    ...readSectionChoices(store),
+    [id]: choiceFor(isOpen),
+  });
+  // Storage refusing is absorbed by the door. The choice still holds for this
+  // visit, which is the part the reader can see, because `useBookSections`
+  // keeps what it was told beside what is stored: see the note there, which is
+  // the one place in this app where a second copy of a stored value is correct.
 }
 
 function choiceFor(isOpen: boolean): SectionChoice {

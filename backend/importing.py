@@ -46,7 +46,6 @@ be the oracle again by another route.
 """
 
 import logging
-import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, time
@@ -57,6 +56,7 @@ from sqlalchemy.orm import Session
 
 import book_columns
 import csv_import
+import identity
 import marc
 from catalogue import Record
 from classifications import add_headings, bounded_headings
@@ -159,10 +159,13 @@ class _CatalogueIndex:
             # matches one must attach its status and its notes to the same copy
             # on every run, not to whichever the query happened to return.
             by_isbn=_first_wins((isbn, book_id) for book_id, isbn, _title in visible if isbn),
-            # First wins, matching the old `.first()`: two editions of one
-            # title collide, which is acceptable for a status and would not be
-            # for anything destructive.
-            by_title=_first_wins((title.lower(), book_id) for book_id, _isbn, title in visible),
+            # First wins, matching the old `.first()`. What the collision
+            # costs is `identity.reading_history_title`'s subject, not this
+            # comment's: here the rule is only which row wins one.
+            by_title=_first_wins(
+                (identity.reading_history_title(title), book_id)
+                for book_id, _isbn, title in visible
+            ),
             taken_isbns=_taken_isbns(db),
             # The Member's whole reading record rather than the matched Books':
             # which Books a 5,000 row file will match is not known until it has
@@ -188,15 +191,20 @@ class _CatalogueIndex:
         implementation and not one per importer.** `OpdsImport` matches on
         exactly this rule by the owner's instruction of 2026-09-05, and a second
         index keyed the same way would be a second place for it to drift. It is
-        deliberately **not** `MarcIndex`'s rule, which folds the author in: see
-        that class for why a catalogue transfer needs the stricter one and a
-        reading history does not.
+        deliberately **not** `MarcIndex`'s rule, which folds the author in
+        **and folds the title all the way**: see that class for why a catalogue
+        transfer needs the stricter one and a reading history does not.
+
+        **The title is matched as a catalogue spelled it**, through
+        `identity.reading_history_title`, which is the one predicate in that
+        module that takes only half the fold. Which half, and why it refuses
+        the rest, is there.
         """
         book_id = None
         if isbn:
             book_id = self.by_isbn.get(isbn)
         if book_id is None:
-            book_id = self.by_title.get(title.lower())
+            book_id = self.by_title.get(identity.reading_history_title(title))
         return db.get(Book, book_id) if book_id is not None else None
 
     def isbn_is_taken(self, isbn: str | None) -> bool:
@@ -211,7 +219,7 @@ class _CatalogueIndex:
         if book.isbn:
             self.by_isbn[book.isbn] = book.id
             self.taken_isbns.add(book.isbn)
-        self.by_title.setdefault(book.title.lower(), book.id)
+        self.by_title.setdefault(identity.reading_history_title(book.title), book.id)
 
 
 def _first_wins(pairs: Iterable[tuple[str, int]]) -> dict[str, int]:
@@ -598,54 +606,7 @@ def _fill_gaps(book: Book, row: csv_import.ImportRow) -> None:
 # cataloguer least wants to retype and the one this whole ticket turns on.
 #
 # **It matches on author and title together, never on title alone.** See
-# `identity_key`.
-
-
-#: Words a title may start with that say nothing about which book it is.
-#:
-#: Taken from `routers/books._ARTICLES` when `_duplicate_key` moved here, so
-#: the duplicate finder and the importer agree about what "the same book" is.
-_ARTICLES: Final = ("the ", "a ", "an ", "der ", "die ", "das ", "ein ", "eine ")
-
-
-def identity_key(title: str | None, author: str | None) -> str:
-    """Normalise a book to something two editions of it will share.
-
-    **The one notion of "this is the same book" in the app**, and it was two
-    until this function existed: `routers/books._duplicate_key` computed it for
-    the duplicate finder, and `_CatalogueIndex.by_title` matched an import row
-    on a lower cased title with no author in it at all.
-
-    That second one is the reason this is here rather than left alone. A CSV
-    export is somebody's reading history and a title collision costs a reading
-    status attached to the wrong edition. A MARC file is another institution's
-    catalogue, and a title collision **merges two different books**: every
-    library holds more than one *Selected poems*, and an import that folded
-    them would be discovered by a cataloguer months later with no record of
-    what was lost.
-
-    Deliberately lossy, as it has always been. Punctuation is dropped, case is
-    folded, whitespace is collapsed and a leading article is removed, because
-    two catalogues spell one book six ways.
-
-    **Only the first author**, split before normalising: `normalise` strips the
-    comma, so splitting afterwards finds nothing to split on and the whole
-    credit list becomes the key. "Terry Pratchett" and "Terry Pratchett, Neil
-    Gaiman" are the same book credited differently on two editions.
-    """
-
-    def normalise(value: str | None) -> str:
-        text = (value or "").casefold().strip()
-        text = re.sub(r"[^\w\s]", "", text)
-        text = re.sub(r"\s+", " ", text)
-        for article in _ARTICLES:
-            if text.startswith(article):
-                text = text[len(article) :]
-                break
-        return text
-
-    first_author = (author or "").split(",")[0]
-    return f"{normalise(title)}|{normalise(first_author)}"
+# `identity.work_key`.
 
 
 def bounded_fields(record: Record) -> dict[str, Any]:
@@ -698,14 +659,18 @@ def bounded_fields(record: Record) -> dict[str, Any]:
 class MarcIndex:
     """The catalogue keyed the two ways a MARC record is matched.
 
-    A separate index from `_CatalogueIndex` rather than two more fields on it,
-    because the two importers ask different questions and the difference is not
-    a detail. A CSV row is matched on ISBN then on **title alone**, which is
-    right for a reading history: the worst case is a status on the wrong
-    edition of a book somebody read. A MARC record is matched on ISBN then on
-    **author and title together**, because the worst case there is two
-    different books folded into one catalogue entry, and every library holds
-    more than one *Selected poems*.
+    **A separate index from `_CatalogueIndex` rather than two more fields on it**,
+    which is the one thing only this class knows. The two importers ask different
+    questions: this one matches on ISBN then `identity.work_key`, that one on
+    ISBN then `identity.reading_history_title`. What each wrong answer costs is
+    stated once, in `identity.py`, rather than twice here.
+
+    **Two differences rather than one, and naming only the credit understates
+    it.** The looser rule does not fold its title all the way either: it
+    normalises case, composition and spacing and stops there, keeping a leading
+    article and any punctuation inside the title. So a feed spelling
+    `The Hobbit` against a stored `Hobbit` creates a second Book where this
+    index matches one.
 
     Built from one query over what the Member can see, like `_CatalogueIndex`,
     for the same reason: the per row lookup was one statement per row and a
@@ -729,7 +694,7 @@ class MarcIndex:
                 (isbn, book_id) for book_id, isbn, _title, _author in visible if isbn
             ),
             by_identity=_first_wins(
-                (identity_key(title, author), book_id)
+                (identity.work_key(title, author), book_id)
                 for book_id, _isbn, title, author in visible
             ),
             taken_isbns=_taken_isbns(db),
@@ -746,7 +711,9 @@ class MarcIndex:
             book_id = self.by_isbn.get(isbn)
             if book_id is not None:
                 return book_id
-        return self.by_identity.get(identity_key(fields["title"], fields["author"]))
+        return self.by_identity.get(
+            identity.work_key(fields["title"], fields["author"])
+        )
 
     def holds(self, fields: dict[str, Any]) -> bool:
         """Whether this Library already has the Book this record describes.
@@ -796,7 +763,7 @@ class MarcIndex:
         if book.isbn:
             self.by_isbn[book.isbn] = book.id
             self.taken_isbns.add(book.isbn)
-        self.by_identity.setdefault(identity_key(book.title, book.author), book.id)
+        self.by_identity.setdefault(identity.work_key(book.title, book.author), book.id)
 
 
 def within_bounds(attribute: str, value: Any) -> Any:
@@ -1182,10 +1149,18 @@ class OpdsImport:
             # nobody made. `opds.entry_record` refuses an entry whose `<title>`
             # is missing or blank, so that is not this arm either.
             #
-            # Without it `find_by` raises `AttributeError` on `title.lower()`
-            # and one over long title costs the whole sync. The stated reason
-            # here was `within_bounds` truncating to `""`, which it cannot do:
-            # a critic read the mechanism rather than the comment.
+            # Without it an empty title reaches `find_by` and keys as the
+            # empty string, which is what every other untitled row keys as, so
+            # the feed's status lands on whichever of them `_first_wins` kept.
+            # The stated reason here was `within_bounds` truncating to `""`,
+            # which it cannot do: a critic read the mechanism rather than the
+            # comment. It then said `find_by` would raise `AttributeError`,
+            # which stopped being true when the title predicate stopped
+            # reaching for a method on its argument. **A guard justified by a
+            # crash outlives the crash**, and what it is really worth is above:
+            # silence, not a traceback. Stated without naming what the
+            # predicate does with a missing title, because its signature does
+            # not accept one and this arm is what keeps that true.
             tally.skipped_untitled += 1
             return
 

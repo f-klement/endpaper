@@ -5,18 +5,25 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import ColumnPicker from "../../../../src/pages/Home/components/ColumnPicker";
+import type { ColumnChoice } from "../../../../src/pages/Home/hooks";
 import { renderLocalised } from "../../../utils";
 
-function renderPicker(props: Partial<Parameters<typeof ColumnPicker>[0]> = {}) {
+/**
+ * The picker takes the column choice as one value, so the overrides here name
+ * its fields rather than six separate props.
+ */
+function renderPicker(overrides: Partial<ColumnChoice> = {}) {
   return renderLocalised(
     <ColumnPicker
-      available={["title", "author", "callNumber", "classification"]}
-      visible={["title", "author"]}
-      onToggle={() => {}}
-      onReset={() => {}}
-      canReset={false}
-      canChange={true}
-      {...props}
+      choice={{
+        available: ["title", "author", "callNumber", "classification"],
+        columns: ["title", "author"],
+        isDefault: true,
+        toggle: () => {},
+        reset: () => {},
+        canChange: true,
+        ...overrides,
+      }}
     />,
   );
 }
@@ -79,7 +86,7 @@ describe("ColumnPicker", () => {
 
   it("asks the caller to turn one on", async () => {
     const onToggle = vi.fn();
-    renderPicker({ onToggle });
+    renderPicker({ toggle: onToggle });
     await open();
 
     await userEvent
@@ -94,7 +101,7 @@ describe("ColumnPicker", () => {
     // table's headers gives the reader no way to learn that the missing
     // control is not their mistake.
     const onToggle = vi.fn();
-    renderPicker({ onToggle });
+    renderPicker({ toggle: onToggle });
     await open();
 
     const title = screen.getByRole("button", { name: "Title" });
@@ -122,7 +129,7 @@ describe("ColumnPicker", () => {
     // 141 files. `aria-pressed` is what the rule is actually about, so the
     // assertion now covers the chips this picker draws today and the ones a
     // later version adds.
-    renderPicker({ visible: ["title", "author", "callNumber"] });
+    renderPicker({ columns: ["title", "author", "callNumber"] });
     await open();
 
     const pressed = screen.getAllByRole("button", { pressed: true });
@@ -140,7 +147,7 @@ describe("ColumnPicker", () => {
   });
 
   it("offers no way back while there is nothing to go back from", async () => {
-    renderPicker({ canReset: false });
+    renderPicker({ isDefault: true });
     await open();
 
     expect(screen.queryByRole("button", { name: /usual columns/ })).toBeNull();
@@ -148,7 +155,7 @@ describe("ColumnPicker", () => {
 
   it("offers the way back once the set has been changed", async () => {
     const onReset = vi.fn();
-    renderPicker({ canReset: true, onReset });
+    renderPicker({ isDefault: false, reset: onReset });
     await open();
 
     await userEvent
@@ -164,7 +171,7 @@ describe("ColumnPicker before the mode is known", () => {
     // A toggle in that window writes the household's key whatever mode the
     // flags turn out to name, and nothing says so afterwards.
     const onToggle = vi.fn();
-    renderPicker({ canChange: false, onToggle });
+    renderPicker({ canChange: false, toggle: onToggle });
     await open();
 
     const author = screen.getByRole("button", { name: "Author" });
@@ -175,9 +182,9 @@ describe("ColumnPicker before the mode is known", () => {
 
   it("disables the reset rather than hiding it", async () => {
     // Hiding it would read as "there is nothing to reset", which is the
-    // opposite of what `canReset` true means.
+    // opposite of what a set that is not the default means.
     const onReset = vi.fn();
-    renderPicker({ canChange: false, canReset: true, onReset });
+    renderPicker({ canChange: false, isDefault: false, reset: onReset });
     await open();
 
     const reset = screen.getByRole("button", {
