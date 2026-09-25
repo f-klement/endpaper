@@ -12593,6 +12593,79 @@ same wave, and the Calibre trio fixed it: `withoutPlaceholders` now sieves the f
 before any comparison, including `year: opf.year === CALIBRE_UNDEFINED_YEAR ? null :
 opf.year`. Recorded because the convergence is the evidence, not because anything is open.
 
+## A file's subject is a category, not a tag, and the library says so by 1.058
+
+**Owner decision, 2026-09-26.** A subject read out of an ebook file routes to
+`books.categories`. **No route mints a tag from one.**
+
+Three design seats independently named the same figure as the one that would change their
+answer: distinct case folded subjects per book over a real library. Measured over the
+household's own, 1,176 files parsed, none unreadable:
+
+| | |
+|---|---|
+| books carrying at least one subject | 731, 62% |
+| subject values total | 2,735 |
+| **distinct, case folded** | **1,244** |
+| of those matching the 105 curated names | **17, one percent** |
+| names appearing exactly once | 774 of 1,244 |
+| **distinct to book ratio** | **1.058** |
+
+The design round set that threshold itself: near one to one means minting argues its way out
+of the create request altogether. **Importing 900 books would mint about a thousand tags,
+nearly all of them used once.**
+
+The one percent is the decisive half. These are catalogue headings rather than household
+words, `england -- fiction`, `psychological fiction`, `bildungsromans`, `horror tales`, so
+minting them produces exactly the generated vocabulary nobody can later tell apart that
+`docs/data-model.md` warns against.
+
+**So the destination was already named and already built.** The vocabulary this project
+writes to, `docs/data-model.md` and the column's own comment in `backend/models.py` each say a
+category is an uncontrolled subject label supplied by a publisher or a catalogue, and
+deliberately not the tag system. `BookOut` serves the column; `BookCreate` was the one request body missing
+the middle layer. **That is the whole gap.**
+
+**Refused by the same measurement**: a flag defaulting false, and the screen that would have
+warned before minting. Nothing is minted, so neither has a job. Promoting a subject to a tag
+stays a deliberate act on one book, which is what a curated vocabulary means.
+
+**Incidental and it re-scopes the readers' work**: the measured library holds 931 epub and 244
+opf, and **zero fb2, zero cbz and one mobi**.
+
+## Excluding Calibre's tags is a scope decision, and the request figure was wrong
+
+The reader's exclusion bullet in `frontend/src/lib/calibre.ts` justified dropping tags,
+ratings and book files together with one number, one extra request a book. Re-derived
+2026-09-25 against the routes the committed generated client publishes, that number is
+right for a rating and wrong for a tag in both directions.
+
+| what | requests |
+|---|---|
+| the import itself | one `POST /api/books/scan` per book it can build a body for |
+| a rating on top | one `PATCH` a book |
+| a tag, per book route | one `POST /api/books/{book_id}/tags/{tag_id}` per book **and** tag |
+| a tag, bulk route | one `POST /api/books/bulk` per distinct tag per 500 books carrying it, plus one listing and one `POST /api/books/tags` per distinct name |
+
+`BookCreate` carries no tag field, so no path makes a tag free. The per book route is a
+multiple of the book count equal to the mean tags a book, so the old figure was a floor only
+a library tagging each book exactly once would meet. The bulk route is flat in the size of
+the library: `BulkRequest.book_ids` is bounded at 500 server side, so at its ceiling of
+three requests a distinct tag it passes the book count only past about three hundred
+distinct names, growing with the vocabulary rather than with the shelf.
+
+**Reading the names costs no request at all**, one more `db.query` beside the eight
+`readCalibreLibrary` already issues over the whole file. So the exclusion survives on the
+other half of its own sentence, scope: this module returns records and the import flow
+decides what is written. The measurement lives at the exclusion site; this entry is why it
+was made.
+
+**What does not decide it.** This is not the file readers' subject question. Those decline a
+genre because a file's free text is uncontrolled and has nowhere to go; a Calibre `tags` row
+is the vocabulary the member curated in their own library, and the two routes above take it.
+What is declined here is the writing rather than the names. The open decision about whether
+an import may invent a tag gates the writer, not this reader.
+
 ## A Calibre library's `metadata.opf` is a stale copy of the index, not a second source
 
 Measured 2026-09-08 over the household's reference library: 897 books in `metadata.db`, 244
@@ -16951,9 +17024,10 @@ deleted rather than shipped green, and it has its own ticket.
 **About identity keys, and not about ranking.** Four keys decided whether two books were the
 same, and the question asked was whether they collapse to one, to two, or not at all. They
 collapse to one **fold** and three **predicates**, which is the distinction none of the four
-drew. The same shape does not settle the two completeness lists, `catalogue._SCORED` and
-`metadata._COMPLETENESS_FIELDS`, which differ on which fields take part and are the other
-half of that work: see the entry they get when somebody does it.
+drew. The same shape does not settle the two completeness scores, `catalogue._SCORED` and
+`metadata._PICKABLE_FIELDS`, which differ on which fields take part and are the other
+half of that work: they are settled under *The two completeness scores are two questions,
+not one list*.
 
 The fold is how text becomes comparable. It was written four times and the four differed by
 accident rather than by argument: one stripped a leading article and two did not, one
@@ -17200,6 +17274,52 @@ and that row set is the modules the ADR argues about, which this one is not. **T
 recorded here because nothing detects it**: the depth test only checks rows that exist, so the
 table is equally green with the row and without it, and a reader who recomputes the table and
 finds a backend module missing should meet the reason rather than the gap.
+
+**This is the record of one decision and not the form for the next.** ADR 0008's section
+*What a new module earns in this document* is the standing rule: a module that is not a row
+earns a name in a sentence there, or nothing, and where its relation to the instrument is
+worth writing down and no claim there needs it, it goes in that module's own docstring
+without a figure.
+
+## The two completeness scores are two questions, not one list
+
+`catalogue._SCORED` and `metadata._PICKABLE_FIELDS` both rank how complete a record is. They
+share `author`, `year`, `publisher` and `page_count`, disagree on five more, and neither
+docstring named the other. **They are two**, and the test a fold has to pass here is that the
+differences are accidents. **None of the five is.**
+
+**What each is asked.** `Record.completeness` is read once the book is identified: which of
+several records for one ISBN a catalogue answers with, which catalogue leads a merge, and how
+the edition picker is ordered. The relevance term is read **before** the book is identified,
+over rows that may not be the same book at all.
+
+**Why the search score carries `isbn` and `cover_url` and the record score does not.** At a
+lookup the query supplies both, so across a candidate set for one ISBN they are constant and
+separate nothing. A title query supplies no ISBN, so there both are the row's own. Seven
+decoders sit in three shapes: four stamp the ISBN that was asked, two parse one out of the
+record, and one prefers its own and falls back to the asked one. **So wherever a record's own
+ISBN is read, scoring these fields ranks by which catalogue printed a parseable one.**
+
+**Why the record score carries `language`, `series_name`, `description` and a subjects bonus
+and the search score does not.** `language` and `series_name` are already scored in the
+relevance tuple's **first** element, by their own weights, so repeating them in the second
+counts one fact twice in the weaker of the two places. `description` and the subjects bonus say
+**which catalogue answered** rather than what the book is: the Open Library search writes
+neither, and the DNB carries a 520 on 1 of 85 live records.
+
+**The cost, stated rather than hidden.** A MARC search row is built with no ISBN, so every such
+row scores zero on both fields the search score adds where an Open Library row may score two.
+That is a source lean in the opposite direction to the one refused above. Folding would trade
+this lean for the other one **and** add the double count: two costs for one tidy.
+
+**One list with a flag is refused too**, the same refusal the identity predicates took.
+
+**What holds it.** Ten arms, one per field per direction, plus a floor on each weight. The
+first version was armed in one direction only, so the **subtraction** fold, which is how two
+lists actually become one, walked past it: dropping either of two fields was green. Two of its
+arms compared a sum against the constant it adds and could not fail under any weight, which is
+the tautology shape this file already records one section below. Both were found by a seat that
+did not write them.
 
 ## An arm compared against itself survives every mutant, and the sweep cannot see it
 

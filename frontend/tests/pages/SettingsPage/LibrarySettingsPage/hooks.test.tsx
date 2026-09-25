@@ -1,31 +1,47 @@
 /**
- * Tests for `useCalibreImport` and `useStoreImport` in
+ * Tests for the four import hooks in
  * src/pages/SettingsPage/LibrarySettingsPage/hooks.ts.
  *
- * The reader has its own file; what is pinned here is the orchestration, which
- * is where a nine hundred book import can go wrong in ways no unit answers: how
- * many requests are made and in what order, what happens to the eight hundredth
- * when the fourth is refused, and whether stopping stops.
+ * What is pinned throughout is the orchestration; the readers have their own
+ * files. Two families, and they are stubbed differently because they import
+ * differently.
  *
- * **The engine is loaded for real.** `fetch` is replaced here rather than
- * through `mockApi`, because the module fetches its own `.wasm` asset and a
- * stub with no `arrayBuffer` would report every run as a browser that cannot
- * compile WebAssembly. Replacing the global is what `tests/setup.ts` already
- * does before every test, so this is that stub with two more URLs in it and not
- * a module mock.
+ * **`useCalibreImport` and `useStoreImport` read the file in the browser**, so
+ * a nine hundred book import goes wrong in ways no unit answers: how many
+ * requests are made and in what order, what happens to the eight hundredth when
+ * the fourth is refused, and whether stopping stops. **The engine is loaded for
+ * real**, so `fetch` is replaced here rather than through `mockApi`: the module
+ * fetches its own `.wasm` asset and a stub with no `arrayBuffer` would report
+ * every run as a browser that cannot compile WebAssembly. Replacing the global
+ * is what `tests/setup.ts` already does before every test, so this is that stub
+ * with two more URLs in it and not a module mock.
+ *
+ * **`useLibraryImport` and `useMarcImport` preview on the server**, so the
+ * subject there is which paths were asked for and in what order, and those arms
+ * take `mockApi` instead. They sit at the foot of the file, under their own
+ * heading, and install their stub over this one per test.
  */
 
-import { act, waitFor } from "@testing-library/react";
+import { act, waitFor, type RenderHookResult } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  ImportPreviewOut,
+  ImportResultOut,
+  MarcPreviewOut,
+} from "../../../../src/api/generated/model";
+import { ApiError } from "../../../../src/api/mutator";
 import {
   useCalibreImport,
+  useLibraryImport,
+  useMarcImport,
   useStoreImport,
+  type UseTwoStepImportResult,
 } from "../../../../src/pages/SettingsPage/LibrarySettingsPage/hooks";
 import { CALIBRE_SCHEMA, databaseOf } from "../../../lib/sqliteFixtures";
-import { renderHookWithProviders } from "../../../utils";
+import { mockApi, renderHookWithProviders, type MockApi } from "../../../utils";
 
 const require = createRequire(import.meta.url);
 
@@ -653,5 +669,385 @@ describe("an unreadable store is one skipped source", () => {
       "Book 1",
       "Book 2",
     ]);
+  });
+});
+
+// ── The two step imports the server runs ─────────────────────────────────────
+
+/**
+ * What each case below needs, over the two things that differ.
+ *
+ * The paths and the preview body are data; `render` is where each hook binds
+ * the confirm options its own card offers, which is what lets every arm call
+ * `confirm()` with no arguments and stay one test over two hooks.
+ */
+/**
+ * The bytes each case's file carries, written out once.
+ *
+ * A literal rather than a read of the file, because the arm asserting what was
+ * uploaded builds its file from this and compares against this: an expectation
+ * taken back through the reader it is looking with is one value read twice.
+ */
+const CSV_BYTES = "Title,Author\nDune,Herbert\n";
+const MARC_BYTES = "00123nam a2200073 4500";
+
+interface TwoStepCase {
+  what: string;
+  previewPath: string;
+  writePath: string;
+  /** What its file holds, as the literal that file is built from. */
+  bytes: string;
+  /** What that hook's preview endpoint answers, in its own model. */
+  preview: ImportPreviewOut | MarcPreviewOut;
+  /** A fresh file each call: a `File` is read once and the arms pick twice. */
+  file: () => File;
+  render: () => RenderHookResult<TwoStepImport, unknown>;
+}
+
+/**
+ * The contract, with `confirm`'s options already chosen.
+ *
+ * **Written as the exported interface less one member rather than as its own
+ * shape**, so a member leaving `UseTwoStepImportResult` takes these arms with
+ * it instead of leaving them asserting against a shape nothing returns.
+ */
+type TwoStepImport = Omit<UseTwoStepImportResult<unknown, never>, "confirm"> & {
+  confirm: () => void;
+};
+
+const CSV_PREVIEW: ImportPreviewOut = {
+  delimiter: ",",
+  headers: ["Title", "Author"],
+  mapping: { Title: "title", Author: "author" },
+  skipped: 0,
+  total_rows: 3,
+};
+
+const MARC_PREVIEW: MarcPreviewOut = {
+  already_held: 1,
+  readable: 3,
+  skipped: 0,
+  total_records: 4,
+};
+
+const WRITTEN: ImportResultOut = {
+  created: 3,
+  matched: 0,
+  rows_read: 3,
+  skipped: 0,
+  statuses_updated: 0,
+};
+
+const FAMILY: TwoStepCase[] = [
+  {
+    what: "a CSV library export",
+    previewPath: "/api/imports/preview",
+    writePath: "/api/imports/csv",
+    preview: CSV_PREVIEW,
+    bytes: CSV_BYTES,
+    file: () => new File([CSV_BYTES], "library.csv"),
+    render: () =>
+      renderHookWithProviders((): TwoStepImport => {
+        const hook = useLibraryImport();
+        return {
+          ...hook,
+          confirm: () => hook.confirm({ createMissing: true, applyTags: true }),
+        };
+      }),
+  },
+  {
+    what: "a MARC catalogue",
+    previewPath: "/api/imports/marc/preview",
+    writePath: "/api/imports/marc",
+    preview: MARC_PREVIEW,
+    bytes: MARC_BYTES,
+    file: () => new File([MARC_BYTES], "records.mrc"),
+    render: () =>
+      renderHookWithProviders((): TwoStepImport => {
+        const hook = useMarcImport();
+        return {
+          ...hook,
+          confirm: () => hook.confirm({ createMissing: true }),
+        };
+      }),
+  },
+];
+
+/**
+ * Both endpoints stubbed, the write registered first.
+ *
+ * **The order is load bearing.** Handlers are consulted newest first and a
+ * matcher is a substring, so `/api/imports/marc` matches the MARC *preview*
+ * URL as well. Registered the other way round, every MARC preview would be
+ * answered with an import result and the arms below would assert against the
+ * wrong reply while still going green on the request counts.
+ */
+function arrange(one: TwoStepCase): MockApi {
+  const api = mockApi();
+  api.on(one.writePath, { body: WRITTEN }, "POST");
+  api.on(one.previewPath, { body: one.preview }, "POST");
+  return api;
+}
+
+/** A request's path, with the query string cut off. */
+function pathOf(call: { url: string }): string {
+  return call.url.split("?")[0] ?? call.url;
+}
+
+/** Every request made, in order. The subject of the rule under test. */
+function paths(api: MockApi): string[] {
+  return api.calls.map(pathOf);
+}
+
+/** The last request to exactly that path, query string aside. */
+function lastTo(api: MockApi, path: string) {
+  return [...api.calls].reverse().find((call) => pathOf(call) === path);
+}
+
+/** The query string that request carried, as a record. */
+function queryOf(api: MockApi, path: string): Record<string, string> {
+  const url = lastTo(api, path)?.url ?? "";
+  return Object.fromEntries(new URLSearchParams(url.split("?")[1] ?? ""));
+}
+
+/**
+ * The rule three docstrings in that module state and nothing asserted: a file
+ * is previewed, and written only when the member says so.
+ *
+ * **Both halves are requests here, and that is what separates this family from
+ * the two above.** A Calibre or a store pick is read in the browser, so those
+ * arms can say nothing was written by counting requests of any kind. These two
+ * upload the file to preview it, so an arm has to say *which* requests were
+ * made: the subject throughout is the path list, in order.
+ *
+ * **One table run twice, because the two hooks are one contract and two
+ * bodies.** `UseTwoStepImportResult` makes them one type, and a type is not a
+ * runtime: `useLibraryImport` and `useMarcImport` carry separate `choose` and
+ * `confirm` implementations, so an arm written once against the shape says
+ * nothing about the second hook unless it is run against it. What the wire then
+ * carries differs per hook and is asserted per hook, at the foot of this file.
+ *
+ * Real `File`s and the real generated mutations: the openers here are
+ * `FormData`, so nothing needs standing in for a file and no module is replaced.
+ */
+describe.each(FAMILY)("$what, previewed and then written", (one) => {
+  it("reports what the file holds and writes nothing", async () => {
+    const api = arrange(one);
+    const { result } = one.render();
+
+    await act(async () => result.current.choose(one.file()));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    expect(result.current.preview).toEqual(one.preview);
+    expect(result.current.result).toBeNull();
+    // The whole list rather than a count: a write reaching the server before
+    // the member confirmed appends the write path and reddens this line by
+    // name. A `toHaveLength` would report the same failure as a number.
+    expect(paths(api)).toEqual([one.previewPath]);
+  });
+
+  it("writes the file it previewed once the member confirms", async () => {
+    const api = arrange(one);
+    const { result } = one.render();
+    const picked = one.file();
+    await act(async () => result.current.choose(picked));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(paths(api)).toEqual([one.previewPath, one.writePath]);
+    expect(result.current.result).toEqual(WRITTEN);
+    // **The name and the bytes, against a literal.** This is the half of the
+    // rule saying the report the member was shown describes what is then
+    // written, and it is the third spelling of it: each of the two simpler ones
+    // was wrong, so neither is a simplification available here.
+    //
+    // A name matched against the fixture that produced it pins the filename,
+    // and a confirm uploading a **wholly different file** under that name
+    // passed. The picked object by **identity** refuses a faithful re-wrap
+    // carrying a MIME type the server wants, which uploads the member's file
+    // correctly, and anything re-wrapping the data between the pick and the
+    // request breaks that claim while the rule holds. And the bytes compared
+    // against `await picked.text()` read the expectation back through the
+    // instrument doing the looking: with the reader stubbed to succeed at
+    // returning nothing, the clean tree stayed green at 37 with the pair dead
+    // and silent, **and so did a wholly different file**. Only a read that
+    // succeeds at returning nothing hides that way; a rejecting or a hanging
+    // reader fails, because the value is awaited here with no window.
+    //
+    // So the expectation is `one.bytes`, which the case's file is built from
+    // and no reader ever produced. Measured: red on the different file with
+    // the dead reader, naming both rows and showing the empty string it got;
+    // green at 37 clean; green on the faithful re-wrap, so no false red is
+    // reintroduced.
+    //
+    // **Two things carried rather than closed.** That stub is a reader
+    // degraded for every file, so it bounds nothing about this environment: it
+    // says the arm must not source its own expectation. And two picks with
+    // identical bytes are one file here, so the family still has no arm saying
+    // which of two picks was written; the arm about a second pick asserts no
+    // upload, so nothing regresses on it. A lossy transform, a re-encode
+    // rather than a re-wrap, reddens this correctly.
+    const sent = lastTo(api, one.writePath)?.body;
+    const uploaded = (sent as FormData).get("file") as File;
+    expect(uploaded.name).toBe(picked.name);
+    // The fixture rather than the code: at an empty literal the comparison
+    // below is true of an upload carrying nothing, so a hook sending an empty
+    // file would go green on one edit with nothing here reporting it.
+    expect(one.bytes).not.toBe("");
+    expect(await uploaded.text()).toBe(one.bytes);
+    // Cleared: the card shows the result now, and a preview left beside it
+    // offers to import the same file again.
+    expect(result.current.preview).toBeNull();
+  });
+
+  it("writes nothing when confirm comes before any file is picked", async () => {
+    const api = arrange(one);
+    const { result } = one.render();
+
+    await act(async () => result.current.confirm());
+
+    expect(paths(api)).toEqual([]);
+    expect(result.current.result).toBeNull();
+  });
+
+  it("forgets the file, so a confirm after reset writes nothing", async () => {
+    const api = arrange(one);
+    const { result } = one.render();
+    await act(async () => result.current.choose(one.file()));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    await act(async () => result.current.reset());
+    expect(result.current.preview).toBeNull();
+    await act(async () => result.current.confirm());
+
+    // Still the one preview. `reset` clears the held file as well as the
+    // screen, so the button that is left cannot write what was dropped.
+    expect(paths(api)).toEqual([one.previewPath]);
+  });
+
+  it("reports a refused preview and writes nothing", async () => {
+    const api = arrange(one);
+    api.on(one.previewPath, { status: 422, body: { detail: "no" } }, "POST");
+    const { result } = one.render();
+
+    await act(async () => result.current.choose(one.file()));
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+
+    expect(result.current.preview).toBeNull();
+    expect(paths(api)).toEqual([one.previewPath]);
+  });
+
+  it("reports the preview's failure while both steps have failed", async () => {
+    // `error` is one member over two mutations, and which one it answers with
+    // is a decision rather than an accident: a refused preview leaves the file
+    // held, so the member can still press Import and fail a second way. The
+    // write is held open so that both failures are certainly settled when the
+    // coalesce is read, rather than asserting on a window.
+    const api = arrange(one);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    api.on(
+      one.writePath,
+      async () => {
+        await held;
+        return { status: 500, body: { detail: "no" } };
+      },
+      "POST",
+    );
+    api.on(one.previewPath, { status: 422, body: { detail: "no" } }, "POST");
+    const { result } = one.render();
+
+    await act(async () => result.current.choose(one.file()));
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.isImporting).toBe(true));
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.isImporting).toBe(false));
+
+    expect(paths(api)).toEqual([one.previewPath, one.writePath]);
+    expect(result.current.error).toBeInstanceOf(ApiError);
+    expect((result.current.error as ApiError).status).toBe(422);
+  });
+
+  it("clears the last import's result when another file is picked", async () => {
+    const api = arrange(one);
+    const { result } = one.render();
+    await act(async () => result.current.choose(one.file()));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    await act(async () => result.current.choose(one.file()));
+
+    // On the pick rather than on the second preview landing: a result still on
+    // screen under a new file reads as that file having been imported.
+    expect(result.current.result).toBeNull();
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    expect(paths(api)).toEqual([
+      one.previewPath,
+      one.writePath,
+      one.previewPath,
+    ]);
+  });
+});
+
+/**
+ * What each card's own flags put on the wire.
+ *
+ * **The one thing the table above cannot carry**, and the reason it binds
+ * `confirm`'s options per case instead of asserting them: the two hooks take
+ * different options because they write different things. A CSV import writes
+ * the member's reading record, so the tag flag exists; a MARC import writes
+ * none, so there is no tag flag to send and its absence is the assertion.
+ */
+describe("the flags a confirm carries", () => {
+  it("sends both of the CSV card's flags, as chosen", async () => {
+    const api = mockApi();
+    api.on("/api/imports/csv", { body: WRITTEN }, "POST");
+    api.on("/api/imports/preview", { body: CSV_PREVIEW }, "POST");
+    const { result } = renderHookWithProviders(() => useLibraryImport());
+
+    await act(async () =>
+      result.current.choose(new File(["Title\nDune\n"], "library.csv")),
+    );
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    await act(async () =>
+      result.current.confirm({ createMissing: true, applyTags: false }),
+    );
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    // Both spelled out, `false` included: a flag dropped rather than sent off
+    // is the server's default, which for `apply_tags` is the same answer and
+    // for `create_missing` is not.
+    expect(queryOf(api, "/api/imports/csv")).toEqual({
+      create_missing: "true",
+      apply_tags: "false",
+    });
+  });
+
+  it("sends the MARC card's one flag and no tag flag at all", async () => {
+    const api = mockApi();
+    api.on("/api/imports/marc", { body: WRITTEN }, "POST");
+    api.on("/api/imports/marc/preview", { body: MARC_PREVIEW }, "POST");
+    const { result } = renderHookWithProviders(() => useMarcImport());
+
+    await act(async () =>
+      result.current.choose(new File(["00123nam"], "records.mrc")),
+    );
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    await act(async () => result.current.confirm({ createMissing: false }));
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(queryOf(api, "/api/imports/marc")).toEqual({
+      create_missing: "false",
+    });
   });
 });

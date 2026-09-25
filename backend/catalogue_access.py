@@ -40,7 +40,12 @@ How to choose between an ISBN, a store identifier and a title, which is
 `enrich_book`'s own ordering policy and carries ADR 0006's rule that only a record found
 by the Book's own ISBN asserts authorship. And any query over books: nothing here takes
 a `User` or reaches `user.id`, so nothing here can build one, and
-`Shelf.seen_by` stays in the handler that pages a shelf. Both were proposed and both are
+`Shelf.seen_by` stays in the handler that pages a shelf. And the outbound cost ceiling a
+backfill spends its key through: every value here is read from a settings row and answers
+whether this Library may ask, where a concurrency bound is a fact about one pod's memory
+that no Member is ever told. Folding them puts a ceiling in the one module built from a
+store that degrades rather than refuses, so it would fail open toward a larger bound. All
+three were proposed and all three are
 refused: this module is one concept, and the reason it can be reviewed for the
 credential properties above is that it is only that one.
 """

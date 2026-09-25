@@ -12,7 +12,9 @@ from typing import cast
 import pytest
 
 from enums import BulkAction
+from models import Book, Tag
 from routers import books as books_router
+from tags import MAX_TAGS_PER_BOOK
 
 
 def bulk(client, headers, book_ids, action, value=None):
@@ -47,6 +49,26 @@ class TestTagging:
 
         assert res.json()["unchanged"] == 1
         assert res.json()["updated"] == 0
+
+    def test_a_book_at_its_ceiling_is_counted_unchanged(
+        self, client, admin, make_book, fiction_id, db
+    ):
+        """A refusal and "it already had this tag" are different answers and this
+        result has three buckets, the third of which the caller computes from the
+        permission walk. So a full book is reported as the no change it is, the
+        drop is logged, and a fourth bucket is a response shape change nobody has
+        asked for."""
+        book = make_book(admin["headers"])
+        full = db.get(Book, book["id"])
+        for index in range(MAX_TAGS_PER_BOOK):
+            row = Tag(name=f"filler {index}", category="custom", is_predefined=False)
+            db.add(row)
+            full.tags.append(row)
+        db.commit()
+
+        res = bulk(client, admin["headers"], [book["id"]], "add_tag", fiction_id)
+
+        assert res.json() == {"updated": 0, "unchanged": 1, "skipped": 0}
 
     def test_removes_a_tag(self, client, admin, make_book, fiction_id):
         book = make_book(admin["headers"])

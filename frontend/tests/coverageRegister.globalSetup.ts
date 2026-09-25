@@ -17,10 +17,12 @@
  * reporter's own to report, and it writes the marker before it decides, so a
  * stale register fails once rather than twice.
  *
- * The path travels in the environment rather than being a fixed name, so a
- * nested run, which `coverageRegister.test.ts` spawns three of, cannot satisfy
- * or clear the outer run's marker. A child inherits the variable and its own
- * setup replaces it before its own reporter reads it.
+ * The path travels in the environment rather than being a fixed name, so the
+ * nested runs `coverageRegister.test.ts` spawns cannot satisfy or clear the
+ * outer run's marker. A child inherits the variable and its own setup replaces
+ * it before its own reporter reads it. The count of those runs is deliberately
+ * not written here: it moves whenever an arm is added, and a figure beside a
+ * rule is read as current long after it stops being so.
  */
 
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -33,10 +35,11 @@ export const MARKER = "ENDPAPER_COVERAGE_REGISTER_MARKER";
  * The process whose setup made that path.
  *
  * **A child inherits the variable, and only a convention stops it satisfying
- * its parent's marker.** Every nested run this suite spawns names this global
- * setup, so each replaces the path in its own process before its own reporter
- * reads it, and the guarantee rests on every future one remembering to. The pid
- * makes it structural: a reporter writes only where its own setup ran.
+ * its parent's marker.** Every nested run this suite spawns reaches this setup,
+ * through the wrapper that fixture writes around it, so each replaces the path
+ * in its own process before its own reporter reads it, and the guarantee rests
+ * on every future one remembering to. The pid makes it structural: a reporter
+ * writes only where its own setup ran.
  */
 export const OWNER = "ENDPAPER_COVERAGE_REGISTER_OWNER";
 

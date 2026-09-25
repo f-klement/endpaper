@@ -34,6 +34,7 @@ import catalogue
 import csv_import
 import importing
 import marc
+import tags
 from catalogue import Record
 from enums import OwnershipStatus, ReadStatus, TagCategory
 from importing import (
@@ -471,9 +472,30 @@ class TestTheTagCaps:
 
         assert db.query(Tag).filter(Tag.name.in_(["Bookclub", "bookclub"])).count() == 1
 
+    def test_a_full_book_does_not_spend_the_budget(self, db, member):
+        """The room check comes before the mint, and this is what it buys. A Book
+        already at its ceiling that minted first would invent Library wide tags
+        it is then refused, so a later Book in the same file loses tags to one
+        that could not carry them."""
+        book = Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id)
+        db.add(book)
+        for index in range(tags.MAX_TAGS_PER_BOOK):
+            filler = Tag(name=f"filler {index}", category=TagCategory.CUSTOM)
+            db.add(filler)
+            book.tags.append(filler)
+        db.commit()
+        before = db.query(Tag).count()
+
+        Import.for_member(db, member.id).apply(
+            parse(row("Dune", isbn="9780441013593", shelves="one,two,three")),
+            apply_tags=True,
+        )
+
+        assert db.query(Tag).count() == before
+
     def test_it_stops_inventing_rather_than_failing(self, db, member):
         """Past the cap the Books in the file are still worth having."""
-        many = ",".join(f"tag{n}" for n in range(csv_import.MAX_NEW_TAGS_PER_IMPORT + 20))
+        many = ",".join(f"tag{n}" for n in range(tags.MAX_NEW_TAGS_PER_IMPORT + 20))
         db.add(Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id))
         db.commit()
 
@@ -483,7 +505,7 @@ class TestTheTagCaps:
 
         assert result.matched == 1
         invented = db.query(Tag).filter(Tag.name.like("tag%")).count()
-        assert invented <= csv_import.MAX_NEW_TAGS_PER_IMPORT
+        assert invented <= tags.MAX_NEW_TAGS_PER_IMPORT
 
     def test_tags_are_off_unless_asked_for(self, db, member):
         db.add(Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id))

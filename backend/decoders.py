@@ -225,7 +225,20 @@ class Decoding:
 
         A validated value object is what lets a decoder read a knob without
         asking whether the knob means anything for it.
+
+        **`reader` is refused by type for the same reason and by the same
+        argument.** `Reader` is a `StrEnum`, so a member hashes as its own value
+        and a bare `"marc_plain"` is in `MARC_READERS`, is a key of a reader
+        table exactly where its member is, and is not the member.
+        `metadata._marc_build` is the one site
+        that asks `is`, so such a decoding is read by `_dnb_record` where it
+        asked for `_k10plus_record`: GND headings harvested, volume slot titles
+        refused, and the whole record reported as read. `targets.Target` refuses
+        the same value and that is again not enough, because this is the field
+        `_marc_build` reads and `Target.decoding` is not the only builder of one.
         """
+        if not isinstance(self.reader, Reader):
+            raise ValueError(f"{self.source}: {self.reader!r} is not a Reader")
         if self.reader not in MARC_READERS and (
             self.refuses_component_parts or self.reads_author_identifiers
         ):

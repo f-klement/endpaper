@@ -24,6 +24,62 @@ from ratelimit import (
 from tests.helpers import silence_catalogues
 
 
+def _limiters_ratelimit_declares() -> dict[str, SlidingWindowLimiter]:
+    """Every **name** `ratelimit` binds to a limiter, and the object it binds.
+
+    Membership is a property of the object rather than of the text that built
+    it, which is what the three rules below need: the fixture between tests can
+    only reach a limiter it can name. One derivation rather than three, because
+    three spellings of one question drift into three answers.
+
+    **Names bound is not limiters constructed, and the two part in both
+    directions.** A limiter held inside a container is constructed and bound to
+    no name, so it is missing here; a name bound to a limiter the parse did not
+    see built here, an alias, an import, or a subclass whose callee it does not
+    recognise, is counted here and not there.
+    `_limiters_ratelimit_constructs` is the other
+    instrument, and
+    `TestTheRateLimitTableInTheDocsIsTheModule::test_the_two_derivations_agree`
+    is what makes either case loud rather than a number nobody re-derives.
+
+    Neither sees a limiter another module constructs and this one never binds.
+    """
+    import ratelimit
+
+    return {
+        name: value
+        for name, value in vars(ratelimit).items()
+        if isinstance(value, SlidingWindowLimiter)
+    }
+
+
+def _limiters_ratelimit_constructs() -> int:
+    """How many limiters the module's source **constructs**, parsed not matched.
+
+    The second instrument, and its whole job is to degrade differently from the
+    one above so that a disagreement is visible: it reads calls out of the
+    syntax tree, so it sees a construction whatever it is assigned to, and
+    sees neither an alias nor a construction whose callee is spelled otherwise,
+    a subclass being the example. Parsed rather than counted as text because a pattern
+    over source is the shape this repository has measured wrong every time,
+    once by a line break the formatter itself mandates.
+
+    It counts every construction in the module, including any inside a
+    function, which the namespace walk would also miss.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "ratelimit.py").read_text()
+    return sum(
+        1
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "SlidingWindowLimiter"
+    )
+
+
 class TestSlidingWindowLimiter:
     def test_allows_up_to_the_limit(self):
         limiter = SlidingWindowLimiter(RateLimit(max_attempts=3, window_seconds=60))
@@ -279,12 +335,7 @@ class TestTheRateLimitTableInTheDocsIsTheModule:
 
     @staticmethod
     def _counters() -> int:
-        from pathlib import Path
-
-        source = (Path(__file__).resolve().parents[1] / "ratelimit.py").read_text()
-        return source.count("SlidingWindowLimiter(") - source.count(
-            "class SlidingWindowLimiter("
-        )
+        return len(_limiters_ratelimit_declares())
 
     def test_the_module_defines_the_counters_this_rule_counts(self):
         """A guard that inspects nothing reads as coverage. If the module stops
@@ -294,8 +345,40 @@ class TestTheRateLimitTableInTheDocsIsTheModule:
     def test_the_stated_number_is_the_number_of_counters(self):
         count = self._counters()
         assert f"**{self._WORDS[count]} counters," in self._security_doc(), (
-            f"backend/ratelimit.py constructs {count} limiters. docs/security.md "
-            "opens its rate limiting section with a different number."
+            f"backend/ratelimit.py binds {count} names to a limiter. "
+            "docs/security.md opens its rate limiting section with a different "
+            "number."
+        )
+
+    def test_the_two_derivations_agree(self):
+        """Names bound against limiters constructed, pinned to each other.
+
+        Neither is the number on its own. They part in opposite directions and
+        the arms above read only one of them, so without this a drift is a
+        smaller number nobody sees: a limiter held in a container is
+        constructed and bound to no name, and a name bound to a limiter the
+        parse did not see built here is the reverse. **The shape is what is
+        checked, not the cause**: an alias, an import and a subclass instance
+        all produce it, and they do not want the same fix, since the first two
+        are one counter twice over and a subclass is a real further counter the
+        fixture does reset. Measured, planting one of each direction: a
+        container leaves the walk at eleven
+        while the parse says twelve, and an alias leaves the walk at twelve
+        while the parse says eleven.
+        """
+        bound = self._counters()
+        constructed = _limiters_ratelimit_constructs()
+        assert bound == constructed, (
+            f"backend/ratelimit.py binds {bound} names to a limiter and "
+            f"constructs {constructed}. Fewer names than constructions is a "
+            "limiter nothing can reach by name, which the reset fixture "
+            "between tests cannot touch. More names than constructions is a "
+            "name bound to a limiter the parse did not see built here, and "
+            "the two cases want opposite fixes: one this module never "
+            "constructed, an alias or an import, is one counter under two "
+            "names and this table would count it twice; one built by a call "
+            "the parse does not recognise, a subclass being the example, is a "
+            "real further counter and wants a row."
         )
 
     def test_the_table_has_a_row_for_every_counter(self):
@@ -318,34 +401,68 @@ class TestTheRateLimitTableInTheDocsIsTheModule:
         )
 
 
-def test_every_limiter_in_the_module_is_reset_between_tests():
-    """The suite's `reset_rate_limits` fixture has to know about all of them.
+class TestEveryLimiterIsResetBetweenTests:
+    """The suite's `reset_rate_limits` fixture has to reach all of them.
 
-    Its own docstring records what happens when it does not: the import limiter
-    was added later, and its absence turned twelve unrelated import tests red,
-    every one of them passing on its own. That is a whole afternoon, and it is
-    detectable in four lines.
+    The limiters are process global, so one test spending a budget rations
+    every later test that shares it, and which test fails then depends on
+    ordering. The import limiter was added after the fixture and its absence
+    turned twelve unrelated import tests red, every one of them passing on its
+    own.
 
-    Derived from the module rather than compared against a list, so a limiter
-    added tomorrow is caught rather than a list somebody remembered to extend.
+    **Run, not read.** The fixture used to name its limiters and this rule used
+    to look for `<name>.reset()` in its source; both were enumerations, and the
+    second could be beaten by a spelling as ordinary as a line break. The
+    fixture derives its limiters from `ratelimit`'s namespace, and this dirties
+    every limiter that namespace holds, runs the fixture, and asks which came
+    back dirty.
+
+    **What it does not reach, stated rather than bounded.** It shares the
+    fixture's definition of membership, so a limiter the fixture cannot see is
+    one this cannot see either: one another module constructs for itself, or
+    one held inside a container rather than bound to a name. The second is
+    caught a rule away, by the two derivations disagreeing; the first is
+    caught nowhere. It reads `_hits`, so a `reset` that empties the hits and
+    leaves state added to the limiter later would pass here.
     """
-    import ratelimit
-    from tests import conftest
 
-    limiters = {
-        name
-        for name, value in vars(ratelimit).items()
-        if isinstance(value, ratelimit.SlidingWindowLimiter)
-    }
-    assert limiters, "No limiters found; this rule now inspects nothing."
+    def test_the_module_declares_limiters_for_this_rule_to_find(self):
+        """A guard that inspects nothing reads as coverage."""
+        assert _limiters_ratelimit_declares()
 
-    source = inspect.getsource(conftest.reset_rate_limits)
-    missing = sorted(name for name in limiters if f"{name}.reset()" not in source)
-    assert missing == [], (
-        f"These limiters are never reset between tests: {missing}. They are "
-        "process global, so one test spending a budget rations every later test "
-        "that shares it, and which test fails then depends on ordering."
-    )
+    def test_running_the_fixture_clears_every_limiter_the_module_declares(self):
+        from tests import conftest
+
+        limiters = _limiters_ratelimit_declares()
+        for limiter in limiters.values():
+            limiter.check("a key this test invented")
+        # Asserted, because an empty table satisfies the assertion below just
+        # as well as a reset does: without this the arm passes when the
+        # dirtying stops happening at all.
+        clean = sorted(name for name, limiter in limiters.items() if not limiter._hits)
+        assert clean == [], (
+            f"These limiters were not dirtied: {clean}. The assertion below "
+            "would then be met by an empty table rather than by a reset."
+        )
+
+        # `@pytest.fixture` returns a wrapper that refuses to be called and
+        # carries the function it wrapped on `__wrapped__`. Should that stop
+        # being true, `unwrap` hands back the wrapper and pytest fails the call
+        # by name, which is the outcome this wants rather than a quiet pass.
+        inspect.unwrap(conftest.reset_rate_limits)()
+
+        dirty = sorted(name for name, limiter in limiters.items() if limiter._hits)
+        assert dirty == [], (
+            f"These limiters still hold state after the fixture ran: {dirty}. "
+            "They are process global, so one test spending a budget rations "
+            "every later test that shares it."
+        )
+
+    def test_the_fixture_runs_without_a_test_asking_for_it(self, request):
+        """Autouse is what makes it run between tests at all, and the arm above
+        cannot see it: that one calls the fixture by hand. This test requests
+        nothing, so the name appearing here is the fixture being applied."""
+        assert "reset_rate_limits" in request.fixturenames
 
 
 class TestTheKeyTableIsBounded:
@@ -538,12 +655,9 @@ class TestTheKeyTableIsBounded:
         """Derived from the module rather than asserted on one of them: a
         limiter constructed with a different cap by a later edit would be
         unbounded again, and nothing else would notice."""
-        import ratelimit
-
         unbounded = sorted(
             name
-            for name, value in vars(ratelimit).items()
-            if isinstance(value, SlidingWindowLimiter)
-            and value._max_keys != MAX_TRACKED_KEYS
+            for name, value in _limiters_ratelimit_declares().items()
+            if value._max_keys != MAX_TRACKED_KEYS
         )
         assert unbounded == [], f"These limiters do not carry the ceiling: {unbounded}"

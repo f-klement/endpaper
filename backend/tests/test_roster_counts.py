@@ -840,14 +840,14 @@ def candidates(root: Path | None = None) -> list[Path]:
             name
             for name in subdirectories
             if not name.startswith(".")
-            and not _is_ignored((here / name).relative_to(root), patterns)
+            and not _is_ignored((here / name).relative_to(root), patterns, is_dir=True)
         ]
         for name in files:
             path = here / name
             relative = path.relative_to(root)
             if path.suffix not in READS:
                 continue
-            if _is_ignored(relative, patterns) or _is_vendored(path, root):
+            if _is_ignored(relative, patterns, is_dir=False) or _is_vendored(path, root):
                 continue
             if any(s in str(relative) or s in str(path) for s in skip):
                 continue
@@ -2594,7 +2594,7 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
         root = self._tree(tmp_path)
         patterns = _ignore_patterns(root)
         for name in ("vendor/node_modules/lib.ts", ".hidden.ts"):
-            assert not _is_ignored(Path(name), patterns), (
+            assert not _is_ignored(Path(name), patterns, is_dir=False), (
                 f"{name} is ignored here, so this drives the ignore rule and not "
                 "the vendor rule"
             )

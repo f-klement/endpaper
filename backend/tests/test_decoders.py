@@ -256,6 +256,29 @@ class TestADecoderIsNeverToldHowTheBytesArrived:
             assert any("Decoding" in name for name in annotations), _named(decoder)
 
 
+#: The readers that read no MARC, derived from the registry rather than listed,
+#: and the population the ordering arm below runs over.
+#:
+#: **Asserted non empty here rather than inside that arm**, and the placement is
+#: the whole point: pytest reports an empty parametrisation as one skipped test,
+#: a skip is a pass, and an assertion in the body of an arm that never runs
+#: cannot see the vacuity it is there to catch. Emptying this set reddened only
+#: three neighbouring arms, each of which names its own readers, so until this
+#: line the vacuity was pinned on their backs and would be unguarded the day any
+#: of them moved.
+#:
+#: **What it looks like when it fires is surprising in three ways, none of them
+#: a defect.** It fails at collection, so it takes the rest of this file down
+#: with it: 152 passed becomes 93, and the arms that did not run are reported
+#: **not at all**, neither as passes nor as failures. So the only thing tying
+#: that count drop to its cause is the one error line carrying this message, and
+#: a reader watching a pass count rather than the summary sees a smaller number
+#: and no failures. The parallel runner then prints that one cause once per
+#: worker, which reads as three errors and is one.
+_READERS_THAT_READ_NO_MARC = sorted(set(decoders.Reader) - decoders.MARC_READERS)
+assert _READERS_THAT_READ_NO_MARC, "every reader reads MARC, so the ordering arm is a skip"
+
+
 class TestADecodingIsValidatedWhereverItIsBuilt:
     """The value object refuses what no row has checked.
 
@@ -306,6 +329,54 @@ class TestADecodingIsValidatedWhereverItIsBuilt:
         assert decoders.Decoding(
             source="a folder of files", reader=decoders.Reader.MARC_GND
         ).requires_isbn_claim
+
+    @pytest.mark.parametrize("reader", list(decoders.Reader))
+    def test_a_readers_own_string_is_not_that_reader(self, reader):
+        """`Reader` is a `StrEnum`, so a member hashes as its own value.
+
+        A bare `"marc_plain"` is in `MARC_READERS` and is a key of a reader
+        table exactly where its member is, so the knob refusal above and both
+        registries read it as the
+        member; `metadata._marc_build` asks `is` and reads it as the other MARC
+        reader. `targets.Target` refuses the same value and this field still
+        needs its own refusal, because `Target.decoding` is not the only builder
+        of a decoding and the `is` site reads this field rather than the row's.
+
+        Every member, derived from the enum rather than listed, so a tenth
+        reader is covered by existing.
+        """
+        with pytest.raises(ValueError, match="is not a Reader"):
+            decoders.Decoding(source="a folder of files", reader=reader.value)
+
+    @pytest.mark.parametrize("reader", _READERS_THAT_READ_NO_MARC)
+    def test_a_bare_spelling_carrying_a_knob_is_refused_by_type_first(self, reader):
+        """**This arm is the placement**, and no arm above it can see one.
+
+        The knob refusal below reads the value, and a bare spelling is in
+        `MARC_READERS` or out of it exactly as its member is, so with the two
+        swapped a decoding built from `"dublin_core"` and a MARC knob is
+        reported as a MARC knob on a reader that reads no MARC. No value is
+        admitted either way; what is lost is the diagnosis, and a decoding whose
+        field is a string never learns that is what is wrong with it.
+
+        Every reader that reads no MARC, derived from the registry rather than
+        listed. The MARC readers are excluded because the knob is legal on them,
+        so the refusal below does not fire and the order cannot be observed.
+        """
+        with pytest.raises(ValueError, match="is not a Reader"):
+            decoders.Decoding(
+                source="a folder of files",
+                reader=reader.value,
+                refuses_component_parts=True,
+            )
+
+    @pytest.mark.parametrize("reader", list(decoders.Reader))
+    def test_and_the_member_itself_is_carried(self, reader):
+        """The control: the refusal is on the type and not on the reader."""
+        assert (
+            decoders.Decoding(source="a folder of files", reader=reader).reader
+            is reader
+        )
 
 
 def _production_sources(root: pathlib.Path = BACKEND) -> list[pathlib.Path]:

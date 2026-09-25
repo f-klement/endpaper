@@ -593,6 +593,30 @@ class Target:
             raise ValueError(
                 f"{self.source}: no Z39.50 door yet, the transport dispatch is #129"
             )
+        if not isinstance(self.reader, Reader):
+            # **A `StrEnum` member hashes as its own value, so a bare string is
+            # a key of a reader table exactly where its member is, and is not
+            # the member**, and this field is read
+            # under both disciplines. Every site below and in `metadata.resolve`
+            # asks membership, under which `"marc_plain"` is a MARC reader;
+            # `metadata._marc_build` asks `is`, under which it is not, and picks
+            # the other MARC reader. A row naming `"marc_plain"` would therefore
+            # be parsed by `_dnb_record`, which harvests GND headings and
+            # refuses volume slot titles, where the row asked for
+            # `_k10plus_record`: a wrong reading of every record, reported as a
+            # successful one. `main.seed_catalogue_targets` reads `.value` off
+            # the same field and would raise instead.
+            #
+            # Refused by type at the one site that writes the field, so the
+            # readers agree because the value cannot exist rather than because
+            # six spellings are kept in step. **Ahead of the two refusals below
+            # for the same reason the secret's is ahead of its own**: a refusal
+            # that reads the value has already trusted it.
+            #
+            # `Decoding.__post_init__` carries the same line, and needs its own:
+            # the `is` site reads `Decoding.reader`, and a decoding built from a
+            # file rather than from `Target.decoding` has passed no row.
+            raise ValueError(f"{self.source}: {self.reader!r} is not a Reader")
         if self.reader in IMPORT_READERS:
             # **The registry refusing the other family's parser**, which is the
             # one rule `enums.SourceFamily` exists for and the one place a row

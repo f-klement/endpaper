@@ -119,9 +119,9 @@ def _table(name: str) -> Table:
 def _union_tags(fold: _Fold) -> None:
     """A set union, since `book_tags` has no payload beyond the pair.
 
-    **No ceiling, deliberately.** `MAX_TAGS_PER_BOOK` binds exactly one writer,
-    the CSV importer, and no tag route caps a Book at all, so a cap here would
-    be the only cap in the feature.
+    **No ceiling, deliberately.** `tags.attach` holds `MAX_TAGS_PER_BOOK` against
+    every writer naming a tag, and a merge names none: dropping one here would
+    lose a name off a member's own shelf that nothing puts back.
     """
     existing = {tag.id for tag in fold.keeper.tags}
     for loser in fold.losers:

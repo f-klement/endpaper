@@ -31,10 +31,32 @@
  *   nothing to be stored as and a row claiming one would lie.
  *   `identifiersWithScheme` is where a type becomes a scheme, and it states
  *   what each decline was measured against.
- * - **Tags, ratings and the book files themselves.** Each is a second request a
- *   book, and whether an import should make one is a decision about the import
- *   flow rather than about this reader. The `data` table is still read, for the
- *   one fact it settles that the OPF cannot: whether a book has a file at all.
+ * - **Tags, ratings and the book files themselves.** The reason is scope
+ *   rather than cost: this module returns records, and what an import writes is
+ *   the import flow's decision. **Measured 2026-09-25**, the cost a tag puts on
+ *   that flow is not one extra request a book. The import is one
+ *   `POST /api/books/scan` per book it can build a body for, and a rating is
+ *   one `PATCH` a book on top of that. A tag is neither:
+ *   `POST /api/books/{book_id}/tags/{tag_id}` costs one request per book
+ *   **and** tag, while `POST /api/books/bulk` carries `add_tag` over 500 book
+ *   ids at a time, so the same work is one request per distinct tag per 500
+ *   books carrying it, plus one listing of the tags that exist and one
+ *   `POST /api/books/tags` per distinct name, which creates it or returns the
+ *   one already there. On a library of this size that is at most three requests
+ *   a tag, so it passes the book count only past about three hundred distinct
+ *   names, and it grows with the vocabulary rather than with the shelf. What
+ *   that route needs and the write loop discards is the id each scan answered.
+ *   **Reading the names here costs no request at all**, a ninth `db.query` in
+ *   `readCalibreLibrary`, once for the whole file rather than once a book,
+ *   which is why the surviving reason is the scope one. The loop those imports
+ *   share owns no request and runs one item at a time, by its own docstring,
+ *   so it moves none of this. **Not the file readers' reason either**: those
+ *   decline a subject because a file's genre is uncontrolled free text with
+ *   nowhere to go, where a `tags` row is the vocabulary the member curated in
+ *   their own library and the two routes above take it, so what is declined
+ *   here is the writing rather than the names. The `data` table is still read,
+ *   for the one fact it settles that the OPF cannot: whether a book has a file
+ *   at all.
  * - **Custom columns.** They live in tables named per library
  *   (`custom_column_3`), so reading them means reading `custom_columns` first
  *   and mapping names a household invented onto fields this one defines.

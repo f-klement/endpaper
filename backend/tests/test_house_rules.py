@@ -5489,18 +5489,24 @@ class TestEveryPythonFileCompilesWithoutAWarning:
 #: the runner ships a tar that excludes it. A rule calling `git ls-files` there
 #: is a rule that fails or, worse, quietly answers nothing.
 #:
-#: **A pattern this cannot evaluate exactly raises, rather than being
-#: approximated in either direction.** Approximating it wide drops a versioned
-#: file from the walk, which is the defect the walk exists to stop. Approximating
-#: it narrow walks a directory the repository ignores, which is how the publish
-#: tooling's own output came to be read as source. So the refusal is a class and
-#: not a list of forms: anything the two arms below cannot decide, which today
-#: means a negation, a `**`, and a wildcard in an anchored pattern, because that
-#: arm compares text rather than matching.
-def _ignore_patterns(root: Path) -> list[tuple[str, bool]]:
+#: **Three forms raise rather than being approximated in either direction**: a
+#: negation, a `**`, and a wildcard inside an anchored pattern, because that arm
+#: compares text rather than matching. Approximating wide drops a versioned file
+#: from the walk, which is the defect the walk exists to stop; approximating
+#: narrow walks a directory the repository ignores, which is how the publish
+#: tooling's own output came to be read as source.
+#:
+#: **That is three forms and not the class "anything this cannot evaluate
+#: exactly", which is what this comment used to claim.** A backslash escape and a
+#: POSIX character class are both evaluated, wrongly and in silence: `fnmatch`
+#: reads `\` as an ordinary character and `[[:alpha:]]` as the set of the
+#: literal characters between the brackets. Neither form is in this repository's
+#: ignore file. Naming the three is honest; a fourth predicate for each shape
+#: somebody thinks of is the enumeration this whole walk replaced.
+def _ignore_patterns(root: Path) -> list[tuple[str, bool, bool]]:
     ignore_file = root / ".gitignore"
     assert ignore_file.is_file(), f"no .gitignore at {root}, so the walk has no rule"
-    patterns: list[tuple[str, bool]] = []
+    patterns: list[tuple[str, bool, bool]] = []
     for line in ignore_file.read_text(encoding="utf-8").splitlines():
         entry = line.strip()
         if not entry or entry.startswith("#"):
@@ -5510,27 +5516,92 @@ def _ignore_patterns(root: Path) -> list[tuple[str, bool]]:
         # between `backend/data/` meaning that one directory and meaning any
         # `data` anywhere.
         anchored = entry.startswith("/")
+        # A trailing slash is git's directory only marker, and dropping it with
+        # the anchor marker hides a versioned **file** of that name: unanchored,
+        # `data/` would also hide a file called `data`; anchored, `backend/data/`
+        # would also hide the file `backend/data`. Neither exists here, counted,
+        # so it was latent rather than failing, and it was reachable the moment a
+        # consumer stopped filtering to a suffix.
+        directory_only = entry.endswith("/")
         entry = entry.strip("/")
         anchored = anchored or "/" in entry
         # The anchored arm compares text rather than matching, so a wildcard
-        # there would read as "never matches" instead of raising. Refused as a
-        # class, by the characters, rather than as two more names beside `!` and
-        # `**`: naming forms one at a time is the shape this whole walk replaced.
+        # there would read as "never matches" instead of raising.
         assert "!" not in entry and "**" not in entry and not (
             anchored and set(entry) & set("*?[")
         ), f"unsupported .gitignore form, teach this walk about it: {entry}"
-        patterns.append((entry, anchored))
+        patterns.append((entry, anchored, directory_only))
     return patterns
 
 
-def _is_ignored(relative: Path, patterns: list[tuple[str, bool]]) -> bool:
+def _is_ignored(relative: Path, patterns: list[tuple[str, bool, bool]], is_dir: bool) -> bool:
+    """Whether the repository ignores `relative`, which is a directory when `is_dir`.
+
+    **`is_dir` is what carries the directory only marker**, and every caller
+    already knows it without asking the filesystem a second time. It has no
+    default deliberately: a default is the answer a call site forgets to give,
+    and a wrong answer here drops a versioned file in silence.
+
+    **The separator in the anchored arm is load bearing.** Written
+    `startswith(pattern)` it silently drops `backend/database.py`, because
+    `backend/data` is an anchored entry in this repository's own ignore file.
+    That consequence is live rather than latent, which is why it has an arm of
+    its own, `test_an_anchored_rule_stops_at_the_separator_rather_than_the_prefix`.
+
+    **Four mutations, three of this function and one of a call site, survive
+    every arm covering either, and the gap is known rather than missed.**
+    Nothing in this tree can observe them:
+
+    * Requiring `is_dir` on the anchored **exact** match moves only an anchored
+      entry carrying no marker. One entry is in that class here against six
+      carrying the marker, and it names a directory, so no caller asks about it
+      as a file. **Adding the slash it is missing would empty the class**, and
+      this sentence would then be true because there is nothing left to be wrong
+      about rather than because the rule holds.
+    * Honouring the marker on the anchored **subtree** match moves only a file
+      under an ignored directory, and every walk over this prunes that
+      directory before it reaches the file.
+    * Reading only the **last** component in the unanchored arm breaks ancestor
+      semantics, and nothing here can see it: the walks prune the ancestor
+      first, and every unanchored entry carrying no marker names a file.
+    * Asking this with `is_dir=False` where a walk prunes moves only which of
+      two arms drops the entry, because the arm for files decides the same
+      question one component further down.
+
+    Each becomes observable the moment its premise moves: an anchored entry with
+    no marker naming a file, a caller that asks about a path it did not walk to,
+    a walk that stops pruning. An arm is the wrong answer to all four, because an
+    arm asserting a fixture nothing reaches asserts the fixture.
+
+    **That pruning is also why two mutations here mask each other**, which is the
+    general shape and not a detail of these two. Dropping `is_dir` from the
+    unanchored arm, and shortening that arm's components to nothing, are each
+    green alone against every walk and red together: the walk never reaches a
+    file under an ignored directory, so each mutation removes the evidence the
+    other would have left. What catches either alone is the anti vacuity pin in
+    the guard over the strip list, which asks this directly rather than through a
+    walk. A guard that only drives the walk cannot see either.
+    """
     text = str(relative)
-    return any(
-        (text == pattern or text.startswith(f"{pattern}/"))
-        if anchored
-        else any(fnmatch(part, pattern) for part in relative.parts)
-        for pattern, anchored in patterns
-    )
+    for pattern, anchored, directory_only in patterns:
+        if anchored:
+            # An anchored pattern matches the path itself, where the marker
+            # decides, or anything under it, where it cannot.
+            matched = (
+                (is_dir or not directory_only)
+                if text == pattern
+                else text.startswith(f"{pattern}/")
+            )
+        else:
+            # A directory only pattern still matches a **directory component**
+            # of a file's path. The last component is the entry itself and is a
+            # directory only when the caller says so; every component before it
+            # is one by construction.
+            parts = relative.parts if (is_dir or not directory_only) else relative.parts[:-1]
+            matched = any(fnmatch(part, pattern) for part in parts)
+        if matched:
+            return True
+    return False
 
 
 #: Every Markdown file this repository versions.
@@ -5582,13 +5653,13 @@ def _markdown_sources(root: Path | None = None) -> list[Path]:
             name
             for name in subdirectories
             if not name.startswith(".")
-            and not _is_ignored((here / name).relative_to(root), patterns)
+            and not _is_ignored((here / name).relative_to(root), patterns, is_dir=True)
         ]
         found += [
             here / name
             for name in files
             if name.endswith(".md")
-            and not _is_ignored((here / name).relative_to(root), patterns)
+            and not _is_ignored((here / name).relative_to(root), patterns, is_dir=False)
         ]
     return sorted(found)
 
@@ -5657,7 +5728,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         replaced = {
             path.relative_to(repo)
             for path in [*repo.glob("*.md"), *repo.glob("docs/*.md")]
-            if not _is_ignored(path.relative_to(repo), patterns)
+            if not _is_ignored(path.relative_to(repo), patterns, is_dir=False)
         }
         assert replaced <= walked, sorted(str(p) for p in replaced - walked)
         assert Path("CHANGELOG.md") in walked
@@ -5701,6 +5772,72 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         (tmp_path / "docs" / "scratch.md").write_text("# deeper than the pattern\n")
         walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
         assert walked == {"docs/real.md"}
+
+    def test_a_directory_only_rule_does_not_drop_a_versioned_file_of_that_name(
+        self, tmp_path: Path
+    ) -> None:
+        """git's trailing slash says directory, and throwing it away hides a
+        **file** of that name as well: `data/` is an unanchored directory only
+        entry in this repository's own ignore file, and a versioned file called
+        `data` would have gone with it. The wave's scratch directory is another,
+        named here by description because it is on the publish gate's strip list
+        and this file is published.
+
+        **The fixture's pattern carries a `.md` suffix because this walk collects
+        only `.md`**, which is also why the live defect is latent: every
+        unanchored directory only entry in this repository's ignore file is
+        suffix-less, so no file this walk can collect is named for one. A
+        consumer that stopped filtering by suffix would reach it.
+        """
+        (tmp_path / ".gitignore").write_text("notes.md/\n")
+        (tmp_path / "notes.md").mkdir()
+        (tmp_path / "notes.md" / "inner.md").write_text("# inside the ignored directory\n")
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "notes.md").write_text("# a file, and this pattern says directory\n")
+        walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
+        assert walked == {"docs/notes.md"}
+
+    def test_an_anchored_directory_only_rule_spares_a_file_at_that_path(
+        self, tmp_path: Path
+    ) -> None:
+        """The marker has two branches and the arm above reaches one. Discarding
+        it in the anchored branch survives that arm, and the anchored directory
+        only entries here include the backend data directory and the agent
+        worktrees.
+
+        **One path and one file, not the two the arm above uses**, because a
+        directory and a file cannot share a path: a `build/out.md/` holding
+        something, beside a file called `build/out.md`, cannot be built.
+        """
+        (tmp_path / ".gitignore").write_text("build/out.md/\n")
+        (tmp_path / "build").mkdir()
+        (tmp_path / "build" / "out.md").write_text("# a file where a directory is ignored\n")
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "real.md").write_text("# real\n")
+        walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
+        assert walked == {"build/out.md", "docs/real.md"}
+
+    def test_an_anchored_rule_stops_at_the_separator_rather_than_the_prefix(
+        self, tmp_path: Path
+    ) -> None:
+        """Written `startswith(pattern)` the anchored arm takes every sibling
+        whose name begins with the same characters, and it drops them **from the
+        walk**, silently. `backend/data` is an anchored entry in this
+        repository's own ignore file and `backend/database.py` is a versioned
+        module, so the consequence is live here rather than latent, which is why
+        this one is an arm where the other blind spots in `_is_ignored` are a
+        paragraph.
+
+        The ignored directory's own file is beside the sibling so the fixture
+        also shows the prune still happening: without the separator the walk
+        returns nothing at all, not the two files.
+        """
+        (tmp_path / ".gitignore").write_text("docs/note/\n")
+        (tmp_path / "docs" / "note").mkdir(parents=True)
+        (tmp_path / "docs" / "note" / "inner.md").write_text("# inside the ignored directory\n")
+        (tmp_path / "docs" / "notes.md").write_text("# a sibling sharing the first characters\n")
+        walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
+        assert walked == {"docs/notes.md"}
 
     def test_a_hidden_directory_is_not_walked_even_where_the_ignore_file_is_silent(
         self, tmp_path: Path

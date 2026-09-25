@@ -3470,12 +3470,36 @@ _SECONDARY_SOURCES: Final = frozenset(
 )
 _SECONDARY_PENALTY: Final = 1
 
-#: Fields that make a row pickable rather than a stub. Scored **separately**
-#: from matching and only ever as a tiebreaker: a fully populated record that
-#: answers nothing must never outrank a sparse one that answers the question.
-#: It did, and "Christmas at Hogwarts" came second for "harry potter
+#: Fields that make a search row pickable rather than a stub. Scored
+#: **separately** from matching and only ever as a tiebreaker: a fully populated
+#: record that answers nothing must never outrank a sparse one that answers the
+#: question. It did, and "Christmas at Hogwarts" came second for "harry potter
 #: philosopher's stone".
-_COMPLETENESS_FIELDS: Final = (
+#:
+#: **`catalogue.Record.completeness` is the other completeness score and is not
+#: this one.** It ranks records already known to describe one book; this ranks
+#: rows that may not be the same book at all, and that is what puts the five
+#: differing fields where they are. Three are absent from here:
+#:
+#: * `language` and `series_name` are already scored, in `_relevance`'s **first**
+#:   element, by `_LANGUAGE_WEIGHT` and `_SERIES_WEIGHT`. Repeating them here
+#:   counts one fact twice in one comparison, in the weaker of the two places.
+#: * `description`, and the subjects bonus `completeness` adds, say which
+#:   catalogue answered rather than what the book is. `_open_library_search`
+#:   writes neither field at all, and the DNB carries a 520 on 1 of 85 live
+#:   records; see `_dnb_record`. Scoring them would rank by source under a name
+#:   promising to rank by the row.
+#:
+#: **What this list costs is the opposite lean, accepted rather than unnoticed.**
+#: `_marc_record` builds a search row with no ISBN, so no row from a MARC search
+#: scores on either of these two, whichever catalogue answered, where an Open
+#: Library row may score both. Said by the decoder rather than by a list of
+#: source names, which is what goes stale the day a fifth MARC catalogue is
+#: added. A member reading a list of results is choosing something to scan and
+#: something with a cover, which is the answer the product wants; that the pair
+#: is also a source signal is the price. `docs/decisions.md` holds the argument,
+#: under *The two completeness scores are two questions, not one list*.
+_PICKABLE_FIELDS: Final = (
     "author",
     "year",
     "publisher",
@@ -3496,7 +3520,7 @@ def _relevance(
     publication year.
 
       1. how much of the query this row accounts for
-      2. how complete the row is
+      2. how pickable the row is, by `_PICKABLE_FIELDS`
       3. how recent the printing is
 
     Needed at all because the catalogues return **catalogue order**, which for
@@ -3550,8 +3574,25 @@ def _relevance(
     if sources and sources <= _SECONDARY_SOURCES:
         score -= _SECONDARY_PENALTY
 
-    completeness = sum(1 for name in _COMPLETENESS_FIELDS if getattr(match, name))
-    return (score, completeness, match.year or 0)
+    pickable = sum(1 for name in _PICKABLE_FIELDS if getattr(match, name))
+    return (score, pickable, match.year or 0)
+
+
+def _ranked(
+    matches: list[Record], terms: list[str], prefer_language: str | None
+) -> list[Record]:
+    """Every match, best answer first. The ordering a search actually returns.
+
+    **A function rather than the `sorted` that was written at its one call
+    site**, because the tests had written their own copy of that `sorted` and so
+    pinned `_relevance` while pinning nothing about the ordering: `reverse=True`
+    could be dropped, or an element taken off the key, and every arm stayed
+    green. The fixtures call this, so the ordering under test is the ordering
+    that ships.
+    """
+    return sorted(
+        matches, key=lambda match: _relevance(match, terms, prefer_language), reverse=True
+    )
 
 
 @dataclass(frozen=True)
@@ -3738,9 +3779,7 @@ async def title_search(
 
     merged = _merge_matches([row for tier in tiers for row in tier])
 
-    ranked = sorted(
-        merged, key=lambda match: _relevance(match, terms, prefer_language), reverse=True
-    )
+    ranked = _ranked(merged, terms, prefer_language)
     asked = frozenset(roster)
     return Search(
         ranked[:limit],

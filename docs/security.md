@@ -823,8 +823,9 @@ is how a secret reaches a log aggregator.
 ## Rate limiting
 
 **Eleven counters, for five different reasons.** The count is not read off this
-page: `SlidingWindowLimiter(` in `backend/ratelimit.py` is counted on every run,
-which is why no date is attached to it. The method was added on 2026-08-28,
+page: the names `backend/ratelimit.py` binds to a limiter are counted on every
+run, pinned against a parse of the limiters that module constructs, which is
+why no date is attached to it. The method was added on 2026-08-28,
 after this table said five and listed four of them, omitting the authority and
 cover backfill limits entirely. The number is derived rather than written:
 `tests/test_ratelimit.py::TestTheRateLimitTableInTheDocsIsTheModule`

@@ -564,7 +564,15 @@ class TestMergingTwoCataloguesOfOnePrinting:
 
 
 class TestHowCompleteARecordIs:
-    """The score that decides which printing and which catalogue leads."""
+    """The score that decides which printing and which catalogue leads.
+
+    **Both directions of the fold with `metadata._PICKABLE_FIELDS` are held
+    here**, and the subtraction half is the one that needs saying. Three arms
+    assert that `language`, `description` and `series_name` count, because
+    "delete the differences" is how two lists become one and nothing else in the
+    repository would notice: measured, dropping `series_name` alone from
+    `_SCORED`, and `language` alone, each left both of these files green.
+    """
 
     def test_an_empty_record_scores_nothing(self):
         assert Record().completeness == 0
@@ -584,6 +592,40 @@ class TestHowCompleteARecordIs:
     def test_headings_do_not_count(self):
         """A record is not more recognisable for carrying a call number."""
         assert Record(headings=(DDC_004,)).completeness == 0
+
+    def test_an_isbn_does_not_count(self):
+        """Every candidate for one ISBN carries the ISBN that was asked."""
+        assert Record(isbn="9780441013593").completeness == 0
+
+    def test_a_cover_url_does_not_count(self):
+        """Built from that same ISBN, so it separates no candidate either."""
+        assert Record(cover_url="https://example.com/cover.jpg").completeness == 0
+
+    def test_a_declared_language_counts(self):
+        """Which printing somebody is holding, where several are catalogued."""
+        assert Record(language="de").completeness == 1
+
+    def test_a_blurb_counts(self):
+        """The one field a member reads to tell two records apart by hand."""
+        assert Record(description="A desert planet.").completeness == 1
+
+    def test_a_series_name_counts(self):
+        """A volume out of a series is recognised by the series, not the title."""
+        assert Record(series_name="Dune Chronicles").completeness == 1
+
+    def test_every_scored_name_is_readable_off_a_record(self):
+        """A name left behind by a rename raises on a live lookup, not here.
+
+        **`hasattr` and not `dataclasses.fields`**, which is a refusal rather
+        than a spelling. `completeness` reads each name with `getattr`, which
+        resolves a property as happily as a field, so a field membership test
+        refuses a derived name that works: measured, adding a real property to
+        `Record` failed that spelling alone on an otherwise working tree.
+        `hasattr` also catches a property a rename removed, which the field test
+        never could.
+        """
+        record = Record()
+        assert [name for name in catalogue._SCORED if not hasattr(record, name)] == []
 
 
 class TestTheTwoDraftShapes:

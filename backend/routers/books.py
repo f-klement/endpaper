@@ -166,6 +166,7 @@ from shelf import (
     order_for,
     whole_table_for_uniqueness,
 )
+from tags import MAX_TAGS_PER_BOOK, Mint, attach
 from uploads import read_image_upload
 
 logger = logging.getLogger("endpaper.books")
@@ -232,32 +233,28 @@ def create_tag(payload: TagCreate, db: DbSession, current_user: CurrentUser) -> 
     than a 409: somebody typing a name that is already there wants that tag,
     and an error would send them to find it by hand.
     """
-    # **Folded in Python on both sides, never `func.lower` against `.lower()`.**
-    # Those are two different functions: SQLite's `lower()` is ASCII only, so
-    # `lower('Ästhetik')` is `'Ästhetik'` there and `'ästhetik'` here. A stored
-    # tag with a non-ASCII capital therefore never matched, and the insert then
-    # hit the binary `unique=True` on `tags.name` with a name already present:
-    # measured, this route answered **500** to `{"name": "Ästhetik"}` whenever
-    # that tag existed. See `docs/decisions.md`, "SQLite folds case in ASCII
-    # and Python does not".
-    #
-    # One query and a scan rather than a filtered lookup, because the tags are
-    # a library's curated list plus what imports invented, and correctness here
-    # is worth more than the index. `importing.Import._tags_by_folded_name`
-    # does the same thing for the same reason.
-    folded = payload.name.lower()
-    existing = next(
-        (tag for tag in db.query(Tag).order_by(Tag.id).all() if tag.name.lower() == folded),
-        None,
-    )
-    if existing is not None:
-        return existing
+    # The fold, the order a case differing pair is resolved in, the
+    # normalisation and the ceiling are `tags.py`'s, and every writer asks the
+    # same Mint for them. **What stays here is the commit**, which is the one
+    # thing about that module's shape that cannot move: an import needs the same
+    # primitive inside a transaction it commits once, at the end of the file.
+    minted = Mint(db).get_or_mint(payload.name)
+    if minted is None:
+        # `TagCreate.tidy` refuses a name that normalises to nothing before this
+        # is reached and this Mint carries no budget, so nothing left can answer
+        # None. It is handled rather than asserted because the Mint is one
+        # function for two callers and the other has no schema in front of it.
+        #
+        # **400 and not 422**, although an empty name is what 422 is for: the
+        # committed schema types a 422 `detail` as the array of validation
+        # entries FastAPI sends, so a sentence under that status is read by a
+        # generated client as a list. `tests/test_errors.py` holds that rule and
+        # is what caught this line.
+        raise HTTPException(status_code=400, detail="A tag needs a name.")
 
-    tag = Tag(name=payload.name, category=TagCategory.CUSTOM, is_predefined=False)
-    db.add(tag)
     db.commit()
-    db.refresh(tag)
-    return tag
+    db.refresh(minted)
+    return minted
 
 
 @router.delete("/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1446,11 +1443,17 @@ def _bulk_add_tag(
     tag = _require_tag(db, value)
     updated = unchanged = 0
     for book in books:
-        if any(existing.id == tag.id for existing in book.tags):
-            unchanged += 1
-        else:
-            book.tags.append(tag)
+        # **A Book at its ceiling is counted unchanged, which is true of that
+        # Book and is not the whole truth.** A refusal and "it already had this
+        # tag" are different answers and `BulkResult` has three buckets, the
+        # third of which the caller computes from the permission walk. A fourth
+        # is a response shape change, so the refusal is logged by `tags.attach`
+        # and reported here as no change rather than as a change nobody made.
+        already = any(existing.id == tag.id for existing in book.tags)
+        if not already and attach(book, tag):
             updated += 1
+        else:
+            unchanged += 1
     return updated, unchanged
 
 
@@ -2735,13 +2738,18 @@ MAX_IDENTIFIER_BACKFILL: Final = 50
 
 #: Volume lookups in flight at once during a backfill.
 #:
-#: **Six, the same as `covers.MAX_CONCURRENT_FETCHES`, and bounded for the same
-#: reason plus one of its own.** A backfill runs over a whole library, so an
-#: unbounded gather would open a socket per book and get this deployment's
-#: address refused. The reason of its own is memory: `fetch.MAX_RESPONSE_BYTES`
-#: prices the pod at sixteen concurrent 2 MiB responses, and `metadata.search`
-#: already spends eight of them, so a backfill that ran ten at a time could put
-#: a search over the ceiling that constant computes.
+#: **Six, derived here rather than borrowed.** A backfill runs over a whole
+#: library, so an unbounded gather would open a socket per book and get this
+#: deployment's address refused. The binding reason is memory:
+#: `fetch.MAX_RESPONSE_BYTES` prices the pod at sixteen concurrent 2 MiB
+#: responses, and `metadata.search` already spends eight of them, so a backfill
+#: that ran ten at a time could put a search over the ceiling that constant
+#: computes.
+#:
+#: **`covers.MAX_CONCURRENT_FETCHES` is also six and that is not evidence**, on
+#: the ground `MAX_IDENTIFIER_BACKFILL` states four lines above: that route is
+#: bounded by what two image services will tolerate, and this one by a metered
+#: key's bill. Either may move without the other.
 IDENTIFIER_BACKFILL_CONCURRENCY: Final = 6
 
 
@@ -3659,7 +3667,18 @@ def add_book_tag(
     if tag is None:
         raise HTTPException(status_code=404, detail="Tag not found")
     if tag not in book.tags:
-        book.tags.append(tag)
+        # **Refused rather than dropped, which is where this differs from the
+        # import.** A member pressed one button for one tag, so a 200 with the
+        # tag missing is the picker lying to them; an import is a file of
+        # thousands and its ceiling is reached quietly by design. `tags.attach`
+        # is what makes the ceiling true of every writer: this route is how the
+        # 4000 tags on one Book that the import cap exists to prevent stayed
+        # reachable, one request at a time.
+        if not attach(book, tag):
+            raise HTTPException(
+                status_code=400,
+                detail=f"A book can carry {MAX_TAGS_PER_BOOK} tags, and this one already does.",
+            )
         db.commit()
         db.refresh(book)
     return book_to_out(book, current_user, db)

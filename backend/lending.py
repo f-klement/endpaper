@@ -28,6 +28,16 @@ cosmetic: `visible_to` admits the viewer's **own** private Books, so a digest
 running as an admin would post that admin's private titles to a Telegram
 channel. The refusal is in the query rather than in a count downstream.
 
+**Small by ADR 0008's depth instrument, and that is a fact about size rather than about the
+door.** That ratio is statements behind each public name, and this module sits below
+`dependencies.py`, the floor that document's central comparison is proved against, while
+`Loans` is the arrangement `Shelf` is. It is named there as the module that stops the
+comparison reading as a claim about shape. Nothing follows for the door: what a caller stops
+knowing is the four facts above, which is `dependencies.py`'s own argument at a ratio of the
+same kind. **The figure is deliberately not written here**, because nothing here would
+recompute it and a number that is copied rather than derived is what that document exists to
+refuse.
+
 ## What this module does not own
 
 **The overdue predicate**, which is `notifications.overdue_clauses`: one

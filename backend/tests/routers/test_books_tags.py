@@ -11,7 +11,8 @@ be deleted, because `seed_tags()` would put it straight back and the delete
 would look like it silently failed.
 """
 
-from models import Tag
+from models import Book, Tag
+from tags import MAX_TAGS_PER_BOOK
 
 
 class TestCreating:
@@ -159,6 +160,89 @@ class TestCreating:
 
     def test_requires_authentication(self, client):
         assert client.post("/api/books/tags", json={"name": "X"}).status_code == 401
+
+
+class TestPuttingOneOnABook:
+    """The ceiling every writer now shares.
+
+    It bound the CSV importer alone while it lived in that parser, so the 4000
+    tags on one Book its measured failure produced stayed reachable here, one
+    request at a time.
+
+    **Refused rather than dropped, which is where this differs from an import.**
+    A member pressed one button for one tag, so a 200 with the tag missing is
+    the picker lying to them; an import is a file of thousands and reaches its
+    ceiling quietly by design.
+    """
+
+    def fill(self, db, book_id, how_many):
+        book = db.get(Book, book_id)
+        for index in range(how_many):
+            row = Tag(name=f"filler {index}", category="custom", is_predefined=False)
+            db.add(row)
+            book.tags.append(row)
+        db.commit()
+
+    def test_a_tag_lands_on_the_book(self, client, admin, make_book):
+        book = make_book(admin["headers"])
+        tag = client.post(
+            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
+        ).json()
+
+        res = client.post(
+            f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"]
+        )
+
+        assert res.status_code == 200
+        assert [carried["name"] for carried in res.json()["tags"]] == ["Holiday reads"]
+
+    def test_a_book_at_its_ceiling_refuses_another(self, client, admin, make_book, db):
+        book = make_book(admin["headers"])
+        self.fill(db, book["id"], MAX_TAGS_PER_BOOK)
+        tag = client.post(
+            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
+        ).json()
+
+        res = client.post(
+            f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"]
+        )
+
+        assert res.status_code == 400
+        detail = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
+        assert len(detail["tags"]) == MAX_TAGS_PER_BOOK
+
+    def test_a_book_one_short_still_takes_one(self, client, admin, make_book, db):
+        """The diagonal, so the refusal above is not an off by one refusing every
+        book."""
+        book = make_book(admin["headers"])
+        self.fill(db, book["id"], MAX_TAGS_PER_BOOK - 1)
+        tag = client.post(
+            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
+        ).json()
+
+        res = client.post(
+            f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"]
+        )
+
+        assert res.status_code == 200
+        assert len(res.json()["tags"]) == MAX_TAGS_PER_BOOK
+
+    def test_a_full_book_still_answers_for_a_tag_it_already_has(
+        self, client, admin, make_book, db
+    ):
+        """Asking again for something already there is not a refusal, so a client
+        retrying a request it did not see the answer to gets the book back."""
+        book = make_book(admin["headers"])
+        self.fill(db, book["id"], MAX_TAGS_PER_BOOK)
+        carried = client.get(
+            f"/api/books/{book['id']}", headers=admin["headers"]
+        ).json()["tags"][0]
+
+        res = client.post(
+            f"/api/books/{book['id']}/tags/{carried['id']}", headers=admin["headers"]
+        )
+
+        assert res.status_code == 200
 
 
 class TestDeleting:

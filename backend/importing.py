@@ -58,14 +58,14 @@ import book_columns
 import csv_import
 import identity
 import marc
+import tags
 from catalogue import Record
 from classifications import add_headings, bounded_headings
-from enums import OwnershipStatus, ReadStatus, TagCategory
-from models import Book, Note, Tag
+from enums import OwnershipStatus, ReadStatus
+from models import Book, Note
 from reading import Reading, Records
 from schemas import ImportResultOut
 from schemas.book import BookCreate
-from schemas.tag import MAX_TAG_NAME
 from shelf import Shelf, whole_table_for_uniqueness
 
 logger = logging.getLogger("endpaper.importing")
@@ -347,10 +347,13 @@ class Import:
         """
         index = _CatalogueIndex.build(self._db, self._member_id)
         tally = _Tally()
-        tag_cache = self._tags_by_folded_name() if apply_tags else {}
+        # Built whether or not tags are wanted, because a Mint reads nothing
+        # until it is asked: the branch this replaced existed only to keep the
+        # query off an import that applies no tags.
+        mint = tags.Mint(self._db, budget=tags.MAX_NEW_TAGS_PER_IMPORT)
 
         for row in parsed.rows:
-            self._apply_one(row, index, tally, tag_cache, create_missing, apply_tags)
+            self._apply_one(row, index, tally, mint, create_missing, apply_tags)
 
         self._db.commit()
 
@@ -373,50 +376,12 @@ class Import:
             unmatched_titles=tally.unmatched,
         )
 
-    def _tags_by_folded_name(self) -> dict[str, Tag]:
-        """Every Tag in the Library, keyed the way `_apply_tags` looks one up.
-
-        **Read once here rather than queried per unseen name, and the reason is
-        correctness before it is cost.** The per-name query was
-        `func.lower(Tag.name) == key`, which folds in SQLite, against a `key`
-        folded in Python. Those are not the same function: SQLite's `lower()`
-        is ASCII only. Measured, `lower('Ästhetik')` is `'Ästhetik'` in SQLite
-        and `'ästhetik'` in Python, so a stored Tag carrying a non-ASCII
-        capital never matched, the import decided it was new, and the insert
-        hit the binary `unique=True` on `tags.name` with a name already there.
-        That raises `IntegrityError` **and takes the whole file with it**: a
-        member with one German shelf name imported nothing, every time, with a
-        500.
-
-        Folding both sides in Python removes the mismatch by removing the
-        second folder. It also turns one query per unseen name into one query
-        per import.
-
-        Ordered by id, and **first wins**, which is `_first_wins` a hundred lines
-        above and `routers/books.create_tag` doing the same thing. Two Tags
-        differing only in case are reachable on any database that met the bug
-        this replaced, because the old `create_tag` created exactly that pair:
-        the lookup missed and the binary index allowed both.
-
-        Stability alone is not enough there, and that is the trap. A dict
-        comprehension over the same ordering is equally stable and keeps the
-        **last** key written, so the import resolved such a pair to the highest
-        id while `create_tag` resolved it to the lowest. Measured on a pair at
-        ids 106 and 107: the import picked 107 and the route picked 106. Both
-        stable, on opposite ends, and both docstrings claimed the ordering was
-        what made them agree.
-        """
-        folded: dict[str, Tag] = {}
-        for tag in self._db.query(Tag).order_by(Tag.id).all():
-            folded.setdefault(tag.name.lower(), tag)
-        return folded
-
     def _apply_one(
         self,
         row: csv_import.ImportRow,
         index: _CatalogueIndex,
         tally: _Tally,
-        tag_cache: dict[str, Tag],
+        mint: tags.Mint,
         create_missing: bool,
         apply_tags: bool,
     ) -> None:
@@ -435,7 +400,7 @@ class Import:
             return
 
         if apply_tags and row.tags:
-            self._apply_tags(book, row.tags, tag_cache, tally)
+            self._apply_tags(book, row.tags, mint)
 
         if self._apply_reading_record(index, book_id=book.id, row=row):
             tally.updated += 1
@@ -474,57 +439,33 @@ class Import:
         index.remember(book)
         return book
 
-    def _apply_tags(
-        self, book: Book, names: list[str], cache: dict[str, Tag], tally: _Tally
-    ) -> None:
+    def _apply_tags(self, book: Book, names: list[str], mint: tags.Mint) -> None:
         """Put the file's tags on the Book, inventing the new ones.
 
-        Takes the tally rather than the count so far and a return value: the
-        budget spent is read and written in one place instead of being threaded
-        out of the caller and back in.
+        **Every rule this used to carry lives in `tags.py` now**, which is the
+        point of that module: the fold, the ordering a case differing pair is
+        resolved by, the normalisation, the truncation and both caps. This is
+        the loop and nothing else, and what it must not do is reimplement any of
+        them for the import's convenience.
 
-        The cache is seeded once by `_tags_by_folded_name` and there is no
-        per-name query left. There used to be: a five hundred row export shares
-        a handful of tags, and looking each one up per row was five hundred
-        queries for the same answer.
+        **The room check comes before the mint and is not the same check as
+        `tags.attach`'s.** A Book already at its ceiling would otherwise spend
+        the import's new tag budget on names it is then refused, so a later Book
+        in the same file loses tags to one that could not carry them.
 
-        **Two caps, and both were measured rather than guessed.** A 12 KB file
-        of 200 rows created **4032** Library wide tags and put 4000 of them on
-        one Book, because the only limit was per row. Past the caps this stops
-        inventing rather than failing: the Books in the file are still worth
-        having.
-
-        The name is truncated **before** the cache key. Truncating only at the
-        insert made two tags sharing their first hundred characters both miss
-        the cache, and the second insert violate the unique index, which took
-        the whole import down. That was one instance of the class the fold
-        above is the other one of.
+        Takes the Mint rather than a cache and a tally: the budget is spent and
+        counted in one object instead of being threaded out of the caller and
+        back in.
         """
-        existing_ids = {tag.id for tag in book.tags}
-
         for raw in names:
-            if len(existing_ids) >= csv_import.MAX_TAGS_PER_BOOK:
+            if not tags.room_on(book):
                 break
 
-            name = raw[:MAX_TAG_NAME]
-            key = name.lower()
-
-            tag = cache.get(key)
+            tag = mint.get_or_mint(raw)
             if tag is None:
-                # Genuinely new: the cache was seeded from the whole table, so
-                # a miss here is a miss in the database. See
-                # `_tags_by_folded_name` for why there is no second lookup.
-                if tally.new_tags >= csv_import.MAX_NEW_TAGS_PER_IMPORT:
-                    continue
-                tag = Tag(name=name, category=TagCategory.CUSTOM, is_predefined=False)
-                self._db.add(tag)
-                self._db.flush()
-                tally.new_tags += 1
-                cache[key] = tag
+                continue
 
-            if tag.id not in existing_ids:
-                book.tags.append(tag)
-                existing_ids.add(tag.id)
+            tags.attach(book, tag)
 
     def _keep_review(self, index: _CatalogueIndex, *, book_id: int, text: str) -> None:
         """Keep the review the export carried, as this Member's private note.
@@ -627,7 +568,6 @@ class _Tally:
     matched: int = 0
     created: int = 0
     updated: int = 0
-    new_tags: int = 0
     unmatched_private: int = 0
     #: Records with nothing left to file them under. Only `OpdsImport` counts
     #: these: the other two importers get the number from their parser, which

@@ -54,7 +54,7 @@ import metadata
 import sources
 import targets
 import z3950
-from catalogue import AuthorityAssertion, Heading, Record, Subject
+from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
 from enums import (
     AuthorityScheme,
     CatalogueSource,
@@ -2567,12 +2567,13 @@ class TestRanking:
         return Record(**overrides)
 
     def rank(self, matches, query, prefer_language=None):
-        terms = metadata._search_terms(query)
-        return sorted(
-            matches,
-            key=lambda match: metadata._relevance(match, terms, prefer_language),
-            reverse=True,
-        )
+        """Through `_ranked`, which is the ordering `search` ships.
+
+        This used to be its own `sorted` over `_relevance`. That pinned the key
+        and nothing about the ordering: `reverse=True` could be dropped from the
+        real call and every arm below stayed green.
+        """
+        return metadata._ranked(matches, metadata._search_terms(query), prefer_language)
 
     def test_the_novel_outranks_a_book_about_it(self):
         """The study guide carries the author's name inside its own title.
@@ -2608,7 +2609,7 @@ class TestRanking:
         ranked = self.rank([unrelated, matching], "harry potter philosopher stone")
         assert ranked[0] is matching
 
-    def test_completeness_breaks_a_tie_between_equal_matches(self):
+    def test_a_more_pickable_row_breaks_a_tie_between_equal_matches(self):
         sparse = self.match(title="Dune", author="Frank Herbert")
         full = self.match(
             title="Dune",
@@ -2668,6 +2669,134 @@ class TestRanking:
     def test_a_row_matching_nothing_scores_zero(self):
         unrelated = self.match(title="Something else", author="Nobody")
         assert metadata._relevance(unrelated, ["dune"], None)[0] == 0
+
+
+class TestPickabilityIsNotRecordCompleteness:
+    """`_PICKABLE_FIELDS` and `Record.completeness` are two scores, not one.
+
+    They share four field names and differ on five, and the standing proposal
+    is to fold them. Each arm here holds one of the five differences by its own
+    reason, so a fold in either direction goes red by name rather than by a
+    count somebody has to interpret.
+
+    **What these do not hold is the ordering of whole live result sets.** They
+    are written over constructed rows, so they say which field moves which part
+    of the tuple and nothing about how often it decides a real search.
+
+    **Nor do they hold the arity of the key.** Shrinking `_relevance`'s tuple
+    passes every arm here and is caught by mypy, at the annotated `return` in
+    `metadata.py`, because the type is declared. Stated rather than armed: a
+    second instrument already refuses it.
+    """
+
+    def match(self, **overrides: Any) -> Record:
+        """One row, defaulting to a primary source so the penalty is opt in."""
+        overrides.setdefault("source", "open_library")
+        return Record(**overrides)
+
+    def relevance(
+        self, match: Record, query: str, prefer_language: str | None = None
+    ) -> tuple[int, int, int]:
+        return metadata._relevance(
+            match, metadata._search_terms(query), prefer_language
+        )
+
+    def test_a_row_carrying_an_isbn_outranks_an_identical_row_without_one(self):
+        """A title query supplies no ISBN, so carrying one is the row's own."""
+        scannable = self.match(
+            title="Dune", author="Frank Herbert", isbn="9780441013593"
+        )
+        bare = self.match(title="Dune", author="Frank Herbert")
+        assert self.relevance(scannable, "dune herbert")[1] > self.relevance(
+            bare, "dune herbert"
+        )[1]
+
+    def test_a_row_carrying_a_cover_outranks_an_identical_row_without_one(self):
+        """The picker shows the cover, so a row without one is harder to pick."""
+        illustrated = self.match(
+            title="Dune",
+            author="Frank Herbert",
+            cover_url="https://example.com/cover.jpg",
+        )
+        bare = self.match(title="Dune", author="Frank Herbert")
+        assert self.relevance(illustrated, "dune herbert")[1] > self.relevance(
+            bare, "dune herbert"
+        )[1]
+
+    def test_a_blurb_does_not_lift_a_row_above_an_identical_one(self):
+        """Which rows carry one is a fact about the catalogue, not the book.
+
+        `_open_library_search` writes no description at all and the DNB carries
+        a 520 on 1 of 85 live records, so scoring it ranks by source.
+        """
+        blurbed = self.match(
+            title="Dune", author="Frank Herbert", description="A desert planet."
+        )
+        bare = self.match(title="Dune", author="Frank Herbert")
+        assert self.relevance(blurbed, "dune herbert") == self.relevance(
+            bare, "dune herbert"
+        )
+
+    def test_subjects_do_not_lift_a_row_above_an_identical_one(self):
+        """The same source signal: an Open Library search row carries none."""
+        classified = self.match(
+            title="Dune",
+            author="Frank Herbert",
+            subjects=uncontrolled(("Science fiction",)),
+        )
+        bare = self.match(title="Dune", author="Frank Herbert")
+        assert self.relevance(classified, "dune herbert") == self.relevance(
+            bare, "dune herbert"
+        )
+
+    def test_a_series_name_is_worth_its_weight_once(self):
+        """It is already scored in the matching term, which is the stronger one."""
+        in_series = self.match(
+            title="Dune", author="Frank Herbert", series_name="Dune Chronicles"
+        )
+        bare = self.match(title="Dune", author="Frank Herbert")
+        scored = self.relevance(in_series, "dune chronicles")
+        unscored = self.relevance(bare, "dune chronicles")
+        # **The inequality is not the equality restated.** The equality compares
+        # `score += _SERIES_WEIGHT` against `_SERIES_WEIGHT` and so cannot fail
+        # under any value of it: measured, `_SERIES_WEIGHT = 0` left this arm
+        # green, and at zero the claim this arm exists for, that a series name is
+        # already scored in the first element, is false.
+        assert scored[0] > unscored[0]
+        assert scored[0] - unscored[0] == metadata._SERIES_WEIGHT
+        assert scored[1] == unscored[1]
+
+    def test_the_readers_language_is_worth_its_weight_once(self):
+        """Also already scored in the matching term, by `_LANGUAGE_WEIGHT`.
+
+        **The row without a language declares none, rather than declaring a
+        different one.** Two rows that both name a language move the pickability
+        term together, so that pair cannot see `language` being added to
+        `_PICKABLE_FIELDS`: measured, the mutation passed this arm before it was
+        written this way.
+        """
+        wanted = self.match(title="Dune", author="Frank Herbert", language="de")
+        silent = self.match(title="Dune", author="Frank Herbert")
+        scored = self.relevance(wanted, "dune herbert", "de")
+        unscored = self.relevance(silent, "dune herbert", "de")
+        # The same floor, for the same reason, against `_LANGUAGE_WEIGHT`. See
+        # the series arm above.
+        assert scored[0] > unscored[0]
+        assert scored[0] - unscored[0] == metadata._LANGUAGE_WEIGHT
+        assert scored[1] == unscored[1]
+
+    def test_every_pickable_name_is_readable_off_a_record(self):
+        """A name left behind by a rename raises on a live search, not here.
+
+        `hasattr` and not `dataclasses.fields`, for the reason
+        `test_catalogue.py::TestHowCompleteARecordIs` states at its twin: the
+        score reads with `getattr`, so a field test refuses a derived name that
+        works.
+        """
+        record = Record()
+        assert [
+            name for name in metadata._PICKABLE_FIELDS if not hasattr(record, name)
+        ] == []
 
 
 class TestAHostileSourceCostsItsOwnRows:

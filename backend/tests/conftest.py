@@ -233,21 +233,9 @@ import accounts  # noqa: E402
 import covers  # noqa: E402
 import main  # noqa: E402
 import metadata  # noqa: E402
+import ratelimit  # noqa: E402
 from database import Base, SessionLocal, engine  # noqa: E402
 from models import User  # noqa: E402
-from ratelimit import (  # noqa: E402
-    authority_limiter,
-    cover_backfill_limiter,
-    identifier_backfill_limiter,
-    import_limiter,
-    login_limiter,
-    metadata_limiter,
-    public_catalogue_limiter,
-    recovery_code_limiter,
-    recovery_request_account_limiter,
-    recovery_request_address_limiter,
-    register_limiter,
-)
 from tests.helpers import cover_resolver  # noqa: E402
 
 
@@ -447,21 +435,23 @@ def reset_rate_limits() -> None:
     They are process-global and deliberately survive requests, so without this
     a test that logs in or imports repeatedly would start tripping the limiter
     partway through the suite, and which test failed would depend on ordering.
+    The import limiter was added after this fixture and its absence turned
+    twelve unrelated import tests red, every one of them passing on its own.
 
-    Every limiter belongs here. The import one was added later and its absence
-    turned twelve unrelated import tests red, all of them passing on their own.
+    **Membership is a property, not a list**: whatever is bound in
+    `ratelimit`'s namespace and is a `SlidingWindowLimiter`. Naming them here
+    is what let the import limiter go missing, and a list cannot close a class
+    that grows.
+
+    Two things it does not reach: a limiter another module constructs for
+    itself, and one `ratelimit` holds inside a container rather than binding to
+    a name. The second is **loud** rather than merely stated, because
+    `tests/test_ratelimit.py` counts names bound against limiters constructed
+    and a container makes those two disagree. The first is unwatched.
     """
-    login_limiter.reset()
-    register_limiter.reset()
-    import_limiter.reset()
-    metadata_limiter.reset()
-    authority_limiter.reset()
-    cover_backfill_limiter.reset()
-    identifier_backfill_limiter.reset()
-    public_catalogue_limiter.reset()
-    recovery_request_address_limiter.reset()
-    recovery_request_account_limiter.reset()
-    recovery_code_limiter.reset()
+    for limiter in list(vars(ratelimit).values()):
+        if isinstance(limiter, ratelimit.SlidingWindowLimiter):
+            limiter.reset()
 
 
 @pytest.fixture(autouse=True)

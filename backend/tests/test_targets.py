@@ -558,3 +558,107 @@ class TestARowNamesTheSecretItsOwnDoorTakes:
         one that is believed: a bespoke row needing a credential and naming no
         secret is refused by `metadata.resolve`."""
         assert _seeded().secret is targets.Secret.NONE
+
+
+#: The readers a catalogue row may name, derived from the import registry rather
+#: than listed, and the population the control arm below runs over.
+#:
+#: **Asserted non empty here rather than inside that arm**, for the reason
+#: `test_decoders.py` states beside its own population: an empty parametrisation
+#: is one skipped test, a skip is a pass, and an assertion in the body of an arm
+#: that never runs cannot see the vacuity it is there to catch.
+#:
+#: **What it guards is the expression on the line below it, not a widened import
+#: registry.** That registry cannot reach this: widening it to the whole enum
+#: refuses every seeded row at `targets` import, which dies in the shared
+#: fixtures before anything here is collected, at a different exit. So the
+#: message says what an edit here would do, because a message naming a cause it
+#: cannot fire on aims the next reader's repair at the wrong thing, and a wrong
+#: diagnosis in a loud failure is worse than a vague one.
+_READERS_A_ROW_MAY_NAME = sorted(set(targets.Reader) - decoders.IMPORT_READERS)
+assert _READERS_A_ROW_MAY_NAME, "the subtraction above leaves no reader for the control arm"
+
+
+class TestARowNamesAReaderAndNotItsSpelling:
+    """`Target.reader`, refused by type at the one site the row writes it.
+
+    **The field is read under two disciplines and `Reader` is a `StrEnum`**, so
+    a member hashes as its own value: a bare `"marc_plain"` is in
+    `decoders.MARC_READERS`, is a key of a reader table exactly where its member
+    is, passes
+    `metadata.resolve`, and is not the member where `metadata._marc_build` asks
+    `is`. Such a row is parsed by `_dnb_record` having asked for
+    `_k10plus_record`, and every record comes back read the other way round with
+    no error anywhere.
+
+    **What these arms check is the refusal, not the readers.** They fire at
+    construction and say nothing about the six sites themselves; what makes the
+    sites agree is that the value cannot exist, and the arms are what pins that.
+
+    **What goes past them.** A row read back from its columns does not come
+    through here at all, and **that is a policy the whole table is missing
+    rather than a gap on this column**: of the five enum valued columns on
+    `catalogue_targets`, `transport` is the only one whose value set a CHECK
+    names, and `reader`, `query_language` and `title_query_shape` are in the
+    same position, `source` being named only by the ISBN claim waiver. A
+    constraint defends the Core write path, which is a different mechanism from
+    a constructor refusal and not one a refusal can stand in for.
+    `main.seed_catalogue_targets` writes the table and #130 is where a row is
+    read back out of it. A decoding built from a file rather than from a row is
+    the other side, refused in `decoders.Decoding` and pinned by
+    `test_decoders.py::TestADecodingIsValidatedWhereverItIsBuilt`.
+
+    **A partial widening of either registry shrinks a derived population without
+    emptying it, and nothing here would see that.** The assertions beside the
+    two populations catch only the empty case, and the arms that pin those
+    registries name their own readers, so a registry widened by a reader they do
+    not name leaves an arm covering one member fewer, silently. Nothing in
+    either file compares a population's size against anything, deliberately:
+    that is the enumeration one level up, and it is the shape this file's
+    neighbours already refuse.
+
+    **`test_classifications.py` restates the MARC pair rather than deriving
+    it**, at three sites, as the written out `[Reader.MARC_GND,
+    Reader.MARC_PLAIN]`. It agrees with `decoders.MARC_READERS` today, measured:
+    the same two members and no others. It is a second spelling of the same
+    fact, so a widening of the registry would leave it naming two where the
+    registry names three, and it belongs to whoever widens that registry rather
+    than here.
+    """
+
+    @pytest.mark.parametrize("reader", list(targets.Reader))
+    def test_a_readers_own_string_is_not_that_reader(self, reader):
+        """Every member, derived from the enum rather than listed, so a tenth
+        reader is covered by existing.
+
+        `reader.value` is exactly what `main.seed_catalogue_targets` writes into
+        the column, which is the value a readback would hand back.
+        """
+        with pytest.raises(ValueError, match="is not a Reader"):
+            _seeded(reader=reader.value)
+
+    @pytest.mark.parametrize("reader", _READERS_A_ROW_MAY_NAME)
+    def test_and_the_member_itself_is_carried(self, reader):
+        """The control: the refusal is on the type and not on the reader.
+
+        The import family is excluded because the row refuses it for its own
+        reason, which the next arm is about.
+        """
+        assert _seeded(reader=reader).reader is reader
+
+    def test_the_import_family_is_still_refused_by_its_own_rule(self):
+        """The member spelling reaches the refusal below it and gets that
+        message, rather than this one."""
+        with pytest.raises(ValueError, match="belongs to the import family"):
+            _seeded(reader=targets.Reader.OPDS_ATOM)
+
+    def test_but_its_bare_spelling_is_refused_by_type_first(self):
+        """**This arm is the placement**, and it is why the type test sits ahead
+        of the two membership refusals rather than beside them.
+
+        `"opds_atom"` is in `IMPORT_READERS`, so a refusal that reads the value
+        reports it as an import reader and the row never learns its field is a
+        string. A refusal that has read the value has already trusted it.
+        """
+        with pytest.raises(ValueError, match="is not a Reader"):
+            _seeded(reader=targets.Reader.OPDS_ATOM.value)

@@ -178,12 +178,40 @@ class AuthorityAssertion:
     identifier: str
 
 
-#: Fields worth having, and therefore worth scoring a record on.
+#: Fields worth having, and therefore worth scoring a record on, asked of a book
+#: that is already identified.
 #:
-#: Used twice, and the two uses are why this is a property rather than a rule at
-#: either call site: choosing between several printings of one ISBN inside a
-#: single catalogue, and choosing which catalogue leads the merge when both
-#: answer.
+#: Read at three questions, which is why it is a property rather than a rule at
+#: each call site: which of several records for one ISBN a single catalogue
+#: should answer with, which catalogue leads the merge when two answer, and how
+#: the edition picker is ordered.
+#:
+#: **`metadata._PICKABLE_FIELDS` is the other completeness score and is not this
+#: one.** It ranks title search rows, where the book is not identified yet and a
+#: row may not even be the right book. The two lists differ on five fields and
+#: each difference has its own argument; `docs/decisions.md` holds them, under
+#: *The two completeness scores are two questions, not one list*.
+#:
+#: **`isbn` and `cover_url` are absent because at a lookup neither says anything
+#: about the book.** Six lookup decoders build the cover URL from an ISBN, so it
+#: carries nothing the ISBN does not. Google Books supplies its own thumbnail
+#: and is the exception, and one source's thumbnail is not what should decide
+#: which catalogue leads.
+#:
+#: **For `isbn` the decoders do not agree, and the extent matters here.** Four
+#: stamp the ISBN that was **asked** onto the record, where it is then identical
+#: on every candidate and separates nothing. `_bnf_record` and `_loc_record` take
+#: no ISBN at all and parse one out of the record; `_google_record` does both,
+#: preferring Google's own and falling back to the asked one. Wherever a record's
+#: own ISBN is read, the field measures which catalogue printed a parseable one,
+#: which is the same ranking by source this list refuses in the other direction.
+#: Neither reading says anything about the book, which is why the disagreement
+#: strengthens the case rather than weakening it.
+#:
+#: **The edition picker is where that stops being true and they are still not
+#: scored.** Its entries are different printings, so both fields do vary there.
+#: Ranking on them changes which printings a member is shown, which is a product
+#: decision and not something this list should make on the way past.
 _SCORED: Final = (
     "author",
     "year",
@@ -709,6 +737,10 @@ class Record:
         A count rather than a weighting: the question it answers is "is this a
         record somebody could recognise their copy from", and every field in
         `_SCORED` answers it once.
+
+        **Not the score a title search ranks on**, which is
+        `metadata._PICKABLE_FIELDS` and answers a different question over a
+        different population. `_SCORED` says why they are two.
         """
         return sum(1 for name in _SCORED if getattr(self, name)) + bool(self.subjects)
 
