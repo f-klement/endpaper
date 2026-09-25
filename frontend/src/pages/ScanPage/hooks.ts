@@ -10,6 +10,7 @@ import { useCallback, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { classifyError } from "../../components/ErrorState";
+import type { RequestFailure } from "../../components/ErrorState";
 import { useInvalidate } from "../../api/invalidate";
 import { ApiError } from "../../api/mutator";
 
@@ -674,9 +675,48 @@ export type ScanReason =
 function reasonForError(error: unknown): ScanReason | undefined {
   const failure = classifyError(error);
   if (failure === undefined) return undefined;
-  return failure.kind === "unreachable"
-    ? { kind: "unreachable" }
-    : { kind: "server-said", message: failure.message };
+  return reasonFor(failure.kind, failure);
+}
+
+/**
+ * What each kind of failed request becomes on a row.
+ *
+ * **A total `Record` keyed on the union rather than a ternary**, which is
+ * `OFFERED_AGAIN`'s rule one union over: a third `RequestFailure` does not
+ * compile until it appears here. The ternary this replaced refused only the
+ * third kind that carries no words of its own, because the else branch reads
+ * `message`; a third kind that happened to carry one would have been reported
+ * to the member as the server's own sentence, which is the one thing on this
+ * page nothing can translate and nothing can take back.
+ *
+ * Each arm is handed the failure its own key stands for, so the arm that has
+ * words reads them and the arm that has none cannot.
+ */
+const REASON_FOR_FAILURE: {
+  [Kind in RequestFailure["kind"]]: (
+    failure: Extract<RequestFailure, { kind: Kind }>,
+  ) => ScanReason;
+} = {
+  unreachable: () => ({ kind: "unreachable" }),
+  said: (failure) => ({ kind: "server-said", message: failure.message }),
+};
+
+/**
+ * The arm for one failure, applied to that failure.
+ *
+ * **Separate from `reasonForError` because the key has to be generic**, which
+ * is the whole reason this function exists and is what stops somebody folding
+ * it back in. Indexing the table with a union typed `failure.kind` yields a
+ * union of arms, and calling that asks for the intersection of their
+ * parameters, which is `never`: measured, `TS2345` on the call. Written with
+ * the key as a type parameter, the table and the argument stay correlated and
+ * no cast is needed anywhere.
+ */
+function reasonFor<Kind extends RequestFailure["kind"]>(
+  kind: Kind,
+  failure: Extract<RequestFailure, { kind: Kind }>,
+): ScanReason {
+  return REASON_FOR_FAILURE[kind](failure);
 }
 
 /** One book caught by the rapid scanner or picked as a file, and how it has gone so far. */
@@ -912,9 +952,82 @@ function foldersOf(file: File): string[] {
     : [];
 }
 
-/** An entry with records offered and neither taken nor refused. */
-function isBeingDecided(entry: ScannedEntry): boolean {
-  return entry.state === "choosing";
+/**
+ * What every rule in this file makes of a row's state.
+ *
+ * **A total `Record` keyed on the union rather than a comparison at each site**,
+ * which is `OFFERED_AGAIN`'s rule one field over, and the field it is one over
+ * is the one that was open: a ninth `ScannedEntry["state"]` used to compile
+ * clean and be silently wrong in five places at once. Three predicates below
+ * answered `false` for it, the run's own reading answered `false`, and the
+ * queue's rows are drawn by a table in `RapidQueue.tsx` that had a line for
+ * each of the eight states and no line for anything else, so the row appeared
+ * on screen with nothing at all in it. Nothing was red anywhere. A ninth state
+ * now fails to compile here and at that table, which are the two places its
+ * author has to answer for it.
+ *
+ * **Three facts and not one flag per predicate.** Each is something a state
+ * either is or is not, and the predicates below are conjunctions over them and
+ * the fields beside them. `derived` is `standsUnderItsName` without `deciding`,
+ * which is a reading of the two rather than a third entry: two fields that
+ * agree by construction and by nothing else are what `ScannedEntry.claims`
+ * refuses one level down.
+ */
+interface QueueStateRules {
+  /**
+   * The file behind this row is still being read.
+   *
+   * What a stop has to be able to interrupt, and what the page reads to know a
+   * pick is still going.
+   */
+  readonly stillReading: boolean;
+  /**
+   * The row is standing under the name its file carried, so a catalogue has
+   * something to be asked about it.
+   *
+   * True of a row nothing has been offered for and of a row with records on
+   * screen: both carry a draft made from the name, which is what the queue
+   * draws and what a lookup would replace.
+   */
+  readonly standsUnderItsName: boolean;
+  /** Records are offered on this row and the member has neither taken nor refused them. */
+  readonly deciding: boolean;
+}
+
+const QUEUE_STATES: Record<ScannedEntry["state"], QueueStateRules> = {
+  "looking-up": {
+    stillReading: false,
+    standsUnderItsName: false,
+    deciding: false,
+  },
+  reading: { stillReading: true, standsUnderItsName: false, deciding: false },
+  derived: { stillReading: false, standsUnderItsName: true, deciding: false },
+  searching: {
+    stillReading: false,
+    standsUnderItsName: false,
+    deciding: false,
+  },
+  choosing: { stillReading: false, standsUnderItsName: true, deciding: true },
+  found: { stillReading: false, standsUnderItsName: false, deciding: false },
+  "not-found": {
+    stillReading: false,
+    standsUnderItsName: false,
+    deciding: false,
+  },
+  failed: { stillReading: false, standsUnderItsName: false, deciding: false },
+};
+
+/**
+ * An entry with records offered and neither taken nor refused.
+ *
+ * **Exported for `RapidQueue.tsx`**, which used to spell this state out by hand
+ * beside the records it draws. One rule with one home, and the component asks
+ * the question rather than knowing the answer: a predicate written twice is a
+ * screen able to report something the page did not do, which is the reason
+ * `QueueFigures` exists at all.
+ */
+export function isBeingDecided(entry: ScannedEntry): boolean {
+  return QUEUE_STATES[entry.state].deciding;
 }
 
 /**
@@ -994,8 +1107,10 @@ const OFFERED_AGAIN: Record<CatalogueAnswer, boolean> = {
  * second control saying so in its own words.
  */
 function needsALookup(entry: ScannedEntry): boolean {
+  const state = QUEUE_STATES[entry.state];
   return (
-    entry.state === "derived" &&
+    state.standsUnderItsName &&
+    !state.deciding &&
     entry.answered === undefined &&
     (entry.isbn !== "" || entry.query !== undefined)
   );
@@ -1010,8 +1125,10 @@ function needsALookup(entry: ScannedEntry): boolean {
  * of the work.
  */
 function canBeAskedAgain(entry: ScannedEntry): boolean {
+  const state = QUEUE_STATES[entry.state];
   return (
-    entry.state === "derived" &&
+    state.standsUnderItsName &&
+    !state.deciding &&
     entry.answered !== undefined &&
     OFFERED_AGAIN[entry.answered] &&
     (entry.isbn !== "" || entry.query !== undefined)
@@ -1021,15 +1138,18 @@ function canBeAskedAgain(entry: ScannedEntry): boolean {
 /**
  * What the queue adds up to, counted once and read everywhere.
  *
- * **One value rather than five members, because they are one reading of one
+ * **One value rather than a member each, because they are one reading of one
  * array.** Every figure here is derived from `entries` by a predicate this
  * module owns, and the screen's rule is that it may render them and may not
  * recompute them: a predicate written twice is a button offering to look up
- * twelve beside a run that looks up nine. Passed as a group so that a sixth
- * figure reaches the component without a sixth prop, and so the docstring
- * saying what each one counts has one home.
+ * twelve beside a run that looks up nine. Passed as a group so that another
+ * figure reaches the component without another prop, and so the docstring
+ * saying what each one counts has one home. There is deliberately no count of
+ * them written here: the version of this sentence that said five was stale on
+ * the day the sixth arrived, and it had anticipated that arrival in its own
+ * next clause.
  *
- * **Two of the five are minutes and not counts**, which is why this is not
+ * **The two pace members are minutes and not counts**, which is why this is not
  * named for counting. They are derived from the counts beside them by one
  * arithmetic, so carrying them apart is how a figure on a button comes to quote
  * a pace the run it starts does not keep.
@@ -1057,6 +1177,21 @@ export interface QueueFigures {
    * their own, which names them.
    */
   readonly keptForNow: number;
+  /**
+   * Files a catalogue was asked about and had no record of.
+   *
+   * **Here rather than read off the rows by whoever draws them**, which is the
+   * rule this interface states and the one place the queue component was still
+   * breaking it: it held the only `entries.some` on the page, spelling an
+   * answer out by hand to decide whether to say that catalogues list few
+   * ebooks. A second reading of `answered` is a second place for that sentence
+   * to appear beside a queue it is not true of.
+   *
+   * A count and not a flag, for the reason the figures beside it are counts:
+   * what the screen does with it is the screen's, and a member who was offered
+   * records and preferred the name is not counted here at all.
+   */
+  readonly emptyAnswers: number;
   /** Roughly how long looking all of them up would take, in minutes. */
   readonly paceMinutes: number;
   /** The same figure for a second pass over the names kept in bulk. */
@@ -1978,6 +2113,12 @@ export function useRapidIntake(): UseRapidIntakeResult {
   const waiting = entries.filter(needsALookup).length;
   const deciding = entries.filter(isBeingDecided).length;
   const keptForNow = entries.filter(canBeAskedAgain).length;
+  // Counted here rather than on the screen that says so, which is the rule
+  // every figure beside it follows: the queue component held the only reading
+  // of `answered` outside this file.
+  const emptyAnswers = entries.filter(
+    (entry) => entry.answered === "nothing",
+  ).length;
 
   /**
    * Roughly how long a paced run over this many files takes, in minutes.
@@ -1991,13 +2132,14 @@ export function useRapidIntake(): UseRapidIntakeResult {
     return Math.max(1, Math.ceil((count * FALLBACK_INTERVAL_MS) / 60_000));
   }
 
-  // Assembled once, here, rather than as five members of the return: the pace
+  // Assembled once, here, rather than as a member each of the return: the pace
   // figures are derived from the counts beside them, so a screen cannot be
   // handed one without the other.
   const figures: QueueFigures = {
     waiting,
     deciding,
     keptForNow,
+    emptyAnswers,
     paceMinutes: paceFor(waiting),
     keptPaceMinutes: paceFor(keptForNow),
   };
@@ -2018,7 +2160,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
     // Derived rather than counted. A count is a second record of the same fact
     // and drifts the first time a read ends on a path that forgets to decrement
     // it; the queue already says which entries are still being read.
-    isReading: entries.some((entry) => entry.state === "reading"),
+    isReading: entries.some((entry) => QUEUE_STATES[entry.state].stillReading),
     skipped,
     figures,
     lookUpTheNames: () => void runTheLookups(needsALookup),

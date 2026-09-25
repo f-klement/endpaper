@@ -9,9 +9,9 @@ for a catalogue reading a file.
 A decoder that takes a `decoders.Decoding` and then reaches a module level
 client is invisible here inside `metadata.py`;
 `test_the_contract_names_no_other_module_of_this_application` stops it only for
-`decoders.py` itself. The two bespoke entries in `metadata._BESPOKE_LOOKUPS` do
-fetch, which is why that table is named a table of adapters and is not in the
-registries these guards read.
+`decoders.py` itself. The two bespoke entries, in `metadata._FREE_LOOKUPS` and
+`metadata._KEYED_LOOKUPS`, do fetch, which is why those tables are named tables
+of adapters and are not in the registries these guards read.
 
 **`_OF_FAMILY`'s import side is invented, and that bounds what the two family
 arm measures.** There is no import registry yet, so the identifier is a string
@@ -584,10 +584,10 @@ class TestEveryCatalogueReaderIsPlacedOrExcluded:
     writing it down.** A bad reason on `OPEN_LIBRARY` or `GOOGLE_BOOKS` passes
     every arm here and nothing anywhere else reports it: `metadata.NOT_DECODERS`
     has exactly one reader in the application, its own definition, and `resolve`
-    consults the five dispatch tables rather than this one. Those two readers do
-    decode, through `_BESPOKE_LOOKUPS` and the search tables, which is why an
-    element table reachability test cannot see them. Widening `reachable` to the
-    bespoke tables would turn a one name exemption into a three name allowlist,
+    consults the six dispatch tables rather than this one. Those two readers do
+    decode, through the two bespoke lookup tables and the search tables, which is
+    why an element table reachability test cannot see them. Widening `reachable`
+    to the bespoke tables would turn a one name exemption into a three name allowlist,
     and an allowlist is what this class exists not to be.
     """
 

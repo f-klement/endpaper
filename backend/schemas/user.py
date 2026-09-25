@@ -5,6 +5,7 @@ from pydantic import AfterValidator, BaseModel, Field
 
 import mailer
 from enums import AuthMode, ThemeMode, VerificationProvenance
+from models import USERNAME_MAX
 
 # bcrypt only hashes the first 72 bytes; anything beyond it is not merely
 # useless but actively misleading, since two passwords sharing a 72-byte prefix
@@ -68,7 +69,7 @@ class UserCreate(BaseModel):
     `email` creates exactly the account it created before.
     """
 
-    username: str = Field(min_length=1, max_length=50, pattern=r"^\S.*$")
+    username: str = Field(min_length=1, max_length=USERNAME_MAX, pattern=r"^\S.*$")
     password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_BYTES)
     email: AddressField = None
 
@@ -83,7 +84,7 @@ class LoginRequest(BaseModel):
     an attacker something about the stored password.
     """
 
-    username: str = Field(min_length=1, max_length=50)
+    username: str = Field(min_length=1, max_length=USERNAME_MAX)
     password: str = Field(min_length=1, max_length=MAX_PASSWORD_BYTES)
 
 
@@ -257,7 +258,7 @@ class ResetRequest(BaseModel):
     against.
     """
 
-    username: str = Field(min_length=1, max_length=50)
+    username: str = Field(min_length=1, max_length=USERNAME_MAX)
 
 
 class ResetRedeem(BaseModel):
@@ -268,7 +269,7 @@ class ResetRedeem(BaseModel):
     no account created before the policy for it to lock out.
     """
 
-    username: str = Field(min_length=1, max_length=50)
+    username: str = Field(min_length=1, max_length=USERNAME_MAX)
     code: str = Field(min_length=1, max_length=MAX_CODE_LENGTH)
     new_password: str = Field(
         min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_BYTES
@@ -278,13 +279,13 @@ class ResetRedeem(BaseModel):
 class VerificationRequest(BaseModel):
     """Send the confirmation code for this account again."""
 
-    username: str = Field(min_length=1, max_length=50)
+    username: str = Field(min_length=1, max_length=USERNAME_MAX)
 
 
 class VerificationRedeem(BaseModel):
     """The confirmation code that arrived by mail."""
 
-    username: str = Field(min_length=1, max_length=50)
+    username: str = Field(min_length=1, max_length=USERNAME_MAX)
     code: str = Field(min_length=1, max_length=MAX_CODE_LENGTH)
 
 

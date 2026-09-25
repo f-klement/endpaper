@@ -197,6 +197,7 @@
  * are each built to survive.
  */
 
+import { childrenNamed as namedChildren } from "./elementChildren";
 import { declaresEntities } from "./xmlEntities";
 import { leadingYear } from "./year";
 
@@ -440,37 +441,23 @@ const OWNED = new Map<string, boolean>([
 /**
  * Children of `parent` whose name matches, in document order.
  *
- * **A sibling walk and not a spread of `parent.children`**, which is live and
- * is not required to index in constant time, so spreading one costs whatever
- * the host charges per index over a length a member supplied file decides.
- * `opf.ts` measured the shape: 4 times the elements took 14.8 times the wall
- * clock under its jsdom.
+ * **A binding and not a copy: the walk itself is `elementChildren.ts`**, which
+ * holds the measurement and the reason a spread of `parent.children` is the
+ * wrong shape. What stays here is the parameter, and that is the whole point of
+ * the line. The shared door takes a `string`, because the names a package
+ * document may be asked for are open; this one takes a `KindleElement`, which
+ * is what makes the argument at `ELEMENTS` a property of the types rather than
+ * of care taken. **Calling the shared door directly from a lookup below widens
+ * that parameter back to `string` and dissolves the argument**, which is the
+ * consequence that stops somebody doing it.
  *
- * **By name and not by namespace.** Both captures declare none: 0 occurrences
+ * **By name and not by namespace**, which the shared module concedes once and
+ * this format inherits deliberately. Both captures declare none: 0 occurrences
  * of `xmlns` in either. What that concedes is at `ROOT` above, which is where
  * it decides something.
- *
- * **Not shared with `opf.ts`, which has the same four lines, and the reason is
- * the parameter rather than taste.** That one takes a `string`, because a
- * package document's Dublin Core names are open; this one takes a
- * `KindleElement`, which is what makes the argument at `ELEMENTS` a property of
- * the types. Merging them widens this parameter back to `string` and dissolves
- * that argument, which is the consequence that stops somebody doing it. The
- * milder reason, that a helper reading a document belongs to the format that
- * spells it, is `xmlEntities.ts`'s rule and is true here too, and on its own a
- * generic helper rebuts it.
  */
-function childrenNamed(parent: Element, name: KindleElement): Element[] {
-  const found: Element[] = [];
-  for (
-    let child = parent.firstElementChild;
-    child !== null;
-    child = child.nextElementSibling
-  ) {
-    if (child.localName === name) found.push(child);
-  }
-  return found;
-}
+const childrenNamed = (parent: Element, name: KindleElement): Element[] =>
+  namedChildren(parent, name);
 
 /** The first such child's text, or `null` where there is none worth having. */
 function childText(parent: Element, name: KindleElement): string | null {

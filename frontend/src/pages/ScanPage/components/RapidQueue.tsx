@@ -1,7 +1,10 @@
+import type { ReactNode } from "react";
+
 import { useTranslation, type MessageKey, type Translate } from "../../../i18n";
 import type { BookMatch } from "../../../api/generated/model";
 import type { AudioFailure } from "../../../lib/audiobook";
 import type { FileFailure } from "../../../lib/fileReaders";
+import { isBeingDecided } from "../hooks";
 import type {
   NamedScanReason,
   QueueFigures,
@@ -85,6 +88,91 @@ function reasonText(reason: ScanReason, t: Translate): string {
   if (reason.kind === "audio") return t(AUDIO_FAILURES[reason.failure]);
   if (reason.kind === "server-said") return reason.message;
   return t(REASONS[reason.kind]);
+}
+
+/**
+ * What the queue shows for a row in each state.
+ *
+ * **A total `Record` keyed on `ScannedEntry["state"]` rather than a run of
+ * comparisons**, which is `FILE_FAILURES`' rule and `OFFERED_AGAIN`'s, and the
+ * defect it closes was live: the run of comparisons this replaced covered
+ * exactly the states that existed and had no last arm, so a ninth state
+ * rendered a row on screen with nothing in it. Nothing was red, because a row
+ * with no line is a row, and no test asked about a state nobody had added yet.
+ * A ninth state is now a compile error here and at `QUEUE_STATES` in the hook,
+ * which are the two places its author has to say what it means.
+ *
+ * **`derived` and `choosing` share one arm**, and that is the rule rather than
+ * a saving: both are a row standing under the name its file carried, and what
+ * separates them is whether records are on screen for it, which is drawn
+ * below and not here.
+ *
+ * Each arm takes the reader's own `t`, because the row is drawn in the
+ * language in force now and the reason it carries is a name until then: see
+ * `reasonText`.
+ */
+const ROW_LINE: Record<
+  ScannedEntry["state"],
+  (entry: ScannedEntry, t: Translate) => ReactNode
+> = {
+  "looking-up": (_entry, t) => (
+    <span className="text-paper-600 dark:text-paper-400">
+      {t("rapid.lookingUp")}
+    </span>
+  ),
+  reading: (entry, t) => (
+    <span className="text-paper-600 dark:text-paper-400">
+      {t("rapid.reading", { name: entry.label })}
+    </span>
+  ),
+  searching: (_entry, t) => (
+    <span className="text-paper-600 dark:text-paper-400">
+      {t("fallback.searching")}
+    </span>
+  ),
+  found: (entry) => (
+    <span className="text-paper-800 dark:text-paper-100">
+      {entry.draft?.title}
+    </span>
+  ),
+  "not-found": (entry, t) => (
+    <span className="text-amber-700 dark:text-amber-300">
+      {t("rapid.notFound", { isbn: entry.isbn })}
+    </span>
+  ),
+  // A book, not a failure: it carries what its name said and the batch adds it
+  // like any other. The note beside it says where the title came from and what
+  // the file itself could not say.
+  derived: (entry, t) => namedDraftLine(entry, t),
+  choosing: (entry, t) => namedDraftLine(entry, t),
+  // Named, not counted. After a shelf of thirty, "six could not be added" is
+  // unrecoverable: this says which six and why, and they stay in the queue so
+  // they can be retried or dropped.
+  failed: (entry, t) => (
+    <span className="text-danger-600 dark:text-danger-300">
+      {entry.draft?.title || entry.label}
+      {entry.reason && (
+        <span className="text-paper-600 dark:text-paper-400">
+          {" "}
+          {reasonText(entry.reason, t)}
+        </span>
+      )}
+    </span>
+  ),
+};
+
+/** The line a row standing under its file's own name reads. */
+function namedDraftLine(entry: ScannedEntry, t: Translate): ReactNode {
+  return (
+    <span className="text-paper-800 dark:text-paper-100">
+      {entry.draft?.title}
+      <span className="text-paper-600 dark:text-paper-400">
+        {" "}
+        {t("fallback.fromTheName")}
+        {entry.reason ? ` ${reasonText(entry.reason, t)}` : ""}
+      </span>
+    </span>
+  );
 }
 
 /**
@@ -193,15 +281,26 @@ export default function RapidQueue({
 }: RapidQueueProps) {
   const { t } = useTranslation();
   // Read out here so every figure below is spelled the way the hook spells it.
-  const { waiting, deciding, keptForNow, paceMinutes, keptPaceMinutes } =
-    figures;
+  const {
+    waiting,
+    deciding,
+    keptForNow,
+    emptyAnswers,
+    paceMinutes,
+    keptPaceMinutes,
+  } = figures;
 
   // **Said once, and only for the rows it is true of.** Explaining before the
   // fact would be a page apologising for something that may not happen, and
   // explaining per row would say it thirty times. A member who was offered
   // records and preferred the name is not a member the catalogues had nothing
   // for, so `answered` carries the two apart.
-  const anyEmptyAnswer = entries.some((entry) => entry.answered === "nothing");
+  //
+  // **Counted by the hook and read here**, which is what every other figure on
+  // this screen already did: this was the one reading of a row's own fields
+  // left in the component, and a second reading is a second place for this
+  // sentence to appear beside a queue it is not true of.
+  const anyEmptyAnswer = emptyAnswers > 0;
   const busy = isAdding || isLookingUp;
   // Rows standing under their names with somewhere to go back to, and no run in
   // the way. Read three times below, so it is named once.
@@ -309,58 +408,7 @@ export default function RapidQueue({
           >
             <div className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate">
-                {entry.state === "looking-up" && (
-                  <span className="text-paper-600 dark:text-paper-400">
-                    {t("rapid.lookingUp")}
-                  </span>
-                )}
-                {entry.state === "reading" && (
-                  <span className="text-paper-600 dark:text-paper-400">
-                    {t("rapid.reading", { name: entry.label })}
-                  </span>
-                )}
-                {entry.state === "found" && (
-                  <span className="text-paper-800 dark:text-paper-100">
-                    {entry.draft?.title}
-                  </span>
-                )}
-                {entry.state === "not-found" && (
-                  <span className="text-amber-700 dark:text-amber-300">
-                    {t("rapid.notFound", { isbn: entry.isbn })}
-                  </span>
-                )}
-                {entry.state === "searching" && (
-                  <span className="text-paper-600 dark:text-paper-400">
-                    {t("fallback.searching")}
-                  </span>
-                )}
-                {/* A book, not a failure: it carries what its name said and the
-                  batch adds it like any other. The note beside it says where
-                  the title came from and what the file itself could not say. */}
-                {(entry.state === "derived" || entry.state === "choosing") && (
-                  <span className="text-paper-800 dark:text-paper-100">
-                    {entry.draft?.title}
-                    <span className="text-paper-600 dark:text-paper-400">
-                      {" "}
-                      {t("fallback.fromTheName")}
-                      {entry.reason ? ` ${reasonText(entry.reason, t)}` : ""}
-                    </span>
-                  </span>
-                )}
-                {/* Named, not counted. After a shelf of thirty, "six could not
-                  be added" is unrecoverable: this says which six and why, and
-                  they stay in the queue so they can be retried or dropped. */}
-                {entry.state === "failed" && (
-                  <span className="text-danger-600 dark:text-danger-300">
-                    {entry.draft?.title || entry.label}
-                    {entry.reason && (
-                      <span className="text-paper-600 dark:text-paper-400">
-                        {" "}
-                        {reasonText(entry.reason, t)}
-                      </span>
-                    )}
-                  </span>
-                )}
+                {ROW_LINE[entry.state](entry, t)}
               </span>
               <button
                 type="button"
@@ -406,8 +454,14 @@ export default function RapidQueue({
             )}
 
             {/* Accept or reject, per file. The ranking already put the likeliest
-                record first, and the rest are here to be disagreed with. */}
-            {entry.state === "choosing" && entry.matches && (
+                record first, and the rest are here to be disagreed with.
+
+                **The hook's own predicate rather than the state spelled out
+                here**, which is what it was: the rule for which rows are still
+                being decided is counted for the figure above by that predicate,
+                so a second spelling is a screen able to offer records the page
+                does not count as offered. */}
+            {isBeingDecided(entry) && entry.matches && (
               <div className="mt-2 space-y-1">
                 <p className="text-xs text-paper-600 dark:text-paper-400">
                   {t("fallback.matches", { count: entry.matches.length })}

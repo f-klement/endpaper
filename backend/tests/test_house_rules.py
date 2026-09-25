@@ -16,6 +16,7 @@ import os
 import re
 import tomllib
 import warnings
+from collections.abc import Container, Sequence
 from enum import StrEnum
 from fnmatch import fnmatch
 from pathlib import Path
@@ -630,7 +631,7 @@ def _every_walk() -> frozenset[str]:
     limitation `_every_module_but_the_tests` records for this file, widened
     here to every module. And a module that walks the tree without importing
     from this file at all is out of scope by construction, which is what
-    `test_no_other_test_module_walks_the_backend_without_the_shared_rule`
+    `test_no_other_test_module_walks_a_tree_of_python_without_the_shared_rule`
     covers from the other side for a walk that could yield a `.py` file, and
     what nothing covers for one that could not.
     """
@@ -1004,7 +1005,7 @@ class TestTheSourceWalkSeesOnlyThisProject:
         that produced the defect, where the offending function in all three
         cases carried the name it was copied from. It makes that paste expensive
         rather than free, and
-        `test_no_other_test_module_walks_the_backend_without_the_shared_rule`
+        `test_no_other_test_module_walks_a_tree_of_python_without_the_shared_rule`
         catches the class it cannot see.
         """
         _, names = _walk_names()
@@ -1023,11 +1024,23 @@ class TestTheSourceWalkSeesOnlyThisProject:
             f"as vendored is decided twice: {copies}"
         )
 
-    def test_no_other_test_module_walks_the_backend_without_the_shared_rule(
+    def test_no_other_test_module_walks_a_tree_of_python_without_the_shared_rule(
         self,
     ) -> None:
         """The rule the test above cannot state, which is about the shape rather
         than the name.
+
+        **The subject is a walk of any tree, not of `backend/`.** `_is_a_walk`
+        reads the pattern and the name `walk` and never the receiver, so a module
+        recursing `frontend/`, `docs/` or the repository root for Python is
+        reported exactly as one recursing `backend/`. That is the live case and
+        not a spare one: `test_google_books.py` walks `frontend/src` for the
+        browser's own source, and it is out of this rule because it asks
+        `_is_vendored` rather than because of the tree it picked. **Naming one
+        tree in this rule is what invites a receiver check**, and a receiver
+        check drops that walk out of the population while every assertion here
+        stays green, which is the failure a stated reason narrower than the code
+        produces rather than prevents.
 
         Nine test modules recursed `backend/` for `*.py` under names of their
         own, each excluding a list of directory names it had heard of and **none
@@ -1047,8 +1060,10 @@ class TestTheSourceWalkSeesOnlyThisProject:
         three evasions clean. So a call is a walk when its pattern carries `**`,
         or when it is `rglob`, or when anything at all is called `walk`. What is
         genuinely out is a `glob` whose pattern has no `**`, which reads one
-        directory and cannot enter a vendored tree at all; five sites here are
-        that shape.
+        directory and cannot enter a vendored tree at all. **How many sites are
+        that shape is deliberately not written here.** Nothing in this rule
+        asserts it, so a figure beside it is one nobody recomputes and the next
+        reader takes as current.
 
         **Asked of the module rather than of the function**, and the cost is
         stated rather than discovered: a module that walks in one place and asks
@@ -1094,7 +1109,7 @@ class TestTheSourceWalkSeesOnlyThisProject:
         # the population rather than the verdict.
         assert len(checked) >= 8, f"the walks went missing from the tests: {checked}"
         assert not offenders, (
-            "these recurse `backend/` and decide what vendored means for "
+            "these recurse a tree of Python and decide what vendored means for "
             f"themselves, so the pipeline's cache is read as ours: {offenders}"
         )
 
@@ -4117,16 +4132,20 @@ class TestNoModuleHardCodesASourceOrder:
     exemption: it is a `frozenset` and says which sources are docked a point,
     not in what order.
 
-    Five exemptions over six names, each a deliberate table that something
-    else pins. The counts differ because one bullet covers the two dispatch
-    tables together:
+    Five exemptions over five names, each a deliberate table that something
+    else pins. One name each, and the bullets are the list:
 
     * `sources.DEFAULT_ORDER`, the seeded order itself.
     * `metadata._MATCH_PRECEDENCE`, which source is believed about a shared
-      field, deliberately not reachable from the settings list, and
-      `metadata._BESPOKE_LOOKUPS` beside it. This is the bullet the count below
-      means by covering two names, and naming the second is what stops the
-      sentence explaining an arithmetic nobody can check against it.
+      field, deliberately not reachable from the settings list.
+
+      **`metadata._BESPOKE_LOOKUPS` was exempted here and its entry is gone
+      because the table is**, which is recorded rather than quietly dropped
+      because the reason is the same one `_METERED_SEARCHES` is unexempted for.
+      It split into `_FREE_LOOKUPS` and `_KEYED_LOOKUPS`, one entry each, so
+      neither is ever two or more sources and neither is reported.
+      `test_dropping_an_exemption_surfaces_only_its_own_literal` is what said
+      so: with the entry kept, dropping it surfaced nothing.
     * `targets.SEEDED`, the eleven catalogue rows. **A mapping consulted by key**,
       the narrower claim `SERVES_GROUPS` makes: `metadata` reaches it with
       `SEEDED[name]`, and the four derivations in `sources.py` build
@@ -4203,7 +4222,7 @@ class TestNoModuleHardCodesASourceOrder:
     #: Where an ordered literal of sources is still allowed, by module and name.
     ALLOWED = {
         "sources.py": {"DEFAULT_ORDER", "MEASURED", "TAIL_MARGINAL"},
-        "metadata.py": {"_MATCH_PRECEDENCE", "_BESPOKE_LOOKUPS"},
+        "metadata.py": {"_MATCH_PRECEDENCE"},
         # The literal is inline in the `MappingProxyType` call, so the exempt
         # name and the literal are the same assignment again. Naming the view
         # when it wrapped a separate private dict exempted nothing, because a
@@ -4419,13 +4438,18 @@ def _source_named(
     both were invisible. The first is the aliased-import shape this repository
     has already been caught by once.
 
-    **The cost is a false positive, and it stopped being latent.** Any attribute
-    whose name is a member counts, so an unrelated enum with a colliding member
-    is reported. This paragraph used to say no enum collided and that the cost
-    was therefore hypothetical; `targets.Reader` collides on `OPEN_LIBRARY` and
-    `GOOGLE_BOOKS`, because a reader is named after the one catalogue it reads,
-    and `metadata._BESPOKE_LOOKUPS` is reported for it. That is the exemption in
-    `ALLOWED` and it is a false positive rather than an order.
+    **The cost is a false positive, and it is real rather than hypothetical
+    whether or not anything is currently reported.** Any attribute whose name is
+    a member counts, so an unrelated enum with a colliding member is reported.
+    `targets.Reader` collides on `OPEN_LIBRARY` and `GOOGLE_BOOKS`, because a
+    reader is named after the one catalogue it reads, and a literal naming two
+    of those readers in order is reported as an order of two sources.
+
+    **No literal in the tree is one today, and that is weaker than it reads
+    as**: the cost is unobserved rather than absent, and `ALLOWED` holds nothing
+    for it. Every reader keyed table is below the two source floor. The next one
+    that is not is reported, and whoever writes it meets this paragraph rather
+    than a surprise.
 
     It is still the right trade, because the alternative is resolving aliases by
     following imports, and because a false positive fails loudly and is cleared
@@ -7652,6 +7676,52 @@ class TestEveryTextCeilingComesFromTheColumn:
 
     **Read off the mapper and off `model_fields`**, never off the source text, so
     a literal reintroduced in any spelling fails.
+
+    **Two rules over two different populations, and they are different on
+    purpose.** The equality rule below reads `Book` alone. The named constant
+    rule reads every column in `Base.metadata` that bounds a length, which on
+    2026-09-25 is 70 columns over 19 of the 22 tables: `books` carries 17 and the
+    other 18 tables carry 53 between them, measured by walking
+    `Base.metadata.sorted_tables` for a `length` on the column type.
+
+    **The equality rule does not widen with it, and that is measured rather than
+    assumed.** Its premise is that a field named after a column is that column's
+    width, which holds for `books` because those names are the domain's own
+    words. Elsewhere the names are ordinary words and the premise fails in both
+    directions at once. Run over every table it judges 28 fields it does not
+    judge today, 57 against 29, and **every report it makes of the 28 is a false
+    one**: 17 agree with their column and are silent, three are a different fact
+    wearing the same word, `BookMatch.source` at 120 against
+    `catalogue_targets.source` at 32 and `OpdsCredentialIn.username` at 255 and
+    `SourceCredentialIn.username` at 320 against `users.username` at 50, each of
+    them a login somewhere else; and the remaining eight land on `name`, `key`
+    or `value`, which several tables carry at different widths, so there is no
+    single width for the rule to compare against at all. **Eleven is the
+    classification, eight is what a concrete widening prints**, and the two are
+    different numbers of different things: a map built last wins over
+    `sorted_tables` happens to agree with three of the eight ambiguous fields,
+    so it reports the three different facts plus five. Eleven cannot be a
+    defect; eight is what the reader would see. Every one of the eight agrees
+    with its own table's column, so nothing hides behind the ambiguity either.
+
+    **And the 17 that agree buy nothing either**, which is the other half of the
+    argument: each of them names its column's constant, so the equality is held
+    by Python rather than by a comparison, and the rule below would be checking
+    that a constant equals itself. It is the named constant rule that puts them
+    in that position, which is why that is the half that widens.
+
+    **The named constant rule widens because it asks for a name and not for a
+    value.** A field whose bound is genuinely not that column's fact satisfies it
+    by naming its own constant, which is what `OpdsCredentialIn` now does, so the
+    collisions that defeat the equality rule cost it nothing. Widening it
+    reported seven sites the narrow population walked past, every one of them a
+    number copied from a column: six in `schemas/user.py` and one in
+    `schemas/opds.py`.
+
+    **What the wider population admits is a name this repository uses for two
+    things**, and the rule's answer to that is in its own docstring below. It is
+    not a hypothetical: `username` is both `users.username` and the login at
+    somebody else's server, and both are now in scope.
     """
 
     #: Fields whose name matches a Book column and whose ceiling is deliberately
@@ -7682,6 +7752,39 @@ class TestEveryTextCeilingComesFromTheColumn:
             for column in Book.__table__.columns
             if (length := getattr(column.type, "length", None))
         }
+
+    @staticmethod
+    def _column_names() -> frozenset[str]:
+        """Every column name in the schema that bounds a length, any table.
+
+        **A set of names and deliberately not a map of widths.** Three names are
+        carried by columns of different widths, `name` at 60, 80 and 100, `key`
+        at 50 and 64 and `value` at 60 and 500, so a map would have to pick one
+        and would pick whichever table `sorted_tables` yielded last. The rule
+        that reads this asks for a constant to be named rather than for a value
+        to match, so it needs the name and never the width, and building a set
+        is what makes that structural rather than a thing to remember.
+
+        **Derived from the type, not from the source and not from a list of
+        tables.** `Base.metadata` is what `--autogenerate` and `create_all` work
+        from, so a table added anywhere joins this on the commit that declares
+        it.
+
+        **What it leaves out is a column whose type carries no `length`**, which
+        is `Text` here: five columns on four tables, `books.description`,
+        `books.categories`, `notes.content`, `settings.value` and
+        `catalogue_credentials.envelope`. They bound nothing to copy, so there
+        is no drift for this rule to catch on them. It is `Text` that is left
+        out rather than "the unbounded ones": whether a `Text` column is bounded
+        some other way is `TestEveryTextCeilingBindsOnBytesToo`'s subject and
+        not this one's.
+        """
+        return frozenset(
+            column.name
+            for table in Base.metadata.sorted_tables
+            for column in table.columns
+            if getattr(column.type, "length", None) is not None
+        )
 
     def _ceilings(self) -> list[tuple[str, str, int]]:
         """Every `(model, field, max_length)` under `schemas/`.
@@ -7735,14 +7838,15 @@ class TestEveryTextCeilingComesFromTheColumn:
         )
 
     def test_the_widths_are_the_columns_named_constants(self) -> None:
-        """The other half of the pair's tripwire, and it had none.
+        """The width rule's tripwire, and it had none.
 
-        **Both rules go vacuous together if this map empties**: the width rule
-        is keyed `if field in widths` and the literal rule on
-        `name not in widths`, so an empty map reports nothing from either and
-        the three diagonals above never touch it, because they build their own.
-        It shrank by a fifth without a word when `DegradingEnum` arrived, which
-        is what that looks like from here.
+        **That rule goes vacuous if this map empties**: it is keyed
+        `if field in widths`, so an empty map reports nothing and the diagonals
+        above never touch it, because they build their own. It shrank by a fifth
+        without a word when `DegradingEnum` arrived, which is what that looks
+        like from here. The named constant rule has its own subject, and
+        `test_the_wider_population_holds_columns_only_other_tables_have` is what
+        stands here for it.
 
         **Against the constants rather than against a count.** A count fails
         when the map empties and passes when a column and its constant part
@@ -7758,6 +7862,82 @@ class TestEveryTextCeilingComesFromTheColumn:
         # The three the `isinstance(type, String)` test used to drop, named so
         # the fix does not quietly come undone.
         assert {"format", "condition", "lending"} <= set(widths)
+
+    #: One bounded column on each of five tables that are not `books`, named as
+    #: `(table, column)` so a rename of either end reddens the arm below by
+    #: `KeyError` rather than passing over nothing.
+    #:
+    #: **Five tables rather than five columns**, because the failure this
+    #: catches is a walk that reached one table and stopped, and five columns of
+    #: one table would not see it. Each is a name `books` does not carry, so the
+    #: arm cannot be satisfied by a walk that fell back to `Book`.
+    ELSEWHERE_IN_THE_SCHEMA: Final = (
+        ("users", "username"),
+        ("opds_servers", "credential_key"),
+        ("classifications", "sort_key"),
+        ("digital_references", "relative_path"),
+        ("author_aliases", "canonical_name"),
+    )
+
+    def test_the_wider_population_holds_columns_only_other_tables_have(self) -> None:
+        """The named constant rule's subject, which is the schema and not `Book`.
+
+        **A walk that quietly narrowed back to one model is the failure**, and
+        it is silent: the rule reports nothing either way on a clean tree, so
+        the population is the only thing that can be checked. It is checked
+        against columns named in the schema, so a table or a column that is
+        renamed fails here rather than dropping out of scope.
+
+        **The floor is stated as a strict superset, not as a count.** A count
+        moves every time somebody adds a column and stops being re-derived; the
+        superset says the one thing that has to stay true, that widening added
+        members and lost none.
+        """
+        names = self._column_names()
+
+        for table, column in self.ELSEWHERE_IN_THE_SCHEMA:
+            declared = Base.metadata.tables[table].columns[column]
+            assert getattr(declared.type, "length", None) is not None, (table, column)
+            assert column in names
+
+        book = set(self._book_widths())
+        assert book < names, sorted(book - names)
+        # Not every string: a name no column carries stays out, which is what
+        # keeps the rule from reporting `book_ids` and its kind.
+        assert "book_ids" not in names
+        # And not every column either. A `Text` column carries no length, so a
+        # walk that dropped that filter would put `content` in scope and start
+        # asking for a constant to be named for a bound no column has. The
+        # second line is why the first one is still about `Text`: give
+        # `notes.content` a length and this reddens, rather than agreeing with
+        # itself about an example that has moved.
+        assert "content" not in names
+        content = Base.metadata.tables["notes"].columns["content"]
+        assert getattr(content.type, "length", None) is None
+
+    def test_the_wider_population_is_what_reports_a_column_outside_books(self) -> None:
+        """The diagonal for the widening itself, on constructed source.
+
+        Against the tree it is vacuous in both directions: every site names a
+        constant now, so the narrow population and the wide one both answer
+        `[]`. This plants the offence the widening exists to catch and shows
+        which population sees it.
+
+        **Driven through `_offenders`, which is what the rule above calls**, so
+        the population the shipped rule uses is the population under test. The
+        two `_bare_ceilings` calls below say the checker can tell the two
+        populations apart; only the `_offenders` call says the rule is handed
+        the wide one, and narrowing that line reddens here by name.
+        """
+        offence = "username: str = Field(min_length=1, max_length=50)\n"
+
+        assert self._offenders([("planted.py", offence)]) == [
+            "planted.py: username bounds a bare 50"
+        ]
+        assert self._bare_ceilings(offence, set(self._book_widths())) == []
+        assert self._bare_ceilings(offence, self._column_names()) == [
+            "username bounds a bare 50"
+        ]
 
     def test_every_deliberately_different_field_carries_a_reason(self) -> None:
         """Empty today. An exemption with an empty string beside it is an
@@ -7782,8 +7962,13 @@ class TestEveryTextCeilingComesFromTheColumn:
         assert ("OpdsCredentialIn", "username") in found
 
     @staticmethod
-    def _bare_ceilings(source: str, widths: dict[str, int]) -> list[str]:
-        """Every `max_length=<number>` beside a name a Book column also has.
+    def _bare_ceilings(source: str, names: Container[str]) -> list[str]:
+        """Every `max_length=<number>` beside a name some column also has.
+
+        **Takes the names and never the widths**, which is what lets the
+        population be every table: it reports the spelling and says nothing
+        about the value, so a name two tables carry at two widths costs it
+        nothing to judge.
 
         **A function over a string rather than a loop over the tree**, because a
         rule that only ever runs on this checkout is a rule whose arms cannot be
@@ -7860,7 +8045,7 @@ class TestEveryTextCeilingComesFromTheColumn:
                 annotated.append((node.arg, node.annotation))
 
         for name, expression in annotated:
-            if name not in widths:
+            if name not in names:
                 continue
             for node in ast.walk(expression):
                 if isinstance(node, ast.Name) and node.id in bare_aliases:
@@ -7877,6 +8062,54 @@ class TestEveryTextCeilingComesFromTheColumn:
                         found.append(f"{name} bounds a bare {keyword.value.value!r}")
         return found
 
+    @staticmethod
+    def _module_sources() -> list[tuple[str, str]]:
+        """Every backend module, as its path relative to `backend/` and its text.
+
+        **Pairs and never a mapping, because a mapping deduplicates.** Keyed on
+        the basename this dropped ten of the 94 modules, nine basenames being
+        carried twice or three times: five routers, `schemas/public.py` and four
+        more. Which of a colliding pair survived was filesystem order, so the
+        population was not even the same on two machines. The path relative to
+        the root is what distinguishes `opds.py` from `routers/opds.py` and
+        `schemas/opds.py`, and it is what the report names.
+        """
+        return [
+            (str(path.relative_to(BACKEND)), path.read_text())
+            for path in _python_sources()
+        ]
+
+    def _offenders(
+        self, sources: Sequence[tuple[str, str]] | None = None
+    ) -> list[str]:
+        """What the shipped rule reports, over the sources and the population it
+        actually ships with.
+
+        **This exists so the one line joining the two can be driven.** Both
+        halves were reachable on their own, the walk by calling it and the
+        checker by handing it a population built in the test, and the line that
+        hands the checker the *wide* population was not: narrowing it back to
+        the `Book` widths left the whole file green, because the tree reports
+        nothing either way. A seam the diagonal below can drive with a planted
+        offence is what makes that narrowing red.
+
+        **The default is the half a driven arm cannot see**, since every arm
+        that drives this supplies its own sources, and the shipped rule, which
+        is the only caller taking the default, asserts an empty list. So the
+        module walk is guarded beside the multi file arm rather than here: one
+        entry per module walked, which is the property, not a count.
+        """
+        if sources is None:
+            sources = self._module_sources()
+
+        names = self._column_names()
+
+        return sorted(
+            f"{where}: {offender}"
+            for where, text in sources
+            for offender in self._bare_ceilings(text, names)
+        )
+
     def test_the_ceilings_are_the_named_constants_and_not_their_values(
         self,
     ) -> None:
@@ -7884,8 +8117,14 @@ class TestEveryTextCeilingComesFromTheColumn:
 
         A literal equal to the constant passes every assertion here, which is
         the whole defect: it is only wrong on the commit that widens the column.
-        So this reads the source and refuses a bare number beside a name that is
-        a Book column's.
+        So this reads the source and refuses a bare number beside a name that
+        some column in the schema has.
+
+        **Every table, and the population is the schema rather than one model.**
+        `_column_names` is where that is derived and where what it leaves out is
+        stated. Widened from `Book` alone it reported seven sites: six in
+        `schemas/user.py`, all of them `users.username`'s 50 with no constant to
+        name until this change added one, and one in `schemas/opds.py`.
 
         **Refused on the name, not on the number**, because the numbers collide:
         `max_length=500` is `TITLE_MAX` on `title` and a bulk request's row cap
@@ -7907,17 +8146,18 @@ class TestEveryTextCeilingComesFromTheColumn:
         is the width rule's escape hatch and is not consulted here: a ceiling
         this rule reports is satisfied by naming any constant, so there is
         nothing for an exemption to carry.
-        """
-        widths = self._book_widths()
 
-        offenders = sorted(
-            f"{path.name}: {offender}"
-            for path in _python_sources()
-            for offender in self._bare_ceilings(path.read_text(), widths)
-        )
+        **That is also what the wider population costs, and it is a real cost.**
+        `username` is a column here and is also a login at somebody else's
+        server, so `schemas/opds.py` is now judged for a fact that is not
+        `users.username`'s at all. The answer it gets is the same one a search
+        term gets, name your own constant, and `OPDS_CREDENTIAL_FIELD_MAX` is
+        that name. A rule keyed on the value could not have offered it one.
+        """
+        offenders = self._offenders()
 
         assert offenders == [], (
-            "these write a bound as a number beside a name a Book column also "
+            "these write a bound as a number beside a name some column also "
             "has. Name the column's constant where it is that column's fact, "
             "and the bound's own constant where it is not: a literal is only "
             "wrong on the commit that moves what it copied, and nothing goes "
@@ -7936,7 +8176,7 @@ class TestEveryTextCeilingComesFromTheColumn:
         Each shape is dropped in turn and each is reported for its own, so one
         arm cannot be covering for the other.
         """
-        widths = {"location": 120, "title": 500}
+        names = {"location", "title"}
 
         field = "location: str | None = Field(default=None, max_length=120)\n"
         parameter = (
@@ -7950,16 +8190,16 @@ class TestEveryTextCeilingComesFromTheColumn:
         )
         no_default = "location: Annotated[str, Field(max_length=120)]\n"
 
-        assert self._bare_ceilings(field, widths) == ["location bounds a bare 120"]
-        assert self._bare_ceilings(parameter, widths) == ["title bounds a bare 500"]
+        assert self._bare_ceilings(field, names) == ["location bounds a bare 120"]
+        assert self._bare_ceilings(parameter, names) == ["title bounds a bare 500"]
         # The two the first version walked past. `Annotated[...]` on an
         # assignment puts the bound in the annotation rather than the default,
         # which is the spelling `routers/books.py` already uses, and a field
         # with no default was skipped before its annotation was read at all.
-        assert self._bare_ceilings(annotated, widths) == [
+        assert self._bare_ceilings(annotated, names) == [
             "location bounds a bare 120"
         ]
-        assert self._bare_ceilings(no_default, widths) == [
+        assert self._bare_ceilings(no_default, names) == [
             "location bounds a bare 120"
         ]
 
@@ -7969,7 +8209,7 @@ class TestEveryTextCeilingComesFromTheColumn:
             "LocationField = Annotated[str | None, Field(max_length=120)]\n"
             "location: LocationField = None\n"
         )
-        assert self._bare_ceilings(alias, widths) == [
+        assert self._bare_ceilings(alias, names) == [
             "location bounds a bare 120 through LocationField"
         ]
 
@@ -7984,31 +8224,31 @@ class TestEveryTextCeilingComesFromTheColumn:
         where it is declared refuses those. The rule stays keyed on the name a
         Book column has, which is the property every other arm rests on too.
         """
-        widths = {"location": 120}
+        names = {"location"}
         declared_only = "RowIds = Annotated[list[int], Field(max_length=500)]\n"
         used_by_another_name = (
             "RowIds = Annotated[list[int], Field(max_length=500)]\n"
             "book_ids: RowIds = []\n"
         )
 
-        assert self._bare_ceilings(declared_only, widths) == []
-        assert self._bare_ceilings(used_by_another_name, widths) == []
+        assert self._bare_ceilings(declared_only, names) == []
+        assert self._bare_ceilings(used_by_another_name, names) == []
 
     def test_a_named_constant_in_an_alias_is_not_reported(self) -> None:
         """The other half of the alias diagonal, so the arm cannot be satisfied
         by refusing every alias."""
-        widths = {"location": 120}
+        names = {"location"}
         named = (
             "LocationField = Annotated[str | None, Field(max_length=LOCATION_MAX)]\n"
             "location: LocationField = None\n"
         )
 
-        assert self._bare_ceilings(named, widths) == []
+        assert self._bare_ceilings(named, names) == []
 
     def test_it_reports_neither_shape_once_the_constant_is_named(self) -> None:
         """The other half of the diagonal: a rule refusing everything would pass
         the two arms above and fail the tree for the wrong reason."""
-        widths = {"location": 120, "title": 500}
+        names = {"location", "title"}
 
         field = "location: str | None = Field(default=None, max_length=LOCATION_MAX)\n"
         parameter = (
@@ -8017,17 +8257,17 @@ class TestEveryTextCeilingComesFromTheColumn:
             ") -> None: ...\n"
         )
 
-        assert self._bare_ceilings(field, widths) == []
-        assert self._bare_ceilings(parameter, widths) == []
+        assert self._bare_ceilings(field, names) == []
+        assert self._bare_ceilings(parameter, names) == []
 
-    def test_it_ignores_a_name_no_book_column_has(self) -> None:
+    def test_it_ignores_a_name_no_column_has(self) -> None:
         """`book_ids` carries `max_length=500`, which is a row cap rather than
         `TITLE_MAX` wearing its value. A rule keyed on the number would have to
         exempt it by hand."""
-        widths = {"title": 500}
+        names = {"title"}
 
         assert self._bare_ceilings(
-            "book_ids: list[int] = Field(min_length=2, max_length=500)\n", widths
+            "book_ids: list[int] = Field(min_length=2, max_length=500)\n", names
         ) == []
 
     def test_the_bare_literal_rule_reads_more_than_one_file(self) -> None:
@@ -8036,6 +8276,34 @@ class TestEveryTextCeilingComesFromTheColumn:
         names = {path.name for path in _python_sources()}
 
         assert {"book.py", "books.py", "public.py"} <= names
+
+    def test_the_rule_reads_one_entry_per_module_the_walk_returns(self) -> None:
+        """The arm the basename key defeated, and it is the one nothing had.
+
+        **Every arm that drives `_offenders` supplies its own sources**, and the
+        only caller taking the default asserts an empty list, so a default that
+        quietly lost a tenth of the tree was untested by construction. Keying
+        the sources on the basename did exactly that: nine basenames are carried
+        twice or three times here, so ten modules never reached the checker, and
+        which of a pair survived was filesystem order rather than anything this
+        repository decides.
+
+        **Stated as one entry per module walked, not as a number.** A count goes
+        stale the next time somebody adds a file; the equality says the thing
+        that has to stay true. The distinctness assertion is why: it names
+        deduplication as the failure rather than leaving the reader to infer it
+        from a length.
+        """
+        walked = _python_sources()
+        sources = self._module_sources()
+
+        assert len(sources) == len(walked)
+        assert len({where for where, _ in sources}) == len(walked)
+        # The basename collision this was written for, named so the arm cannot
+        # be satisfied by a tree that happens to have none.
+        assert {"opds.py", "routers/opds.py", "schemas/opds.py"} <= {
+            where for where, _ in sources
+        }
 
 
 class TestTheShippedImageCarriesThePostgresDriver:

@@ -50,6 +50,16 @@
  * when a member picks a file whose name ends in one of the two extensions.
  */
 
+/**
+ * **Scoping every read to a named parent is the whole of this reader's defence
+ * against the wrong author**, which is why these two and never a search of the
+ * subtree. `<description>` carries a `document-info` beside `title-info`, and
+ * `document-info` has `<author>` children naming whoever produced the FB2 file
+ * rather than whoever wrote the book. 15 of the 18 corpus files carry one. A
+ * `getElementsByTagName("author")` would file the converter as a co-author of
+ * every book.
+ */
+import { childrenNamed, firstNamed } from "./elementChildren";
 import { plausibleYear } from "./year";
 import { parseIsbn } from "./isbn";
 import { type FileIdentifier, type FileMetadata } from "./fileReaders";
@@ -137,49 +147,6 @@ export type Fb2Failure =
 export type Fb2Reading =
   | { readonly ok: true; readonly metadata: FileMetadata }
   | { readonly ok: false; readonly failure: Fb2Failure };
-
-/**
- * Children of `parent` whose local name matches, in document order.
- *
- * A sibling walk and not a spread of `parent.children`, for the reason and the
- * measurement `opf.ts` states at its own copy of this: the collection is live,
- * indexing it is not required to be constant time, and the length is the
- * member's file's choice. Duplicated rather than imported because `opf.ts` does
- * not export it and this module does not own that file.
- *
- * **Scoping every read to a named parent is also the whole of this reader's
- * defence against the wrong author.** `<description>` carries a `document-info`
- * beside `title-info`, and `document-info` has `<author>` children naming
- * whoever produced the FB2 file rather than whoever wrote the book. 15 of the 18
- * corpus files carry one. A `getElementsByTagName("author")` would file the
- * converter as a co-author of every book.
- */
-function childrenNamed(parent: Element, local: string): Element[] {
-  const found: Element[] = [];
-  for (
-    let child = parent.firstElementChild;
-    child !== null;
-    child = child.nextElementSibling
-  ) {
-    if (child.localName === local) found.push(child);
-  }
-  return found;
-}
-
-function firstNamed(
-  parent: Element | null | undefined,
-  local: string,
-): Element | null {
-  if (parent === null || parent === undefined) return null;
-  for (
-    let child = parent.firstElementChild;
-    child !== null;
-    child = child.nextElementSibling
-  ) {
-    if (child.localName === local) return child;
-  }
-  return null;
-}
 
 function text(element: Element | null): string | null {
   const value = element?.textContent?.trim();

@@ -46,10 +46,10 @@ be the oracle again by another route.
 """
 
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, time
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 import annotated_types
 from sqlalchemy.orm import Session
@@ -229,6 +229,80 @@ def _first_wins(pairs: Iterable[tuple[str, int]]) -> dict[str, int]:
     return result
 
 
+class _KnowsTakenIsbns(Protocol):
+    """The one question the spine asks an index.
+
+    Both index classes answer more than this, and only this is named: a
+    protocol wider than the call is a claim about the two indexes that nothing
+    checks, and the two `find` methods do not agree on a signature anyway.
+    """
+
+    def isbn_is_taken(self, isbn: str | None) -> bool: ...
+
+
+def _settle_one(
+    index: _KnowsTakenIsbns,
+    tally: _Tally,
+    book: Book | None,
+    *,
+    isbn: str | None,
+    unmatched_title: str,
+    create: Callable[[], Book],
+    fill_gaps: Callable[[Book], None],
+    create_missing: bool,
+) -> Book | None:
+    """One row, once the catalogue has been asked about it.
+
+    **The branch that is about privacy rather than correctness is here and
+    nowhere else.** A row whose ISBN belongs to a Book this Member cannot see
+    is counted and its title is never reported. This module's docstring holds
+    what creating it would cost and why `skipped` counts it together with the
+    rows that had no title; it is not restated here.
+
+    **Every importer creates through this function and has no other path to the
+    database**, which is what the three hand written copies could not give: a
+    fourth importer that writes the refusal itself, or forgets to, cannot add a
+    Book at all. `tests/test_importing.py::TestEveryImporterCreatesThroughTheSpine`
+    derives the importers from the module rather than listing them, and states
+    what that derivation cannot see.
+
+    Returns the Book a per importer tail runs on, or None when the row is
+    done. **None means done, not "was not created"**: the refused row and the
+    unmatched row both end here, and a caller that carried on would run its
+    tail on a row this function declined to act on.
+
+    What stays with each importer, because each difference has a reason:
+
+    * **how the catalogue was asked.** Three signatures over two matching
+      rules, which is why the match happens at the call site and the result is
+      passed in. `_CatalogueIndex.find_by` and `MarcIndex` hold the two rules.
+    * **what `unmatched_title` is spelled from.** Three spellings over three
+      sources, and only one of them is behavioural: `OpdsImport` refuses a
+      missing title before the match because its own constructor path nulls an
+      over wide one, `csv_import` has already dropped such a row, and the MARC
+      caller's `or ""` is a type level belt no uploaded file reaches. Each call
+      site says which it is.
+    * **which columns the gap fill writes**, and every `_create` body.
+    * **the tail**, and where it sits relative to the gap fill.
+    """
+    if book is not None:
+        tally.matched += 1
+        fill_gaps(book)
+        return book
+
+    if create_missing:
+        if index.isbn_is_taken(isbn):
+            tally.unmatched_private += 1
+            return None
+        created = create()
+        tally.created += 1
+        return created
+
+    if len(tally.unmatched) < MAX_UNMATCHED_REPORTED:
+        tally.unmatched.append(unmatched_title)
+    return None
+
+
 class Import:
     """One parsed export, applied to the Library as one Member.
 
@@ -347,25 +421,18 @@ class Import:
         apply_tags: bool,
     ) -> None:
         """One row: match it, maybe create it, then write what is personal."""
-        book = index.find(self._db, row)
-
-        if book is None and create_missing and index.isbn_is_taken(row.isbn):
-            # The ISBN belongs to a Book this Member cannot see, which means
-            # somebody else's Private one. See this module's docstring: the
-            # title is deliberately not reported.
-            tally.unmatched_private += 1
+        book = _settle_one(
+            index,
+            tally,
+            index.find(self._db, row),
+            isbn=row.isbn,
+            unmatched_title=row.title,
+            create=lambda: self._create(row, index),
+            fill_gaps=lambda matched: _fill_gaps(matched, row),
+            create_missing=create_missing,
+        )
+        if book is None:
             return
-
-        if book is None and create_missing:
-            book = self._create(row, index)
-            tally.created += 1
-        elif book is None:
-            if len(tally.unmatched) < MAX_UNMATCHED_REPORTED:
-                tally.unmatched.append(row.title)
-            return
-        else:
-            tally.matched += 1
-            _fill_gaps(book, row)
 
         if apply_tags and row.tags:
             self._apply_tags(book, row.tags, tag_cache, tally)
@@ -955,24 +1022,41 @@ class MarcImport:
         # the same strings or a truncated record cannot match itself. See
         # `bounded_fields`.
         fields = bounded_fields(record)
-        book = index.find(self._db, fields)
-
-        if book is None and create_missing and index.isbn_is_taken(fields["isbn"]):
-            tally.unmatched_private += 1
+        book = _settle_one(
+            index,
+            tally,
+            index.find(self._db, fields),
+            isbn=fields["isbn"],
+            # A title the caller supplied in their own file, so reporting it
+            # discloses nothing they did not already have.
+            #
+            # **`or ""` is a type level belt and no uploaded file reaches it.**
+            # `marc.py` builds through `Record.from_upload`, and `title` is in
+            # `catalogue._CUT_ON_UPLOAD`, so an over wide one is cut to the
+            # column's width and the unstorable pass then finds it in bounds. A
+            # ten thousand character title arrives here as a five hundred
+            # character string, and a record with no `245 $a` never becomes a
+            # Record at all: `marc.read` counts it in `ParsedMarc.skipped`.
+            # **The value's own declared type is `str | None`; the
+            # annotation at this site is `Any`**, because `bounded_fields`
+            # returns `dict[str, Any]`. So no type checker ever required this
+            # belt and nothing but this comment records why it is here, which
+            # is exactly why it reads as unnecessary.
+            #
+            # **`OpdsImport._apply_one` is the contrast, not the source.** That
+            # path builds through the plain constructor, where the unstorable
+            # pass does null an over wide title, which is why its refusal is
+            # behavioural where this belt is not. `from_upload` is the single
+            # fact the two paths do not share, and a reason carried across it
+            # is wrong in exactly this way: this comment said the column had
+            # dropped the title, which is the OPDS sentence.
+            unmatched_title=fields["title"] or "",
+            create=lambda: self._create(fields, index),
+            fill_gaps=lambda matched: _fill_marc_gaps(matched, fields),
+            create_missing=create_missing,
+        )
+        if book is None:
             return
-
-        if book is None and create_missing:
-            book = self._create(fields, index)
-            tally.created += 1
-        elif book is None:
-            if len(tally.unmatched) < MAX_UNMATCHED_REPORTED:
-                # A title the caller supplied in their own file, so reporting it
-                # discloses nothing they did not already have.
-                tally.unmatched.append(fields["title"] or "")
-            return
-        else:
-            tally.matched += 1
-            _fill_marc_gaps(book, fields)
 
         # After the create and after the gap fill, so a matched Book gains the
         # headings it lacked as well as a new one getting all of them.
@@ -1164,26 +1248,22 @@ class OpdsImport:
             tally.skipped_untitled += 1
             return
 
-        book = index.find_by(self._db, fields["isbn"], title)
-
-        if book is None and create_missing and index.isbn_is_taken(fields["isbn"]):
-            # The ISBN belongs to a Book this Member cannot see. Creating it
-            # would raise on the unique index and abort the whole sync, and the
-            # title is never reported: see this module's docstring.
-            tally.unmatched_private += 1
-            return
-
-        if book is None and create_missing:
-            self._create(fields, index)
-            tally.created += 1
-        elif book is None:
-            if len(tally.unmatched) < MAX_UNMATCHED_REPORTED:
-                # A title from the member's own server, so reporting it back to
-                # that member discloses nothing they did not already have.
-                tally.unmatched.append(title)
-        else:
-            tally.matched += 1
-            _fill_opds_gaps(book, fields)
+        # The return is dropped because this importer has no tail. It is the
+        # one of the three with nothing to run after the branch, and that is
+        # the whole of the difference.
+        _settle_one(
+            index,
+            tally,
+            index.find_by(self._db, fields["isbn"], title),
+            isbn=fields["isbn"],
+            # A title from the member's own server, so reporting it back to
+            # that member discloses nothing they did not already have. Known
+            # non-empty: the arm above returned on anything else.
+            unmatched_title=title,
+            create=lambda: self._create(fields, index),
+            fill_gaps=lambda matched: _fill_opds_gaps(matched, fields),
+            create_missing=create_missing,
+        )
 
     def _create(self, fields: dict[str, Any], index: _CatalogueIndex) -> Book:
         """Add a Book the member's server lists and this Library does not hold.

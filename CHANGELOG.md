@@ -590,6 +590,60 @@
   returning a file nobody read. Each now declares what it returns, and the two pairs that are
   the same shape declare it once between them.
 
+- **The DOM child walk that five file readers had each written for themselves now lives in
+  one module**, `frontend/src/lib/elementChildren.ts`, with the measurement that argues for
+  it. The EPUB package document, FictionBook and Kindle library readers take it from there;
+  the Adobe Digital Editions and comic archive readers still carry their own and are named
+  in the rule that holds the count at one. **The structural rule that a member's book file
+  cannot reach the network watches the whole directory now**, rather than the reader modules
+  it derived by the byte tokens each names: the shared walk names none of those tokens, so a
+  `fetch` written into the one module every reader hands its nodes to would have published
+  green, where the identical line in any reader it came out of fails. The import arm is
+  narrowed to pay for it, because over the whole directory a refusal of any import from the
+  generated client false refused nine modules whose only match is a type.
+
+- **The house rule that stops a test module deciding for itself what vendored code is now
+  says, in its name and in its failure message, that it covers a walk of any tree.** It
+  always did: the walk predicate reads the pattern and never the receiver, and one test
+  module already walks the browser's own source under it. No behaviour changed.
+
+- **A ninth kind of queued row on the rapid scan page would have appeared on screen with
+  nothing in it.** The scanner's rows go through a fixed set of eight states, and the rules
+  over them were written out one comparison at a time: three of the queue's own rules, the
+  reading that says a pick is still going, and the queue's own display, which had a line for
+  each state that existed and none for anything else. Adding a state compiled clean and was
+  silently wrong in all five places at once. The rules and the display are tables keyed on
+  the set of states now, so a new one does not compile until somebody says what it means and
+  what it looks like. No behaviour changes for the states that exist.
+
+- **The sentence explaining that catalogues list few ebooks could have appeared beside a
+  queue it was not true of.** The queue component decided for itself which rows a catalogue
+  had no record of, which is the one reading of a row's own fields it still did; every other
+  figure on that screen is counted once by the page's hook and rendered. It is counted with
+  the rest now, and a test refuses a second reader.
+
+- **The three ordered lists in the page level view types that a set equality test still
+  guarded, the formats, the lending answers and the light or dark modes, are refused at
+  compile time when they leave a member out, and the refusal names the member.** All five
+  such lists in that file are wrapped now. What stays a test is the duplicate entry, which
+  the type cannot see because a list naming a member twice still excludes nothing, and the
+  sequence, which the type has no opinion on.
+
+- **The key this library holds for one catalogue now reaches only that catalogue.** The
+  dispatch for the two catalogues with a JSON API of their own decided who was handed the
+  Google Books key by asking whether the source charges per request, which several sources
+  can answer yes to, so the next paid catalogue added would have been handed that key and
+  would have sent it with its own requests. The other half of the same test handed an unpaid
+  source an empty key, which is a valid argument meaning "ask without one", so such a source
+  would have asked Google anonymously and reported the answer as a book not found. Neither
+  was reachable from anything a reader can do: every catalogue this asks is one of the eleven
+  written into the release, and nothing builds another at runtime. A row names the secret its
+  own door takes, by whose secret it is, and that is refused at construction where it
+  disagrees with the rest of the row. A source that needs a credential and has no door
+  carrying one fails the startup check instead of asking without it. Both doors a catalogue
+  of this kind answers, the ISBN lookup and the title search, read that one statement on the
+  row.
+
 ## v0.17.2
 
 _2026-09-17_

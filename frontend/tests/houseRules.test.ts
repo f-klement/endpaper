@@ -623,8 +623,22 @@ const ENGINE_URL_IMPORT =
  * a request, in the one directory where a member's own bytes are the only bytes
  * there are.
  */
+// **The import arm excludes the generated model, and that is a widening this
+// rule pays for on purpose.** It used to refuse any import from `api/`, which
+// was safe while the population was the fifteen readers, none of which imports
+// anything from there. Once the population became the whole directory it false
+// refused **nine** modules whose only match is `from "../api/generated/model"`,
+// a type import that house rule 3 permits outright and that is erased before
+// anything runs: a type cannot carry a member's bytes anywhere.
+//
+// **What this now accepts that it refused before**: a module in `lib/` naming a
+// generated type. What it still refuses is every runtime path to the network,
+// and the generated client specifically, which is `api/generated/endpoints/`
+// and is separately held behind the hooks by the first rule in this file. So
+// the client is guarded twice and the types are guarded by neither, which is
+// the right way round.
 const REACHES_THE_NETWORK =
-  /\b(fetch|XMLHttpRequest|WebSocket|sendBeacon|FormData|navigator\.send)\b|from "[^"]*\/api\//;
+  /\b(fetch|XMLHttpRequest|WebSocket|sendBeacon|FormData|navigator\.send)\b|from "[^"]*\/api\/(?!generated\/model")/;
 
 describe("a member's book file cannot leave the browser", () => {
   it("keeps every reader out of reach of the network", () => {
@@ -637,8 +651,26 @@ describe("a member's book file cannot leave the browser", () => {
     // A guard on the page instead would have to tell a book file from a cover
     // image, and the page legitimately sends the second. This one does not need
     // to, because it sits where only the first exists.
+    //
+    // **The population is the directory, not the derived reader set**, and that
+    // is a real difference rather than a tidier spelling. `fileReaders()` keeps
+    // the modules naming one of six byte tokens, and a module can hold a
+    // member's parsed document without naming any of them: the sibling walk
+    // every reader calls was moved into `lib/elementChildren.ts` on 2026-09-25
+    // and that module names none of the six, so a `fetch` written into the one
+    // module every reader passes its nodes to would have published with this
+    // arm green, where the identical line in any of the three readers it came
+    // out of fails it. The derivation's own docstring names that hole and says
+    // the equality below makes it visible rather than closing it.
+    //
+    // **Widening it is free, measured rather than assumed**: the only two
+    // `lib/` modules naming a network token are already in the derived set, so
+    // this catches nothing that was not already watched and closes the class
+    // for every future module that names no byte token. The equality arm below
+    // keeps its own population, because that one is a claim about the readers
+    // and not about the directory.
     const offenders = entries()
-      .filter(([path]) => fileReaders().includes(path))
+      .filter(([path]) => path.startsWith("lib/") && !path.endsWith(".d.ts"))
       .filter(([path, source]) => {
         const code = withoutProse(source, langOf(path));
         return REACHES_THE_NETWORK.test(
@@ -3247,6 +3279,115 @@ describe("a scan reason is a name, and three arms carry anything else", () => {
 });
 
 /**
+ * What a catalogue answered about a queued row is read in one file.
+ *
+ * **The rule the queue's own figures rest on.** Every count the scan page puts
+ * on a control is derived in `pages/ScanPage/hooks.ts` by a predicate that file
+ * owns, and the component that draws them renders them and may not recompute
+ * them: a predicate written twice is a button offering to look up twelve beside
+ * a run that looks up nine. The queue component held the last exception, one
+ * `entries.some` deciding by hand whether to tell a member that catalogues list
+ * few ebooks, and it could have said so beside a queue where no catalogue had
+ * answered nothing.
+ *
+ * **Read off the stripped source**, so a docstring naming the field is not a
+ * reader. That is what lets every paragraph in this tree discuss it freely.
+ *
+ * **What it matches, exactly, because a claim of exactness here has been wrong
+ * twice.** A comparison whose one side is the field, with or without a receiver
+ * in front, and whose other side is one of the answers the union declares or
+ * `undefined`. **In either order**, **loose or strict**, and **in any of the
+ * three quotes this language spells a string with**. Every one of those three
+ * widenings was an evasion somebody ran: the field on the left only,
+ * `===` only, and double quotes only, which the formatter writes and a hand
+ * does not have to. **The lint rules that would refuse the reversed and the
+ * loose spellings both live in a category this config does not enforce**, so
+ * there is nothing else watching either of them. **And the other side is bound
+ * to the union's own literals**, because a rule matching any right hand side
+ * reddens on an unrelated field of the same ordinary English word, which it
+ * did.
+ *
+ * **What goes past it, described rather than listed.** A comparison against a
+ * value held in a variable, a `switch`, and a read handed to another function.
+ * A destructure is not among them: the field keeps its name, so the comparison
+ * after it is matched. What holds the rest is that there is nothing to read
+ * them from, since the figures arrive counted, and that is a property of the
+ * interface rather than of this rule.
+ */
+describe("what a catalogue answered is read in one file", () => {
+  /** The file that owns the queue's rows, and every rule over them. */
+  const QUEUE = "pages/ScanPage/hooks.ts";
+
+  /**
+   * A comparison between a row's stored answer and one of the answers there
+   * are, in either order, over stripped source.
+   *
+   * Built from the union's own arms rather than written out, so an answer added
+   * to it is covered here by arriving rather than by somebody remembering.
+   */
+  function comparesAnAnswer(): RegExp {
+    const source = SOURCES[`../src/${QUEUE}`];
+    const declared =
+      source === undefined
+        ? null
+        : declaredIn(QUEUE, source, "CatalogueAnswer");
+    // **Every quote this language has, not the one the formatter writes.** A
+    // backticked answer is the same comparison and passed the version that
+    // listed double quotes alone.
+    const answers = declared === null ? [] : literalsOf(declared);
+    const values = [
+      ...answers.flatMap((answer) => [
+        `"${answer}"`,
+        `'${answer}'`,
+        `\`${answer}\``,
+      ]),
+      "undefined",
+    ]
+      .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|");
+    const field = "(?:[\\w$]+\\.)*\\banswered\\b";
+    // **Loose equality as well as strict**, because the rule that would
+    // otherwise refuse `==` lives in a lint category this tree does not
+    // enforce, which is the same reason the reversed spelling needed covering.
+    // Spelled so that a single `=` cannot match: an assignment is not a
+    // comparison, and a class of `!` or `=` followed by an optional one reads
+    // one.
+    const compares = "(?:!==?|===?)";
+    return new RegExp(
+      `(?:${field}\\s*${compares}\\s*(?:${values})|(?:${values})\\s*${compares}\\s*${field})`,
+    );
+  }
+
+  function readers(): string[] {
+    const compares = comparesAnAnswer();
+    return entries()
+      .filter(([path, source]) =>
+        compares.test(withoutProse(source, langOf(path))),
+      )
+      .map(([path]) => path)
+      .sort();
+  }
+
+  it("finds the file it is about", () => {
+    // **A rule with no subject passes over nothing**, which is what a rename or
+    // a move would leave behind: the rule is that one file reads the field, and
+    // a tree where no file reads it satisfies that vacuously. This is what goes
+    // red instead, and it is checked against the declaration as well as the
+    // reading, so a queue that kept the readings and lost the union is caught.
+    const source = SOURCES[`../src/${QUEUE}`];
+    expect(source).toBeDefined();
+    const answers = declaredIn(QUEUE, source!, "CatalogueAnswer");
+    expect(answers).not.toBeNull();
+    expect(literalsOf(answers!).length).toBeGreaterThan(1);
+    expect(readers()).toContain(QUEUE);
+  });
+
+  it("is read in no other module", () => {
+    expect(readers()).toEqual([QUEUE]);
+  });
+});
+
+/**
  * Browser storage is reached through one door, and every other reader is named
  * along with the keys it may touch.
  *
@@ -4786,5 +4927,847 @@ describe("a date reaches a reader through one module", () => {
         else expect(found).toContain(name);
       }
     }
+  });
+});
+
+/** Every node under `value`, in no particular order. */
+function visitNodes(value: unknown, visit: (node: Node) => void): void {
+  if (Array.isArray(value)) {
+    for (const item of value as unknown[]) visitNodes(item, visit);
+    return;
+  }
+  if (!isNode(value)) return;
+  visit(value);
+  for (const key of Object.keys(value)) visitNodes(value[key], visit);
+}
+
+/** One exported hook, its interface width and the writes behind it. */
+interface HookRow {
+  readonly path: string;
+  readonly hook: string;
+  /** What the module binds it as, which is the row's identity. See `hooks`. */
+  readonly local: string;
+  readonly members: number;
+  readonly mutations: number;
+}
+
+/** Distinct generated mutation hooks reached, per member of the interface. */
+function ratioOf(row: HookRow): number {
+  return row.mutations / row.members;
+}
+
+/**
+ * The generated client's mutation hooks, read rather than matched on a name.
+ *
+ * **What makes one a write is its own signature**, an options bag typed
+ * `UseMutationOptions`, and not the shape of its name: the generated client
+ * spells a read and a write alike, so a name pattern would count both and the
+ * ratio would stop being about writes at all.
+ */
+function mutationHookNames(): Set<string> {
+  const names = new Set<string>();
+  for (const [path, source] of entries()) {
+    if (!path.startsWith("api/generated/endpoints/")) continue;
+    visitNodes(parseAst(source, { lang: langOf(path) }), (node) => {
+      if (node.type !== "VariableDeclarator") return;
+      const id = isNode(node.id) ? text(node.id.name) : null;
+      if (id === null || !/^use[A-Z]/.test(id)) return;
+      let mutates = false;
+      visitNodes(node, (inner) => {
+        if (
+          inner.type === "TSTypeReference" &&
+          isNode(inner.typeName) &&
+          text(inner.typeName.name) === "UseMutationOptions"
+        )
+          mutates = true;
+      });
+      if (mutates) names.add(id);
+    });
+  }
+  return names;
+}
+
+/** A binding under the name a module exports it as, which may be another. */
+interface ExportedHook extends Binding {
+  /** The name the module binds. Two exports of one binding share it. */
+  readonly local: string;
+}
+
+/** One name a declaration binds, what it binds to it, and how it is typed. */
+interface Binding {
+  readonly name: string;
+  readonly value: Node;
+  /** The type annotation on the binding itself, where the form allows one. */
+  readonly declaredAs: Node | null;
+}
+
+/**
+ * Every name a top level declaration binds, and what it binds it to.
+ *
+ * **A declaration binds through its own `id`, or through the `id` of each
+ * declarator it carries**, and that is the whole rule: it is a property of the
+ * node rather than a list of the node types that have one, so a declaration
+ * form this tree does not use today still yields its names. The first version
+ * of the census named the forms instead and was blind to the ones it had not
+ * thought of, which is what this file has paid for four times over.
+ *
+ * The value is the declarator's initialiser where there is one, because that is
+ * what a caller gets, and the declaration itself otherwise.
+ */
+function bindingsOf(node: Node): Binding[] {
+  const named = isNode(node.id) ? text(node.id.name) : null;
+  if (named !== null) return [{ name: named, value: node, declaredAs: null }];
+  const declarations = Array.isArray(node.declarations)
+    ? (node.declarations as unknown[])
+    : [];
+  return declarations.flatMap((one) => {
+    if (!isNode(one) || !isNode(one.id)) return [];
+    const value = isNode(one.init) ? one.init : one;
+    const direct = text(one.id.name);
+    // **The annotation on the binding, kept beside the value it binds.** A
+    // callable carries its return type on itself, and a binding can carry the
+    // whole signature instead: both write the return type down, and a rule
+    // about whether one is written has to read either. Only the identifier
+    // form has one to read, because a pattern's annotation describes the
+    // object being destructured rather than any one name it binds.
+    const declaredAs = isNode(one.id.typeAnnotation)
+      ? one.id.typeAnnotation
+      : null;
+    if (direct !== null) return [{ name: direct, value, declaredAs }];
+    // **The name is inside a pattern**, and a pattern binds names as much as an
+    // identifier does. Asking whether the `id` happens to be an identifier is
+    // the same mistake one binding form over as asking whether a declaration
+    // happens to sit under an `export` keyword: a hook destructured out of a
+    // factory reached neither list. Every identifier the pattern carries is
+    // taken, so no spelling of a pattern is enumerated here.
+    return identifiersIn(one.id).map((name) => ({
+      name,
+      value,
+      declaredAs: null,
+    }));
+  });
+}
+
+/**
+ * Every name a binding pattern binds.
+ *
+ * **In a destructuring pattern a key is never a binding, under any spelling.**
+ * In `{ a: b }` the name bound is `b` and `a` is the property being read from;
+ * in `{ [expr]: b }` the same holds, and `expr` is an expression that names a
+ * value already bound somewhere else. So a key contributes no name here, and
+ * that is a property of what a key is rather than a list of the ways one can be
+ * written.
+ *
+ * **Do not re-add a condition that descends into a computed key.** It was tried
+ * on the argument that a computed key is an expression where a written one is a
+ * label, which is true and is the reason to skip both: descending collects a
+ * **read** as though it were a binding. Measured, `{ [useTheHook]: renamed }`
+ * took that hook out of the measured set.
+ *
+ * **What it costs when this is wrong is a row deleted, not a row added.** The
+ * census keys its bindings by name, so a name collected here that nothing
+ * declares overwrites whatever did declare it with a value that is not
+ * callable, and the hook leaves the measured set. Three lines whose only effect
+ * was one key turned two red arms green. Same class as the specifier export and
+ * the pattern binding, and the third time it has been paid for.
+ */
+function identifiersIn(pattern: Node): string[] {
+  const names: string[] = [];
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value as unknown[]) walk(item);
+      return;
+    }
+    if (!isNode(value)) return;
+    if (value.type === "Identifier") {
+      const name = text(value.name);
+      if (name !== null) names.push(name);
+      return;
+    }
+    const carriesAKey = value.type.endsWith("Property");
+    for (const key of Object.keys(value)) {
+      if (carriesAKey && key === "key") continue;
+      walk(value[key]);
+    }
+  };
+  walk(pattern);
+  return names;
+}
+
+/** One exported hook and whether its return type is written down. */
+interface ContractRow {
+  readonly path: string;
+  readonly hook: string;
+  /**
+   * A return type is declared, on the callable itself or on its binding.
+   *
+   * **Present, never informative.** `(): unknown` satisfies this, and so does
+   * an alias for something inferred elsewhere. What a return type is worth
+   * saying is not judged here and no assertion below claims it is.
+   */
+  readonly annotated: boolean;
+  /**
+   * Something callable is bound to the name, so there is a signature to read.
+   *
+   * False when the name is bound to anything else, `memo(f)` or a factory's
+   * answer, where the only thing left to read is the binding's own annotation.
+   */
+  readonly callable: boolean;
+}
+
+/** Does this binding put a return type in the source, in either place? */
+function declaresItsReturn(one: Binding): boolean {
+  return isNode(one.value.returnType) || isNode(one.declaredAs);
+}
+
+/** A value whose signature can be read: anything carrying a parameter list. */
+function isCallable(value: Node): boolean {
+  return /Function|Arrow/.test(value.type);
+}
+
+/**
+ * What one module exports under a hook's name, and the two maps read beside it.
+ *
+ * **One walk, because there is one population.** The width census below and the
+ * contract census both ask which names a module exports as hooks, and two walks
+ * asking it would be the same fact stored twice, drifting the first time one of
+ * them learned a form the other had not. Every fix this walk has taken is a fix
+ * both censuses get.
+ *
+ * `widths` and `fromTheClient` are the width census's alone and are collected
+ * here because they are properties of the same traversal.
+ *
+ * **The two censuses take this population differently, and widening it is not
+ * symmetric.** The contract census takes every row; the width census keeps the
+ * rows it can measure and names the rest in `unmeasured`. So a form learned
+ * here, as the renamed specifier export was, adds rows to both and may add
+ * them to `unmeasured` rather than to `measured`, which **no width arm can
+ * see**: those arms are ordinal over the measured rows and a row that never
+ * enters them changes nothing. Benign so far, and stated because it is the
+ * shape in which this walk growing would quietly narrow the other rule.
+ */
+function hooksExportedBy(
+  path: string,
+  source: string,
+): {
+  hooks: ExportedHook[];
+  widths: Map<string, number>;
+  fromTheClient: Set<string>;
+} {
+  const ast: unknown = parseAst(source, { lang: langOf(path) });
+  const top = isNode(ast) && Array.isArray(ast.body) ? ast.body : [];
+  const widths = new Map<string, number>();
+  const fromTheClient = new Set<string>();
+  const bound = new Map<string, Binding>();
+  // **Keyed on the name the module exports, valued by the name it binds**, and
+  // the two differ under exactly one form, `export { inner as useX }`. Reading
+  // the local name there tested `inner` against the hook pattern and produced
+  // no row at all, so a hook renamed on its way out was outside both this
+  // census and the floor arm that guards it: the one export form where this
+  // walk read the declaration rather than the export, which is the mistake its
+  // own docstring says it does not make. The tree has renamed specifier
+  // exports, all of them re-exports carrying a `from`, which is why nothing
+  // here demonstrated the hole.
+  //
+  // **Changing a population's key moves membership in both directions at
+  // once**, which is not how changing its extent behaves and is the thing to
+  // check when this line is next edited. This key gained the rename and the
+  // aliased second row, and lost the default written as a specifier and the
+  // string literal name, before any of the four was noticed; `renamesOf`
+  // carries what each of them is now.
+  const exported = new Map<string, string>();
+
+  for (const statement of top as unknown[]) {
+    if (!isNode(statement)) continue;
+    if (statement.type === "ImportDeclaration") {
+      const from = isNode(statement.source)
+        ? text(statement.source.value)
+        : null;
+      if (from === null || !from.includes("api/generated/endpoints")) continue;
+      for (const one of localNamesOf(statement)) fromTheClient.add(one);
+      continue;
+    }
+
+    const wraps = statement.type.startsWith("Export");
+    const declared =
+      wraps && isNode(statement.declaration)
+        ? statement.declaration
+        : statement;
+    if (declared.type === "TSInterfaceDeclaration" && isNode(declared.id)) {
+      const name = text(declared.id.name);
+      const body = isNode(declared.body) ? declared.body.body : null;
+      if (name !== null && Array.isArray(body)) widths.set(name, body.length);
+    }
+    for (const binding of bindingsOf(declared))
+      bound.set(binding.name, binding);
+
+    if (!wraps) continue;
+    if (isNode(statement.declaration)) {
+      for (const { name } of bindingsOf(statement.declaration))
+        exported.set(name, name);
+      // `export default theHook`, where the export names an existing binding
+      // rather than carrying a declaration of its own.
+      const direct = text(statement.declaration.name);
+      if (direct !== null) exported.set(direct, direct);
+    }
+    // A specifier export with a `source` re-exports another module's name and
+    // binds nothing here, so it is not this module's row.
+    if (statement.source === null || statement.source === undefined)
+      for (const one of renamesOf(statement)) exported.set(one.out, one.here);
+  }
+
+  const hooks: ExportedHook[] = [];
+  for (const [hook, local] of exported) {
+    if (!/^use[A-Z]/.test(hook)) continue;
+    const binding = bound.get(local);
+    // **Named twice on purpose.** `name` is what callers see and is what the
+    // rule is about; `local` is what the module binds and is what identifies
+    // the row, because one binding exported twice is two names and still one
+    // hook. Dropping the second is how a hook came to sit in an ordering under
+    // both its names while the arm that refuses a duplicate stayed green.
+    if (binding !== undefined) hooks.push({ ...binding, name: hook, local });
+  }
+  return { hooks, widths, fromTheClient };
+}
+
+/**
+ * The one exclusion either census makes, named rather than globbed.
+ *
+ * Orval writes this directory and a regeneration rewrites it, so a rule about
+ * how the hooks in this tree are written cannot bind it: the answer to a
+ * failure there is a generator setting, not an edit. **Every other module under
+ * `src` is in the population, whatever it is called and wherever it sits**,
+ * which is the half an inclusion glob of `pages` would have lost: hook
+ * exporting modules sit outside it, and a glob that missed them would have run
+ * green over them for ever rather than failing once.
+ */
+const NOT_OURS_TO_WRITE = "api/generated/";
+
+/**
+ * Every exported hook in the tree, split by whether it can be measured.
+ *
+ * **The population is stated as an exclusion and the exclusion is reported.** A
+ * row is every `use*` a module both binds and exports, outside the generated
+ * client, whether it is bound through an identifier or through a pattern. It
+ * is measurable when the value bound is callable and its declared
+ * return type resolves to an interface declared in the same module, which is a
+ * property of the hook; every exported `use*` that is not goes into
+ * `unmeasured` by name. Dropping those would be an inclusion list arrived at by
+ * another route, and a blank cell reads as zero. **That name is the one the
+ * module binds**, because the list is also the identity key the duplicate arm
+ * reads: for a hook exported only under a rename it is therefore an internal
+ * name no caller sees, and the exported name is carried on the row rather than
+ * here. Keying the population on the
+ * `Use<X>Result` name instead would be the same mistake with better manners: a
+ * name is not a property of a hook.
+ *
+ * **`contracts` is the same population read for a different property**, whether
+ * the hook writes its return type down, which every exported hook has whether
+ * or not its width can be measured. It is not the complement of `unmeasured`
+ * and must not be read as one: a hook returning an annotated type declared in
+ * another module is unmeasurable here and perfectly well annotated.
+ *
+ * **What is exported is read from the export, not from the declaration.** The
+ * first version asked whether a declaration was written under an `export`
+ * keyword, so a hook exported by specifier or as a default reached neither set
+ * and was not even in the exclusion list: a planted hook wider than anything in
+ * the tree and deeper than anything in it passed all three arms, one character
+ * of difference from the form that failed two of them. The fix is not a fourth
+ * form in a list; it is that a name is exported when an export names it, in
+ * whatever way, and a candidate is any name a top level declaration binds.
+ *
+ * **A name exported here but declared elsewhere is measured where it is
+ * declared**, which is every `index.ts` in this tree re-exporting its page's
+ * hook. Such an export binds nothing locally, so it yields no candidate here
+ * and is not lost: it is counted once, in the module that writes it.
+ */
+let census: {
+  measured: HookRow[];
+  unmeasured: string[];
+  contracts: ContractRow[];
+} | null = null;
+
+function hookRows(): {
+  measured: HookRow[];
+  unmeasured: string[];
+  contracts: ContractRow[];
+} {
+  if (census !== null) return census;
+  const writes = mutationHookNames();
+  const measured: HookRow[] = [];
+  const unmeasured: string[] = [];
+  const contracts: ContractRow[] = [];
+
+  for (const [path, source] of entries()) {
+    if (path.startsWith(NOT_OURS_TO_WRITE)) continue;
+    const { hooks, widths, fromTheClient } = hooksExportedBy(path, source);
+
+    for (const binding of hooks) {
+      const hook = binding.name;
+      const local = binding.local;
+      const fn = binding.value;
+      contracts.push({
+        path,
+        hook,
+        annotated: declaresItsReturn(binding),
+        callable: isCallable(fn),
+      });
+      if (!isCallable(fn)) {
+        unmeasured.push(`${path}:${local}`);
+        continue;
+      }
+      const returned = isNode(fn.returnType)
+        ? fn.returnType.typeAnnotation
+        : null;
+      const named =
+        isNode(returned) &&
+        returned.type === "TSTypeReference" &&
+        isNode(returned.typeName)
+          ? text(returned.typeName.name)
+          : null;
+      const members = named === null ? undefined : widths.get(named);
+      if (members === undefined) {
+        unmeasured.push(`${path}:${local}`);
+        continue;
+      }
+      const called = new Set<string>();
+      visitNodes(fn.body, (node) => {
+        if (node.type !== "CallExpression" || !isNode(node.callee)) return;
+        const callee = text(node.callee.name);
+        if (callee !== null) called.add(callee);
+      });
+      const mutations = [...called].filter(
+        (name) => fromTheClient.has(name) && writes.has(name),
+      ).length;
+      measured.push({ path, hook, local, members, mutations });
+    }
+  }
+
+  census = { measured, unmeasured, contracts };
+  return census;
+}
+
+/**
+ * What an export statement's specifiers call each name, inside and outside.
+ *
+ * The two are the same under every spelling but one, and `localNamesOf` beside
+ * this reads only the inside half, which is all an import needs and is why it
+ * is left alone.
+ *
+ * **`default` is not a name**, it is the slot, so a specifier exporting into it
+ * falls back to the local name. `export default useX` a few lines above already
+ * does that, and without this the same hook written
+ * `export { useX as default }` keyed on a word no hook can be called and left
+ * the population, which is the sibling branch and this one disagreeing about
+ * one hook.
+ *
+ * **A type only export carries no value**, so `export type { Foo as useX }`
+ * and a `type` marked specifier inside an ordinary export are skipped rather
+ * than admitted as a hook bound to something uncallable. `exportKind` is read
+ * on the statement and on the specifier because either may carry it.
+ *
+ * A specifier naming its outside half with a string literal yields nothing
+ * here, which is a form this walk used to cover under its local name and now
+ * does not: no identifier can be spelled that way, so nothing it named could
+ * have been reached as a hook.
+ */
+function renamesOf(statement: Node): { out: string; here: string }[] {
+  if (text(statement.exportKind) === "type") return [];
+  const specifiers = Array.isArray(statement.specifiers)
+    ? (statement.specifiers as unknown[])
+    : [];
+  return specifiers.flatMap((one) => {
+    if (!isNode(one) || !isNode(one.local)) return [];
+    if (text(one.exportKind) === "type") return [];
+    const here = text(one.local.name);
+    const named = isNode(one.exported) ? text(one.exported.name) : here;
+    const out = named === "default" ? here : named;
+    return here === null || out === null ? [] : [{ out, here }];
+  });
+}
+
+/** The local names an import or export statement's specifiers stand for. */
+function localNamesOf(statement: Node): string[] {
+  const specifiers = Array.isArray(statement.specifiers)
+    ? (statement.specifiers as unknown[])
+    : [];
+  return specifiers.flatMap((one) => {
+    if (!isNode(one) || !isNode(one.local)) return [];
+    const local = text(one.local.name);
+    return local === null ? [] : [local];
+  });
+}
+
+/**
+ * Width is a symptom, and this is where that claim is held.
+ *
+ * **The claim the decision record on deep modules behind narrow doors makes
+ * about this tree's hooks**, asserted here rather than left in its prose. That
+ * document is stripped before publication and this file is not, so the pointer
+ * runs one way only: it names this block, and nothing here names it. Its
+ * frontend section carried three live figures and every one of them was wrong
+ * by the time anybody re read them, which is what a number in prose does: it
+ * stops being re derived and starts being copied.
+ *
+ * **Two quantities, and the third was measured and refused.** The width of a
+ * hook's result interface, and per member the distinct generated mutation hooks
+ * its body **calls by the name it imported them under**. That is what is
+ * counted, and it is narrower than reaching them: a call through an alias,
+ * `const call = useAddBook`, and a call through a member expression are both
+ * invisible to it, so a hook whose writes all go that way measures zero and
+ * enters the comparison as a shallow one. **The extent of what else is not
+ * bounded here**, and no alias is chased: following one needs a resolver, which
+ * is a larger instrument than this arm and is the enumeration the population
+ * walk has already been fixed three times for. An arm's job is to fail on a
+ * mutation rather than to quantify its own blind spot.
+ *
+ * A count of the private declarations a hook reads was the obvious third and is
+ * not here: two instruments disagreed on it for two of the
+ * three rows anybody had published while agreeing on these two for every row of
+ * the tree, and a private declaration that a sibling hook also reads belongs to
+ * neither of them, so the column needs a policy and a policy is the hand
+ * judgement a derived figure exists to remove.
+ *
+ * **No figure is written down and no cut is asserted.** Both arms below are
+ * ordinal. A bound stops guarding without ever failing, which this tree has
+ * measured twice, and the backend guard for the same document records a rank
+ * cut passing with a margin of three hundredths before it was replaced by a
+ * claim about a family.
+ *
+ * **What it does not hold, stated rather than bounded: the refusal.** The
+ * section refuses collapsing a wide hook of distinct operations into one
+ * `update(patch)`, and no assertion over these two quantities can refuse it,
+ * because the collapse takes members away and leaves the writes where they
+ * are, which moves that hook **up** the second ordering and leaves every arm
+ * below green. What stops that is the paragraph. How much else these two
+ * quantities miss is not bounded here, because every seat that tries will
+ * succeed at measuring something and fail at bounding it.
+ */
+describe("a hook's width does not rank it by what is behind its door", () => {
+  /**
+   * The two hooks the section argues about, by name.
+   *
+   * **Named because the document names them**, which is the difference between
+   * this and the pair it refuses to name elsewhere: that one is an illustration
+   * chosen to show a general claim and swaps as the tree moves, and these two
+   * are the subject the section was written about. A rename or a deletion has
+   * to fail here rather than pass over a population that no longer holds them.
+   */
+  const NARROWED = "useLibrary";
+  const REFUSED = "useBookActions";
+
+  it("finds the hooks the section argues about", () => {
+    const { measured, unmeasured } = hookRows();
+
+    // **No hook is counted twice and the exclusion is a list rather than a
+    // silence.** A row the instrument cannot measure is named in `unmeasured`
+    // and a duplicate would let one hook sit at the top of both orderings
+    // under two entries, which is the arithmetic the arms below rest on.
+    //
+    // **Keyed on what the module binds, not on what it exports**, because one
+    // binding exported twice, `export { useX as useAlias }` beside `useX`, is
+    // two names and one hook: keyed on the exported name this arm stayed green
+    // over exactly the duplicate its comment says it refuses, while the
+    // orderings below took the hook twice.
+    //
+    // **The arms below depend on this one for identity, not only for
+    // arithmetic**, which is a dependency rather than an order of execution.
+    // They tell hooks apart by the exported name and, at the intersection of
+    // widest and deepest, by object reference. Both are unique per hook only
+    // while no binding has two rows: with an alias, a hook is compared against
+    // itself, and one hook can stand at the top of both orderings under two
+    // names with the intersection still empty. So a red here is not a count
+    // going wrong, it is the population those arms are written over ceasing to
+    // be one row per hook.
+    expect(measured.length + unmeasured.length).toBe(
+      new Set([
+        ...measured.map((row) => `${row.path}:${row.local}`),
+        ...unmeasured,
+      ]).size,
+    );
+    expect(measured.length).toBeGreaterThan(1);
+
+    const found = measured.map((row) => row.hook);
+    expect(found).toContain(NARROWED);
+    expect(found).toContain(REFUSED);
+  });
+
+  it("ranks no hook first by width and first by depth at once", () => {
+    // **The claim itself.** Falsified exactly when the two orderings agree at
+    // the top, which is the tree in which ranking hooks by the width of their
+    // interface would be ranking them by what is behind it, and the section
+    // would be wrong. Written over the whole population rather than over a
+    // pair, and tie safe in both orderings: a hook is at the top when nothing
+    // stands strictly above it.
+    const { measured } = hookRows();
+    const widest = measured.filter(
+      (row) => !measured.some((other) => other.members > row.members),
+    );
+    const deepest = measured.filter(
+      (row) => !measured.some((other) => ratioOf(other) > ratioOf(row)),
+    );
+
+    expect(
+      widest.filter((row) => deepest.includes(row)).map((row) => row.hook),
+    ).toEqual([]);
+  });
+
+  it("keeps the refused hook the deeper of every hook as wide as it", () => {
+    // **The sentence the section actually writes**, in both halves. The pair:
+    // these two look alike by width and only one of them is a defect. The
+    // family: at that width, this hook is the one with an operation per name.
+    //
+    // **The pair alone is not enough and that was measured.** The narrowed hook
+    // calls no mutation at all, so "deeper than it" is "deeper than nothing",
+    // and the only tree that falsifies it is one where the refused hook's
+    // writes reach exactly zero. Planted, its writes collapsed to one and six
+    // hooks standing above it, and the pair arm stayed green. The family arm is
+    // red on that same mutant, because the widest hook in the tree sits above
+    // it the moment its operations stop being distinct.
+    //
+    // **Quantified over the hooks at least as wide, not over all of them.** A
+    // thin door over two writes ranks high per member and says nothing about
+    // this claim, which is about what is behind a wide door; asking the whole
+    // population is the rank cut this replaced, and it reddens on such a door
+    // arriving. Today the subpopulation is this hook and the widest one, at
+    // 10x.
+    //
+    // **And the subpopulation has to have somebody in it**, which is this
+    // file's own rule that a claim with no subject passes over nothing, applied
+    // to a claim whose subject is a set rather than a name. Two ordinary
+    // changes empty it: widening the refused hook past everything, which also
+    // takes its ratio down and is invisible to every other arm, and narrowing
+    // the widest hook below it, which is the subject of the work this block was
+    // written during. Either one means the section's own "two came out at the
+    // top" has stopped describing the tree, so a red here is a paragraph
+    // wanting re-reading rather than a spurious failure.
+    const { measured } = hookRows();
+    const refused = measured.find((row) => row.hook === REFUSED);
+    const narrowed = measured.find((row) => row.hook === NARROWED);
+    expect(refused).toBeDefined();
+    expect(narrowed).toBeDefined();
+
+    expect(
+      ratioOf(refused!) > ratioOf(narrowed!)
+        ? "the refused hook is the deeper of the two"
+        : `${REFUSED} is no longer deeper per member than ${NARROWED}`,
+    ).toBe("the refused hook is the deeper of the two");
+
+    const asWide = measured.filter(
+      (row) => row.hook !== REFUSED && row.members >= refused!.members,
+    );
+
+    expect(
+      asWide.length > 0
+        ? "some other hook is as wide as the refused one"
+        : `nothing is as wide as ${REFUSED} any more, so this claim holds over nothing`,
+    ).toBe("some other hook is as wide as the refused one");
+
+    expect(
+      asWide
+        .filter((row) => ratioOf(row) >= ratioOf(refused!))
+        .map((row) => row.hook),
+    ).toEqual([]);
+  });
+});
+
+/**
+ * Every exported hook writes its return type down.
+ *
+ * **An inferred hook return is invisible to review**, which is the whole
+ * reason: one had reached twelve members before anybody noticed, because a
+ * diff adding a field to an inferred object shows a field and never a
+ * signature. A declared return type puts the shape in the source, so widening
+ * it is an edit somebody has to make on purpose.
+ *
+ * **The population is the census above**, every `use*` a module under `src`
+ * both binds and exports, and it is stated as an exclusion: the generated
+ * client, at `NOT_OURS_TO_WRITE`, and nothing else. A glob of the pages tree
+ * would have been an inclusion list arrived at by another route, silent about
+ * every hook exporting module outside it.
+ *
+ * **Two spellings, and only one of them has a counter example in this tree.**
+ * A rule matching `export function use` misses `export const useX = () => …`
+ * entirely, and nothing in the tree would make a reader think of it. So the
+ * check reads the property, a return type on the callable or on the binding it
+ * is assigned to, and the fixture arm below pins both spellings whether or not
+ * either is written here today. **The name is read from the export in every
+ * form, including the rename**, `export { inner as useX }`: reading the local
+ * name there produced no row at all, and the tree's renamed exports all carry
+ * a `from` and are somebody else's rows, which is why nothing here showed it.
+ *
+ * **What it does not hold, stated rather than bounded.** It asks whether a
+ * return type is written, never whether it says anything: `(): unknown` passes,
+ * and so does an alias for something inferred elsewhere. It takes a name
+ * beginning `use` as the definition of a hook, because nothing short of a type
+ * checker distinguishes one, so a hook under another name is outside it and a
+ * constant under this one is inside it. A hook declared in one module and
+ * re-exported by another is judged where it is declared, which is the census's
+ * own rule and is why every page's `index.ts` contributes nothing here. How
+ * much else a name based population misses is not bounded: every seat that
+ * tries will succeed at measuring something and fail at bounding it.
+ */
+describe("every exported hook declares its return type", () => {
+  /**
+   * A module that exports a hook, by the coarsest reading available.
+   *
+   * **A floor for the census, not a second population.** It sees the two
+   * spellings written at the top of a line and is blind to the specifier and
+   * default exports the census walk does see, so it under reports by
+   * construction and the census is the only thing holding those forms. It can
+   * also over report, which is why a red below is a module to go and look at
+   * rather than proof of a missed export: comments are read past, but
+   * `withoutProse` keeps template chunks and JSX text, so a line beginning
+   * `export const useFake` written inside either is characters to this probe
+   * and nothing at all to the census.
+   */
+  function looksLikeItExportsAHook(path: string, source: string): boolean {
+    return /^export (?:function|const) use[A-Z]/m.test(
+      withoutProse(source, langOf(path)),
+    );
+  }
+
+  it("finds the exported hooks of every module that has one", () => {
+    const { contracts } = hookRows();
+
+    // **A subject, before any claim about it.** A census that silently returned
+    // nothing would satisfy every assertion below by holding over nobody, which
+    // is this file's own rule applied to itself. Renaming the census, moving
+    // the source glob or breaking the parse all land here.
+    expect(contracts.length).toBeGreaterThan(0);
+
+    const covered = new Set(contracts.map((row) => row.path));
+    const missed = entries()
+      .filter(([path]) => !path.startsWith(NOT_OURS_TO_WRITE))
+      .filter(([path, source]) => looksLikeItExportsAHook(path, source))
+      .map(([path]) => path)
+      .filter((path) => !covered.has(path));
+
+    // Named rather than counted: a module dropped from the population is the
+    // failure that reads as a pass, and a number says nothing about which.
+    //
+    // **This is also what catches a second exclusion**, and it is the only
+    // thing that does: a prefix skipped anywhere in the census leaves its
+    // modules out of `covered` and they arrive here by name. It catches one
+    // only over the modules the floor can see, which is every hook exporting
+    // module in the tree today and no claim about tomorrow's.
+    expect(missed).toEqual([]);
+
+    // The named exclusion is honoured. **This assertion cannot see a second
+    // one**: an early `continue` for another prefix leaves it green, because
+    // what it reads is which paths are present rather than which are skipped.
+    expect(
+      contracts.filter((row) => row.path.startsWith(NOT_OURS_TO_WRITE)),
+    ).toEqual([]);
+  });
+
+  it("tells an inferred return from a declared one in either spelling", () => {
+    // **The detector's own diagonal.** Every arm here reports what the tree
+    // holds, and a check that answered "annotated" to everything would report a
+    // clean tree for ever. So the same function is run over a module written to
+    // contain both answers, and it has to split them.
+    //
+    // The forms are the ones this census has already been wrong about or is
+    // warned about: the declaration, the arrow that no counter example in the
+    // tree would suggest, the binding carrying the signature instead of the
+    // callable, the export by specifier that once took a hook out of the
+    // population entirely, the rename on the way out, which is the one form
+    // where this walk read the declaration instead of the export and so had no
+    // row to be wrong about, the default slot written as a specifier, which is
+    // a hook and not a hook called `default`, and the two type only spellings,
+    // which are neither. The floor arm above cannot see any specifier form, so
+    // this is where all of them are held.
+    const source = [
+      "interface Shape { a: number }",
+      "export function useAnnotatedDeclaration(): Shape { return here(); }",
+      "export function useInferredDeclaration() { return here(); }",
+      "export const useAnnotatedArrow = (): Shape => here();",
+      "export const useInferredArrow = () => ({ a: 1 });",
+      "export const useAnnotatedBinding: () => Shape = () => here();",
+      "const useInferredSpecifier = () => ({ a: 1 });",
+      "export { useInferredSpecifier };",
+      "const innerName = () => ({ a: 1 });",
+      "const annotatedInner = (): Shape => here();",
+      "export { innerName as useInferredRename };",
+      "export { annotatedInner as useAnnotatedRename };",
+      // `default` is the slot rather than a name, so this is the same row
+      // `export default useDefaultSlot` would give, under the local name.
+      "const useDefaultSlot = () => ({ a: 1 });",
+      "export { useDefaultSlot as default };",
+      // A type carries no value and is not a hook however it is named.
+      "interface Foo { b: number }",
+      "export type { Foo as useNotAHookAtAll };",
+      "export { type Foo as useNorThisOne };",
+    ].join("\n");
+
+    const hooks = hooksExportedBy("fixture.ts", source).hooks;
+    const split = (annotated: boolean): string[] =>
+      hooks
+        .filter((one) => declaresItsReturn(one) === annotated)
+        .map((one) => one.name)
+        .sort();
+
+    // Asserted by the exported name, which is the name a caller sees and the
+    // one the rule is about. `innerName` appearing here instead would mean the
+    // walk had gone back to reading the declaration.
+    // **Two names for one binding are two rows and one hook**, which is what
+    // the width census's duplicate arm keys on `local` to see. Asserted apart
+    // from the two lists so that neither has to carry an alias of a name it
+    // already holds.
+    const aliased = hooksExportedBy(
+      "fixture.ts",
+      [
+        "const useOne = () => ({ a: 1 });",
+        "export { useOne, useOne as useTwo };",
+      ].join("\n"),
+    ).hooks;
+    expect(aliased.map((one) => `${one.name}:${one.local}`).sort()).toEqual([
+      "useOne:useOne",
+      "useTwo:useOne",
+    ]);
+
+    expect(split(true)).toEqual([
+      "useAnnotatedArrow",
+      "useAnnotatedBinding",
+      "useAnnotatedDeclaration",
+      "useAnnotatedRename",
+    ]);
+    expect(split(false)).toEqual([
+      "useDefaultSlot",
+      "useInferredArrow",
+      "useInferredDeclaration",
+      "useInferredRename",
+      "useInferredSpecifier",
+    ]);
+  });
+
+  it("leaves no exported hook's return type to inference", () => {
+    // **The rule.** Listed by name, because the point of a red here is to say
+    // which hook to go and annotate.
+    const { contracts } = hookRows();
+
+    expect(
+      contracts
+        .filter((row) => !row.annotated)
+        .map((row) => `${row.path}:${row.hook}`)
+        .sort(),
+    ).toEqual([]);
+  });
+
+  it("reads a callable for every exported hook", () => {
+    // **A form the check can only half read, raised rather than passed over.**
+    // A name bound to something that is not callable, `memo(f)` or a factory's
+    // answer, carries no signature of its own, so the arm above is left reading
+    // the binding's annotation and nothing else. There are none today. A red
+    // here is a spelling arriving that somebody has to look at, not a defect in
+    // the hook it names.
+    const { contracts } = hookRows();
+
+    expect(
+      contracts
+        .filter((row) => !row.callable)
+        .map((row) => `${row.path}:${row.hook}`)
+        .sort(),
+    ).toEqual([]);
   });
 });

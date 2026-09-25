@@ -48,10 +48,10 @@ import type { ThemePreference } from "../theme";
  * duplicate, since a list naming a member twice still excludes nothing, so that
  * property stays a test.
  *
- * `FORMAT_ORDER`, `LENDING_ORDER` and `MODE_ORDER` are not wrapped: each already
- * has a set equality test, so wrapping them buys the error earlier and retires
- * three tests, which is worth reviewing on its own rather than inside a status
- * fix.
+ * Every `*_ORDER` list in this file is wrapped. The three that joined last,
+ * `FORMAT_ORDER`, `LENDING_ORDER` and `MODE_ORDER`, each had a set equality test
+ * first, so the wrap replaced an instrument rather than closing a gap: it takes
+ * exhaustiveness, and what it cannot see stays a test beside it.
  */
 export const everyOneOf =
   <Union extends string>() =>
@@ -157,19 +157,20 @@ export const FORMAT_LABELS: Record<BookFormat, MessageKey> = {
 /**
  * The order they are offered in, coarsest first.
  *
- * **A list, so the type cannot see a missing value the way `FORMAT_LABELS`
- * can**, and every dropdown and filter in the app is built from it: a format
- * left out here is one a member can never choose and never filter by, with
- * nothing red anywhere. `tests/pages/types.test.ts` asserts it covers the enum.
+ * Every dropdown and filter in the app is built from it, so a format left out
+ * is one a member can never choose and never filter by. The compiler refuses
+ * that now, where a set equality test used to catch it. The test could not see
+ * a duplicate and had no opinion on where the catch-all sits, so
+ * `tests/pages/types.test.ts` still names both of those separately.
  */
-export const FORMAT_ORDER: readonly BookFormat[] = [
+export const FORMAT_ORDER = everyOneOf<BookFormat>()([
   BookFormat.hardcover,
   BookFormat.paperback,
   BookFormat.ebook,
   BookFormat.audiobook,
   BookFormat.comic,
   BookFormat.other,
-];
+]);
 
 export const CONDITION_LABELS: Record<BookCondition, MessageKey> = {
   [BookCondition.new]: "copy.condition.new",
@@ -214,12 +215,18 @@ export const LENDING_LABELS: Record<LendingWillingness, MessageKey> = {
   [LendingWillingness.happy]: "lending.happy",
 };
 
-/** Yes, later, no. Offered in the order somebody would say them. */
-export const LENDING_ORDER: readonly LendingWillingness[] = [
+/**
+ * Yes, later, no. Offered in the order somebody would say them.
+ *
+ * The sorted array comparison this replaced did three jobs in one expression,
+ * and the wrap takes one of them. A duplicate is still a test's to catch: a
+ * list naming an answer twice excludes nothing, so the type has no opinion.
+ */
+export const LENDING_ORDER = everyOneOf<LendingWillingness>()([
   LendingWillingness.happy,
   LendingWillingness.in_use,
   LendingWillingness.never,
-];
+]);
 
 /** Type, genre and age. One value, written once. */
 const CURATED_PILL = "bg-paper-100 text-paper-700";
@@ -325,9 +332,17 @@ export const MODE_LABELS: Record<ThemePreference, MessageKey> = {
  *
  * `system` last rather than first: it is the default, and a default reads
  * better as the thing you return to than the thing you start at.
+ *
+ * `ThemePreference` is a bare string union with no runtime object to
+ * enumerate, so what guarded this before the wrap was a **pair**: `MODE_LABELS`
+ * is a total `Record` over the union, and the retired test compared this order
+ * against its keys. Drop a mode from the table and `tsc` refuses it, TS2741,
+ * measured 2026-09-25. The pair held, so the wrap closes no hole: what it buys
+ * is one instrument at the declaration, which does not depend on that table
+ * staying total.
  */
-export const MODE_ORDER: readonly ThemePreference[] = [
+export const MODE_ORDER = everyOneOf<ThemePreference>()([
   "light",
   "dark",
   "system",
-];
+]);

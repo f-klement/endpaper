@@ -2113,6 +2113,10 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     // up files nobody has asked about.
     expect(result.current.figures.keptForNow).toBe(1);
     expect(result.current.figures.waiting).toBe(0);
+    // **And not counted as a catalogue having had nothing**, which is the
+    // distinction the sentence on screen turns on: this member was offered
+    // records and kept the name for now.
+    expect(result.current.figures.emptyAnswers).toBe(0);
   });
 
   it("does not offer a second pass for a name the catalogues answered nothing about", async () => {
@@ -2133,6 +2137,10 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       expect(result.current.entries[0]?.answered).toBe("nothing"),
     );
     expect(result.current.figures.keptForNow).toBe(0);
+    // **Counted here rather than by whoever draws the queue.** The screen says
+    // why a book kept its file name only once a catalogue has actually
+    // answered nothing, and the reading that decides it is this one.
+    expect(result.current.figures.emptyAnswers).toBe(1);
   });
 
   it("does not put a name kept in bulk back into the ordinary lookup", async () => {

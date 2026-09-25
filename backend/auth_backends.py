@@ -43,7 +43,7 @@ from config import (
     proxy_user_header,
 )
 from enums import AuthMode, VerificationProvenance
-from models import User
+from models import USERNAME_MAX, User
 
 logger = logging.getLogger("endpaper.auth")
 
@@ -60,12 +60,16 @@ def _free_username(db: Session, base: str) -> str:
 
     Terminates: every candidate it rejects is a distinct row that already
     exists, and there are finitely many of those. Truncated to fit
-    `users.username`, which is `String(50)`, so a maximum-length name does not
-    come back too long to store.
+    `users.username`, so a maximum-length name does not come back too long to
+    store: the width, the hyphen and the suffix together are what has to fit.
+
+    **`USERNAME_MAX` rather than the number**, because a truncation written as a
+    literal keeps truncating at the old width after the column is widened and
+    nothing goes red.
     """
     suffix = 2
     while True:
-        candidate = f"{base[: 49 - len(str(suffix))]}-{suffix}"
+        candidate = f"{base[: USERNAME_MAX - 1 - len(str(suffix))]}-{suffix}"
         if db.query(User).filter(User.username == candidate).first() is None:
             return candidate
         suffix += 1
@@ -527,7 +531,12 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
 #: actually uses. It is not an attempt to authenticate the header, which is
 #: impossible from here. It bounds the damage of a header that is wrong, which
 #: is a different and achievable goal.
-_PROXY_USERNAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,49}$")
+#:
+#: **The repeat is `USERNAME_MAX` minus the leading character**, derived rather
+#: than written, because the whole point of the length arm is that a header
+#: cannot write a row `users.username` will not hold: a literal here would go on
+#: refusing at the old width after the column moved, in either direction.
+_PROXY_USERNAME = re.compile(rf"^[A-Za-z0-9][A-Za-z0-9._@-]{{0,{USERNAME_MAX - 1}}}$")
 
 
 def _admin_group_set(source: AuthMode) -> bool:
@@ -569,9 +578,9 @@ def user_from_proxy_headers(db: Session, request: Request) -> User | None:
     2026-08-18 a pod inside the cluster sent `Remote-User: intruder` straight
     to the Service and left a permanent admin account behind:
 
-    * The name has to look like a username. `String(50)` is not enforced by
-      SQLite, so an unvalidated header wrote whatever length it liked; a
-      4000-character `Remote-User` produced a 4000-character account.
+    * The name has to look like a username. `String(USERNAME_MAX)` is not
+      enforced by SQLite, so an unvalidated header wrote whatever length it
+      liked; a 4000-character `Remote-User` produced a 4000-character account.
     * Anything rejected is logged at WARNING with the source address. The one
       trace that incident left was an INFO line nothing was watching.
 

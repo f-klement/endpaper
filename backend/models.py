@@ -722,11 +722,29 @@ class Tag(Base):
         return name
 
 
+#: The longest username a local account may hold, in characters.
+#:
+#: **One home, because the value had six copies and none of them was reachable
+#: from here.** `schemas/user.py` wrote the number at six fields,
+#: `auth_backends._free_username` truncated against it and
+#: `auth_backends._PROXY_USERNAME` bounded its repeat against it, so widening
+#: the column would have left every one of them behind with nothing red.
+#: `TestEveryTextCeilingComesFromTheColumn` is what reports the schema half
+#: now; the other two are structural, deriving from this name rather than
+#: repeating its value.
+#:
+#: A revision installs the literal rather than importing this, for the reason
+#: every revision here gives.
+USERNAME_MAX = 50
+
+
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    username: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    username: Mapped[str] = mapped_column(
+        String(USERNAME_MAX), unique=True, index=True, nullable=False
+    )
     # Nullable since accounts authenticated by LDAP or by an upstream proxy
     # have no local password. Storing a dummy hash instead would leave a
     # credential that looks usable and is not.

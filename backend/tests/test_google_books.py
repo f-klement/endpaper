@@ -652,7 +652,7 @@ class TestTheShapeIsSpelledOncePerTree:
         set already names `node_modules`, which is the one directory this walk
         would have to learn about the day somebody points the root a level up at
         `frontend/`. A walk that decides that for itself is what the rule
-        `test_no_other_test_module_walks_the_backend_without_the_shared_rule`
+        `test_no_other_test_module_walks_a_tree_of_python_without_the_shared_rule`
         refuses, and it refuses it by shape rather than by which tree is walked.
 
         **It narrows this corpus by nothing today**, measured 2026-09-20: 461

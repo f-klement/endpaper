@@ -93,6 +93,37 @@ class Transport(StrEnum):
     BESPOKE = "bespoke"
 
 
+class Secret(StrEnum):
+    """Which deployment secret this row's own adapter is handed, by its owner.
+
+    **Named for whose secret it is, and that is the whole of what this type
+    buys.** `metadata.Access.api_key` is not "a credential": it is one named
+    source's key, this deployment's own Google Books quota, and it travels in a
+    query string. A dispatch that decides who receives it by asking whether the
+    row is metered, or whether the row needs a credential, is asking a question
+    several sources can answer yes to, so the first bespoke credentialled non
+    Google source to arrive receives Google's key and sends it wherever its own
+    adapter sends things. Both spellings were proposed and both are refused
+    here: a member names an owner, so a row can claim only a secret that exists
+    for it.
+
+    **A sealed login is deliberately not a member.** Which doors carry one is
+    `metadata.carries_a_credential`, which is a claim about the effect of a
+    branch and is measured against whether an `Authorization` header left the
+    process. A second spelling of that fact on the row would be checked only
+    against the first, and the measurement that makes it worth having is the
+    thing that would be lost.
+    """
+
+    #: This row's adapter is handed no deployment secret. Every SRU row, whose
+    #: login travels through `fetch` bound to the origin it was sealed for, and
+    #: every bespoke row that pays for nothing.
+    NONE = "none"
+    #: Google Books' API key, `metadata.Access.api_key`. One source is entitled
+    #: to it and the enum is how that is said once.
+    GOOGLE_BOOKS_KEY = "google_books_key"
+
+
 class QueryLanguage(StrEnum):
     """CQL, or the PQF one target speaks instead.
 
@@ -414,6 +445,23 @@ class Target:
     #: whole of what makes shipping one safe.** `credentials._resolve` is the one
     #: walk, and `ShippedCredential` says why it may exist at all.
     shipped_credential: ShippedCredential | None = None
+    #: Which deployment secret this row's own adapter is handed. See `Secret`.
+    #:
+    #: **A property of the source, never of the reader**, and the roster is what
+    #: says so rather than a preference: `dublin_core_bare` serves the Czech
+    #: National Library, which authenticates nothing, and the Argentine row,
+    #: which needs a credential, so a reader is coarser than this question and
+    #: on this roster it always will be. The reader keyed dispatch tables in
+    #: `metadata.py` therefore carry no credential slot and this column is what
+    #: they read instead.
+    #:
+    #: **Defaulted, unlike `serves_groups` above, and the asymmetry is
+    #: deliberate.** Omission here answers `NONE`, and a row that needs a
+    #: credential and answers `NONE` on a bespoke transport is refused by
+    #: `metadata.resolve` at boot, because no bespoke door carries a sealed
+    #: login. So the value a forgetful row gets is the one that fails loudly,
+    #: where a defaulted remit would silently answer "no remit" and be believed.
+    secret: Secret = Secret.NONE
 
     # ── SRU, and empty for every other transport ──────────────────────────────
 
@@ -577,6 +625,39 @@ class Target:
             raise ValueError(
                 f"{self.source}: a shipped login on a row that needs no credential"
             )
+        if not isinstance(self.secret, Secret):
+            # **A `StrEnum` member equals its own string, so the value has to be
+            # refused here or three sites disagree about it.** This class and
+            # `metadata.resolve` compare with `is`, under which a bare
+            # `"google_books_key"` is not `GOOGLE_BOOKS_KEY`; `_lookup_one`
+            # matches, and `match` compares with `==`, under which it is. So a
+            # bare string would be read as naming a secret by the two refusals
+            # below and routed to the keyed door by the dispatch, which is the
+            # leak direction. Refused by type at the one site that writes the
+            # field, so all three agree by the value being impossible rather
+            # than by three spellings being kept in step.
+            #
+            # **The exposure this closes is the readback path.** A seeded row is
+            # refused at boot by `metadata.resolve`, which `main` runs over the
+            # roster; a `Target` built from column values is not, and that is
+            # the path `main.seed_catalogue_targets` names as still open.
+            raise ValueError(f"{self.source}: {self.secret!r} is not a Secret")
+        if self.secret is not Secret.NONE:
+            # **The two halves of "this row may be handed that secret", refused
+            # here so the dispatch never has to ask.** A row naming a secret and
+            # needing no credential is claiming somebody else's key, which is
+            # the leak `metadata._lookup_one`'s predicate used to admit; and the
+            # SRU door hands its adapter nothing, since its login goes through
+            # `fetch` bound to the origin it was sealed for, so a secret on an
+            # SRU row is a value nothing would ever read.
+            if not self.needs_key:
+                raise ValueError(
+                    f"{self.source}: names {self.secret} on a row that needs no credential"
+                )
+            if self.transport is Transport.SRU:
+                raise ValueError(
+                    f"{self.source}: an SRU row's login is sealed, not an adapter argument"
+                )
 
     def _check_sru(self) -> None:
         if not self.sru_version or not self.query_parameter:
@@ -1063,6 +1144,11 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             answers_search=True,
             metered=True,
             needs_key=True,
+            # **The one row entitled to `metadata.Access.api_key`, and the only
+            # row on the roster naming a secret at all.** The dispatch reads
+            # this rather than `metered` or `needs_key`, both of which several
+            # sources can answer yes to. See `Secret`.
+            secret=Secret.GOOGLE_BOOKS_KEY,
             serves_groups=frozenset(),
         ),
         CatalogueSource.BNF: Target(

@@ -17547,3 +17547,231 @@ only invented part of the design and the only part that was wrong.
 to be removed. The work ends at 292 lines added and 13 removed over two files: only two lines
 could safely go, the dead members, and what was missing was a written contract rather than a
 shared body. A count of repeated lines reads like a measurement of the cost and is not one.
+
+## The words beside a guard are read as its extent, and they were wrong in both directions
+
+**Four times in one wave, three of them on one branch, a guard's prose claimed more than its
+code held**: a stated mechanism, two table headings, a measurement taken with the wrong
+instrument, and a count described as what a body **reaches** where the code counts what it
+calls by the name it imported. **The code was right every time.** What was wrong was the
+sentence beside it, and the sentence is what a reader acts on: it is read as the extent of the
+guard, so a reviewer agrees with it and the gap it describes away survives.
+
+**The shape is always an extent claim**, a word like "every", "any" or "reaches" standing where
+the code holds something narrower. **So state what is counted and name what goes past, and
+refuse the extent rather than bounding it.** Every seat that has tried to bound one here
+succeeded at measuring something and failed at bounding it. The check that finds these is not
+review: it is planting the spelling the sentence promises to catch.
+
+**The same wave produced the other direction, in a name rather than in prose.** The rule that
+no test module decides for itself what vendored code is was bought by nine modules recursing
+`backend/`, and it was named for them. The predicate it grew into reads the pattern and never
+the receiver, so it covers a walk of any tree, and one module already walks `frontend/src`
+under it. **A name narrower than the code is read as the code**, and the cheap next edit is a
+receiver check that drops that module out of the population with every assertion still green.
+So a guard's name states the population it fires on, not the population that bought it, and
+the live case is named in the docstring rather than left to be inferred.
+
+## Every population derived by matching source text in this wave was wrong at least once
+
+Four guards in this wave decide who they fire on by matching the source of the tree, and each
+was found wrong before it shipped. The failures do not share a spelling, so the conclusion is
+about the instrument rather than about any one pattern.
+
+**One was beaten by the line break the formatter itself mandates.** The arm that fails when a
+wrapped ordered list has no witness required a literal space after the `=`, and prettier breaks
+a declaration over 80 columns as the name and `=` on one line and the call on the next. The
+blind spot was therefore not a spelling somebody chooses: it was the one `format:check`
+enforces, and the longer the union name the likelier it was.
+
+**One counted by the name a hook was imported under while its sentence said what a body
+reaches**, so a call through an alias or a member expression measured zero and entered the
+comparison as a shallow hook. No alias is chased, because following one needs a resolver.
+
+**An emptiness assertion does not catch this.** A pattern that stops matching short leaves a
+real population behind and still reports a non empty set, and the evasion that found the
+formatter case derived five members against a true six and passed. **So pin the count against a
+second derivation of the same file that degrades differently**, rather than against the same
+instrument twice: the ordered list arm is now held against a bare count of the wrapper's own
+call sites.
+
+## A refactor moved the data out of the set the privacy guard watched
+
+The rule that a member's book file cannot leave the browser is held structurally rather than by
+review: the reader modules hold the only copy of somebody's book, so if none of them can reach
+the network, nothing above them can send one. The watched set was derived, keeping the modules
+that name one of six byte tokens.
+
+**A module can hold a member's parsed document and name none of them.** The sibling walk every
+reader calls was moved into its own module, which names no byte token, so a `fetch` written
+into the one module every reader hands its nodes to would have published with that arm green,
+where the identical line in any of the three readers it came out of fails it. **The guard went
+blind exactly where every reader converges**, which is the worst place for it and the place a
+refactor creates.
+
+The population is the directory now. **One alternative is narrowed to pay for it**, and that is
+the trade rather than a tidy up: refusing any import from the generated client was safe over
+fifteen readers, none of which imports from there, and over the whole directory it false
+refused nine modules whose only match is a generated **type**, which house rule 3 permits and
+which is erased before anything runs. The client itself is a different path, held behind the
+hooks by the first rule in that file, so it is guarded twice and the types by neither.
+
+**The measurement that said the widening was free was wrong**, which is why the trade is
+written out rather than asserted: it was taken with a hand rebuilt pattern rather than the one
+in the file, and missed both the import arm and that the real rule reads the source with its
+prose stripped.
+
+## A fix round is better where it was aimed and weaker where nobody looked again
+
+**Seven fixes in this wave were weaker than what they replaced, three of them handed down by
+the coordinating session.** The shape is constant: better in the dimension the finding named,
+weaker in one nobody re checked, and the seat writing it had no reason to look because the
+finding did not point there.
+
+Two are in the tree as their own commits. The Kindle binding arm counted one import and its
+comment claimed the count caught any lookup going around the binding; a second import of the
+same door under another name, or a namespace import, leaves the count where it was and puts a
+`string` taking function back in front of the document. The count stays, because it is exact
+rather than an inequality and is recomputed every run, and a second assertion holds the module
+to one import of the shared door whatever it binds it to. The other is the watched set above,
+whose widening was justified by a measurement taken with the wrong pattern.
+
+**So a fix round is reviewed as a change and not as a repair.** The question is what the new
+code is weaker at, asked by somebody who has not read the finding, because the finding is
+exactly the direction that has already been looked at.
+
+## A shared helper takes the wider type, and a caller that has narrowed one keeps its own
+
+`frontend/src/lib/elementChildren.ts` holds the sibling walk that five readers had written
+between them. Its doors take a `string` name. `kindle.ts` does not call them directly: it keeps
+a one line binding typed to the member type of its own closed element list, and every lookup in
+that module goes through the binding.
+
+The reason is that the constraint is the caller's and not the walk's. `kindle.ts` argues at its
+element list that nothing outside that list is ever looked up **as a property of the types**,
+which is what stops a document the member supplied choosing what is read rather than only what
+is found. Sharing the loop by widening that parameter to `string` would have paid for a
+performance fix with a type guarantee, which is a trade nobody asked for.
+
+A type parameter on the shared door was considered and does not hold it: inference binds such a
+parameter to whatever the call site passed, so `childrenNamed(parent, entry.getAttribute("x")
+?? "")` infers `string` and compiles. An explicit type argument at each call site holds it only
+at the sites that remember to write one. The binding holds it at the module, once.
+
+This is `dialect.py`'s shape on the other side of the app: one dispatch, every spelling at its
+own site.
+
+## A `*_ORDER` list is exhaustive by type, and the tests keep only what the type cannot hold
+
+`everyOneOf` refuses an incomplete list at compile time and names the member left out. All five
+ordered lists in `frontend/src/pages/types.ts` use it. What stays a test is the duplicate entry,
+which the type cannot see because a list naming a member twice still excludes nothing, and the
+sequence, which the type has no opinion on.
+
+Two things bought this, both measured on 2026-09-25 with a full frontend test run:
+
+- A set equality arm written over **sorted arrays** rather than `Set`s is also a duplicate
+  check. Retiring the lending and mode arms as "replaced by the type" would have dropped that
+  property; each duplicate was caught by exactly those arms and by nothing else.
+- `MODE_ORDER`'s arm compared it with `MODE_LABELS` over a **bare string union** with no runtime
+  object to enumerate, and it held as half of a pair: `MODE_LABELS` is a total `Record`, so a
+  mode dropped from the table is TS2741 and a mode dropped from the order was that arm. The wrap
+  replaces the pair with one instrument at the declaration, independent of that table staying
+  total. **It closes no hole.** A question about a type is asked with a frontend type check: the
+  first pass asked it with a frontend test run, which does not typecheck, and recorded the
+  opposite in two published files.
+
+A wrapped constant carries **no type annotation**. The annotation does not defeat the refusal at
+the call site, measured the same day, but it erases the constant's declared members, which is
+all the exhaustiveness witnesses beside it can read.
+
+## A decision record's own figures are deleted rather than corrected
+
+The worked frontend example in the deep modules record carried three live figures about a hook's
+interface, and by 2026-09-25 every one of them was wrong: the member count, the count of members
+that are actions, and the number of distinct endpoints behind them. Nothing measured them wrong.
+They went stale by ordinary development, which is what a number in prose does.
+
+**They are deleted rather than corrected.** None is recomputed by anything and none is frozen as
+evidence the decision was taken on, so correcting them would buy one round of accuracy and the
+next stale figure. They were decoration either way: the refusal rests on each member calling a
+different endpoint, not on how many there are. One of the two corrections was additionally
+impossible as written, because a member carrying two mutation hooks makes a count of actions and
+a count of endpoints unable to agree.
+
+What holds the claim they were evidence for is `frontend/tests/houseRules.test.ts`, which
+recomputes both quantities over every exported hook in the tree on every run and asserts the
+ordering, under *a hook's width does not rank it by what is behind its door*. The `useLibrary`
+half of that section stays, frozen with its date, because that half **is** evidence the decision
+was taken on.
+
+**The claim is in the published test tree and the record is not, and the pointer can only run one
+way.** A published file may not name a stripped one, so the test names nothing in that record and
+the record names the test. Writing it the other way would have meant stripping the file that
+enforces two of this project's house rules, to buy one table.
+
+**What the test does not hold is the record's refusal**, and that is stated rather than bounded:
+collapsing a wide hook of distinct operations into one patch call takes members away and leaves
+the endpoints where they are, which moves that hook **up** the ordering the test asserts. The
+paragraph is what refuses it.
+
+## The scan queue keeps no module, and the reason is a measurement
+
+The proposal was a page local module holding the queue's vocabulary. It was refused after
+measurement, and the refusal is here rather than in a ticket because the next reviewer ranking
+that hook by width will reach for it again.
+
+**It buys no interface member.** None of the eleven private rules is a member of the hook's
+result interface, so the hook is the same width before and after. **And it is not a door**: the
+hook keeps every transition and still calls every rule, so the only caller that stops knowing
+anything is the queue component, which stopped knowing one rule. What the module was defined by
+was what it **excluded**, the transitions, and nothing mechanical would have held that exclusion.
+
+**What replaced it reaches further.** Two of the eleven rules were already a compile error, and
+what the type level route took is the closed state union: a total table keyed on it in the hook
+and another in the component, in place of comparisons at each site. That closes a live defect a
+module would not have, and it costs no new file, no move and no import.
+
+## A row names whose secret its door takes, not whether it is metered
+
+`Access.api_key` is not "a credential": it is one named source's key, this deployment's Google
+Books quota, and it travels in a query string. The bespoke ISBN dispatch chose who received it on
+`Capability.METERED`, and the obvious repair, `NEEDS_A_CREDENTIAL`, is worse than the defect.
+Both are predicates several rows can satisfy, so under either the first bespoke credentialled non
+Google source to arrive receives Google's key. The metered spelling made that a **drop**, since
+the unmetered arm passed `""`; the credential spelling makes it a **leak**. No test in the tree
+failed on the way past, because the two seeded bespoke rows agree on both predicates.
+
+So the fact is `targets.Secret`, on the row, named for the secret's owner. A member is an owner,
+so a row can claim only a secret that exists for it, and `Target.__post_init__` refuses a row
+that names one while needing no credential, and an SRU row that names one at all.
+
+**It is a property of the source and never of the reader.** `dublin_core_bare` serves the Czech
+National Library, which authenticates nothing, and the Argentine row, which needs a credential.
+So a reader is coarser than this question on today's roster, not on a hypothetical one, and a
+reader keyed table carrying a credential slot is wrong now.
+
+**A sealed login is deliberately not a member of that enum.** Which doors carry one is
+`metadata.carries_a_credential`, which is a claim about the effect of a branch and is measured
+against whether an `Authorization` header left the process. A second spelling on the row would be
+checked only against the first, and the measurement is the whole reason that function exists
+rather than being written out at its call sites.
+
+**The two tables are the enforcement, not a check.** `_FREE_LOOKUPS` values take an ISBN and
+`_KEYED_LOOKUPS` values take an ISBN and a key, so the free door has no parameter a secret could
+arrive in and the empty string is gone rather than guarded. A keyed adapter placed in the free
+table is a `[dict-item]` type error, measured.
+
+**Both doors read the field, because whose key it is has nothing to do with which question is
+being asked.** The search dispatch's two tables differ by arity, so its metered test read as a
+signature selector; it was also the credential gate, and a second metered bespoke source would
+have been handed Google's key by arriving.
+
+**And a `StrEnum` member equals its own string**, so a `match` on the field would accept a bare
+string where an `is` test refused it, and the three sites reading the field would then disagree
+about the same value. It is refused by type at the one site that writes it, which is what lets
+both dispatches match.
+
+**And the guard that named this rule was a tautology**, computing its expectation as the
+expression under test over a roster that cannot separate the candidate predicates. Its
+replacement writes the expectation out and constructs the two rows the roster has not got.

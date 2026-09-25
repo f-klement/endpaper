@@ -455,3 +455,106 @@ class TestARowDeclaresWhatItCanBeAskedForInOneStatement:
         assert not targets.SEEDED[CatalogueSource.NKP].can(
             Capability.ANSWERS_TITLE_SEARCH
         )
+
+
+class TestARowNamesTheSecretItsOwnDoorTakes:
+    """`Target.secret`, and the two disagreements a row can hold on its own.
+
+    **The column exists because a reader is coarser than the question.**
+    `dublin_core_bare` serves the Czech National Library, which authenticates
+    nothing, and the Argentine row, which needs a credential, so no table keyed
+    on a reader can answer which secret a door is entitled to. `targets.Secret`
+    says it about the row, and `metadata._lookup_one` reads it.
+
+    **What these arms cannot see is the roster**, because the roster names one
+    secret on one row. The dispatch side is
+    `test_metadata.py::TestOnlyTheKeysOwnerIsHandedIt`, which constructs the
+    rows this roster has not got.
+    """
+
+    def test_a_row_that_needs_no_credential_may_not_name_a_secret(self):
+        """A key claimed by a row that pays for nothing is somebody else's key.
+
+        This is the refusal that makes the enum worth more than a boolean: the
+        member names an owner, so the row claiming it is claiming one named
+        source's quota rather than "a credential".
+        """
+        with pytest.raises(ValueError, match="needs no credential"):
+            _seeded(
+                transport=targets.Transport.BESPOKE,
+                base_url="https://www.googleapis.com/books/v1/volumes",
+                reader=targets.Reader.GOOGLE_BOOKS,
+                sru_version="",
+                query_parameter="",
+                query_language=None,
+                record_schema="",
+                isbn_index="",
+                title_index="",
+                title_query_shape=None,
+                lookup_records=0,
+                search_multiplier=0,
+                search_cap=0,
+                needs_key=False,
+                secret=targets.Secret.GOOGLE_BOOKS_KEY,
+            )
+
+    def test_an_sru_row_may_not_name_a_secret(self):
+        """An SRU login is sealed against an origin and goes out through
+        `fetch`, so a secret on such a row is a value nothing would read."""
+        with pytest.raises(ValueError, match="sealed"):
+            _seeded(needs_key=True, secret=targets.Secret.GOOGLE_BOOKS_KEY)
+
+    def test_the_row_that_owns_the_key_says_so(self):
+        """Or both arms above refuse a shape nothing on the roster has, and the
+        column is never read in anger."""
+        assert (
+            targets.SEEDED[CatalogueSource.GOOGLE_BOOKS].secret
+            is targets.Secret.GOOGLE_BOOKS_KEY
+        )
+
+    def test_no_other_seeded_row_names_a_secret(self):
+        assert [
+            source
+            for source, row in targets.SEEDED.items()
+            if row.secret is not targets.Secret.NONE
+        ] == [CatalogueSource.GOOGLE_BOOKS]
+
+    def test_a_bare_string_is_not_a_secret(self):
+        """`Secret` is a `StrEnum`, so its member equals its own string.
+
+        Three sites read this field and two of them compare with `is`, under
+        which `"google_books_key"` is not the member, while `metadata._lookup_one`
+        matches and `match` compares with `==`, under which it is. A bare string
+        would therefore be refused a key by the arms above and handed one by the
+        dispatch. Refused by type here, at the one site that writes the field, so
+        the three agree because the value cannot exist rather than because three
+        spellings were kept in step.
+
+        **The path this is for is a row read back from its columns**, which does
+        not go through `metadata.resolve`. A seeded row carrying one is refused
+        at boot by that function instead.
+        """
+        with pytest.raises(ValueError, match="is not a Secret"):
+            _seeded(
+                transport=targets.Transport.BESPOKE,
+                base_url="https://www.googleapis.com/books/v1/volumes",
+                reader=targets.Reader.GOOGLE_BOOKS,
+                sru_version="",
+                query_parameter="",
+                query_language=None,
+                record_schema="",
+                isbn_index="",
+                title_index="",
+                title_query_shape=None,
+                lookup_records=0,
+                search_multiplier=0,
+                search_cap=0,
+                needs_key=True,
+                secret="google_books_key",
+            )
+
+    def test_omitting_it_answers_none(self):
+        """The default is the value that fails loudly downstream rather than the
+        one that is believed: a bespoke row needing a credential and naming no
+        secret is refused by `metadata.resolve`."""
+        assert _seeded().secret is targets.Secret.NONE

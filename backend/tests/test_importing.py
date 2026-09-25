@@ -22,6 +22,8 @@ caps, the truncate-before-the-cache-key ordering, and that the catalogue is
 read once rather than three times per row.
 """
 
+import ast
+import inspect
 from collections import Counter
 from typing import Any
 
@@ -30,14 +32,18 @@ from sqlalchemy import event
 
 import catalogue
 import csv_import
+import importing
+import marc
 from catalogue import Record
 from enums import OwnershipStatus, ReadStatus, TagCategory
 from importing import (
     _MARC_RECORD_FIELDS,
     Import,
+    MarcImport,
     MarcIndex,
     OpdsImport,
     _CatalogueIndex,
+    _settle_one,
     bounded_fields,
 )
 from models import TITLE_MAX, Book, Note, Tag, User, UserBook
@@ -1029,3 +1035,619 @@ class TestTheSecondBoundHasOneConstructibleBypass:
         record = Record(**fields)
 
         assert bounded_fields(record)[name] == inside
+
+
+def catalogued(title: str, *, author: str | None = None, isbn: str | None = None):
+    """One record as `marc.read` would produce it."""
+    return Record(source="marc", title=title, author=author, isbn=isbn)
+
+
+def one_marc_file(*records: Record, skipped: int = 0) -> marc.ParsedMarc:
+    return marc.ParsedMarc(records=records, skipped=skipped)
+
+
+class TestTheMarcPrivateBookOracle:
+    """A record whose ISBN belongs to a Book this Member cannot see.
+
+    **The arm this file was missing.** It was reachable only through a route,
+    where a status code and a file upload sit between the rule and the
+    assertion, while the other two importers were driven here directly. The
+    refusal is one function now, so the three arms are the same rule read three
+    ways rather than three implementations, and this one closes the hole rather
+    than replacing what is already in `tests/routers/test_imports_marc.py`.
+    """
+
+    def test_it_is_skipped_rather_than_raising_on_the_unique_index(self, db, member, other):
+        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True,
+                    added_by_user_id=other.id))
+        db.commit()
+
+        result = MarcImport.for_member(db, member.id).apply(
+            one_marc_file(catalogued("Small Gods", author="T Pratchett",
+                                     isbn="9780552152976"))
+        )
+
+        assert (result.created, result.skipped) == (0, 1)
+
+    def test_its_title_is_never_reported(self, db, member, other):
+        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True,
+                    added_by_user_id=other.id))
+        db.commit()
+
+        result = MarcImport.for_member(db, member.id).apply(
+            one_marc_file(catalogued("Small Gods", author="T Pratchett",
+                                     isbn="9780552152976"))
+        )
+
+        assert result.unmatched_titles == []
+
+    def test_the_rest_of_the_file_still_lands(self, db, member, other):
+        """One record that cannot be acted on is counted and skipped, never a
+        failed transfer."""
+        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True,
+                    added_by_user_id=other.id))
+        db.commit()
+
+        result = MarcImport.for_member(db, member.id).apply(
+            one_marc_file(
+                catalogued("Small Gods", author="T Pratchett", isbn="9780552152976"),
+                catalogued("Good Omens", author="T Pratchett"),
+            )
+        )
+
+        assert (result.created, result.skipped) == (1, 1)
+
+    def test_a_visible_book_with_the_same_isbn_is_matched_not_skipped(self, db, member):
+        """The refusal is about what the Member cannot see, never about the
+        ISBN being known."""
+        db.add(Book(title="Small Gods", isbn="9780552152976", added_by_user_id=member.id))
+        db.commit()
+
+        result = MarcImport.for_member(db, member.id).apply(
+            one_marc_file(catalogued("Small Gods", author="T Pratchett",
+                                     isbn="9780552152976"))
+        )
+
+        assert (result.matched, result.created, result.skipped) == (1, 0, 0)
+
+
+class _TakenIsbns:
+    """An index that answers the one question the spine asks it."""
+
+    def __init__(self, *taken: str) -> None:
+        self._taken = set(taken)
+
+    def isbn_is_taken(self, isbn: str | None) -> bool:
+        return bool(isbn) and isbn in self._taken
+
+
+def _refuse_to_create() -> Book:
+    raise AssertionError("the spine created a Book it should have refused")
+
+
+def _refuse_to_fill(book: Book) -> None:
+    raise AssertionError("the spine filled gaps on a row it did not match")
+
+
+class TestTheSpine:
+    """`_settle_one` driven directly, with no database and no importer.
+
+    The three behavioural classes above say each importer obeys the rule; these
+    say what the rule is, in the one place it is now written.
+    """
+
+    def test_a_taken_isbn_is_counted_and_never_created(self):
+        tally = importing._Tally()
+
+        book = _settle_one(
+            _TakenIsbns("9780552152976"),
+            tally,
+            None,
+            isbn="9780552152976",
+            unmatched_title="Small Gods",
+            create=_refuse_to_create,
+            fill_gaps=_refuse_to_fill,
+            create_missing=True,
+        )
+
+        assert book is None
+        assert (tally.unmatched_private, tally.created) == (1, 0)
+
+    def test_a_taken_isbn_is_never_named(self):
+        """The whole of the privacy rule: naming it answers "does a Book with
+        this ISBN exist in this house"."""
+        tally = importing._Tally()
+
+        _settle_one(
+            _TakenIsbns("9780552152976"),
+            tally,
+            None,
+            isbn="9780552152976",
+            unmatched_title="Small Gods",
+            create=_refuse_to_create,
+            fill_gaps=_refuse_to_fill,
+            create_missing=True,
+        )
+
+        assert tally.unmatched == []
+
+    def test_a_caller_that_asked_for_no_creations_still_reports_a_taken_isbn(self):
+        """**The refusal is about the create, not about the ISBN.** With
+        nothing to create, the title came off the caller's own file and telling
+        them about it discloses nothing they did not upload. Pinned because a
+        spine that hoisted the check out of the create arm would silently turn
+        this row into a refusal and cost the CSV path its unmatched report."""
+        tally = importing._Tally()
+
+        _settle_one(
+            _TakenIsbns("9780552152976"),
+            tally,
+            None,
+            isbn="9780552152976",
+            unmatched_title="Small Gods",
+            create=_refuse_to_create,
+            fill_gaps=_refuse_to_fill,
+            create_missing=False,
+        )
+
+        assert (tally.unmatched, tally.unmatched_private) == (["Small Gods"], 0)
+
+    def test_the_unmatched_report_stops_at_the_cap(self):
+        tally = importing._Tally()
+        for n in range(importing.MAX_UNMATCHED_REPORTED + 5):
+            _settle_one(
+                _TakenIsbns(),
+                tally,
+                None,
+                isbn=None,
+                unmatched_title=f"Title {n}",
+                create=_refuse_to_create,
+                fill_gaps=_refuse_to_fill,
+                create_missing=False,
+            )
+
+        assert len(tally.unmatched) == importing.MAX_UNMATCHED_REPORTED
+
+    def test_a_matched_row_fills_its_gaps_and_comes_back_for_the_tail(self):
+        tally = importing._Tally()
+        matched = Book(title="Small Gods")
+        filled: list[Book] = []
+
+        book = _settle_one(
+            _TakenIsbns("9780552152976"),
+            tally,
+            matched,
+            isbn="9780552152976",
+            unmatched_title="Small Gods",
+            create=_refuse_to_create,
+            fill_gaps=filled.append,
+            create_missing=True,
+        )
+
+        assert book is matched
+        assert filled == [matched]
+        assert (tally.matched, tally.unmatched_private) == (1, 0)
+
+
+SPINE = "_settle_one"
+
+
+def _creates_outside_the_spine(source: str, spine: str = SPINE) -> list[str]:
+    """Every Book construction in `source` on a path the spine does not hold,
+    qualified by the class and function it sits in.
+
+    A constructor is any function whose body contains a `Book(...)` call. Two
+    ways out of the spine are reported and the second is why there are two:
+
+    * **a call to a constructor that is not sheltered.** Sheltered means the
+      call sits inside the spine's `create` argument and no other, which is
+      what a `create=lambda: ...` is. The other arguments are not shelter:
+      `fill_gaps` runs on the matched arm, past the refusal.
+    * **a constructor nothing in the module calls or names.** An `apply` entry
+      point is exactly such a function, so a bare `Book(` written straight into
+      the import loop has no call site to catch and the first check sees
+      nothing. **Named counts as well as called**, so handing the builder to
+      the spine through a partial rather than a lambda is the same shelter.
+      Without this one the pass was blind in the plainest spelling it exists
+      to see, and its own blind spot list excused the hole.
+
+    **The classes are nowhere in this function**, so a fourth importer is
+    covered whatever it names things. **The constructor set is not derived from
+    a property though**, and the pack that said otherwise was wrong: it matches
+    the literal name `Book`, which is source text matching, so an import
+    aliased to another name is invisible. That is the known cost of the one
+    matched token here, and it is stated rather than bounded.
+
+    **The rest of what it cannot see**, likewise stated:
+
+    * one source at a time, so an importer written in another module is
+      invisible to it;
+    * a create that never constructs a `Book` at all: a helper elsewhere, a
+      `merge`, a bulk insert, or an ORM call spelled some other way;
+    * a call spelled other than `self.X(...)`, through another object or a
+      module level name, still keys to the bare name, so two functions sharing
+      that name share a verdict about whether anything calls them. **`_create`
+      is the collision to expect**: all three importers use it and a fourth
+      will copy it, which is why `self.X(...)` is keyed to its class;
+    * whether the refusal inside the spine is right. It says the create is
+      routed, and the behavioural classes above say what routing it buys.
+    """
+    tree = ast.parse(source)
+    parents: dict[int, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[id(child)] = node
+
+    def qualified(node: ast.AST) -> str:
+        parts: list[str] = []
+        cursor: ast.AST | None = node
+        while cursor is not None:
+            if isinstance(cursor, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                parts.append(cursor.name)
+            cursor = parents.get(id(cursor))
+        return ".".join(reversed(parts)) or "<module>"
+
+    constructors = [
+        function
+        for function in ast.walk(tree)
+        if isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef)
+        and any(
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "Book"
+            for call in ast.walk(function)
+        )
+    ]
+    constructor_names = {function.name for function in constructors}
+
+    def owner(node: ast.AST) -> str | None:
+        cursor: ast.AST | None = parents.get(id(node))
+        while cursor is not None:
+            if isinstance(cursor, ast.ClassDef):
+                return cursor.name
+            cursor = parents.get(id(cursor))
+        return None
+
+    sheltered: set[int] = set()
+    named_builders: set[str] = set()
+    for call in ast.walk(tree):
+        if (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == spine
+        ):
+            # **Only the `create` argument shelters, because only `create`
+            # sits behind the refusal.** `fill_gaps` runs on the matched arm,
+            # where the predicate is never reached, so a Book minted through
+            # that callable has gone round the rule while sitting inside the
+            # spine call. Sheltering the whole call read as obvious and checked
+            # nothing: the next reader's instinct is that the spine call is the
+            # spine call, and it is not.
+            #
+            # **Reading the keyword alone cannot miss a legal call**, because
+            # `_settle_one` declares `create` after a bare `*`, so there is no
+            # positional spelling of it to overlook.
+            #
+            # **A builder the argument names rather than calls is sheltered
+            # too**, which is what `create=partial(self._create, row, index)`
+            # is: the same shelter, spelled without a call. Only the naming is
+            # recorded here, because the no call site check below would
+            # otherwise see a builder nothing calls and report a legal
+            # spelling. A guard that reddens on correct code is what teaches
+            # the next reader to weaken the rule instead of obeying it.
+            for word in call.keywords:
+                if word.arg != "create":
+                    continue
+                sheltered.update(id(node) for node in ast.walk(word.value))
+                for node in ast.walk(word.value):
+                    if (
+                        isinstance(node, ast.Attribute)
+                        and isinstance(node.value, ast.Name)
+                        and node.value.id == "self"
+                    ):
+                        here = owner(node)
+                        named_builders.add(
+                            f"{here}.{node.attr}" if here else node.attr
+                        )
+
+    def called(call: ast.Call) -> str | None:
+        if isinstance(call.func, ast.Attribute):
+            return call.func.attr
+        if isinstance(call.func, ast.Name):
+            return call.func.id
+        return None
+
+    def resolved(call: ast.Call) -> str | None:
+        """A call keyed so that one class's method is not another's.
+
+        **`self.X(...)` keys to the class it is written in**, because the bare
+        name does not distinguish them and `_create` is the name every importer
+        here already uses. A fourth one whose builder is called from another
+        module has no local call site, and under the bare name it borrowed the
+        three existing calls and went unreported. Anything else keys to its own
+        name, which is the conservative answer: it can fail to exclude, never
+        fail to report.
+        """
+        if (
+            isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "self"
+        ):
+            here = owner(call)
+            return f"{here}.{call.func.attr}" if here else call.func.attr
+        return called(call)
+
+    def own_key(function: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+        here = owner(function)
+        return f"{here}.{function.name}" if here else function.name
+
+    everything_called = {
+        resolved(call) for call in ast.walk(tree) if isinstance(call, ast.Call)
+    } | named_builders
+
+    return sorted(
+        {
+            qualified(call)
+            for call in ast.walk(tree)
+            if isinstance(call, ast.Call)
+            and called(call) in constructor_names
+            and id(call) not in sheltered
+        }
+        | {
+            qualified(function)
+            for function in constructors
+            if own_key(function) not in everything_called
+        }
+    )
+
+
+def _importers_that_never_reach_the_spine(source: str, spine: str = SPINE) -> list[str]:
+    """Every class in `source` offering `apply` and never calling the spine.
+
+    The population is again a property: a class with an `apply` method is what
+    an importer is here, so the fourth one is covered without an arm. It sees
+    nothing outside the source it is handed, and a class that reaches the spine
+    on one path and not another looks clean to it.
+    """
+    tree = ast.parse(source)
+    missing: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        offers_apply = any(
+            isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef) and item.name == "apply"
+            for item in node.body
+        )
+        if not offers_apply:
+            continue
+        reaches = any(
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == spine
+            for call in ast.walk(node)
+        )
+        if not reaches:
+            missing.append(node.name)
+    return sorted(missing)
+
+
+A_FOURTH_IMPORTER_WRITING_THE_BRANCH_BY_HAND = '''
+class OaiImport:
+    def apply(self, records, *, create_missing=True):
+        for record in records:
+            self._apply_one(record, create_missing)
+
+    def _apply_one(self, record, create_missing):
+        book = self._index.find(self._db, record)
+        if book is None and create_missing and self._index.isbn_is_taken(record.isbn):
+            return
+        if book is None and create_missing:
+            self._mint(record)
+
+    def _mint(self, record):
+        book = Book(title=record.title)
+        self._db.add(book)
+        return book
+'''
+
+A_FOURTH_IMPORTER_ROUTED_THROUGH_THE_SPINE = '''
+class OaiImport:
+    def apply(self, records, *, create_missing=True):
+        for record in records:
+            self._apply_one(record, create_missing)
+
+    def _apply_one(self, record, create_missing):
+        _settle_one(
+            self._index,
+            self._tally,
+            self._index.find(self._db, record),
+            isbn=record.isbn,
+            unmatched_title=record.title,
+            create=lambda: self._mint(record),
+            fill_gaps=lambda matched: _fill_oai_gaps(matched, record),
+            create_missing=create_missing,
+        )
+
+    def _mint(self, record):
+        book = Book(title=record.title)
+        self._db.add(book)
+        return book
+'''
+
+A_FOURTH_IMPORTER_BUILDING_A_BOOK_IN_ITS_OWN_LOOP = '''
+class OaiImport:
+    def apply(self, records, *, create_missing=True):
+        for record in records:
+            if create_missing:
+                self._db.add(Book(title=record.title))
+'''
+
+A_FOURTH_IMPORTER_WHOSE_BUILDER_COLLIDES = '''
+class OpdsImport:
+    def apply(self, records):
+        for record in records:
+            self._apply_one(record)
+
+    def _apply_one(self, record):
+        _settle_one(
+            self._index,
+            self._tally,
+            None,
+            isbn=record.isbn,
+            unmatched_title=record.title,
+            create=lambda: self._create(record),
+            fill_gaps=lambda matched: None,
+            create_missing=True,
+        )
+
+    def _create(self, record):
+        book = Book(title=record.title)
+        self._db.add(book)
+        return book
+
+
+class OaiImport:
+    def apply(self, records):
+        harvest.drive(self, records)
+
+    def _create(self, record):
+        book = Book(title=record.title)
+        self._db.add(book)
+        return book
+'''
+
+A_FOURTH_IMPORTER_MINTING_ON_THE_MATCHED_ARM = '''
+class OaiImport:
+    def apply(self, records, *, create_missing=True):
+        for record in records:
+            self._apply_one(record, create_missing)
+
+    def _apply_one(self, record, create_missing):
+        _settle_one(
+            self._index,
+            self._tally,
+            self._index.find(self._db, record),
+            isbn=record.isbn,
+            unmatched_title=record.title,
+            create=lambda: self._mint(record),
+            fill_gaps=lambda matched: self._mint_a_companion(record),
+            create_missing=create_missing,
+        )
+
+    def _mint(self, record):
+        book = Book(title=record.title)
+        self._db.add(book)
+        return book
+
+    def _mint_a_companion(self, record):
+        book = Book(title=record.title + " (companion)")
+        self._db.add(book)
+        return book
+'''
+
+A_FOURTH_IMPORTER_HANDING_ITS_BUILDER_OVER = '''
+class OaiImport:
+    def apply(self, records, *, create_missing=True):
+        for record in records:
+            self._apply_one(record, create_missing)
+
+    def _apply_one(self, record, create_missing):
+        _settle_one(
+            self._index,
+            self._tally,
+            self._index.find(self._db, record),
+            isbn=record.isbn,
+            unmatched_title=record.title,
+            create=functools.partial(self._mint, record),
+            fill_gaps=lambda matched: None,
+            create_missing=create_missing,
+        )
+
+    def _mint(self, record):
+        book = Book(title=record.title)
+        self._db.add(book)
+        return book
+'''
+
+
+class TestEveryImporterCreatesThroughTheSpine:
+    """The class this stops returning is **a fourth importer whose privacy
+    branch is written by hand**.
+
+    It was written by hand three times and the three agreed; the fourth is the
+    one that would not, and an enumerated guard naming the three would have had
+    nothing to say about it. Both passes below derive their population from the
+    module, so the arm count does not move when an importer arrives.
+
+    **The first pass is over every Book construction in the module, which is
+    wider than the importers**, and the arm is named for that rather than for
+    this class. A construction here that is not an importer's is still a Book
+    on a path the spine does not hold.
+
+    Deleting `_settle_one`'s `isbn_is_taken` call does not redden these: they
+    are about the route, and `TestTheSpine` is about the rule. Both are needed
+    and neither covers the other.
+    """
+
+    def test_no_book_is_constructed_off_the_spine(self):
+        assert _creates_outside_the_spine(inspect.getsource(importing)) == []
+
+    def test_every_class_offering_apply_calls_the_spine(self):
+        assert _importers_that_never_reach_the_spine(inspect.getsource(importing)) == []
+
+    def test_a_fourth_importer_writing_the_branch_by_hand_is_named(self):
+        assert _creates_outside_the_spine(
+            A_FOURTH_IMPORTER_WRITING_THE_BRANCH_BY_HAND
+        ) == ["OaiImport._apply_one"]
+
+    def test_a_fourth_importer_that_never_calls_the_spine_is_named(self):
+        assert _importers_that_never_reach_the_spine(
+            A_FOURTH_IMPORTER_WRITING_THE_BRANCH_BY_HAND
+        ) == ["OaiImport"]
+
+    def test_a_fourth_importer_building_a_book_in_its_own_loop_is_named(self):
+        """**The arm the first version of this pass did not have.** It reported
+        call sites of constructors and an `apply` entry point has none, so a
+        bare `Book(` written straight into the import loop was green: the
+        plainest spelling of the thing the guard exists to catch."""
+        assert _creates_outside_the_spine(
+            A_FOURTH_IMPORTER_BUILDING_A_BOOK_IN_ITS_OWN_LOOP
+        ) == ["OaiImport.apply"]
+
+    def test_a_fourth_importer_whose_builder_shares_a_name_is_still_named(self):
+        """**The name alone used to flip the verdict.** `_create` is what all
+        three importers call their builder and what a fourth will copy. Keyed
+        by the bare name, a fourth one whose builder is driven from another
+        module borrowed the three existing call sites and went unreported,
+        while the same function called `_mint` was caught. The call site is
+        keyed to the class it is written in, so the borrowing stops."""
+        assert _creates_outside_the_spine(A_FOURTH_IMPORTER_WHOSE_BUILDER_COLLIDES) == [
+            "OaiImport._create"
+        ]
+
+    def test_a_book_minted_on_the_matched_arm_is_named(self):
+        """**Sitting inside the spine call is not the same as sitting behind
+        the refusal.** `fill_gaps` runs only where a Book was already matched,
+        so the privacy predicate is never reached on that path. A pass that
+        sheltered every argument of the spine call reported this clean, which
+        is the guard agreeing with its own name rather than with the rule."""
+        assert _creates_outside_the_spine(
+            A_FOURTH_IMPORTER_MINTING_ON_THE_MATCHED_ARM
+        ) == ["OaiImport._apply_one"]
+
+    def test_a_builder_handed_over_rather_than_called_is_clean(self):
+        """`create=partial(self._mint, record)` is the same shelter spelled
+        without a call, and the pass used to report it: the walk follows calls,
+        so a builder that is only named had no call site and the no call site
+        check fired. **A guard that reddens on a legal spelling is the half an
+        author never looks for**, and it is a trap laid for whoever converts a
+        lambda to a partial and reads the red as the guard being wrong."""
+        assert _creates_outside_the_spine(A_FOURTH_IMPORTER_HANDING_ITS_BUILDER_OVER) == []
+
+    def test_a_fourth_importer_routed_through_the_spine_is_clean(self):
+        """The other half of the diagonal. Without it a pass that named every
+        class it read would score both catches above and mean nothing."""
+        assert _creates_outside_the_spine(A_FOURTH_IMPORTER_ROUTED_THROUGH_THE_SPINE) == []
+        assert _importers_that_never_reach_the_spine(
+            A_FOURTH_IMPORTER_ROUTED_THROUGH_THE_SPINE
+        ) == []

@@ -24,6 +24,7 @@ const FIGURES: QueueFigures = {
   waiting: 0,
   deciding: 0,
   keptForNow: 0,
+  emptyAnswers: 0,
   paceMinutes: 1,
   keptPaceMinutes: 1,
 };
@@ -33,7 +34,7 @@ const FIGURES: QueueFigures = {
  *
  * The component takes them as one value, and a test that says `waiting: 1`
  * means one thing by it. Flat here and assembled below, so a test naming one
- * figure does not have to restate the other four.
+ * figure does not have to restate the rest.
  */
 type QueueOverrides = Partial<
   Omit<Parameters<typeof RapidQueue>[0], "figures">
@@ -46,6 +47,7 @@ function splitFigures(overrides: QueueOverrides, base: QueueFigures) {
     waiting,
     deciding,
     keptForNow,
+    emptyAnswers,
     paceMinutes,
     keptPaceMinutes,
     ...rest
@@ -54,6 +56,7 @@ function splitFigures(overrides: QueueOverrides, base: QueueFigures) {
     waiting: waiting ?? base.waiting,
     deciding: deciding ?? base.deciding,
     keptForNow: keptForNow ?? base.keptForNow,
+    emptyAnswers: emptyAnswers ?? base.emptyAnswers,
     paceMinutes: paceMinutes ?? base.paceMinutes,
     keptPaceMinutes: keptPaceMinutes ?? base.keptPaceMinutes,
   };
@@ -840,6 +843,9 @@ describe("RapidQueue and a book taken from its file name", () => {
     // it is electronic, so this is the ordinary outcome for a title that only
     // exists as a file. Said once a catalogue has actually answered nothing:
     // explaining beforehand would apologise for something that may not happen.
+    // **Two such rows and one sentence**, which is the arm: the figure the hook
+    // hands over is a count, and a component reading it per row is what would
+    // print it twice.
     renderQueue({
       entries: [
         {
@@ -853,6 +859,7 @@ describe("RapidQueue and a book taken from its file name", () => {
           answered: "nothing" as const,
         },
       ],
+      emptyAnswers: 2,
     });
 
     expect(
@@ -860,9 +867,12 @@ describe("RapidQueue and a book taken from its file name", () => {
     ).toHaveLength(1);
   });
 
-  it("does not say it to a member who was offered records and refused", () => {
-    // The catalogues answered, with records. Telling that member the catalogues
-    // do not list ebooks describes something that did not happen.
+  it("does not say it where nothing on the queue was answered that way", () => {
+    // A member offered records and preferring the name is not a member the
+    // catalogues had nothing for, and telling them so describes something that
+    // did not happen. **Which rows those are is the hook's reading now**, so
+    // what this arm holds is that the component says nothing of its own accord:
+    // the row below is answered, and the figure is not.
     renderQueue({
       entries: [
         {
@@ -871,6 +881,7 @@ describe("RapidQueue and a book taken from its file name", () => {
           reason: { kind: "kept-the-name" },
         },
       ],
+      emptyAnswers: 0,
     });
 
     expect(

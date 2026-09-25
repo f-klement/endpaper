@@ -57,7 +57,6 @@ import z3950
 from catalogue import AuthorityAssertion, Heading, Record, Subject
 from enums import (
     AuthorityScheme,
-    Capability,
     CatalogueSource,
     ClassificationScheme,
     HeadingKind,
@@ -3376,7 +3375,7 @@ class TestTheOpenLibraryLookup:
 
     @staticmethod
     async def _lookup(mock: respx.Router) -> metadata.Lookup:
-        return await metadata._open_library(ENGLISH_ISBN, "")
+        return await metadata._open_library(ENGLISH_ISBN)
 
     @pytest.mark.asyncio
     async def test_the_work_record_supplies_the_subjects_the_edition_lacks(self):
@@ -7357,38 +7356,49 @@ class TestACatalogueLoginReachesTheRequestItWasStoredFor:
         assert "authorization" not in k10plus.calls.last.request.headers
 
 
-class TestTheKeyReachesAMeteredDoorAndNoOther:
-    """The API key is metered quota, so an unmetered door is handed nothing.
+class TestOnlyTheKeysOwnerIsHandedIt:
+    """`metadata.Access.api_key` reaches the one source it belongs to.
 
-    **The evasion this closes was recorded rather than fixed** when the outbound
-    request became one value: add a row to `_BESPOKE_LOOKUPS` whose adapter takes
-    the key and sends it somewhere that is not Google, and `_lookup_one` hands it
-    over by the row merely existing. `_search_one` already asked
-    `Capability.METERED` before reaching for it; this is the lookup half of the
-    same question.
+    **The key is not "a credential".** It is Google Books' own, this
+    deployment's quota, and it travels in a query string. So the question the
+    dispatch has to answer is which secret a row's adapter takes, not whether
+    the row is metered and not whether it needs a credential: several sources
+    can answer yes to either, and the first bespoke credentialled non Google
+    source to arrive under one of those predicates would be handed Google's key
+    and would send it wherever its own adapter sends things.
 
-    **Asked of what `_lookup_one` passes, not of what the adapter does with it.**
-    Open Library's adapter opens with `del api_key`, so a test through the wire
-    passes whether the door is narrow or not.
+    **Asked of what `_lookup_one` passes, not of what the adapter does with
+    it.** Open Library's used to open with `del api_key`, so a test through the
+    wire passed whether the door was narrow or not. It has no such parameter
+    now, which is the fix rather than a convenience: `_FREE_LOOKUPS` values take
+    an ISBN and there is nothing a secret could arrive in.
+
+    **The seeded roster cannot separate the candidate predicates, so two arms
+    construct rows it has not got.** Its two bespoke lookup rows agree on
+    `metered`, on `needs_key` and on `secret`: Open Library is no to all three,
+    Google Books is yes to all three. An expectation computed from any of them
+    would therefore be right on this roster whichever one it read, which is what
+    the previous version of this class was and why it pinned the defect as
+    correct. The literal table below is written out for the same reason.
+
+    **What the old rule refused and this one must go on refusing**: Open
+    Library receives nothing. `test_a_free_door_is_handed_no_secret` is that
+    arm, and it is the one to break first when attacking this class.
     """
 
     ISBN = "9780743273565"
     KEY = "a-metered-key"
+    QUERY = "the great gatsby"
+    LIMIT = 5
 
-    def _captured(self, monkeypatch) -> list[str]:
-        """What each bespoke adapter was handed, in call order."""
-        seen: list[str] = []
-
-        async def adapter(isbn: str, api_key: str) -> metadata.Lookup:
-            seen.append(api_key)
-            return metadata.Lookup(Outcome.NOT_FOUND, source="")
-
-        monkeypatch.setattr(
-            metadata,
-            "_BESPOKE_LOOKUPS",
-            dict.fromkeys(metadata._BESPOKE_LOOKUPS, adapter),
-        )
-        return seen
+    #: What each seeded bespoke lookup row's adapter is handed, written out
+    #: rather than computed. A tuple, because its **length** is which of the two
+    #: tables the dispatch chose, so a wrong table is visible here rather than
+    #: inferred from a `KeyError`.
+    EXPECTED = {
+        CatalogueSource.OPEN_LIBRARY: (ISBN,),
+        CatalogueSource.GOOGLE_BOOKS: (ISBN, KEY),
+    }
 
     BESPOKE = sorted(
         (
@@ -7399,28 +7409,311 @@ class TestTheKeyReachesAMeteredDoorAndNoOther:
         key=lambda name: name.value,
     )
 
+    def _captured(self, monkeypatch) -> list[tuple[str, ...]]:
+        """What each bespoke adapter was handed, in call order.
+
+        Both tables are replaced, each recorder keeping its own table's arity,
+        so which door was reached is part of what is recorded.
+        """
+        seen: list[tuple[str, ...]] = []
+
+        async def free(isbn: str) -> metadata.Lookup:
+            seen.append((isbn,))
+            return metadata.Lookup(Outcome.NOT_FOUND, source="")
+
+        async def keyed(isbn: str, api_key: str) -> metadata.Lookup:
+            seen.append((isbn, api_key))
+            return metadata.Lookup(Outcome.NOT_FOUND, source="")
+
+        monkeypatch.setattr(
+            metadata, "_FREE_LOOKUPS", dict.fromkeys(metadata._FREE_LOOKUPS, free)
+        )
+        monkeypatch.setattr(
+            metadata, "_KEYED_LOOKUPS", dict.fromkeys(metadata._KEYED_LOOKUPS, keyed)
+        )
+        return seen
+
+    def test_the_table_covers_every_bespoke_lookup_row(self):
+        """A row added to the roster and not to `EXPECTED` would be uncovered by
+        an arm that only walks what it finds."""
+        assert sorted(self.EXPECTED, key=lambda name: name.value) == self.BESPOKE
+
     @pytest.mark.parametrize("source", BESPOKE, ids=lambda source: source.value)
-    async def test_a_bespoke_door_is_handed_the_key_only_if_it_is_metered(
+    async def test_a_seeded_door_is_handed_what_the_table_says(
         self, source, monkeypatch
     ):
-        target = targets.SEEDED[source]
         seen = self._captured(monkeypatch)
 
-        await metadata._lookup_one(target, self.ISBN, self.KEY, credential=None)
+        await metadata._lookup_one(
+            targets.SEEDED[source], self.ISBN, self.KEY, credential=None
+        )
 
-        expected = self.KEY if target.can(Capability.METERED) else ""
-        assert seen == [expected]
+        assert seen == [self.EXPECTED[source]]
+
+    async def test_a_free_door_is_handed_no_secret(self, monkeypatch):
+        """The rule the old version got right, kept and strengthened.
+
+        It is now a statement about the argument list rather than about the
+        value: the free door receives one argument, and no spelling of an empty
+        secret is available to be passed.
+        """
+        seen = self._captured(monkeypatch)
+
+        await metadata._lookup_one(
+            targets.SEEDED[CatalogueSource.OPEN_LIBRARY],
+            self.ISBN,
+            self.KEY,
+            credential=None,
+        )
+
+        assert seen == [(self.ISBN,)]
+
+    async def test_being_metered_does_not_entitle_a_row_to_the_key(
+        self, monkeypatch
+    ):
+        """The first row the roster has not got, and the one that separates
+        `metered` from the secret's owner.
+
+        Being billed per request and being entitled to one named source's key
+        are different facts, and no seeded row holds one without the other.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.OPEN_LIBRARY], metered=True
+        )
+        seen = self._captured(monkeypatch)
+
+        await metadata._lookup_one(row, self.ISBN, self.KEY, credential=None)
+
+        assert seen == [(self.ISBN,)]
+
+    async def test_needing_a_credential_does_not_entitle_a_row_to_the_key(
+        self, monkeypatch
+    ):
+        """The second, and the one the plan's own remedy would have failed.
+
+        Substituting `Capability.NEEDS_A_CREDENTIAL` for the metered test was
+        the proposed fix. It is a leak where the defect it replaced was a drop:
+        this row needs a credential, owns no key, and under that predicate is
+        handed Google's.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.OPEN_LIBRARY], needs_key=True
+        )
+        seen = self._captured(monkeypatch)
+
+        await metadata._lookup_one(row, self.ISBN, self.KEY, credential=None)
+
+        assert seen == [(self.ISBN,)]
+
+    def test_such_a_row_never_reaches_the_dispatch_at_all(self):
+        """And the arm above is the second of two checks rather than the only
+        one.
+
+        A bespoke row needing a credential and naming no secret has nothing that
+        can supply one: a sealed login goes out of the SRU door and no other.
+        `resolve` refuses it at boot, so the author of the next catalogue learns
+        it while writing the row rather than reading a miss in production.
+
+        **This arm holds two facts the pair below cannot see, so it is not a
+        weaker version of either.** Their rows are Google Books', which is
+        metered **and** needs a credential, so a refusal asking `metered` where
+        it should ask `needs_key`, the exact confusion this whole rule exists to
+        kill, is invisible to both. This row is Open Library's with a credential
+        added, metered False, and it is the only one that separates them. And it
+        carries a shipped credential, which is the one field a constructible row
+        can differ on while answering both doors: without it, a refusal narrowed
+        to rows shipping no login would let a row whose login is dropped
+        silently walk past, which is the drop this rule turns into a loud boot
+        failure.
+
+        **The transport half of the refusal is untestable today** and is stated
+        rather than left to be found: `Target` refuses the other bespoke
+        transport at construction, so no constructible row separates "not SRU"
+        from "is bespoke", and no arm here or anywhere can.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.OPEN_LIBRARY],
+            needs_key=True,
+            shipped_credential=targets.ShippedCredential("u", "p"),
+        )
+
+        with pytest.raises(ValueError, match="no bespoke door carries one"):
+            metadata.resolve(row)
+
+    async def test_the_row_is_read_and_not_the_tables_key_set(self, monkeypatch):
+        """Selecting on `target.reader in _KEYED_LOOKUPS` is the same defect.
+
+        It agrees with the row on every seeded target, because
+        `main.seed_catalogue_targets` runs `resolve` over the roster at boot and
+        a row whose reader is in no matching table fails there. So the agreement
+        is a property of the roster and not of the dispatch, and a table's key
+        set standing in for a rule about the row is what this function was fixed
+        for.
+
+        **The row that separates them owns the key's reader and names no
+        secret.** The shipped dispatch reads the row, reaches the free table and
+        finds no Google Books entry in it; a reader keyed test reaches the keyed
+        table and answers. `KeyError` is the shape of the refusal because this
+        row cannot reach `resolve`'s roster, which is where a named refusal
+        lives.
+
+        **It separates for the right reason, which is not automatic**: every
+        other fact the dispatch could have read still answers "keyed" on this
+        row, so the arm fails on a reader keyed test and on nothing incidental.
+        The one fact that agrees with the row here, `shipped_credential is
+        None`, reddens a different named arm of this class, so a dispatch
+        reading that instead is covered without a second arm here.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.GOOGLE_BOOKS], secret=targets.Secret.NONE
+        )
+        seen = self._captured(monkeypatch)
+
+        with pytest.raises(KeyError):
+            await metadata._lookup_one(row, self.ISBN, self.KEY, credential=None)
+
+        assert seen == []
+
+    #: The same oracle for the search door, written out for the same reason.
+    #: The tuple's length is which of the two search tables was reached.
+    EXPECTED_SEARCH = {
+        CatalogueSource.OPEN_LIBRARY: (QUERY, LIMIT),
+        CatalogueSource.GOOGLE_BOOKS: (QUERY, LIMIT, KEY),
+    }
+
+    BESPOKE_SEARCH = sorted(
+        (
+            name
+            for name, row in targets.SEEDED.items()
+            if row.answers_search and row.transport is not targets.Transport.SRU
+        ),
+        key=lambda name: name.value,
+    )
+
+    def _captured_search(self, monkeypatch) -> list[tuple[object, ...]]:
+        """What each bespoke search adapter was handed, in call order."""
+        seen: list[tuple[object, ...]] = []
+
+        async def free(query: str, limit: int) -> list[Record]:
+            seen.append((query, limit))
+            return []
+
+        async def keyed(query: str, limit: int, api_key: str) -> list[Record]:
+            seen.append((query, limit, api_key))
+            return []
+
+        monkeypatch.setattr(
+            metadata, "_FREE_SEARCHES", dict.fromkeys(metadata._FREE_SEARCHES, free)
+        )
+        monkeypatch.setattr(
+            metadata,
+            "_METERED_SEARCHES",
+            dict.fromkeys(metadata._METERED_SEARCHES, keyed),
+        )
+        return seen
+
+    def test_the_search_table_covers_every_bespoke_search_row(self):
+        assert (
+            sorted(self.EXPECTED_SEARCH, key=lambda name: name.value)
+            == self.BESPOKE_SEARCH
+        )
+
+    @pytest.mark.parametrize(
+        "source", BESPOKE_SEARCH, ids=lambda source: source.value
+    )
+    async def test_a_seeded_search_door_is_handed_what_the_table_says(
+        self, source, monkeypatch
+    ):
+        seen = self._captured_search(monkeypatch)
+
+        await metadata._search_one(
+            targets.SEEDED[source], self.QUERY, self.LIMIT, self.KEY, credential=None
+        )
+
+        assert seen == [self.EXPECTED_SEARCH[source]]
+
+    async def test_being_metered_does_not_entitle_a_search_door_to_the_key(
+        self, monkeypatch
+    ):
+        """The search door reads the row, and it used to read `METERED`.
+
+        **The same latent leak, one screen from the lookup door.** The two
+        search tables differ by arity, so the old test read as a signature
+        selector; it was also the credential gate, and a second metered bespoke
+        source added to the keyed table would have been handed Google's key by
+        arriving. Whose key it is has nothing to do with which question is being
+        asked, so both doors read the same field.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.OPEN_LIBRARY], metered=True
+        )
+        seen = self._captured_search(monkeypatch)
+
+        await metadata._search_one(
+            row, self.QUERY, self.LIMIT, self.KEY, credential=None
+        )
+
+        assert seen == [(self.QUERY, self.LIMIT)]
+
+    def test_a_search_only_row_is_refused_by_the_same_rule(self):
+        """The reason that refusal sits above both arms and not inside one.
+
+        A row whose only door is the search door needs the same refusal: a
+        sealed login goes out of the SRU door and no other, whichever question
+        is being asked. Written into the lookup arm, where it began, this row
+        walked past it.
+
+        **This arm and the lookup only one below are a pair, and neither is
+        redundant**, which is not obvious and is the sentence that stops one of
+        them being deleted. **Both seeded bespoke rows answer both doors**, each
+        `answers_lookup=True, answers_search=True`, so no row on the roster
+        separates the two sides and every arm using one pins neither. Each of
+        the pair therefore constructs a row the roster has not got, and each is
+        the only thing that sees its own half of the refusal narrowed away.
+
+        **The `match` is the load bearing half of both.** With the refusal
+        narrowed to the lookup arm, this row still raises, from the search arm's
+        reader check and with a different message, so a `raises` with no `match`
+        would be green against the one change it exists to catch.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.GOOGLE_BOOKS],
+            answers_lookup=False,
+            secret=targets.Secret.NONE,
+        )
+
+        with pytest.raises(ValueError, match="no bespoke door carries one"):
+            metadata.resolve(row)
+
+    def test_a_lookup_only_row_is_refused_by_the_same_rule(self):
+        """The other half of the diagonal. See the arm above for why both.
+
+        Narrowed to the search arm instead, this row resolves, reaches the free
+        door and sends a request without the credential it declares, which is
+        the drop the refusal exists to turn into a loud boot failure.
+
+        The `match` is load bearing here for the mirror of the reason above:
+        under that narrowing the row still raises, from the lookup arm's reader
+        check and with a different message.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.GOOGLE_BOOKS],
+            answers_search=False,
+            secret=targets.Secret.NONE,
+        )
+
+        with pytest.raises(ValueError, match="no bespoke door carries one"):
+            metadata.resolve(row)
 
     def test_the_roster_holds_a_door_of_each_kind(self):
-        """Or the arm above is parametrised over one answer and proves half of it."""
-        bespoke = [
-            row
-            for row in targets.SEEDED.values()
-            if row.answers_lookup and row.transport is not targets.Transport.SRU
+        """Or the parametrised arm is over one answer and proves half of it."""
+        owners = [
+            source
+            for source in self.BESPOKE
+            if targets.SEEDED[source].secret is not targets.Secret.NONE
         ]
-        metered = [row for row in bespoke if row.can(Capability.METERED)]
 
-        assert metered and len(metered) < len(bespoke)
+        assert owners and len(owners) < len(self.BESPOKE)
 
 
 class TestWhichDoorCarriesALogin:

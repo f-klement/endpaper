@@ -16,7 +16,7 @@ from sqlalchemy import event
 import auth_backends
 from auth import hash_password
 from enums import AuthMode
-from models import User
+from models import USERNAME_MAX, User
 from tests.helpers import FakeConnection, FakeEntry, directory_with, install_directory
 
 # ── Local ─────────────────────────────────────────────────────────────────────
@@ -328,7 +328,8 @@ class TestProxyIdentityIsBounded:
         assert db.query(User).count() == 0
 
     @pytest.mark.parametrize(
-        "username", ["rose", "local_admin", "a.b-c_d", "user@example.com", "x" * 50]
+        "username",
+        ["rose", "local_admin", "a.b-c_d", "user@example.com", "x" * USERNAME_MAX],
     )
     def test_an_ordinary_name_still_works(self, db, username):
         request = request_with({"Remote-User": username})
@@ -568,9 +569,14 @@ class TestATestAccountIsNeverAdopted:
         assert alice.username == "alice-3"
 
     def test_the_new_name_still_fits_the_column(self, db):
-        """`users.username` is String(50), and SQLite would not complain."""
+        """`users.username` is `String(USERNAME_MAX)`, and SQLite would not complain.
+
+        **The width is read rather than written.** This arm is the one whose
+        subject is the fit, so a literal here reddens it on the commit that
+        widens the column, saying a name does not fit when it does.
+        """
         db.add(User(username="admin", password_hash=hash_password("password123"), is_admin=True))
-        long_name = "a" * 50
+        long_name = "a" * USERNAME_MAX
         db.add(
             User(
                 username=long_name,
@@ -585,7 +591,15 @@ class TestATestAccountIsNeverAdopted:
         )
 
         renamed = db.query(User).filter(User.is_test_account.is_(True)).one()
-        assert len(renamed.username) <= 50
+        # **Against the column, not against the constant this fixture is built
+        # from.** Both sides reading `USERNAME_MAX` checks the truncation
+        # against itself, so moving the model's own width leaves this green
+        # while the name no longer fits the column it invokes.
+        declared = getattr(User.__table__.columns["username"].type, "length", None)
+        # A column with no declared length has no fit to test, so say so rather
+        # than comparing against None.
+        assert declared is not None
+        assert len(renamed.username) <= declared
         assert renamed.username.endswith("-2")
 
     def test_the_rename_is_logged_loudly(self, db, alice, caplog):

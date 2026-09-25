@@ -398,8 +398,8 @@ function descendantsNamed(
  * **A sibling walk and not a spread of `parent.children`**, which is live and is
  * not required to index in constant time, so spreading one costs whatever the
  * host charges per index over a length a member supplied file decides.
- * `opf.ts` measured the shape: 4 times the elements took 14.8 times the wall
- * clock under its jsdom.
+ * `elementChildren.ts` measured the shape: 4 times the elements took 14.8
+ * times the wall clock under its jsdom.
  */
 function childElements(parent: Element): Element[] {
   const found: Element[] = [];

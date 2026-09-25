@@ -14,6 +14,24 @@ from enums import CredentialProvenance
 from models import BASE_URL_MAX, SERVER_NAME_MAX
 from schemas.imports import ImportResultOut
 
+#: The longest username or password `OpdsCredentialIn` accepts, in characters.
+#:
+#: **Not a column's width, and named so that nobody reads it as one.** This is a
+#: login at somebody else's server: the pair is sealed into
+#: `catalogue_credentials.envelope`, which is `Text`, so no column here bounds
+#: either half and what bounds them is what this request is willing to carry.
+#: The number used to be written twice as a literal beside the name `username`,
+#: which `users.username` also has at a different width, so a reader had no way
+#: to tell which of the two facts it was.
+#:
+#: **Inherited: this and `schemas.settings.MAX_CREDENTIAL_USERNAME` are the same
+#: concept at two widths**, 255 here and 320 there, both of them a login at a
+#: catalogue this application does not own. The divergence is older than the
+#: name: giving the fact a name is what made it visible, and naming it did not
+#: create it. Reconciling the two is a decision about what a remote login may be
+#: rather than a tidy up, so it is stated here and left.
+OPDS_CREDENTIAL_FIELD_MAX = 255
+
 
 class OpdsServerIn(BaseModel):
     """A server an admin is adding, or the two fields of one they are editing.
@@ -52,8 +70,8 @@ class OpdsCredentialIn(BaseModel):
     user-id and this application keeps one representation of the pair.
     """
 
-    username: Annotated[str, Field(min_length=1, max_length=255)]
-    password: Annotated[str, Field(min_length=1, max_length=255)]
+    username: Annotated[str, Field(min_length=1, max_length=OPDS_CREDENTIAL_FIELD_MAX)]
+    password: Annotated[str, Field(min_length=1, max_length=OPDS_CREDENTIAL_FIELD_MAX)]
 
 
 class OpdsServerOut(BaseModel):

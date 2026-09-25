@@ -56,6 +56,7 @@
  * here would reach a screen and no column.
  */
 
+import { childrenNamed } from "./elementChildren";
 import { leadingYear } from "./year";
 import { type FileIdentifier, type FileMetadata } from "./fileReaders";
 import { declaresEntities } from "./xmlEntities";
@@ -63,27 +64,6 @@ import { parseIsbn } from "./isbn";
 import { stripIsbnPrefix } from "./isbnLabel";
 
 const OPF_NAMESPACE = "http://www.idpf.org/2007/opf";
-
-/** Children of `parent` whose local name matches, in document order. */
-function childrenNamed(parent: Element, local: string): Element[] {
-  // **A sibling walk, not a spread of `parent.children`.** That collection is
-  // live, and indexing one is not required to be constant time: spreading it
-  // costs whatever the host's implementation charges per index, which for a
-  // list the file's own length decides is a cost the file chooses. Measured
-  // 2026-09-07 under this file's jsdom: 4 times the creators took 14.8 times
-  // the wall clock, which is the quadratic signature, and the walk below took
-  // it to linear. A browser may charge less; the point is that this does not
-  // depend on which.
-  const found: Element[] = [];
-  for (
-    let child = parent.firstElementChild;
-    child !== null;
-    child = child.nextElementSibling
-  ) {
-    if (child.localName === local) found.push(child);
-  }
-  return found;
-}
 
 /**
  * Dublin Core children of `<metadata>`, by local name and **not by namespace**.

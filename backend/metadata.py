@@ -40,7 +40,7 @@ import unicodedata
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
-from typing import Any, Final
+from typing import Any, Final, assert_never
 from xml.etree import ElementTree
 
 import httpx
@@ -544,7 +544,7 @@ async def _open_library_work(
         return {}
 
 
-async def _open_library(isbn: str, api_key: str) -> Lookup:
+async def _open_library(isbn: str) -> Lookup:
     """The edition record, its work, and one call for the author's name.
 
     `?default=false` on the cover URL matters: without it Open Library answers
@@ -556,8 +556,6 @@ async def _open_library(isbn: str, api_key: str) -> Lookup:
     lookups that were going to be slow anyway. A failure in either of the two
     extra calls costs that field and not the record.
     """
-    del api_key  # Open Library needs none.
-
     try:
         async with fetch.catalogue_client() as client:
             response = await fetch.get(client, f"{_OPEN_LIBRARY}/isbn/{isbn}.json")
@@ -1870,17 +1868,26 @@ def _nkp_record(
 # measurement and is not re-derived here**, because the seat that wrote this had
 # no key. The per source figures and the frames: `sources.MEASURED`.
 
-#: The ISBN lookup adapter for a transport that is neither SRU nor Z39.50.
+#: The ISBN lookup adapter for a bespoke door that is handed no secret.
 #:
-#: **Two entries where there used to be seven**, and the five that left are the
-#: whole ticket: every SRU source now shares `_sru_lookup`, driven by its row.
-#: What is left is the two catalogues with a JSON API of their own, and they are
-#: keyed on the reader rather than on the source for the same reason the search
-#: tables are: a reader is what a row names.
+#: **One table where there used to be seven entries in one**, and the split from
+#: `_KEYED_LOOKUPS` below is the whole of it: every SRU source shares
+#: `_sru_lookup`, driven by its row, and what is left is the two catalogues with
+#: a JSON API of their own. They are keyed on the reader rather than on the
+#: source for the same reason the search tables are: a reader is what a row
+#: names. The bespoke lookup **adapters**, by `decoders.Reader`, and the word is
+#: not decoration.
+#:
+#: **The signature is the enforcement, which is why this is two tables and not
+#: one with a branch.** A value here is handed an ISBN and has no parameter a
+#: secret could arrive in, so a free door being handed a key is not a case that
+#: is refused at runtime: it cannot be written. Held in one table the two shared
+#: a `(isbn, key)` signature, the key was chosen by asking whether the row was
+#: metered, and Open Library's adapter opened with `del api_key`, which is a
+#: statement about that one adapter rather than about the dispatch. See
+#: `_lookup_one`.
 #:
 #: `metadata.resolve` is what stops a row naming a reader that is not in here.
-#: The bespoke lookup **adapters**, by `decoders.Reader`, and the word is not
-#: decoration.
 #:
 #: **These fetch as well as decode, and they are the one place in the roster
 #: where the two are still welded.** Splitting them is a rewrite of two JSON
@@ -1888,10 +1895,24 @@ def _nkp_record(
 #: scope. The decoder is already separate inside each: `_open_library_edition`
 #: and `_google_record` take parsed JSON and return a `Record`, and neither
 #: mentions a request. What is missing is only the registry entry for them.
-_BESPOKE_LOOKUPS: Final[
-    dict[decoders.Reader, Callable[[str, str], Awaitable[Lookup]]]
+_FREE_LOOKUPS: Final[
+    dict[decoders.Reader, Callable[[str], Awaitable[Lookup]]]
 ] = {
     decoders.Reader.OPEN_LIBRARY: _open_library,
+}
+
+#: The ISBN lookup adapter for a bespoke door that is handed a deployment secret.
+#:
+#: **Named for what its values take and not for what the row costs.** Being
+#: billed per request and being entitled to one named source's key are different
+#: facts about a row, and "metered" was the question this dispatch asked and the
+#: wrong one. `targets.Secret` is the fact, and both `_lookup_one` and
+#: `_search_one` read it. **`_METERED_SEARCHES` one screen down still carries
+#: the older word in its name** and is selected on this same fact; the name is
+#: the last of that spelling and is not what anything asks.
+_KEYED_LOOKUPS: Final[
+    dict[decoders.Reader, Callable[[str, str], Awaitable[Lookup]]]
+] = {
     decoders.Reader.GOOGLE_BOOKS: _google_books,
 }
 
@@ -3160,13 +3181,34 @@ def resolve(target: targets.Target) -> None:
     the invariants it can see on one row on its own. This is the half that needs
     to know what code exists.
     """
-    if target.can(Capability.ANSWERS_ISBN):
-        table = (
-            _LOOKUP_READERS
-            if target.transport is targets.Transport.SRU
-            else _BESPOKE_LOOKUPS
+    if (
+        target.transport is not targets.Transport.SRU
+        and target.needs_key
+        and target.secret is targets.Secret.NONE
+    ):
+        # **The refusal the bespoke path did not have, and it is about the row
+        # rather than about either door**, which is why it is hoisted above both
+        # arms instead of written into one. A bespoke row needing a credential
+        # and naming no secret has nothing that can supply one: a sealed login
+        # goes out of the SRU door and no other, which `carries_a_credential`
+        # states and `tests/test_metadata.py::TestWhichDoorCarriesALogin`
+        # measures at the wire. Before this, such a row resolved, reached
+        # `_lookup_one` and was handed `""`, and the request went out
+        # unauthenticated and came back as an ordinary miss. Written into the
+        # lookup arm alone it would have missed a row whose only door is the
+        # search door.
+        raise ValueError(
+            f"{target.source}: needs a credential and no bespoke door carries one"
         )
-        if target.reader not in table:
+    if target.can(Capability.ANSWERS_ISBN):
+        lookup_readers: Collection[decoders.Reader]
+        if target.transport is targets.Transport.SRU:
+            lookup_readers = _LOOKUP_READERS.keys()
+        elif target.secret is targets.Secret.GOOGLE_BOOKS_KEY:
+            lookup_readers = _KEYED_LOOKUPS.keys()
+        else:
+            lookup_readers = _FREE_LOOKUPS.keys()
+        if target.reader not in lookup_readers:
             raise ValueError(
                 f"{target.source}: answers a lookup and {target.reader} reads none"
             )
@@ -3174,7 +3216,14 @@ def resolve(target: targets.Target) -> None:
         readers: Collection[decoders.Reader]
         if target.transport is targets.Transport.SRU:
             readers = _SEARCH_READERS.keys()
-        elif target.can(Capability.METERED):
+        elif target.secret is targets.Secret.GOOGLE_BOOKS_KEY:
+            # **The same fact as the lookup arm above, and not
+            # `Capability.METERED`.** The two agree on the seeded roster and are
+            # different questions: being billed per request is not being
+            # entitled to one named source's key, and a second metered bespoke
+            # source added to the table below would have been handed Google's by
+            # arriving. That is the defect this commit closes at the lookup
+            # door, one screen away.
             readers = _METERED_SEARCHES.keys()
         else:
             readers = _FREE_SEARCHES.keys()
@@ -3245,18 +3294,51 @@ async def _lookup_one(
     `tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt` is
     the tripwire that asks it of the roster.
 
-    **Only a metered one, which is the same test `_search_one` already applies.**
-    The key is this deployment's own and it is metered quota: a bespoke target
-    that is not metered has no use for it and must not be handed it, because a
-    row added to `_BESPOKE_LOOKUPS` would otherwise receive it by arriving. That
-    is the evasion the security seat recorded against this rule on 2026-09-17,
-    and it costs nothing today: Open Library is the other bespoke door and its
-    adapter opens with `del api_key`.
+    **Only the source the key belongs to, which is a narrower question than the
+    one this used to ask.** `api_key` is Google Books' key, this deployment's
+    own, and the predicate here was `target.can(METERED)`: several rows can
+    answer yes to that, so the first bespoke credentialled non Google source to
+    arrive would have been handed Google's key and would have sent it wherever
+    its own adapter sends things. `targets.Secret` names the owner instead, so a
+    row can claim only a secret that exists for it.
+
+    **And the free door is a different table with a different signature, so the
+    empty string is gone rather than guarded.** Passing `""` was what made the
+    old shape silent: it is a valid argument to every adapter and means "send it
+    without a key" to one of them, and `_google_books` had no line refusing it
+    where `_google_search` did. A `_FREE_LOOKUPS` value has no parameter a
+    secret could arrive in, so there is nothing left to pass.
+
+    **A `match` over every member with an `assert_never` tail, not a test and a
+    fallthrough**, in the shape `notifications.py` already uses. A third secret
+    is then a mypy error at this line rather than a row quietly routed to the
+    free door, and the predicate cannot be widened to "names any secret" without
+    deleting a branch the type checker is holding. A guard arm would have
+    checked the same thing one member late.
+
+    **What makes that safe is a refusal in `targets.Target.__post_init__` and
+    not anything here, and `_search_one` rests on the same one.** `Secret` is a
+    `StrEnum`, so a `match` compares by equality and a bare `"google_books_key"`
+    would route to the keyed door where an `is` test refused it. The field is
+    refused by type at the one site that writes it, which is why both dispatches
+    can match rather than each carrying its own narrower test.
+
+    **The row is what is read, never the table's key set.** Selecting on
+    `target.reader in _KEYED_LOOKUPS` is equivalent on the seeded roster,
+    because `main.seed_catalogue_targets` runs `resolve` over it at boot, and it
+    is the defect this function was fixed for wearing a different spelling: a
+    table's accident standing in for a rule about the row.
+    `tests/test_metadata.py::TestOnlyTheKeysOwnerIsHandedIt::test_the_row_is_read_and_not_the_tables_key_set`
+    is what separates them.
     """
     if target.transport is targets.Transport.SRU:
         return await _sru_lookup(target, isbn, credential)
-    metered = api_key if target.can(Capability.METERED) else ""
-    return await _BESPOKE_LOOKUPS[target.reader](isbn, metered)
+    match target.secret:
+        case targets.Secret.GOOGLE_BOOKS_KEY:
+            return await _KEYED_LOOKUPS[target.reader](isbn, api_key)
+        case targets.Secret.NONE:
+            return await _FREE_LOOKUPS[target.reader](isbn)
+    assert_never(target.secret)
 
 
 async def _search_one(
@@ -3270,13 +3352,24 @@ async def _search_one(
     """Ask one target for title matches, through whichever door its row names.
 
     `credential` carries the rule `_lookup_one` states, including which doors
-    take one.
+    take one, and so does the fact the `match` below reads: the search door is
+    handed the same secret on the same terms as the lookup door, because whose
+    key it is has nothing to do with which question is being asked.
+
+    **`Capability.METERED` is what this used to select on**, and the two tables
+    below differ by arity, so it read as a signature selector rather than as the
+    credential gate it also was. It was both: a second metered bespoke source
+    would have been handed Google's key by arriving, exactly as at the lookup
+    door.
     """
     if target.transport is targets.Transport.SRU:
         return await _sru_search(target, query, limit, credential)
-    if target.can(Capability.METERED):
-        return await _METERED_SEARCHES[target.reader](query, limit, api_key)
-    return await _FREE_SEARCHES[target.reader](query, limit)
+    match target.secret:
+        case targets.Secret.GOOGLE_BOOKS_KEY:
+            return await _METERED_SEARCHES[target.reader](query, limit, api_key)
+        case targets.Secret.NONE:
+            return await _FREE_SEARCHES[target.reader](query, limit)
+    assert_never(target.secret)
 
 
 # ── Ranking ───────────────────────────────────────────────────────────────────
@@ -3656,12 +3749,17 @@ async def title_search(
     )
 
 
-#: The title search adapter for a bespoke transport that needs no credential.
+#: The title search adapter for a bespoke door that is handed no secret.
+#:
+#: **The door, not the row**, which is the distinction the credential dispatch
+#: was fixed for: "needs a credential" is a fact about a source and several can
+#: answer yes to it, where what decides this table is what the adapter takes.
+#: The Argentine row needs a credential and belongs to neither search table.
 #:
 #: **One entry, where this held seven.** Six of those were SRU sources that now
 #: share `_sru_search`, driven by a row, and the seventh is Google Books, which
-#: needs a key and so cannot share this signature: `_METERED_SEARCHES` below
-#: holds it.
+#: takes a deployment secret and so cannot share this signature:
+#: `_METERED_SEARCHES` below holds it.
 #:
 #: **Keyed on the reader and not on the source**, which is what makes the
 #: sharing possible: three sources name `MARC_GND` and a fourth would add no
@@ -3707,12 +3805,18 @@ async def _google_search(query: str, limit: int, api_key: str) -> list[Record]:
     return [_google_record(item) for item in found]
 
 
-#: The title search adapter for every source that needs a credential.
+#: The title search adapter for a bespoke door that is handed a deployment secret.
 #:
 #: Separate from `_FREE_SEARCHES` because the signature differs, and a table
 #: rather than a branch on one name because a branch is only correct while there
-#: is exactly one of them. `resolve` is what stops a metered row naming a reader
-#: that is not in here.
+#: is exactly one of them. `resolve` is what stops a row naming a secret from
+#: naming a reader that is not in here.
+#:
+#: **The name is the last of an older spelling and is not what anything asks.**
+#: `_search_one` and `resolve` both select on `targets.Secret`, because being
+#: billed per request and being entitled to one named source's key are different
+#: facts about a row, and the second is the one that decides who is handed
+#: `Access.api_key`. See `_KEYED_LOOKUPS`.
 _METERED_SEARCHES: Final[
     dict[decoders.Reader, Callable[[str, int, str], Coroutine[Any, Any, list[Record]]]]
 ] = {
