@@ -62,7 +62,16 @@ describe("ErrorBoundary", () => {
       </ErrorBoundary>,
     );
 
-    expect(consoleError).toHaveBeenCalled();
+    // **Asserted on the boundary's own words, not on the call.** React logs a
+    // caught error itself, which the sibling arm above says in as many words, so
+    // `toHaveBeenCalled` passes whether or not the boundary logs anything: it was
+    // satisfied by the framework rather than by the subject. This literal comes
+    // from `componentDidCatch` and nothing else in the tree writes it.
+    expect(consoleError).toHaveBeenCalledWith(
+      "Unhandled render error:",
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it("recovers when the boundary is reset", async () => {

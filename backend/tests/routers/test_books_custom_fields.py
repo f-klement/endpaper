@@ -372,7 +372,7 @@ class TestAPercentEscapeIsOnlyRefusedInTheHost:
 class TestControlCharactersDoNotSurvive:
     def test_a_nul_is_removed_from_a_value(self, client, admin, make_book, text_field):
         """`str.split()` does not drop a NUL: it is not whitespace. Measured on
-        the live route, `a\x00b` was stored unchanged, serialised as
+        the live route, `a\\x00b` was stored unchanged, serialised as
         `\\u0000`, and invisible everywhere a person could notice it."""
         book = make_book(admin["headers"])
 

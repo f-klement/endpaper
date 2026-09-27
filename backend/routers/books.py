@@ -3,9 +3,9 @@ import csv
 import io
 import logging
 from collections.abc import Callable, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, wait
 from datetime import UTC, date, datetime
-from typing import Annotated, Any, Final
+from typing import Annotated, Any, Final, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -21,6 +21,7 @@ import cover_store
 import covers
 import custom_fields
 import ddc
+import deadline
 import folding
 import google_books
 import identity
@@ -100,6 +101,7 @@ from reading import Reading
 from schemas import (
     MAX_DIGITAL_REFERENCES_PER_BOOK,
     MAX_ROW_ID,
+    POPPED_BEFORE_THE_CONSTRUCTOR,
     AuthorBatchMergeOut,
     AuthorIdentifierOut,
     AuthorIdentifierRequest,
@@ -1283,13 +1285,25 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
                 db.flush()
 
     fields = payload.model_dump()
-    # Popped before the constructor: `Book.classifications` is a relationship,
-    # so handing it a list of plain dicts raises rather than building rows.
-    # The validated models on `payload` are what the rows are written from.
-    # `identifiers` is the same shape and is popped for the same reason.
-    fields.pop("classifications", None)
-    fields.pop("identifiers", None)
-    book = Book(**fields, added_by_user_id=current_user.id)
+    # The loop rather than one `pop` per name, so this list and the import time
+    # refusal in `schemas/book.py` are the same object: a field added to the body
+    # that the constructor cannot take stops every test run there rather than
+    # failing the first create. Two cells because the reasons differ.
+    # `Book.classifications` is a relationship, so handing it a list of plain
+    # dicts raises rather than building rows, and the validated models on
+    # `payload` are what the rows are written from. `categories` IS a column, and
+    # is popped because its stored shape is one joined string: the constructor
+    # would take the list and the INSERT would fail on it.
+    for name in POPPED_BEFORE_THE_CONSTRUCTOR:
+        fields.pop(name, None)
+    book = Book(
+        **fields,
+        # Paired with the pop deliberately. A pop with no write is a 201 that
+        # accepted a field and stored nothing, which is the quietest failure
+        # available here, so the refusal named above holds both halves.
+        categories=google_books.join_categories(payload.categories),
+        added_by_user_id=current_user.id,
+    )
     db.add(book)
     # Before the commit, so a book and the headings it was added with land in
     # one transaction: a failure here must not leave a book claiming a
@@ -2572,12 +2586,95 @@ def merge_books(
 
 # ── Covers ────────────────────────────────────────────────────────────────────
 
-#: Books one backfill run repairs. The run is bounded rather than open ended
-#: because it holds an HTTP request open while it fetches: at six at a time and
-#: a six second timeout, a hundred books is the most that reliably finishes
-#: inside a proxy's read timeout. The response says how many are left, and the
-#: caller presses again.
+#: Books one backfill run repairs.
+#:
+#: **Bounded because it holds an HTTP request open while it fetches**, and it is
+#: what a press examines at most rather than what a run costs:
+#: `COVER_BACKFILL_DEADLINE_SECONDS` bounds the run's life whatever the hundred is.
+#: The response says how many are left, and the caller presses again.
 MAX_BACKFILL_BOOKS: Final = 100
+
+#: Wall clock one book of a backfill run may spend.
+#:
+#: **Twelve, two hops of `covers.TIMEOUT_SECONDS`.** One cover book is a candidate
+#: check and then a download, each of which may walk up to `covers.MAX_REDIRECTS`
+#: further hops, and with no budget every one of those hops gets the full
+#: `covers.TIMEOUT_SECONDS`: `covers.resolve_and_store` records what that bounds
+#: and what it does not. Passing this is what makes a book's cost a number, and so
+#: what makes a wave's.
+#:
+#: **A book that runs out of budget is not lost and is not skipped.** Past it the
+#: best candidate is kept unverified, so the row carries the remote URL and the run
+#: counts the book `unreachable`; no file lands behind its id, so it is a candidate
+#: again on the next pass through the library. That is the trade
+#: `covers.INTERACTIVE_BUDGET_SECONDS` makes on the add path, for a caller who is
+#: waiting on one book rather than on a run of them.
+#:
+#: **Not that constant's four.** Four is sized against a person watching one book
+#: being added, and Open Library answers every cover with a chain of three hops
+#: (`covers.COVER_HOSTS` measured it), so four here would report `unreachable` for
+#: covers that are merely behind two redirects.
+#:
+#: **Retuning `covers.TIMEOUT_SECONDS` means retuning this.** A budget that is not
+#: whole hops of it buys a fraction of a hop nothing can spend, `_hop_seconds`
+#: giving a hop the smaller of that timeout and what is left, so
+#: `test_a_books_budget_is_whole_hops` goes red on the hop timeout moving and the
+#: edit it is asking for is here rather than there.
+COVER_BACKFILL_BUDGET_SECONDS: Final = 12
+
+#: How long one backfill run may spend waiting for fetch slots.
+#:
+#: **Twenty four, and this route's first deadline of any kind.** Without one a run
+#: was bounded only by the batch: `ceil(MAX_BACKFILL_BOOKS /
+#: covers.MAX_CONCURRENT_FETCHES)` waves, 17, of whatever one book cost, which with
+#: nothing bounding a book was the figure `covers.INTERACTIVE_BUDGET_SECONDS`
+#: derives for an unbudgeted walk and put a run near 400s. At
+#: `ratelimit.COVER_BACKFILL_LIMIT`'s 0.1 presses a second that is **41 runs in
+#: flight from one member**, each holding a connection and six fetch slots, which
+#: is what this constant and `covers.FETCHES_AT_ONCE` close between them.
+#:
+#: * **The hold.** `get_current_user` checks a connection out before this runs and
+#:   `get_db` returns it only after the response, so a run holds one for its whole
+#:   life: this plus one `COVER_BACKFILL_BUDGET_SECONDS`, because the check before a
+#:   wave is `left(ends) <= 0`, so a wave admitted just under 24 runs a full book
+#:   after it. `0.1 x 36s` is **3.6 runs in flight**, against 41.
+#:
+#:   **One budget and not one per book of the wave, and what makes that true is
+#:   where the wave's cancels sit.** The handler cancels every unstarted
+#:   submission of a wave before it reads any of them; interleaved, a worker freed
+#:   during one read starts the next offset and the wave drains serially for a
+#:   budget a book, measured at 0.919s against a claimed 0.400s. The comment at
+#:   that loop carries the measurement, and this figure is only the hold while the
+#:   ordering there holds.
+#: * **The sibling's hold is the ceiling, not a number repeated here.**
+#:   `IDENTIFIER_BACKFILL_DEADLINE_SECONDS` argues its own hold down to a share of
+#:   the pool and states the pool's size; this route's arrival rate is the same, so
+#:   the comparison is between the two holds and
+#:   `TestTheDeadlineIsDerivedRatherThanChosen` asserts it rather than copying the
+#:   figure a third time.
+#: * **The wave.** Two whole `COVER_BACKFILL_BUDGET_SECONDS`, so where every book
+#:   spends its whole budget a cut lands where a wave would have ended rather than
+#:   mid wave.
+#:
+#: **It does not make this route safe for the pool**, for the reason the sibling
+#: constant states in full: the limiter keys on a username and under
+#: `AUTH_MODE=proxy` a username is free, so no arrival rate bounds the adversarial
+#: case. It moves one member's hold and removes no class.
+#:
+#: **This figure exists because the fan out runs inside the request.** Move it to a
+#: background job and this is deleted rather than retuned, while
+#: `covers.FETCHES_AT_ONCE`, the per book budget and the cursor all survive
+#: unchanged.
+COVER_BACKFILL_DEADLINE_SECONDS: Final = 24
+
+#: The three outcomes `CoverBackfillOut` counts, as the run's own walk labels one
+#: book.
+#:
+#: A `Literal` for `_Bucket`'s reason, which that alias states: the counts are taken
+#: with `list.count`, so a typo in one of the three reports 0 for that outcome while
+#: `examined`, which is the length of the run rather than their sum, stays right.
+#: Nothing on the wire would say so. Against this alias mypy refuses the typo.
+_Cover = Literal["stored", "unreachable", "still_missing"]
 
 
 @router.post("/covers/backfill", response_model=CoverBackfillOut)
@@ -2631,6 +2728,20 @@ def backfill_covers(
     once the end is reached, so pressing again starts over and re-tries the ones
     that failed, which may since have become fixable.
 
+    **Bounded in wall clock as well as in books**, so a slow or blackholing image
+    service leaves the batch short rather than holding the request open. A short
+    run answers with whatever resolved, counts only the books it has an outcome
+    for, and moves the cursor over exactly those, so pressing again resumes at the
+    first book this one did not reach. The reply does not distinguish a short run
+    from a complete one and does not need to: press again while `remaining` is
+    above zero.
+
+    **Each book is bounded too.** A cover is a candidate check and then a
+    download, each of which may follow redirects, and with no budget every hop of
+    both got a timeout of its own, so one unlucky book could spend what the whole
+    run was meant to. Past its budget a book keeps the remote URL, is counted
+    `unreachable`, and is a candidate again on the next pass through the library.
+
     Idempotent either way: a book with a file behind it is never a candidate, so
     a second pass over the same range examines nothing it fixed.
     """
@@ -2648,63 +2759,187 @@ def backfill_covers(
     candidates = [book for book in catalogue if book.id not in on_disk]
     batch = candidates[:MAX_BACKFILL_BOOKS]
 
-    # Concurrent, because serial would be one round trip per book: a thousand
-    # books at even half a second each is eight minutes of waiting. Bounded,
-    # because the other end is two free public services and this deployment has
-    # one address at them.
-    #
-    # Only the fetch runs in the pool. The Session is not thread safe, so the
-    # assignment happens back here, in one thread. `pool.map` yields results in
-    # the order it was given the inputs, which is what makes the positional zip
-    # below correct.
-    with ThreadPoolExecutor(max_workers=covers.MAX_CONCURRENT_FETCHES) as pool:
-        resolved = list(
-            pool.map(
-                lambda book: covers.resolve_and_store(book.id, book.isbn, book.cover_url),
-                batch,
-            )
-        )
+    ends = deadline.in_(COVER_BACKFILL_DEADLINE_SECONDS)
 
-    stored = 0
-    unreachable = 0
-    still_missing = 0
-    for book, url in zip(batch, resolved, strict=True):
+    def record(book: Book, url: str | None) -> _Cover:
+        """Fold one answer into its Book, and name the outcome it counts as."""
         if url is None:
-            still_missing += 1
-            continue
+            return "still_missing"
+        # **The guard is not about the UPDATE, which the unit of work already
+        # elides**: an assignment of an equal value emits no statement and this
+        # table has no `onupdate`, measured with a cursor listener. What it keeps
+        # out is `Book._store_covers_over_https`, which **drops** a value it finds
+        # unrenderable rather than passing it through. `resolve_and_store` answers
+        # with `supplied` when the download fails, so an unrenderable URL that
+        # `backup.restore` wrote through Core, where `@validates` does not fire,
+        # comes back here equal to the column: assigning it would null the only
+        # cover that row has and log a warning, on a run that repaired nothing.
+        # `test_a_run_that_re_resolves_an_unrenderable_stored_cover_keeps_it` fails
+        # if this goes.
         if url != book.cover_url:
             book.cover_url = url
         if covers.is_local(url):
-            stored += 1
-        else:
-            # Resolved to a remote URL this server could not download. Counted
-            # separately from "no image service has one": with no egress every
-            # book lands here, and folding it into either of the other two would
-            # report a clean no-op in exactly the situation this exists for.
-            unreachable += 1
+            return "stored"
+        # Resolved to a remote URL this server could not download. Counted
+        # separately from "no image service has one": with no egress every book
+        # lands here, and folding it into either of the other two would report a
+        # clean no-op in exactly the situation this exists for.
+        return "unreachable"
+
+    # One outcome per book of the batch, in batch order, `None` where this run
+    # learned nothing about it: no slot came free inside the deadline, or the
+    # deadline cut before its wave was submitted.
+    outcomes: list[_Cover | None] = [None] * len(batch)
+    cut_short = False
+
+    # **Waves of `covers.MAX_CONCURRENT_FETCHES`, the deadline checked between
+    # them, rather than one `pool.map` over the batch.** Concurrent either way,
+    # because serial is one round trip per book and a thousand books at even half
+    # a second each is eight minutes of waiting. Three reasons for the waves, and
+    # the first changes an answer rather than a cost.
+    #
+    # * `next_after_id` has to be the end of the **contiguous** examined run, and
+    #   submitting in batch order a wave at a time is what makes the examined set
+    #   a prefix by construction. `pool.map` has the ordering but not the cut: it
+    #   cannot be stopped at a wall clock without abandoning the iterator, and an
+    #   abandoned fetch still writes its file, which takes the book out of the
+    #   candidate set with its row left pointing at whatever it pointed at before.
+    # * A submission is queued, not run, so submitting the whole batch at once
+    #   puts a second member's first wave behind a hundred of somebody else's
+    #   fetches. A wave never leaves more than `covers.MAX_CONCURRENT_FETCHES`
+    #   queued, so the pool's own order is a queue of waves rather than of runs.
+    # * It is what puts a cut on a wave boundary, which is the third of
+    #   `COVER_BACKFILL_DEADLINE_SECONDS`' derivations.
+    #
+    # The cost, stated rather than left to be discovered: a wave's wall clock is
+    # its slowest book, so idle slots appear where one `map` would have kept six
+    # in flight.
+    at = 0
+    while at < len(batch):
+        if deadline.left(ends) <= 0:
+            cut_short = True
+            break
+        # **Every column is read here, in this thread, and never in the pool.**
+        # The Session is not thread safe, and a lazy load or a refresh fired from
+        # a worker is a read on this handler's session from another thread. The
+        # comment this replaces claimed only the fetch ran in the pool while the
+        # `lambda` it sat on read three columns there.
+        asked: list[tuple[int, Book, Future[str | None]]] = []
+        while at < len(batch) and len(asked) < covers.MAX_CONCURRENT_FETCHES:
+            book = batch[at]
+            asked.append(
+                (
+                    at,
+                    book,
+                    covers.FETCHES_AT_ONCE.submit(
+                        covers.resolve_and_store,
+                        book.id,
+                        book.isbn,
+                        book.cover_url,
+                        budget=COVER_BACKFILL_BUDGET_SECONDS,
+                    ),
+                )
+            )
+            at += 1
+
+        # **The deadline is spent on the slot and nowhere else**, and the two
+        # spellings a reader reaches for first are both worse.
+        #
+        # A deadline on the **request** loses the answers already in hand: the
+        # fetches that finished have written their files, so abandoning their
+        # results leaves a cover behind a book id with the row still naming the
+        # remote URL it could not download, and nothing makes that book a
+        # candidate again to repair it.
+        #
+        # Cancelling a fetch in flight cannot be done at all: a thread running
+        # `covers.resolve_and_store` is not interruptible, and the file it is part
+        # way through writing is `cover_store`'s to finish. So what this waits on
+        # is only the part that is still a **queue position**, and
+        # `Future.cancel` is what distinguishes the two: true for a submission
+        # that never started, false for one that is running or done, which is then
+        # read for its answer and counted.
+        #
+        # **The wait is therefore not a bound on the wave.** A wave that has
+        # started runs to `COVER_BACKFILL_BUDGET_SECONDS`, which is the second term
+        # in the hold that constant's own comment derives.
+        wait([fetching for _, _, fetching in asked], timeout=max(deadline.left(ends), 0.0))
+
+        # **Every cancel before any read, and that ordering is the hold.** A read
+        # blocks for up to `COVER_BACKFILL_BUDGET_SECONDS` and this pool is process
+        # wide, so with the two interleaved a worker freed during the read of one
+        # offset dequeues the next one and **starts** it: its `cancel` then answers
+        # False, it is waited for from its own start, and the wave drains serially
+        # for one budget a book. Measured on a one slot stand-in, three books, a
+        # 0.1s deadline and a 0.3s fetch: **0.919s held against the 0.400s the
+        # deadline claims, the whole wave examined and the run not reporting a cut**,
+        # which at the shipped figures is `24 + 6 x 12` rather than `24 + 12`.
+        # Cancelling first makes every future still read one that had started at or
+        # before the cut, which is what `COVER_BACKFILL_DEADLINE_SECONDS`' hold is
+        # derived from, and it leaves nothing queued behind a read that raises.
+        started = [
+            (offset, book, fetching)
+            for offset, book, fetching in asked
+            if not fetching.cancel()
+        ]
+        if len(started) != len(asked):
+            # A submission that never started is a book this run never examined,
+            # and so is everything after it.
+            cut_short = True
+        for offset, book, fetching in started:
+            outcomes[offset] = record(book, fetching.result())
+        if cut_short:
+            break
+
     db.commit()
 
-    remaining = len(candidates) - len(batch)
+    # The unbroken examined run, which is the only thing the cursor may clear.
+    #
+    # **A book past the cut whose fetch did answer is still stored**, because the
+    # bytes are already on this volume: the row is updated and committed above,
+    # which is what keeps the column and the directory agreeing. It is counted in
+    # no outcome, so the reply understates what this run did and never overstates
+    # it, and that book is not a candidate for the next press.
+    cleared = outcomes[
+        : next(
+            (offset for offset, outcome in enumerate(outcomes) if outcome is None),
+            len(outcomes),
+        )
+    ]
+    examined = len(cleared)
+    stored = cleared.count("stored")
+    unreachable = cleared.count("unreachable")
+    still_missing = cleared.count("still_missing")
+    remaining = len(candidates) - examined
     logger.info(
-        "Cover backfill for %s: examined %d, stored %d, unreachable %d, "
-        "none found for %d, %d left. Totals: %s",
+        "Cover backfill for %s: examined %d of %d, stored %d, unreachable %d, "
+        "none found for %d, %d left%s. Totals: %s",
         current_user.username,
+        examined,
         len(batch),
         stored,
         unreachable,
         still_missing,
         remaining,
+        ", cut short by the deadline" if cut_short else "",
         covers.outcome_counts(),
     )
     return CoverBackfillOut(
-        examined=len(batch),
+        examined=examined,
         stored=stored,
         unreachable=unreachable,
         still_missing=still_missing,
         remaining=remaining,
-        # 0 at the end, so the next press starts over rather than answering
-        # nothing for ever.
-        next_after_id=batch[-1].id if remaining > 0 else 0,
+        # **The last book of the unbroken examined run, never the last book of the
+        # batch**, which would skip every book a cut dropped for a whole pass of
+        # the library. Where the run examined none of them it is `after_id`
+        # unchanged, so the next press resumes where this one stood. 0 at the end,
+        # so the next press starts over rather than answering nothing for ever,
+        # and a cut can never report the end: a cut means at least one book of the
+        # batch has no outcome, so `examined <= len(batch) - 1` and `remaining` is
+        # at least 1.
+        next_after_id=(
+            (batch[examined - 1].id if examined else after_id) if remaining > 0 else 0
+        ),
     )
 
 
@@ -2717,19 +2952,24 @@ def backfill_covers(
 #: proxy's read timeout, which for the deployments this ships to is a minute.
 #: `IDENTIFIER_BACKFILL_CONCURRENCY` in flight over fifty books is
 #: `ceil(50 / 6)` waves, nine, and one request is bounded by
-#: `fetch.TIMEOUT_SECONDS`, so the worst case is **90s**. That worst case is
-#: every request timing out, which means Google is unreachable and the batch
-#: was going to produce nothing anyway; the case that has to fit inside the
-#: proxy is the ordinary one, which is one wave of latency per nine.
+#: `fetch.TIMEOUT_SECONDS`, so this constant alone would put the worst case at
+#: **90s**.
+#:
+#: **It no longer does, and this figure is no longer what keeps the route inside
+#: the minute.** `IDENTIFIER_BACKFILL_DEADLINE_SECONDS` bounds the run's life at
+#: 40s whatever the fifty is, so the arithmetic above is now what the fifty would
+#: cost unbounded rather than what a run costs. The fifty survives as what a
+#: press examines at most, which is the presses a member pays, and the paragraph
+#: below is the number to argue with.
 #:
 #: **Deliberately not compared with the cover backfill's hundred**, and an
 #: earlier version of this paragraph was: "six at a time against a six second
-#: timeout, so a hundred books is at worst 100s". That figure does not exist.
-#: `backfill_covers` passes no budget to `covers.resolve_and_store`, which
-#: bounds a hop rather than a book, and one cover book is up to three candidate
-#: checks plus a download rather than one request. The two routes differ in the
-#: work per book, not in the timeout, so the hundred is not evidence about this
-#: fifty.
+#: timeout, so a hundred books is at worst 100s". That figure does not exist. One
+#: cover book is up to three candidate checks plus a download rather than one
+#: request, which is why that route's per book ceiling is its own constant,
+#: `COVER_BACKFILL_BUDGET_SECONDS`, rather than a request's timeout. The two routes
+#: differ in the work per book, not in the timeout, so the hundred is not evidence
+#: about this fifty.
 #:
 #: **What it costs a member is presses**, and that is the number to argue with:
 #: a 900 book Play Books import is 18 of them. The response says how many are
@@ -2751,6 +2991,109 @@ MAX_IDENTIFIER_BACKFILL: Final = 50
 #: bounded by what two image services will tolerate, and this one by a metered
 #: key's bill. Either may move without the other.
 IDENTIFIER_BACKFILL_CONCURRENCY: Final = 6
+
+#: The pod's slots for a backfill's outbound volume requests, held once for the
+#: process rather than once per request.
+#:
+#: **Built here rather than in the handler body, which is the defect this
+#: replaces.** The ceiling it defends belongs to the pod:
+#: `fetch.MAX_RESPONSE_BYTES` prices sixteen concurrent responses and
+#: `metadata.search` spends eight of them **per fan out, not per pod**: the
+#: default path admits four fan outs per member, `ratelimit.METADATA_LIMIT`'s 60 a
+#: minute over `metadata.SEARCH_DEADLINE_SECONDS`' 4.0s, so 32 responses can be
+#: live on that path alone. So this bound leaves room for one fan out and **does
+#: not keep the pod under the sixteen**, which is the search path's own question
+#: and has its own ticket. A semaphore built per call
+#: bounds one call and enforces nothing about the pod, so nine runs of six
+#: inside this route's own rate limit put 54 sockets, and **54, plus a search's
+#: eight**, at that constant's own retention figure is about 1.99 GB of parse
+#: against a pod `fetch.py` records being OOMKilled at 1.8 GB once already.
+#: **The eight is load bearing and was left out of that sentence once**: 54 alone
+#: is 1.73 GB, which is under the 1.8, so what carries the conclusion is the
+#: sockets a search is already holding rather than this route's own. `metadata._HARDER_AT_ONCE` is the
+#: same placement for the same reason and states the pool's fifteen this does
+#: not restate.
+#:
+#: **Process wide is pod wide only because the pod runs one process.** The image
+#: gives uvicorn no `--workers`, so under one this is the pod's bound and under
+#: `--workers N` it becomes per worker and the sixteen is exceeded N-fold with
+#: nothing going red. No test in this tree can read a `CMD` line.
+#:
+#: **Waited on, where `_HARDER_AT_ONCE` refuses to wait, and the difference is
+#: the caller rather than the resource.** A search that loses its slot runs the
+#: ordinary search and says which catalogues it asked, so a refusal there is a
+#: true answer; a backfill has nothing cheaper to do, so a refusal is a retry
+#: and no rows. `IDENTIFIER_BACKFILL_DEADLINE_SECONDS` is what buys the wait.
+#:
+#: **What a process wide bound admits, said here because a later reader will
+#: assume it absent**: occupancy is observable across members, since a member
+#: can read somebody else's activity off their own batch's shortfall. Six slots
+#: busy, and not a title, an identifier or whose books; every public book is
+#: already a candidate for everyone, so nothing is paid to close it.
+_BACKFILL_LOOKUPS_AT_ONCE: Final = asyncio.Semaphore(IDENTIFIER_BACKFILL_CONCURRENCY)
+
+#: How long one backfill run may spend waiting for slots and for answers.
+#:
+#: **Thirty, and three independent derivations land on it**, which is the reason
+#: to prefer it to 25 or 35.
+#:
+#: * **The pool.** `get_current_user` checks a connection out before this runs
+#:   and `get_db` returns it only after the response, so a run holds one for its
+#:   whole life. **Little's law takes the hold, not this constant**, and the hold
+#:   is this plus one `fetch.TIMEOUT_SECONDS`: waves are sequential and the check
+#:   before each one is `left(ends) <= 0`, so an acquire admitted just under 30
+#:   runs a full request after it, which `fetch.get` bounds with no retry on the
+#:   path. This route's limiter allows six presses a minute, so `0.1/s x 40s` is
+#:   **4 of the pool's fifteen per member**, against the 9 the route held when its
+#:   worst case was 90s, which is that same quantity over that life.
+#: * **The wave.** It is exactly three times `fetch.TIMEOUT_SECONDS`, so in the
+#:   every-request-times-out case a cut lands where a wave would have ended
+#:   anyway rather than mid wave, which is what the loop below needs.
+#: * **The proxy.** Half the 60s read timeout measured on the proxy in front of
+#:   this, which leaves the two queries and the commit real margin. That figure
+#:   is deliberately not given a name here: it is a dependency default nobody in
+#:   this deployment set, and a named constant would read as this repository's.
+#:
+#: **It does not make this route safe for the pool**, and a comment saying it
+#: did would be the thing that stopped anybody finishing the job. It moves the
+#: hold from 9 of fifteen to 4 and removes no class: the limiter keys on a
+#: username, and under `AUTH_MODE=proxy` a username is free, so no arrival rate
+#: bounds the adversarial case. The class goes only by not holding the session
+#: across the fan out, which is larger than one sitting.
+#:
+#: **Not sized against `QueuePool`'s 30.0s `pool_timeout`, which is the
+#: comparison the next reader reaches for**, because the honest handler bound is
+#: this plus `fetch.TIMEOUT_SECONDS`, 40s, and that is longer. `pool_timeout` is
+#: a waiter's patience once the pool is empty, not a permitted hold: at 4 of
+#: fifteen per member nothing waits, and where occupancy does empty the pool no
+#: value of this constant saves it.
+#:
+#: **This figure exists because the fan out runs inside the request.** Move it
+#: to a background job and this constant is deleted rather than retuned, while
+#: `_BACKFILL_LOOKUPS_AT_ONCE` and the cursor both survive unchanged.
+IDENTIFIER_BACKFILL_DEADLINE_SECONDS: Final = 30
+
+#: The four outcomes `IdentifierBackfillOut` counts, as the backfill's own walk
+#: labels one book.
+#:
+#: **A `Literal` rather than four bare strings, because the invariant is
+#: published.** `IdentifierBackfillOut`'s docstring promises that `examined` is
+#: the sum of these four, and the run counts them with `list.count`, so a typo in
+#: one of the four calls returned 0 for that outcome, broke the promised
+#: arithmetic on the wire and reported a smaller `examined`, with nothing at all
+#: to say so. Against this alias `count` takes a `_Bucket | None` and mypy refuses
+#: the typo.
+#:
+#: **It does not cover the fifth site**, `"enriched" in buckets`, which decides
+#: whether to commit: `list.__contains__` takes `object`, so a typo there type
+#: checks. What catches that one is behaviour rather than a type, and loudly:
+#: nothing is committed, so every arm that presses twice and expects the second
+#: press to examine nothing fails.
+#:
+#: Not an enum, which is what `enums.py` is for: these four are read only by the
+#: handler that writes them, and a name in that module is a name the schema layer
+#: and the migrations can reach.
+_Bucket = Literal["enriched", "not_found", "unavailable", "unresolvable"]
 
 
 def _resolvable_volume_id(book: Book) -> str | None:
@@ -2840,9 +3183,17 @@ async def backfill_from_identifiers(
     than examining nothing and reporting a clean run. The cause is a switch and
     a key in Settings, and the reply names both.
 
-    Batched and resumable. `next_after_id` carries on past what this run tried,
-    and comes back as 0 at the end of the library so pressing again starts over
-    and re-tries whatever has since become resolvable.
+    Batched and resumable. `next_after_id` carries on past what this run
+    examined, and comes back as 0 at the end of the library so pressing again
+    starts over and re-tries whatever has since become resolvable.
+
+    **Bounded in wall clock as well as in books**, so a slow or busy Google
+    leaves the batch short rather than holding the request open. A short run
+    answers with whatever resolved, counts only the books it has an outcome for,
+    and moves the cursor over exactly those, so pressing again resumes at the
+    first book this one did not reach. The reply does not distinguish a short run
+    from a complete one and does not need to: press again while `remaining` is
+    above zero.
     """
     # Charges the batch's own limiter and refuses unless Google Books is asked,
     # both behind the constructor. Holding one of these means the answer was yes.
@@ -2873,30 +3224,56 @@ async def backfill_from_identifiers(
     # it will never resolve, and leaving it out of `next_after_id` would park
     # the run on it for ever.
     pairs = [(book, _resolvable_volume_id(book)) for book in batch]
-    askable = [(book, value) for book, value in pairs if value is not None]
 
-    # Bounded rather than gathered whole. See `IDENTIFIER_BACKFILL_CONCURRENCY`.
-    gate = asyncio.Semaphore(IDENTIFIER_BACKFILL_CONCURRENCY)
+    ends = deadline.in_(IDENTIFIER_BACKFILL_DEADLINE_SECONDS)
 
-    async def resolve(volume_id: str) -> metadata.Lookup:
-        async with gate:
+    async def resolve(volume_id: str) -> metadata.Lookup | None:
+        """One volume lookup, or `None` where no slot came free in time.
+
+        **The deadline is spent on the acquire and nowhere else**, and the two
+        spellings a reader reaches for first are both worse than no deadline.
+
+        `deadline=` threaded down to `fetch` is the shape `authority.py` uses,
+        so it is the first thing a reader of that precedent copies, and it
+        **bounds nothing here**: `deadline.left` is consulted when a request
+        starts, and a coroutine parked on `acquire` has not started one. It
+        would leave this handler's connection checked out for as long as the
+        queue is long, which is the whole reason the deadline exists, and it
+        widens three signatures to do it.
+
+        `asyncio.timeout` around the `gather` **loses the whole batch**: the
+        children that already answered are unreachable through a cancelled
+        gather, so nothing merges, nothing commits, the caller gets a 500, and
+        up to `MAX_IDENTIFIER_BACKFILL` metered requests are spent on a cursor
+        that cannot advance, so the member presses again and spends them again.
+
+        `asyncio.wait(timeout=)` cancelling the stragglers is refused for a
+        narrower reason: `for_a_batch_backfill` charges the limiter before a
+        slot is sought and a cancelled Google request is already charged, so
+        cancelling a lookup in flight spends a metered request for nothing.
+
+        **Cancelling a pending acquire leaks no slot**, which is what makes this
+        safe rather than hoped: `asyncio.Semaphore.acquire` restores the count
+        and wakes the next waiter when its own wait is cancelled. Remove the
+        timeout and a starved run holds the request and the connection open for
+        as long as somebody else's batch takes.
+        """
+        try:
+            async with asyncio.timeout(deadline.left(ends)):
+                await _BACKFILL_LOOKUPS_AT_ONCE.acquire()
+        except TimeoutError:
+            return None
+        try:
             return await google.volume(volume_id)
+        finally:
+            _BACKFILL_LOOKUPS_AT_ONCE.release()
 
-    # `return_exceptions` is not set, for `metadata.lookup`'s reason: every
-    # source turns its own failures into an outcome, so an exception escaping
-    # one is a bug worth seeing rather than a network condition to absorb.
-    results = await asyncio.gather(*(resolve(value) for _, value in askable))
-
-    enriched = 0
-    not_found = 0
-    unavailable = 0
-    for (book, _), result in zip(askable, results, strict=True):
+    def store(book: Book, result: metadata.Lookup) -> _Bucket:
+        """Fold one answer into its Book, and name the outcome it counts as."""
         if result.outcome is metadata.Outcome.NOT_FOUND:
-            not_found += 1
-            continue
+            return "not_found"
         if not result.found or result.record is None:
-            unavailable += 1
-            continue
+            return "unavailable"
         # Bounded here rather than trusted, exactly as `enrich_book` does it:
         # this is whatever Google answered and `merge_into` writes twelve
         # columns from it.
@@ -2915,9 +3292,110 @@ async def backfill_from_identifiers(
         # saw it: nothing written, the Book still a candidate, `enriched: 1` on
         # every press for ever. Found by a design critic as the defect the
         # removal of `unchanged` had moved one layer up.
-        enriched += 1
+        return "enriched"
 
-    if enriched:
+    # One bucket per book of the batch, in batch order, `None` where this run
+    # learned nothing about it: no slot came free inside the deadline, or the
+    # deadline cut before its wave started.
+    buckets: list[_Bucket | None] = [None] * len(pairs)
+    cut_short = False
+
+    # **Waves of `IDENTIFIER_BACKFILL_CONCURRENCY` lookups, the deadline checked
+    # between them, rather than one `gather` over the whole batch.** Three
+    # reasons, and the first changes an answer rather than a cost.
+    #
+    # * `next_after_id` has to be the end of the **contiguous** examined run,
+    #   and going in batch order is what makes the examined set a prefix by
+    #   construction. Read off the order the semaphore woke its waiters it would
+    #   rest on `asyncio.Semaphore` being FIFO, which CPython is today and
+    #   promises nowhere.
+    #
+    #   **The prefix does not depend on FIFO. Fair progress under contention
+    #   does.** A second member's six waiters sit ahead of the first member's next
+    #   wave only because the wakeups are ordered; without that order, one member
+    #   pressing flat out keeps all six slots occupied, since four runs in flight
+    #   each want six of six, and everybody else's press resolves nothing while
+    #   spending one of their own six. Bounded in damage, not in reach: a starved
+    #   run answers 200, spends no metered request and leaves the cursor where it
+    #   stood, so it costs the feature rather than data, and the presser's
+    #   username is free under `AUTH_MODE=proxy`.
+    # * One `gather` over fifty books enqueues fifty acquires at once, so a
+    #   second member's run queues behind all fifty: at six at a time and
+    #   `fetch.TIMEOUT_SECONDS` each that is up to 83s of slot time, longer than
+    #   any deadline that fits inside the proxy's minute, so their batch would
+    #   resolve approximately nothing whatever this deadline's value is. A wave
+    #   never leaves more than `IDENTIFIER_BACKFILL_CONCURRENCY` pending.
+    # * It is what puts a cut on a wave boundary, which is the third of
+    #   `IDENTIFIER_BACKFILL_DEADLINE_SECONDS`' derivations.
+    #
+    # The cost, stated rather than left to be discovered: a wave's wall clock is
+    # its slowest member, so idle slots appear where one gather would have kept
+    # six in flight. `ceil(50 / 6)`, the nine waves `MAX_IDENTIFIER_BACKFILL`
+    # models this route as, is the ceiling: a batch with unresolvable rows in it
+    # runs fewer, because a wave is filled by lookup rather than by book.
+    at = 0
+    while at < len(pairs):
+        if deadline.left(ends) <= 0:
+            cut_short = True
+            break
+        # **A wave is six lookups, not six books**, and the difference is the
+        # throughput of a library this route exists for. Sliced off `pairs`
+        # instead, a wave holding k unresolvable rows ran `6 - k` requests and
+        # still spent one request's latency, so a half unresolvable library
+        # examined about half as many books per press inside the same deadline
+        # and a wholly unresolvable one spent a wave on nothing. That is not a
+        # spare case: `IdentifierBackfillOut`'s own docstring records a library
+        # whose rows are all unresolvable, because the candidate query narrows on
+        # carrying a `google_books` identifier and cannot narrow on its shape.
+        #
+        # **It costs the prefix nothing**, which is the only thing that could
+        # have refused it: the span is still contiguous in batch order and still
+        # walked in that order, so everything before the first book that got no
+        # slot still has an outcome. What it does change is that a wave's span in
+        # books is no longer six, so the nine waves `MAX_IDENTIFIER_BACKFILL`
+        # models this route as is now a ceiling rather than a count.
+        asked: list[tuple[int, Book, str]] = []
+        while at < len(pairs) and len(asked) < IDENTIFIER_BACKFILL_CONCURRENCY:
+            book, value = pairs[at]
+            if value is None:
+                # No request to make, so no slot to wait for: examined for free,
+                # exactly as it was before this route had a deadline. Marked as
+                # the walk passes it, which is what keeps the examined set
+                # contiguous while the wave is filled by lookup rather than by
+                # book.
+                buckets[at] = "unresolvable"
+            else:
+                asked.append((at, book, value))
+            at += 1
+        # `return_exceptions` is not set, for `metadata.lookup`'s reason: every
+        # source turns its own failures into an outcome, so an exception
+        # escaping one is a bug worth seeing rather than a network condition to
+        # absorb. **Empty needs no guard here and does under `asyncio.wait`**,
+        # which raises `ValueError` on an empty set where `asyncio.gather()`
+        # returns `[]`; a library whose every row is unresolvable reaches this
+        # with nothing asked, and `metadata._within_deadline`'s docstring records
+        # that defect shipping once.
+        answers = await asyncio.gather(*(resolve(value) for _, _, value in asked))
+        for (offset, book, _), answer in zip(asked, answers, strict=True):
+            if answer is None:
+                cut_short = True
+                continue
+            buckets[offset] = store(book, answer)
+        if cut_short:
+            break
+
+    # The unbroken examined run, which is the only thing the cursor may clear.
+    #
+    # **A book past the cut that did answer is still stored**, because its
+    # metered request is already paid for and `merge_into` writes
+    # `google_books_id`, which takes it out of the candidate set so the next
+    # press does not spend another. It is counted in no bucket, so the reply
+    # understates what this run did and never overstates it.
+    cleared = buckets[
+        : next((at for at, bucket in enumerate(buckets) if bucket is None), len(buckets))
+    ]
+
+    if "enriched" in buckets:
         # **One commit for the batch, in a thread**, which is where this differs
         # from `enrich_book` and why. That handler is a coroutine too and
         # commits inline, because it holds one dirty Book; this holds up to
@@ -2932,23 +3410,38 @@ async def backfill_from_identifiers(
         # limit. `POST /api/books/covers/backfill` is the route for that, it is
         # already bounded against those services, and a book this run gave a
         # `cover_url` to is a candidate for it.
+        #
+        # **Outside every deadline scope, and it has to stay there.**
+        # `asyncio.to_thread` cannot be cancelled, which `notifications.py`
+        # already records: inside a scope that expires, the await is cancelled,
+        # the thread keeps committing, and `get_db` closes the session under it
+        # on a connection built with `check_same_thread=False`. A test for that
+        # would be flaky rather than red, which is why this is a comment.
         await asyncio.to_thread(db.commit)
 
-    # Every book in the batch, not only the ones asked about: an unresolvable
-    # row was still examined, and the cursor has to clear it.
-    examined = len(batch)
-    unresolvable = examined - len(askable)
+    # **The books this run has an outcome for, which is not always the batch.**
+    # A book with no resolvable identifier is examined for free, as before; a
+    # book the deadline never got a slot for is not examined at all, and neither
+    # is anything after it, so every count here is over the prefix and the four
+    # still sum to `examined`, which is what keeps the wire shape unchanged.
+    examined = len(cleared)
+    enriched = cleared.count("enriched")
+    not_found = cleared.count("not_found")
+    unavailable = cleared.count("unavailable")
+    unresolvable = cleared.count("unresolvable")
     remaining = total - examined
     logger.info(
-        "Identifier backfill for %s: examined %d, enriched %d, "
-        "no such volume %d, unavailable %d, unresolvable %d, %d left",
+        "Identifier backfill for %s: examined %d of %d, enriched %d, "
+        "no such volume %d, unavailable %d, unresolvable %d, %d left%s",
         current_user.username,
         examined,
+        len(batch),
         enriched,
         not_found,
         unavailable,
         unresolvable,
         remaining,
+        ", cut short by the deadline" if cut_short else "",
     )
     return IdentifierBackfillOut(
         examined=examined,
@@ -2964,7 +3457,21 @@ async def backfill_from_identifiers(
         unavailable=unavailable,
         unresolvable=unresolvable,
         remaining=remaining,
-        next_after_id=batch[-1].id if remaining > 0 and batch else 0,
+        # **The last book of the unbroken examined run, never the last book of
+        # the batch.** `batch[-1].id` would skip every book a cut dropped for a
+        # whole pass of the library, and they would come back only when the
+        # cursor wrapped to 0. Where the run examined none of them it is
+        # `after_id` unchanged, so the next press resumes where this one stood.
+        # 0 at the end, so the next press starts over rather than answering
+        # nothing for ever.
+        #
+        # **A cut can never report the library finished**, which is the one way
+        # this could lose books: a cut means at least one book of the batch has
+        # no outcome, so `examined <= len(batch) - 1 <= total - 1`, so
+        # `remaining >= 1` and the cursor moves over the prefix rather than to 0.
+        next_after_id=(
+            (batch[examined - 1].id if examined else after_id) if remaining > 0 else 0
+        ),
     )
 
 

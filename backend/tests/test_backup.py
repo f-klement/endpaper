@@ -2091,7 +2091,7 @@ class TestARestoreWritesOnlyAnImage:
         `ValueError` at the same site. Measured on CPython 3.14: `zipfile`
         truncates a member name at the first NUL on the way in, both through
         `writestr` and through a hand patched central directory, so
-        `covers/1\x00.jpg` reaches this code as `covers/1` and is refused for
+        `covers/1\\x00.jpg` reaches this code as `covers/1` and is refused for
         having no suffix. A test written for it passes without ever reaching the
         guard.
         """

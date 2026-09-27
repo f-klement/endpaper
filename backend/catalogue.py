@@ -33,7 +33,7 @@ import dataclasses
 import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, get_origin
 
 import covers
 import google_books
@@ -52,7 +52,7 @@ from models import (
     SUBTITLE_MAX,
     TITLE_MAX,
 )
-from schemas.book import MAX_YEAR, MIN_YEAR
+from schemas.book import MAX_CATEGORIES_PER_BOOK, MAX_YEAR, MIN_YEAR
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 
 logger = logging.getLogger("endpaper.catalogue")
@@ -859,6 +859,53 @@ class Record:
         """
         return dataclasses.replace(self, cover_url=cover_url)
 
+    def with_scalars(self, **values: Any) -> Record:
+        """The same record, with these scalars rewritten. The general case of
+        `with_cover`, and here for the same reason: **no module outside this one
+        replaces a field on a `Record`**, so `_folded` keeps one reader rather
+        than becoming a convention every caller has to know.
+        `tests/test_house_rules.py::TestOnlyTheCatalogueBuildsAnUnfoldedRecord`
+        is what holds that, and it is why `importing.stored_record` asks for this
+        rather than replacing a field where it stands.
+
+        **It refuses a collection, which is the whole of the difference between
+        this and a bare `replace`.** A `replace` carrying a new `subjects` or
+        `headings` keeps the flag and skips the fold, so the record ships every
+        repeat its catalogue sent: `_folded` measures what that costs in both
+        directions, and `merged_with` is the one caller that reopens the fold
+        deliberately. **Refused rather than folded again**, because a caller
+        wanting the fold wants `merged_with`, and quietly doing the expensive
+        thing for it is how the 31 second stall arrived.
+
+        **Which names those are is derived from the declarations**, so a fourth
+        collection on `Record` joins the refusal by being a tuple rather than by
+        being remembered. Two derivations of the same set, the annotation and the
+        default, because either alone is a reading of one thing.
+
+        **Every dropper runs again, because this is a construction.** An over
+        wide scalar passed here is nulled rather than cut, and a `cover_url`
+        naming one of this deployment's own files is dropped: see
+        `_REFUSED_AS_OUR_OWN` for why that belongs in `__post_init__` and not at
+        a writer. So a caller composing a truncation with this has to know that
+        the two disagree about over wide strings, which is stated at the one
+        caller that does.
+        """
+        folded = {
+            name
+            for name, declared in self.__dataclass_fields__.items()
+            if get_origin(declared.type) is tuple or isinstance(declared.default, tuple)
+        } | {"_folded"}
+        refused = sorted(folded & values.keys())
+        if refused:
+            raise ValueError(
+                f"{', '.join(refused)}: the fold flag and the collections it "
+                "guards belong to __post_init__. A collection carried through a "
+                "replace keeps the flag set and skips the fold, so the record "
+                "then holds every repeat its catalogue sent. See the flag's own "
+                "comment and `Record.merged_with`."
+            )
+        return dataclasses.replace(self, **values)
+
     def as_lookup(self) -> dict[str, Any]:
         """The scalar facts, in the keys `schemas.book.BookLookup` names.
 
@@ -948,6 +995,21 @@ class Record:
         and its `split_categories` are the only two places that know the
         separator is a semicolon, because Google's own category names contain
         commas ("Fiction, general"). Calling it is not a third place that knows.
+
+        **The subject count is capped here, and it belongs to the shape rather
+        than to the caller**, which is exactly `match_headings`' argument one
+        field over and was bought by the same incident. `BookMatch` refuses past
+        `MAX_CATEGORIES_PER_BOOK` and `routers/books._match_rows` builds it inside
+        a `try` that drops the **row**, so an uncapped value costs a whole search
+        result for a record that is merely well described: measured, 33 short
+        subjects join to 493 characters, far inside the column's bound, and
+        returned zero rows. Capping in the search handler alone would leave
+        `GET /{id}/enrich/candidates` on the same footing, since it is fed by the
+        same function.
+
+        **The model keeps its own count bound**, because the other producer of
+        that body is a client on `POST /{id}/enrich/apply`, where nothing has
+        capped anything and a refusal is a 422 somebody can read.
         """
         return {
             "source": self.source,
@@ -960,7 +1022,10 @@ class Record:
             "description": self.description,
             "page_count": self.page_count,
             "language": self.language,
-            "categories": google_books.join_categories(self.subject_labels) or None,
+            "categories": google_books.join_categories(
+                self.subject_labels, limit=MAX_CATEGORIES_PER_BOOK
+            )
+            or None,
             "cover_url": self.cover_url,
             "isbn13": self.isbn,
             "series_name": self.series_name,

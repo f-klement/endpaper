@@ -55,8 +55,57 @@ class GoogleBooksError(Exception):
 CATEGORY_SEPARATOR: Final = "; "
 
 
-def join_categories(categories: list[str]) -> str | None:
-    return CATEGORY_SEPARATOR.join(categories) or None
+def join_categories(categories: list[str], *, limit: int | None = None) -> str | None:
+    """The stored form of a subject list, dropping one that carries the separator.
+
+    **Dropped here rather than at each producer, because this is the one place
+    that knows the separator and so reaches every writer of the column.** A
+    subject containing a bare `;` is not representable in this column:
+    `split_categories` below splits on that character, so storing one serves two
+    subjects to every reader and **manufactures** an assertion nobody made. Two
+    upstream joins build their value without looking inside a single subject
+    (`_volume_to_fields` here and `catalogue.Record.as_match`), which is what makes
+    that reachable. Dropping loses a subject, which asserts nothing false.
+
+    **Dropped and logged rather than raised**, which is
+    `classifications.bounded_headings`' arrangement for the same shape: this runs
+    inside a catalogue read, so raising would lose a whole record over one
+    subject. `schemas.book.BookCreate.one_subject_per_entry` is the door that
+    refuses instead, because there a caller chose the value and there is somebody
+    to tell.
+
+    **`limit` caps the count, and a caller that produces a value for `BookMatch`
+    has to pass it.** That model refuses past its own count, and
+    `routers/books._match_rows` builds it inside a `try` that drops the **row**,
+    so an unbounded producer costs a whole search result rather than a field.
+    `catalogue.Record.match_headings` carries the same rule for headings and the
+    incident that bought it. The number is not read here because it lives in
+    `schemas/book.py`, which imports this module.
+
+    **Dropped first and truncated second**, for `bounded_headings`' reason: slicing
+    to the limit before the drop would let the separator bearing entries at the
+    front hide good subjects behind them.
+    """
+    keepable = [
+        subject for subject in categories if CATEGORY_SEPARATOR.strip() not in subject
+    ]
+    if len(keepable) != len(categories):
+        logger.info(
+            "Dropped %d of %d subjects: this column stores them joined on %r, so "
+            "one carrying it would read back as two",
+            len(categories) - len(keepable),
+            len(categories),
+            CATEGORY_SEPARATOR.strip(),
+        )
+    if limit is not None and len(keepable) > limit:
+        logger.info(
+            "Kept the first %d of %d subjects: a producer's value may not exceed "
+            "what the request model accepts, or the model refuses the whole row",
+            limit,
+            len(keepable),
+        )
+        keepable = keepable[:limit]
+    return CATEGORY_SEPARATOR.join(keepable) or None
 
 
 def split_categories(value: str | None) -> list[str]:

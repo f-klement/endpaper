@@ -33,7 +33,7 @@ import bibliographic
 import marc_fields
 import metadata
 from catalogue import Heading, Record
-from enums import ClassificationScheme
+from enums import ClassificationScheme, HeadingKind
 from marc_fields import Fields, Subfields
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -190,14 +190,49 @@ NAMESPACE: Final = marc_fields.NAMESPACE
 #: without it names no authority file and the reader drops it.
 _GND_PREFIX: Final = marc_fields.GND_PREFIX
 
-#: `$2` values naming the vocabulary a `650` heading came from.
+#: `$2` values naming the vocabulary a heading came from.
 #:
 #: Required whenever the second indicator is `7`, which is what "source
 #: specified in subfield $2" means. Without it a receiving system has a heading
 #: string and no way to know which thesaurus authorised it.
+#:
+#: **This names the vocabulary and only the vocabulary.** What the citing record
+#: was asserting with the heading is `_HEADING_KIND_FIELD` below, because a
+#: vocabulary has a code for that only where its own publisher issued one.
 _SUBJECT_SOURCE: Final[dict[ClassificationScheme, str]] = {
     ClassificationScheme.GND: "gnd",
     ClassificationScheme.LCSH: "lcsh",
+}
+
+#: Which field a heading goes in and what its `$2` says, where the record
+#: declared what it was asserting.
+#:
+#: **The tag and the code are one decision, which is why they are one entry.**
+#: Choosing them separately is how a carrier comes to be written as a subject:
+#: `655 $2 gnd` loses the kind on the way back in, and `650 $2 gnd-carrier`
+#: keeps it while filing a disc under what the book is about. Both halves are
+#: read here or neither is.
+#:
+#: `655` is MARC's genre or form field, and it is where the GND's own two
+#: segments arrive rather than a choice made here: the captured DNB record in
+#: `tests/test_metadata.py` writes `655 #7 $a Fiktionale Darstellung $0
+#: (DE-588)1071854844 $2 gnd-content`, and `marc_fields` reads that tag back.
+#: **Not `338`**, which is RDA's carrier field and takes an RDA term. The row in
+#: hand holds a GND number and a GND caption, so naming the RDA word for it
+#: would be the crosswalk `marc_fields` refuses in as many words.
+#:
+#: **The absences are the rule rather than a short list.** A pair with no entry
+#: writes `650` and the vocabulary's plain code, which is what a record that
+#: declared nothing says and is the only thing available for a kind the
+#: vocabulary cannot spell: there is no `lcsh-carrier`, so an LCSH row carrying
+#: a kind exports without it and `tests/test_marc.py` pins that loss. The key
+#: admits a null kind so one lookup answers for every row; no entry carries one,
+#: because a record that declared nothing has nothing to spell.
+_HEADING_KIND_FIELD: Final[
+    dict[tuple[ClassificationScheme, HeadingKind | None], tuple[str, str]]
+] = {
+    (ClassificationScheme.GND, HeadingKind.CONTENT): ("655", "gnd-content"),
+    (ClassificationScheme.GND, HeadingKind.CARRIER): ("655", "gnd-carrier"),
 }
 
 
@@ -301,7 +336,8 @@ def _record_element(book: Book) -> ElementTree.Element:
     | `264 #1 $b $c` | `publisher`, `year` | `Fields.publisher`, `Fields.year` |
     | `300 ## $a` | `page_count` | `bibliographic.pages_from_extent` |
     | `520 ## $a` | `description` | `Fields.description` |
-    | `650 #7 $a $0 $2` | a `gnd` or `lcsh` classification | `Fields.controlled_subjects`, this module |
+    | `650 #7 $a $0 $2` | a `gnd` or `lcsh` subject | `Fields.controlled_subjects`, this module |
+    | `655 #7 $a $0 $2` | a `gnd` content or carrier term | `Fields.controlled_subjects` |
     | `700 0# $a $4` | every credited name after the first | `Fields.authors` |
 
     **`100` and `700` carry first indicator `0`, "forename".** That is the
@@ -425,7 +461,10 @@ def _classifications(book: Book) -> Iterator[ElementTree.Element | None]:
 
 
 def _subject_fields(book: Book) -> Iterator[ElementTree.Element | None]:
-    """The subject headings: `650`, with `$2` naming the vocabulary.
+    """The authority controlled headings, with `$2` naming the vocabulary.
+
+    **`650` for a subject and `655` for a content or carrier term**, which is
+    `_HEADING_KIND_FIELD` and not a rule of its own.
 
     **`$a` is the caption and `$0` is the identifier, which is the same split
     the table stores.** A GND row keeps its number in `$0` with the
@@ -433,19 +472,49 @@ def _subject_fields(book: Book) -> Iterator[ElementTree.Element | None]:
     authority file a number belongs to and `Subfields.gnd_identifier` reads
     nothing without it.
 
-    **A GND row with no caption writes no field, and cannot.** `650` without
-    `$a` is a heading with no heading; `Fields.controlled_subjects` skips it, and so
-    does every other reader. `Classification.label` is nullable and a MARC `082`
-    supplies none, so this is reachable: a Book whose GND row arrived without a
-    caption exports without that subject. Writing the number into `$a` instead
-    would put an identifier where a receiving catalogue prints a phrase.
+    **What the record was asserting is carried rather than flattened, and the
+    reader it goes back to is not the only one that matters.** `sru.py` serves
+    this same record to a stranger who sent no session, so a heading written as
+    a subject is this catalogue telling another institution that a disc is what
+    a book is about, and their ingest has no way to know otherwise.
+    `schemas/public.py` states the same choice for the JSON payload, which
+    already publishes the kind: these are the two halves of one public server
+    agreeing rather than a new position.
+
+    **A row with no caption still writes a field, and that field reaches a
+    stranger.** `_datafield` returns None only when *every* subfield is empty, so
+    a caption-less row emits the identifier and the vocabulary with no `$a`:
+    measured, `<datafield tag="655" ind1=" " ind2="7">` carrying `$0` and `$2`
+    alone. Every reader skips it, `Fields.controlled_subjects` included, so no
+    round trip can see it, which is why the arm pinning this asserts the bytes
+    rather than the parse.
+
+    **This paragraph used to claim such a row writes no field and cannot**, a
+    claim that was false of `650` before this and became false of `655` here,
+    which is the worse half: a genre or form field with no term is a stranger
+    receiving a vocabulary code and an identifier and nothing to print.
+    `Classification.label` is nullable and a MARC `082` supplies none, so it is
+    reachable rather than hypothetical. **Whether such a field should be emitted
+    at all is a behaviour question on a public path and has its own ticket**;
+    writing the number into `$a` instead is refused either way, because that puts
+    an identifier where a receiving catalogue prints a phrase.
     """
     for entry in book.classifications:
         # Coerced for `_classifications`'s reason: a stored scheme is a `str`.
         scheme = ClassificationScheme(entry.scheme)
-        source = _SUBJECT_SOURCE.get(scheme)
-        if source is None:
+        vocabulary = _SUBJECT_SOURCE.get(scheme)
+        if vocabulary is None:
             continue
+        # **Coerced although the lookup below would match without it**, which is
+        # the opposite direction from `_classifications`'s trap and the reason to
+        # say so here: `HeadingKind` is a `StrEnum`, so a stored `"carrier"`
+        # hashes and compares equal to the member and the pair would answer
+        # correctly anyway. What the coercion buys is that the value is a member
+        # from this line on, so an `is` test somebody adds later is not silently
+        # False for every stored row, which is the failure the comment above
+        # records for `scheme`.
+        kind = HeadingKind(entry.kind) if entry.kind is not None else None
+        tag, source = _HEADING_KIND_FIELD.get((scheme, kind), ("650", vocabulary))
         # LCSH stores the authorised heading string itself as `number`, since
         # the record carries no identifier for one. So the caption is the
         # number there and the label everywhere else, which is
@@ -456,7 +525,7 @@ def _subject_fields(book: Book) -> Iterator[ElementTree.Element | None]:
         )
         # ind2 `7`: the source of the heading is named in `$2`.
         yield _datafield(
-            "650", " ", "7", [("a", caption), ("0", identifier), ("2", source)]
+            tag, " ", "7", [("a", caption), ("0", identifier), ("2", source)]
         )
 
 

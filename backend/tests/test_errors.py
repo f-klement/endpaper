@@ -113,6 +113,17 @@ class TestUnhandledExceptions:
 
         Registered directly on the app rather than mocked, so this exercises
         the real handler chain.
+
+        **The removal is in a `finally`, and that is a guard rather than a style.**
+        `main.app` is process wide, so a route left behind is visible to every
+        later test in the worker, and one of them derives the app's whole handler
+        population and refuses a handler no module declares:
+        `tests/test_house_rules.py::TestTheRouteHandlerPopulationIsDerivedTwice`.
+        After a bare `yield` the cleanup is skipped whenever the generator is
+        closed rather than resumed, and the failure then lands in another file
+        under a message about this app registering a route nobody wrote.
+        `--dist loadfile` is not protection: it keeps one file's tests together, it
+        does not keep two files apart.
         """
         import main
 
@@ -120,10 +131,14 @@ class TestUnhandledExceptions:
         def boom() -> None:
             raise RuntimeError("a secret internal detail")
 
-        yield
-        main.app.routes[:] = [
-            route for route in main.app.routes if getattr(route, "path", None) != "/boom-test"
-        ]
+        try:
+            yield
+        finally:
+            main.app.routes[:] = [
+                route
+                for route in main.app.routes
+                if getattr(route, "path", None) != "/boom-test"
+            ]
 
     def test_returns_500_without_the_traceback(self, client, exploding_route):
         # raise_server_exceptions=False makes TestClient behave like a real
@@ -221,9 +236,10 @@ def _schema() -> dict[str, Any]:
     """The document this API publishes.
 
     Generated from the app rather than read from `frontend/openapi.json`, which
-    is the same document by another guard: CI diffs the committed file against a
-    fresh generation on every push. Asking the app is the same question with no
-    second copy of where that file lives.
+    is the same document by another guard: `test_openapi_drift.py` holds the
+    committed file byte identical to what `scripts/dump_openapi.py` writes.
+    Asking the app is the same question with no second copy of where that file
+    lives.
     """
     return main.app.openapi()
 

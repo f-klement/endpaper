@@ -1283,7 +1283,7 @@ class TestTheInteractiveBudget:
 
         `fetch.TIMEOUT_SECONDS` is pinned at its own value one door along, so
         this side is the movable one. Same shape as
-        `tests/test_opds.py::test_the_sync_deadline_is_longer_than_one_request`.
+        `tests/test_opds.py::test_the_sync_deadline_is_longer_than_one_request_and_shorter_than_the_page_cap`.
         """
         assert covers.TIMEOUT_SECONDS < fetch.TIMEOUT_SECONDS
 

@@ -6,8 +6,11 @@
 /**
  * Tests for src/lib/bookBounds.ts.
  *
- * **The guard recomputes every number from `openapi.json` rather than restating
- * it.** A table of ceilings copied out of a schema is a table that stops being
+ * **The guard recomputes every number this module carries from `openapi.json`
+ * rather than restating it, and the schema states three more that it does not
+ * carry.** Those three are list bounds, `maxItems` and a per entry width; the
+ * module holds no list ceiling, and the arm below pins that boundary so the
+ * absence is derived from the schema rather than left to a reader to notice. A table of ceilings copied out of a schema is a table that stops being
  * true the first time a column moves, silently and in the safe-looking
  * direction: a stale ceiling that is too small only drops fields, so nothing
  * fails and the app quietly stops sending a publisher. Recomputing is what a
@@ -44,6 +47,8 @@ interface Constraint {
   maxLength?: number;
   minimum?: number;
   maximum?: number;
+  maxItems?: number;
+  items?: { maxLength?: number };
   anyOf?: Constraint[];
 }
 
@@ -54,6 +59,13 @@ function flatten(property: Constraint): Constraint {
     maxLength: parts.find((part) => part.maxLength !== undefined)?.maxLength,
     minimum: parts.find((part) => part.minimum !== undefined)?.minimum,
     maximum: parts.find((part) => part.maximum !== undefined)?.maximum,
+    // **Carried so the arm below can see them, and deliberately not merged into
+    // `maxLength`.** A list bound this flattener dropped was a number the file
+    // above claimed to recompute and could not reach. Merging `items.maxLength`
+    // into `maxLength` would be worse than dropping it: a subject list would
+    // read as a bounded string and be expected to join `TEXT_CEILINGS`.
+    maxItems: parts.find((part) => part.maxItems !== undefined)?.maxItems,
+    items: parts.find((part) => part.items !== undefined)?.items,
   };
 }
 
@@ -95,6 +107,30 @@ describe("the ceilings agree with the schema they describe", () => {
       .map(([name, property]) => [name, [property.minimum, property.maximum]]);
 
     expect(Object.entries(NUMBER_RANGES).sort()).toEqual(bounded.sort());
+  });
+
+  it("bounds no list, derived from the schema rather than left unsaid", () => {
+    // **The extent claim, armed.** Three fields state a bound this file cannot
+    // express as a scalar ceiling, and the flattener used to drop them, so the
+    // claim above was unverifiable in the direction that matters: a number in
+    // the schema that nothing here recomputes.
+    //
+    // The source carries no list ceiling, so what is checked is the boundary,
+    // not an agreement: every list bounded field is named by neither table.
+    // **A future list ceiling wants its own agreement arm and does not get one
+    // from this**, which is stated rather than implied, because the cost of the
+    // last version of this sentence was believing three numbers were covered.
+    const lists = Object.entries(bookCreate()).filter(
+      ([, property]) => property.maxItems !== undefined,
+    );
+
+    // A schema stating no list bound would leave the rest of this arm passing
+    // over nothing, which is the shape this repository keeps paying for.
+    expect(lists.length).toBeGreaterThan(0);
+
+    const named = lists.map(([name]) => name);
+    expect(named.filter((name) => name in TEXT_CEILINGS)).toEqual([]);
+    expect(named.filter((name) => name in NUMBER_RANGES)).toEqual([]);
   });
 
   it("classifies every bounded string as cut or kept whole, exactly once", () => {

@@ -28,7 +28,7 @@ import { join, relative } from "node:path";
 
 import {
   type Census,
-  WRITTEN_OUT,
+  countWrittenOut,
   declaresItselfInternal,
   problems,
 } from "./coverageRegister";
@@ -113,7 +113,7 @@ export default class CoverageRegisterReporter {
       const file = here(module.moduleId);
       const source = readFileSync(module.moduleId, "utf8");
       counts.set(file, [...module.children.allTests()].length);
-      writtenOut.set(file, (source.match(WRITTEN_OUT) ?? []).length);
+      writtenOut.set(file, countWrittenOut(source, file));
       if (declaresItselfInternal(source)) internal.add(file);
     }
 

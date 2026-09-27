@@ -255,12 +255,8 @@ import pytest
 
 import sources
 from enums import CatalogueSource
-from tests.test_house_rules import (
-    _ignore_patterns,
-    _is_ignored,
-    _is_vendored,
-    _markdown_sources,
-)
+from tests.ignorefile import ignore_patterns, is_ignored
+from tests.test_house_rules import _is_vendored, _markdown_sources
 
 #: This module's own docstring, bound while it is still the nearest one.
 #: `__doc__` inside a method body is an ordinary global lookup and reads
@@ -389,9 +385,10 @@ _NOUN = r"(?:sources?|catalogues?|providers?)"
 #: 2026-09-06 over the walk this replaces: **zero** of the 423 grammar matches
 #: it read cross a cell boundary, so this refuses nothing that was being read.
 #: The figure is that walk's and is not reproducible from `scope()` here, which
-#: reads the two `COVERAGE.md` files the old one missed: over the 590 files in
-#: scope the strict pattern matches 428 against a permissive 435, and **seven**
-#: cross a cell. **Five** of the ten in the two `COVERAGE.md` files do, every
+#: reads the two `COVERAGE.md` files the old one missed. On the same date, over
+#: the 590 files `scope()` then reported, the strict pattern matched 428 against
+#: a permissive 435, and **seven** crossed a cell. **Five** of the ten in the two
+#: `COVERAGE.md` files did, every
 #: one of them a test count beside a roster noun in the next column. Remove it
 #: and those five become candidates the moment a test count passes through a
 #: live cardinality, which is a number that moves whenever anybody writes a
@@ -504,25 +501,36 @@ NOT_PROSE = ("/generated/", "/dist/")
 #: and because the gate already requires this line of every document it strips.
 #: One convention, enforced at both ends.
 #:
-#: **Recounted 2026-09-06 over the widened walk**, across the 630 files
-#: `len(candidates())` reports: 30 carry the declaration in their header, every
-#: one of them is stripped from the mirror, and between them they hold **zero**
-#: census candidates. So the rule drops exactly what the mirror drops and costs
-#: no coverage today. It read six of 547 when the walk was a list of globs, and
-#: the ratio moving that far on a change to the **walk** rather than to the tree
-#: is the reminder that a corpus figure measures the instrument too. Every
-#: figure below is taken by calling `candidates()` and reading what it returns,
-#: which is the walk the rule itself uses.
+#: **The size of the walk is deliberately not written down here, and it used to
+#: be, in nine places.** A corpus figure beside a rule stops being re-derived and
+#: starts being copied, which is this file's own subject aimed at this file:
+#: measured 2026-09-27, every figure in it that an arm recomputed was right and
+#: every figure written by hand was wrong. The walk's size moves on any commit
+#: that adds a file, so no sentence here states it; what a measurement was taken
+#: over is named by the walk instead, and a reading kept for its history carries
+#: the date and the population it was taken on.
+#:
+#: **What the rule costs is recomputed rather than recounted.** Every file
+#: carrying the declaration in its header is stripped from the mirror, and between
+#: them they hold **one** census candidate, in a stripped research document. So
+#: the rule drops what the mirror drops and costs that one claim's coverage. It
+#: read six of 547 when the walk was a list of globs, and the ratio moving that
+#: far on a change to the **walk** rather than to the tree is the reminder that a
+#: corpus figure measures the instrument too. The figure moves only when a
+#: stripped document gains or loses a roster count, which is the event the
+#: sentence exists to disclose, and
+#: `test_the_coverage_the_declaration_rule_costs_is_the_figure_it_states` is what
+#: stops it reading zero over a corpus that holds one. It already had.
 #:
 #: **The anchoring is a rule about shape and this corpus does not justify it**,
 #: which is worth saying because the first version of this comment claimed it
-#: did. The phrase occurs 35 times across 32 files, this file's own `_DECLARES`
-#: among them. Five of those sit outside the header window this reads and are
-#: not the question; of the 30 inside it,
-#: the anchored pattern matches all 30 and so does a bare substring, so nothing
-#: in this tree separates a mention from a declaration. The anchor is kept
-#: because it is the publish gate's own pattern, not because the corpus argues
-#: for it.
+#: did. Inside the header window the anchored pattern and a bare substring select
+#: the same files, so nothing in this tree separates a mention from a declaration;
+#: a file mentioning the phrase below the window is outside the question. The
+#: anchor is kept because it is the publish gate's own pattern, not because the
+#: corpus argues for it. That is a set equality and it is recomputed: the three
+#: counts of the phrase this paragraph used to carry were all wrong within three
+#: weeks of being written.
 #:
 #: **The gate's own corpus would separate them and is deliberately not quoted.**
 #: Not because the measurement cannot be stated without naming a stripped path,
@@ -534,24 +542,32 @@ NOT_PROSE = ("/generated/", "/dist/")
 #: question about the same file, so this reads the same number of opening lines
 #: the gate's own guard reads. They used to differ, this reading 2000 characters
 #: and the gate 30 lines, and the difference was written down as harmless on the
-#: strength of the two agreeing about every candidate. They do still agree,
-#: measured over all 630, **and that agreement was luck rather than structure**:
-#: **577** of the 630 have thirty lines or more counting newlines, the way
-#: `wc -l` does, all but **three** of those run their opening thirty under 2000
-#: characters, and where they do they run under it by as much as **1470**. Every
-#: declaration in this tree sits by line 24, counted 1 based
-#: the way `grep -n` reports one. So the old window read past the end of line 30
-#: in most of the tree, and one declaration written into that span in a
+#: strength of the two agreeing about every candidate. They do still agree, and
+#: that is recomputed rather than counted, **but the agreement was luck rather
+#: than structure**. The reading that shows it is kept with its date and its own
+#: population, because it is history rather than a current fact. Measured
+#: 2026-09-06, when the walk reported 630 files: **577** of the 630 had thirty
+#: lines or more counting newlines, the way `wc -l` does, all but **three** of
+#: those ran their opening thirty under 2000 characters, and where they did they
+#: ran under it by as much as **1470**. So the old window read past the end of
+#: line 30 in most of the tree, and one declaration written into that span in a
 #: **published** document would be dropped here and published there, quietly.
 #:
-#: **Both figures need their counting rule beside them or they are three
-#: numbers each.** The population is 630 over every candidate, which folds in
-#: files with no line 31 and compares nothing; 577 if a line is what
-#: `split("\n")` returns, which counts a trailing empty; 575 if it must exceed
-#: thirty newlines. **The trailing empty is the whole of that difference, and
-#: the splitter is not part of it**: `str.splitlines` breaks on strictly more
+#: Every declaration in this tree sits by line **24**, counted 1 based the way
+#: `grep -n` reports one, against a window of thirty. That one is a current fact,
+#: it is what says the window still has slack, and
+#: `test_the_line_every_declaration_sits_by_is_the_line_it_states` recomputes it:
+#: it moves when somebody writes a declaration further down a file, which is the
+#: event worth a red, and not when the tree grows.
+#:
+#: **Each figure in that dated reading needs its counting rule beside it or it is
+#: three numbers.** On that reading the population was 630 over every candidate,
+#: which folds in files with no line 31 and compares nothing; 577 if a line is
+#: what `split("\n")` returns, which counts a trailing empty; 575 if it must
+#: exceed thirty newlines. **The trailing empty is the whole of that difference,
+#: and the splitter is not part of it**: `str.splitlines` breaks on strictly more
 #: characters than a newline does, so under one threshold it can never return
-#: the smaller population, and it returns the same 577 here. Reading 575 as its
+#: the smaller population, and it returned the same 577 there. Reading 575 as its
 #: figure is a lenient splitter answering with less than a strict one, which is
 #: this file's own first tell. And the bound is 1470 measured to the
 #: end of line 30's text and 1469 measured to the end of its newline, which is
@@ -602,9 +618,12 @@ def declares_itself_internal(path) -> bool:
     attempt at that sentence omitted the one member a reader thinks of first.
     A file carrying any of the nine would have its thirtieth line arrive early
     here and not at the gate, so the window would be narrower for that file
-    only. Measured over the 630 candidates, **none** holds one, which is a
-    corpus cooperating rather than a rule holding, and it is cheaper to make
-    the rule hold.
+    only. **None** of the candidates holds one, which is a corpus cooperating
+    rather than a rule holding, and it is cheaper to make the rule hold.
+    Recomputed by
+    `test_no_candidate_holds_a_break_character_only_one_of_the_two_units_sees`,
+    over the walk rather than over a size of it: a sentence here that named the
+    population was one of nine that went stale together.
     """
     try:
         header = path.read_text(encoding="utf-8").split("\n")[:_HEADER_LINES]
@@ -831,7 +850,7 @@ def candidates(root: Path | None = None) -> list[Path]:
     where somebody thought of every directory.
     """
     root = REPO if root is None else root
-    patterns = _ignore_patterns(root)
+    patterns = ignore_patterns(root / ".gitignore", refuse_empty=False)
     skip = NOT_PROSE + DATED_REGISTERS
     found: list[Path] = []
     for directory, subdirectories, files in os.walk(root):
@@ -840,14 +859,14 @@ def candidates(root: Path | None = None) -> list[Path]:
             name
             for name in subdirectories
             if not name.startswith(".")
-            and not _is_ignored((here / name).relative_to(root), patterns, is_dir=True)
+            and not is_ignored((here / name).relative_to(root), patterns, is_dir=True)
         ]
         for name in files:
             path = here / name
             relative = path.relative_to(root)
             if path.suffix not in READS:
                 continue
-            if _is_ignored(relative, patterns, is_dir=False) or _is_vendored(path, root):
+            if is_ignored(relative, patterns, is_dir=False) or _is_vendored(path, root):
                 continue
             if any(s in str(relative) or s in str(path) for s in skip):
                 continue
@@ -2434,6 +2453,132 @@ class TestThisFileCountsItself:
             f"releases {released} of {len(cases.REFUSED)}"
         )
 
+    #: This file's own source, for the claims that live in a `#:` comment rather
+    #: than in a docstring. `_DOC` cannot reach those and the population figures
+    #: that went stale were all in one.
+    @staticmethod
+    def _source() -> str:
+        return (BACKEND / "tests" / "test_roster_counts.py").read_text(encoding="utf-8")
+
+    @staticmethod
+    def _declaring() -> list[Path]:
+        return [path for path in candidates() if declares_itself_internal(path)]
+
+    def test_the_coverage_the_declaration_rule_costs_is_the_figure_it_states(self):
+        """What the census gives up by dropping every file the mirror strips.
+
+        **This is the figure that had already gone wrong, and it is the one that
+        matters.** It read zero, which is what let the sentence beside it say the
+        rule costs no coverage. A stripped document then gained a roster count and
+        nothing compared the two, which is this whole file's subject turned on the
+        file itself. Recomputed here, so the sentence cannot say zero over a
+        corpus that holds one.
+
+        **The figure is small on purpose and is not a population.** It moves only
+        when a stripped document gains or loses a roster count, which is an event
+        a reader should hear about, where the size of the walk moves on any commit
+        that adds a file and is therefore not written down anywhere.
+        """
+        held = [
+            occurrence
+            for path in self._declaring()
+            for occurrence in scan(
+                str(path.relative_to(REPO)), path.read_text(encoding="utf-8")
+            )
+        ]
+        stated = re.search(
+            r"they hold \*\*(\w+)\*\* census candidate", self._source()
+        )
+        assert stated is not None, "that comment no longer states the coverage cost"
+        assert SPELLED.get(stated.group(1).lower()) == len(held), (
+            f"the comment says {stated.group(1)}; the declaration rule now drops "
+            f"{len(held)} census candidate(s): {[occurrence.where for occurrence in held]}"
+        )
+
+    def test_nothing_in_this_tree_separates_a_declaration_from_a_mention(self):
+        """The claim the anchoring rests on, recomputed instead of counted.
+
+        `_INTERNAL` is the publish gate's own pattern and is kept for that reason
+        rather than because this corpus argues for it. The sentence saying so used
+        to carry three counts of the phrase and all three were wrong within three
+        weeks; the claim underneath them is a set equality and does not move when
+        the tree grows.
+
+        **Read over the same window both ways.** A file mentioning the phrase
+        below the window is outside the question, which is why this compares the
+        two patterns inside it rather than over whole files.
+        """
+        anchored = set()
+        substring = set()
+        for path in candidates():
+            try:
+                header = "\n".join(
+                    path.read_text(encoding="utf-8").split("\n")[:_HEADER_LINES]
+                )
+            except (OSError, UnicodeDecodeError):
+                continue
+            if _INTERNAL.search(header):
+                anchored.add(path)
+            if _DECLARES in header:
+                substring.add(path)
+        assert anchored, "no file carries the declaration, so this compares nothing"
+        assert anchored == substring, sorted(
+            str(path.relative_to(REPO)) for path in anchored ^ substring
+        )
+
+    def test_the_line_every_declaration_sits_by_is_the_line_it_states(self):
+        """What says the window still has slack, and the only reason a number
+        rather than a word is right here: the reader needs the distance to 30.
+
+        It moves when somebody writes a declaration further down a file, which is
+        the event worth a red, and not when the tree grows.
+        """
+        latest = 0
+        for path in self._declaring():
+            for number, line in enumerate(
+                path.read_text(encoding="utf-8").split("\n")[:_HEADER_LINES], start=1
+            ):
+                if _INTERNAL.search(line):
+                    latest = max(latest, number)
+                    break
+        stated = re.search(r"sits by line \*\*(\d+)\*\*", self._source())
+        assert stated is not None, "that comment no longer states the line"
+        assert int(stated.group(1)) == latest, (
+            f"the comment says line {stated.group(1)}; the furthest declaration is "
+            f"on line {latest} of its file, against a window of {_HEADER_LINES}"
+        )
+
+    def test_no_candidate_holds_a_break_character_only_one_of_the_two_units_sees(
+        self,
+    ):
+        """Why the fixture arm over the nine characters is a fixture.
+
+        The claim is that the corpus cooperates, which is a different thing from
+        the rule holding, and it is stated in two places as a word. Recomputed, so
+        neither can say none over a tree that has gained one: a candidate holding
+        one reaches its thirtieth line earlier here than at the gate, and the
+        window is then narrower for that file alone.
+        """
+        breaks = [
+            character
+            for point in range(0x110000)
+            if (character := chr(point)) != "\n"
+            and len(f"a{character}b".splitlines()) > 1
+        ]
+        assert len(breaks) == 9, (
+            f"{len(breaks)} characters break a line for `str.splitlines` and not "
+            "for a newline, so the sentences naming nine have moved"
+        )
+        holding = [
+            str(path.relative_to(REPO))
+            for path in candidates()
+            if any(
+                character in path.read_text(encoding="utf-8", errors="replace")
+                for character in breaks
+            )
+        ]
+        assert holding == [], holding
+
     def test_the_docstring_states_how_many_occurrences_are_not_a_roster_count(self):
         """Recomputed rather than reread, and **counting what the sentence says**.
 
@@ -2592,9 +2737,14 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
         the arm needs driving rather than observing.
         """
         root = self._tree(tmp_path)
-        patterns = _ignore_patterns(root)
+        # **Refusing an empty parse is what arms the precondition below.** It is a
+        # negative assertion, so an empty parse satisfies it for every name and the
+        # arm then credits the vendor rule for a behaviour the ignore rule was
+        # never asked about. The fixture always writes three entries, so this only
+        # ever fires on a parse that broke.
+        patterns = ignore_patterns(root / ".gitignore", refuse_empty=True)
         for name in ("vendor/node_modules/lib.ts", ".hidden.ts"):
-            assert not _is_ignored(Path(name), patterns, is_dir=False), (
+            assert not is_ignored(Path(name), patterns, is_dir=False), (
                 f"{name} is ignored here, so this drives the ignore rule and not "
                 "the vendor rule"
             )
@@ -2644,7 +2794,7 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
         """The finding that narrowed this rule from every document to the README.
 
         Quantifying over every document under a directory quantifies over an
-        accident: in this repository one coverage register is the sole Markdown
+        accident: measured 2026-09-06, one coverage register was the sole Markdown
         file under two directories carrying 203 and 92 candidates, so a
         declaration written into it took the scope from 590 to 392 and no test
         named the walk. A README speaks for its directory. A register that
@@ -2681,12 +2831,12 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
         """The two ends have to answer the same question about the same file.
 
         This read 2000 characters where the gate reads lines, and the two agreed
-        about every candidate, which was luck: 577 of the 630 have thirty lines
-        or more by `wc -l`, all but three of those run their opening thirty
-        under 2000 characters, and where they do it is by as much as 1470, with
-        every declaration in the tree sitting by line 24. Both figures carry
-        their counting rule at `_INTERNAL`, because each is three different
-        numbers without one. A declaration written into that
+        about every candidate, which was luck: most of the tree runs its opening
+        thirty lines well under 2000 characters, so the old window read past line
+        30. **The reading behind that, its date and its population are at
+        `_INTERNAL` and are not restated here**, which is where each of those
+        figures carries the counting rule that makes it one number rather than
+        three. A declaration written into that
         span in a published document was dropped here and published there, so
         the census stopped reading a file the mirror carries and nothing said
         so.
@@ -2719,9 +2869,10 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
         the gate's for that file: it publishes, and the census has already
         stopped reading it.
 
-        **Zero of the 630 candidates hold one of those characters, which is why
-        this needs a fixture rather than the tree.** Measured before it was
-        written: reverting the split to `splitlines` was caught by nothing at
+        **No candidate holds one of those characters, which is why this needs a
+        fixture rather than the tree.** That is recomputed at
+        `declares_itself_internal` rather than restated here. Measured before this
+        was written: reverting the split to `splitlines` was caught by nothing at
         all, so the rule was a sentence in a docstring and not a guard.
 
         The fixture puts thirty five form feeds on the first newline delimited

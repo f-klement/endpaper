@@ -29,6 +29,7 @@ from schemas.author import (
     RefusedAssertionOut,
 )
 from schemas.book import (
+    POPPED_BEFORE_THE_CONSTRUCTOR,
     BookColumns,
     BookCreate,
     BookDetailsUpdate,
@@ -169,6 +170,9 @@ __all__ = [
     "MAX_IDENTIFIERS_PER_BOOK",
     "MAX_PAGE_SIZE",
     "MAX_ROW_ID",
+    # The create route's own pop list, read by `routers/books._create_book`.
+    # Exported because the route loops it rather than spelling one pop per name.
+    "POPPED_BEFORE_THE_CONSTRUCTOR",
     "AppearanceOut",
     "AppearanceUpdate",
     "AuthConfigOut",

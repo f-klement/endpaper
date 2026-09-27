@@ -1640,7 +1640,7 @@ React Query's client is created once per page load and does not care who is sign
 
 | How | What happens in the browser |
 |---|---|
-| Signing out | `localStorage` is cleared and the app stays put |
+| Signing out | the two session keys are removed and the app stays put. `localStorage` is **not** cleared, and what survives is deliberate: see `docs/decisions.md`, *`clearSession()` leaves the saved searches and the last location behind, and that is accepted*, which is where that list lives |
 | "Switch account" | A router link to `/login`, deliberately reachable while signed in |
 | Switching into a test account | A button in Settings, then a router navigation home |
 | The proxy names somebody else | Nothing at all happens in this app |

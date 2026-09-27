@@ -3934,6 +3934,12 @@ SEARCH_HARDER_DEADLINE_SECONDS: Final = 12.0
 #: caller that cannot have the slot runs the ordinary search instead, and the
 #: answer says which catalogues were asked, so it is a true answer rather than a
 #: slow one.
+#:
+#: **The identifier backfill takes the opposite policy, and the difference is the
+#: caller rather than the resource.** It has nothing cheaper to do with a refusal,
+#: so it waits, and what makes waiting safe there is a deadline on the slot itself.
+#: `docs/decisions.md` carries both, one after the other, so neither reads as the
+#: rule for the other.
 _HARDER_AT_ONCE: Final = asyncio.Semaphore(1)
 
 

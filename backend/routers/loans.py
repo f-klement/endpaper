@@ -3,7 +3,7 @@ from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 import lending
 import notifications
@@ -89,7 +89,14 @@ def _to_out(loan: Loan, now: datetime) -> LoanOut:
 def _loan_with_relations(loan_id: int, db: Session, now: datetime) -> LoanOut:
     loan = (
         db.query(Loan)
-        .options(joinedload(Loan.book), joinedload(Loan.loaned_to), joinedload(Loan.loaned_by))
+        # **The door's plan, not a third copy of it.** This asked for the book and
+        # the two people and stopped, so four nested relations of the book, its
+        # uploader, its tags, its classifications and its identifiers, lazy loaded
+        # one statement each on a response that renders all of them. The list
+        # routes have used `lending.RENDERED` since the loan door landed; these two
+        # kept the hand written trio they had before it, which is the divergence no
+        # guard on the other side could see.
+        .options(*lending.RENDERED)
         .filter(Loan.id == loan_id)
         .first()
     )

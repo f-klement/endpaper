@@ -105,8 +105,9 @@ BACKEND = Path(__file__).resolve().parent.parent
 #: The committed schema, which is what this module is about.
 #:
 #: Read from the file rather than from `main.app.openapi()` on purpose. The file
-#: is what the client generator turns into TypeScript and what CI diffs against
-#: a fresh generation, so it is the artefact a divergence reaches a reader
+#: is what the client generator turns into TypeScript and what
+#: `test_openapi_drift.py` holds byte identical to a fresh generation, so it is
+#: the artefact a divergence reaches a reader
 #: through. `TestTheCommittedSchemaDescribesTheAppUnderTest` holds the two
 #: together, which is this module's own premise and is checked rather than
 #: assumed.
@@ -498,8 +499,9 @@ def test_every_response_matches_the_schema_that_declares_it(case, contract_membe
 class TestTheCommittedSchemaDescribesTheAppUnderTest:
     """The premise: the file read above and the app called above are one API.
 
-    CI diffs the committed schema against a fresh generation on every push, so
-    this is not that check arriving late. It is this module's own footing: every
+    `test_openapi_drift.py` holds the committed schema byte identical to a fresh
+    generation, so this is not that check arriving late. It is this module's own
+    footing: every
     assertion above is about an operation read out of a file, and a file
     describing another version of the app makes all of them vacuous in a way no
     failure would announce.

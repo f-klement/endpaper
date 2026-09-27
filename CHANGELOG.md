@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **A store identifier backfill no longer lets one library's own presses exhaust the pod.**
+  The limit on how many volume lookups it runs at once was justified from a figure about
+  one pod's memory and enforced once per request, so nine runs inside the route's own rate
+  limit ran fifty four lookups against a pod priced at sixteen. It is one limit for the
+  process now. A run that cannot get a slot waits, under a whole batch deadline instead of
+  for as long as somebody else's batch takes, and answers with whatever it resolved: the
+  counts cover only the books it reached, and the cursor moves over exactly those, so a
+  short run cannot skip the books it never looked at. Pressing again resumes there.
+
 - **A catalogue's own punctuation no longer creates a second copy of a book.** A reading
   history import and an OPDS sync fall back to matching on the title when there is no ISBN,
   and they matched it exactly as the feed spelled it, so `Ulysses :` and `[Hamlet]`, which are
@@ -643,6 +652,132 @@
   carrying one fails the startup check instead of asking without it. Both doors a catalogue
   of this kind answers, the ISBN lookup and the title search, read that one statement on the
   row.
+
+- **A nested test run no longer leaves a worker behind when it is killed for taking too
+  long.** The coverage register's own end to end test spawns a whole test runner over a
+  fixture library and bounds it with a timeout, and that timeout kills the runner by process
+  id: the worker the runner had forked survived it, on the machine the suite's caller runs on,
+  with nothing waiting on it to notice. The nested runner now runs its tests in threads of the
+  process the timeout can reach, so there is no second process to lose, and an arm asks the
+  nested run which process ran its tests rather than trusting the flag that put it there.
+  Starting the child in a process group of its own was measured first and is worse here: the
+  group is one nothing signals, and leaving the outer run's group is what would stop a signal
+  aimed at the suite from reaching the child at all.
+
+- **A vulnerability scanner reads the committed dependency export, and it had drifted fifteen
+  distributions behind the lock it claims to come from.** `alembic`, `cryptography`, `ldap3`,
+  `pg8000`, `rapidfuzz` and `mnemonic` among them, and eight more pins stood *newer* than the
+  lock resolves, so the export had been generated from a resolution this tree no longer has.
+  Nothing installs from that file: the image and the suite both sync from the lock. It is
+  regenerated, and three arms now compare the two committed artefacts on every run, so an
+  export that stops describing the lock is red rather than quietly audited.
+
+- **The MARC and OPDS importers carry the typed catalogue record all the way to the write**,
+  instead of turning it back into an untyped dictionary one module short of the row. Nothing
+  about what an import does changes. The dictionary's eleven keys were the only thing stopping
+  a write reaching a column the importer has no business setting, by raising when it was asked
+  for one, so that accident is replaced by a rule that reads the module and says which columns
+  a write may name.
+
+- **The developer documentation has a generated index of its decisions register.** One row per
+  heading, with the section it sits under, a link to it, and how many words the entry is. Every
+  session is told to read the relevant entry before changing anything, and nothing said which
+  entry or how large one is: they run from one paragraph to longer than most of the rest of the
+  file. It is generated from the register's own headings and regenerated rather than edited, and
+  the suite is red until a change to the register is followed by a regeneration.
+
+- **A book can be created with a list of subjects.** They are stored as supplied and
+  interpreted by nothing: no tag is created, no existing tag is matched, and nothing on any
+  screen sends them yet. A subject containing the separator this column is stored on is refused
+  at the request and dropped at the catalogue joins, because such a value reads back as two
+  subjects. Both request bodies that write the column now bound the subjects inside it rather
+  than only the string they arrive in.
+
+- **The rule for what the repository versions has one home instead of three.** Four walks decide
+  which files they are about by reading the ignore file, and three separate copies of that rule
+  answered them, one of the three a script rather than a test. They had drifted in three
+  directions, each missing a different half: one returned no directory only marker, two refused
+  nothing when the parse came back empty, and one raised where the others asserted. All four read
+  one module now, which is the union of the three rather than the largest of them, every refusal
+  raises rather than asserting so that no consumer can walk an unevaluated tree under an
+  interpreter that compiles assertions out, and whether an empty parse is a legitimate input is
+  the caller's own answer rather than a default. Nothing about which files a walk reads changes,
+  measured over every entry asked both as a file and as a directory.
+
+- **The rule that says what a `.gitignore` this project cannot honour looks like now refuses
+  four more forms and stops refusing two files git honours.** A negation was refused by
+  containment, so a versioned file with an exclamation mark anywhere in its name,
+  `notes!draft.md`, was a hard failure rather than a literal. It is the marker's position that
+  is refused now, read before the anchor and directory markers come off, because reading it
+  afterwards is the same false refusal from the other side: git reads `/!foo` as an anchored
+  literal path, and stripping the anchor moves the marker into first place. Narrowing that
+  opened a silent hole in the same move, which is why the backslash class rides with it:
+  `\!name` is git's escape for a literal marker, `fnmatch` reads the backslash as an ordinary
+  character, and the entry then matches a name git never ignores. A bare `*` is refused too, by
+  equality and never by containment: it matches every path component, so it takes every
+  population derived from this walk to zero at once, and three of this repository's own twenty
+  five entries carry a star. That failure was already loud, in nine arms across four files, so
+  what the refusal buys is one message naming the entry instead of four walks each reporting
+  that they found nothing. A byte order mark on the file no longer disarms whichever entry is on
+  line 1. **And each of those refusals now says which form it refused**, because five of them
+  shared one sentence and the likeliest one a contributor meets, a path spelled with
+  backslashes, was being told to teach the walk about a form when the answer is a forward slash.
+- **Two guards over that walk stopped deriving their own floor from the thing they were
+  checking.** The anti vacuity ratchet over the Markdown walk took both sides of its inequality
+  from one parse, so an ignore file the walk stopped understanding subtracted the floor away
+  with the walk and the comparison held over nothing; the floor now comes from a parse built
+  beside the arm rather than by it, selected by what each parsed entry matches rather than by
+  how its line is spelled, and driven over fixture trees so that the one shape where the two
+  floors differ is observed rather than asserted. And the census over roster counts in prose
+  stated the size of its own walk in nine places, none of which anything recomputed. Those
+  figures are gone, the readings kept for their history carry their date and the population they
+  were taken on, and the claims that are current facts are recomputed by four new arms. One of
+  them had already gone wrong: the sentence saying the declaration rule costs no coverage read
+  zero, and a stripped document has since gained a roster count.
+- **The committed API schema is checked by the suite rather than by a pipeline step.**
+  `frontend/openapi.json` is a committed artefact that the frontend tests read as the authority
+  on what the API accepts, and the only thing comparing it against a fresh generation ran after
+  a push. Of 24 backend job failures over 300 pipelines, 4 were that comparison, and every one
+  was a docstring edit in a router or a schema module, because a route's docstring becomes the
+  schema description. A local run answers now. The cost is real and is stated at the site: a
+  drift is reported after the suite has run rather than in the seconds before it. A generation
+  that did not happen is refused as a broken generator rather than reported as a stale schema,
+  because the remedy for the two is not the same.
+- **A wall clock bound now sits where its own comment says it does.** The test holding the
+  catalogue search deadline to its promise was bounded at the lower of the two return times it
+  discriminates between while its comment claimed the midpoint, and it went red once on
+  scheduler noise by 59ms. The bound is the midpoint now, which still fails the regression it is
+  written for and no longer fails on the good case's own overhead. The slack was sized by
+  raising the simulated slow source rather than by widening the margin alone, which costs no
+  wall clock because that sleep is abandoned whenever the deadline works; the comment records
+  what it does cost, that the overrun a partial regression has to reach before being seen moved
+  from 2.5x the deadline to 3.5x.
+- **The pytest worker count no longer cites a measurement of a different suite.** It carried a
+  serial duration, a two worker duration and a test count taken when the suite was a fifth its
+  present size. The durations are gone rather than replaced, because a duration is a fact about
+  a machine and a worker count: what carries the setting is that this suite drops and recreates
+  every table between tests and that two workers were measured using 0.68 cores between them,
+  which never depended on how many tests there are.
+- **A theme rule that reads a component's class strings now reads past a comment.** The two
+  status pill patterns were matched against the raw module, and a comment quoting a declaration
+  is a match, so a copy of a pill the app no longer paints would have become the subject of
+  every contrast measurement below it while the arm that checks the read still passed. Such a
+  comment has to quote the declaration with its key, not name the classes, so nothing in the
+  component today was a near miss. The stripping the rule reads through is the parser backed one
+  the rest of the test tree shares rather than a matcher of its own, which matters in the other
+  direction: a class string carrying a slash and a star is code that reads as a comment opener
+  to a text scan, and a text level strip deletes the declarations after it. Latent on this tree,
+  so no figure moves. No behaviour changes.
+- **A disc no longer leaves this catalogue described as a subject.** The DNB writes a content
+  type and a carrier type into a record's subject fields with an authority number on each, and
+  this library stores what the record was asserting beside the heading itself. The MARC export
+  wrote the heading back out with the vocabulary's plain code in every case, so `CD-ROM` left as
+  an ordinary topical heading: a receiving catalogue filed a disc beside a place and a period,
+  and the same record is what the public catalogue server hands anybody who asks it. A heading
+  the record marked as a content or carrier term now leaves in MARC's genre or form field with
+  the code that says which, which is the field and the code the source itself used. A heading in
+  a vocabulary that issued no such code keeps its heading and loses the mark, because there is
+  nothing to write and inventing one would be a worse answer than an honest gap.
 
 ## v0.17.2
 

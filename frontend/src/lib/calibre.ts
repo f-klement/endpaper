@@ -51,12 +51,12 @@
  *   which is why the surviving reason is the scope one. The loop those imports
  *   share owns no request and runs one item at a time, by its own docstring,
  *   so it moves none of this. **Not the file readers' reason either**: those
- *   decline a subject because a file's genre is uncontrolled free text with
- *   nowhere to go, where a `tags` row is the vocabulary the member curated in
- *   their own library and the two routes above take it, so what is declined
- *   here is the writing rather than the names. The `data` table is still read,
- *   for the one fact it settles that the OPF cannot: whether a book has a file
- *   at all.
+ *   decline a subject because no field of their own record holds one, and a
+ *   file's genre is uncontrolled free text either way, where a `tags` row is the
+ *   vocabulary the member curated in their own library and the two routes above
+ *   take it, so what is declined here is the writing rather than the names. The
+ *   `data` table is still read, for the one fact it settles that the OPF cannot:
+ *   whether a book has a file at all.
  * - **Custom columns.** They live in tables named per library
  *   (`custom_column_3`), so reading them means reading `custom_columns` first
  *   and mapping names a household invented onto fields this one defines.

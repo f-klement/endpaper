@@ -47,13 +47,9 @@
  * `ScanPage/types.ts`, because both are about the destination rather than about
  * the file.
  *
- * **`dc:subject` is read by nothing here, and it is a destination problem
- * rather than a reading one.** `fb2.ts`, `mobi.ts` and `cbz.ts` each write the
- * same sentence about their own format's spelling of a subject, and this reader
- * was the fourth with the same wall and no sentence. `FileMetadata` has no
- * field for one, and no request body this app sends has anywhere to put it:
- * `BookCreate` takes no `categories` and no free text tag, so a subject read
- * here would reach a screen and no column.
+ * **`dc:subject` is read by nothing here**, because `FileMetadata` declares no
+ * field for a subject. That type carries the reason and what adding one would
+ * reach.
  */
 
 import { childrenNamed } from "./elementChildren";

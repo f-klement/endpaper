@@ -282,6 +282,21 @@ const NOT_SENT_BY_THE_SCAN_FLOW: Record<string, string> = {
   // send it is the store import, where a catalogue may be recording a library
   // loan, and `LibrarySettingsPage/types.ts` sends `unknown` there.
   ownership: "scanning a barcode means holding the book, which is the default",
+  // Accepted by the endpoint and carried by nothing here, and the reason is a
+  // shape mismatch rather than a decision about the value. **No reader emits a
+  // subject**: `FileMetadata` declares no field for one, so `draftFromFile` has
+  // nothing to put in this one. The match a lookup returns does carry the
+  // column, as the single joined string the server stores, and reading that onto
+  // a list here would put the separator rule in a second language, which
+  // `docs/data-model.md`, `catalogue.py` and `schemas/book.py` each refuse in as
+  // many words.
+  //
+  // So this waits on the work that gives a reader a subject to read, and a
+  // browser side bound belongs with it rather than here: the endpoint refuses
+  // the whole payload past the count, so one file carrying more subjects than
+  // the ceiling would lose its book rather than its extra subjects.
+  categories:
+    "no reader emits a subject, and a match carries the column joined",
 };
 
 /**

@@ -49,7 +49,7 @@ import logging
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, time
-from typing import Any, Final, Protocol
+from typing import Any, Final, NewType, Protocol
 
 import annotated_types
 from sqlalchemy.orm import Session
@@ -65,7 +65,7 @@ from enums import OwnershipStatus, ReadStatus
 from models import Book, Note
 from reading import Reading, Records
 from schemas import ImportResultOut
-from schemas.book import BookCreate
+from schemas.book import BookCreate, admits_a_container
 from shelf import Shelf, whole_table_for_uniqueness
 
 logger = logging.getLogger("endpaper.importing")
@@ -616,13 +616,45 @@ def _fill_gaps(book: Book, row: csv_import.ImportRow) -> None:
 # `identity.work_key`.
 
 
-def bounded_fields(record: Record) -> dict[str, Any]:
+#: A `Record` this Library has already held to its own bounds: what every
+#: importer below reads, and what matching keys on.
+#:
+#: **A `NewType` rather than a second dataclass**, so the column names and their
+#: types stay declared once, on `Record`. It is identity at runtime, so nothing
+#: is copied and there is no third table of column names to drift against
+#: `_MARC_RECORD_FIELDS` and the two ceiling tables.
+#:
+#: **What it buys is a signature that cannot take an unbounded record.** Without
+#: it, "matching reads the bounded view, never the raw record" is a docstring
+#: sentence with nothing behind it: handing the raw record to `MarcIndex`
+#: behaves identically on every reachable path, because `within_bounds` is the
+#: identity there, so no behavioural test could ever observe the mistake.
+#:
+#: **The type checker and the guard refuse different things, and only the guard
+#: reaches a write site.** Measured: `mypy` refuses a plain `Record` where a
+#: `Stored` is wanted, which is the whole of what the name buys, and it accepts
+#: `Stored(record)` over a raw one, because a `NewType` call is a cast. **Neither
+#: create path is checked at the write either, and the reason is the constructor
+#: rather than how the kwargs are spelled**: `Book.__init__` is `(self, **kwargs)`,
+#: contributed by SQLAlchemy's instrumentation, and the only mypy plugin configured
+#: here is pydantic's, so `Book(cover_url=...)` is accepted whatever the value.
+#: `OpdsImport._create` names its three fields outright and is no more checked than
+#: the walk beside it. So what refuses a column this importer must not write is
+#: `tests/test_importing.py::TestTheImporterReachesNoColumnOffItsOwnTuple`,
+#: and what keeps the cast to one site is its arm on the mint. **That arm reads
+#: this module only**, so a raw record laundered through `Stored` elsewhere
+#: satisfies every signature below and is invisible to both instruments.
+Stored = NewType("Stored", Record)
+
+
+def stored_record(record: Record) -> Stored:
     """The record as this Library will store it, computed once.
 
     **Matching reads this, not the record**, which is a correctness fix rather
     than an optimisation: matching on the incoming value and storing the bounded
     one means the key a duplicate is looked up by is not the key that was stored,
-    so the same record imported twice can fail to find itself.
+    so the same record imported twice can fail to find itself. `Stored` is what
+    makes that a signature rather than a sentence.
 
     **The `within_bounds` call no longer bounds anything, and is kept as belt.**
     Every producer builds its record through `Record.__init__`, so
@@ -649,17 +681,62 @@ def bounded_fields(record: Record) -> dict[str, Any]:
     this line with nothing that would notice it stopping, which is the state this
     docstring described until 2026-09-19.
 
+    **It answers the record itself where the belt altered nothing**, which is
+    every reachable path, and that is a behaviour decision rather than a saving.
+    `Record.with_scalars` re-runs `__post_init__`, whose droppers cover the **whole**
+    record including `isbn`, which `_MARC_RECORD_FIELDS` excludes and which
+    therefore reaches its column unbounded by this function. Rebuilding
+    unconditionally turns a 40 character ISBN set past the constructor from
+    verbatim into `None`: measured, and **nothing in the suite distinguishes the
+    two answers**, which is what makes the unconditional spelling tempting and
+    wrong to take here.
+
+    **So an over wide ISBN on that bypass reaches its column when the belt altered
+    nothing else, and comes back `None` when it altered anything**, because the
+    rebuild re-runs the droppers over the whole record. Measured on the one
+    constructible bypass, with a 550 character title and again with an out of range
+    year: a field this function never walks answers differently depending on an
+    unrelated neighbour. That conditionality is the sharper argument for a bound
+    that drops rather than cuts, since a value whose fate depends on another column
+    is worse than one that is consistently wrong.
+
+    **It stays open on purpose, and it is mechanically closable**, which an earlier
+    version of this paragraph denied: `isbn` could join `_MARC_RECORD_FIELDS`,
+    `_gap_fields` would
+    still drop it because `book_columns.WORK_DETAIL` holds neither it nor `title`,
+    and the belt would cut rather than null it because its ceiling equals the
+    column's. **The objection is the value, not the mechanism.**
+    `catalogue._KEPT_WHOLE_ON_UPLOAD` already records that a cut ISBN is a
+    different identifier, and this column is unique across the whole table and is
+    this importer's primary match key, so a truncation invents a key that can
+    collide with a row no catalogue ever named. Measured: a 40 character value
+    cuts to 20 characters that `isbn.parse` refuses. Closing it therefore wants a
+    bound that drops rather than cuts, and
+    `tests/routers/test_imports_marc.py::TestAMatchedBookNeverGainsAnIsbn` carries
+    an arm reading today's tuple that would have to be changed deliberately.
+
+    **Where the belt did alter something, two bounds compose, and that is why
+    the tables have to agree per name.** The rebuild re-runs `_drop_unstorable`,
+    which **nulls** an over wide string where `within_bounds` **cuts** one. So a
+    truncation survives the rebuild only while `min(column width, BookCreate
+    MaxLen)` is no wider than `catalogue._TEXT_CEILINGS`, and a range survives
+    only while the `Ge` and `Le` sit inside `catalogue._NUMBER_RANGES`. That
+    equality was prose while this function returned a dict and never re-entered
+    the constructor. It is load bearing now, so it has arms:
+    `tests/test_importing.py::TestBothBoundsAgreeOnEveryName`.
+
     **Which is why this is not where a new column gets its bound.** The
     ceilings live in `catalogue.py` and
     `tests/test_marc.py::TestEveryColumnTheImporterWritesIsBounded` asserts that
     every name in `_MARC_RECORD_FIELDS` has an entry in one of its two tables.
     """
-    fields = {
-        name: within_bounds(name, getattr(record, name))
-        for name in _MARC_RECORD_FIELDS
-    }
-    fields["isbn"] = record.isbn
-    return fields
+    rebound: dict[str, Any] = {}
+    for name in _MARC_RECORD_FIELDS:
+        value = getattr(record, name)
+        held = within_bounds(name, value)
+        if held != value:
+            rebound[name] = held
+    return Stored(record.with_scalars(**rebound) if rebound else record)
 
 
 @dataclass
@@ -707,22 +784,21 @@ class MarcIndex:
             taken_isbns=_taken_isbns(db),
         )
 
-    def _matched_id(self, fields: dict[str, Any]) -> int | None:
+    def _matched_id(self, stored: Stored) -> int | None:
         """The id of the Book this record is about, without loading it.
 
-        Takes `bounded_fields`, never a `Record`: see that function for what
-        matching on the unbounded values cost.
+        Takes a `Stored`, never a plain `Record`: see `stored_record` for what
+        matching on the unbounded values cost. The annotation is the whole of
+        that rule now, where it used to be this sentence.
         """
-        isbn = fields["isbn"]
+        isbn = stored.isbn
         if isbn:
             book_id = self.by_isbn.get(isbn)
             if book_id is not None:
                 return book_id
-        return self.by_identity.get(
-            identity.work_key(fields["title"], fields["author"])
-        )
+        return self.by_identity.get(identity.work_key(stored.title, stored.author))
 
-    def holds(self, fields: dict[str, Any]) -> bool:
+    def holds(self, stored: Stored) -> bool:
         """Whether this Library already has the Book this record describes.
 
         **A boolean, and it costs no statement**, which is why it is not
@@ -733,9 +809,9 @@ class MarcIndex:
         `marc.MAX_RECORDS` puts the ceiling at 20,000 on a route that writes
         nothing.
         """
-        return self._matched_id(fields) is not None
+        return self._matched_id(stored) is not None
 
-    def would_refuse(self, fields: dict[str, Any]) -> bool:
+    def would_refuse(self, stored: Stored) -> bool:
         """Whether the import will skip this record without touching a Book.
 
         **The preview's headline number is wrong without this.** A record whose
@@ -745,16 +821,16 @@ class MarcIndex:
         that modelled only `holds` would promise a record the import then
         refuses, and the screen's whole job is answering what the import will do.
         """
-        return not self.holds(fields) and self.isbn_is_taken(fields["isbn"])
+        return not self.holds(stored) and self.isbn_is_taken(stored.isbn)
 
-    def find(self, db: Session, fields: dict[str, Any]) -> Book | None:
+    def find(self, db: Session, stored: Stored) -> Book | None:
         """The Book this record is about, loaded, or None.
 
         `holds` is the question the preview asks and this is the one the applier
         asks: it needs the object to write to. Keep them apart, or the preview
         pays for a load it throws away.
         """
-        book_id = self._matched_id(fields)
+        book_id = self._matched_id(stored)
         return db.get(Book, book_id) if book_id is not None else None
 
     def isbn_is_taken(self, isbn: str | None) -> bool:
@@ -793,19 +869,33 @@ def within_bounds(attribute: str, value: Any) -> Any:
 
     **Strings truncate, numbers are dropped.** Truncating a title keeps a usable
     record; truncating a number invents a different one.
+
+    **A `MaxLen` on a container field is a count of entries, not a width, and is
+    ignored here.** `BookCreate.categories` is `list[CategoryField]` with
+    `MaxLen(32)` for the number of subjects, while the column is `Text` and states
+    no width, so reading that 32 as a width cut a joined subject string to 32
+    characters. Measured, before this guard: `within_bounds("categories", "x" * 200)`
+    returned 32 characters. Not reachable today, because `_MARC_RECORD_FIELDS`
+    excludes the column, and that tuple's own docstring invites additions.
+    `schemas.book.admits_a_container` is the one home for the question.
     """
     if value is None:
         return None
 
     field = BookCreate.model_fields.get(attribute)
     limits = list(field.metadata) if field is not None else []
+    counts_entries = field is not None and admits_a_container(field.annotation)
 
     if isinstance(value, str):
         widths = [
             width
             for width in (
                 getattr(Book.__table__.c[attribute].type, "length", None),
-                *(m.max_length for m in limits if isinstance(m, annotated_types.MaxLen)),
+                *(
+                    m.max_length
+                    for m in limits
+                    if isinstance(m, annotated_types.MaxLen) and not counts_entries
+                ),
             )
             if width is not None
         ]
@@ -829,6 +919,19 @@ def within_bounds(attribute: str, value: Any) -> Any:
 #:
 #: `isbn` is deliberately absent and is bounded already: `marc_fields.Fields.isbn`
 #: returns `isbn.parse`'s output or None, which is thirteen digits.
+#:
+#: **`categories` is deliberately absent too, and it is an exclusion rather than an
+#: omission.** A MARC record **does** carry uncontrolled subject labels:
+#: `marc_fields.Fields.controlled_subjects` answers two lists and `marc.py` puts the
+#: plain `$a` on `Record.subjects`. This importer **discards** them, writing only
+#: `record.headings`, at `MarcImport._apply_one`. So the exclusion is a decision
+#: about what an import writes and not a claim about what a record holds, which an
+#: earlier version of this note got backwards.
+#:
+#: The same labels do reach `books.categories` on the **lookup** path, where
+#: `Record.subject_labels` feeds `catalogue.Record.as_match`. Stated because an
+#: exclusion and an omission read identically at this site, and `POST /api/books`
+#: now writes that column, so the next reader would otherwise have to guess.
 _MARC_RECORD_FIELDS: Final = (
     "title",
     "subtitle",
@@ -960,13 +1063,13 @@ class MarcImport:
     ) -> None:
         # Once, before anything reads a value: matching and writing have to see
         # the same strings or a truncated record cannot match itself. See
-        # `bounded_fields`.
-        fields = bounded_fields(record)
+        # `stored_record`.
+        stored = stored_record(record)
         book = _settle_one(
             index,
             tally,
-            index.find(self._db, fields),
-            isbn=fields["isbn"],
+            index.find(self._db, stored),
+            isbn=stored.isbn,
             # A title the caller supplied in their own file, so reporting it
             # discloses nothing they did not already have.
             #
@@ -977,11 +1080,13 @@ class MarcImport:
             # ten thousand character title arrives here as a five hundred
             # character string, and a record with no `245 $a` never becomes a
             # Record at all: `marc.read` counts it in `ParsedMarc.skipped`.
-            # **The value's own declared type is `str | None`; the
-            # annotation at this site is `Any`**, because `bounded_fields`
-            # returns `dict[str, Any]`. So no type checker ever required this
-            # belt and nothing but this comment records why it is here, which
-            # is exactly why it reads as unnecessary.
+            # **The type checker now requires it**, where it did not while
+            # this value arrived out of a `dict[str, Any]`: `Record.title` is
+            # declared `str | None` and `unmatched_title` is `str`. So removing
+            # it is a mypy error rather than a silent change, and this comment
+            # is no longer the only thing holding it in place. What the comment
+            # is still for is the half a type cannot say: which file shapes
+            # reach the `None` side, and that none of them does.
             #
             # **`OpdsImport._apply_one` is the contrast, not the source.** That
             # path builds through the plain constructor, where the unstorable
@@ -990,9 +1095,9 @@ class MarcImport:
             # fact the two paths do not share, and a reason carried across it
             # is wrong in exactly this way: this comment said the column had
             # dropped the title, which is the OPDS sentence.
-            unmatched_title=fields["title"] or "",
-            create=lambda: self._create(fields, index),
-            fill_gaps=lambda matched: _fill_marc_gaps(matched, fields),
+            unmatched_title=stored.title or "",
+            create=lambda: self._create(stored, index),
+            fill_gaps=lambda matched: _fill_marc_gaps(matched, stored),
             create_missing=create_missing,
         )
         if book is None:
@@ -1005,7 +1110,7 @@ class MarcImport:
         # long caption nor a repeated import can push a Book past the ceiling.
         add_headings(book, bounded_headings(record.headings), self._db)
 
-    def _create(self, fields: dict[str, Any], index: MarcIndex) -> Book:
+    def _create(self, stored: Stored, index: MarcIndex) -> Book:
         """Add a Book the file catalogues and this Library does not hold.
 
         **`ownership=UNKNOWN`, exactly as the CSV path does it**, and the reason
@@ -1020,10 +1125,17 @@ class MarcImport:
         bounded batches.
         """
         book = Book(
-            # `fields` is already bounded, over one list both writers walk, so a
-            # column added here cannot skip the guard by being forgotten.
-            **{name: fields[name] for name in _MARC_RECORD_FIELDS},
-            isbn=fields["isbn"],
+            # Already bounded, over one list both writers walk, so a column
+            # added here cannot skip the guard by being forgotten.
+            #
+            # **This line is not type checked and must not be described as
+            # such**, and the reason is `Book.__init__`, which is
+            # `(self, **kwargs)` from SQLAlchemy's instrumentation: spelling the
+            # columns out as keywords would be no more checked than this walk.
+            # What bounds which columns a record can reach from here is the tuple
+            # and the `ast` pass over this module that reads it, named at `Stored`.
+            **{name: getattr(stored, name) for name in _MARC_RECORD_FIELDS},
+            isbn=stored.isbn,
             added_by_user_id=self._member_id,
             ownership=OwnershipStatus.UNKNOWN,
         )
@@ -1033,15 +1145,15 @@ class MarcImport:
         return book
 
 
-def _fill_marc_gaps(book: Book, fields: dict[str, Any]) -> None:
+def _fill_marc_gaps(book: Book, stored: Stored) -> None:
     """Add what the incoming record knows and this catalogue does not.
 
-    Never overwrites: see `_MARC_GAP_FIELDS`. Takes the bounded fields, like
-    every other reader of a record here, so a matched Book cannot be given a
-    value the create path would have cut.
+    Never overwrites: see `_MARC_GAP_FIELDS`. Takes a `Stored`, like every other
+    reader of a record here, so a matched Book cannot be given a value the create
+    path would have cut.
     """
     for attribute in _MARC_GAP_FIELDS:
-        value = fields[attribute]
+        value = getattr(stored, attribute)
         if value is not None and getattr(book, attribute) is None:
             setattr(book, attribute, value)
 
@@ -1160,11 +1272,11 @@ class OpdsImport:
         tally: _Tally,
         create_missing: bool,
     ) -> None:
-        # Bounded once, before anything reads a value, for `bounded_fields`'
+        # Bounded once, before anything reads a value, for `stored_record`'s
         # reason: matching on the incoming value and storing the bounded one
         # means the same feed synced twice can fail to find itself.
-        fields = bounded_fields(record)
-        title = fields["title"]
+        stored = stored_record(record)
+        title = stored.title
         if not title:
             # **What reaches here is a record whose title `catalogue.Record`
             # dropped**, not one `within_bounds` truncated: `_drop_unstorable`
@@ -1194,18 +1306,18 @@ class OpdsImport:
         _settle_one(
             index,
             tally,
-            index.find_by(self._db, fields["isbn"], title),
-            isbn=fields["isbn"],
+            index.find_by(self._db, stored.isbn, title),
+            isbn=stored.isbn,
             # A title from the member's own server, so reporting it back to
             # that member discloses nothing they did not already have. Known
             # non-empty: the arm above returned on anything else.
             unmatched_title=title,
-            create=lambda: self._create(fields, index),
-            fill_gaps=lambda matched: _fill_opds_gaps(matched, fields),
+            create=lambda: self._create(stored, index),
+            fill_gaps=lambda matched: _fill_opds_gaps(matched, stored),
             create_missing=create_missing,
         )
 
-    def _create(self, fields: dict[str, Any], index: _CatalogueIndex) -> Book:
+    def _create(self, stored: Stored, index: _CatalogueIndex) -> Book:
         """Add a Book the member's server lists and this Library does not hold.
 
         **`ownership=OWNED`, where both other importers arrive at UNKNOWN**, and
@@ -1221,9 +1333,9 @@ class OpdsImport:
         request open. `POST /api/books/covers/backfill` does it afterwards.
         """
         book = Book(
-            title=fields["title"],
-            author=fields["author"],
-            isbn=fields["isbn"],
+            title=stored.title,
+            author=stored.author,
+            isbn=stored.isbn,
             added_by_user_id=self._member_id,
             ownership=OwnershipStatus.OWNED,
         )
@@ -1233,7 +1345,7 @@ class OpdsImport:
         return book
 
 
-def _fill_opds_gaps(book: Book, fields: dict[str, Any]) -> None:
+def _fill_opds_gaps(book: Book, stored: Stored) -> None:
     """Add what the member's server knows and this catalogue does not.
 
     **Never overwrites, and ownership is the one that needed a rule.** The other
@@ -1251,7 +1363,7 @@ def _fill_opds_gaps(book: Book, fields: dict[str, Any]) -> None:
     also the case where the ISBN is least likely to be about the same book.
     """
     for attribute in _OPDS_GAP_FIELDS:
-        value = fields[attribute]
+        value = getattr(stored, attribute)
         if value is not None and getattr(book, attribute) is None:
             setattr(book, attribute, value)
     if book.ownership == OwnershipStatus.UNKNOWN:

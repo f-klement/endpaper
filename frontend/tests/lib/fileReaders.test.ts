@@ -1141,3 +1141,131 @@ describe("what may name a scheme this app stores", () => {
     expect(computed).toEqual(Object.keys(COMPUTES_ITS_SCHEME).sort());
   });
 });
+
+const SCHEMA = import.meta.glob("../../openapi.json", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
+/**
+ * A module's prose with every line break and comment marker flattened away.
+ *
+ * **Without this the arms below are beaten by the wrap, which is how the first
+ * version of them failed.** Three of the four readers carry the phrase across two
+ * lines because it runs past eighty columns, and prettier is what puts it there, so
+ * the blind spot would have been the one spelling the gate mandates rather than one
+ * anybody chooses. Measured: matching the raw source found the phrase in one of the
+ * four modules that carry it.
+ *
+ * **Both comment markers, because stripping one and not the other moved the blind
+ * spot rather than closing it.** The first fix removed the block continuation `*`
+ * only, so a phrase wrapped across `//` lines was still missed: measured, found in
+ * both block styles and not in line comments, over a population of 123 modules
+ * carrying three or more consecutive `//` lines. The arm that went **silently**
+ * wrong is the one asserting a claim appears nowhere, which is the one whose whole
+ * job is catching a regression.
+ */
+function flattenedProse(source: string): string {
+  return source
+    .replace(/^\s*\*/gm, " ")
+    .replace(/^\s*\/\//gm, " ")
+    .replace(/\s+/g, " ");
+}
+
+/** The reason, which lives once. No reader restates it. */
+const THE_REASON = "the wall is this type rather than the server";
+
+/** What a reader says instead: the absence, and where the reason is. */
+const THE_POINTER = "`FileMetadata` declares no field for a subject";
+
+/** The half of the old sentence that went stale when the server grew the field. */
+const STALE_CLAIM = "takes no `categories`";
+
+function modulesCarrying(phrase: string): string[] {
+  return modules()
+    .filter(([, source]) => flattenedProse(source).includes(phrase))
+    .map(([path]) => path)
+    .sort();
+}
+
+describe("where the missing destination for a subject is written down", () => {
+  /**
+   * Three arms over phrases, and the blind spot is stated rather than left to be
+   * found.
+   *
+   * **These match a phrase and not a claim, so a paraphrase evades them.** What
+   * makes that affordable is the denominator: four modules wrote one sentence
+   * nearly verbatim, so phrase matching would have caught every instance that has
+   * ever existed. The duplication is what produced the ticket, not the wording.
+   */
+  it("says the server takes no categories in no module at all", () => {
+    // A machine oracle for the only checkable half of the old sentence, which is
+    // whether the endpoint has the field. It does, so the claim may appear nowhere.
+    const raw = SCHEMA["../../openapi.json"] ?? "";
+    expect(
+      raw,
+      "openapi.json was not read, so this arm proves nothing",
+    ).not.toBe("");
+    // Named rather than indexed, because an index signature is possibly
+    // undefined under this tsconfig and the arm is about one known body.
+    const schema = JSON.parse(raw) as {
+      components: { schemas: { BookCreate: { properties?: unknown } } };
+    };
+
+    expect(
+      schema.components.schemas.BookCreate.properties,
+      "the create body no longer carries the field, so this arm is about nothing",
+    ).toHaveProperty("categories");
+    expect(modulesCarrying(STALE_CLAIM)).toEqual([]);
+  });
+
+  it("gives the reason in exactly one module", () => {
+    // The arm that stops a sixth copy of the reasoning, which is the duplication
+    // that produced the ticket.
+    expect(modulesCarrying(THE_REASON)).toEqual([SEAM]);
+  });
+
+  it("has every reader that passes over a subject point at the seam", () => {
+    // The other direction, which the arm above cannot see: a reader could state
+    // its own reason without repeating this one's words, and go quiet.
+    //
+    // **Containment rather than equality, and the seam is excluded.** Equality made
+    // this refuse a fifth reader that pointed correctly, which is a false refusal
+    // bought for nothing: these four are the modules that had the sentence, so
+    // requiring them catches one going quiet, and a fifth that points is right and
+    // needs no edit here. The registry is not the population, checked: `epub.ts` is
+    // registered and `opf.ts`, which carries the pointer, is not.
+    const pointing = modulesCarrying(THE_POINTER);
+
+    expect(pointing).toEqual(
+      expect.arrayContaining([
+        "lib/cbz.ts",
+        "lib/fb2.ts",
+        "lib/mobi.ts",
+        "lib/opf.ts",
+      ]),
+    );
+    expect(pointing).not.toContain(SEAM);
+  });
+
+  it("finds a phrase wrapped across line comments too", () => {
+    // The probe for the normaliser, driven rather than asserted about. Without the
+    // `//` arm of the chain this passes only for the block styles, which is how the
+    // stale-claim arm above could go silently green.
+    const wrapped = [
+      "// something before",
+      "// `FileMetadata` declares no",
+      "// field for a subject: see that type.",
+    ].join("\n");
+    const block = [
+      "/**",
+      " * `FileMetadata` declares no",
+      " * field for a subject.",
+      " */",
+    ].join("\n");
+
+    expect(flattenedProse(wrapped)).toContain(THE_POINTER);
+    expect(flattenedProse(block)).toContain(THE_POINTER);
+  });
+});

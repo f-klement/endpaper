@@ -69,7 +69,7 @@ class TestMatchSubjectsToTags:
         assert match_subjects_to_tags([subject], [Tag(id=1, name=tag)]) == []
 
     def test_a_tag_name_ending_in_punctuation_still_matches(self):
-        """The boundary is a lookaround rather than `\b`, because `\b` after a
+        """The boundary is a lookaround rather than `\\b`, because `\\b` after a
         `+` asserts that a word character follows."""
         assert match_subjects_to_tags(["C++ programming"], [Tag(id=1, name="C++")]) == [1]
 

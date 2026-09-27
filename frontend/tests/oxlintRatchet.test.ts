@@ -52,15 +52,53 @@ import { describe, expect, it } from "vitest";
  *
  * Cost on the `builder` worker: three invocations in the steady state, one of
  * which lints nothing, and this whole file measures 189ms against a frontend
- * suite of 46.66s to 50.93s over three runs. The ceiling is 20 invocations at
- * about 1.1s, reached when every entry looks clean in one run at once, or
- * when the run enabled fewer rules than it denied.
+ * suite of 46.66s to 50.93s over three runs. The ceiling is 20 invocations,
+ * about 1.1s **in total**, reached when every entry looks clean in one run at
+ * once, or when the run enabled fewer rules than it denied. It is 20 because
+ * three invocations are fixed and one confirms each suppressed entry.
+ *
+ * **In total, and the unit is spelled out because it has been read the other
+ * way.** As 1.1s each, that ceiling reads as 22s, and a bare figure beside a
+ * count is what puts two readers a factor of twenty apart. `LINTED` below bounds
+ * a single invocation and carries the re measurement.
  */
 
 const CONFIG = ".oxlintrc.json";
 const OXLINT = "./node_modules/.bin/oxlint";
 const TREES = ["src", "tests"];
 const BATCH = "the run denying every suppressed rule";
+
+/**
+ * What one oxlint invocation may take before it is a wedge, and the arm's own
+ * budget above it.
+ *
+ * **`execFileSync` with no timeout waits forever**, which is what both calls
+ * below did: a hung oxlint hung the arm, then the file, then the suite, and said
+ * nothing while it did. A timeout makes the call throw with a null status, which
+ * `outputOfFailedRun` and `parseReport` already refuse by name, so this adds a
+ * bound and no new failure path.
+ *
+ * 10s is about seventy times one invocation, derived from this file's own cost
+ * above over its three invocations and taken on the slower of the two workers,
+ * where the file measures 438ms rather than the 189ms quoted above.
+ *
+ * **The arm's budget is that plus 30s**, so that one wedged invocation is
+ * reported by this bound rather than killed by vitest's default of 5s, and 30s
+ * covers the other nineteen at many times their measured cost. Before this the
+ * arm ran on that default with **no margin written down anywhere**: at the
+ * ceiling on the slower worker it is about 3s against 5s, which passes today and
+ * is not something anybody chose. A second invocation wedging in the same run is
+ * reported by the budget instead, which is a poorer message for a state one
+ * wedge already explains.
+ */
+const LINTED = 10_000;
+
+/**
+ * The budget of the one arm that invokes oxlint, kept above `LINTED` so that the
+ * bound reports a wedge rather than vitest killing the arm mid refusal. Derived
+ * there; no second figure lives here.
+ */
+const BUDGET = LINTED + 30_000;
 
 /**
  * The fields of oxlint's JSON report this test reads.
@@ -250,6 +288,7 @@ function lint(deny: string[]): Report {
   try {
     raw = execFileSync(OXLINT, args, {
       encoding: "utf8",
+      timeout: LINTED,
       // Set rather than left at Node's 1 MiB. The JSON report is 122 KB and
       // the rendered one 298 KB on a suite worker, so this is headroom and not
       // a fix: an overflow arrives as a throw whose `stdout` is truncated,
@@ -297,6 +336,7 @@ function effectiveLevels(): Record<string, unknown> {
   try {
     raw = execFileSync(OXLINT, ["--print-config"], {
       encoding: "utf8",
+      timeout: LINTED,
       maxBuffer: 64 * 1024 * 1024,
     });
   } catch (thrown) {
@@ -368,80 +408,86 @@ function staleRules(
 }
 
 describe("the oxlint suppression list", () => {
-  it("turns off no rule that this tree would now pass", () => {
-    // Our own parse of the config runs BEFORE oxlint is asked anything, and
-    // the order is a statement rather than argument evaluation order. A
-    // config that is not JSON is refused here, by a reader that quotes no
-    // path, rather than by oxlint, whose parse error cites the config's
-    // absolute path and would land in the 200 bytes a refusal carries.
-    //
-    // It closes that class and not the question. A config that is valid JSON
-    // and that oxlint still refuses, an `extends` that does not resolve, is
-    // outside this order and does cite the path, well inside the 200 bytes a
-    // refusal carries. Neither a length nor an offset is quoted for it, and
-    // the reason is not that both drift: oxlint interpolates the absolute
-    // path into that message, so the total varies with where the checkout
-    // sits while the offset does not, being a fixed prefix. Quoting the
-    // stable half is what invites the next reader to quote the unstable one
-    // beside it. The refusals that carry no path are an unknown rule, an
-    // unknown plugin and a malformed value.
-    const named = rulesNamedInConfig();
-    const suppressed = suppressedIn(named, effectiveLevels());
+  it(
+    "turns off no rule that this tree would now pass",
+    () => {
+      // Our own parse of the config runs BEFORE oxlint is asked anything, and
+      // the order is a statement rather than argument evaluation order. A
+      // config that is not JSON is refused here, by a reader that quotes no
+      // path, rather than by oxlint, whose parse error cites the config's
+      // absolute path and would land in the 200 bytes a refusal carries.
+      //
+      // It closes that class and not the question. A config that is valid JSON
+      // and that oxlint still refuses, an `extends` that does not resolve, is
+      // outside this order and does cite the path, well inside the 200 bytes a
+      // refusal carries. Neither a length nor an offset is quoted for it, and
+      // the reason is not that both drift: oxlint interpolates the absolute
+      // path into that message, so the total varies with where the checkout
+      // sits while the offset does not, being a fixed prefix. Quoting the
+      // stable half is what invites the next reader to quote the unstable one
+      // beside it. The refusals that carry no path are an unknown rule, an
+      // unknown plugin and a malformed value.
+      const named = rulesNamedInConfig();
+      const suppressed = suppressedIn(named, effectiveLevels());
 
-    // A config with nothing suppressed would make the rest of this vacuous, so
-    // the floor is asserted rather than assumed.
-    expect(suppressed.length).toBeGreaterThan(0);
+      // A config with nothing suppressed would make the rest of this vacuous, so
+      // the floor is asserted rather than assumed.
+      expect(suppressed.length).toBeGreaterThan(0);
 
-    const baseline = lint([]);
-    const denied = lint(suppressed);
+      const baseline = lint([]);
+      const denied = lint(suppressed);
 
-    expect(differentTree(baseline, denied, BATCH)).toBeNull();
-    expect(
-      shortCountBlames(suppressed, baseline, denied, (rule) => lint([rule])),
-    ).toBeNull();
-
-    const firing = new Set(denied.diagnostics.map(({ code }) => ruleOf(code)));
-    const confirmed = new Map<string, Report>();
-
-    const { stale, lost } = staleRules(suppressed, firing, (rule) => {
-      const alone = lint([rule]);
+      expect(differentTree(baseline, denied, BATCH)).toBeNull();
       expect(
-        differentTree(baseline, alone, `the run denying ${rule}`),
+        shortCountBlames(suppressed, baseline, denied, (rule) => lint([rule])),
       ).toBeNull();
-      expect(
-        deniedNothing(baseline, alone, 1, `the run denying ${rule}`),
-      ).toBeNull();
-      confirmed.set(rule, alone);
-      return new Set(alone.diagnostics.map(({ code }) => ruleOf(code)));
-    });
 
-    // Not a failure. The verdict on the entry is right either way and leaving
-    // a suppression standing is the harmless direction. It is printed because
-    // it is the only evidence anybody gets of a batch run losing findings,
-    // which nobody has yet caught in the act, and the counts are printed with
-    // it because the surviving signature is about how few findings a lost rule
-    // has.
-    for (const rule of lost) {
-      const alone = confirmed.get(rule)!;
-      const mine = alone.diagnostics.filter(
-        ({ code }) => ruleOf(code) === bareName(rule),
-      ).length;
-      console.warn(
-        `oxlint lost ${rule} in a run of ${String(denied.diagnostics.length)} ` +
-          `diagnostics over ${String(denied.number_of_files)} files, and ` +
-          `reported ${String(mine)} finding(s) for it when denying it alone ` +
-          `over ${String(alone.number_of_files)} files.`,
+      const firing = new Set(
+        denied.diagnostics.map(({ code }) => ruleOf(code)),
       );
-    }
+      const confirmed = new Map<string, Report>();
 
-    expect(
-      stale,
-      `these rules are off in ${CONFIG} and no finding for them reached ` +
-        `either of two oxlint runs over the same ` +
-        `${String(baseline.number_of_files)} files. Reproduce the clean ` +
-        `result by hand before deleting an entry, then turn the rule on.`,
-    ).toEqual([]);
-  });
+      const { stale, lost } = staleRules(suppressed, firing, (rule) => {
+        const alone = lint([rule]);
+        expect(
+          differentTree(baseline, alone, `the run denying ${rule}`),
+        ).toBeNull();
+        expect(
+          deniedNothing(baseline, alone, 1, `the run denying ${rule}`),
+        ).toBeNull();
+        confirmed.set(rule, alone);
+        return new Set(alone.diagnostics.map(({ code }) => ruleOf(code)));
+      });
+
+      // Not a failure. The verdict on the entry is right either way and leaving
+      // a suppression standing is the harmless direction. It is printed because
+      // it is the only evidence anybody gets of a batch run losing findings,
+      // which nobody has yet caught in the act, and the counts are printed with
+      // it because the surviving signature is about how few findings a lost rule
+      // has.
+      for (const rule of lost) {
+        const alone = confirmed.get(rule)!;
+        const mine = alone.diagnostics.filter(
+          ({ code }) => ruleOf(code) === bareName(rule),
+        ).length;
+        console.warn(
+          `oxlint lost ${rule} in a run of ${String(denied.diagnostics.length)} ` +
+            `diagnostics over ${String(denied.number_of_files)} files, and ` +
+            `reported ${String(mine)} finding(s) for it when denying it alone ` +
+            `over ${String(alone.number_of_files)} files.`,
+        );
+      }
+
+      expect(
+        stale,
+        `these rules are off in ${CONFIG} and no finding for them reached ` +
+          `either of two oxlint runs over the same ` +
+          `${String(baseline.number_of_files)} files. Reproduce the clean ` +
+          `result by hand before deleting an entry, then turn the rule on.`,
+      ).toEqual([]);
+    },
+    BUDGET,
+  );
 });
 
 describe("a report that did not arrive whole", () => {

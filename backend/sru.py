@@ -231,7 +231,7 @@ def _safe(value: str) -> str:
 # **The product is what matters rather than any one of them, and the obvious
 # product is wrong.** `MAX_CLAUSES * MAX_WORDS_IN_A_TERM` is the ceiling for an
 # index over one column, and `cql.serverChoice` covers three, so the real figure
-# is three times it. `tests/test_sru.py::TestTheWorstLegalQueryIsBounded`
+# is three times it. `tests/test_sru.py::TestTheCostOfTheWorstLegalQueryIsBounded`
 # measures the compiled SQL for both shapes rather than trusting either
 # multiplication, which is how that factor of three was found.
 

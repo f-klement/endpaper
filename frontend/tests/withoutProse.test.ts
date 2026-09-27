@@ -331,6 +331,37 @@ const STILL_ITS_OWN: Record<string, string> = {
   "./pages/ScanPage/types.test.ts": "one module's source",
 };
 
+/**
+ * What a path says about how to parse it, and the three weakenings that used to
+ * survive.
+ *
+ * **Every caller feeds `langOf` from a glob over `*.{ts,tsx}`, so the separating
+ * population is empty by construction** and no caller's own arms could reach this:
+ * measured 2026-09-26, `includes(".tsx")`, `endsWith("x")` and `!endsWith(".ts")`
+ * all survived the whole tree, because the only two shapes any caller offers are
+ * classified identically by each of them. The rows below are the shapes nothing in
+ * the tree has, which is exactly why they belong here rather than at a call site.
+ *
+ * `.mts` and `.cts` are `ts`, which is correct and is not the interesting row: the
+ * suites collect neither.
+ */
+const LANGUAGES: [string, "ts" | "tsx"][] = [
+  ["a.test.ts", "ts"],
+  ["a.test.tsx", "tsx"],
+  // Refuses `includes(".tsx")`: the extension is `.ts` and `.tsx` is in the stem.
+  ["a.tsx.test.ts", "ts"],
+  // Refuses `endsWith("x")` and `!endsWith(".ts")` in one row.
+  ["a.jsx", "ts"],
+  // Refuses `!endsWith(".ts")` on its own.
+  ["a.test.mts", "ts"],
+];
+
+describe("a path decides how it is parsed", () => {
+  it.each(LANGUAGES)("%s parses as %s", (path, lang) => {
+    expect(langOf(path)).toBe(lang);
+  });
+});
+
 describe("the stripping has one home", () => {
   const KNOWN = [
     ...Object.keys(ANOTHER_LANGUAGE),

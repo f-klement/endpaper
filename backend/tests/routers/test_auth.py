@@ -799,9 +799,10 @@ class TestARouteThatSendsNoBodyDocumentsNone:
         )
 
     def test_none_of_them_declares_content(self) -> None:
-        """Off `app.openapi()`, which CI diffs the committed
-        `frontend/openapi.json` against on every push, so this is that document
-        without a second copy of where it lives."""
+        """Off `app.openapi()`. `test_openapi_drift.py` holds the committed
+        `frontend/openapi.json` byte identical to what `scripts/dump_openapi.py`
+        writes, so this is that document without a second copy of where it
+        lives."""
         schema = main.app.openapi()
         promised = [
             f"{sorted(route.methods)[0]} {route.path} declares "

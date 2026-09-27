@@ -21,9 +21,10 @@ import pytest
 import respx
 
 from enums import SettingKey
-from models import CATEGORIES_MAX, DESCRIPTION_MAX, TITLE_MAX, Classification
+from models import DESCRIPTION_MAX, TITLE_MAX, Classification
 from routers.books import _bounded_match
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
+from schemas.book import CATEGORIES_MAX
 from tests.helpers import GOOGLE_BOOKS, K10PLUS, silence_catalogues, sru_response
 
 

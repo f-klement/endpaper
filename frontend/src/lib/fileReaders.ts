@@ -87,6 +87,22 @@ export interface FileIdentifier {
  * does not import the EPUB module to say what a book is.** `opf.ts` reads it
  * back from here for the same reason: the format that shaped this record is a
  * producer of it like any other, not its owner.
+ *
+ * **No field here holds a subject, and the wall is this type rather than the
+ * server.** Every format in the family states one and every reader passes over
+ * it: `dc:subject` in OPF, `<genre>` in FB2, EXTH 105 in MOBI, `Genre` in
+ * ComicInfo. Stated once here rather than four times, because the reason is not
+ * any format's: it is that this record declares no field for one, so nothing a
+ * reader read could travel, and `ScanPage/types.draftFromFile` has nothing to
+ * put anywhere.
+ *
+ * **The column it would go to is not the Tag system**, which is the distinction
+ * that decides what a field here would mean. `books.categories` is uncontrolled
+ * free text a producer supplied and nothing is minted from it; tags are the
+ * small vocabulary a library curates. `docs/data-model.md` carries the three
+ * layers and which is which. A field here would therefore be the file's own
+ * words and never a tag, and adding one means this type, the readers that fill
+ * it, and `lib/bookRequest.ts`, which maps a record onto a request.
  */
 export interface FileMetadata extends SourceRecord {
   /**

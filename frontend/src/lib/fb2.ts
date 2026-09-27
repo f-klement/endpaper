@@ -37,14 +37,10 @@
  * Everything else in the minimum field set arrives: title, authors as separate
  * values, ISBN, series and index, publisher, year, language and description.
  *
- * **`<genre>` is read by nothing here, and that is a destination problem rather
- * than a reading one**, which is the sentence `mobi.ts`, `opf.ts` and `cbz.ts`
- * each write about their own format's spelling of a subject. `FileMetadata` has
- * no field for one, and no request body this app sends has anywhere to put it:
- * `BookCreate` takes no `categories` and no free text tag, so a subject read
- * here would reach a screen and no column. It is carried by every file in the
- * corpus, 35 elements across 18, as `lang` is, so it is the one exclusion here
- * worth revisiting when that door exists.
+ * **`<genre>` is read by nothing here**, because `FileMetadata` declares no
+ * field for a subject: see that type for the reason. It is carried by every
+ * file in the corpus, 35 elements across 18, as `lang` is, so of this reader's
+ * exclusions it is the one costing the most.
  *
  * **Lazy loaded**, like every reader: `lib/fileReaders.ts` imports this only
  * when a member picks a file whose name ends in one of the two extensions.

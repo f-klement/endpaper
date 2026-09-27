@@ -4649,10 +4649,16 @@ class TestTheAustrianNationalLibrarySearch:
 
     #: The deadline this test patches in, and the sleep it puts behind one source.
     #:
-    #: **Both are scaled down from 4.0 and 5, and the ratio is what matters rather than
-    #: the values.** The sleep must outlast the deadline by enough that a broken deadline
-    #: misses the bound by a wide margin, and the deadline must be long enough that the
-    #: five other mocked sources finish inside it.
+    #: **Neither is a scaling of anything and the ratio between them is chosen here.**
+    #: `_DEADLINE` stands in for `metadata.SEARCH_DEADLINE_SECONDS`, which is 4.0; the
+    #: sleep stands in for nothing in the application, because no production value says
+    #: how slow a slow source is. The deadline is small so the suite does not pay for it.
+    #: The sleep is then
+    #: set so the midpoint between the two clears the good case's own overhead, which is
+    #: what `_MARGIN` records; it is not the real sleep reduced by the same factor.
+    #: The two constraints are that the sleep outlasts the deadline by enough for a
+    #: broken deadline to miss the bound widely, and that the deadline is long enough for
+    #: the five other mocked sources to finish inside it.
     #:
     #: **The old numbers made this test nearly unable to fail.** It slept 5 against the
     #: real 4.0 deadline and asserted `elapsed < 5`. A working deadline returns at about
@@ -4666,27 +4672,63 @@ class TestTheAustrianNationalLibrarySearch:
     #:
     #: It also spent four seconds of real wall clock on every suite run.
     _DEADLINE = 0.5
-    _SLOWER_THAN_THE_DEADLINE = 2.0
+    _SLOWER_THAN_THE_DEADLINE = 3.0
 
     #: What the five mocked sources, the merge and the ranking are allowed on top of the
     #: deadline.
     #:
-    #: **Chosen so the two failure directions have the same slack**, which is what the old
-    #: bound did not have. A working deadline returns at about `_DEADLINE` and has this
-    #: much room before the bound; a broken one returns at about
-    #: `_SLOWER_THAN_THE_DEADLINE` and misses the bound by 1.05s, measured. Every source
-    #: here is a mock that answers instantly, so this is slack against a loaded worker
-    #: rather than against any real work.
-    _MARGIN = 0.5
+    #: **The bound is the midpoint of the two modelled return times**, `_DEADLINE` and
+    #: `_SLOWER_THAN_THE_DEADLINE`, so 1.75s. That is the point furthest from both, which
+    #: is the only thing a single number can be chosen to be, and it is half of the 2.5s
+    #: the regression costs.
+    #:
+    #: **The two directions are not equally slack, and the good case is the tight one.**
+    #: A broken deadline returns at `_SLOWER_THAN_THE_DEADLINE` and misses by 1.25s. A
+    #: working one is modelled at `_DEADLINE` but has been **observed at 1.0589s**, on the
+    #: run that reddened this test on 2026-09-18 against the bound of 1.0 it then had, so
+    #: the five mocks, the merge and the ranking cost about 0.56s of real time. Measured
+    #: against that observation the bound leaves about 0.69s rather than 1.25s.
+    #:
+    #: **Sized against that observation is not the same as sized against the tail.** The
+    #: 1.0589s is one draw and it is the draw that failed, so nothing here bounds the
+    #: overhead above it. What is known about the shape is that this pod is quota bound at
+    #: 2 CPUs and throttled in a third to a half of all periods, so a burst loses up to a
+    #: full 100ms period at a time: 0.69s is about seven such periods where the previous
+    #: bound left about two. Every source here answers instantly, so all of this is slack
+    #: against a throttled worker rather than against any work.
+    #:
+    #: **What raising `_SLOWER_THAN_THE_DEADLINE` to 3.0 cost, stated rather than waved
+    #: past.** The bound detects an overrun beyond itself, so moving it from 1.25s to
+    #: 1.75s moves the detection threshold from 2.5x `_DEADLINE` to 3.5x, and a partial
+    #: overrun landing inside the new band goes unseen. **`_DEADLINE` and not the real
+    #: deadline**, which is `metadata.SEARCH_DEADLINE_SECONDS` at 4.0 and against which
+    #: this bound is 0.44x. The distinction is worth the words because this block uses the
+    #: word real for the production constant twice. It is free in wall clock, because the
+    #: sleep is abandoned
+    #: rather than awaited whenever the deadline works, so only an already red run pays the
+    #: extra second.
+    #:
+    #: **And most of that threshold is a floor rather than a choice.** The bound has the
+    #: form `_DEADLINE` plus overhead, and the overhead alone was observed at 0.5589s,
+    #: which is 1.12x `_DEADLINE`, so no value of this constant reaches below about 2.1x.
+    #: Lowering the sleep again does not buy back 2.5x. That is what makes the sentence
+    #: below a bound rather than an opinion.
+    #:
+    #: **The constant is the wrong instrument for this and a ticket says so.** Budgeting
+    #: for the mocks, the merge and the ranking *inside* the bound is what forces the
+    #: choice between headroom and detection. Subtracting them, by measuring the overhead
+    #: in a control case with no slow source and bounding only the part attributable to
+    #: the deadline, ends the class; moving this number only relocates it.
+    _MARGIN = 1.25
 
     @pytest.mark.asyncio
     async def test_a_slow_oenb_does_not_extend_the_shared_deadline(self, monkeypatch):
         """User story 5. The deadline degrades the results, never the latency.
 
-        **Bounded against the deadline, not against the sleep.** A broken deadline now
-        misses by 1.05s rather than by microseconds, and the number in the assertion says
-        what is being tested. `_MARGIN` is the slack for five mocked sources and the
-        merge, and it is far below the 1.5s a regression would cost.
+        **Bounded against the deadline, not against the sleep.** A broken deadline misses
+        by 1.25s rather than by microseconds, and the number in the assertion says what is
+        being tested. `_MARGIN` is the slack for five mocked sources and the merge, and it
+        is half the 2.5s a regression would cost.
 
         **Proved to discriminate rather than asserted to**: with the deadline raised
         above the sleep, this test is the one that fails, and it fails on the elapsed

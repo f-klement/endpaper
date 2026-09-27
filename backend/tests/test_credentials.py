@@ -2502,7 +2502,7 @@ class TestTheSourceRuleAndItsConstraintAgree:
     That omission is the whole lesson here: the two agreed on every printable
     input, including all three path traversal payloads, and parted on an
     embedded NUL, because SQLite's `length` and `GLOB` are C string operations
-    that stop at the first one. `bne\0../../books/5?` read as `bne` in SQL and
+    that stop at the first one. `bne\\0../../books/5?` read as `bne` in SQL and
     was refused in Python, so the constraint the comments called "the last line"
     was not there for exactly the value that needed it. A differential test
     whose inputs are all drawn from the class where two implementations agree

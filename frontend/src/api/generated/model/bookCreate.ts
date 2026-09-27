@@ -12,6 +12,11 @@ import type { OwnershipStatus } from "./ownershipStatus.ts";
 
 export interface BookCreate {
   author?: string | null;
+  /**
+   * @maxItems 32
+   * @items.maxLength 120
+   */
+  categories?: string[];
   /** @maxItems 8 */
   classifications?: ClassificationIn[];
   collection_id?: number | null;

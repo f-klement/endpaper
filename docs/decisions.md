@@ -3,6 +3,10 @@
 Things that look wrong, redundant or old-fashioned until you know why. Read the relevant
 entry before "fixing" one.
 
+An index of every entry below, with the section it sits under and how long it is, is in
+[`decisions-index.md`](decisions-index.md). It is generated from the headings in this
+file: add an entry by writing it here, and regenerate the index rather than editing it.
+
 ## Backend
 
 ### `bcrypt` directly, not `passlib`
@@ -2157,7 +2161,10 @@ naming where that reasoning lives.
 
 The corollary is a house rule that already existed and was broken twice in one session:
 **regenerate the client after any change a docstring or a schema makes to the OpenAPI
-document**, not only after a field change. Nothing in CI catches a stale client, and
+document**, not only after a field change. The frontend job snapshots the committed client
+and diffs it against a fresh generation, and the backend suite holds the committed schema
+against a fresh dump, so a stale client fails CI and a stale schema fails a local run.
+Neither of them regenerates anything, and
 `bun run api:generate` cannot run on the test host, whose frontend image has no `uv`: dump
 the schema locally with `uv --directory backend run python scripts/dump_openapi.py` and run
 `orval` on its own.
@@ -2656,6 +2663,16 @@ seats reached this independently and neither found a live offender, which is the
 point. The second rule is scoped to modules importing `catalogue` rather than to
 every backend module, because seven others define frozen dataclasses that have
 nothing to do with this; the gap that leaves is listed in the guard's docstring.
+
+**Amended 2026-09-26: the rule held against the import path, and that is why
+`Record.with_scalars` exists.** The import write rebuilds a record where its belt altered a
+scalar, and the first version of that rebuild called `dataclasses.replace` in
+`importing.py`, which the second rule refuses. **The guard found it, not a reader**: the arm
+was red on the first targeted run of the branch. The rule's own stated remedy is a second
+method rather than an allowlist entry, so `with_scalars` was added as the general case of
+`with_cover`. It refuses the fold flag and every collection, with the refused names derived
+from the declarations rather than listed, and the pin beside that derivation is there because
+an empty derivation would refuse nothing and the loop would pass.
 
 **The severity was recorded wrong twice, in opposite directions, and how is
 worth keeping.** The comment first claimed over 120 seconds against a shape of
@@ -4640,6 +4657,64 @@ a guard noticing something.
 **On standard output because the tree is deleted before anybody can read a file in it.** The
 suite runs in a pod whose repository is removed by the runner's cleanup, so a report written
 to a path inside it is gone by the time the sweep could look.
+
+### A test asking which refusal fired reads the message off a channel the fixture owns, never a stream a runner formatted
+
+The entry above is about a verdict. This is about a refusal's text, and the mechanism is a
+rung lower than a shared stream.
+
+`Error.stack` is formatted **when something reads it**, under whichever
+`Error.prepareStackTrace` and `Error.stackTraceLimit` are installed at that moment rather
+than at the throw. The runner collects a teardown error and prints it later, from `stack`,
+and it reassigns both of those globals at runtime. So the text a reader sees is decided by
+what the runner had installed when it got around to printing, and one path reduces a real
+error to the bare word `Error`.
+
+**So a test asking which refusal fired reads a file the fixture owns**, written at throw
+time, and a test asking whether a refusal reaches a person reads the stream, which is the
+different question and the only thing the stream can answer. The register's guard keeps two
+arms on the stream for exactly that, one per printing route, because a guard nobody can read
+is a guard nobody acts on.
+
+**Pin no spelling of the message.** The engine the nested child runs under is a property of
+where the suite runs, not of this tree: inside the suite container it is one engine and on a
+maintainer's machine the same shebang resolves to the other, and the two word the same
+`TypeError` differently. The child records its own engine and formatter state beside every
+refusal, so the question is answered by a reading rather than by an argument. Three seats
+reasoned to three different answers before that instrument existed, each correct about a
+different process.
+
+**And a count over source text is not the instrument for what a file writes out.** A pattern
+matched against the text counted a call written inside a string literal, so one file
+published a figure two too high. The walk reads the parsed source.
+
+### A backticked test name is an assertion about a location, and a name that is gone loses its backticks
+
+A bare backticked name cannot be told from a name written down **because** the test is gone,
+and this tree holds more of the second than the first. So what is asserted is the qualified
+form, the ones that spell a location: those are a pointer, and a pointer that resolves to
+nothing is a rename nobody noticed. A rule over every backticked name is red on correct
+prose several times over for each real defect it finds.
+
+**The escape is dropping the backticks**, which is one mechanism rather than a list of files
+allowed to carry a dead name. It **exists** rather than being in use: a non author measured
+zero live instances, and the first is the repair in the entry about a free and credentialled
+source, where a guard's old name is recorded because the premise it rested on turned out
+false.
+
+**Resolved against the run's own collection, and against a parse of the files the run did not
+collect.** A parse alone resolves a name that is `def`ined and not collectable and so fails
+green, which is why the collection answers first. There is no gate: the shape this replaced
+put the only enforcing arm behind a fixture that **skips** a narrowed run, so one test file
+collecting nothing would have left the rest of the module green with the rule switched off.
+What is left is the other direction, a whole run being stricter than a targeted one, so such
+a defect is met in CI rather than locally.
+
+**The population is matched from source text, so it anchors on the token and pairs backticks
+nowhere.** Files with an odd total backtick count exist here, and whole file pairing inverts
+from the stray onward: that is why a **more permissive** span bound returned a **smaller**
+population, which is the tell that an instrument rather than a tree is being measured.
+
 
 ### The frontend has no sweep, and the route to one is recorded rather than built
 
@@ -7287,7 +7362,7 @@ what a batch wants; clamping a year of `9999`, MARC's own open ended date, to
 and `_NUMBER_RANGES`, and `Record.from_upload` truncates the cut set before that,
 so what a column the importer writes inherits comes from those two tables and from
 nothing else. Measured over 43 (field, value) pairs through both constructors, 86
-cases: `bounded_fields` differed from the record's own fields in 0. Over the whole
+cases: `stored_record` differed from the record's own fields in 0. Over the whole
 reachable domain rather than the sample, each `catalogue` ceiling equals
 `min(column width, BookCreate MaxLen)` and each `_NUMBER_RANGES` bound equals the
 `Ge`/`Le`, so `within_bounds` is the identity there and no end to end test can
@@ -7299,7 +7374,7 @@ each comes back as rather than that it changed, by
 `tests/test_importing.py::TestTheSecondBoundHasOneConstructibleBypass`. The
 coverage question, whether a new column is bounded at all, is asked of
 `catalogue.py` by `tests/test_marc.py::TestEveryColumnTheImporterWritesIsBounded`.
-**The falsifier for keeping the call** is at `bounded_fields`: a `Record` producer
+**The falsifier for keeping the call** is at `stored_record`: a `Record` producer
 that does not run `__post_init__` makes it load bearing again.
 
 **And the policy above now has a test.** This entry names `within_bounds` as the
@@ -7311,6 +7386,57 @@ to be inhomogeneous, because `("x"*n)[:c]` and `("x"*n)[-c:]` are the same strin
 and the assertion holds that shape rather than a comment describing it: a check
 that a probe is on the right side is not a check that it can tell the two sides
 apart.
+
+**Amended 2026-09-26: the belt answers the record, and the composition is what the two
+ceiling tables buy.** `stored_record` answers a `Stored`, a `NewType` over `Record`, and
+rebuilds through `Record.with_scalars` only where the belt altered something. That rebuild
+re-enters `__post_init__`, whose dropper **nulls** an over wide string where the belt **cuts**
+one, so the equality between `catalogue._TEXT_CEILINGS[name]` and `min(column width,
+BookCreate MaxLen)` stopped being an observation and became load bearing. It has an arm per
+name in `tests/test_importing.py::TestBothBoundsAgreeOnEveryName`, and both sides of every
+one of those arms resolve to the same `models` constant, so it catches a retyped literal
+rather than a moved constant and says so.
+
+**The `NewType` is the convenience and an `ast` pass is the enforcement.** The type checker
+runs in CI as of 2026-09-26, and what it refuses is one thing: a raw `Record` where a
+`Stored` is wanted. Wrapping one is **accepted**, a `NewType` call being a cast, and neither
+create path is checked at all, because `Book.__init__` is `(self, **kwargs)`. So
+`tests/test_importing.py::TestTheImporterReachesNoColumnOffItsOwnTuple` is what replaces the
+`KeyError` an eleven key dict used to give.
+
+**That pass asks about the write, not about the record, and the second shape is why.** Its
+first three versions followed the value through arguments, containers, yields, comparisons
+and returns, and bought one closed hole for eight refusals of legal code, the worst being
+that `Stored | None` could not be consumed: the `is None` check that makes the shape safe was
+itself reported. Narrowed to which columns are read off a bounded record, the kinds of
+finding fall from ten to four and the machinery from 169 statements to 130. **What it gave up
+is stated at the top of its blind spots**: it says nothing about where a record goes, so a
+write in another module is outside it entirely. What replaces the worst of that costs no
+tracking, because it is also a question about the write: every `**` into `Book(...)` here
+must be a walk over one of this module's own tuples, which catches the whole
+`Book(**anything)` family that a pure attribute rule would have lost.
+
+**One hole is open on purpose, and that is a decision rather than a limitation.** `isbn` does
+not pass through the belt, so an over wide one set past the constructor reaches its column
+verbatim. Rebuilding unconditionally would null it instead, measured, and nothing in the suite
+distinguishes the two answers, so the spelling preserving today's behaviour was taken. The
+behaviour is **conditional**, which is worse than consistently wrong and is the argument for
+closing it: measured, the value arrives verbatim when the belt altered nothing else and as
+`None` when it did, shown with an over long title and again with an out of range year.
+
+**It is mechanically closable, and the first draft of this amendment said otherwise.**
+Measured: `isbn` can join `_MARC_RECORD_FIELDS`, `_gap_fields` still drops it because
+`book_columns.WORK_DETAIL` holds neither it nor `title`, and the belt cuts rather than nulls
+it because `_TEXT_CEILINGS["isbn"]` equals the column's 20. The cost is one duplicate keyword
+in `MarcImport._create` and one arm of `TestAMatchedBookNeverGainsAnIsbn`, which reads today's
+tuple and would have to be changed deliberately.
+
+**The objection is the value, not the mechanism.** A cut ISBN is a different identifier:
+`_KEPT_WHOLE_ON_UPLOAD` already records that, `books.isbn` is unique across the whole table
+and is this importer's primary match key, so a truncation invents a key that can collide with
+a row no catalogue ever named. Measured: a 40 character value cuts to 20 characters that
+`isbn.parse` refuses. Closing it wants a bound that **drops** rather than cuts, which is its
+own ticket, and the reason recorded here is that one rather than an impossibility.
 
 ### A guard's fixture has to reference the thing the guard stops
 
@@ -7327,12 +7453,20 @@ names the refusal, so falling through to any other `MarcError` fails. Measured
 on a mutant with the guard removed: 898 bytes became a 1,000,000 character
 title.
 
-### The seam into `metadata.py` is pinned by a derived guard, and `mypy` is not in CI
+### No module reads another module's private names
 
-`marc.py` reads twenty private names on `metadata`, which no other module in
-this tree does. `tests/test_marc.py::TestTheSeamIntoMetadataIsPinned` derives
-that list with `ast` rather than writing it down, and asserts both that every
-name still exists and that `marc.py` is the only module doing it.
+No module of ours reaches past another's door, and there is no exemption. `marc.py`
+was the one: it composed the MARC parser in `metadata.py` by name, because an
+uploaded file is a third MARC profile over the same fields and a second parser
+would be a second set of field decisions to keep in step. It composes the same
+parser through `marc_fields.py` now, so there is nothing left to admit. The two
+private names still written in `marc.py` are in docstrings, citing a measurement
+and a policy, which is a mention rather than a read.
+
+`tests/test_marc.py::TestNoModuleReadsAnotherModulesPrivateNames` derives the reads
+with `ast` rather than listing them, and drives its two halves separately. A test
+naming the names would be the shape this repository records as wrong on every first
+attempt, a guard that enumerates something open.
 
 It took three attempts and each failure was found by attacking it: the first
 matched a module basename against any local variable and reported `shelf.py`
@@ -7341,12 +7475,23 @@ same import shape `tests/test_shelf.py` records its own first version sailing
 past; the third keyed on the local binding, so `import metadata as m` filed the
 read under `m` and the "is it one of ours" filter skipped it.
 
-**`mypy` reports all twenty statically and the pipeline does not run it.**
-The pipeline runs `ruff check`, the OpenAPI diff and `pytest`; its only
-mention of `mypy` is a comment. Adding `uv run mypy .` to the backend job would
-pin these and `_Subfields`, which is annotation only and which no runtime guard
-can reach. **Raised rather than done**, because a pipeline change affects every
-trio's push and is not one trio's to make.
+**`mypy` reports these statically, and as of 2026-09-26 the pipeline runs it.**
+Until then the backend job ran `ruff check`, the OpenAPI diff and `pytest`, and its only
+mention of the type checker was a comment saying the synced virtualenv happens to hold one, so
+a type error reached `main` green and waited for whoever next ran the full gate on their own
+machine. It runs beside the lint step now, at 27.6s over 276 source files against about 240s
+for the suite in the same job, and it pins these reads and `_Subfields`, which is annotation
+only and which no runtime guard can reach.
+
+**This paragraph said "raised rather than done, because a pipeline change is not one trio's to
+make", and that was right about a trio and not about the work.** It is the main session's to
+make, and the cost of it standing was measured on the day it was taken: two type red trees
+committed in one session, each found hours later by somebody looking for something else.
+An arm named `TestTheTypeCheckTheGateNamesIsRunByAJob`, in the internal test module that
+holds the rule about which commands a published document may offer, reads the job's own script
+block and is what stops the step being deleted as unexplained. It lives there rather than beside
+this entry because that module is stripped from the published tree, so it may name the pipeline
+file; a published document may not, which is how this paragraph first failed the gate.
 
 ### `isbn` is never gap-filled onto a matched Book, and that is what stops a 500
 
@@ -8811,8 +8956,12 @@ source code list holding hundreds, and a table from those onto the enum is the c
 
 A new `book_subjects` table cannot hold it either, not without retiring `books.categories`
 first: both would hold the same labels, and two stores for one fact is the objection that
-decides it. Retiring that column reaches 10 backend modules, 12 frontend files, both
-importers, both exporters, `backup` and the public shelf schema, counted 2026-08-31.
+decides it. Retiring that column reaches both importers, both exporters, `backup`, the
+public shelf schema and every other module that names the column. **The reach is recounted
+rather than stated here**, because a figure beside a rule goes stale against the rule and
+this one did: the wave that gave the column a request field, a route write, three constants,
+two validators and a generated client model made the 2026-08-31 count short without touching
+this sentence. What names it is what `grep -rl categories backend frontend/src` answers.
 
 **So this ticket writes no migration**, against the wave plan's forecast of one, and
 nothing here changes a column, a constraint or a table. Growing `ClassificationScheme`
@@ -9034,8 +9183,13 @@ column, or from a stated derivation.
 `1e9` is roughly 70 GB and ten minutes, per member, per request, until somebody finds the
 row. Measured in `importing.py` at 70.5 bytes and 0.624s per million elements.
 
-**`CATEGORIES_MAX` is `32 * CLASSIFICATION_NUMBER_MAX + 31 * 2`, which is 3,902**, written as
-the expression so the number and its sentence cannot drift. 32 headings, because the two
+**`CATEGORIES_MAX` is `MAX_CATEGORIES_PER_BOOK * CATEGORY_MAX + (MAX_CATEGORIES_PER_BOOK -
+1) * len(CATEGORY_SEPARATOR)`, which is 3,902**, written as the expression so the number and
+its sentence cannot drift. The number has not moved; its factors are named, and they and the
+expression live in `schemas/book.py` rather than `models.py`, where a request body states the
+pair the column states the product of. `CLASSIFICATION_NUMBER_MAX` is no longer read there:
+`CATEGORY_MAX` is the literal 120, held equal to it by an arm, so widening a column width
+cannot widen every subject list this application accepts. 32 headings, because the two
 failure modes are not symmetric: too loose costs page weight (25 books at 3,902 is 97,550
 characters), and too tight drops a whole search result silently, since `_match_rows` drops
 the row rather than the field. The widest shape measured here is 14 headings at up to 91
@@ -9249,6 +9403,171 @@ killed the `uv` parent and not the pytest grandchild, and the orphan spun the un
 loop for 53 minutes at 8.6 GB on the machine that runs etcd.
 
 ---
+
+## The two doors over `books.categories`, and why they differ
+
+**`books.categories` has two request bodies and a third writer, and the rules differ. The
+deciding fact is the wire shape, not the producer.**
+
+`BookCreate.categories` is a list and **refuses** a subject containing the separator, with a 422.
+`BookMatch.categories` is one joined string and **splits and rejoins**.
+`google_books.join_categories` **drops** such a subject. None of the three is a relaxation of
+another.
+
+**The ground for refusing is that the value is unrepresentable, not that it is risky.**
+`split_categories` splits on a **bare** separator, so a stored `"Fiction; general"` is served as
+two subjects to every reader of this column, including the member who typed it. So the refusal
+says "this column cannot hold that value", which is true whoever produced it.
+
+**A 422 at the request and a drop at the producer is this tree's existing arrangement, not a
+choice made for this field.** `classifications.bounded_headings` states it: a bad entry is
+dropped and logged there, because nothing in a record is worth failing a whole lookup for, while
+`ClassificationIn.number` is a hard 422 on the same route. This column has no parser layer yet,
+because no reader emits a subject, so the drop lives at `join_categories`, which is the one place
+that knows the separator and so reaches every producer.
+
+**The split on the match door is forced rather than chosen.** `catalogue.Record.as_match` joins
+with a string containing the bare separator, so a refusal there would refuse every record
+carrying two or more subjects, and nothing about a pre joined string distinguishes a structural
+separator from a typed one. **A producer argument does not separate the two doors**:
+`POST /{book_id}/enrich/apply` validates a body the client sent, which is the same producer class
+the other door refuses. An earlier version of this entry argued from the producer and was wrong
+at both sites.
+
+**All three are correctness controls and none is a security control.** A hostile client can store
+any value the column holds through either door.
+
+**The match door stays a string rather than becoming a list**, on three measured grounds:
+`google_books.merge_into` assigns this column by name off `book_columns.WORK_DETAIL`, so a list
+would need reshaping there; `catalogue.as_match` would have to stop joining, against the rule its
+own site states; and `TestTheSignatureIsTheBound` partitions names rather than types, so it would
+not catch either. Three reshape sites against one.
+
+**Bounds on the match door apply after the split and never before.** A 3,902 character string
+spelled `a;` repeated is 1,951 subjects, inside the field's own `max_length` and 61 times the
+count the create door allows.
+
+**The count is capped at the producer and refused at the model, and both halves are needed.**
+`BookMatch` is a response model as well as a request body, and `routers/books._match_rows` builds
+it inside a `try` that drops the **row**, so a count bound on the model alone cost a whole search
+result for a record that is merely well described: measured, 33 short subjects join to 493
+characters, far inside the width bound, and returned **zero** rows where 32 returned one.
+`catalogue.Record.as_match` now passes the count to `join_categories`, which is
+`Record.match_headings`' arrangement one field over and was bought there by the same incident, in
+its words "it belongs to the shape rather than to the caller". The model keeps its refusal,
+because the other producer of that body is a client on `POST /{book_id}/enrich/apply` where
+nothing has capped anything and a 422 is readable. Measured after: 33, 40 and 200 subject records
+all return one row carrying 32, and a 1,951 subject client body is still refused.
+
+**A record is still lost whole on that path, by the field's own width**, which predates this work:
+32 distinct 400 character subjects join to 12,862 and the `max_length` refuses them.
+`tests/routers/test_books_search.py` already pins that as the one field where a record is lost
+whole. Only the count was newly reachable, and the rejoin width is not reachable there at all,
+because the join guarantees no bare separator so split then rejoin is the identity.
+
+**Its two bounds are the count and the width of the rejoin, and not a width per subject.** A per
+subject width refuses a single long heading that is inside the stated bound, which this path pins
+as the deliberate answer: what the bound admits is stored. Splitting on a bare separator and
+rejoining with the two character one lengthens the value by one per split, so a payload of
+exactly 3,902 carrying 31 bare separators is 32 subjects, inside the count, and rejoins to
+**3,933**. The count alone does not protect the bound and the rejoin width does, exactly.
+
+**The create door and the match door do not state the same pair, and neither is missing one.**
+The create door bounds a list, which needs a count and a per element width for the schema rule to
+see it as bounded at all, and the product of that pair is the stated width. The match door bounds
+one string, where the count and the stored width are complete. The per subject width is 120 on the
+door where a refusal is a 422 a caller can act on, and absent on the door where a refusal drops a
+field on an enrichment the member did not choose the value of.
+
+**`CATEGORIES_MAX` is a stated bound and not something the column enforces.**
+`books.categories` is `Text` and SQLite ignores a declared width, so nothing breaks at 3,903. It
+is a page weight control, because the column is on the list payload and an oversized value is
+paid for on every row of every page.
+
+### The 422 is unreachable from an honest producer today, and that is a precondition rather than a note
+
+**A `field_validator` raising refuses the whole request, so the member loses the book and not the
+subject.** Today that costs nothing, checked per producer rather than argued: no file reader
+emits a subject; the scan flow does not forward the field and its own exclusion row names it; the
+MARC import's field list excludes this column and its gap filler assigns by plain `setattr`, so no
+validator of any model runs; and the CSV and OPDS imports read bounds only to truncate.
+
+**A browser side bound that drops a separator bearing subject is therefore a shipping
+precondition of the work that makes a reader emit one**, in the same relation as
+`bounded_headings` to `ClassificationIn`'s 422. Without it the refusal becomes a lost book on a
+bulk import: one file with 33 subjects, or one carrying the separator, loses its whole book.
+
+### The frequency measurement was withdrawn, and where a split would live if it is ever run
+
+The question of how often a real `<dc:subject>` carries a separator **was not measured and no
+decision rests on it**. The 1,176 file library is not on the development machine and the earlier
+wave's instrument was deleted with its notes; the tree holds two synthetic subject values.
+
+The unrepresentability ground above decides it without the number.
+
+**If the measurement is ever run and comes back substantial, the right home for a split is the
+reader, not a shared validator.** A reader knows its own format's convention: OPF repeats
+`<dc:subject>`, so a separator inside one element is the producer's own punctuation, while a
+format with a single subject field says nothing of the kind.
+
+### The bound is two named factors, and both are literals
+
+`CATEGORIES_MAX` was `32 * CLASSIFICATION_NUMBER_MAX + 31 * 2` in `models.py`. The two factors now
+carry names, `MAX_CATEGORIES_PER_BOOK` and `CATEGORY_MAX`, because a request body states the pair
+where the column states the product. 3,902 does not move.
+
+**All three live in `backend/schemas/book.py` now**, beside the three other per book request
+counts: none of them is a column width, since `books.categories` is `Text`, and that module is
+their only consumer.
+
+**`CATEGORY_MAX` is the literal 120 and not an alias of `CLASSIFICATION_NUMBER_MAX`**, though the
+two are the same number because they are the same population measured. Aliasing made the
+shared population claim unfalsifiable while the coupling ran the wrong way: that constant is a
+**column** width, widened three times for column reasons by its own record, and each widening
+would have silently widened every subject list this application accepts with every arm green. An
+arm holds the equality instead, so moving either has to be done twice.
+
+**The separator's width is read rather than retyped.** Writing the `2` put one fact in two
+modules, and the note there argued only the safe direction: a **wider** separator would make the
+stated width too small and every widest list claim false. `len(CATEGORY_SEPARATOR)` removes the
+second home instead of guarding it.
+
+This is also the fourth case in `BookMatch`'s number provenance comment. The first three are a
+field taking `BookCreate`'s number, a field taking its column's width, and `source`, which has no
+column. This field takes neither: both bodies name the column in two shapes, and one bound is the
+product of what the other is computed from.
+
+### The write has no unwrite
+
+**Nothing clears `books.categories` and nothing did before this change.** `BookDetailsUpdate` has
+never named the column, so the hand edit route cannot touch it, and `google_books.merge_into`
+skips an incoming value that is null, empty or an empty list, so **enrich apply with `overwrite`
+replaces the value and never clears it**. Recorded explicitly so nobody can later argue a removal
+route already exists.
+
+**The unwrite is a precondition of the emitter work, not a note beside it.** The moment a file's
+own two or three words occupy the column at creation, they occupy it permanently and block a
+catalogue's better list from ever filling it, on every imported book. Whether an empty list
+clears the column is its own question, under the model validator that already refuses to clear a
+column that cannot be null.
+
+### One demand declined, with the reason, because its only other home is deleted
+
+**`backend/schemas/book.py`'s "the two fields a record does not carry" sentence is not stale**,
+and a design seat read it as a claim about what bounds the column. It is a claim about what
+`catalogue.Record` does not clear at construction. `Record` still carries no such scalar and
+`as_match` still assembles the value, so the sentence is unchanged by this work. Recorded because
+the only other place this answer was written is a wave note that gets deleted.
+
+### `categories` is deliberately absent from the MARC importer's field list
+
+A MARC record **does** carry uncontrolled subject labels: `Fields.controlled_subjects` answers two
+lists and `marc.py` puts the plain `$a` on `Record.subjects`. The importer **discards** them,
+writing only `record.headings`, at `MarcImport._apply_one`. So the exclusion is a decision about
+what an import writes, not a claim about what a record holds, and the same labels do reach
+`books.categories` on the **lookup** path through `Record.subject_labels` and `as_match`. An
+earlier version of this entry had the reasoning backwards and named the wrong function. Stated at
+the site because an exclusion and an omission read identically there.
 
 ## A guard that names two enforcers and has one
 
@@ -9489,6 +9808,66 @@ ordinary search, and `asked` says so.
 
 ---
 
+
+**The identifier backfill takes the opposite policy**, for a caller with nothing cheaper to
+do, and what makes its queue safe is a deadline on the slot. See the entry below it.
+
+### The backfill waits where the search refuses, and a deadline is what buys the wait
+
+`IDENTIFIER_BACKFILL_CONCURRENCY` was justified from a process wide resource and enforced
+per request: the semaphore was a local in the handler body, so nine concurrent runs inside
+the rate limit put 54 sockets against a pod `fetch.MAX_RESPONSE_BYTES` prices at sixteen,
+with `metadata.search` spending eight of them per fan out. It is one module level semaphore
+now, which is where `metadata._HARDER_AT_ONCE` already lives.
+
+The eight is per fan out and not per pod, and the default search path admits four fan outs
+per member, so this bound leaves room for one search and does not put the pod under the
+sixteen. That is the search path's own question and is filed separately.
+
+The policy is the opposite of that precedent's, and the difference is the caller rather
+than the resource. A search that cannot have the slot runs the ordinary search and says
+which catalogues it asked, so a refusal is a true answer; a backfill refused its slot has
+nothing cheaper to do, so a refusal is a retry and no rows. So this one waits.
+
+What makes waiting safe is the thing the precedent refuses a queue to avoid: the handler
+holds one of the pool's connections for its whole life, and a process wide bound makes
+each run's hold longer by its contention factor. `IDENTIFIER_BACKFILL_DEADLINE_SECONDS`
+caps it. Thirty, because three independent derivations reach it: Little's law over the hold,
+which is the deadline plus one `fetch.TIMEOUT_SECONDS` because an acquire admitted just
+under the deadline still runs a full request, puts `0.1/s x 40s` at four of the pool's
+fifteen per member against the nine the route held at a 90s life, it is
+exactly three times `fetch.TIMEOUT_SECONDS` so a cut lands on a wave boundary, and it is
+half the 60s read timeout measured on the proxy in front of this. It does not make the
+route safe for the pool: it moves nine to four, and the limiter keys on a username, which
+under `AUTH_MODE=proxy` is free, so no arrival rate bounds the adversarial case.
+
+The deadline is spent on the **slot** and on nothing else, which is the part a reader will
+want to simplify. Threaded down to `fetch` it bounds no waiter, because `deadline.left` is
+consulted when a request starts and a coroutine parked on `acquire` has not started one.
+Around the `gather` it loses every answer that already arrived, spends up to fifty metered
+requests and returns a 500 on a cursor that cannot advance. Cancelling stragglers with
+`asyncio.wait` spends a metered request that is already charged for nothing.
+
+The batch runs in waves of `IDENTIFIER_BACKFILL_CONCURRENCY` **lookups**, with the deadline
+checked between them, so the examined set is a prefix of the batch by construction rather
+than by `asyncio.Semaphore` happening to be FIFO. Lookups and not books: sliced off the
+batch instead, a wave holding k rows that carry no resolvable identifier ran `6 - k`
+requests and still spent one request's latency, so a half unresolvable library examined
+about half as many books per press inside the same deadline. Fair progress between members does rest on that
+order: without it one member pressing flat out holds all six slots and everybody else's
+press resolves nothing, which costs them a press and no rows rather than any data. A cut batch reports the counts for that prefix
+and a cursor clearing exactly it: the alternative skips the dropped books for a whole pass
+of the library. A book resolved after the cut is still stored, because its metered request
+is paid for and writing `google_books_id` takes it out of the candidate set; it is counted
+in no bucket, so the reply understates what the run did and never overstates it.
+
+`MAX_IDENTIFIER_BACKFILL`'s own comment stated the route's worst case as 90s and argued it
+against the proxy's minute. The life is the deadline's now, so that figure is what the fifty
+would cost unbounded and the fifty survives as what a press examines.
+
+Still open, and not made cheaper by any of this: the session is held across the fan out at
+all, here and in `backfill_covers`, which keeps its own per request `ThreadPoolExecutor`
+and its own named exemption in the route layer guard until that sitting.
 ## Asking nothing has two causes, and the answer has to tell them apart
 
 `_search_terms` drops anything under two characters and the CQL keywords, so a query that
@@ -11029,6 +11408,133 @@ assertion. The opposite direction, that every stripped document declares itself,
 deliberately not asserted: the derivation reads the working tree where the gate reads a
 committed ref, so that arm would turn the suite red on an untracked working note.
 
+## The ignore file rule had three homes with three refusal shapes, and one module replaced them
+
+Three walks derived their population from `.gitignore` and each parsed it for itself: the
+Markdown and roster walks in the backend test tree, the walk in the pipeline selftest, and
+the corpus behind the rule that every command a published document offers is one this
+repository runs. Not two copies of one rule. **Three, drifted in three directions, each
+missing a different half:**
+
+| refusal | the backend walks | the selftest walk | the corpus |
+|---|---|---|---|
+| the three forms | `assert` | `assert` | `raise SystemExit` |
+| directory only marker in the return | yes | yes | **no**, a 2-tuple |
+| an empty parse refused | **no** | **no** | yes |
+
+**So the collapse had to be a union rather than a pick.** The home a reader reaches for as
+canonical is the largest one, and it is the one lacking the anti vacuity refusal: pointing the
+others at it would have deleted that refusal and been green doing it.
+
+**The refusals differ because the failure directions differ, and one module serving both
+directions carries both.** The corpus is permissive evidence, so an empty parse leaves it
+unbounded: it reads the caches, the dependency trees and the build output, accepts more
+commands and fails no test. The walks are restrictive, so an empty parse widens a population
+and trips a ratchet instead. The empty parse refusal is therefore an argument with no default
+rather than a constant, which is the same reasoning the matcher's `is_dir` already carries: a
+default is the answer a call site forgets to give.
+
+**Four fixtures write an ignore file that parses to nothing, on purpose**, which is why some
+callers answer the way they do. Their subject is a rule a walk has to apply on its own, and an
+ignore file with entries in it would let the walk pass by reading the file instead.
+
+**Which answer a caller gives is derivable from its own signature, and that was the second
+attempt.** A caller that takes the tree as a parameter refuses nothing; a caller that reads the
+repository's own ignore file refuses an empty parse. The first attempt justified the permissive
+answer entirely by those fixtures and then gave it at every walk, including three callers that
+read the repository's own file and can never be handed a fixture. That made the permissive answer
+eight of nine and the local idiom, with three sites already modelling it without the stated
+ground, so the next consumer would have copied it and taken an unbounded population. Moving those
+three is monotone and moves nothing on a tree whose ignore file parses. **A seam whose answer a
+reader has to take on trust is a seam that drifts**, and one derivable from the signature does
+not need an arm at every future call site.
+
+**The module is stdlib only, and that is load bearing rather than tidy.** The selftest kept its
+own copy because the module holding the rule needed the application's dependencies and its job
+installs none. A module importing only `fnmatch` and `pathlib` dissolves that reason, which is
+the whole claim the collapse rests on.
+
+**Where it lives is decided by the publish gate, not by taste, and the invariant is per file
+rather than per directory.** A published file may not name a stripped path, while a stripped file
+may name a published one freely. Of the six importers **two publish** and **four are stripped**,
+and **two of those four sit in the same directory as the module**, because the strip list names
+individual files. So "under the test tree" is not what makes this module published: being absent
+from the strip list is. What the asymmetry forbids is the module naming any stripped consumer,
+which is why its prose names each by role, and what it permits is every stripped consumer naming
+the module.
+
+**The operative half is how a stripped consumer reaches a published module, and it is not an
+import.** Neither of the two that run outside the test runner can import this package, so each
+loads the file through `importlib` by path, checking the path exists first: a spec built for a
+missing file carries a loader, so the failure would otherwise be a traceback out of the exec
+rather than the refusal the module promises. **By path and not by putting the application's
+directory on `sys.path`**, which would put its sixty top level modules in front of the standard
+library for the rest of the process; none is named for a standard module today, counted, and
+loading by path is the shape that cannot go stale. The reason is stated once, in the module, with
+a pointer at each load site: it was written twice in two files' words and had already drifted
+apart in the commit that wrote it.
+
+**Every refusal raises rather than asserting.** Two homes spelled it `assert`, which is
+removable: under `-O` the whole contract compiles out and every consumer silently walks an
+unevaluated tree. Nothing runs `-O` here, counted, so that half is latent. What is not latent
+is that one consumer is a script run directly rather than under a test runner, for which
+`SystemExit` is the exit a refusal wants. Three arms asserting the old type moved with it.
+
+**The marker fold changed no file and is latent rather than correct.** Giving the corpus the
+directory only marker makes it **grow**, which is its silent direction. Measured: the set of files that
+moves is **empty**, and **15 of the 16 directory only entries hold a member that is waiting**, the
+sixteenth being masked by the hidden directory rule. **No absolute corpus count is recorded here**,
+for the reason the code carries: the one measured first was stale by the end of the same commit
+that measured it. The empty symmetric difference is the claim, it is re-derivable, and it does not
+depend on how many files the corpus holds. The fold therefore ships with an arm that asks the
+matcher directly, because every walk prunes the ancestor first and cannot observe a file of the
+directory's own name.
+
+**A red set is certified by name, from the failure lines, not from the summary line.** A summary
+gives a fraction and the failure lines give names, and a certification claim is about which arms
+are red rather than how many. That is also the only form that survives the run: a summary line can
+be overwritten by interleaved log output, measured on this work, and the failure lines cannot be.
+
+**What the failure lines cannot say is how many tests ran**, so on their own they do not separate a
+finished run from one that died early, which would show few failures for the wrong reason. Two
+things separate them and both are needed: the runner's own exit line, and the coverage register
+arm's rendered block, which only a run that reached collection can print. Read those two beside the
+names rather than quoting a total.
+
+**Four shapes were refused, so nobody proposes them again.** A maintainer who adds a negation
+meets 41 red lines in one suite and 2 in another and reaches for exactly these:
+
+1. **Teaching the walk the negation form.** Refused. Git cannot re-include a path under an
+   excluded parent, and 16 of this file's 25 entries carry the directory only marker, so a
+   negation is dead under the majority of them: two derivations agree on the population and not
+   merely the number. It would make the file's line order semantically load bearing where the
+   parse is order independent today, and no anti vacuity pin in this tree checks an individual
+   member, so one file silently dropped by a mis-evaluated negation would pass every pin.
+2. **Skipping the guards when the ignore file cannot be parsed.** Refused, and this one carries
+   an artefact rather than an argument: the 41 arms cannot run without a parse, so a skip
+   converts 41 armed reds into 41 not-runs, and a not-run is green. The arm whose whole subject
+   is the refusal drives a fixture tree and **passed on the planted run**, so a skip yields a
+   green suite over a population nothing evaluated.
+3. **A degraded return, a sentinel or a dropped entry.** Refused outright: it is the
+   mis-evaluation the refusal exists to stop, wearing a fix's clothes.
+4. **Replacing the parser with `git check-ignore`.** Refused for a measured reason rather than
+   a preference: the pod the suites run in has neither the binary nor a `.git`, because the
+   runner ships a tar that excludes both.
+
+**The refusal is reported once per consumer, and the wall of identical sentences is the designed
+report rather than a defect.** What a maintainer pays is noticing that N identical messages are
+one cause. The message names the file, quotes the entry and says what to do.
+
+**Rescued from a deleted arm, because it is the only thing stopping the next reader rebuilding
+it.** The two `assert` homes were pinned against each other by an arm comparing the refusal as
+source text, and its docstring recorded why it compared the refusal **and nothing else**:
+widening it to the whole parser "would make it a copy check that fails on every honest edit to
+either side." That arm is deleted rather than migrated, because with one importable module
+there is no "either file" left for it to be about. **It could not have been extended to the
+third home in any case**: that home spelled the refusal as a `raise`, so a text count there is
+zero and adding its path would have failed on a correct tree. It was an enumeration of homes,
+which is what one module replaces.
+
 ## The ASCII narrowing rule is about alphanumeric predicates, not digits
 
 The constant held three names and the family has four: `str.isalnum()` is the same defect
@@ -11222,8 +11728,9 @@ next, taking a verdict with it each way. **So the exclusion is a property of the
 and not a name in a list**: a claim's gap may not carry a `|`. Measured over the walk this
 replaces, zero of the 423 grammar matches it read crossed a cell boundary, so the rule
 refuses nothing that was being read. That figure is the old walk's and does not reproduce
-from the new scope, which reads the two registers the old one missed: 428 strict matches
-against 435 permissive over 590 files, seven of them crossing a cell. Five are the register
+from the new scope, which reads the two registers the old one missed. Measured 2026-09-06,
+over the 590 files the scope then reported: 428 strict matches against 435 permissive, seven
+of them crossing a cell. Five are the register
 rows and two are the guard's own written out examples of the shape. What it refuses that
 nothing else would is a count genuinely written as a value column beside a description
 column, of which this tree has none.
@@ -11250,8 +11757,9 @@ requirement.
 of the rule's safety.** Quantifying over all of them quantifies over an accident: six
 directories holding Markdown in the candidate set hold exactly one document and four of the
 six are published, and one coverage register is that sole document for two of the four, with
-203 and 92 candidates beneath it counting itself. Driving that register to declare itself turned eight directories internal and took
-the scope from 590 to 392, with three tests failing and none of them naming the walk. A
+203 and 92 candidates beneath it counting itself. Measured 2026-09-06, when the scope reported 590 files, driving that register to declare
+itself turned eight directories internal and took the scope to 392, with three tests failing
+and none of them naming the walk. A
 README speaks for its directory; a register that happens to be the only document in it does
 not, and at one document a quantifier cannot tell them apart. Under the narrower rule the
 same edit costs one file, which is that file itself, and the set in scope today is
@@ -11267,19 +11775,24 @@ as the two read the same window.
 characters and the gate reads the first 30 lines, so a declaration below line 30 in a
 document whose header is short was invisible to the gate and visible to the census: measured
 by planting one at line 35, the gate exits 0 for all three published READMEs the rule is
-about, and the census drops two of them, taking the scope from 590 to 589 and to 587. The two
-agreed about every candidate before that, and the agreement was luck: **573** of the 629 have
-thirty lines or more counting newlines, the way `wc -l` does, and their opening thirty run
-under 2000 characters by as much as **1475**, with every declaration in the tree sitting by
-line 24, counted 1 based the way `grep -n` reports one.
+about, and the census drops two of them. The two agreed about every candidate before that,
+and the agreement was luck: most of the candidates have thirty lines or more counting
+newlines, the way `wc -l` does, and their opening thirty run under 2000 characters with room
+to spare, with every declaration in the tree sitting by line 24, counted 1 based the way
+`grep -n` reports one.
 
 **Both figures need their counting rule beside them, because each is three numbers without
-one.** The population is 626 over every candidate, which folds in files that have no line 31
-and so compares nothing, 575 if a line is what splitting on a newline returns, and 571 if it
-must exceed thirty. The bound is 1475 measured to the end of line 30's text and 1474 measured
-to the end of its newline. The bound does not move with the population; it moves with that.
-Two review seats disagreed by exactly one on each, and both disagreements were a definition
-rather than a count.
+one.** The population depends on whether a file with no line 31 is folded in, on whether a
+line is what splitting on a newline returns, and on whether it must exceed thirty; the bound
+depends on whether it is measured to the end of line 30's text or to the end of its newline.
+The bound does not move with the population; it moves with that. Two review seats disagreed
+by exactly one on each, and both disagreements were a definition rather than a count.
+
+**The reading itself has one home and it is not here.** This register and the census file
+carried two readings of the same thing, taken at two moments and each written as a fact, and
+neither was the tree: the file states the current one with its date and the population it was
+taken on, and the figures are gone from here rather than corrected, because a corrected
+literal is the same defect with a fresher date.
 
 The census now reads the same window the gate reads, which makes the mitigation true by
 construction rather than by a caveat somebody has to keep in step. **Neither direction of a
@@ -11290,9 +11803,12 @@ files and none of them holds a census candidate, so nothing would fail at either
 catches a drift is a literal pin spelling the number a second time, on the same reasoning as
 the register exclusion pinned beside its own rule.
 
-**The rule bought nothing today and that is the honest report of it.** It drops ten files
-holding zero census candidates. It is a named test that fails on its deletion, not a
-measurement of anything it has caught. **What would delete it** is the build tooling's own
+**What the rule drops is recomputed rather than written here.** It drops the files carrying
+the declaration, which are the files the mirror strips, and between them they hold one census
+candidate, in a stripped document. It read zero when this entry was written, and the sentence
+beside it said the rule cost no coverage: that is exactly the event the figure exists to
+disclose, and nothing compared the two until an arm recomputed it. It is a named test that
+fails on its deletion, not a measurement of anything it has caught. **What would delete it** is the build tooling's own
 source carrying the declaration, which the per file rule already reads: the pattern matches
 a comment prefixed line, so a `#` and the sentence is enough. Those are files this trio does
 not own.
@@ -11731,8 +12247,10 @@ one that does not look like one is dropped rather than logged.
 `sources.NEEDS_A_KEY` and `sources.METERED` were one set while the only credential in the
 roster was also the only bill. The Argentine national library is free and needs a login, so:
 
-* `test_house_rules.py::test_a_source_needing_a_key_is_one_that_costs_money` fails, as its own
-  docstring says it should. `Plan.lookup_together` and `describe` were re-read: the tier bars
+* test_house_rules.py::test_a_source_needing_a_key_is_one_that_costs_money failed, as its own
+  docstring said it should. The name carries no backticks because it is gone: the guard is
+  `test_a_metered_source_is_one_that_needs_a_credential` now, and a name written down because
+  it no longer exists is spelled without them, which is the escape the pointer anchor ships. `Plan.lookup_together` and `describe` were re-read: the tier bars
   a **metered** source and a free credentialled one may join it, which is right because it
   costs nothing per request, and `describe` already reports needing a key and holding one as
   two fields over two stores.
@@ -17895,3 +18413,258 @@ both dispatches match.
 **And the guard that named this rule was a tautology**, computing its expectation as the
 expression under test over a roster that cannot separate the candidate predicates. Its
 replacement writes the expectation out and constructs the two rows the roster has not got.
+
+## A weakened population and a decorative tuple member are different failures, and only one is a cross check
+
+A guard deriving one population two ways catches a **narrowing**: drop a decorator name from the
+tuple the parser matches on and the framework still serves the routes, so the two sides disagree
+by name. It says nothing about a member **no handler carries**, because such a member changes
+neither side, and nothing about a member whose every handler carries another too, because dropping
+it loses no member of the population.
+
+Measured on the route handler population: `api_route` was carried by exactly one handler and was
+that handler's only route decorator. Rewriting that handler's two `api_route` decorators as two
+`get` decorators, which breaks nothing, and then deleting `api_route` from the tuple, left every
+arm green with the hole the tuple had been widened for open again. Two green steps back to the
+hole.
+
+**So a tuple feeding a population needs three separate things**: the cross check, an arm that
+every member is carried by something, and an arm that no member is covered by another. The second
+carries an explicitly empty exemption set, refused from both sides, so a member nothing carries
+and a row whose handler has arrived are each red rather than silent.
+
+**And the second derivation in an arm has to be checked for cancellation.** The minimality arm was
+first written comparing a weakened population against the **registered** one. Given the cross
+check, the weakened population is a subset of the declared one, so the registered side cancelled
+out of the inequality: substituting the declared side for it survived, and the arm had read as a
+second instrument for a round. **An arm naming a second derivation is not using it until replacing
+that derivation with the first one turns the arm red.** That is the test to run before believing
+the word "cross check" in a class name, including in this repository's own; the family is
+*An arm that cannot fail the claim it was written for*, and the populations themselves are
+*Every population derived by matching source text in this wave was wrong at least once*.
+
+**The entry this is not, recorded so nobody writes it**: *a population's extent is held by a second
+derivation, never by a floor*. That is already the practice here and already tested,
+and an entry would add words to a rule that has enforcement.
+
+## An index of this file is generated, not written
+
+**Measured 2026-09-26**, and every figure here is that day's rather than today's: this file was
+734 headings and 195,090 words, and `CLAUDE.md` tells every session to read the relevant entry
+before changing anything. Nothing said which entry, and nothing said how large one is: they ran
+from 7 words to 31,154.
+
+So there is an index, and it is generated from these headings rather than maintained beside
+them. A hand written index is a second home for every title, and this repository's own rule is
+that a number or a name written down stops being re-derived and starts being copied. The index
+carries no summary, no module attribution and no line numbers: a summary would be a sentence
+that exists nowhere else and drifts, a module attribution is a claim the headings do not carry,
+and a line number changes on any edit above it where the anchor survives the entry moving.
+
+**It does not say which module a decision is about.** 16 of the headings name a source
+file at all, counting the **heading line only**, so the key would have to be derived from each
+body, and a wrong key routes a reader to a real entry that is the wrong one, with nothing red.
+The other population reads differently and was measured too: 270 of the 727 sections name
+at least one, counting the body as well, which is why the two figures in this wave's notes
+disagree and are both right. Search the titles instead.
+
+**An index does not repair a citation with no title in it.** Most mentions of this file in the
+source tree name no entry, and the index cannot give them one.
+
+## A second derivation is only a second instrument until you delete the first and watch it fail
+
+Three arms in one wave claimed to hold a population two ways and held it one way.
+
+| where | the two "derivations" | what made them one |
+|---|---|---|
+| the route handler population | a weakened decorator tuple against the registered routes | given the cross check, the weakened population is a **subset** of the declared one, so the registered side cancelled out of the inequality |
+| the importer's bounded record pass | an `ast` walk of the source against the live annotations | both resolved an annotation by **unparsing it to a literal string**, so `Stored | None` and a quoted `"Stored"` were invisible to each, and the two agreed on the wrong answer |
+| the decisions index's fence walk | a marker state machine against a second fence walk | the second walk was a blind delimiter pairing, which is the state machine with its rules removed: a boolean toggle, no info string, no length and no marker character were **each green on every arm** |
+
+**The test is mechanical and none of the three authors ran it.** Replace the first derivation
+with the second and the arm must redden; replace the second with the first and it must redden. An
+arm surviving either substitution is holding one derivation under two names, and it reads as two
+to every future reader of its class name.
+
+**The failure is not in the idea, it is in what the two instruments share.** All three pairs
+differed in traversal and agreed in the predicate underneath, which is the part a reader does not
+check because the traversals are visibly different. So the question to ask of a claimed pair is
+not "do these walk differently" but **"what do they both ask, and can that one thing be wrong"**.
+
+All three were found by a **non author** picking evasions, never by the author and never by a
+green gate.
+
+## A literal beside a derivation may be carrying a floor, so ask what it refuses before deleting what it repeats
+
+A guard parsed the publish gate's exemptions out of the gate and then asserted them equal to a
+literal pair. That reads as a second home for a fact this repository's own rule says to point at,
+and it was deleted for exactly that reason, on instruction from the coordinating seat.
+
+**The literal was also the only floor.** Nothing else asserted the checked population was non
+empty, and three arms iterate it, so an exemption added to the gate silently shrinks it.
+Reproduced against a gate exempting every entry of its own strip list: the population is **zero
+and every arm passes over nothing**. The repair is one line asserting the population is non
+empty, which keeps the derivation and restores what the literal was doing.
+
+**So a redundant literal is two things at once and only one of them is redundant.** Before
+removing one for what it repeats, ask what it refuses. Where the answer is a floor, replace the
+floor rather than dropping it, and say at the site that a floor is not a literal, so the next
+reader does not remove it again for the reason the first one did.
+
+**This was a fix handed down by the coordinating seat**, which is the worst source of a
+narrowing: measured over three waves, eight fixes were weaker than what they replaced and four
+of those came from the seat that proposes without building. A critic proposes without testing and
+the main session relays without measuring.
+
+## A refusal is narrowed and its escape hatch is closed in the same change
+
+The ignore file rule refused a negation by asking whether the entry contained an exclamation
+mark. git defines the marker as the first character of a line, so that refused
+`notes!draft.md`, a name git honours, and the walk went from over excluding in silence to
+failing outright on a versioned file.
+
+Narrowing it to the position is not a smaller change than it looks, and the reason is the only
+part worth recording. Containment was also the whole of what refused `\!name`, git's escape
+for a literal leading marker. By position that entry passes, and `fnmatch` then reads the
+backslash as an ordinary character and matches a name with a backslash in it rather than the
+file git ignores: narrow, and silent, which is the direction this walk exists to refuse. So
+the backslash class is refused in the same commit. **A refusal narrowed on one axis has to be
+checked for what its old, wrong breadth was incidentally covering**, because the coverage
+disappears with the breadth and nothing reports it.
+
+The position test is read before the anchor and directory markers come off, which is the other
+half of the same trap. Asked one line later it refuses `/!foo`, an anchored literal path,
+because stripping the anchor has just moved the marker into first place.
+
+## A refusal can be worth having for the shape of the failure alone
+
+A bare `*` matches every path component, so it takes every population derived from the ignore
+walk to zero while the parse still holds an entry and the empty parse refusal never fires.
+That reads like a silent hole and is not one. Measured with a star appended to a copy of this
+repository's ignore file: **nine arms across four files go red**, three of those files in the
+backend test tree and one outside the published tree, and the consumer that runs as a script
+refuses on its own. Nothing about it was quiet.
+
+**So the refusal earns its place on the shape of the failure rather than on coverage it
+adds**, and that is a reason worth recording because it is the one a review will not credit by
+default. Nine reds in four files each report an empty population, and not one of them names
+the line that emptied it: the person reading them is told that four separate walks found
+nothing. One refusal at the parse names the entry and the term. **Where a defect is already
+caught loudly in several places, the case for catching it earlier is diagnosis, and it has to
+be argued as diagnosis rather than as a hole being closed.**
+
+Two earlier versions of this entry got that wrong in the same direction, once in the pack that
+commissioned the work and once in the build seat's own correction of the pack, which named the
+census walk and the two by path readers as the silent radius. All three of those are in the
+nine. **The guard review measured it, and the lesson is that a claim about what nothing
+catches is a claim about every arm in the repository**, which is not a thing a seat holding one
+file can know by reading.
+
+It is refused by equality and never by containment. Three of the twenty five entries in this
+repository's ignore file carry a star inside a name, so a containment test refuses the file it
+is meant to read. What goes past is stated rather than bounded: a `?` or a character class
+each match something narrower than every name, so neither empties a population on its own.
+
+## A refusal that shares one message across five terms sends the reader to the wrong fix
+
+The ignore rule refuses five forms and reported all of them in identical words, telling the
+reader to teach the walk about a form. For four of the five that is the right instruction. For
+the fifth it is not: the likeliest trigger is a path spelled with backslashes, where the answer
+is a forward slash and no change to the walk at all. The message carries the matched term now,
+and the backslash term says that git spells every pattern with forward slashes.
+
+**The term is asserted by the arm that drives each form, not left to the code's own comment.**
+A message nothing reads is prose, and five terms sharing one sentence are what that costs.
+
+## A corpus figure is stated as an exclusion or recomputed, and the census had to learn this about itself
+
+The register already decided this once, under *A corpus is stated as an exclusion, never as a
+total*: the total goes rather than being corrected, because a corrected literal is the same
+defect with a fresher date. The census over roster counts in prose was written after that
+decision and broke it about its own walk, stating that walk's size in nine places.
+
+Measured 2026-09-27 over the whole file, on two instruments that agreed exactly: **every
+figure in it that an arm recomputed was right and every figure written by hand was wrong.**
+The largest was short by 192 rather than by the one the defect was filed for, and the same
+held of the scope, of the count of files carrying the internal declaration, and of the count
+of files long enough to tell the line window from the character window. The two counts an arm
+already recomputed were both correct.
+
+**The readings are not restated here**, which is this entry's own rule applied to itself: the
+walk's size moves on any commit that adds a file, and the wave carrying this change added one,
+so a total written into this paragraph would have been stale before it was read.
+
+**One of the stale figures was not scaffolding.** The sentence saying the declaration rule
+drops exactly what the mirror drops and costs no coverage read zero census candidates inside
+the dropped files. It is one now: a stripped document gained a roster count, which is
+precisely the event that sentence exists to disclose, and nothing compared the two. That
+figure is recomputed now, and it is a figure rather than a word deliberately, because it moves
+only on that event and not on any commit that adds a file.
+
+## A duration is attributed to a machine and a worker count or it is not evidence
+
+`backend/pyproject.toml` justified its worker count with a serial duration, a two worker
+duration and a test count, taken when the suite was a fifth its present size. **The figures
+are not restated in this entry**, and that is the rule applying to itself: this register
+publishes, so quoting them here would return exactly what was removed from the configuration
+file, on the argument that a figure nobody re-derives gets copied.
+
+The figure proposed to replace it was measured through this project's own suite harness, which
+appends its own worker flag to pytest's command line, and a command line worker flag wins over
+the one in `addopts`. So the replacement was not a reading of that setting either, and the
+readings on record differ in the machine and in the worker count at once, which means nothing
+on record separates the two effects.
+
+The setting therefore keeps the half that never depended on either, that the suite drops and
+recreates every table between tests and that two workers were measured using 0.68 cores
+between them, and carries no duration at all.
+
+## One fact, several homes, and the sweep for the others is part of the change
+
+Moving where the schema comparison lives falsified **six** statements of where it lives: a
+published test docstring, the reciprocal comment of the pipeline job that owns the other half,
+the skill every seat loads before running a suite, a helper docstring in the error tests, and
+two comments in the contract module. All six now name the guard rather than the pipeline.
+
+**The instrument matters more than the sweep.** A grep for the file name found three of the
+six. The other three say "the committed file", "the committed schema" and "what CI diffs
+against" without naming `openapi.json` at all, and they were found by grepping the **claim**,
+the phrase "CI diffs", instead of the path. Six sibling hits on that same phrase are about the
+generated client and are still true, so the phrase is not itself the defect: reading each hit
+is.
+
+**A change that moves where a fact lives greps for the fact's other homes, by claim and not
+only by path, before it is finished.**
+
+## The field a heading goes in and the code naming its vocabulary are one decision
+
+`marc.py` wrote every authority controlled heading as a `650` and keyed `$2` on the scheme
+alone, so a row `classifications.kind` marked as a carrier left as `650 #7 $2 gnd`. That is
+not a smaller record than the right one, it is a different assertion: `650` is what the work is
+about, and a consumer ingesting it has no way to recover that the citing record said
+otherwise. The export and the unauthenticated catalogue server share the builder, so the wrong
+answer went to strangers and to other institutions, and the JSON half of the same server
+already published the kind for exactly this reason.
+
+**The two halves are read out of one table rather than chosen separately**, which is the
+structural part. `655 $2 gnd` loses the kind on the way back in; `650 $2 gnd-carrier` keeps it
+and still files a disc under a subject. A single entry per pair makes both wrong answers
+unreachable instead of each being one edit away.
+
+**`655`, not `338`.** RDA's carrier field takes an RDA term, and the row in hand holds a GND
+number and a GND caption; naming the RDA word for it is the crosswalk `marc_fields` refuses in
+as many words. `655` is also where the source put it: the captured DNB record in
+`backend/tests/test_metadata.py` writes `655 #7 $2 gnd-content`, and the reader already reads
+that tag.
+
+**A vocabulary that issued no code for a kind loses the kind, and the gap is stated rather
+than filled.** There is no `lcsh-carrier`. Writing such a row into `655` with a plain `$2
+lcsh` would lose the whole heading, because `marc._extra_headings` reads LCSH out of `650`
+alone, so the heading is kept and the mark is dropped. The pair is reachable through
+`POST /api/books` and nothing in this application produces one, since every code that carries
+a kind is the GND's.
+
+**The round trip's pinned losses went from 9 to 10**, re-derived by counting the class's own
+methods on both trees rather than by adding one: `backend/tests/test_marc.py`,
+`TestWhatTheRoundTripCannotCarry`. The new member is the unspellable kind above. Nothing moved
+out of the class.

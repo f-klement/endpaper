@@ -25,8 +25,17 @@ import pytest
 import marc
 import marc_fields
 from catalogue import Heading
-from enums import ClassificationScheme
+from enums import ClassificationScheme, HeadingKind
 from tests.test_house_rules import _is_vendored
+
+#: The kinds a stored row can actually declare, driven from the enum.
+#:
+#: **`SUBJECT` is excluded because the column refuses the word**, which is
+#: `models.ck_classifications_kind`: that state is the null, and the null is
+#: what every arm not naming a kind already exercises. Derived rather than
+#: listed, so a member added to `HeadingKind` arrives in the arm below in the
+#: same edit instead of being exported as an ordinary subject with nothing red.
+_DECLARABLE_KINDS = [kind for kind in HeadingKind if kind is not HeadingKind.SUBJECT]
 
 #: The application's own directory.
 #:
@@ -75,8 +84,18 @@ def a_book(**overrides):
     return types.SimpleNamespace(**fields)
 
 
-def a_heading(scheme, number, label=None):
-    return types.SimpleNamespace(scheme=scheme, number=number, label=label)
+def a_heading(scheme, number, label=None, kind=None):
+    """A stand-in for a `Classification` row, carrying only what the writer reads.
+
+    `kind` defaults to the null the column holds for a record that declared
+    nothing, which is what every row written before `classifications.kind`
+    existed carries. Spelled as a parameter rather than left off the object:
+    the writer reads the attribute, so a stub without one would fail with an
+    `AttributeError` that says nothing about the record.
+    """
+    return types.SimpleNamespace(
+        scheme=scheme, number=number, label=label, kind=kind
+    )
 
 
 def round_trip(**overrides):
@@ -182,6 +201,111 @@ class TestEveryFieldMapsBothWays:
             Heading(ClassificationScheme.LCSH, "Treasure troves", None),
         )
 
+    #: What each declared kind writes: `(kind, tag, $2)`.
+    #:
+    #: **Spelled out rather than read off `marc._HEADING_KIND_FIELD`**, which
+    #: would make this assert that the table equals itself. The case is part of
+    #: the expectation and not incidental: `Subfields.subject_vocabulary` lower
+    #: cases what it reads, so a writer shouting `GND-CARRIER` round trips
+    #: perfectly through this application and hands every other one a code that
+    #: is not on MARC's list.
+    WRITTEN_AS = [
+        (HeadingKind.CONTENT, "655", "gnd-content"),
+        (HeadingKind.CARRIER, "655", "gnd-carrier"),
+    ]
+
+    #: What a row whose record declared nothing writes: `(scheme, number,
+    #: label, $2)`.
+    #:
+    #: **The ordinary path carries the same case hazard as `WRITTEN_AS` above,
+    #: and for longer.** A shouted `GND` or `LCSH` round trips through this
+    #: application intact, because `Subfields.subject_vocabulary` lower cases
+    #: what it reads, and hands every other one a code that is not on MARC's
+    #: published list. So the codes are spelled here too rather than read off
+    #: `marc._SUBJECT_SOURCE`.
+    #:
+    #: LCSH keeps the heading string in `number` and carries no label, which is
+    #: `ClassificationScheme` saying that the authorised string is the only
+    #: identifier that vocabulary supplies.
+    DECLARED_NOTHING = [
+        (ClassificationScheme.GND, "4203576-4", "Schatz", "gnd"),
+        (ClassificationScheme.LCSH, "Treasure troves", None, "lcsh"),
+    ]
+
+    @pytest.mark.parametrize(("scheme", "number", "label", "code"), DECLARED_NOTHING)
+    def test_a_row_declaring_no_kind_is_written_as_an_ordinary_subject(
+        self, scheme, number, label, code
+    ):
+        """`650`, its two indicators, and the vocabulary's plain code.
+
+        **The indicators are observed by this arm and by the one below, and by
+        nothing else in this file.** The reader ignores `ind1` and `ind2`
+        entirely, so every round trip arm on this path is blind to both. `ind2`
+        `7` is what tells a receiving catalogue that `$2` names the source of the
+        heading; without it the code beside it means nothing, and no round trip
+        can notice. The tag is a variable in the writer now, so this is also
+        what stops the ordinary path being given a field call of its own and
+        quietly losing them.
+        """
+        written = marc.write(
+            [a_book(classifications=[a_heading(scheme, number, label)])]
+        )
+        assert '<datafield tag="650" ind1=" " ind2="7">' in written
+        assert 'tag="655"' not in written
+        assert f">{code}<" in written
+
+    @pytest.mark.parametrize(("kind", "tag", "code"), WRITTEN_AS)
+    def test_a_declared_kind_is_written_as_its_own_field_and_code(
+        self, kind, tag, code
+    ):
+        """The field and the `$2` together, asserted against the bytes.
+
+        The round trip alone is satisfied by anything this application's own
+        reader happens to accept, and the reader accepts a `650` carrying
+        `$2 gnd-carrier` perfectly well. What a receiving catalogue does with the
+        two spellings is not the same: `650` is what the book is **about**, so a
+        disc written there is filed beside a place and a period. The same record
+        goes out over SRU to somebody who sent no session, which is why this is
+        asserted on what leaves rather than on what comes back.
+        """
+        written = marc.write(
+            [
+                a_book(
+                    classifications=[
+                        a_heading(
+                            ClassificationScheme.GND, "4139307-7", "CD-ROM", kind
+                        )
+                    ]
+                )
+            ]
+        )
+        assert f'<datafield tag="{tag}" ind1=" " ind2="7">' in written
+        assert 'tag="650"' not in written
+        assert f">{code}<" in written
+
+    @pytest.mark.parametrize("kind", _DECLARABLE_KINDS)
+    def test_every_kind_a_row_can_declare_survives(self, kind):
+        """One GND number, one caption, each kind the column can hold.
+
+        The number and the caption are the same in every case on purpose: the
+        kind is the only thing varying, so a failure names the kind rather than
+        the row.
+        """
+        record = round_trip(
+            classifications=[
+                a_heading(ClassificationScheme.GND, "4139307-7", "CD-ROM", kind)
+            ]
+        )
+        assert record.headings == (
+            Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM", kind),
+        )
+
+    def test_there_are_kinds_for_the_arm_above_to_drive(self):
+        """A `parametrize` over an empty population collects nothing and reports
+        green, which is exactly what `_DECLARABLE_KINDS` deriving to nothing
+        would look like from the outside."""
+        assert len(_DECLARABLE_KINDS) >= 2
+
     def test_a_whole_record_survives_every_field_at_once(self):
         """The fat record too, because a field that only works alone is not a
         field that works: a writer emitting two `245` fields, or a reader taking
@@ -238,13 +362,65 @@ class TestWhatTheRoundTripCannotCarry:
         so the reader takes the first digit run."""
         assert round_trip(title="A", series_name="S", series_index=2.5).series_index == 2.0
 
-    def test_a_gnd_heading_with_no_caption_is_not_written_at_all(self):
-        """`650` without `$a` is a heading with no heading. Putting the
-        identifier in `$a` instead would print a number where a catalogue
-        prints a phrase."""
+    def test_a_gnd_heading_with_no_caption_is_written_and_read_by_nobody(self):
+        """A heading with no heading: the field goes out, every reader skips it.
+
+        **Named for what happens rather than for what was claimed.** This arm
+        was called `..._is_not_written_at_all` and asserted only the parse, so
+        it was green on a field that is written and dropped, and its name
+        carried a prohibition the writer does not have. `_datafield` refuses
+        only when every subfield is empty.
+
+        So the bytes are pinned here and the parse below it: a round trip cannot
+        distinguish a field nobody reads from a field nobody wrote, which is
+        exactly the gap the old name papered over. Putting the identifier in
+        `$a` instead would print a number where a catalogue prints a phrase.
+        """
+        written = marc.write(
+            [a_book(classifications=[a_heading(ClassificationScheme.GND, "4203576-4")])]
+        )
+        # **The whole field, not a substring.** `code="a"` appears in the `245`
+        # of every record, so asserting its absence across the document is a
+        # test of the title rather than of this heading: it failed on the first
+        # run for exactly that reason. An exact field pins the tag, both
+        # indicators, both subfields and the absence of `$a` at once.
+        assert (
+            datafield("650", ("0", "(DE-588)4203576-4"), ("2", "gnd"), ind2="7")
+            in written
+        )
         assert round_trip(
             classifications=[a_heading(ClassificationScheme.GND, "4203576-4")]
         ).headings == ()
+
+    def test_a_kind_on_a_vocabulary_that_cannot_spell_one_is_dropped(self):
+        """There is no `lcsh-carrier`, and inventing one would be worse.
+
+        `$2` carries a code from MARC's own published source list, and the GND
+        issued `gnd-content` and `gnd-carrier` where the Library of Congress
+        issued no counterpart for LCSH. So a kind on an LCSH row has nowhere to
+        go: writing the heading in `655` with a plain `$2 lcsh` would say
+        genre or form without saying which, and `marc._extra_headings` reads
+        LCSH out of `650` alone, so the whole heading would be lost rather than
+        just the kind. The heading is kept and the kind is not.
+
+        **Reachable rather than hypothetical**, and by one route only:
+        `ck_classifications_kind` and `schemas.classification.ClassificationIn`
+        both permit the pair, so a client can post it. Nothing in this app
+        produces one, because a kind is read from a `$2` and every code that
+        carries one is the GND's.
+        """
+        record = round_trip(
+            classifications=[
+                a_heading(
+                    ClassificationScheme.LCSH,
+                    "CD-ROM",
+                    kind=HeadingKind.CARRIER,
+                )
+            ]
+        )
+        assert record.headings == (
+            Heading(ClassificationScheme.LCSH, "CD-ROM", None, None),
+        )
 
     def test_a_name_typed_in_catalogue_order_becomes_two_people_in_the_record(self):
         """The cost of `author` being one free text column, and it is a cost to
@@ -301,7 +477,7 @@ class TestWhatTheRoundTripCannotCarry:
         assert round_trip(title="A", series_index=3.0).series_index is None
 
     def test_a_carriage_return_comes_back_as_a_newline(self):
-        """XML 1.0 normalises `\r` to `\n` on parse and `ElementTree` does not
+        """XML 1.0 normalises `\\r` to `\\n` on parse and `ElementTree` does not
         write it as `&#13;`, so the character cannot survive. It is legal to
         carry and impossible to round trip, which is the format's rule rather
         than this writer's."""
@@ -671,10 +847,12 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
     reached into is one of this package's own files rather than a list of names
     to forgive.
 
-    **`mypy` reports a reach in statically and the CI pipeline does not run
-    it.** The build runs `ruff check`, the OpenAPI diff and `pytest`, and its
-    only mention of the type checker is a comment. That is a pipeline change and
-    is raised rather than made here.
+    **`mypy` reports a reach in statically, and it now runs in the pipeline.**
+    Both halves of this paragraph were false by the time they were read: the type
+    check was added to the backend job on 2026-09-26, and the schema comparison
+    this sentence listed beside it moved into the suite on 2026-09-27, so the
+    build no longer has a step of that name. It is left recorded rather than
+    deleted because the reach it describes is still the subject of the arm below.
 
     The pipeline definition is deliberately not named: it is stripped from the
     published tree, and a published file pointing at a stripped path is what the

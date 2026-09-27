@@ -10,7 +10,7 @@ import asyncio
 import dataclasses
 import logging
 import pathlib
-from typing import Any, Final, cast
+from typing import Any, Final, cast, get_origin
 
 import annotated_types
 import pytest
@@ -23,7 +23,7 @@ import isbn as isbn_utils
 import metadata
 from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
 from enums import AuthorityScheme, ClassificationScheme, HeadingKind
-from models import DESCRIPTION_MAX, ISBN_MAX, Book
+from models import DESCRIPTION_MAX, ISBN_MAX, TITLE_MAX, Book
 from schemas.book import BookCreate, BookLookup, BookMatch
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 from tests.test_house_rules import _is_vendored
@@ -951,10 +951,11 @@ class TestARecordFitsTheColumnsItFeeds:
         assert BookLookup(**record.as_lookup()).description is None
 
     def test_a_cover_chosen_after_the_fold_is_bounded_too(self):
-        """`with_cover` replaces a scalar on a record whose `_folded` flag is
-        already set, so a bound below that guard would let this one field
-        through. It is the only `replace` in this module that introduces a value
-        from outside."""
+        """`with_cover` replaces a scalar on a record whose fold flag is already
+        set, so a bound below that guard would let this one field through. It is
+        one of the two doors in this module that introduce a value from outside
+        after the fold; `with_scalars` is the other, and
+        `TestRewritingAScalarKeepsTheFoldClosed` covers it."""
         record = Record(source="dnb", title="X").with_cover(
             "https://example.com/" + "x" * catalogue._TEXT_CEILINGS["cover_url"]
         )
@@ -1573,6 +1574,85 @@ class TestAScalarThatIsNotTextIsDroppedRatherThanMeasured:
         assert Record(series_index=1.5).series_index == 1.5
 
 
+class TestRewritingAScalarKeepsTheFoldClosed:
+    """`Record.with_scalars` is the door `importing.stored_record` rebuilds a
+    record through, and what it has to refuse is a collection.
+
+    **Why it is a method here rather than a `replace` at the caller**: no module
+    outside this one replaces a field on a `Record`, which is what keeps the fold
+    flag a rule with one reader instead of a convention every caller has to know.
+    `tests/test_house_rules.py::TestOnlyTheCatalogueBuildsAnUnfoldedRecord`
+    refuses the distant spelling, and that refusal is the whole reason this
+    method exists. `with_cover` is the same argument for one field.
+
+    **What the refusal buys.** A collection carried through a `replace` keeps the
+    flag set, so `__post_init__` returns before deduplicating and the record ships
+    every repeat its catalogue sent.
+    `TestTheFoldRunsOncePerSetOfCollections` measures what the flag is worth in
+    the other direction, which is why a caller wanting the fold is sent to
+    `merged_with` rather than quietly given it.
+    """
+
+    def test_the_names_it_refuses_are_derived_from_the_declarations(self):
+        """**The method derives them, and this arm derives them the same way and
+        then pins the answer.** The literal below is the pin, deliberately: without
+        it a derivation that returned nothing would refuse nothing and this arm
+        would pass on an empty loop. So it is one derivation and a pin rather than
+        two readings, which an earlier version of this docstring claimed and the
+        assertion underneath it contradicted.
+
+        Derived through `get_origin`, which is the annotation the method reads,
+        rather than through the default alone: the method takes either, so an arm
+        reading only the default would be green against a collection declared
+        without one."""
+        collections = {
+            declared.name
+            for declared in dataclasses.fields(Record)
+            if get_origin(declared.type) is tuple
+            or isinstance(declared.default, tuple)
+        }
+        flag = {
+            declared.name
+            for declared in dataclasses.fields(Record)
+            if not declared.compare
+        }
+
+        assert collections == {"subjects", "headings", "author_identifiers"}
+        assert len(flag) == 1
+
+        for name in collections | flag:
+            with pytest.raises(ValueError, match=name):
+                Record(source="dnb").with_scalars(**{name: ()})
+
+    def test_a_scalar_rewrite_leaves_every_collection_untouched(self):
+        """Identity rather than equality, and that is the assertion: each fold
+        builds a new tuple, so a fold that re-ran would answer an equal object
+        and not the same one."""
+        record = Record(
+            source="dnb",
+            title="X",
+            subjects=(Subject(label="a"),),
+            headings=(Heading(scheme=ClassificationScheme.DDC, number="820"),),
+        )
+
+        rewritten = record.with_scalars(title="Y")
+
+        assert rewritten.title == "Y"
+        assert rewritten.subjects is record.subjects
+        assert rewritten.headings is record.headings
+        assert rewritten.author_identifiers is record.author_identifiers
+
+    def test_an_over_wide_scalar_is_nulled_here_rather_than_cut(self):
+        """**The composition trap, pinned where it is created.** This is a
+        construction, so `_drop_unstorable` runs again and nulls what the column
+        cannot hold, where `importing.within_bounds` cuts. A caller composing the
+        two keeps a truncation only while the two ceilings agree, which
+        `tests/test_importing.py::TestBothBoundsAgreeOnEveryName` is."""
+        record = Record(source="dnb", title="X")
+
+        assert record.with_scalars(title="x" * (TITLE_MAX + 1)).title is None
+
+
 class TestARecordCannotClaimThisAppsOwnFiles:
     """A catalogue may not answer with a URL naming a file this app stores.
 
@@ -1606,6 +1686,15 @@ class TestARecordCannotClaimThisAppsOwnFiles:
         reach.
         """
         assert Record().with_cover(self.LOCAL).cover_url is None
+
+    def test_a_rewritten_scalar_goes_through_the_same_door(self):
+        """The fourth door, and the one this repository gained when the import
+        path started rebuilding a record. `with_scalars` re-enters
+        `__post_init__`, so the locality rule applies to it without a second
+        belt: `importing.within_bounds`, which is the belt on the bounds, checks
+        lengths and ranges and never locality, so refusing here is the only thing
+        holding it on that path."""
+        assert Record().with_scalars(cover_url=self.LOCAL).cover_url is None
 
     def test_an_uploaded_file_cannot_either(self):
         """The other producer. `_KEPT_WHOLE_ON_UPLOAD` carries `cover_url`, so

@@ -21,12 +21,14 @@ import {
   END,
   type Census,
   blockOf,
+  countWrittenOut,
   covers,
   problems,
   render,
   rowsOf,
 } from "./coverageRegister";
 import { MARKER } from "./coverageRegister.globalSetup";
+import CoverageRegisterReporter from "./coverageRegister.reporter";
 
 const census = (
   counts: Record<string, number>,
@@ -37,6 +39,22 @@ const census = (
   writtenOut: new Map(Object.entries(writtenOut)),
   internal: new Set(internal),
 });
+
+/**
+ * Whether a line carries anything a person could read.
+ *
+ * **Lifted out of the filter it came from so that one arm holds it at no spawn
+ * cost.** Inside `refusedLines` this predicate was at rung "stated": no refusal
+ * this register throws has a whitespace only line, measured over every shape, so
+ * arming it there would have meant making a child throw one, which is another
+ * nested vitest for a guard on a guard. Here it is a pure function and the arm
+ * below is free.
+ *
+ * `trim`, not a comparison against the empty string: `"\n \n"` splits to one
+ * line of a single space, which passes a length check and is contained in any
+ * stderr at all, so the readability pair would go green over nothing.
+ */
+const carriesText = (line: string): boolean => line.trim() !== "";
 
 const registerFor = (body: Census, rows: [string, number][]): string =>
   [
@@ -80,6 +98,65 @@ describe("reading the document", () => {
     expect(() => blockOf("# Coverage\n\nNothing fenced here.\n")).toThrow(
       /no measured block/,
     );
+  });
+});
+
+describe("what counts as a line carrying something", () => {
+  it("keeps a line with text and drops every whitespace only one", () => {
+    expect(["a refusal", "", " ", "\t", "  \t "].filter(carriesText)).toEqual([
+      "a refusal",
+    ]);
+  });
+});
+
+describe("counting what a file writes out", () => {
+  const ts = (source: string) => countWrittenOut(source, "a.test.ts");
+
+  it("does not count a call written inside a string literal", () => {
+    expect(ts(`const fixture = "it('one', () => {});";\n`)).toBe(0);
+  });
+
+  it("does not count a call written inside a comment", () => {
+    expect(
+      ts("// it('once', () => {});\n/* test('twice', () => {}) */\n"),
+    ).toBe(0);
+  });
+
+  it("counts a call inside a template substitution, which is code", () => {
+    expect(ts('const x = `${it("a", () => {})}`;\n')).toBe(1);
+  });
+
+  it("leaves a generated case out, so it falls to the residual", () => {
+    expect(ts("it.each([1, 2])('case %d', () => {});\n")).toBe(0);
+  });
+
+  it("counts the `test` spelling of the pair as well as `it`", () => {
+    // Without this the `test` half is at rung "stated" inside the one function
+    // whose subject is the pair: dropping it from the name check moves no figure,
+    // because a bare `test(` call appears nowhere in the 198 files this counts.
+    expect(ts("test('a', () => {});\n")).toBe(1);
+  });
+
+  it("reads a file named .tsx as JSX rather than as TypeScript", () => {
+    const source = `const prose = <p>don't</p>;\nit("after", () => {});\n`;
+
+    expect(countWrittenOut(source, "a.test.tsx")).toBe(1);
+  });
+
+  it("reads a file named .ts as TypeScript rather than as JSX", () => {
+    // The other direction, and the one the arm above cannot hold. Forcing `"ts"`
+    // breaks 119 of the 198 files and is caught by any of them; forcing `"tsx"`
+    // breaks none, so `langOf` was armed one way only. A prefix type assertion
+    // is the syntax the two grammars disagree about: `tsx` reads `<number>` as a
+    // tag that is never closed.
+    const cast = "const n = <number>(x as unknown);\nit('a', () => {});\n";
+
+    expect(countWrittenOut(cast, "a.test.ts")).toBe(1);
+    expect(() => countWrittenOut(cast, "a.test.tsx")).toThrow(/a\.test\.tsx/);
+  });
+
+  it("refuses a source it cannot parse rather than returning a figure", () => {
+    expect(() => ts("it('unclosed', () => {\n")).toThrow();
   });
 });
 
@@ -170,6 +247,88 @@ describe("what the run says the register has wrong", () => {
     );
   });
 
+  /**
+   * The state that would otherwise make the block's own sentence false: such a
+   * file generates nothing and is published as one of the files generating any.
+   * `coverageRegister.test.ts` was in it at `fee91e9`.
+   *
+   * **Four arms because four planted mutations survived one**, and each is a
+   * property the refusal's comment claims: that it is reported before anything
+   * else, that it names every offender, that it does not need a collected test to
+   * fire, and that it fires in one direction only.
+   */
+  it("reports it before anything else the register has wrong", () => {
+    const body = census(
+      { "a.test.ts": 2, "b.test.ts": 4 },
+      { "a.test.ts": 3, "b.test.ts": 4 },
+    );
+    const rows: [string, number][] = [
+      ["a.test.ts", 2],
+      ["b.test.ts", 4],
+    ];
+    const alsoStale = registerFor(body, rows).replace(
+      "| `b.test.ts` | 4 |",
+      "| `b.test.ts` | 9 |",
+    );
+
+    const found = problems(alsoStale, body);
+
+    expect(found[0]).toContain("a.test.ts: 3 written out against 2 collected");
+    expect(found.join("\n")).toContain("`b.test.ts`: the register says 9");
+  });
+
+  it("names every file in that state rather than only the first", () => {
+    const body = census(
+      { "a.test.ts": 2, "b.test.ts": 1 },
+      { "a.test.ts": 3, "b.test.ts": 5 },
+    );
+    const rows: [string, number][] = [
+      ["a.test.ts", 2],
+      ["b.test.ts", 1],
+    ];
+
+    const found = problems(registerFor(body, rows), body).join("\n");
+
+    expect(found).toContain("a.test.ts: 3 written out against 2 collected");
+    expect(found).toContain("b.test.ts: 5 written out against 1 collected");
+  });
+
+  it("names a file that collected nothing while writing a test out", () => {
+    // The purest instance of what this refuses, and the one a `count > 0` guard
+    // would silently exempt: a call in a helper nothing invokes, in a file where
+    // every call is one, so the run collects nothing and the source still writes.
+    //
+    // **This census is deliberately one file, and that is what preserves the arm
+    // these four replaced.** That arm carried one file too, so a refusal firing
+    // only where a census holds several would have slipped past the other three,
+    // which carry two. Adding a second file here closes that hole by accident.
+    const body = census({ "a.test.ts": 0 }, { "a.test.ts": 1 });
+
+    expect(
+      problems(registerFor(body, [["a.test.ts", 0]]), body).join("\n"),
+    ).toContain("a.test.ts: 1 written out against 0 collected");
+  });
+
+  it("leaves a file that genuinely generates out of it", () => {
+    // The other direction, which is the whole point: `!==` here would name a file
+    // whose cases a generator produced, which is every `it.each` in the tree.
+    const body = census(
+      { "a.test.ts": 4, "b.test.ts": 2 },
+      { "a.test.ts": 1, "b.test.ts": 3 },
+    );
+    const rows: [string, number][] = [
+      ["a.test.ts", 4],
+      ["b.test.ts", 2],
+    ];
+
+    const found = problems(registerFor(body, rows), body).join("\n");
+
+    expect(found).not.toContain("a.test.ts:");
+    // Not vacuous: the sibling in the same census is named, so the refusal did
+    // run over both and chose.
+    expect(found).toContain("b.test.ts: 3 written out against 2 collected");
+  });
+
   it("names a file no row covers rather than counting it", () => {
     const body = census({ ...counts, "orphan.test.ts": 3 });
     const register = registerFor(census(counts), rows);
@@ -211,8 +370,13 @@ describe("the block, rendered from one census", () => {
   });
 
   it("splits written out from generated, counting the files that generate", () => {
+    // The whole clause, and its fixture has exactly one generating file on
+    // purpose: that is where a finite verb would have to agree with the noun and
+    // could not. **This arm used to stop one word short, so it was pinning the
+    // disagreement it stood on** rather than the rule, which is the part of this
+    // a future reader needs.
     expect(render(body, ["a.test.ts"])).toContain(
-      "**12 are written out and 4 are generated**, over the 1 file that generate",
+      "**12 are written out and 4 are generated**, over the 1 file generating any.",
     );
   });
 });
@@ -254,19 +418,19 @@ describe("the guard is wired into the suite it guards", () => {
  * **Which refusal fired is read from a file the fixture writes, never from the
  * child's stderr.** The fixture wraps the real reporter and the real global
  * setup, records the message of whatever they throw and rethrows it, so an arm
- * below passes only if the half it names threw the message it names. Three arms
- * read the child's stderr for that instead, and it is the wrong instrument for
- * that question: the text an `Error` prints is built when something first reads
- * its `.stack`, by whichever `Error.prepareStackTrace` is installed at that
- * moment, and vitest reassigns that global while it runs. So a refusal thrown
- * here was formatted there.
+ * below passes only if the half it names threw the message it names. The child's
+ * stderr is the wrong instrument for that question: the text an `Error` prints
+ * is built when something first reads its `.stack`, by whichever
+ * `Error.prepareStackTrace` is installed at that moment, and vitest reassigns
+ * that global while it runs. So a refusal thrown here was formatted there, and
+ * the two fields the fixture records beside each message say under what.
  *
  * **Whether a refusal is readable is a different question, and it keeps two
  * arms of its own at the bottom**, one for each of the two routes vitest prints
  * by. Their docstring holds the measurement, and the second of them is the only
  * arm in this file that notices the failure that opened this subject.
  */
-describe("the reporter fails a run", () => {
+describe("the guard fails a run", () => {
   const root = join(import.meta.dirname, "..");
   let fixture: string;
 
@@ -284,10 +448,46 @@ describe("the reporter fails a run", () => {
    */
   const CHANNEL = "ENDPAPER_REGISTER_REFUSALS";
 
+  /**
+   * Where the fixture's setup file records the process a test file ran in.
+   *
+   * A channel of its own rather than a field on the one above, for two reasons
+   * that both bite. `asRefusal` refuses a line its `record` did not write, so a
+   * foreign line there reddens every spawn. And the refusal channel is written
+   * only when a half throws, where this one is written by every run, including
+   * the passing ones.
+   */
+  const PROCESSES = "ENDPAPER_REGISTER_PROCESSES";
+
   let spawned = 0;
 
-  type Refusal = { from: string; message: string };
-  type Run = { status: number | null; stderr: string; refusals: Refusal[] };
+  /**
+   * One refusal, plus the state of the two globals that decide what an `Error`
+   * prints.
+   *
+   * **`stackTraceLimit` is a string because JSON has neither `Infinity` nor
+   * `NaN`**, and this field may hold either. `JSON.stringify` writes both as
+   * `null`, which is also what an unset field reads as, so a number here would
+   * collapse three different states into one. Measured with `node -e`, frames in
+   * `error.stack`: `Infinity` keeps **every** frame, `NaN` keeps **none**, and
+   * `0` keeps none. So `NaN` is the setting under which a stack arrives with no
+   * frames at all while looking like an ordinary reassignment, and it is exactly
+   * the one a number could not have told apart from unset.
+   */
+  type Refusal = {
+    from: string;
+    message: string;
+    prepareStackTrace: boolean;
+    stackTraceLimit: string;
+    engine: string;
+  };
+  type Run = {
+    pid: number;
+    status: number | null;
+    stderr: string;
+    refusals: Refusal[];
+    ranTestsIn: Where[];
+  };
 
   /**
    * **Bounded twice, and neither bound is decoration.**
@@ -300,32 +500,187 @@ describe("the reporter fails a run", () => {
    * cleanup and leaves a pod holding a node lock.
    *
    * One worker, because the fixture config would otherwise read the host's
-   * cores rather than the pod's limit, and these forks are grandchildren the
-   * timeout above does not reach. Two files need no parallelism at all.
+   * cores rather than the pod's limit. Two files need no parallelism at all.
+   * **How many workers is that bound's business; what a worker IS belongs to
+   * the bound above it**, and `runThere` holds that with the measurement.
    */
   const SPAWNED = 60_000;
 
+  /**
+   * Everything the spawn below asks for except its environment, in one place so
+   * that the arm can read the bound back.
+   *
+   * **Removing the bound was green on every arm before this const existed**, and
+   * that is worse than it sounds: `--pool=threads` makes a kill total and the
+   * timeout is what delivers a kill, so with the timeout gone the pool buys
+   * nothing against the defect it is here for. Only one of the two halves was
+   * armed.
+   *
+   * Two shapes fail. Editing either value reddens the arm. Deleting either field
+   * is a type error at the arm's own read, measured: `Property 'timeout' does not
+   * exist`.
+   *
+   * **A third does not, and it is the one a reader will assume.** Replacing the
+   * spread below with an inline object that still carries `cwd` and `encoding`,
+   * and no bound, passes the type check and the arm: this const stays used by the
+   * arm that reads it, so nothing is unused, and `encoding` being present is what
+   * keeps `stderr` a `string`. Measured, both directions. So what lives here is
+   * the bound's **values and its fields**, not the fact that the call still
+   * spreads them. Closing that needs the arm the next paragraph refuses to write.
+   *
+   * **It holds presence, not delivery.** Nothing here says the kill lands or
+   * that it lands on everything: that needs a nested run wedged under a
+   * deliberately small timeout with its signal asserted, which needs a fixture
+   * root of its own.
+   */
+  const SPAWN = {
+    cwd: root,
+    encoding: "utf8",
+    timeout: SPAWNED,
+    killSignal: "SIGKILL",
+  } as const;
+
+  /**
+   * The hook the fixture's reporter wrapper overrides, held against the class it
+   * overrides it on.
+   *
+   * The wrapper is a string, so nothing in the gate checks this name: prettier
+   * does not format a template literal's contents, oxlint sees no code there and
+   * `tsc` sees a string. Interpolated into all three of the wrapper's spellings
+   * so the name has one home, and asserted below against the real reporter's own
+   * prototype. Deleting either half restores a rename that goes unnoticed.
+   */
+  const HOOK = "onTestRunEnd";
+
+  /**
+   * One recorded line, refused rather than trusted.
+   *
+   * **The probe is held here rather than in an arm of its own, which is what
+   * makes it free.** All four fields are what the fixture's `record` writes, so
+   * a line short of any of them means the wrapper and this reader have stopped
+   * agreeing, and refusing at the read reddens whichever of the spawns below
+   * produced it. An arm would have cost another nested vitest to say the same
+   * thing.
+   */
+  const asRefusal = (line: string, channel: string): Refusal => {
+    const parsed = JSON.parse(line) as Partial<Refusal>;
+    if (
+      typeof parsed.from !== "string" ||
+      typeof parsed.message !== "string" ||
+      typeof parsed.prepareStackTrace !== "boolean" ||
+      typeof parsed.stackTraceLimit !== "string" ||
+      typeof parsed.engine !== "string"
+    )
+      throw new Error(
+        `${channel} carries a line the fixture's record() did not write, so ` +
+          `this run cannot say what formatted its refusal: ${line}`,
+      );
+    return {
+      from: parsed.from,
+      message: parsed.message,
+      prepareStackTrace: parsed.prepareStackTrace,
+      stackTraceLimit: parsed.stackTraceLimit,
+      engine: parsed.engine,
+    };
+  };
+
+  /** One test file, and the process and thread the pool gave it. */
+  type Where = { pid: number; ppid: number; isMainThread: boolean };
+
+  /**
+   * One recorded process, refused rather than trusted, for the reason
+   * `asRefusal` is.
+   *
+   * **`isMainThread` is refused here rather than defaulted**, because a line
+   * short of it is a probe that has moved somewhere the pool does not decide,
+   * and defaulting it would make that move green.
+   */
+  const asWhere = (line: string, channel: string): Where => {
+    const parsed = JSON.parse(line) as Partial<Where>;
+    if (
+      typeof parsed.pid !== "number" ||
+      typeof parsed.ppid !== "number" ||
+      typeof parsed.isMainThread !== "boolean"
+    )
+      throw new Error(
+        `${channel} carries a line the fixture's setup file did not write, so ` +
+          `this run cannot say which process ran its tests: ${line}`,
+      );
+    return {
+      pid: parsed.pid,
+      ppid: parsed.ppid,
+      isMainThread: parsed.isMainThread,
+    };
+  };
+
+  /**
+   * The nested runner, bounded, with its workers inside the process the bound
+   * can reach.
+   *
+   * **`timeout` kills this child by pid, and a pool that forks leaves the worker
+   * behind.** Measured 2026-09-26 with `node` against a child that starts one
+   * long lived grandchild and waits: under `timeout` with
+   * `killSignal: "SIGKILL"` the child dies and the grandchild is still alive
+   * after it, and `detached: true` does not change that, because the kill is
+   * aimed at the pid either way. So `--pool=threads` here is not about speed. It
+   * is what makes the worker a thread of this pid rather than a process of its
+   * own. The arm below holds it by asking the child which process ran its tests.
+   *
+   * **The flag does work rather than restate a default.** Measured by removing
+   * it: the arm reddens with the test file in pid 147 against the runner's 126,
+   * so the installed vitest 5 resolves to a pool that forks when nothing asks
+   * otherwise.
+   *
+   * **What an orphan here costs depends on where this file was run, and one of
+   * the two is unbounded.** Inside the suite container it holds memory against
+   * that pod's limit until the pod goes, so the symptom is somebody else's run
+   * dying on 137. Run on the machine the suite is invoked from, which nothing in
+   * this file can prevent, it is bounded by nothing: the sibling of this defect
+   * in the harness written in the other language here sat at 8.6 GB for 53
+   * minutes, and an orphan is by definition not being waited on, so neither case
+   * reports itself.
+   *
+   * **`detached` is the fix that reads as right and measures worse.** Its own
+   * group is a group nothing here signals: `spawnSync` offers no way to signal
+   * one, so reaching the workers would mean an async `spawn`, a timer of this
+   * file's own and `process.kill(-pid)`, none of which exists on a platform
+   * without process groups. That timer also dies with this worker, and leaving
+   * the outer run's group is what would stop a signal aimed at the suite
+   * reaching this child at all. Inside that group, with no worker process to
+   * lose, nothing here needs a process group to exist.
+   *
+   * On the command line rather than in the fixture config, because this is where
+   * the timeout it pairs with lives and the two are only safe read together.
+   */
   const runThere = (...flags: string[]): Run => {
     const channel = join(fixture, `refusals.${(spawned += 1)}.jsonl`);
+    const processes = join(fixture, `processes.${String(spawned)}.jsonl`);
     writeFileSync(channel, "");
+    writeFileSync(processes, "");
     const run = spawnSync(
       join(root, "node_modules", ".bin", "vitest"),
-      ["run", "--root", fixture, ...flags],
+      ["run", "--root", fixture, "--pool=threads", ...flags],
       {
-        cwd: root,
-        encoding: "utf8",
-        timeout: SPAWNED,
-        killSignal: "SIGKILL",
-        env: { ...process.env, [CHANNEL]: channel },
+        ...SPAWN,
+        env: {
+          ...process.env,
+          [CHANNEL]: channel,
+          [PROCESSES]: processes,
+        },
       },
     );
     return {
+      pid: run.pid,
       status: run.status,
       stderr: run.stderr,
       refusals: readFileSync(channel, "utf8")
         .split("\n")
         .filter((line) => line !== "")
-        .map((line) => JSON.parse(line) as Refusal),
+        .map((line) => asRefusal(line, channel)),
+      ranTestsIn: readFileSync(processes, "utf8")
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => asWhere(line, processes)),
     };
   };
 
@@ -335,6 +690,112 @@ describe("the reporter fails a run", () => {
       .filter((refusal) => refusal.from === from)
       .map((refusal) => refusal.message)
       .join("\n");
+
+  /**
+   * That half's refusal as lines, blank and whitespace only ones dropped.
+   *
+   * **The readability arms assert each line separately rather than the message in
+   * one piece, and the reason is indentation.** Both forms are positive
+   * containment, so neither is in the fragile class and this was never a choice
+   * about that. What separates them is what a runner does to a multi-line error
+   * block, and the likeliest thing it does is **prepend**: indenting the block
+   * destroys a whole message substring and leaves every per line substring
+   * intact.
+   *
+   * Asserting only the first line is the other end and gives up too much. The
+   * reporter's refusal is 110 characters over two non blank lines of **45** and
+   * **63**, and those 63 are the only characters naming the row, which the
+   * literal these arms replaced asserted outright. For the global setup's
+   * refusal, 299 characters on one line, all three forms are the same assertion.
+   *
+   * **What per line gives up, in full**: the blank line between the parts,
+   * contiguity, order, and that the lines arrived as one block. All four are
+   * right to give up, because the subject of these two arms is that a refusal
+   * reaches a person and not how it was laid out.
+   *
+   * **The caveat is that per line is only as strong as its shortest line, and
+   * that is not a constant.** Over every refusal shape this register can throw,
+   * driven with the fixture's own row patterns, the shortest non blank line is
+   * the 45 character `tests/COVERAGE.md does not describe this run:` that every
+   * reporter refusal carries, including the five line block mismatch. But the
+   * "matches no file" shape is a row pattern plus 37 characters, and a row
+   * pattern is data in a document anybody can edit: against this register's own
+   * rows the shortest is `app/*`, which makes that line **42**. So the mechanism
+   * is that the floor tracks the shortest row rather than sitting at a figure,
+   * and no figure here is a bound. What makes the trade safe is that no shape
+   * approaches a length a stderr would carry by accident.
+   */
+  const refusedLines = (run: Run, from: string): string[] =>
+    refused(run, from).split("\n").filter(carriesText);
+
+  /**
+   * Why the vacuity line above each stream assertion exists.
+   *
+   * An arm handed an empty channel would assert nothing and go **green over
+   * nothing** rather than red. This is the one line in each pair a reviewer
+   * should try to delete first.
+   */
+  const EMPTY_CHANNEL =
+    "the channel carries no refusal from this half, so the stream assertions " +
+    "after it would have run over nothing";
+
+  /**
+   * The same line for the process channel, and it guards more here.
+   *
+   * The comparison below runs over the recorded lines, so an empty channel is a
+   * loop that executes nothing: green, with the pool unexamined. The setup file
+   * is silent when the variable does not reach it, deliberately, so that a
+   * channel that never arrives reddens this arm rather than every spawn.
+   */
+  const NOTHING_RECORDED =
+    "no test file recorded the process it ran in, so the comparison after this " +
+    "line would have run over nothing";
+
+  /** What the child's process tree was, for the assertion that has just failed. */
+  const topology = (run: Run, where: Where): string =>
+    `a test file ran in pid ${String(where.pid)}, whose parent is ` +
+    `${String(where.ppid)}, on ${where.isMainThread ? "the main thread" : "a worker thread"}, ` +
+    `where the spawn's own child is ${String(run.pid)}. A test body in a ` +
+    `process of its own is a process the timeout's kill does not reach, so a ` +
+    `run that hits SPAWNED leaves it behind. A test body on the main thread is ` +
+    `a probe that is no longer asking the pool anything`;
+
+  /**
+   * What the child was when that half threw, as a sentence for whichever
+   * assertion is failing: its runtime, and the two globals that decide what an
+   * `Error` prints.
+   *
+   * **Named for the child and not for the formatter, because the child is a
+   * process boundary away from the runner** and forgetting that is what sent
+   * three rounds of this review to the wrong subject.
+   *
+   * **This is the one place the probe's value reaches a person, and that is
+   * deliberate.** No arm pins either field: `prepareStackTrace` being installed
+   * is the precondition of the bare `Error` below, so an arm pinning it would
+   * redden on the vitest release that stopped reassigning, which is red on a
+   * repair rather than on a defect. So the fields are recorded, their **shape**
+   * is held by `asRefusal` at the channel read, where its own docstring says
+   * why, and their value is printed where it explains something: beside a stream
+   * assertion that has just failed.
+   *
+   * Measured through this sentence on 2026-09-26: at the moment the global
+   * setup's teardown throws, `prepareStackTrace` is installed and
+   * `stackTraceLimit` is 10. So the reassignment is live here and the path that
+   * reduces the limit to 1 is not the one these runs take.
+   */
+  const childState = (run: Run, from: string): string => {
+    const recorded = run.refusals.find((refusal) => refusal.from === from);
+    if (recorded === undefined)
+      return `nothing was recorded from ${from}, so this stream has no refusal to carry`;
+    return (
+      `the child at throw time: ${recorded.engine}, ` +
+      `Error.prepareStackTrace installed ` +
+      `${recorded.prepareStackTrace}, Error.stackTraceLimit ` +
+      `${recorded.stackTraceLimit}. A stack string is built on first read under ` +
+      `whichever of those two are installed then, which is how a refusal thrown ` +
+      `here can print with its text gone`
+    );
+  };
 
   beforeAll(() => {
     fixture = mkdtempSync(join(tmpdir(), "endpaper-register-"));
@@ -347,32 +808,126 @@ describe("the reporter fails a run", () => {
     // code there and `tsc` sees a string, so the middle of this guard is the
     // one part of the tree no check covers.
     //
-    // The annotation in the reporter wrapper looks like a compile time link to
-    // the hook's name and is not one. The wrapper spells `onTestRunEnd` as a
-    // literal, so a vitest release renaming that hook, correctly followed in
-    // `coverageRegister.reporter.ts`, leaves the wrapper's `catch` unreached:
-    // the two arms that read the channel then redden on an empty file while
-    // the guard itself is working. **That is what a red on an empty channel
-    // means**, and it is a false red rather than a miss. The same upgrade was
-    // green while those arms read the child's stderr, so this is a cost of the
-    // channel and not a defect in it.
+    // The `Parameters<...>` annotation in the reporter wrapper looks like a
+    // compile time link to the hook's name and is not one, for the same reason:
+    // `tsc` sees a string. `HOOK` above gives that name one home and the arm
+    // below fails on it by name.
+    //
+    // **A rename can still empty the channel. What changed is that the two
+    // causes are now told apart.** Trace it: vitest renames the hook, the real
+    // reporter follows, and `HOOK` still spells the old name. The wrapper then
+    // overrides a name nothing calls, `Recording` inherits the new one from the
+    // real class, vitest calls that, the real hook runs **unwrapped**, and its
+    // throw is never recorded. So the channel is empty while the half did throw.
+    // Read off the override rule rather than measured, because vitest's own call
+    // site is what would have to move.
+    //
+    // A rename only half followed leaves a **third** state, and this one is
+    // measured: with the real class renamed and vitest still calling the old
+    // name, the wrapper runs, `super[HOOK]` is undefined, and the channel carries
+    // a `TypeError` from `super` where a refusal should be.
+    //
+    // **The state is the point. The wording belongs to the child's engine, and
+    // the child's engine is a property of where the suite runs rather than of
+    // this repository.** Read off the channel on a real run: **the child is bun
+    // 1.4.2**, inside the suite container. The same shebang resolves the other way
+    // on the machine this is written on, where `node_modules/.bin/vitest` is
+    // `env node` and `node` inside a `bun run` script is node 24.10.0, verified.
+    // So the two engines word this failure differently, the child takes the one
+    // its own environment gives it, and **three rounds of review settled it
+    // locally and were each correct about the wrong process.** Nothing in the
+    // tree decides it and no local check can, which is why `record` reports the
+    // child's runtime beside every refusal and `childState` prints it into any
+    // failing stream assertion. Why the container resolves it that way is not
+    // established here and is not claimed.
+    //
+    // **Pin no spelling of that message**, here or in an arm: it is an engine's
+    // diagnostic, it moves with an image nobody diffs, and this comment names the
+    // state rather than the text for that reason.
+    //
+    // **In both rename shapes the arm below reddens and names the hook; where the
+    // half simply did not throw it stays green, and that difference is the
+    // diagnosis.** Beside the four channel arms below, the `status` assertion says
+    // it a second way; the readability pair after them carries no status
+    // assertion and never did. A fixture config that stopped loading reddens
+    // **every spawning arm** at once rather than emptying the channel quietly.
+    // Not the hook arm: it reads the prototype in process, loads no fixture
+    // config and stays green, which is the same reason it is the discriminator.
 
     writeFileSync(
       join(fixture, "record.ts"),
       `import { appendFileSync } from "node:fs";
 
+// **Never read \`error.stack\` here, and this is the one line that cannot be
+// simplified away.** V8 formats a stack on first access and caches the string,
+// so reading it in this wrapper would freeze it under the throw time formatter
+// and repair the bare \`Error\` that the last arm of this block is the tree's
+// only detector of. The two fields below are the formatter's state and not the
+// formatted text, which is why they are safe to read and \`stack\` is not.
 export function record(from: string, error: unknown): void {
   const channel = process.env[${JSON.stringify(CHANNEL)}];
   if (channel === undefined) return;
   const message = error instanceof Error ? error.message : String(error);
-  appendFileSync(channel, JSON.stringify({ from, message }) + "\\n");
+  appendFileSync(
+    channel,
+    JSON.stringify({
+      from,
+      message,
+      prepareStackTrace: typeof Error.prepareStackTrace === "function",
+      stackTraceLimit: String(Error.stackTraceLimit),
+      // **The child is a process boundary away from whatever spawned it**, and
+      // three attempts to reason from the runner's engine to this one settled the
+      // question on the wrong subject. Asked here instead, where the answer is.
+      engine:
+        process.versions.bun === undefined
+          ? "node " + process.versions.node
+          : "bun " + process.versions.bun,
+    }) + "\\n",
+  );
 }
+`,
+    );
+
+    // **A setup file, because it is the only half of a nested run that executes
+    // where the pool put it.** The two wrappers below run in the runner's own
+    // process whatever the pool is, so neither can answer the question the arm
+    // on `--pool=threads` asks.
+    //
+    // **That sentence used to be the whole guarantee, and moving this probe into
+    // the global setup wrapper was green on every arm with the pool flag also
+    // gone.** A pid recorded from the runner's own main process equals the
+    // spawn's pid under any pool, so the comparison held while its subject was
+    // no longer being observed. `isMainThread` is what closes it: the pool is the
+    // only thing that decides it, so a probe that moved out of the pool's reach
+    // reports `true` and reddens. The one shape it would wrongly refuse is a pool
+    // that runs test files on the main thread of the main process, which no
+    // vitest 5 pool does.
+    //
+    // Silent without the variable rather than throwing: a channel that does not
+    // reach here would otherwise redden every spawn with a setup file failure,
+    // where what it means is that one arm's instrument is missing. That arm
+    // carries the vacuity line for it.
+    writeFileSync(
+      join(fixture, "processes.ts"),
+      `import { appendFileSync } from "node:fs";
+import { isMainThread } from "node:worker_threads";
+
+const channel = process.env[${JSON.stringify(PROCESSES)}];
+if (channel !== undefined)
+  appendFileSync(
+    channel,
+    JSON.stringify({
+      pid: process.pid,
+      ppid: process.ppid,
+      isMainThread,
+    }) + "\\n",
+  );
 `,
     );
 
     // **The fixture config names these wrappers, and the real files are what
     // run inside them.** The reporter wrapper extends the real class, so it is
-    // the real `onTestRunEnd` that decides; the setup wrapper re-exports the
+    // the real hook that decides; the setup wrapper re-exports the
     // real `setup` and calls the real `teardown`. Swallowing instead of
     // rethrowing would change the child's exit code, which every arm below
     // still asserts, so a wrapper that stopped rethrowing reddens rather than
@@ -393,11 +948,11 @@ export function record(from: string, error: unknown): void {
 import { record } from "./record";
 
 export default class Recording extends Real {
-  async onTestRunEnd(
-    ...args: Parameters<InstanceType<typeof Real>["onTestRunEnd"]>
+  async ${HOOK}(
+    ...args: Parameters<InstanceType<typeof Real>["${HOOK}"]>
   ): Promise<void> {
     try {
-      await super.onTestRunEnd(...args);
+      await super.${HOOK}(...args);
     } catch (error) {
       record("reporter", error);
       throw error;
@@ -425,10 +980,33 @@ export function teardown(): void {
 `,
     );
 
+    // **`.mjs`, and it buys nothing against the failure rate.** The fixture lands
+    // in a temporary directory with no `package.json` anywhere above it, so under
+    // `.ts` Vite reads the file as CommonJS and prints a **374 byte**
+    // incompatibility warning above every one of these runs. Measured in process
+    // against this exact config body through Vite's own `loadConfigFromFile`: one
+    // `esm-syntax-in-cjs` finding and 374 bytes under `.ts`, and none at all
+    // under `.mjs`. The 1,154 bytes recorded elsewhere for this are the child's
+    // **whole** stderr, byte identical over 400 green runs, of which this warning
+    // is a third. No `toContain` can be displaced by extra bytes on a stream
+    // either way. **So this is noise removal and not a fix for a flake**, and
+    // reading it as one is how the wrong mechanism was written the first time.
+    //
+    // It is also the less coupled spelling, not the more: Vite names a `.mjs`
+    // extension as its own remedy and says the native loader is planned to become
+    // the default, so `.ts` here loads only while the bundling loader tolerates
+    // the mismatch. The body has no TypeScript syntax, and `.mjs` is in vitest's
+    // own config candidate list.
+    //
+    // No arm guards the extension. A fixture config that stops loading reddens
+    // every spawning arm at once, and a negative assertion on a stream a third
+    // party writes into is the one shape extra bytes really can change, which is
+    // the defect this block exists to stay clear of.
     writeFileSync(
-      join(fixture, "vitest.config.ts"),
+      join(fixture, "vitest.config.mjs"),
       "export default { test: { globals: true, include: ['tests/**/*.test.ts'], " +
         "maxWorkers: 1, minWorkers: 1, " +
+        `setupFiles: [${JSON.stringify(join(fixture, "processes.ts"))}], ` +
         `globalSetup: [${JSON.stringify(join(fixture, "globalSetup.ts"))}], ` +
         `reporters: ['default', ${JSON.stringify(join(fixture, "reporter.ts"))}] } };\n`,
     );
@@ -444,6 +1022,22 @@ export function teardown(): void {
   });
 
   afterAll(() => rmSync(fixture, { recursive: true, force: true }));
+
+  it("wraps a hook the real reporter has", () => {
+    // **Read through the prototype chain, because `super[HOOK]` is**, where
+    // `Object.getOwnPropertyNames` is not: a hook the real reporter inherited
+    // would leave the wrapper working and this arm red. Not live today, vitest's
+    // `Reporter` being an interface. `toBeTypeOf` also catches the name present
+    // as something not callable, which a name listing cannot.
+    //
+    // **Evaded once, and this arm is what caught it.** Renaming the hook in
+    // `coverageRegister.reporter.ts` and changing nothing else fails this arm on
+    // `expected undefined to be type of 'function'`. Three channel arms redden
+    // with it, by the teardown noticing its marker was never written, and their
+    // wording sends the reader to a `--reporter` flag: this one names the thing
+    // that actually moved, which is why it is not redundant with them.
+    expect(CoverageRegisterReporter.prototype[HOOK]).toBeTypeOf("function");
+  });
 
   const body = census(
     { "a.test.ts": 2, "b.test.ts": 4 },
@@ -469,6 +1063,61 @@ export function teardown(): void {
 
       expect(run.refusals).toEqual([]);
       expect(run.status).toBe(0);
+    },
+    SPAWNED + 30_000,
+  );
+
+  /**
+   * That the tests of a nested run ran in the process this file can kill.
+   *
+   * **The instrument is the spawn's own pid against the pid the child reports**,
+   * and the first half of that is why it is not the child's opinion of its own
+   * topology: `spawnSync` returns the pid its timeout would signal. Equal means
+   * the pool put the test body in that pid. Different means a worker process,
+   * which that signal does not reach and nothing then waits on.
+   *
+   * Delete `--pool=threads` from `runThere` and this arm reddens, naming both
+   * pids and the worker's parent. **It is the only arm here that does**: the
+   * other spawning arms pass under either pool, because a forked worker runs the
+   * tests correctly and is only a problem once something has to kill it.
+   *
+   * **The thread half is not a second way of saying the first.** A pid comparison
+   * is satisfied by anything recorded from the runner's own main process,
+   * whatever the pool is, so it cannot tell a pool of threads from a probe that
+   * stopped asking the pool. `isMainThread` can, and the fixture's comment holds
+   * what that closed.
+   *
+   * **Both halves of the bound, because the pool only makes a kill total and the
+   * timeout is what delivers one.** Read off `SPAWN`, whose docstring says which
+   * two shapes that catches and which one it does not.
+   *
+   * **The dependency this rests on, stated rather than assumed**: that the vitest
+   * launcher execs in place, so the pid `spawnSync` returns is the runner's own
+   * main process. A launcher that forks, a shell wrapper around it, or a future
+   * vitest that re executes itself to pass a flag would redden this arm on a
+   * correct tree. That is the same class of mistake this file records three
+   * review rounds lost to, one process boundary further out.
+   *
+   * **What it does not hold**: that the runner has no other descendant. It reads
+   * the processes that ran a test file and enumerates nothing else, so a
+   * transform service or a coverage helper the runner starts is outside it, and
+   * this arm says nothing about how many of those there are.
+   */
+  it(
+    "runs a nested run's tests in the process the timeout can kill",
+    () => {
+      write(registerFor(body, rows));
+
+      expect(SPAWN.timeout, "the spawn asks for no timeout").toBe(SPAWNED);
+      expect(SPAWN.killSignal, "the spawn names no signal").toBe("SIGKILL");
+
+      const run = runThere();
+
+      expect(run.ranTestsIn, NOTHING_RECORDED).not.toHaveLength(0);
+      for (const where of run.ranTestsIn) {
+        expect(where.pid, topology(run, where)).toBe(run.pid);
+        expect(where.isMainThread, topology(run, where)).toBe(false);
+      }
     },
     SPAWNED + 30_000,
   );
@@ -521,9 +1170,9 @@ export function teardown(): void {
   /**
    * The two arms whose subject is the child's stderr, and the only two.
    *
-   * The arms above ask which refusal fired, which the stream cannot answer
-   * without also answering for vitest's formatting. These ask the different
-   * question the block would otherwise stop covering: that a refusal reaches a
+   * The four channel arms above ask which refusal fired, which the stream
+   * cannot answer without also answering for vitest's formatting. These ask the
+   * different question the block would otherwise stop covering: that a refusal reaches a
    * person, and not only the file the fixture records it in. A guard nobody
    * can read is a guard nobody acts on.
    *
@@ -534,6 +1183,15 @@ export function teardown(): void {
    * prints is the `stack` string; a stack string is built when something first
    * reads it, by whichever `Error.prepareStackTrace` is installed at that
    * moment, and vitest reassigns that global while it runs.
+   *
+   * **Each asserts, line by line, the message the channel recorded, not a
+   * literal of its own.**
+   * The wording then has one home, at the site that throws it, where before two
+   * of these literals were a strict prefix of another arm's and rewording either
+   * refusal reddened an arm that does not care what the refusal says. It is also
+   * the stronger claim: it holds that the **same** message reached both routes,
+   * where two independent literals would pass while the child recorded one
+   * refusal and printed another.
    *
    * That is measured rather than supposed. Assigning
    * `Error.prepareStackTrace = () => "Error"` inside the child reduces the
@@ -546,12 +1204,12 @@ export function teardown(): void {
     () => {
       write(oneTestOut());
 
-      const { stderr } = runThere();
+      const run = runThere();
+      const recorded = refusedLines(run, "reporter");
 
-      expect(stderr).toContain("tests/COVERAGE.md does not describe this run");
-      expect(stderr).toContain(
-        "`a.test.ts`: the register says 3, the run counted 2 over 1 file",
-      );
+      expect(recorded, EMPTY_CHANNEL).not.toHaveLength(0);
+      for (const line of recorded)
+        expect(run.stderr, childState(run, "reporter")).toContain(line);
     },
     SPAWNED + 30_000,
   );
@@ -561,9 +1219,12 @@ export function teardown(): void {
     () => {
       write(registerFor(body, rows));
 
-      expect(runThere("--reporter=default").stderr).toContain(
-        "the coverage register reporter did not run, so tests/COVERAGE.md was",
-      );
+      const run = runThere("--reporter=default");
+      const recorded = refusedLines(run, "globalSetup");
+
+      expect(recorded, EMPTY_CHANNEL).not.toHaveLength(0);
+      for (const line of recorded)
+        expect(run.stderr, childState(run, "globalSetup")).toContain(line);
     },
     SPAWNED + 30_000,
   );

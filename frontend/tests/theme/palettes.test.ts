@@ -14,6 +14,12 @@
 
 import { describe, expect, it } from "vitest";
 
+// The comment stripper, and what decides how a path is parsed. The one fact
+// that lives here rather than at the rule below: the CSS reading keeps its own
+// stripping because this one is `parseAst`, which refuses a stylesheet, and
+// that is the entry this file already has in `withoutProse.test.ts`.
+import { langOf, withoutProse } from "../withoutProse";
+
 import {
   PALETTES,
   isConstructed,
@@ -837,33 +843,104 @@ describe("the status pill's ink, as it draws", () => {
     import: "default",
     eager: true,
   }) as Record<string, string>;
-  const BOOK_CARD = COMPONENTS["../../src/pages/components/BookCard.tsx"] ?? "";
+  const BOOK_CARD_PATH = "../../src/pages/components/BookCard.tsx";
 
-  const UNREAD =
-    /\[ReadStatus\.unread\]:\s*"bg-paper-(\d+)\/(\d+) text-paper-(\d+)\b/.exec(
-      BOOK_CARD,
-    );
-  const FINISHED =
-    /\[ReadStatus\.did_not_finish\]:\s*"bg-paper-(\d+) text-paper-(\d+)\b/.exec(
-      BOOK_CARD,
-    );
+  const UNREAD_PILL =
+    /\[ReadStatus\.unread\]:\s*"bg-paper-(\d+)\/(\d+) text-paper-(\d+)\b/;
+  const FINISHED_PILL =
+    /\[ReadStatus\.did_not_finish\]:\s*"bg-paper-(\d+) text-paper-(\d+)\b/;
+
+  /**
+   * The two pill class strings a module declares, read past a comment.
+   *
+   * **Stripped, because a comment quoting a declaration is a match.** `exec`
+   * returns the earliest match in whatever text it is handed, so a copy of a
+   * pill this app no longer paints becomes the subject of every arm below while
+   * `is reading the pill the component draws` still passes. What it takes to be
+   * that copy is the declaration **with its bracketed key**, not the classes:
+   * both patterns want the key adjacent to the quote, so the comments in
+   * `BookCard.tsx` that explain a rung by naming one are near misses of
+   * nothing. None of them carries a key, and each pattern matches once in the
+   * raw text, counted 2026-09-27, so nothing measured here moves. What this
+   * stops is the next comment.
+   *
+   * **What is checked is the earliest match in the code, which is narrower than
+   * reading the declaration.** A string literal and JSX text are deliberately
+   * not prose to the stripper, so an example carrying the whole shape, the key
+   * and the quote and both classes, placed above the map inside either of them,
+   * is still the subject with every arm here green. So is a second real
+   * declaration. Stated rather than armed, because the fix is to scope the match
+   * to the one binding rather than to the module, which is its own item: an arm
+   * counting matches would make wrongness loud without making the subject
+   * right, and would refuse a module declaring a second map for another
+   * surface.
+   *
+   * **Parsed and not a text scan**, which is the direction a regex pair cannot
+   * cover: a class string carrying a slash and a star is code that reads as an
+   * opener, so a text level strip runs from there to the next closer and takes
+   * the declarations in between. `withoutProse.ts` holds that measurement over
+   * `src/`, where a media type wildcard in an attribute swallowed sixteen lines
+   * of JSX. Both directions are armed below, and only the first of them fails
+   * when the stripping is removed.
+   */
+  const pillsIn = (source: string) => {
+    const declared = withoutProse(source, langOf(BOOK_CARD_PATH));
+    return {
+      unread: UNREAD_PILL.exec(declared),
+      finished: FINISHED_PILL.exec(declared),
+    };
+  };
+
+  const DRAWN = pillsIn(COMPONENTS[BOOK_CARD_PATH] ?? "");
+  const UNREAD = DRAWN.unread;
+  const FINISHED = DRAWN.finished;
 
   const SURFACE = `--color-paper-${UNREAD?.[1] ?? ""}`;
   const TINT = Number(UNREAD?.[2] ?? 0) / 100;
   const INK = `--color-paper-${UNREAD?.[3] ?? ""}`;
   const CHOSEN = Number(FINISHED?.[2] ?? 0);
 
+  /**
+   * One sentence for a read that came back empty, wherever it surfaces.
+   *
+   * **A pill respelled without changing what it paints nulls the read**, and the
+   * pattern wants the tint and the ink adjacent and double quoted: a `dark:`
+   * variant between the two, the ink first, a template literal, single quotes,
+   * or the pair handed to a class joiner all paint the same pill and match
+   * nothing. That refusal is this file's to lose, not something a message fixes,
+   * and scoping the match is the item that fixes it. What a message fixes is
+   * which of the failures a reader believes.
+   *
+   * **The unnamed half was a stack trace.** `SURFACE` and `INK` fall back to
+   * `--color-paper-`, which is not a token, so a null read failed four arms in
+   * three shapes: the existence arm, a `TypeError` raised inside `luminance` by
+   * way of the two ratios, and two ordinary comparisons. The first two carry
+   * this sentence now and no `TypeError` is raised anywhere, measured by
+   * pointing the glob at a name no component has. The other two are left alone
+   * because they already name their own subjects, reporting a rung count
+   * against its bound and a blend that returned one of its arguments; zero is
+   * the cause of both and neither says so, which is what a reader needs the
+   * first two for.
+   */
+  const UNMATCHED =
+    "BookCard's pill class strings no longer match the shape `pillsIn` reads";
+
+  /** The pill's two tokens, or that sentence instead of a stack trace. */
+  const pillTokens = (tokens: Tokens): { surface: string; ink: string } => {
+    for (const name of [SURFACE, INK])
+      if (tokens[name] === undefined) throw new Error(`${UNMATCHED}: ${name}`);
+    return { surface: tokens[SURFACE]!, ink: tokens[INK]! };
+  };
+
   const pillRatio = (palette: PaletteId): number => {
     const light = tokensFor(palette, "light");
-    return contrast(
-      light[INK]!,
-      blend(light[SURFACE]!, light["--color-paper-0"]!, TINT),
-    );
+    const { surface, ink } = pillTokens(light);
+    return contrast(ink, blend(surface, light["--color-paper-0"]!, TINT));
   };
 
   const mutedRatio = (palette: PaletteId): number => {
     const light = tokensFor(palette, "light");
-    return contrast(light[INK]!, light["--color-paper-0"]!);
+    return contrast(pillTokens(light).ink, light["--color-paper-0"]!);
   };
 
   it("is reading the pill the component draws", () => {
@@ -872,12 +949,66 @@ describe("the status pill's ink, as it draws", () => {
     // paints. Both halves of the pattern are asserted, because a capture that
     // stopped matching would leave every arm reading `--color-paper-` and
     // failing somewhere less legible than here.
-    expect(UNREAD).not.toBeNull();
-    expect(FINISHED).not.toBeNull();
+    expect(UNREAD, UNMATCHED).not.toBeNull();
+    expect(FINISHED, UNMATCHED).not.toBeNull();
     expect(TINT).toBeGreaterThan(0);
     expect(TINT).toBeLessThan(1);
     expect(PAPER_STEPS).toContain(Number(UNREAD?.[3]));
     expect(PAPER_STEPS).toContain(CHOSEN);
+  });
+
+  it("reads the declaration, not a comment quoting an older one", () => {
+    // The stale copy sits **first**, which is the only position that can win:
+    // `exec` returns the earliest match, so an arm placing the prose after the
+    // declaration passes whether the stripping is there or not. Both patterns
+    // and both comment shapes, because a pass covering the line form only would
+    // leave the block form reading prose while this arm went green on the other
+    // half.
+    const quoted = `
+const PILLS = {
+  // [ReadStatus.unread]: "bg-paper-300/40 text-paper-500", before the rung moved
+  [ReadStatus.unread]: "bg-paper-200/70 text-paper-600",
+  /* [ReadStatus.did_not_finish]: "bg-paper-100 text-paper-500", */
+  [ReadStatus.did_not_finish]: "bg-paper-200 text-paper-800",
+};
+`;
+    const read = pillsIn(quoted);
+
+    expect(read.unread?.slice(1)).toEqual(["200", "70", "600"]);
+    expect(read.finished?.slice(1)).toEqual(["200", "800"]);
+  });
+
+  it("keeps a declaration a text scan would read as an open comment", () => {
+    // The other direction, and the one an author does not hunt for: real code
+    // hidden inside what looks like prose. A media type wildcard is a slash and
+    // a star inside a string literal, so a text level strip opens a block there
+    // and deletes everything up to the next closer, declarations included. The
+    // closer here is deliberately **after** both of them.
+    const wildcard = `
+const ACCEPT = "image/*";
+const PILLS = {
+  [ReadStatus.unread]: "bg-paper-200/70 text-paper-600",
+  [ReadStatus.did_not_finish]: "bg-paper-200 text-paper-800",
+};
+/** A block closes here, below the declarations rather than above them. */
+`;
+    const read = pillsIn(wildcard);
+
+    expect(read.unread?.slice(1)).toEqual(["200", "70", "600"]);
+    expect(read.finished?.slice(1)).toEqual(["200", "800"]);
+    // The discriminator, and what makes the fixture evidence rather than one
+    // that would pass under either instrument. Written here rather than borrowed
+    // from `code()` above, which is documented as reading a stylesheet: an
+    // assertion about what that helper does to TypeScript reddens this arm the
+    // next time somebody changes it for the reason it exists, and this diff is
+    // the second reader converted off a hand rolled matcher. Both comment forms,
+    // so what the fixture beats is a competent text scan and not a careless one.
+    const textLevel = wildcard
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*/g, "");
+
+    expect(UNREAD_PILL.test(textLevel)).toBe(false);
+    expect(FINISHED_PILL.test(textLevel)).toBe(false);
   });
 
   it("falls below the text floor where plain muted text does not", () => {

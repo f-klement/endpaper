@@ -113,27 +113,6 @@ def _bare_collapses(source: str) -> list[int]:
     )
 
 
-def _docstrings_carrying_a_control_character(source: str) -> list[int]:
-    """The lines of `source` whose docstring holds a control character.
-
-    Holds one rather than names one: a docstring that is not raw interprets its
-    own escapes. A newline is not counted, since a docstring is made of them.
-    """
-    return sorted(
-        # A module carries no line number and its docstring opens the file.
-        getattr(node, "lineno", 1)
-        for node in ast.walk(ast.parse(source))
-        if isinstance(
-            node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
-        )
-        for text in [ast.get_docstring(node, clean=False) or ""]
-        if any(
-            unicodedata.category(character) == "Cc" and character != "\n"
-            for character in text
-        )
-    )
-
-
 class TestCollapsingAWhitespaceRun:
     def test_a_run_of_spaces_becomes_one(self):
         assert one_line("Holiday   reads") == "Holiday reads"
@@ -297,34 +276,13 @@ class TestTheApiLayerAsksRatherThanSpelling:
         assert _bare_collapses("x = one_line(value)") == []
         assert _bare_collapses('x = value.split(",")') == []
 
-    def test_no_docstring_in_the_layer_carries_a_control_character(self):
-        """The class this change found in its own first draft, twice.
-
-        A docstring about an invisible character has to quote one, and a
-        docstring that is not raw interprets the escape, so the module ships
-        the character its own sentence is about: a NUL in `one_line.__doc__`,
-        and a newline that broke the example claiming a newline is a word
-        break. Making the string raw is the fix and this sweep is what makes it
-        stick, in a layer where a docstring is also the description the client
-        is handed.
-        """
-        carried = [
-            f"{path.relative_to(BACKEND)}:{line}"
-            for path in [*_api_layer(), _HOME]
-            for line in _docstrings_carrying_a_control_character(path.read_text())
-        ]
-        assert carried == [], (
-            f"{carried} hold a control character in a docstring rather than an "
-            "escape naming one. Make the docstring raw."
-        )
-
-    def test_the_docstring_matcher_can_be_driven(self):
-        """Its sibling's reason: a rule that only ever runs on this checkout is
-        a rule whose arms cannot be driven."""
-        assert _docstrings_carrying_a_control_character('def f():\n    """a\\x00b"""') == [1]
-        assert _docstrings_carrying_a_control_character('def f():\n    r"""a\\x00b"""') == []
-        assert _docstrings_carrying_a_control_character('def f():\n    """a\\tb"""') == [1]
-        assert _docstrings_carrying_a_control_character('x = "a\\x00b"') == []
+    # The control character rule that lived here is now tree wide, in
+    # `test_house_rules.py::TestNoDocstringCarriesTheCharacterItDescribes`, with
+    # the predicate. It was found in this layer, where a docstring is also the
+    # description the generated client is handed, and the population it needed
+    # turned out to be every Python file: two of the nine sites were generated
+    # revisions, which no walk this file uses can see. An arm here as well would
+    # be one that cannot fail while that one passes.
 
     def test_the_layer_is_read_off_the_module_rather_than_its_directory(self):
         """The arm that says a new top level package is covered with no edit."""

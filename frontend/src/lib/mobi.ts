@@ -219,11 +219,9 @@ const EXTH_RECORD_HEADER_BYTES = 8;
  *   9 name the person who produced the edition, one of whom appears in 6 of
  *   those 9. Neither is the author, and a reader taking it for one would file
  *   six books under the same typesetter.
- * * **105, the subject.** 62 of 69 carry it, usually several records. There is
- *   nowhere for it to go, which `fb2.ts`, `opf.ts` and `cbz.ts` each say about
- *   their own spelling of one: `FileMetadata` has no field for a subject, and
- *   `BookCreate` takes no `categories` and no free text tag, so one read here
- *   would reach a screen and no column.
+ * * **105, the subject.** 62 of 69 carry it, usually several records. Read by
+ *   nothing, because `FileMetadata` declares no field for a subject: see that
+ *   type for the reason.
  */
 const AUTHOR = 100;
 const PUBLISHER = 101;

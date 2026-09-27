@@ -15,15 +15,18 @@ import respx
 import covers
 import fetch
 from google_books import (
+    CATEGORY_SEPARATOR,
     VOLUME_ID,
     GoogleBooksError,
     _series_from_title,
     _volume_to_fields,
     is_a_volume_id,
+    join_categories,
     lookup_by_isbn,
     lookup_by_volume_id,
     merge_into,
     search,
+    split_categories,
 )
 from models import Book
 from schemas import BookMatch
@@ -1025,3 +1028,101 @@ class TestAHostileVolumePayload:
         )
         assert fields is not None
         assert fields["categories"] == "Fiction"
+
+
+class TestTheJoinRefusesToStoreASubjectThatWouldReadBackAsTwo:
+    """`join_categories` drops a subject carrying the separator.
+
+    **The one place that knows the separator, so it reaches every producer.** Two
+    upstream joins build their value without looking inside a single subject,
+    `_volume_to_fields` here and `catalogue.Record.as_match`, and a subject holding
+    a bare separator is not representable in this column: `split_categories` splits
+    on that character, so storing one serves two subjects to every reader and
+    manufactures an assertion nobody made.
+
+    Dropped rather than raised, because this runs inside a catalogue read and
+    raising would lose a record over one subject.
+    `schemas.book.BookCreate.one_subject_per_entry` is the door that refuses.
+    """
+
+    def test_a_clean_list_is_joined_whole(self) -> None:
+        """The baseline. A join that dropped everything would pass every arm
+        below."""
+        assert join_categories(["Fiction", "Science Fiction"]) == (
+            f"Fiction{CATEGORY_SEPARATOR}Science Fiction"
+        )
+
+    def test_a_subject_carrying_the_separator_is_dropped(self) -> None:
+        """The arm. Before this, `["Fiction; general"]` stored whole and read back
+        as two subjects, measured."""
+        assert join_categories(["Fiction; general", "Horror"]) == "Horror"
+
+    def test_a_list_of_nothing_but_such_subjects_stores_a_null(self) -> None:
+        """The column is nullable and an empty join answers None, so dropping the
+        only subject leaves no row claiming an empty string."""
+        assert join_categories(["A;B"]) is None
+
+    def test_no_value_this_join_produces_reads_back_as_more_subjects(self) -> None:
+        """The property the drop buys, over inputs that can break it.
+
+        The list here carries two separator bearing subjects, so a join that kept
+        them would answer four subjects for a list of four.
+        """
+        supplied = ["Fiction", "Fiction; general", "Horror", "A;B"]
+        assert any(CATEGORY_SEPARATOR.strip() in subject for subject in supplied)
+
+        stored = join_categories(supplied)
+
+        assert split_categories(stored) == ["Fiction", "Horror"]
+
+    def test_a_volume_whose_category_carries_the_separator_stores_neither_half(
+        self,
+    ) -> None:
+        """Through the producer rather than the helper, since that is the path that
+        built such a value."""
+        fields = _volume_to_fields(
+            {"volumeInfo": {"title": "T", "categories": ["Fiction; general"]}}
+        )
+
+        assert fields["categories"] is None
+
+
+class TestTheJoinCapsTheCountForAProducer:
+    """`join_categories(..., limit=)` caps what a producer hands `BookMatch`.
+
+    **The cap belongs to the producer because the model refuses**, and
+    `routers/books._match_rows` builds that model inside a `try` that drops the
+    **row**. So an uncapped producer costs a whole search result for a record that
+    is merely well described. `catalogue.Record.match_headings` carries the same
+    rule one field over, and the incident that bought it.
+    """
+
+    def test_without_a_limit_nothing_is_truncated(self) -> None:
+        """The baseline, and the create route depends on it: that caller is already
+        bounded by the request schema and passes no limit."""
+        assert join_categories(["a"] * 40) == CATEGORY_SEPARATOR.join(["a"] * 40)
+
+    def test_a_list_past_the_limit_is_truncated_to_it(self) -> None:
+        assert join_categories(["a"] * 40, limit=32) == CATEGORY_SEPARATOR.join(
+            ["a"] * 32
+        )
+
+    def test_a_list_inside_the_limit_is_untouched(self) -> None:
+        """The false refusal the cap could have bought."""
+        assert join_categories(["a"] * 32, limit=32) == CATEGORY_SEPARATOR.join(
+            ["a"] * 32
+        )
+
+    def test_the_drop_runs_before_the_truncation(self) -> None:
+        """`bounded_headings`' rule, and the arm that separates the two orders.
+
+        The separator bearing subjects are at the **front**, so truncating first
+        would keep them, watch the join drop them, and answer **30** against a limit
+        of 32, having discarded the two good subjects that sat behind them. Measured
+        both ways. Dropping first answers the limit exactly.
+        """
+        supplied = ["bad;one", "bad;two"] + [f"good {i}" for i in range(32)]
+
+        stored = join_categories(supplied, limit=32)
+
+        assert split_categories(stored) == [f"good {i}" for i in range(32)]

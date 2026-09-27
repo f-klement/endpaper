@@ -1152,7 +1152,7 @@ class TestExport:
 
         Four are the characters Excel and LibreOffice read as the start of a
         formula. Tab and carriage return are the two that read like padding and
-        are not: both are stripped before the cell is parsed, so `"\t=cmd|..."`
+        are not: both are stripped before the cell is parsed, so `"\\t=cmd|..."`
         runs. Nothing else in the tree pins this, and `_csv_safe`'s docstring
         carries the argument.
         """
@@ -1168,7 +1168,7 @@ class TestExport:
         Every other escape assertion in this tree uses `=`, so deleting the
         other five entries passed the whole suite. Tab and carriage return are
         the two that read like padding and are not: Excel strips them and then
-        runs whatever follows, so `"\t=cmd|..."` executes.
+        runs whatever follows, so `"\\t=cmd|..."` executes.
         """
         make_book(admin["headers"], title=f"{lead}=1+1")
         rows = self._rows(client.get("/api/books/export", headers=admin["headers"]))

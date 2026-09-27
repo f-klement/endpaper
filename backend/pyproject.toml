@@ -122,11 +122,34 @@ pythonpath = ["."]
 # every xdist worker is a separate process with its own directory, its own
 # test.db and its own COVERS_DIR. Nothing is shared to race over.
 #
-# Measured: 22m50s serial, 11m50s at -n 2, same 1634 tests. Not the full 2x,
-# because the suite is closer to I/O bound than CPU bound: it drops and
-# recreates every table between tests, and two workers were observed using
-# 0.68 cores between them. That is also why the old 3500m CI limit was
-# unjustified even before this: the serial run was never short of cores.
+# **No duration is written here, and that is the correction rather than an
+# omission.** This paragraph carried a serial duration, a two worker duration and
+# a test count, for long enough that the suite grew past five times that count. A
+# figure nobody re-derives is read as current for exactly as long as it sits
+# there, so restating the old ones here would keep them copyable in the one home
+# that publishes. They are not restated anywhere that publishes, which the
+# decision register says of itself too: the one attributed reading is in a
+# document the gate strips.
+# `tests/COVERAGE.md` recomputes the test count on every run, which is what a
+# number that has to stay true looks like.
+#
+# **A duration is a fact about a machine and a worker count, not about this
+# line.** Recorded readings of this suite are far apart, and they differ in the
+# machine and in the worker count at once, so nothing on record separates the
+# two effects. Neither was taken at the number here either: a command line `-n`
+# wins over the one in `addopts`, so a harness that passes its own worker count
+# is not measuring this setting at all. Read the current duration off the
+# pipeline's own job report, and take your own with `--durations`, saying which
+# machine and which worker count produced it.
+#
+# **What carries this setting was never the durations.** The suite is closer to
+# I/O bound than CPU bound: it drops and recreates every table between tests,
+# and two workers were measured using 0.68 cores between them. So more workers
+# buy wall clock by overlapping waiting rather than by using more CPU, which is
+# why the ratio was never the full 2x, and why the old 3500m CI limit was
+# unjustified even before this: the serial run was never short of cores. None of
+# that depends on how many tests the suite holds, which is why it stays and the
+# figures went.
 #
 # `--dist loadfile` keeps a file's tests on one worker. `load` scatters them,
 # and this suite has files whose tests share a module-level counter

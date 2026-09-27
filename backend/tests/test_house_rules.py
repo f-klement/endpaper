@@ -14,9 +14,11 @@ import importlib
 import inspect
 import os
 import re
+import sys
 import tomllib
+import unicodedata
 import warnings
-from collections.abc import Container, Sequence
+from collections.abc import Container, Iterable, Sequence
 from enum import StrEnum
 from fnmatch import fnmatch
 from pathlib import Path
@@ -36,6 +38,7 @@ import targets
 from database import Base
 from enums import CatalogueSource
 from tests.helpers import silence_catalogues
+from tests.ignorefile import ignore_patterns, is_ignored
 
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -792,6 +795,34 @@ def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
     return found
 
 
+def _docstrings_carrying_a_control_character(source: str) -> list[int]:
+    """The lines of `source` whose docstring holds a control character.
+
+    Holds one rather than names one: a docstring that is not raw interprets its
+    own escapes, so a sentence about an invisible character ships the character.
+    A newline is not counted, since a docstring is made of them.
+
+    **Its home moved here from the one line normalisation tests** when the rule
+    widened from the API layer to the tree. It stays one function because two
+    spellings of this predicate would agree on any tree, and it is driven by
+    `TestNoDocstringCarriesTheCharacterItDescribes` rather than only asserted
+    over this checkout.
+    """
+    return sorted(
+        # A module carries no line number and its docstring opens the file.
+        getattr(node, "lineno", 1)
+        for node in ast.walk(ast.parse(source))
+        if isinstance(
+            node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+        )
+        for text in [ast.get_docstring(node, clean=False) or ""]
+        if any(
+            unicodedata.category(character) == "Cc" and character != "\n"
+            for character in text
+        )
+    )
+
+
 #: The one helper allowed to turn foreign keys off, and the reason there is one.
 #:
 #: `database.py` sets its pragmas on the `connect` event, which SQLAlchemy fires
@@ -813,6 +844,31 @@ BOUNDING_CALLS = frozenset(
 LOWER_BOUNDS = frozenset({"ge", "gt"})
 UPPER_BOUNDS = frozenset({"le", "lt"})
 ROUTE_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
+
+#: The decorators that register a handler, which is not the same set as the
+#: methods. `api_route` carries its methods in a `methods=` keyword instead of in
+#: the attribute name, so a handler registered that way is a route handler whose
+#: attribute is in neither set above. It was invisible to every rule below until
+#: 2026-09-26, found by planting a bound inside one: two live routes use it.
+ROUTE_DECORATORS = ROUTE_METHODS | frozenset({"api_route"})
+
+#: Names in `ROUTE_DECORATORS` deliberately carried ahead of the handler that will
+#: need them, each to the reason. **Empty, and that is the state to keep it in.**
+#:
+#: A name here is a name `test_every_decorator_the_tuple_names_is_carried_here`
+#: cannot hold, so the cost of widening the tuple early is one line rather than the
+#: guard's own subject. It exists because the exemption used to be implicit: the
+#: arm read the names the corpus uses and said nothing about the rest, and "a name
+#: added ahead of its handler" and "a name whose last handler changed shape" are
+#: one state with two histories. Rewriting `main.api_not_found`'s two `api_route`
+#: decorators as two `get` decorators, which breaks nothing, then deleting
+#: `api_route`, put the whole `api_route` hole back with no arm red.
+#:
+#: **A row that is in use is refused too**, by the same arm, because a row whose
+#: handler has arrived is a row that outlived its reason and the neighbouring
+#: `EXCLUDED` in `tests/routers/test_concurrency_bounds.py` records what an
+#: unpoliced one costs.
+DECORATORS_CARRIED_AHEAD: Final[dict[str, str]] = {}
 
 
 def _is_bounding_call(node: ast.AST) -> bool:
@@ -860,13 +916,360 @@ def _preceding_comment_block(lines: list[str], lineno: int) -> str:
     return "\n".join(lines[start:lineno])
 
 
-def _is_route_handler(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    """Decorated `@<something>.get/post/put/patch/delete(...)`."""
+def _decorator_attributes(node: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset[str]:
+    """The attribute of every decorator on this function, `@a.b(...)` and `@a.b` alike.
+
+    Lifted out of `_is_route_handler` because the cross check below needs what a
+    handler **carries** and not only whether it is one: the arm that shows each
+    decorator name load bearing asks which names this corpus uses, rather than
+    reading the tuple it is testing.
+    """
+    found: set[str] = set()
     for decorator in node.decorator_list:
         call = decorator.func if isinstance(decorator, ast.Call) else decorator
-        if isinstance(call, ast.Attribute) and call.attr in ROUTE_METHODS:
-            return True
-    return False
+        if isinstance(call, ast.Attribute):
+            found.add(call.attr)
+    return frozenset(found)
+
+
+def _is_route_handler(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    decorators: frozenset[str] = ROUTE_DECORATORS,
+) -> bool:
+    """Decorated with anything that registers a handler, `ROUTE_DECORATORS`.
+
+    **Not only the five method names.** `api_route` names its methods in a
+    keyword, so keying on the attribute alone missed it, and a bound planted
+    inside such a handler was green on every arm that reads this.
+
+    `decorators` is a parameter so `_declared_route_handlers` can be asked of a
+    weakened tuple and the answer put against the population the framework
+    serves. Every other caller takes the default, which is the one tuple.
+    """
+    return bool(_decorator_attributes(node) & decorators)
+
+
+def _route_handlers_declared_in(
+    paths: Iterable[Path], root: Path
+) -> dict[tuple[str, str], frozenset[str]]:
+    """The parse and the collision refusal, over the modules handed to it.
+
+    **`paths` rather than a root to walk**, because a walk of a tree of Python
+    here has to be one of the shared ones above and carry a row in
+    `WHAT_EACH_WALK_REACHES`. This is the consumer of one, lifted out so the
+    refusal below can be driven against a tree a test builds: asserted over this
+    checkout alone it was at the "measured once" rung, green on 142 handlers over
+    142 names and never shown to fire.
+
+    **Two handlers of one name in one module collapse to one key, and so do their
+    routes on the other side**, which makes a collision invisible to the arms
+    below rather than a disagreement they report. So it is refused rather than
+    stated. `main.assert_unique_operation_ids()` is not what covers it: since
+    2026-09-26 it runs below every router this app includes, so it refuses a name
+    two **published** handlers share, and it reads the published routes alone
+    because `main.api_not_found` is one handler under one name answering two
+    prefixes. Two unpublished handlers of one name still collapse to one key here
+    with nothing else to report them.
+    """
+    declared: dict[tuple[str, str], frozenset[str]] = {}
+    handlers = 0
+    for path in paths:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, _A_FUNCTION) or not _is_route_handler(node):
+                continue
+            handlers += 1
+            declared[str(path.relative_to(root)), node.name] = (
+                _decorator_attributes(node) & ROUTE_DECORATORS
+            )
+    assert len(declared) == handlers, (
+        f"{handlers} route handlers occupy {len(declared)} names, so two of them "
+        "share a module and a name and this population cannot tell them apart"
+    )
+    return declared
+
+
+def _declared_route_handlers() -> dict[tuple[str, str], frozenset[str]]:
+    """Every handler this tree declares, `(module, function)` to its route decorators.
+
+    **Over `_python_sources()` and not `backend/routers/`.** `main.py` declares
+    two handlers and is not in the route layer, so a population stopping at that
+    directory cannot see `api_route` used at all and therefore cannot hold the
+    member of `ROUTE_DECORATORS` that exists for it. Measured 2026-09-26:
+    dropping `api_route` leaves `backend/routers/` at 140 of 140 and this corpus
+    at 141 of 142.
+
+    **Which of the shared walks is chosen changes nothing today, and that is a
+    fact about the tree rather than about the choice.** `_python_sources` differs
+    from `_every_module_but_the_tests` by the migrations, and a generated revision
+    declares no route, so the two answer alike here. Swapping them is a survivor
+    of any sweep for that reason and not because the corpus is unimportant.
+
+    **Membership is `_is_route_handler` and the value is the attributes**, so a
+    weakened tuple's population is set arithmetic over one parse rather than one
+    parse of every module this backend ships per name in the tuple, which is what
+    the minimality arm below would otherwise cost. A clause that function grows is
+    already applied here, because every key is one it accepted under the whole
+    tuple; a clause reading `decorators` itself is the one change that would have
+    to move this with it.
+    """
+    return _route_handlers_declared_in(_python_sources(), BACKEND)
+
+
+def _registered_route_handlers() -> dict[tuple[str, str], list[str]]:
+    """Every handler this application has a route for, `(module, function)` to paths.
+
+    The second derivation, and it reads neither tuple: it asks the app what it
+    registered, which is the population the framework itself serves.
+    `main.iter_api_routes` is the walk, because `include_router` appends a wrapper
+    around the child router rather than splicing that router's routes in.
+
+    **Deduplicated by function**, since one function carrying two decorators holds
+    two routes: `main.api_not_found` carries two `api_route` calls and is one
+    handler answering two paths.
+
+    **It cannot come back empty**, which is why nothing here is a floor.
+    `main.assert_unique_operation_ids()` runs at import and raises when this walk
+    finds no published route, so an app it has stopped understanding fails the
+    import of everything that reaches it rather than reading as a population that
+    shrank. An empty walk leaves nothing published either, so the implication holds
+    in the direction this needs it;
+    `test_main.py::TestTheOperationIdCheckReachesEveryPublishedRoute` is what keeps
+    that refusal from being a claim about unexecuted code.
+
+    **`main` is imported here and not at module scope.** Every other rule in this
+    file is a parse and owes nothing to a built app or to a database.
+
+    **And this reads `main.app` as the run left it**, which is the one input here
+    that is not the source. A fixture registering a route on the real app and
+    removing it again leaks one into this population if its cleanup is skipped, so
+    `tests/test_errors.py::exploding_route` holds its removal in a `try/finally`
+    for that reason and not for tidiness. `--dist loadfile` is not protection: it
+    keeps one file's tests together, it does not keep two files apart.
+
+    **Keyed on `__name__` rather than `__qualname__`**, because the other side of
+    the comparison is an `ast` node's `name` and a qualified key would never match
+    it. That makes a handler defined inside another function invisible to both
+    sides rather than a disagreement; none exists here, measured 2026-09-26, no
+    endpoint whose `__qualname__` differs from its `__name__`.
+
+    A handler whose module is outside `backend/` is keyed by that module's name in
+    angle brackets rather than dropped, so it lands in the disagreement below
+    instead of being filtered out by an inclusion rule nobody revisits.
+    """
+    main = importlib.import_module("main")
+    found: dict[tuple[str, str], list[str]] = {}
+    for route in main.iter_api_routes(main.app.routes):
+        endpoint: object = route.endpoint
+        module = getattr(endpoint, "__module__", "")
+        file = getattr(sys.modules.get(module), "__file__", None)
+        resolved = Path(file).resolve() if file else None
+        where = (
+            str(resolved.relative_to(BACKEND))
+            if resolved is not None and resolved.is_relative_to(BACKEND)
+            else f"<{module}>"
+        )
+        # `repr` rather than a blank, so a callable carrying no `__name__` is
+        # named in the disagreement instead of colliding with every other one.
+        name = getattr(endpoint, "__name__", repr(endpoint))
+        found.setdefault((where, name), []).append(route.path)
+    return found
+
+
+def _a_route_module_declaring(path: Path, *handlers: str) -> None:
+    """Write a module registering one route handler per name given.
+
+    Repeat a name to plant the collision `_route_handlers_declared_in` refuses.
+    `get` for all of them, because the arms this feeds are about the key rather
+    than about which decorator produced it.
+    """
+    path.write_text(
+        "from fastapi import APIRouter\n\nrouter = APIRouter()\n\n"
+        + "\n".join(
+            f'@router.get("/{index}")\ndef {name}() -> None: ...\n'
+            for index, name in enumerate(handlers)
+        )
+    )
+
+
+class TestTheRouteHandlerPopulationIsDerivedTwice:
+    """`ROUTE_DECORATORS` decides what every rule reading `_is_route_handler`
+    examines, so weakening it has to be a disagreement rather than a smaller
+    number nobody sees.
+
+    Measured 2026-09-26, before this existed: dropping `delete` from
+    `ROUTE_METHODS` left 121 of the 140 handlers in `backend/routers/` in the
+    population and every arm of `tests/routers/test_concurrency_bounds.py` green,
+    against a floor of 100 there. The two handlers that guard names are both POST
+    handlers, so the methods nobody would miss were exactly the ones free to
+    leave.
+
+    **A second derivation and not another floor.** A literal beside a number that
+    grows every month is a weaker inequality every month; a second derivation of
+    the same population is the same strength whatever the number does. The floors
+    that used to stand for this in `tests/routers/test_concurrency_bounds.py` are
+    retired: `>= 12` against 13 modules passed while one router module left, and
+    `>= 100` against 140 handlers passed while forty did, where the mutation that
+    raised all this cost nineteen.
+
+    **Only the first arm is a cross check, and the rest are not.** It asks the
+    application which routes it registered, so the two sides can only agree while
+    the tuple names every decorator this tree uses. The two after it read the
+    declared side alone: one holds that the tuple names nothing decorative, the
+    other that no name in it is covered by another. They are worth having and they
+    are not a second instrument, and saying otherwise cost a round: arm two's right
+    hand side was a subset of the declared population, so substituting the declared
+    side for the registered one inside it survived.
+
+    **What goes past every arm here**, the mechanism and no claim about how much:
+    a handler registered with `@router.websocket(...)`. The name is in neither
+    tuple, and FastAPI builds an `APIWebSocketRoute`, which is not an `APIRoute`
+    and carries no nested `routes`, so `main.iter_api_routes` filters it out of the
+    other side too. Both populations stay blind and every arm stays green. Nothing
+    in this tree declares one.
+    """
+
+    def test_the_two_derivations_name_the_same_handlers(self) -> None:
+        declared = _declared_route_handlers()
+        registered = _registered_route_handlers()
+
+        # **The causes it cannot tell apart, all of them.** Naming only the
+        # weakened tuple sends a reader to widen `ROUTE_DECORATORS` for four
+        # states that widening cannot fix, which is the failure the message on
+        # the other side already avoids by listing its own two.
+        assert set(registered) - set(declared) == set(), (
+            "this application serves routes whose handlers no rule in this file "
+            "examines. Any of five: `ROUTE_DECORATORS` no longer names the "
+            "decorator one is registered with; the route is registered by "
+            "`add_api_route` rather than by a decorator; a test registered it on "
+            "the real app and did not remove it; a decorator wrapped the handler "
+            "without `functools.wraps`, so it reports the wrapper's name; or the "
+            "endpoint comes from a module outside this tree, which is the key in "
+            f"angle brackets: {sorted(set(registered) - set(declared))}"
+        )
+        assert set(declared) - set(registered) == set(), (
+            "these carry a route decorator and this application registers no "
+            "route for them, so either a router is never included or one of "
+            "these decorators belongs to something that is not a router: "
+            f"{sorted(set(declared) - set(registered))}"
+        )
+
+    def test_every_decorator_the_tuple_names_is_carried_here(self) -> None:
+        """The tuple names nothing decorative, so no member is free to leave.
+
+        **Both directions, against `DECORATORS_CARRIED_AHEAD`.** A name in the
+        tuple that nothing carries goes unheld by the arm below, and a row in the
+        exemption whose handler has arrived is a row that outlived its reason.
+
+        The arm above cannot stand in for this: the two populations agree on a
+        tuple member nothing uses, because a name no handler carries changes
+        neither side.
+        """
+        declared = _declared_route_handlers()
+        used = frozenset(
+            attribute for attributes in declared.values() for attribute in attributes
+        )
+        carried_ahead = frozenset(DECORATORS_CARRIED_AHEAD)
+
+        assert ROUTE_DECORATORS - used - carried_ahead == set(), (
+            "these are in `ROUTE_DECORATORS` and no handler in this tree carries "
+            "one, so the arm below holds nothing about them and deleting one is "
+            "green: give each a `DECORATORS_CARRIED_AHEAD` row saying which "
+            "handler it is waiting for, or take it out of the tuple: "
+            f"{sorted(ROUTE_DECORATORS - used - carried_ahead)}"
+        )
+        assert carried_ahead & used == set(), (
+            "these are excused as carried ahead of their handler and the handler "
+            "has arrived, so the row outlived its reason and is now hiding the "
+            f"name from the arm below: {sorted(carried_ahead & used)}"
+        )
+
+    def test_no_decorator_the_tuple_names_is_covered_by_another(self) -> None:
+        """Each name is the only route decorator on at least one handler.
+
+        **A minimality check over the declared side alone, and not a second
+        cross check.** Given the arm above, the population under a weakened tuple
+        is a subset of the population under the whole one, so this compares one
+        derivation against itself: it says the tuple carries no name whose every
+        handler would still be found without it. Written with the registered side
+        on the right it looked like an instrument and was not, since that side
+        cancelled out of the inequality.
+
+        What it buys: a name is held by the arm above only while some handler
+        depends on it alone. `api_route` has exactly one such handler,
+        `main.api_not_found`, measured 2026-09-26, so giving that handler a second
+        decorator would make `api_route` deletable with nothing red, which is the
+        two step evasion this arm closes.
+        """
+        declared = _declared_route_handlers()
+        whole = set(declared)
+        used = frozenset(
+            attribute for attributes in declared.values() for attribute in attributes
+        )
+
+        assert used, (
+            "no handler in this corpus carries a route decorator, so this arm has "
+            f"no subject: {len(declared)} handlers declared"
+        )
+
+        # `attributes - {one}` is `attributes & (ROUTE_DECORATORS - {one})`,
+        # because every value here is already inside the tuple.
+        covered = sorted(
+            one
+            for one in used
+            if {handler for handler, attributes in declared.items() if attributes - {one}}
+            == whole
+        )
+        assert covered == [], (
+            "every handler carrying each of these carries another route decorator "
+            "too, so dropping the name from `ROUTE_DECORATORS` loses no handler "
+            "and nothing above goes red. Either the tuple no longer needs it, or "
+            f"the handler that depended on it alone changed shape: {covered}"
+        )
+
+    def test_two_handlers_of_one_name_in_one_module_are_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The collision the population cannot represent, driven rather than measured.
+
+        Both handlers take the same key, here and on the framework's side, so a
+        collision is a handler silently absent from the population instead of a
+        disagreement either arm reports.
+
+        **Against a tree this builds.** Over this checkout the refusal is green on
+        142 handlers holding 142 names and had never been shown to fire, which is
+        the "measured once" rung and not a tested one.
+        """
+        root = tmp_path / "backend"
+        (root / "routers").mkdir(parents=True)
+        _a_route_module_declaring(root / "routers" / "one.py", "list_books", "list_books")
+        _a_route_module_declaring(root / "routers" / "two.py", "trash_book")
+
+        with pytest.raises(AssertionError, match="share a module and a name"):
+            _route_handlers_declared_in(
+                [root / "routers" / "one.py", root / "routers" / "two.py"], root
+            )
+
+    def test_the_same_tree_without_the_collision_is_read(self, tmp_path: Path) -> None:
+        """The other half, without which a refusal of everything passes the arm above.
+
+        It also pins the key, which is what the arm comparing the two populations
+        matches on: the module's path relative to the root, and the function's own
+        name.
+        """
+        root = tmp_path / "backend"
+        (root / "routers").mkdir(parents=True)
+        _a_route_module_declaring(root / "routers" / "one.py", "list_books", "get_book")
+        _a_route_module_declaring(root / "routers" / "two.py", "trash_book")
+
+        declared = _route_handlers_declared_in(
+            [root / "routers" / "one.py", root / "routers" / "two.py"], root
+        )
+
+        assert set(declared) == {
+            ("routers/one.py", "list_books"),
+            ("routers/one.py", "get_book"),
+            ("routers/two.py", "trash_book"),
+        }
 
 
 class TestTheSourceWalkSeesOnlyThisProject:
@@ -5477,131 +5880,6 @@ class TestEveryPythonFileCompilesWithoutAWarning:
             fixture.read_text(encoding="utf-8")
 
 
-#: The patterns in `.gitignore`, each with whether it is anchored to the root.
-#:
-#: **This file is the repository's own statement of what is not source**, it is
-#: what `git` itself consults, and it is versioned, so a rule derived from it
-#: moves when the repository does. That is the property a list of directory
-#: names beside a walk cannot have.
-#:
-#: **Asking `git` would be better and is not available.** Measured 2026-09-06 in
-#: the pod the suites actually run in: no `git` binary, and no `.git`, because
-#: the runner ships a tar that excludes it. A rule calling `git ls-files` there
-#: is a rule that fails or, worse, quietly answers nothing.
-#:
-#: **Three forms raise rather than being approximated in either direction**: a
-#: negation, a `**`, and a wildcard inside an anchored pattern, because that arm
-#: compares text rather than matching. Approximating wide drops a versioned file
-#: from the walk, which is the defect the walk exists to stop; approximating
-#: narrow walks a directory the repository ignores, which is how the publish
-#: tooling's own output came to be read as source.
-#:
-#: **That is three forms and not the class "anything this cannot evaluate
-#: exactly", which is what this comment used to claim.** A backslash escape and a
-#: POSIX character class are both evaluated, wrongly and in silence: `fnmatch`
-#: reads `\` as an ordinary character and `[[:alpha:]]` as the set of the
-#: literal characters between the brackets. Neither form is in this repository's
-#: ignore file. Naming the three is honest; a fourth predicate for each shape
-#: somebody thinks of is the enumeration this whole walk replaced.
-def _ignore_patterns(root: Path) -> list[tuple[str, bool, bool]]:
-    ignore_file = root / ".gitignore"
-    assert ignore_file.is_file(), f"no .gitignore at {root}, so the walk has no rule"
-    patterns: list[tuple[str, bool, bool]] = []
-    for line in ignore_file.read_text(encoding="utf-8").splitlines():
-        entry = line.strip()
-        if not entry or entry.startswith("#"):
-            continue
-        # A pattern with a slash left in it after the markers come off is
-        # anchored to the root, which is git's own rule and the difference
-        # between `backend/data/` meaning that one directory and meaning any
-        # `data` anywhere.
-        anchored = entry.startswith("/")
-        # A trailing slash is git's directory only marker, and dropping it with
-        # the anchor marker hides a versioned **file** of that name: unanchored,
-        # `data/` would also hide a file called `data`; anchored, `backend/data/`
-        # would also hide the file `backend/data`. Neither exists here, counted,
-        # so it was latent rather than failing, and it was reachable the moment a
-        # consumer stopped filtering to a suffix.
-        directory_only = entry.endswith("/")
-        entry = entry.strip("/")
-        anchored = anchored or "/" in entry
-        # The anchored arm compares text rather than matching, so a wildcard
-        # there would read as "never matches" instead of raising.
-        assert "!" not in entry and "**" not in entry and not (
-            anchored and set(entry) & set("*?[")
-        ), f"unsupported .gitignore form, teach this walk about it: {entry}"
-        patterns.append((entry, anchored, directory_only))
-    return patterns
-
-
-def _is_ignored(relative: Path, patterns: list[tuple[str, bool, bool]], is_dir: bool) -> bool:
-    """Whether the repository ignores `relative`, which is a directory when `is_dir`.
-
-    **`is_dir` is what carries the directory only marker**, and every caller
-    already knows it without asking the filesystem a second time. It has no
-    default deliberately: a default is the answer a call site forgets to give,
-    and a wrong answer here drops a versioned file in silence.
-
-    **The separator in the anchored arm is load bearing.** Written
-    `startswith(pattern)` it silently drops `backend/database.py`, because
-    `backend/data` is an anchored entry in this repository's own ignore file.
-    That consequence is live rather than latent, which is why it has an arm of
-    its own, `test_an_anchored_rule_stops_at_the_separator_rather_than_the_prefix`.
-
-    **Four mutations, three of this function and one of a call site, survive
-    every arm covering either, and the gap is known rather than missed.**
-    Nothing in this tree can observe them:
-
-    * Requiring `is_dir` on the anchored **exact** match moves only an anchored
-      entry carrying no marker. One entry is in that class here against six
-      carrying the marker, and it names a directory, so no caller asks about it
-      as a file. **Adding the slash it is missing would empty the class**, and
-      this sentence would then be true because there is nothing left to be wrong
-      about rather than because the rule holds.
-    * Honouring the marker on the anchored **subtree** match moves only a file
-      under an ignored directory, and every walk over this prunes that
-      directory before it reaches the file.
-    * Reading only the **last** component in the unanchored arm breaks ancestor
-      semantics, and nothing here can see it: the walks prune the ancestor
-      first, and every unanchored entry carrying no marker names a file.
-    * Asking this with `is_dir=False` where a walk prunes moves only which of
-      two arms drops the entry, because the arm for files decides the same
-      question one component further down.
-
-    Each becomes observable the moment its premise moves: an anchored entry with
-    no marker naming a file, a caller that asks about a path it did not walk to,
-    a walk that stops pruning. An arm is the wrong answer to all four, because an
-    arm asserting a fixture nothing reaches asserts the fixture.
-
-    **That pruning is also why two mutations here mask each other**, which is the
-    general shape and not a detail of these two. Dropping `is_dir` from the
-    unanchored arm, and shortening that arm's components to nothing, are each
-    green alone against every walk and red together: the walk never reaches a
-    file under an ignored directory, so each mutation removes the evidence the
-    other would have left. What catches either alone is the anti vacuity pin in
-    the guard over the strip list, which asks this directly rather than through a
-    walk. A guard that only drives the walk cannot see either.
-    """
-    text = str(relative)
-    for pattern, anchored, directory_only in patterns:
-        if anchored:
-            # An anchored pattern matches the path itself, where the marker
-            # decides, or anything under it, where it cannot.
-            matched = (
-                (is_dir or not directory_only)
-                if text == pattern
-                else text.startswith(f"{pattern}/")
-            )
-        else:
-            # A directory only pattern still matches a **directory component**
-            # of a file's path. The last component is the entry itself and is a
-            # directory only when the caller says so; every component before it
-            # is one by construction.
-            parts = relative.parts if (is_dir or not directory_only) else relative.parts[:-1]
-            matched = any(fnmatch(part, pattern) for part in parts)
-        if matched:
-            return True
-    return False
 
 
 #: Every Markdown file this repository versions.
@@ -5645,7 +5923,7 @@ def _is_ignored(relative: Path, patterns: list[tuple[str, bool, bool]], is_dir: 
 #: rather than only over this one.
 def _markdown_sources(root: Path | None = None) -> list[Path]:
     root = BACKEND.parent if root is None else root
-    patterns = _ignore_patterns(root)
+    patterns = ignore_patterns(root / ".gitignore", refuse_empty=False)
     found: list[Path] = []
     for directory, subdirectories, files in os.walk(root):
         here = Path(directory)
@@ -5653,15 +5931,76 @@ def _markdown_sources(root: Path | None = None) -> list[Path]:
             name
             for name in subdirectories
             if not name.startswith(".")
-            and not _is_ignored((here / name).relative_to(root), patterns, is_dir=True)
+            and not is_ignored((here / name).relative_to(root), patterns, is_dir=True)
         ]
         found += [
             here / name
             for name in files
             if name.endswith(".md")
-            and not _is_ignored((here / name).relative_to(root), patterns, is_dir=False)
+            and not is_ignored((here / name).relative_to(root), patterns, is_dir=False)
         ]
     return sorted(found)
+
+
+def _floor_from_a_constructed_parse(root: Path, scratch: Path) -> set[Path]:
+    """The two globs the Markdown walk replaced, minus the members an ignore entry
+    that names a **file** in them excludes, read through a parse built here.
+
+    **Why the floor may not come from the parse the walk uses.** A ratchet whose
+    floor and subject are one parse cannot see an ignore file the walk stopped
+    understanding: the floor is subtracted away with the walk and the inequality
+    holds over nothing. Built here, the floor survives its subject.
+
+    **Entries are selected by what the parsed entry matches, never by how the line
+    is spelled.** Keeping the lines that end in `.md` looked equivalent and is a
+    false refusal: `notes-*` is an entry this walk honours correctly, it is not
+    spelled `.md`, and dropping it from the floor reddens the ratchet while the
+    walk is right. So a line is kept when its own parse matches a member as a file
+    and matches no directory on the way to it.
+
+    **The directory test is what keeps the rework worth having.** An entry naming a
+    directory, `docs/`, matches every document under it as a file too, by the
+    subtree branch of the matcher. Admitting it would subtract the whole
+    documentation tree from the floor, which is exactly the shrink this function
+    exists to refuse, so an entry that matches a directory on the path is left
+    outside the filter and the members it took stay in the floor.
+
+    **What it leaves out, stated rather than bounded.** Both sides still share the
+    matcher, so a defect in the matcher moves floor and walk together and is caught
+    by the fixture arms over `_markdown_sources`, not here. A line this walk
+    refuses outright names nothing in the floor, because the walk cannot honour it
+    either. And an entry that ignores a member as a genuine file leaves with the
+    walk, which is a correct green: the member is ignored and is not walked.
+
+    `scratch` is a directory this function may write one ignore file into, per
+    line. It is a parameter so the whole thing can be driven over a fixture tree,
+    which is what the two arms below do: a floor that cannot be driven over a
+    fixture is on the measured once rung, whatever its docstring says.
+    """
+    region = {
+        path.relative_to(root)
+        for path in [*root.glob("*.md"), *root.glob("docs/*.md")]
+    }
+    one_line = scratch / "one-line" / ".gitignore"
+    one_line.parent.mkdir(parents=True, exist_ok=True)
+    excluded: set[Path] = set()
+    for line in (root / ".gitignore").read_text(encoding="utf-8-sig").splitlines():
+        one_line.write_text(f"{line}\n", encoding="utf-8")
+        try:
+            parsed = ignore_patterns(one_line, refuse_empty=False)
+        except SystemExit:
+            continue
+        if not parsed:
+            continue
+        for member in region:
+            names_a_directory = any(
+                is_ignored(parent, parsed, is_dir=True)
+                for parent in member.parents
+                if parent != Path(".")
+            )
+            if is_ignored(member, parsed, is_dir=False) and not names_a_directory:
+                excluded.add(member)
+    return region - excluded
 
 
 def _fence_lines(text: str) -> list[int]:
@@ -5704,7 +6043,9 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         odd = {name: n for name, n in counts.items() if n % 2}
         assert odd == {}, f"{odd}, of {len(counts)} files walked"
 
-    def test_the_walk_never_narrows_below_the_globs_it_replaced(self) -> None:
+    def test_the_walk_never_narrows_below_the_globs_it_replaced(
+        self, tmp_path: Path
+    ) -> None:
         """Anti vacuity, as a ratchet. A walk that returned nothing would pass
         the rule above in silence, which is the shape this repository calls an
         instrument that cannot see the failure reporting its absence, and the
@@ -5717,22 +6058,107 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
 
         **The floor is the old globs minus what the repository ignores**, and
         leaving that out made this test green only while a checkout happened to
-        hold no ignored root document. The wave plan and the technology
-        evaluation beside it are both root Markdown, so they sat inside the old
-        globs and are deliberately outside the walk now: on a checkout carrying
-        either, this failed while nothing was wrong.
+        hold no ignored root document. A wave's own working documents are root
+        Markdown, so they sat inside the old globs and are deliberately outside
+        the walk now: on a checkout carrying one, this failed while nothing was
+        wrong.
+
+        **That exclusion comes from a parse this arm constructs, and it used to
+        come from the one under test.** The comment here said refusing an empty
+        parse armed the comparison. It does not: an ignore file this walk stopped
+        understanding subtracts the floor away with the walk, and a floor that
+        shrank with its subject bounds nothing. Measured: a parse weakened rather
+        than emptied walked 54 files against a floor that stayed at 22 and passed.
+
+        **The construction, what it selects and what it leaves out, are at
+        `_floor_from_a_constructed_parse`**, and so is the reason it is a function
+        taking a root rather than a few lines here: a floor nothing can drive over a
+        fixture is a floor nothing observes. The two arms under this one are what
+        observe it, over the one shape where the two floors differ.
+
+        **What this arm still cannot see is a walk that grew.** Containment does not
+        look for it, and no second instrument for what the repository versions
+        exists in the pod the suites run in.
         """
         repo = BACKEND.parent
-        patterns = _ignore_patterns(repo)
+        # The repository's own ignore file still parses to something. This used to
+        # be described as what armed the comparison below, which it never was; it
+        # is kept because nothing else asserts it over that file, `_markdown_sources`
+        # passing `refuse_empty=False` so a fixture may hand it a silent one.
+        assert ignore_patterns(repo / ".gitignore", refuse_empty=True)
+        replaced = _floor_from_a_constructed_parse(repo, tmp_path)
         walked = {path.relative_to(repo) for path in _markdown_sources()}
-        replaced = {
-            path.relative_to(repo)
-            for path in [*repo.glob("*.md"), *repo.glob("docs/*.md")]
-            if not _is_ignored(path.relative_to(repo), patterns, is_dir=False)
-        }
+        assert replaced, "the floor is empty, so this compares nothing"
         assert replaced <= walked, sorted(str(p) for p in replaced - walked)
         assert Path("CHANGELOG.md") in walked
         assert Path("docs/decisions.md") in walked
+
+    def test_the_floor_is_the_parse_this_arm_builds_and_not_the_one_under_test(
+        self, tmp_path: Path
+    ) -> None:
+        """The one shape where the two floors differ, so the construction is
+        observed rather than asserted.
+
+        An entry naming a directory takes every document under it out of a floor
+        computed from the walk's own parse, which is the inequality holding over a
+        population the parse had just emptied. The constructed floor keeps them, so
+        it is red and names them. On every live shape of this tree the two floors
+        are identical, which is why a mutant reverting the construction is invisible
+        without this arm.
+        """
+        root = tmp_path / "tree"
+        (root / "docs").mkdir(parents=True)
+        (root / ".gitignore").write_text("docs/\n", encoding="utf-8")
+        (root / "CHANGELOG.md").write_text("# a register\n", encoding="utf-8")
+        (root / "docs" / "decisions.md").write_text("# the other one\n", encoding="utf-8")
+
+        region = {
+            path.relative_to(root)
+            for path in [*root.glob("*.md"), *root.glob("docs/*.md")]
+        }
+        constructed = _floor_from_a_constructed_parse(root, tmp_path / "scratch")
+        shared = {
+            member
+            for member in region
+            if not is_ignored(
+                member,
+                ignore_patterns(root / ".gitignore", refuse_empty=True),
+                is_dir=False,
+            )
+        }
+        walked = {path.relative_to(root) for path in _markdown_sources(root)}
+
+        assert Path("docs/decisions.md") in constructed
+        assert Path("docs/decisions.md") not in shared
+        assert not constructed <= walked, "the constructed floor stopped ratcheting"
+        assert shared <= walked, (
+            "the floor taken from the parse under test no longer passes here, so "
+            "this arm has stopped showing the two apart"
+        )
+
+    def test_a_file_shaped_glob_the_walk_honours_does_not_move_the_floor(
+        self, tmp_path: Path
+    ) -> None:
+        """The false refusal the first version of that construction had.
+
+        Selecting the floor's lines by the spelling `.md` dropped `notes-*`, an
+        entry this walk honours exactly right, so the floor kept a document the walk
+        correctly does not and the ratchet was red over a tree with nothing wrong
+        with it. Both spellings are here because one ends in the suffix and one does
+        not, and only the second was caught by reading.
+        """
+        root = tmp_path / "tree"
+        root.mkdir()
+        (root / ".gitignore").write_text("notes-*\nscratch-*.md\n", encoding="utf-8")
+        (root / "CHANGELOG.md").write_text("# a register\n", encoding="utf-8")
+        (root / "notes-draft.md").write_text("# ignored, no suffix on the entry\n", encoding="utf-8")
+        (root / "scratch-two.md").write_text("# ignored, suffix on the entry\n", encoding="utf-8")
+
+        floor = _floor_from_a_constructed_parse(root, tmp_path / "scratch")
+        walked = {path.relative_to(root) for path in _markdown_sources(root)}
+
+        assert floor == {Path("CHANGELOG.md")}, sorted(str(p) for p in floor)
+        assert floor <= walked, sorted(str(p) for p in floor - walked)
 
     def test_a_file_the_repository_does_not_version_is_not_walked(
         self, tmp_path: Path
@@ -5768,7 +6194,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         # text equality lets them all through unchanged: measured, that mutation
         # was invisible to the entire suite. This one is ignored because an
         # unanchored pattern matches a name at any depth, which is git's rule and
-        # the only thing the segment walk in `_is_ignored` buys.
+        # the only thing the segment walk in the shared matcher buys.
         (tmp_path / "docs" / "scratch.md").write_text("# deeper than the pattern\n")
         walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
         assert walked == {"docs/real.md"}
@@ -5825,7 +6251,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         walk**, silently. `backend/data` is an anchored entry in this
         repository's own ignore file and `backend/database.py` is a versioned
         module, so the consequence is live here rather than latent, which is why
-        this one is an arm where the other blind spots in `_is_ignored` are a
+        this one is an arm where the shared matcher's other blind spots are a
         paragraph.
 
         The ignored directory's own file is beside the sibling so the fixture
@@ -5852,13 +6278,173 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
         assert walked == {"README.md"}
 
-    def test_an_ignore_form_this_cannot_honour_is_refused(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("form", "term"),
+        [
+            ("!docs/keep.md", "a negation"),
+            ("build/**/out", "a `**`"),
+            ("build-*/out", "a wildcard inside an anchored pattern"),
+            ("a**b", "a `**`"),
+            ("\\!docs/keep.md", "a backslash"),
+            ("a\\*b", "a backslash"),
+            ("*", "a bare `*`"),
+            ("*/", "a bare `*`"),
+            ("/*", "a bare `*`"),
+        ],
+    )
+    def test_an_ignore_form_this_cannot_honour_is_refused(
+        self, tmp_path: Path, form: str, term: str
+    ) -> None:
         """Under-excluding walks something extra and says so; over-excluding
-        drops a versioned file in silence. A negation is the form that would do
-        the second, so it raises rather than being approximated."""
-        (tmp_path / ".gitignore").write_text("docs/\n!docs/keep.md\n")
-        with pytest.raises(AssertionError, match=re.escape("unsupported .gitignore form")):
+        drops a versioned file in silence. These are the forms that would do the
+        second, so they raise rather than being approximated.
+
+        **Every term of the refusal, not the negation alone.** Two of them were
+        reachable only from the pipeline selftest, which the backend gate does not
+        collect because `testpaths` names this tree, so an edit dropping either
+        passed here and failed on a push. `a**b` is in the set because without it
+        one term is credited and never exercised: the anchored wildcard clause
+        refuses `build/**/out` and `build-*/out` on its own, so deleting the `**`
+        term leaves both still refused.
+
+        **The backslash forms are here because the negation term is a position
+        test**, and the two cases are not interchangeable. `\\!docs/keep.md` is
+        git's escape for a literal name and is what a containment test on `!` used
+        to refuse as a side effect; `a\\*b` carries no marker at all and reaches
+        the backslash term alone. Both fail narrow through `fnmatch`, which reads
+        the character as ordinary.
+
+        **The three spellings of a bare star are one term and three parses.** The
+        refusal tests the entry after the markers come off, so `*/` and `/*` arrive
+        at it as `*` by two different routes and neither is credited to the
+        anchored wildcard clause: `/*` reaches that clause too, `*/` does not, and
+        `*` reaches neither. What a star costs is at the refusal's own site.
+
+        **The message has to name the term, not only the entry.** Eight of these
+        nine came back in identical words, so the one a contributor is likeliest to
+        meet, a path spelled with backslashes, was told to teach the walk about a
+        form when the answer is a character. Asserted here rather than left to the
+        refusal's own comment, because a message nothing reads is prose.
+        """
+        (tmp_path / ".gitignore").write_text(f"docs/\n{form}\n")
+        with pytest.raises(SystemExit, match=re.escape("unsupported .gitignore form")) as refusal:
             _markdown_sources(tmp_path)
+        assert term in str(refusal.value), str(refusal.value)
+
+    @pytest.mark.parametrize(
+        ("entry", "parsed"),
+        [
+            ("notes!draft.md", ("notes!draft.md", False, False)),
+            ("/!draft.md", ("!draft.md", True, False)),
+            ("*.md.bak", ("*.md.bak", False, False)),
+            ("junit-*.xml", ("junit-*.xml", False, False)),
+        ],
+    )
+    def test_a_marker_character_away_from_its_position_is_a_literal(
+        self, tmp_path: Path, entry: str, parsed: tuple[str, bool, bool]
+    ) -> None:
+        """The other half of the refusal above, and the half an author does not
+        hunt for: what it must **not** refuse.
+
+        **The negation marker is the first character of a line and nowhere else.**
+        By containment, `notes!draft.md` is a hard failure over a file git
+        versions, which is the refusal's own failure direction inverted. `/!draft.md`
+        is the same rule read after the markers come off: git reads it as an
+        anchored literal, and a position test asked one line later sees the `!`
+        that the anchor strip has just moved into first place.
+
+        **A star away from being the whole entry is a literal too**, and by
+        containment three of this repository's own entries would refuse. Compared
+        against the parse's own output rather than through the matcher, because a
+        refusal that fired and a matcher that returned the same answer are
+        indistinguishable from a walk.
+        """
+        (tmp_path / ".gitignore").write_text(f"{entry}\n")
+        assert ignore_patterns(tmp_path / ".gitignore", refuse_empty=True) == [parsed]
+
+    def test_a_byte_order_mark_does_not_disarm_the_entry_behind_it(
+        self, tmp_path: Path
+    ) -> None:
+        """Read as plain `utf-8` the mark stays on the text, so the first entry
+        becomes a pattern beginning with a character no path holds. It matches
+        nothing, it is still counted, so the parse is non-empty and the empty
+        parse refusal never fires: whichever entry is on line 1 stops being
+        honoured in silence.
+
+        **Driven over a file this arm writes, and the mark is asserted to be in
+        it.** Latent in this repository today, so an arm reading the repository's
+        own ignore file would take its subject from that file's line order, which
+        is the arming-by-data shape this tree has already paid for twice. Two
+        entries, so the arm also says which of them the mark was in front of.
+        """
+        ignore_file = tmp_path / ".gitignore"
+        ignore_file.write_bytes("\ufeffnotes/\nkept.md\n".encode())
+        assert ignore_file.read_bytes().startswith(b"\xef\xbb\xbf"), (
+            "the fixture no longer carries a byte order mark, so it no longer "
+            "tells the two encodings apart"
+        )
+        assert ignore_patterns(ignore_file, refuse_empty=True) == [
+            ("notes", False, True),
+            ("kept.md", False, False),
+        ]
+
+    def test_an_anchored_entry_loses_its_marker_characters_and_keeps_its_anchor(
+        self, tmp_path: Path
+    ) -> None:
+        """The parse's own output, compared against a value rather than fed back
+        into the matcher.
+
+        **Every other arm over this rule reads the parse through the matcher**, so
+        a parse that mangles an entry and a matcher that mis-reads a sound one are
+        indistinguishable, and one normalisation had no pin at all: stripping only
+        the trailing slash leaves the leading one on the pattern, every arm and
+        every population stays green, and the entry stops being honoured.
+
+        **Its live subject is the publish gate's own output directory**, the one
+        entry in this repository's ignore file written with a leading slash. Losing
+        it puts the stripped tree that gate materialises into the corpus and into
+        both walks, which is the failure the shared rule's own docstring names. It
+        goes red only on a checkout where somebody has run the gate, so its arming
+        would otherwise be whether that happened.
+        """
+        (tmp_path / ".gitignore").write_text("/out/\ndeep/kept/\nplain\n")
+        assert ignore_patterns(tmp_path / ".gitignore", refuse_empty=True) == [
+            ("out", True, True),
+            ("deep/kept", True, True),
+            ("plain", False, False),
+        ]
+
+    def test_the_shared_rule_lets_no_call_site_answer_by_accident(self) -> None:
+        """`is_dir` and `refuse_empty` are keyword-only and have no default, and
+        the module's docstrings give both the same reason: a default is the answer
+        a call site forgets to give, a positional is the answer it gives without
+        reading, and either way a wrong answer drops a versioned file or leaves a
+        population unbounded, silently.
+
+        **The reason was written down and nothing enforced it.** A default added
+        to either failed nothing, and an arm asserting only that no default exists
+        stays green on a positional argument, which is the same hole one step over.
+        """
+        # Read off the function this asserts about rather than off a module
+        # name, so the arm cannot end up parsing a file the callers do not use.
+        source = inspect.getsourcefile(ignore_patterns)
+        assert source is not None
+        module = ast.parse(Path(source).read_text(encoding="utf-8"))
+        checked = {}
+        for node in module.body:
+            if not isinstance(node, ast.FunctionDef) or node.name.startswith("_"):
+                continue
+            checked[node.name] = sorted(
+                argument.arg for argument in node.args.kwonlyargs
+            )
+            assert not node.args.defaults and not any(node.args.kw_defaults), (
+                f"{node.name} carries a default, so a call site can leave the "
+                "answer to it"
+            )
+        assert checked == {
+            "ignore_patterns": ["refuse_empty"],
+            "is_ignored": ["is_dir"],
+        }, checked
 
     def test_an_unbalanced_fence_is_reported(self, tmp_path: Path) -> None:
         fixture = tmp_path / "broken.md"
@@ -9479,3 +10065,85 @@ class TestTheLendingCycleStaysPlain:
                 f"{name} no longer imports {other} at module level, so the "
                 "cycle the rule above is about is not the one in the tree"
             )
+
+
+class TestNoDocstringCarriesTheCharacterItDescribes:
+    r"""A docstring about an invisible character must name it, never hold it.
+
+    **A docstring that is not raw interprets its own escapes**, so a sentence
+    explaining why some code handles a NUL ships a NUL. In the API layer that
+    reaches further than the file, because a docstring there is also the
+    description the OpenAPI document and the generated client are handed; but the
+    reason the rule is the whole tree is the next reader, who copies the line.
+
+    **Measured 2026-09-26 over `_every_python_file`, which is the only walk that
+    sees all of it**: nine sites, seven test modules and two generated
+    revisions. `_python_sources` drops the migrations and two of the nine were
+    there, which is why the arm below does not use the walk the layer's own rule
+    used.
+
+    **The fix was not the one the finding proposed.** Making the string raw is
+    wrong for a docstring carrying another escape for its own reasons, and two of
+    the nine did: one already spelled `\\x00` correctly on one line and `\x00` on
+    two others, and one wrote `\\u0000` deliberately beside a real NUL. Raw
+    ifying either would have changed a second thing silently. Doubling the
+    offending backslash renders as the author meant and touches nothing else.
+    """
+
+    def test_no_docstring_in_the_tree_carries_one(self) -> None:
+        carried = [
+            f"{path.relative_to(BACKEND)}:{line}"
+            for path in _every_python_file()
+            for line in _docstrings_carrying_a_control_character(
+                path.read_text(encoding="utf-8")
+            )
+        ]
+        assert carried == [], (
+            f"{carried} hold a control character in a docstring rather than an "
+            "escape naming one. Double the backslash, which renders as the "
+            "sentence meant; making the whole string raw changes any other "
+            "escape it carries."
+        )
+
+    def test_the_matcher_can_be_driven(self) -> None:
+        """A rule that only ever runs on this checkout is one whose arms cannot fire.
+
+        The third case is the one the tree needed: a doubled escape is what the
+        fix produces, so a matcher that flagged it would refuse every repaired
+        site.
+        """
+        assert _docstrings_carrying_a_control_character(
+            'def f():\n    """a\\x00b"""'
+        ) == [1]
+        assert _docstrings_carrying_a_control_character(
+            'def f():\n    r"""a\\x00b"""'
+        ) == []
+        assert _docstrings_carrying_a_control_character(
+            'def f():\n    """a\\\\x00b"""'
+        ) == []
+        # A tab counts, and that is not incidental: it was the character two of
+        # the eleven sites carried, in docstrings about a spreadsheet reading a
+        # tab as padding before a formula. A first sweep of this tree excluded
+        # tabs and reported nine.
+        assert _docstrings_carrying_a_control_character(
+            'def f():\n    """a\\tb"""'
+        ) == [1]
+        # A string that is not a docstring is not the subject.
+        assert _docstrings_carrying_a_control_character('x = "a\\x00b"') == []
+
+    def test_the_walk_it_uses_reaches_a_generated_revision(self) -> None:
+        """The arm above is only as wide as its walk, and the narrower walk misses.
+
+        Stated as the difference between the two walks rather than as a count of
+        revisions, which moves with every migration anybody writes.
+        """
+        migrations = {
+            path
+            for path in _every_python_file()
+            if "migrations" in path.relative_to(BACKEND).parts
+        }
+        assert migrations, "no generated revision in the walk, so this arm reads nothing"
+        assert not migrations & set(_python_sources()), (
+            "`_python_sources` now reaches the migrations, so the reason this rule "
+            "uses the wider walk no longer holds and the comment above is stale"
+        )

@@ -47,6 +47,7 @@ and refuses past it. `docs/decisions.md` has the round this was settled in.
 import asyncio
 import logging
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from enum import StrEnum
 from typing import Final
 from urllib.parse import urljoin, urlsplit
@@ -154,6 +155,47 @@ MAX_COVER_BYTES: Final = MAX_UPLOAD_BYTES
 #: books would open five thousand sockets and get this deployment's address
 #: refused by both image services at once.
 MAX_CONCURRENT_FETCHES: Final = 6
+
+#: The pod's slots for backfill cover fetches, held once for the process rather
+#: than once per request.
+#:
+#: **Built here rather than in the handler body, which is the defect this
+#: replaces.** `routers/books.backfill_covers` built its own
+#: `ThreadPoolExecutor(max_workers=MAX_CONCURRENT_FETCHES)`, so the six bounded one
+#: request while what the six defends belongs to the pod: two free image services
+#: that see one address, and up to `MAX_COVER_BYTES` in memory for every fetch in
+#: flight. Runs in flight multiplied both, and
+#: `routers/books.COVER_BACKFILL_DEADLINE_SECONDS` is where how many of them one
+#: member can hold is derived.
+#:
+#: **Here rather than in `routers/books.py`, where the sibling backfill's semaphore
+#: sits.** Each bound belongs beside the constant that sizes it, and that constant
+#: is here because the ceiling is: the image services and this deployment's one
+#: address. A second fan out over covers asks this rather than building its own,
+#: which is the whole of the rule
+#: `tests/routers/test_concurrency_bounds.py` states for route handlers.
+#:
+#: **An executor and not a semaphore, because what is rationed is a thread.**
+#: `resolve_and_store` calls `asyncio.run` and so must not run on the event loop,
+#: and the route that fans out is a `def`; a semaphore would ration coroutines
+#: that are not what does the work here.
+#:
+#: **Never shut down, and that is the lifecycle rather than an omission.** A worker
+#: is started by the first submit that finds none idle, at most
+#: `MAX_CONCURRENT_FETCHES` of them, and `concurrent.futures.thread` joins them at
+#: interpreter exit. The `with` block is what made the old one per request;
+#: shutting this one down anywhere would leave the next run submitting to a dead
+#: pool. `tests/routers/test_books_cover_backfill.py` holds that two presses run on
+#: the same workers, which is the observable a per request pool cannot produce.
+#:
+#: **Process wide is pod wide only because the pod runs one process.** The image
+#: gives uvicorn no `--workers`, which
+#: `tests/routers/test_concurrency_bounds.py::TestTheImageRunsOneWorkerSoProcessWideIsPodWide`
+#: holds; under `--workers N` this becomes N pools of six and `WEB_CONCURRENCY` in
+#: a deployment is outside any test's reach.
+FETCHES_AT_ONCE: Final = ThreadPoolExecutor(
+    MAX_CONCURRENT_FETCHES, thread_name_prefix="cover-fetch"
+)
 
 #: How a cover host's name becomes addresses. The seam the suite replaces.
 #:
@@ -630,23 +672,6 @@ async def resolve(
     return None
 
 
-async def resolve_many(isbns: list[str]) -> dict[str, str | None]:
-    """Covers for several ISBNs at once, for the rapid shelf scanner.
-
-    Bounded by `MAX_CONCURRENT_FETCHES`. It used to be a bare gather, which is
-    fine for the eight books somebody scans in a burst and is not fine for the
-    backfill, which calls this with the whole library.
-    """
-    limit = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
-
-    async def one(isbn: str) -> str | None:
-        async with limit:
-            return await resolve(isbn)
-
-    results = await asyncio.gather(*(one(isbn) for isbn in isbns))
-    return dict(zip(isbns, results, strict=True))
-
-
 # ── Storing a cover instead of hotlinking one ─────────────────────────────────
 #
 # A cover URL on another company's server is five separate things that each
@@ -956,19 +981,19 @@ def resolve_and_store(
     other, which is what stops the column and the directory drifting apart
     silently.
 
-    `budget` is a wall clock ceiling in seconds for the whole call, for the
-    paths with a person waiting: see `INTERACTIVE_BUDGET_SECONDS`. Past it the
-    best candidate found so far is returned unverified and the bytes are left to
-    the backfill, which passes no budget because nothing is waiting on it.
+    `budget` is a wall clock ceiling in seconds for the whole call. Past it the
+    best candidate found so far is returned unverified and the bytes are left to a
+    later pass: `INTERACTIVE_BUDGET_SECONDS` is the figure for a path with a person
+    waiting, and `routers/books.COVER_BACKFILL_BUDGET_SECONDS` the one for the
+    backfill, whose caller is waiting on the whole run rather than on one book.
 
-    **With no budget a fetch is bounded per hop and not per book.** `_hop_seconds`
-    gives every hop `TIMEOUT_SECONDS` of wall clock whether or not a deadline was
-    passed, so the backfill's ceiling is that figure times the hops rather than
-    the nothing it used to be: a server sizing chunks at one byte used to stretch
-    a download for as long as it liked, because `MAX_COVER_BYTES` against a per
-    read timeout was the only bound left. What is still missing is a per **book**
-    ceiling, which is one call in `routers/books.py` away and is what closes the
-    difference between three hops and a whole run.
+    **With no budget a fetch is bounded per hop and not per book**, so every caller
+    passes one. `_hop_seconds` gives every hop `TIMEOUT_SECONDS` of wall clock
+    whether or not a deadline was passed, which bounds a hop and not a walk: a
+    server sizing chunks at one byte used to stretch a download for as long as it
+    liked, because `MAX_COVER_BYTES` against a per read timeout was the only bound
+    left. A call with `budget=None` is still admitted and is still bounded per hop
+    only, which is what the default means rather than a caller's option.
 
     **Calls `asyncio.run`, so it must not be called from a coroutine.** Every
     handler that adds a book is a `def` and therefore already runs in a worker

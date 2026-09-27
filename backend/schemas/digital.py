@@ -26,7 +26,8 @@ from models import DIGITAL_REFERENCE_MAX_SIZE, DIGITAL_REFERENCE_PATH_MAX
 #: `MAX_CLASSIFICATIONS_PER_BOOK` sits beside two measured tables; this one
 #: cannot and inventing a corpus for it would be worse than saying so.
 #:
-#: So it is chosen the way `CATEGORIES_MAX` chose 32, by which way the failure
+#: So it is chosen the way `schemas.book.MAX_CATEGORIES_PER_BOOK` chose 32, by
+#: which way the failure
 #: modes are asymmetric. Too loose costs rows on a page nobody scrolls; too
 #: tight refuses a Member a real location and there is no way to tell them which
 #: one to drop. 16 is far past any household's count of machines and shares, and

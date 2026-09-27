@@ -2285,6 +2285,20 @@ export const getBackfillCoversUrl = (params?: BackfillCoversParams) => {
  * once the end is reached, so pressing again starts over and re-tries the ones
  * that failed, which may since have become fixable.
  *
+ * **Bounded in wall clock as well as in books**, so a slow or blackholing image
+ * service leaves the batch short rather than holding the request open. A short
+ * run answers with whatever resolved, counts only the books it has an outcome
+ * for, and moves the cursor over exactly those, so pressing again resumes at the
+ * first book this one did not reach. The reply does not distinguish a short run
+ * from a complete one and does not need to: press again while `remaining` is
+ * above zero.
+ *
+ * **Each book is bounded too.** A cover is a candidate check and then a
+ * download, each of which may follow redirects, and with no budget every hop of
+ * both got a timeout of its own, so one unlucky book could spend what the whole
+ * run was meant to. Past its budget a book keeps the remote URL, is counted
+ * `unreachable`, and is a candidate again on the next pass through the library.
+ *
  * Idempotent either way: a book with a file behind it is never a candidate, so
  * a second pass over the same range examines nothing it fixed.
  * @summary Backfill Covers
@@ -3499,9 +3513,17 @@ export const getBackfillFromIdentifiersUrl = (
  * than examining nothing and reporting a clean run. The cause is a switch and
  * a key in Settings, and the reply names both.
  *
- * Batched and resumable. `next_after_id` carries on past what this run tried,
- * and comes back as 0 at the end of the library so pressing again starts over
- * and re-tries whatever has since become resolvable.
+ * Batched and resumable. `next_after_id` carries on past what this run
+ * examined, and comes back as 0 at the end of the library so pressing again
+ * starts over and re-tries whatever has since become resolvable.
+ *
+ * **Bounded in wall clock as well as in books**, so a slow or busy Google
+ * leaves the batch short rather than holding the request open. A short run
+ * answers with whatever resolved, counts only the books it has an outcome for,
+ * and moves the cursor over exactly those, so pressing again resumes at the
+ * first book this one did not reach. The reply does not distinguish a short run
+ * from a complete one and does not need to: press again while `remaining` is
+ * above zero.
  * @summary Backfill From Identifiers
  */
 export const backfillFromIdentifiers = async (

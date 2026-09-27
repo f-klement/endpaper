@@ -83,8 +83,11 @@ because a collector that finds one module finds no empty ones.
 from __future__ import annotations
 
 import ast
+import collections.abc as abc
 import importlib
+import importlib.util
 import inspect
+import pathlib
 import pkgutil
 import re
 import textwrap
@@ -99,12 +102,24 @@ from annotated_types import MaxLen
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic.fields import FieldInfo
+from sqlalchemy import Column, Integer, MetaData, Table
 
 import catalogue
+import models
 import routers
+import routers.books as books_router
+import schemas.book as schemas_book
 from enums import ReadStatus
-from google_books import CATEGORY_SEPARATOR
-from models import CATEGORIES_MAX, CLASSIFICATION_NUMBER_MAX, Book
+from google_books import CATEGORY_SEPARATOR, join_categories, split_categories
+from models import CLASSIFICATION_NUMBER_MAX, Book
+from schemas.book import (
+    CATEGORIES_MAX,
+    CATEGORY_MAX,
+    MAX_CATEGORIES_PER_BOOK,
+    BookCreate,
+    BookMatch,
+)
 
 #: A caller-supplied field that carries no ceiling, and why that is right.
 #:
@@ -520,8 +535,22 @@ def _column_widths() -> dict[str, int]:
     Read off the table rather than written down, because a width copied here
     is the same fact stored twice and would agree with the schema forever
     while both drifted away from the database. `Text` states none and is
-    absent, which is why `description` and `categories` are covered by the
-    agreement rule and not by the column rule.
+    absent, so `description` and `categories` are outside this rule.
+
+    **`description` is covered by the agreement rule and `categories` is not**,
+    and the difference is the shape rather than the column. Two request bodies
+    state a width for `description` and the agreement rule compares them. Both
+    bodies name `categories`, but one carries it as a list, which `_kinds`
+    answers `{list}` for, so only one of the pair reaches `_column_fields` and
+    there is nothing for that rule to compare. What covers it instead is
+    `TestTheTwoDoorsIntoTheCategoriesColumn`, which asserts the identity between
+    the list bounds and this column's stated width directly.
+
+    **The claim about `categories` was already false before a list door existed**,
+    and dating it to that door would be the same error again: the agreement rule
+    needs two request bodies stating a bound for one column, and `BookMatch` was the
+    only body naming this one, so the rule had a single row and could never report.
+    `BookOut` and `PublicBookOut` are response models.
     """
     widths: dict[str, int] = {}
     for column in Book.__table__.columns:
@@ -779,20 +808,27 @@ class TestEveryFieldARequestBodyCarriesIsBounded:
     def test_the_categories_ceiling_assumes_the_separator_it_is_derived_from(
         self,
     ) -> None:
-        """`CATEGORIES_MAX` is `32 * CLASSIFICATION_NUMBER_MAX + 31 * 2`, and
-        the `2` is the width of `google_books.CATEGORY_SEPARATOR`.
+        """`CATEGORIES_MAX` is `MAX_CATEGORIES_PER_BOOK * CATEGORY_MAX` plus one
+        separator between each pair, and the expression spells that width as
+        `len(CATEGORY_SEPARATOR)` rather than as a `2`.
 
-        That module is the only place allowed to know the separator, by its own
-        docstring, so `models.py` cannot import it without becoming a second
-        place that knows. The literal is pinned here instead: the heading width
-        cannot drift because it is a named constant, and this is what stops the
-        separator from drifting silently underneath a comment claiming the
-        arithmetic cannot.
+        **So there is no literal here to pin, which is the point.** The
+        arithmetic and the separator now sit in the module whose request body
+        states both bounds, so the width is read off the separator and cannot
+        drift underneath a comment claiming it cannot. This arm is a second
+        reading of that one derivation; what it adds is the factors, since a
+        `32` or a `120` retyped anywhere is a further home for a number the
+        field already states.
+
+        `CATEGORY_MAX == CLASSIFICATION_NUMBER_MAX` is asserted as a
+        measurement rather than spelled as an alias, so widening a column width
+        fails here instead of silently widening every accepted subject list.
         """
         assert len(CATEGORY_SEPARATOR) == 2
-        assert 32 * CLASSIFICATION_NUMBER_MAX + 31 * len(
-            CATEGORY_SEPARATOR
-        ) == CATEGORIES_MAX
+        assert CATEGORY_MAX == CLASSIFICATION_NUMBER_MAX
+        assert MAX_CATEGORIES_PER_BOOK * CATEGORY_MAX + (
+            MAX_CATEGORIES_PER_BOOK - 1
+        ) * len(CATEGORY_SEPARATOR) == CATEGORIES_MAX
 
     def test_the_rename_map_names_real_fields_and_real_columns(
         self, bodies: dict[str, type[BaseModel]]
@@ -1512,3 +1548,705 @@ class TestNoBodyWrittenOntoARowCanClearAColumnThatRefusesNull:
             title: str | None = None
 
         assert not _refuses_a_null(_Clearable, "title")
+
+
+def _element_ceiling(field: Any) -> int | None:
+    """The width one entry of a container field declares, or None.
+
+    Through `FieldInfo.from_annotation` rather than by reading `__metadata__`
+    here, so the element goes through the same `_constraints` walk the field
+    does: that walk exists because the house spelling hides a `MaxLen` inside a
+    `FieldInfo`, and an element read any other way would miss it exactly as the
+    first version of that walk did.
+    """
+    elements = _element_types(field.annotation)
+    if not elements:
+        return None
+    return min(
+        (
+            ceiling
+            for element in elements
+            if (ceiling := _stated_ceiling(FieldInfo.from_annotation(element)))
+            is not None
+        ),
+        default=None,
+    )
+
+
+class TestTheTwoDoorsIntoTheCategoriesColumn:
+    """`BookCreate.categories` and `BookMatch.categories`, and the rules differ.
+
+    **The agreement rule cannot see this pair, which is why these arms exist.**
+    `_kinds` answers `{list}` for a generic, deliberately and with its reason at
+    its own site, so `BookCreate.categories` never reaches `_column_fields` and
+    `_disagreements` has one field for this column where it needs two. Nothing
+    else in this file relates `CATEGORIES_MAX` to `MAX_CATEGORIES_PER_BOOK` and
+    `CATEGORY_MAX`: a product and its factors live in one module and no type
+    checker relates them, so a widening of either factor without the width is a
+    stored value the column cannot hold.
+
+    **What these arms do not cover.** They read the bounds the two bodies state
+    and the values the two validators return. A hostile client can store any
+    value the column holds through either door, so nothing here is a claim about
+    what a determined caller writes: the refusal on the create door is a
+    correctness control against an honest producer. Neither is this a claim about
+    stored rows, which predate both bounds.
+    """
+
+    def test_the_widest_list_the_create_body_admits_joins_to_the_column_bound(
+        self,
+    ) -> None:
+        """The identity the two factors were named for.
+
+        Read off the field rather than from the constants, so widening either
+        bound on the body without widening the column fails here. Exactly equal
+        rather than within: that is what makes the width a derivation of the pair
+        and not a number that happens to be larger.
+
+        **Implied by the two arms below rather than independent of them**, which is
+        worth saying instead of adding a fourth: this, the factor arm and
+        `test_the_categories_ceiling_assumes_the_separator_it_is_derived_from` are
+        three readings of one derivation, not three instruments. What this one adds
+        is that it goes through `join_categories`, so a change to the join is
+        visible here and to neither of the others.
+        """
+        field = BookCreate.model_fields["categories"]
+        count = _stated_ceiling(field)
+        entry = _element_ceiling(field)
+        assert count is not None and entry is not None, (
+            "the create body's subject list states no count or no entry width, "
+            "so the column bound is no longer derived from anything"
+        )
+
+        widest = join_categories(["x" * entry] * count)
+
+        assert widest is not None and len(widest) == CATEGORIES_MAX, (
+            f"{count} subjects of {entry} characters join to "
+            f"{len(widest or '')}, and the column holds {CATEGORIES_MAX}"
+        )
+
+    def test_the_two_factors_are_the_ones_the_column_width_is_computed_from(
+        self,
+    ) -> None:
+        """The other half, and it is not the same assertion.
+
+        The arm above passes if the body states any pair whose join fits. This
+        one refuses a body that states a pair the column width was not computed
+        from, which is what stops the two drifting into agreement at the wrong
+        number.
+        """
+        field = BookCreate.model_fields["categories"]
+
+        assert _stated_ceiling(field) == MAX_CATEGORIES_PER_BOOK
+        assert _element_ceiling(field) == CATEGORY_MAX
+
+    def test_the_two_widths_are_the_same_population(self) -> None:
+        """A subject and a classification number are bounded alike because they are
+        the same thing measured: an access point with its subdivisions.
+
+        **An arm rather than an alias.** `CATEGORY_MAX` used to be spelled
+        `= CLASSIFICATION_NUMBER_MAX`, which made this claim unfalsifiable while the
+        coupling ran the wrong way: that constant is a **column** width, widened
+        three times for column reasons by its own record, and each widening silently
+        widened every subject list this application accepts, with every arm green.
+        Two literals and this arm means moving either has to be done twice.
+        """
+        assert CATEGORY_MAX == CLASSIFICATION_NUMBER_MAX
+
+    def test_the_entry_width_applies_to_the_normalised_subject(self) -> None:
+        """The `mode="before"` ordering, and nothing else armed it.
+
+        Measured: under `mode="after"` the element `max_length` would refuse this
+        raw 140 character entry, and under `mode="before"` normalisation removes the
+        20 that have no width and the 120 that remain are accepted. The other two
+        width arms are refused under either ordering, so that mutation survived
+        them both.
+
+        **A `Cc` character and not a `Cf` one.** `one_line_without_invisible_characters`
+        removes NUL and leaves U+200B, U+00AD and U+FEFF in place, deliberately, so a
+        `Cf` probe would be refused for its width and the arm would pass for the
+        wrong reason.
+        """
+        raw = "y" * CATEGORY_MAX + "\x00" * 20
+        assert len(raw) == CATEGORY_MAX + 20
+
+        accepted = BookCreate(title="t", categories=[raw]).categories
+
+        assert accepted == ["y" * CATEGORY_MAX]
+
+    def test_a_subject_carrying_the_separator_is_refused_rather_than_split(
+        self,
+    ) -> None:
+        """The create door's rule, and the value that drives it.
+
+        Splitting would answer 201 and store two subjects where the member
+        asserted one, and the invented one is then served without a session. The
+        entry here is the shape an honest producer supplies: one field a
+        publisher put two subjects in.
+        """
+        with pytest.raises(ValidationError) as refusal:
+            BookCreate(title="t", categories=["Fiction; general"])
+
+        assert CATEGORY_SEPARATOR.strip() in str(refusal.value), (
+            "the refusal does not name the character it refuses, so nobody can "
+            "act on it"
+        )
+
+    def test_the_separator_is_refused_inside_a_subject_however_it_is_spelled(
+        self,
+    ) -> None:
+        """The joined form is two characters and the split form is one, so a
+        rule written against the joined form refuses nothing a bare semicolon
+        does."""
+        for spelling in ("A;B", "A; B", "A ;B", ";A", "A;"):
+            with pytest.raises(ValidationError):
+                BookCreate(title="t", categories=[spelling])
+
+    def test_no_subject_the_create_door_accepts_carries_the_separator(
+        self,
+    ) -> None:
+        """The refusal as a property over what is accepted rather than over what
+        is refused: every candidate either raises or comes back without the
+        character.
+
+        **The candidates have to include one that carries it.** The first version
+        of this arm asserted the property over three entries that had no separator
+        in them, so removing the refusal altogether left it green: measured, that
+        mutation was caught by the two arms above and not by this one. A property
+        arm over inputs that cannot exercise it is the arm that reads as the
+        strongest and holds the least.
+        """
+        candidates = ["Fiction", "Fiction; general", "A;B", "  Social   Problems  "]
+        assert any(CATEGORY_SEPARATOR.strip() in candidate for candidate in candidates)
+
+        seen = 0
+        for candidate in candidates:
+            try:
+                accepted = BookCreate(title="t", categories=[candidate]).categories
+            except ValidationError:
+                continue
+            seen += len(accepted)
+            assert not any(
+                CATEGORY_SEPARATOR.strip() in subject for subject in accepted
+            ), f"{candidate!r} was accepted as {accepted!r}, which carries the separator"
+
+        assert seen, "every candidate was refused, so the property held over nothing"
+
+    def test_an_accepted_list_survives_the_round_trip_through_the_column(
+        self,
+    ) -> None:
+        """Normalisation does not desync the round trip: a padded or multi word
+        subject reads back as the one subject it was.
+
+        **This arm does not carry the refusal**, and saying so is the point: every
+        input here is separator free, so deleting the refusal leaves it green.
+        Measured. What carries the refusal is
+        `test_no_subject_the_create_door_accepts_carries_the_separator`, which is
+        driven by a separator bearing candidate.
+        """
+        accepted = BookCreate(
+            title="t", categories=["Fiction, general", "  Science   Fiction  "]
+        ).categories
+
+        assert split_categories(join_categories(accepted)) == accepted
+        assert accepted == ["Fiction, general", "Science Fiction"]
+
+    def test_an_empty_subject_list_stores_a_null_rather_than_an_empty_string(
+        self,
+    ) -> None:
+        """The column is nullable and `join_categories` answers None for an
+        empty list. A stored `""` would read back as no subjects and sort
+        differently from a row that never had any."""
+        assert join_categories(BookCreate(title="t", categories=[]).categories) is None
+
+    def test_the_enrichment_door_bounds_the_subjects_inside_the_joined_string(
+        self,
+    ) -> None:
+        """The looseness one route apart, and its size.
+
+        `POST /api/books/{book_id}/enrich/apply` takes this body from the client
+        and `merge_into` writes the column from it, so the count the create door
+        states meant nothing here while the only bound was on the string.
+        """
+        stated = _stated_ceiling(BookMatch.model_fields["categories"])
+        assert stated == CATEGORIES_MAX
+        bypass = ("a" + CATEGORY_SEPARATOR.strip()) * (stated // 2)
+        assert len(bypass) == stated, "the driving value no longer fills the field"
+        assert len(split_categories(bypass)) > MAX_CATEGORIES_PER_BOOK
+
+        with pytest.raises(ValidationError):
+            BookMatch(categories=bypass)
+
+    def test_the_enrichment_door_bounds_after_the_split_and_never_before(
+        self,
+    ) -> None:
+        """The ordering, driven by the value that separates the two.
+
+        The field's own `max_length` accepts this payload whole, so a door
+        applying its bounds to what arrived would take it. What it would then
+        store is far wider than the column, which is the failure the order exists
+        to stop.
+        """
+        entry = ("a" + CATEGORY_SEPARATOR.strip()) * (CATEGORY_MAX // 2)
+        payload = CATEGORY_SEPARATOR.join([entry] * MAX_CATEGORIES_PER_BOOK)
+        assert len(payload) <= CATEGORIES_MAX, (
+            "the payload no longer fits the field's own bound, so this arm would "
+            "pass on that bound rather than on the ordering"
+        )
+        rejoined = join_categories(split_categories(payload))
+        assert rejoined is not None and len(rejoined) > CATEGORIES_MAX
+
+        with pytest.raises(ValidationError):
+            BookMatch(categories=payload)
+
+    def test_the_enrichment_door_bounds_the_count_where_the_width_cannot(
+        self,
+    ) -> None:
+        """The count bound, isolated.
+
+        **Every other arm that trips the count also trips the rejoin width**, so
+        deleting the count left them all green. Measured. One character subjects are
+        the shape that separates the two: 33 of them rejoin to 97, far inside
+        `CATEGORIES_MAX`, so only the count can refuse this.
+        """
+        payload = CATEGORY_SEPARATOR.strip().join(["a"] * (MAX_CATEGORIES_PER_BOOK + 1))
+        subjects = split_categories(payload)
+        assert len(subjects) == MAX_CATEGORIES_PER_BOOK + 1
+        rejoined = join_categories(subjects)
+        assert rejoined is not None and len(rejoined) < CATEGORIES_MAX, (
+            "the driving value now trips the width bound too, so this arm would "
+            "pass without the count bound existing"
+        )
+
+        with pytest.raises(ValidationError):
+            BookMatch(categories=payload)
+
+    def test_the_enrichment_door_accepts_exactly_the_count_the_other_door_does(
+        self,
+    ) -> None:
+        """The count bound from the accepting side, which is the side that was
+        unarmed.
+
+        **The most subjects any other arm accepted here was three**, so mutating the
+        comparison to `>=`, or the bound to any constant above three, passed every
+        arm in both suites while making the two doors disagree about a list the
+        create door admits. Measured. This sits the value exactly on the boundary.
+        """
+        payload = CATEGORY_SEPARATOR.strip().join(["a"] * MAX_CATEGORIES_PER_BOOK)
+
+        accepted = BookMatch(categories=payload).categories
+
+        assert accepted == CATEGORY_SEPARATOR.join(["a"] * MAX_CATEGORIES_PER_BOOK)
+        assert len(split_categories(accepted)) == MAX_CATEGORIES_PER_BOOK
+
+    def test_the_enrichment_door_bounds_the_width_of_what_it_would_store(
+        self,
+    ) -> None:
+        """The bound the count cannot stand in for, and the reason it is the
+        rejoin rather than a per subject width.
+
+        Splitting on a bare separator and rejoining with the two character one
+        **lengthens** the value by one per split. So a payload of exactly
+        `CATEGORIES_MAX` carrying the greatest legal number of bare separators is
+        inside the count bound and still 31 characters past the column.
+        """
+        parts = MAX_CATEGORIES_PER_BOOK
+        content = CATEGORIES_MAX - (parts - 1)
+        each, extra = divmod(content, parts)
+        values = ["a" * each] * parts
+        values[0] += "a" * extra
+        payload = CATEGORY_SEPARATOR.strip().join(values)
+
+        assert len(payload) == CATEGORIES_MAX
+        assert len(split_categories(payload)) == MAX_CATEGORIES_PER_BOOK, (
+            "the payload no longer sits inside the count bound, so the count "
+            "would refuse it and this arm would pass on the wrong bound"
+        )
+        joined = join_categories(split_categories(payload))
+        assert joined is not None and len(joined) == CATEGORIES_MAX + parts - 1
+
+        with pytest.raises(ValidationError):
+            BookMatch(categories=payload)
+
+    def test_the_enrichment_door_stores_one_subject_the_column_can_hold(
+        self,
+    ) -> None:
+        """The diagonal, and it is what a per subject width would have broken.
+
+        A catalogue heading wider than one entry of the create body's list is
+        still a value this column holds, and on this path what the column can hold
+        is stored:
+        `tests/routers/test_books_google.py::TestACatalogueCannotWriteWhatTheColumnsRefuse`
+        pins that as the answer for every field. So the bound here is the width of
+        the rejoin and not a width per subject.
+        """
+        widest = "s" * CATEGORIES_MAX
+
+        assert BookMatch(categories=widest).categories == widest
+        assert len(widest) > CATEGORY_MAX
+
+    def test_the_enrichment_door_rejoins_what_it_split(self) -> None:
+        """It hands on the stored form, so what the column holds is what this
+        model validated. A bare separator is the producer's spelling and the
+        joined one is this application's."""
+        assert BookMatch(categories="A;B").categories == f"A{CATEGORY_SEPARATOR}B"
+        assert BookMatch(categories="A ;  B").categories == f"A{CATEGORY_SEPARATOR}B"
+        assert BookMatch(categories="A;;B").categories == f"A{CATEGORY_SEPARATOR}B"
+
+    def test_the_enrichment_door_leaves_an_empty_value_null(self) -> None:
+        """`split_categories` answers `[]` for a string with nothing in it, and
+        the column is nullable, so a blank arrives as a null rather than as an
+        empty string."""
+        assert BookMatch(categories=None).categories is None
+        assert BookMatch(categories="   ").categories is None
+        assert BookMatch(categories=CATEGORY_SEPARATOR).categories is None
+
+    def test_the_enrichment_door_is_idempotent_over_what_it_returns(self) -> None:
+        """It writes the column and `as_match` reads one, so a value round
+        tripping through both must not move on the second pass."""
+        once = BookMatch(categories="A;B; C").categories
+        assert BookMatch(categories=once).categories == once
+
+
+_SCHEMAS_BOOK = pathlib.Path(schemas_book.__file__)
+
+
+def _load_schemas_book() -> None:
+    """Execute `schemas/book.py` as a module of its own, so its refusal runs.
+
+    A fresh module object rather than a reload, for `test_book_columns.py`'s
+    reason: a reload would leave the real module half initialised in this worker
+    when the refusal raises, and every later test in the process would read a
+    schema module with none of its models in it.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "schemas_book_under_test", _SCHEMAS_BOOK
+    )
+    assert spec is not None and spec.loader is not None
+    spec.loader.exec_module(importlib.util.module_from_spec(spec))
+
+
+def _book_whose_table_has(names: list[str]) -> type:
+    """A stand in for `Book` carrying exactly these column names.
+
+    Built here and never mapped, so the real metadata is untouched. Only the
+    names are read, so every column is an `Integer`.
+    """
+    metadata = MetaData()
+    table = Table(
+        "books",
+        metadata,
+        *(Column(name, Integer, primary_key=name == "id") for name in names),
+    )
+    return type("BookStandIn", (), {"__table__": table})
+
+
+def _book_columns() -> list[str]:
+    return [column.name for column in Book.__table__.columns]
+
+
+class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
+    """The partition behind `POPPED_BEFORE_THE_CONSTRUCTOR`, driven.
+
+    Two cells rather than one list of popped names, because the remedies differ:
+    a name in the first has no column at all and is written as child rows, and a
+    name in the second has a column whose stored shape differs from the request
+    shape and needs an assignment at the route as well as the pop.
+
+    The arms below drive the predicate against sides built here, so each one can
+    be made to fail. **The evasions were not chosen by whoever wrote the
+    predicate**, which is the one thing this class cannot certify about itself.
+    """
+
+    def test_nothing_is_reported_when_the_cells_and_the_fields_agree(self) -> None:
+        """The baseline. Without it every arm below scores a pass it did not
+        earn, because a predicate reporting everything reports these too."""
+        assert (
+            schemas_book._unconstructable_create_fields(
+                ["kids"],
+                ["joined"],
+                {"title": str, "kids": list[str], "joined": list[str]},
+                ["title", "joined"],
+            )
+            == {}
+        )
+
+    def test_a_popped_name_that_is_not_a_field_of_the_body_is_reported(self) -> None:
+        """A pop claiming a field nobody sends. Silent today, because `pop` with
+        a default does not raise on a name that is not there."""
+        reported = schemas_book._unconstructable_create_fields(
+            ["gone"], [], {"title": str}, ["title"]
+        )
+
+        assert set(reported) == {"gone"}
+
+    def test_a_child_row_cell_naming_a_real_column_is_reported(self) -> None:
+        """A name popped as a child row that IS a column would pass through or be
+        reshaped, and popping it stores nothing."""
+        reported = schemas_book._unconstructable_create_fields(
+            ["shelf_mark"], [], {"title": str, "shelf_mark": str}, ["title", "shelf_mark"]
+        )
+
+        assert set(reported) == {"shelf_mark"}
+
+    def test_a_popped_name_the_body_lacks_keeps_the_remedy_for_that(self) -> None:
+        """One name, one remedy, and the arms above could not see this.
+
+        Every existing arm passes the offending name **as** a field, so the
+        subtraction that stops a second wrong remedy was unarmed: the child row cell
+        reported such a name as one that "should pass through or be reshaped", which
+        is the wrong instruction for a field nobody sends. Driven from both cells,
+        because only one of them subtracted.
+        """
+        both_cells: tuple[tuple[list[str], list[str]], ...] = (
+            (["ghost"], []),
+            ([], ["ghost"]),
+        )
+        for child_rows, reshaped in both_cells:
+            reported = schemas_book._unconstructable_create_fields(
+                child_rows, reshaped, {"title": str}, ["title", "ghost"]
+            )
+
+            assert set(reported) == {"ghost"}
+            assert "is not a field of the body" in reported["ghost"]
+
+    def test_a_reshaped_cell_naming_no_column_is_reported(self) -> None:
+        """The symmetric half. A name in the reshape cell with no column behind it
+        is a child row, and a reshape assignment for it would raise."""
+        reported = schemas_book._unconstructable_create_fields(
+            [], ["kids"], {"title": str, "kids": list[str]}, ["title"]
+        )
+
+        assert set(reported) == {"kids"}
+
+    def test_a_field_reaching_the_constructor_that_is_not_a_column_is_reported(
+        self,
+    ) -> None:
+        """The ruling's own case: a twentieth field added to the body and to
+        nothing else is a `TypeError` on the constructor."""
+        reported = schemas_book._unconstructable_create_fields(
+            [], [], {"title": str, "shelf_mark": str}, ["title"]
+        )
+
+        assert set(reported) == {"shelf_mark"}
+
+    def test_the_house_spelling_of_a_bounded_container_is_reported(self) -> None:
+        """The spelling every optional field on these bodies has, and the one the
+        predicate missed.
+
+        Measured: `get_origin(Annotated[list[str], ...])` answers `typing.Annotated`
+        rather than `list`, so before the peel this read as a scalar. It answered
+        correctly for `RowIdField | None` for the wrong reason, that
+        `typing.Annotated` is not a `type`.
+        """
+        reported = schemas_book._unconstructable_create_fields(
+            [],
+            [],
+            {"title": str, "subjects": Annotated[list[str], Field(max_length=1)] | None},
+            ["title", "subjects"],
+        )
+
+        assert set(reported) == {"subjects"}
+
+    def test_a_container_spelled_as_an_abstract_type_is_reported(self) -> None:
+        """A field may be annotated with the abstract type rather than the concrete
+        one, and `get_origin` answers the abstract one, so an enumeration of `list`,
+        `set`, `dict` and `tuple` looks straight past it."""
+        reported = schemas_book._unconstructable_create_fields(
+            [], [], {"title": str, "subjects": abc.Sequence[str]}, ["title", "subjects"]
+        )
+
+        assert set(reported) == {"subjects"}
+
+    def test_a_string_field_is_not_reported_as_a_container(self) -> None:
+        """The false refusal the fix above could have bought. Every one of `str`,
+        `bytes` and `bytearray` satisfies `abc.Sequence`, so admitting the abstract
+        types without excluding these three reports every string field on the body
+        and stops the schema module importing."""
+        assert (
+            schemas_book._unconstructable_create_fields(
+                [],
+                [],
+                {"title": str, "raw": bytes, "buf": bytearray, "opt": str | None},
+                ["title", "raw", "buf", "opt"],
+            )
+            == {}
+        )
+
+    def test_a_container_field_reaching_the_constructor_is_reported(self) -> None:
+        """The arm that makes the one above more than a name check.
+
+        A field sharing a name with a column and arriving as a list passes the
+        column arm and still cannot be constructed: the constructor takes the
+        keyword and the INSERT fails on it, which is a 500 rather than a 422.
+        """
+        reported = schemas_book._unconstructable_create_fields(
+            [], [], {"title": str, "subjects": list[str]}, ["title", "subjects"]
+        )
+
+        assert set(reported) == {"subjects"}
+
+    def test_a_scalar_field_whose_name_is_a_column_needs_no_edit(self) -> None:
+        """The common case, and why this is a derivation rather than a list. The
+        arms above are worth nothing if every new field fires them."""
+        assert (
+            schemas_book._unconstructable_create_fields(
+                [], [], {"title": str, "shelf_mark": str | None}, ["title", "shelf_mark"]
+            )
+            == {}
+        )
+
+    def test_each_report_says_which_of_the_faults_it_is(self) -> None:
+        """A set of names cannot say which remedy a fault wants, and the two cells
+        exist because the remedies differ. So the answer is keyed by name."""
+        reported = schemas_book._unconstructable_create_fields(
+            ["shelf_mark"], ["kids"], {"shelf_mark": str, "kids": list[str]}, ["shelf_mark"]
+        )
+
+        assert set(reported) == {"shelf_mark", "kids"}
+        assert reported["shelf_mark"] != reported["kids"]
+
+    def test_the_live_body_and_the_live_table_are_clean(self) -> None:
+        assert (
+            schemas_book._unconstructable_create_fields(
+                schemas_book.CARRIED_AS_CHILD_ROWS,
+                schemas_book.RESHAPED_FOR_ITS_COLUMN,
+                {
+                    name: field.annotation
+                    for name, field in BookCreate.model_fields.items()
+                },
+                _book_columns(),
+            )
+            == {}
+        )
+
+    def test_the_two_cells_do_not_overlap(self) -> None:
+        """A name in both is popped for two reasons, which the predicate cannot
+        report because a dict holds one fault per name."""
+        assert not set(schemas_book.CARRIED_AS_CHILD_ROWS) & set(
+            schemas_book.RESHAPED_FOR_ITS_COLUMN
+        )
+
+    def test_the_popped_list_is_the_two_cells_and_nothing_else(self) -> None:
+        """The route loops this, so a name dropped out of it is a field handed to
+        the constructor and a name added to it is a field silently not stored."""
+        assert set(schemas_book.POPPED_BEFORE_THE_CONSTRUCTOR) == set(
+            schemas_book.CARRIED_AS_CHILD_ROWS
+        ) | set(schemas_book.RESHAPED_FOR_ITS_COLUMN)
+
+
+class TestEveryReshapedFieldIsWrittenAtTheRoute:
+    """The half the import refusal cannot see, and it is the fault it calls worst.
+
+    A name in `RESHAPED_FOR_ITS_COLUMN` is popped out of the dump, so the
+    constructor never sees it and **nothing raises** if the route forgets to write
+    it: the create answers 201 having stored nothing. Measured: deleting the
+    `categories=` keyword from `_create_book` leaves
+    `_unconstructable_create_fields` returning `{}`, the module importing clean and
+    every partition arm green.
+
+    So this reads the route's own source. The security seat asked for it in the
+    design round, shaped on `TestTheSignatureIsTheBound`, which partitions a model's
+    fields against the names a writer's loop walks.
+    """
+
+    @staticmethod
+    def _constructor_keywords() -> set[str]:
+        """Every keyword of the one `Book(...)` call in `_create_book`.
+
+        Read off the function's own source rather than from a list here, so a
+        keyword renamed or moved is visible. `Book(` is the single constructor site
+        in the application, which `TestTheSchemaModuleRefusesToImport` relies on
+        too.
+        """
+        tree = ast.parse(textwrap.dedent(inspect.getsource(books_router._create_book)))
+        return {
+            keyword.arg
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "Book"
+            for keyword in node.keywords
+            if keyword.arg is not None
+        }
+
+    def test_the_route_builds_a_book_at_all(self) -> None:
+        """The baseline. A finder that matched nothing would satisfy the arm below
+        by having no keywords to disagree with."""
+        keywords = self._constructor_keywords()
+
+        assert keywords, "no `Book(...)` call found in the create route"
+        assert "added_by_user_id" in keywords
+
+    def test_every_reshaped_name_is_a_keyword_of_that_call(self) -> None:
+        """The arm. A popped name with no assignment stores nothing and says
+        nothing."""
+        keywords = self._constructor_keywords()
+        unwritten = sorted(
+            name
+            for name in schemas_book.RESHAPED_FOR_ITS_COLUMN
+            if name not in keywords
+        )
+
+        assert unwritten == [], (
+            "These fields are popped out of the dump before the constructor and "
+            "never written back, so the route accepts them and stores nothing: "
+            f"{unwritten}. Each needs a keyword on the `Book(...)` call."
+        )
+
+    def test_no_child_row_name_is_a_keyword_of_that_call(self) -> None:
+        """The other direction, which the arm above cannot see. A name carried as
+        child rows must NOT reach the constructor: `Book.classifications` is a
+        relationship, so handing it plain dicts raises rather than building rows."""
+        keywords = self._constructor_keywords()
+        wrongly_written = sorted(
+            name for name in schemas_book.CARRIED_AS_CHILD_ROWS if name in keywords
+        )
+
+        assert wrongly_written == [], (
+            f"These are written after the insert as rows, not handed to the "
+            f"constructor: {wrongly_written}"
+        )
+
+
+class TestTheSchemaModuleRefusesToImport:
+    def test_it_imports_against_the_real_table(self) -> None:
+        """The baseline arm. A module that raised whatever it was handed would
+        pass the tests below and say nothing."""
+        _load_schemas_book()
+
+    def test_it_refuses_when_a_body_field_has_no_column(self, monkeypatch) -> None:
+        """At import, not at the first create. A check at the first create fires
+        on somebody's library, and the field it fires for is the one whose author
+        never ran the route."""
+        monkeypatch.setattr(
+            models, "Book", _book_whose_table_has([c for c in _book_columns() if c != "location"])
+        )
+        with pytest.raises(RuntimeError, match="location"):
+            _load_schemas_book()
+
+    def test_it_refuses_when_the_reshaped_cell_loses_its_column(
+        self, monkeypatch
+    ) -> None:
+        """The other side of the same name. Without `categories` on the table the
+        reshape cell is a claim about a write nobody can perform."""
+        monkeypatch.setattr(
+            models,
+            "Book",
+            _book_whose_table_has([c for c in _book_columns() if c != "categories"]),
+        )
+        with pytest.raises(RuntimeError, match="categories"):
+            _load_schemas_book()
+
+    def test_the_refusal_says_what_to_do_about_it(self, monkeypatch) -> None:
+        """A refusal that does not say what to do is one somebody deletes. It has
+        to name the pop and the write together, because the fault that costs most
+        is a pop with no write, which raises nothing at all."""
+        monkeypatch.setattr(
+            models, "Book", _book_whose_table_has([c for c in _book_columns() if c != "location"])
+        )
+        with pytest.raises(RuntimeError) as refusal:
+            _load_schemas_book()
+
+        assert "RESHAPED_FOR_ITS_COLUMN" in str(refusal.value)
+        assert "pop" in str(refusal.value)

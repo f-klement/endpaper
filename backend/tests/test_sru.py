@@ -24,9 +24,9 @@ from hypothesis import strategies as st
 
 import marc
 import sru
-from enums import TagCategory
-from models import Book, Tag
-from schemas.public import PublicBookOut
+from enums import ClassificationScheme, HeadingKind, TagCategory
+from models import Book, Classification, Tag
+from schemas.public import PublicBookOut, PublicClassificationOut
 from tests.strategies import invisible_characters, text_around, witness
 
 #: The namespaces a response is read back through.
@@ -1255,6 +1255,13 @@ class TestTheRecordCarriesNoColumnThePublicPayloadWithholds:
     has several, and would say nothing about a value reaching the record through
     a helper. This puts a distinctive value in every withheld column, renders
     the record, and looks for it in the bytes.
+
+    **One table, named because both arms here are green and blind past it.**
+    The population is `Book.__table__.columns` against `PublicBookOut`, so a
+    `classifications` column measured against `PublicClassificationOut` is
+    outside both of them and neither says anything about it. That boundary is
+    `TestTheRecordCarriesNoClassificationColumnThePublicPayloadWithholds` below,
+    and these two are not evidence about it.
     """
 
     #: Withheld columns this test cannot put a distinctive value in.
@@ -1344,6 +1351,74 @@ class TestTheRecordCarriesNoColumnThePublicPayloadWithholds:
             "marc.py reads a Book column the public payload withholds: "
             f"{sorted((read & columns) - set(PublicBookOut.model_fields))}"
         )
+
+
+class TestTheRecordCarriesNoClassificationColumnThePublicPayloadWithholds:
+    """The same column boundary, one table over, which is the table a heading is.
+
+    **The class above is green and stays green while being blind to this**, and
+    that is the whole reason this exists rather than a sentence. Its population
+    is `Book.__table__.columns` measured against `PublicBookOut`; a heading's
+    scheme, number, caption and kind are `classifications` columns measured
+    against `PublicClassificationOut`. Neither arm up there looks at this
+    boundary, so neither is evidence about it, and the record now carries more
+    of this table than it used to.
+
+    **Rendered rather than read out of the source**, for the reason the class
+    above gives and for one more that belongs to this table alone: an AST walk
+    over attribute names cannot tell whose `id` it found, and `marc.py` reads
+    `book.id` for the `001`, so the source instrument reports a leak of the one
+    column the two tables share while nothing is wrong.
+    """
+
+    @staticmethod
+    def _withheld() -> set[str]:
+        return {
+            column.key
+            for column in Classification.__table__.columns
+            if column.key not in PublicClassificationOut.model_fields
+        }
+
+    def test_there_are_withheld_columns_to_check(self):
+        """Without this the arm below passes on a table with nothing withheld,
+        which is what it would look like if `PublicClassificationOut` grew into
+        a copy of the row."""
+        assert len(self._withheld()) >= 3
+
+    def test_no_withheld_value_appears_in_a_rendered_record(self):
+        book = Book(id=1, title="Chartreuse Windmill")
+        heading = Classification(
+            scheme=ClassificationScheme.GND,
+            number="4139307-7",
+            label="CD-ROM",
+            kind=HeadingKind.CARRIER,
+        )
+        book.classifications.append(heading)
+        # **Set after the constructor and after the append, both deliberately.**
+        # `Classification._file_the_number` derives `sort_key` on every ORM write
+        # of `scheme` or `number`, so a sentinel passed to the constructor is
+        # overwritten by the derivation and the arm would assert nothing about
+        # that column. A transient row, never added to a session, so no type
+        # refuses a string in an integer column and no flush regenerates a key.
+        sentinels = {
+            key: f"withheldheading{n}sentinel"
+            for n, key in enumerate(sorted(self._withheld()))
+        }
+        for key, value in sentinels.items():
+            setattr(heading, key, value)
+
+        rendered = ElementTree.tostring(marc.record_element(book), encoding="unicode")
+        for key, value in sentinels.items():
+            assert value not in rendered, (
+                f"`{key}` is withheld from the public classification payload and "
+                "reached a MARC record. The SRU server publishes these records, "
+                "so this is a column leak. Either the subfield does not belong "
+                "in the record, or the public model should carry the column."
+            )
+        # The control: the published half of the row did reach the record, so
+        # the absences above are about the boundary and not about an empty field.
+        assert "CD-ROM" in rendered
+        assert "gnd-carrier" in rendered
 
 
 class TestTheRecordSizeThatDecidedTheCap:
@@ -1521,6 +1596,91 @@ class TestTheResponseIsARecordAnotherSystemCanRead:
             ElementTree.tostring(collection, encoding="unicode").encode()
         )
         assert [entry.title for entry in parsed.records] == [SHARED["title"]]
+
+
+class TestARecordSaysWhatEachHeadingWasAsserting:
+    """A heading leaving this server says what the citing record asserted.
+
+    **Here rather than only in `tests/test_marc.py` because of who reads it.**
+    That file holds the round trip, which asks whether this application can read
+    its own export back. This asks what an ingest at another institution
+    receives from a server that answered without a session: a carrier written
+    into a topical field is this catalogue asserting that a disc is what a book
+    is about, and nothing in the record they hold contradicts it. The JSON
+    payload already publishes the kind for that reason, which
+    `schemas/public.py` states; this is the other half of the same server.
+    """
+
+    @pytest.fixture
+    def disc(self, db, admin):
+        """One public book whose GND row the record marked as a carrier.
+
+        A real `Classification` rather than a stand-in, because the kind reaches
+        the writer off a stored row and `Classification._file_the_number`
+        derives the sort key that the column's NOT NULL demands.
+        """
+        book = Book(
+            isbn="9780000000004", added_by_user_id=admin["user"]["id"], **SHARED
+        )
+        book.classifications.append(
+            Classification(
+                scheme=ClassificationScheme.GND,
+                number="4139307-7",
+                label="CD-ROM",
+                kind=HeadingKind.CARRIER,
+            )
+        )
+        db.add(book)
+        db.commit()
+        db.refresh(book)
+        return book.id
+
+    @staticmethod
+    def _heading_fields(root: ElementTree.Element) -> list[tuple[str, dict[str, str]]]:
+        """Every `65X` field in a response, as `(tag, subfields)`.
+
+        The whole field rather than a search for the code: a test asserting only
+        that `gnd-carrier` appears somewhere passes on a `650` carrying it,
+        which is the spelling this class exists to refuse.
+        """
+        return [
+            (
+                field.get("tag") or "",
+                {
+                    subfield.get("code") or "": subfield.text or ""
+                    for subfield in field.iter(f"{MARC21}subfield")
+                },
+            )
+            for field in root.iter(f"{MARC21}datafield")
+            if (field.get("tag") or "").startswith("65")
+        ]
+
+    def test_a_carrier_reaches_a_stranger_as_a_carrier(self, db, disc):
+        response = respond(db, query=f"rec.id={disc}")
+        assert diagnostic_of(response) is None
+        assert self._heading_fields(response) == [
+            (
+                "655",
+                {"a": "CD-ROM", "0": "(DE-588)4139307-7", "2": "gnd-carrier"},
+            )
+        ]
+
+    def test_the_shelf_without_the_row_carries_no_heading_field_at_all(
+        self, db, shelf
+    ):
+        """The control: no row, no field.
+
+        **It holds less than a first version of this docstring claimed**, and
+        the narrower statement is the honest one. It takes the shelf without the
+        disc, so no `65X` field exists anywhere in that database, and a
+        `rec.id` query answers with a single record, so the document and the
+        record are the same tree in both tests here. What this catches is a
+        reader returning a constant or searching too broadly, **not** a scoping
+        error. Catching that needs a response carrying two records, one of them
+        holding the carrier row, which is an arm rather than a wording change.
+        """
+        response = respond(db, query=f"rec.id={shelf['public']}")
+        assert self._heading_fields(response) == []
 
 
 # ── The parser and the escaping as properties ─────────────────────────────────

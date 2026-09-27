@@ -78,11 +78,8 @@
  *
  * **The month and the day.** The column holds a year.
  *
- * **`Genre`, and it is a destination problem rather than a reading one**, which
- * is the sentence `mobi.ts` and `fb2.ts` each write about their own spelling of
- * a subject: `FileMetadata` has no field for one, and no request body this app
- * sends has anywhere to put it either. `BookCreate` takes no `categories` and
- * no free text tag, so a subject read here would reach a screen and no column.
+ * **`Genre`.** Read by nothing, because `FileMetadata` declares no field for a
+ * subject: see that type for the reason.
  *
  * **Whether the entries are images.** This does not check, because the set of
  * image formats is open and refusing one nobody listed would refuse a real

@@ -134,9 +134,15 @@ never be matched against any metadata source.
 and null while nobody has been asked. A third axis again, and not a fact about right now:
 see *Three axes, not one* below.
 
-Four columns are filled on demand from Google Books and are empty otherwise: `page_count`,
-`language`, `categories` and `google_books_id`. `categories` is Google's own subject list,
-stored as one delimited string because SQLite has no array type, and served as a list.
+Four columns are filled on demand from Google Books: `page_count`, `language`, `categories`
+and `google_books_id`. Three of them are empty otherwise. `categories` is the exception:
+`POST /api/books` accepts a list of subjects and writes the column directly, so it may hold
+whatever a client asserted rather than only what a catalogue supplied. Nothing is minted from
+it either way, and it is not the Tag system: see the three layer table under `classifications`
+below.
+
+`categories` is stored as one delimited string because SQLite has no array type, and served
+as a list.
 **The delimiter is a semicolon, not a comma**, and that is load bearing: Google's own
 category names contain commas ("Fiction, general"). `google_books.join_categories` and
 `split_categories` are the only two places that know this.
@@ -202,15 +208,20 @@ and the caption that scheme gave the number, as three columns rather than the on
 across languages and does not say which scheme it came from.
 
 **Tags, `books.categories` and this are one store with three jobs, not three vocabularies.**
-The difference is provenance. A tag is this library's own word. A category is whatever the
-publisher claimed, uncontrolled. A row here is somebody at a national library placing the
-book in a published schedule, and only that one means anything to another institution.
+The difference is provenance. A tag is this library's own word. A category is uncontrolled free
+text somebody else supplied, whether a catalogue or a client asserting it at create time. A row
+here is somebody at a national library placing the book in a published schedule, and only that
+one means anything to another institution.
 
 | Layer | What it is |
 |---|---|
 | `tags` | this library's own language, curated or invented |
-| `books.categories` | whatever the publisher claimed |
+| `books.categories` | uncontrolled free text, from a catalogue or asserted on create |
 | `classifications` | an assertion from a published scheme |
+
+**A client may assert the middle layer and nothing is minted from it.** `POST /api/books`
+accepts a list of subjects; no tag is created and no existing tag is matched. The uncontrolled
+layer stays uncontrolled, which is the whole reason it is separate from `tags`.
 
 **Four schemes, and `number` means the same thing in three of them.** DDC and LCC are shelf
 orders; GND is the German national subject authority file, and what the column holds for it

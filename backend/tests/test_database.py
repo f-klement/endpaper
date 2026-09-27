@@ -3,6 +3,7 @@
 import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import QueuePool
 
 import database
 from database import Base, engine, get_db
@@ -138,3 +139,63 @@ class TestSynchronousIsWhitelisted:
         """Unset means FULL. This database is somebody's only copy."""
         monkeypatch.delenv("SQLITE_SYNCHRONOUS", raising=False)
         assert database._synchronous() == "FULL"
+
+
+def _the_queue_pool() -> QueuePool:
+    """The engine's pool, narrowed to the class whose defaults the figures are about.
+
+    **The narrowing is what makes the private reads type check**, and it is also the
+    premise of both arms: `size`, `_max_overflow` and `_timeout` are `QueuePool`'s,
+    and neither figure is a statement about a pool that does not queue. Narrowing
+    rather than casting is the honest assertion, because this file's own argument for
+    asserting the capacity instead of setting it is that `pool_size` is a `TypeError`
+    on a pool that does not queue: a URL producing one makes these figures meaningless
+    rather than wrong, and that is worth failing on by name once.
+    """
+    pool = database.engine.pool
+    assert isinstance(pool, QueuePool), (
+        f"the engine's pool is a {type(pool).__name__}, which has neither of the "
+        "defaults the two arms below are about"
+    )
+    return pool
+
+
+class TestThePoolsCapacityIsTheFigureTwoArgumentsRestOn:
+    """The pool admits fifteen connections, and three comments argue from that.
+
+    **Nothing in this repository sets it.** `create_engine` is called with no
+    `pool_size` and no `max_overflow`, so the fifteen is `QueuePool`'s own default
+    of five plus ten, and `pyproject.toml` asks for `sqlalchemy>=2.0.38` with no
+    upper bound. A bump can move a number that three pieces of reasoning stand on
+    without touching a line of this tree.
+
+    **What rests on it.** `metadata._HARDER_AT_ONCE` refuses to let anything wait
+    on its semaphore, because a waiter holds one of these for as long as it waits.
+    `routers/books.py`'s backfill deadline is derived from how many of them one
+    member may hold. Both are arguments about availability, so a silent change is
+    the kind nobody notices until a pool is empty.
+
+    **Asserted rather than set**, because the engine is built from a URL that is
+    not always file backed and `pool_size` is a `TypeError` on a pool class that
+    does not queue. So this is the instrument: it fails on the bump rather than
+    after it, and it names the comments to correct.
+
+    The overflow has no public accessor, which is why it is read privately here.
+    """
+
+    def test_the_pool_admits_fifteen(self) -> None:
+        pool = _the_queue_pool()
+
+        assert pool.size() + pool._max_overflow == 15, (
+            "the pool's capacity moved. Three comments argue from fifteen: "
+            "`metadata._HARDER_AT_ONCE`, and the backfill's deadline and slot "
+            "comments in `routers/books.py`. Correct them, or set the size "
+            "explicitly here and say why this number"
+        )
+
+    def test_a_waiter_gives_up_rather_than_waiting_for_ever(self) -> None:
+        """The other default the availability arguments rest on."""
+        assert _the_queue_pool()._timeout == 30.0, (
+            "`pool_timeout` moved, which changes how long a request parked on an "
+            "exhausted pool holds its worker"
+        )

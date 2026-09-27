@@ -1009,11 +1009,13 @@ class Book(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     cover_url: Mapped[str | None] = mapped_column(String(COVER_URL_MAX), nullable=True)
 
-    # Enrichment fields. Left empty by the ordinary scan flow and filled on
-    # demand from Google Books, which carries them far more often than Open
-    # Library does. `categories` is Google's own subject list and is
-    # deliberately NOT the Tag system: tags are a small curated vocabulary the
-    # library chooses from, these are whatever the publisher supplied.
+    # Enrichment fields, filled on demand from Google Books, which carries them
+    # far more often than Open Library does. Three of the four are left empty by
+    # the ordinary scan flow; `categories` is the exception, since
+    # `POST /api/books` accepts a subject list and writes this column directly.
+    # It is deliberately NOT the Tag system, whoever supplied it: tags are a
+    # small curated vocabulary the library chooses from, these are whatever a
+    # publisher or a member asserted, and nothing is minted from them.
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     language: Mapped[str | None] = mapped_column(String(LANGUAGE_MAX), nullable=True)
     categories: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -2126,20 +2128,6 @@ CLASSIFICATION_NUMBER_MAX = 120
 #: sentence fragment: "Soziale Probleme, Sozialdienste, Versicherungen" is 47
 #: characters and is not the longest.
 CLASSIFICATION_LABEL_MAX = 200
-
-#: The longest subject list a client may write into `books.categories`.
-#:
-#: The second `Text` column on this table and on the **list** payload, so it
-#: inherits `DESCRIPTION_MAX`'s argument whole: an oversized value is paid for on
-#: every page of every listing, and the column stays `Text` so this bounds new
-#: writes without making a stored row unreadable.
-#:
-#: **Computed rather than chosen, so the arithmetic cannot drift from the
-#: sentence**: 32 headings at `CLASSIFICATION_NUMBER_MAX` plus their separators.
-#: 32 because the failure modes are asymmetric: too loose costs page weight, too
-#: tight drops a whole search result silently, since a row is dropped rather than
-#: a field. The widest shape measured here is 14 headings, so it clears 3x.
-CATEGORIES_MAX = 32 * CLASSIFICATION_NUMBER_MAX + 31 * 2
 
 #: How wide the stored shelf key has to be to hold any number the column takes.
 #:

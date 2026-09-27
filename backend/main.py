@@ -451,16 +451,40 @@ def iter_api_routes(routes: Iterable[BaseRoute]) -> Iterator[APIRoute]:
             yield from iter_api_routes(getattr(nested, "routes", nested))
 
 
-def assert_unique_operation_ids() -> None:
-    """Fail at startup if two handlers share a name.
+def schema_routes(routes: Iterable[BaseRoute] | None = None) -> list[APIRoute]:
+    """The routes an operationId can collide in, which is the published ones.
+
+    A route with `include_in_schema=False` contributes no operation to the
+    document, so two of them under one name cannot produce two operations with
+    one id. `api_not_found` is exactly that: registered twice on purpose, one
+    handler under one name answering the two API prefixes, invisible to the
+    schema both times.
+
+    **That narrowing is what lets the check below run where it has to run**,
+    which is under every `include_router`. Registered above `healthz`, the API
+    fallbacks and the cover router, it read 138 of this app's 143 routes, and
+    three of the five it never reached are in the published schema. Moved down
+    without this narrowing it refuses `api_not_found`'s deliberate pair and the
+    app does not start. Measured 2026-09-26.
+    """
+    walked = app.routes if routes is None else routes
+    return [route for route in iter_api_routes(walked) if route.include_in_schema]
+
+
+def assert_unique_operation_ids(routes: Iterable[BaseRoute] | None = None) -> None:
+    """Fail at startup if two published handlers share a name.
 
     custom_operation_id() drops the path from the id, so a duplicate name would
     produce two operations with the same id, and a generated client where one
     endpoint silently overwrites the other.
+
+    **`routes` is a seam for the tests and nothing calls it with one.** The
+    refusal cannot be driven over this app, which has no duplicate to offer, and
+    an app asserted to be clean is not the same claim as a check that refuses.
     """
     seen: dict[str, str] = {}
     checked = 0
-    for route in iter_api_routes(app.routes):
+    for route in schema_routes(routes):
         checked += 1
         if route.name in seen:
             raise RuntimeError(
@@ -473,12 +497,10 @@ def assert_unique_operation_ids() -> None:
     # as coverage. If the route layout changes again, fail loudly here.
     if checked == 0:
         raise RuntimeError(
-            "assert_unique_operation_ids() found no routes to check. "
-            "iter_api_routes() no longer understands this FastAPI's route layout."
+            "assert_unique_operation_ids() found no published routes to check. "
+            "iter_api_routes() no longer understands this FastAPI's route layout, "
+            "or include_in_schema no longer means what schema_routes() reads it to."
         )
-
-
-assert_unique_operation_ids()
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -621,6 +643,14 @@ app.include_router(_fallback)
 # routers/covers.py. Registered before the SPA mount, which would otherwise
 # answer a missing cover with the shell: see `CachePolicyStaticFiles`.
 app.include_router(covers.router)
+
+# **Below every `include_router` above, and that placement is the rule.** This ran
+# from where `custom_operation_id` is defined until 2026-09-26, so it examined the
+# twelve routers included there and none of `healthz`, the API fallbacks or the
+# cover routes, three of which the schema publishes. A router included after this
+# line is unchecked, which is why the test tree holds the ordering rather than
+# trusting this comment.
+assert_unique_operation_ids()
 
 # Vite's `build.assetsDir`. Every filename it emits there carries a content
 # hash, so the name changes whenever the bytes do.
