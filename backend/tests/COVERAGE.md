@@ -2,9 +2,9 @@
 
 <!-- measured: begin -->
 
-**8907 tests, in 132 files**, counted by the run that reads this line.
-**The 119 rows below sum to 8386.**
-The other 521 tests are in 13 files this register may not name.
+**8909 tests, in 132 files**, counted by the run that reads this line.
+**The 118 rows below sum to 8383.**
+The other 526 tests are in 14 files this register may not name.
 <!-- measured: end -->
 
 **Those figures are generated and nothing here is recounted by hand.**
@@ -135,7 +135,6 @@ why the helper uses regexes.
 | `test_schema.py`                           |   267 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial, and the bounds three text columns and one address column gained |
 | `schemas/test_digital.py` | 31 | What a client may say about a file it holds, bounded at the schema: the root, the path beneath it and the fingerprint, each refused at its ceiling rather than trusted for its width |
 | `test_env_example.py` | 4 | **Operator documentation that goes stale silently.** That every environment name `config.py` reads appears in `.env.example` and nothing appears there that the code ignores |
-| `test_dependency_export.py` | 3 | **A committed export against the lock it was generated from.** That every declared dependency reaches `requirements.txt`, that no pin disagrees with `uv.lock`, and that the export names nothing the lock does not resolve: a scanner reading the export sees this project's dependencies only as far as that file is current |
 | `test_database.py` | 29 | Engine setup and the session dependency |
 | `test_fetch.py` | 123 | **The only door outwards.** That the body cap counts raw wire bytes and compression is never requested |
 | `test_deadline.py` | 38 | How much of a deadline is left, and which clock answers: that the two names are the whole door, that neither grows a parameter, and that the module imports nothing but the standard library |

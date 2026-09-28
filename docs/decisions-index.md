@@ -778,4 +778,5 @@ repeat the argument.
 |  | [A duration is attributed to a machine and a worker count or it is not evidence](decisions.md#a-duration-is-attributed-to-a-machine-and-a-worker-count-or-it-is-not-evidence) | 180 |
 |  | [One fact, several homes, and the sweep for the others is part of the change](decisions.md#one-fact-several-homes-and-the-sweep-for-the-others-is-part-of-the-change) | 169 |
 |  | [The field a heading goes in and the code naming its vocabulary are one decision](decisions.md#the-field-a-heading-goes-in-and-the-code-naming-its-vocabulary-are-one-decision) | 351 |
+|  | [A generated export of the lockfile is not committed, because the scanner already reads the lock](decisions.md#a-generated-export-of-the-lockfile-is-not-committed-because-the-scanner-already-reads-the-lock) | 597 |
 <!-- index: end -->

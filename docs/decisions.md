@@ -18668,3 +18668,58 @@ a kind is the GND's.
 methods on both trees rather than by adding one: `backend/tests/test_marc.py`,
 `TestWhatTheRoundTripCannotCarry`. The new member is the unspellable kind above. Nothing moved
 out of the class.
+
+## A generated export of the lockfile is not committed, because the scanner already reads the lock
+
+**`backend/requirements.txt` was an export of `backend/uv.lock` and is gone.** Nothing
+installed from it: the image and the suite both sync from the lock, and the audit step
+generates its own copy. Its one consumer was the source vulnerability scan.
+
+**It bought that scan no coverage.** Measured 2026-09-28 against the scan's own artefact:
+the scanner reads the lock natively as a `uv` target and read the export as a `pip` target,
+52 packages against 43, every shared package at the same version and nothing in the export
+absent from the lock.
+
+**A strict subset by construction, not by that measurement.** The export was derived from the
+lock, so it could never name a distribution the lock does not resolve, nor a different
+version, whatever either file grew to. The count is worth recording; the relation it
+illustrates did not depend on it, and a reader who takes the subset for an observation could
+reasonably re-add the export against a resolution flipping it. None can. Note the 52 is a
+property of the scanner's own analyzer rather than of the lock, which resolves 113.
+
+**And it cost a coupling that nothing maintained.** Three automated paths moved one of the
+two files and none moved both. The dependency bot's requirements manager edited the export
+and never the lock; its lock maintenance and the unattended patch release moved the lock and
+never the export. A guard added 2026-09-26 compared the two, correctly, so from that day all
+three were red by construction.
+
+**One of the three was observed failing and the other two were not**, which is worth
+separating because the fix was taken on the construction rather than on the evidence. Five
+merge requests from the requirements manager failed, on five successive transitive packages.
+The lock maintenance runs weekly and the unattended release only on a night it has a fixable
+advisory to act on, so between the guard landing on a Saturday and this being read on the
+Monday, neither had an occasion to fail. They would have.
+
+**The bot also corrupted what it edited.** It cannot compute hashes for a version it never
+resolved, so it dropped them: one bump took sixty four hash lines off a single package's
+block. The bumps that merged before the guard existed recorded versions nothing ever
+installed, and the next regeneration reverted them with nothing reporting it.
+
+**So the artefact is deleted rather than automated.** Teaching each producer to regenerate it
+is one fix per producer, and a fourth producer arrives untaught. `test_dependency_export.py`
+went with its subject.
+
+**Deleting the file does not close the class on its own**, and saying so was the first
+draft's error. What produced the export in the first place was wanting the scanner to see a
+familiar pin list, and that reasoning is still available to the next reader, who would now
+recreate it with the guard gone too. So the bot's requirements manager is disabled as well,
+and that disable is pinned by a test this published file may not name, which refuses both a
+second selector on the rule and a later rule switching the manager back on.
+
+**A deletion is not an enforcement and neither is a configuration key**, which is the whole
+lesson here rather than an aside: the first two drafts of this entry claimed the class was
+closed on the strength of a key nothing read back, and a reviewer caught each of them. What
+closes it is the test.
+
+**What a reader of the published tree loses** is a pin list in a familiar format.
+`backend/uv.lock` carries the same set.

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Automated dependency updates can land again, and a generated file stops shadowing the
+  lockfile.** `backend/requirements.txt` was an export of `backend/uv.lock` that nothing
+  installed from, kept so the source vulnerability scan had a familiar Python lockfile to
+  read. The scan already reads the lock itself, and covers every package the export named at
+  the same version plus nine more, so the export was a duplicate that three separate
+  automated paths kept disagreeing with: one edited the export and never the lock, two moved
+  the lock and never the export. A guard comparing the two landed on 2026-09-26 and five
+  dependency merge requests failed against it; the other two paths run weekly or on demand
+  and had not yet had the occasion to fail, but would have. The export is deleted, so there
+  is nothing left to drift.
+
 - **A store identifier backfill no longer lets one library's own presses exhaust the pod.**
   The limit on how many volume lookups it runs at once was justified from a figure about
   one pod's memory and enforced once per request, so nine runs inside the route's own rate
