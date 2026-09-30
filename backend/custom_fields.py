@@ -382,11 +382,16 @@ def rename(db: Session, field: CustomField, name: str) -> CustomField:
 def remove(db: Session, field: CustomField) -> int:
     """Delete a field and every value under it. Returns how many values went.
 
-    User story 6. The count goes to the route's **log line** and no further:
-    `TagOut.book_count` exists so a confirmation can say "take this off 214
-    books", and the equivalent number here cannot be published, for the reason
-    in the second paragraph below. The confirmation says "every book" instead,
-    which is true and needs no query.
+    User story 6. The count goes to the route's **log line** and no further,
+    for the reason in the second paragraph below, and the confirmation says
+    "every book" instead, which is true and needs no query.
+
+    **There is no counterexample, and this docstring used to name one.** It
+    cited `TagOut.book_count` as a count a confirmation may publish. That one
+    is the **reader's** count and deleting a tag is library wide, so it
+    understated the action by exactly the books the reader may not see: an
+    admin was told to take a tag off 3 books when it was on two hundred. The
+    tag confirmation now says "every book" for the same reason this one does.
 
     **The values are deleted here rather than left to the cascade.** SQLite
     enforces a foreign key only while `PRAGMA foreign_keys` is on, which

@@ -178,6 +178,28 @@ class TestRemovingWhatHasNoWidth:
             if unicodedata.category(chr(point)) == "Cc"
         }
 
+    def test_a_byte_order_mark_is_kept_and_is_not_whitespace_here(self):
+        """The fact a browser side bound now rests on, asserted beside the rule.
+
+        `frontend/src/lib/bookRequest.ts` collapses whitespace before it
+        measures a subject, and it excludes U+FEFF from what it collapses
+        **because this rule preserves it**: JavaScript's `\\s` holds that code
+        point and `str.split` does not, so a browser collapsing it would send a
+        value this function would never have produced from the file's own text.
+
+        Both halves, because either one alone leaves the premise standing on
+        nothing: it is not in the removed set, and `str.split` does not break
+        on it, so it survives the collapse as an ordinary character.
+
+        **Stated here rather than only in that module's comment**, which is
+        this repository's rule about a reason that rots silently against one
+        that reddens. Had this code point ever joined `_INVISIBLE_CHARACTERS`,
+        the exclusion over there would invert and nothing would have said so.
+        """
+        assert 0xFEFF not in _INVISIBLE_CHARACTERS
+        assert not "\ufeff".isspace()
+        assert one_line_without_invisible_characters("a\ufeffb") == "a\ufeffb"
+
     def test_a_zero_width_joiner_is_kept(self):
         """`Cf` is outside both sets, which is the line between removing a
         character and refusing the value. The joiners matter in Arabic and

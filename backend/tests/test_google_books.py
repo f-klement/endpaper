@@ -1042,7 +1042,8 @@ class TestTheJoinRefusesToStoreASubjectThatWouldReadBackAsTwo:
 
     Dropped rather than raised, because this runs inside a catalogue read and
     raising would lose a record over one subject.
-    `schemas.book.BookCreate.one_subject_per_entry` is the door that refuses.
+    `schemas.book.normalised_subjects` is what refuses, at both request bodies
+    carrying this field.
     """
 
     def test_a_clean_list_is_joined_whole(self) -> None:

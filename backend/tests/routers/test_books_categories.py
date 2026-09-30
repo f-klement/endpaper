@@ -9,8 +9,13 @@ the INSERT rather than a validation error.
 """
 
 from models import Book, Tag
-from schemas import POPPED_BEFORE_THE_CONSTRUCTOR
-from schemas.book import CATEGORY_MAX, MAX_CATEGORIES_PER_BOOK
+from schemas import POPPED_BEFORE_THE_ASSIGNMENT, POPPED_BEFORE_THE_CONSTRUCTOR
+from schemas.book import (
+    CATEGORY_MAX,
+    MAX_CATEGORIES_PER_BOOK,
+    BookCreate,
+    BookDetailsUpdate,
+)
 
 SUBJECTS = ["Science Fiction", "Dystopia"]
 
@@ -67,8 +72,11 @@ class TestAddingABookWithSubjects:
         column: it is stored joined on that character, so a stored subject carrying
         one is served back as two to every reader.
 
-        Not a producer argument: no reader emits a subject, so this door has no
-        honest producer to argue about yet.
+        Not a producer argument, and it stopped being available as one: four file
+        readers emit a subject now, and what keeps this refusal off an honest
+        client is their browser side bound dropping such an entry rather than the
+        absence of a producer. The refusal here is about the value, which is why
+        it did not have to move when the producers arrived.
         """
         res = client.post(
             "/api/books",
@@ -114,6 +122,37 @@ class TestAddingABookWithSubjects:
 
         assert res.status_code == 201
         assert res.json()["categories"] == ["Science Fiction"]
+
+    def test_a_blank_entry_between_two_subjects_drops_and_the_rest_survive(
+        self, client, admin, db
+    ):
+        """An entry with nothing left after normalising is dropped, not
+        refused and not kept as an empty member.
+
+        **Mid list on purpose, not at an edge.** An arm placing the blank
+        first or last is satisfied by a rule that abandons the whole list
+        whenever any entry is blank, which is this repository's own lesson
+        about six arms placing their mark at a string edge, one field over.
+        The assertion is in two halves for the same reason: that the blank
+        goes **and** that its neighbours stay.
+
+        **Read off the column, because the response cannot show it.**
+        `split_categories` drops an empty member on the way out, so a stored
+        `"Science Fiction; ; Dystopia"` reads back through the payload exactly
+        like the canonical value, and the column would carry a value no reader
+        in either tree would call wrong.
+        """
+        res = client.post(
+            "/api/books",
+            json={
+                "title": "Brave New World",
+                "categories": ["Science Fiction", "  \x00 ", "Dystopia"],
+            },
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 201, res.text
+        assert stored(res.json()["id"], db) == "Science Fiction; Dystopia"
 
     def test_the_subjects_a_member_sent_read_back_unchanged(
         self, client, admin, make_book
@@ -170,3 +209,170 @@ class TestAddingABookWithSubjects:
         is what refuses a field silently dropped out of it: without `categories`
         there, the constructor is handed a list and the INSERT fails."""
         assert "categories" in POPPED_BEFORE_THE_CONSTRUCTOR
+
+
+class TestEditingTheSubjectsOfABookThatExists:
+    """`PATCH /api/books/{id}`, which is the only route that removes a subject.
+
+    The create route writes them, the catalogue gap fill and the merge's absorb
+    add them, and `google_books.merge_into` skips an empty incoming value, so
+    an overwriting enrich replaces and cannot clear. Before this door the only
+    removal in the product was deleting the book, over a column
+    `schemas/public.PublicBookOut` serves to a reader with no account.
+
+    Read off the column rather than off the response, for the reason
+    `test_the_route_writes_the_field_it_popped` gives one class up: a pop with
+    no write answers 200 and stores nothing.
+    """
+
+    def _a_book_with_subjects(self, client, admin) -> int:
+        res = client.post(
+            "/api/books",
+            json={"title": "Brave New World", "categories": SUBJECTS},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 201
+        return int(res.json()["id"])
+
+    def test_a_new_list_replaces_the_stored_one(self, client, admin, db):
+        book_id = self._a_book_with_subjects(client, admin)
+
+        res = client.patch(
+            f"/api/books/{book_id}",
+            json={"categories": ["Satire"]},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200, res.text
+        assert stored(book_id, db) == "Satire"
+
+    def test_an_empty_list_clears_them(self, client, admin, db):
+        book_id = self._a_book_with_subjects(client, admin)
+
+        res = client.patch(
+            f"/api/books/{book_id}", json={"categories": []}, headers=admin["headers"]
+        )
+
+        assert res.status_code == 200, res.text
+        assert res.json()["categories"] == []
+
+    def test_a_cleared_column_holds_a_null_rather_than_an_empty_string(
+        self, client, admin, db
+    ):
+        """The half the response cannot show. A hand rolled join at the route
+        would store `""`, which reads back as no subjects and sorts apart from
+        a row that never had any; `google_books.join_categories` answers `None`
+        for an empty list, which is what the create door already stores."""
+        book_id = self._a_book_with_subjects(client, admin)
+
+        client.patch(
+            f"/api/books/{book_id}", json={"categories": []}, headers=admin["headers"]
+        )
+
+        assert stored(book_id, db) is None
+
+    def test_leaving_the_field_out_leaves_the_subjects_alone(self, client, admin, db):
+        """Absent against empty, which is the whole of what makes this partial.
+        A body that edits the title must not clear the subjects."""
+        book_id = self._a_book_with_subjects(client, admin)
+
+        res = client.patch(
+            f"/api/books/{book_id}", json={"title": "Island"}, headers=admin["headers"]
+        )
+
+        assert res.status_code == 200, res.text
+        assert stored(book_id, db) == "Science Fiction; Dystopia"
+
+    def test_a_null_is_refused_rather_than_taken_as_a_second_clear(
+        self, client, admin
+    ):
+        """One act, one spelling. Every other field here clears on a null, so
+        a caller will try it: a 422 says which spelling this column takes
+        instead of accepting both and letting the two diverge."""
+        book_id = self._a_book_with_subjects(client, admin)
+
+        res = client.patch(
+            f"/api/books/{book_id}",
+            json={"categories": None},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422, res.text
+
+    def test_a_subject_carrying_the_separator_is_refused_at_this_door_too(
+        self, client, admin, db
+    ):
+        """The second door onto one column applies the same rule, because both
+        validators call `schemas.book.normalised_subjects`. Stored unsplit it
+        would read back as two subjects nobody asserted."""
+        book_id = self._a_book_with_subjects(client, admin)
+
+        res = client.patch(
+            f"/api/books/{book_id}",
+            json={"categories": ["Fiction; general"]},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422, res.text
+        assert stored(book_id, db) == "Science Fiction; Dystopia"
+
+    def test_a_list_past_the_count_is_refused_at_this_door_too(self, client, admin):
+        book_id = self._a_book_with_subjects(client, admin)
+
+        res = client.patch(
+            f"/api/books/{book_id}",
+            json={"categories": [f"S{n}" for n in range(MAX_CATEGORIES_PER_BOOK + 1)]},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422, res.text
+
+    def test_one_subject_past_the_entry_width_is_refused_at_this_door_too(
+        self, client, admin
+    ):
+        book_id = self._a_book_with_subjects(client, admin)
+
+        res = client.patch(
+            f"/api/books/{book_id}",
+            json={"categories": ["x" * (CATEGORY_MAX + 1)]},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422, res.text
+
+    def test_a_blank_entry_between_two_subjects_drops_at_this_door_too(
+        self, client, admin, db
+    ):
+        """The same rule at the second door, and the same two halves.
+
+        Both validators call one function, so this is the arm that says the
+        second door gets the drop rather than a kept empty member. The reason
+        it is mid list, and the reason it reads the column instead of the
+        payload, are at the create door's twin.
+        """
+        book_id = self._a_book_with_subjects(client, admin)
+
+        res = client.patch(
+            f"/api/books/{book_id}",
+            json={"categories": ["Satire", " \x00  ", "Utopia"]},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200, res.text
+        assert stored(book_id, db) == "Satire; Utopia"
+
+    def test_the_route_pops_the_reshaped_field_by_name(self):
+        """The update route loops its own list, so this is what refuses a field
+        silently dropped out of it: without `categories` there, the assignment
+        loop hands a list to a `Text` column and the flush raises."""
+        assert "categories" in POPPED_BEFORE_THE_ASSIGNMENT
+
+    def test_the_two_doors_bound_the_field_the_same_way(self):
+        """One column, two bodies. A width or a count that moved on one and not
+        the other would let a value in at the door nobody re-read."""
+        create = BookCreate.model_fields["categories"]
+        update = BookDetailsUpdate.model_fields["categories"]
+
+        assert create.annotation == update.annotation
+        assert create.metadata == update.metadata
+        assert create.metadata, "neither field states a bound, so this compares nothing"

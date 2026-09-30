@@ -113,7 +113,7 @@ export interface UseLibraryResult {
   update: (patch: Partial<BookFilters>) => void;
 
   locations: LocationOut[];
-  /** Every collection in the library, for the filter. */
+  /** The collections the caller may be told about, for the filter. */
   collections: CollectionOut[];
   classifications: ClassificationFacets | undefined;
 

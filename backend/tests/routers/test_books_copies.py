@@ -436,7 +436,8 @@ class TestDuplicatesLeaveCopiesAlone:
         book = make_book(admin["headers"], title="Dune", author="Frank Herbert")
         add_copy(client, admin["headers"], book["id"])
 
-        assert client.get("/api/books/duplicates", headers=admin["headers"]).json() == []
+        body = client.get("/api/books/duplicates", headers=admin["headers"]).json()
+        assert body["groups"] == []
 
     def test_a_real_duplicate_beside_a_copy_is_still_found(
         self, client, admin, make_book
@@ -445,7 +446,8 @@ class TestDuplicatesLeaveCopiesAlone:
         add_copy(client, admin["headers"], book["id"])
         stray = make_book(admin["headers"], title="dune", author="frank herbert")
 
-        [group] = client.get("/api/books/duplicates", headers=admin["headers"]).json()
+        body = client.get("/api/books/duplicates", headers=admin["headers"]).json()
+        [group] = body["groups"]
 
         ids = {row["id"] for row in group["books"]}
         assert stray["id"] in ids

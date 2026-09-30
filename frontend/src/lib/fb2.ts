@@ -37,10 +37,17 @@
  * Everything else in the minimum field set arrives: title, authors as separate
  * values, ISBN, series and index, publisher, year, language and description.
  *
- * **`<genre>` is read by nothing here**, because `FileMetadata` declares no
- * field for a subject: see that type for the reason. It is carried by every
- * file in the corpus, 35 elements across 18, as `lang` is, so of this reader's
- * exclusions it is the one costing the most.
+ * **`<genre>` is read, and the format defines a controlled token set for it**
+ * (`sf`, `det`, `prose_rus` and the rest). **Nothing here enforces that set**,
+ * which is the half worth writing down: this reader reports the element's text
+ * as the file wrote it, so a file writing a token with a semicolon in it
+ * produces exactly the entry a controlled vocabulary would make impossible, and
+ * `lib/bookRequest.boundCategories` is what drops it. No arm asserts the set,
+ * and adding one would refuse a real file over a vocabulary this app does not
+ * own. It is carried by every file in the corpus, 35 elements across 18, as
+ * `lang` is. **The token is reported as written and never expanded into a
+ * human readable genre name**: a table of those would be this app asserting a
+ * subject the file did not.
  *
  * **Lazy loaded**, like every reader: `lib/fileReaders.ts` imports this only
  * when a member picks a file whose name ends in one of the two extensions.
@@ -266,6 +273,26 @@ function nameOf(author: Element): string | null {
  * loop is quadratic in it, and this reader's own bound admits far more of them
  * than that stays affordable for.
  */
+/**
+ * The genres the file declared, in its own order and with nothing folded.
+ *
+ * **Scoped to `title-info` like every other read here**, which is this
+ * reader's whole defence against the wrong value: `document-info` describes
+ * whoever produced the file. The format puts `<genre>` in both.
+ *
+ * Folding a repeat and bounding the count are the request's questions and are
+ * `lib/bookRequest.boundCategories`', for the reason this module states about
+ * `<genre>` above: it reports what the file said.
+ */
+function readGenres(titleInfo: Element): string[] {
+  const genres: string[] = [];
+  for (const element of childrenNamed(titleInfo, "genre")) {
+    const genre = text(element);
+    if (genre !== null) genres.push(genre);
+  }
+  return genres;
+}
+
 function readAuthors(titleInfo: Element): string[] {
   const seen = new Set<string>();
   const authors: string[] = [];
@@ -464,6 +491,7 @@ export function readFb2Description(xml: string): FileMetadata | null {
     // FB2 has no second title element. See this module's docstring.
     subtitle: null,
     authors: readAuthors(titleInfo),
+    categories: readGenres(titleInfo),
     identifiers,
     isbn: firstIsbn(identifiers),
     publisher: text(firstNamed(publishInfo, "publisher")),

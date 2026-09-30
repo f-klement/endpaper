@@ -47,6 +47,7 @@ import respx
 import bibliographic
 import covers
 import credentials
+import decoders
 import fetch
 import google_books
 import marc_fields
@@ -57,6 +58,7 @@ import z3950
 from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
 from enums import (
     AuthorityScheme,
+    Capability,
     CatalogueSource,
     ClassificationScheme,
     HeadingKind,
@@ -2702,7 +2704,14 @@ class TestPickabilityIsNotRecordCompleteness:
         )
 
     def test_a_row_carrying_an_isbn_outranks_an_identical_row_without_one(self):
-        """A title query supplies no ISBN, so carrying one is the row's own."""
+        """A title query supplies no ISBN, so carrying one is the row's own.
+
+        **This row shape does not occur on the SRU search door.** An ISBN with
+        no cover beside it is unreachable there, because each of those readers
+        derives the cover from the ISBN it just read: see
+        `TestASearchRowsCoverIsDerivedFromItsOwnIsbn`. What this arm holds is
+        what the field is worth in the tuple, not what a live row looks like.
+        """
         scannable = self.match(
             title="Dune", author="Frank Herbert", isbn="9780441013593"
         )
@@ -2712,7 +2721,13 @@ class TestPickabilityIsNotRecordCompleteness:
         )[1]
 
     def test_a_row_carrying_a_cover_outranks_an_identical_row_without_one(self):
-        """The picker shows the cover, so a row without one is harder to pick."""
+        """The picker shows the cover, so a row without one is harder to pick.
+
+        **The mirrored shape, and it is reachable on two doors only.** A cover
+        with no ISBN beside it comes from Open Library's own cover id or
+        Google's thumbnail; on the SRU door the pair moves together. Same
+        reading as the arm above.
+        """
         illustrated = self.match(
             title="Dune",
             author="Frank Herbert",
@@ -2797,6 +2812,314 @@ class TestPickabilityIsNotRecordCompleteness:
         assert [
             name for name in metadata._PICKABLE_FIELDS if not hasattr(record, name)
         ] == []
+
+
+#: One record per SRU serialisation, with a slot for its identifier, beside the
+#: element that fills the slot.
+#:
+#: **Each body carries more than the minimum, and that is the arm's reach.**
+#: `TestASearchRowsCoverIsDerivedFromItsOwnIsbn` compares a record carrying an
+#: identifier against the same record without one, so it can only observe a
+#: cover keyed on an element the record carries: a cover built from a
+#: description was measured passing a minimal body of this shape. Every field
+#: in that class's `ALSO_READ` comes out of each of these, and is asserted, so
+#: cutting a body back reddens an arm rather than narrowing it in silence.
+#:
+#: **The electronic location is here for the element a real cover would come
+#: from, and it is the one worth not tidying away.** No reader reads `856 $u`
+#: or a MODS `location/url` today, so a cover keyed on either passed the
+#: enriched bodies before this line: closing the element a plant happened to
+#: use and leaving the element an implementation would use is the same
+#: mistake one level down. Carrying it costs nothing, measured: a record with
+#: it still decodes on both readers and is not refused as an online resource,
+#: which `marc_fields.Fields.describes_a_book` decides off the carrier codes
+#: rather than off this field. Dublin Core has no standard equivalent and its
+#: body is unchanged.
+#:
+#: **Keyed on the reader, because a body is a serialisation.** Which row runs
+#: which body is the roster's business and is derived below.
+SRU_PROBE_MARC = (
+    '<record xmlns="http://www.loc.gov/MARC21/slim">'
+    "<leader>01533nam a2200505 c 4500</leader>"
+    "{identifier}"
+    '<datafield tag="041" ind1=" " ind2=" ">'
+    '<subfield code="a">ger</subfield></datafield>'
+    '<datafield tag="100" ind1="1" ind2=" ">'
+    '<subfield code="a">Muster, Anna</subfield>'
+    '<subfield code="4">aut</subfield></datafield>'
+    '<datafield tag="245" ind1="1" ind2="0">'
+    '<subfield code="a">Ein Probeband</subfield></datafield>'
+    '<datafield tag="264" ind1=" " ind2="1">'
+    '<subfield code="b">Ein Verlag</subfield>'
+    '<subfield code="c">2021</subfield></datafield>'
+    '<datafield tag="300" ind1=" " ind2=" ">'
+    '<subfield code="a">237 Seiten</subfield></datafield>'
+    '<datafield tag="520" ind1=" " ind2=" ">'
+    '<subfield code="a">Eine kurze Inhaltsangabe.</subfield></datafield>'
+    '<datafield tag="650" ind1=" " ind2="7">'
+    '<subfield code="a">Roman</subfield></datafield>'
+    '<datafield tag="856" ind1="4" ind2="0">'
+    '<subfield code="u">https://example.com/probe</subfield></datafield>'
+    "</record>"
+)
+SRU_PROBE_MARC_IDENTIFIER = (
+    '<datafield tag="020" ind1=" " ind2=" ">'
+    '<subfield code="a">9783161484100</subfield></datafield>'
+)
+
+#: The BnF's shape. `dc:type` and `dc:format` are its printed book gate.
+SRU_PROBE_DUBLIN_CORE = (
+    '<record xmlns:dc="http://purl.org/dc/elements/1.1/">'
+    "<dc:title>Un livre</dc:title>"
+    "<dc:creator>Muster, Anne</dc:creator>"
+    "<dc:type>text</dc:type>"
+    "<dc:format>200 p.</dc:format>"
+    "<dc:publisher>Un editeur</dc:publisher>"
+    "<dc:date>2021</dc:date>"
+    "<dc:language>fre</dc:language>"
+    '<dc:subject xml:lang="fre">Roman</dc:subject>'
+    "{identifier}"
+    "</record>"
+)
+SRU_PROBE_DUBLIN_CORE_IDENTIFIER = "<dc:identifier>ISBN 9783161484100</dc:identifier>"
+
+#: The Library of Congress's shape. `typeOfResource` and the extent are its gate.
+SRU_PROBE_MODS = (
+    '<mods xmlns="http://www.loc.gov/mods/v3">'
+    "<typeOfResource>text</typeOfResource>"
+    "<titleInfo><title>A Probe</title></titleInfo>"
+    "<name><namePart>Muster, Anna</namePart>"
+    "<role><roleTerm>author</roleTerm></role></name>"
+    "<originInfo><publisher>A Publisher</publisher>"
+    "<dateIssued>2021</dateIssued></originInfo>"
+    "<language><languageTerm>eng</languageTerm></language>"
+    "<physicalDescription><extent>464 p.</extent></physicalDescription>"
+    '<subject authority="lcsh"><topic>Fiction</topic></subject>'
+    '<classification authority="ddc" edition="23">005.133</classification>'
+    "<location><url>https://example.com/probe</url></location>"
+    "{identifier}"
+    "</mods>"
+)
+SRU_PROBE_MODS_IDENTIFIER = '<identifier type="isbn">9783161484100</identifier>'
+
+SRU_PROBE_BODIES = {
+    decoders.Reader.MARC_GND: (SRU_PROBE_MARC, SRU_PROBE_MARC_IDENTIFIER),
+    decoders.Reader.MARC_PLAIN: (SRU_PROBE_MARC, SRU_PROBE_MARC_IDENTIFIER),
+    decoders.Reader.DUBLIN_CORE: (
+        SRU_PROBE_DUBLIN_CORE,
+        SRU_PROBE_DUBLIN_CORE_IDENTIFIER,
+    ),
+    decoders.Reader.MODS: (SRU_PROBE_MODS, SRU_PROBE_MODS_IDENTIFIER),
+}
+
+#: Every seeded row that answers a title search.
+#:
+#: **The roster and the capability, rather than a set of dispatch table
+#: names.** A table name set closes over the tables that exist today: the
+#: Z39.50 transport is declared and ticketed, and the day its rows land they
+#: carry a search capability and appear here, where an arm reading three named
+#: tables would not see a fourth at all.
+SEEDED_SEARCH_ROWS = tuple(
+    target
+    for target in targets.SEEDED.values()
+    if target.can(Capability.ANSWERS_TITLE_SEARCH)
+)
+
+#: The seeded search rows whose answer is an element a reader here can drive.
+SEEDED_ELEMENT_SEARCH_SOURCES = tuple(
+    sorted(
+        target.source
+        for target in SEEDED_SEARCH_ROWS
+        if target.reader in SRU_PROBE_BODIES
+    )
+)
+
+
+class TestASearchRowsCoverIsDerivedFromItsOwnIsbn:
+    """A reader that parses an identifier out of a record builds its cover from it.
+
+    `metadata._PICKABLE_FIELDS` scores `isbn` and `cover_url` separately, so on
+    a row one of these readers built, a single parse moves two of six terms.
+    This class holds that derivation at the reader, where it is a property of
+    the code rather than a sentence beside it.
+
+    **Driven by the seeded row, not by the reader alone.** A `decoders.Decoding`
+    carries three per source knobs beside the reader, and three seeded rows
+    name `MARC_GND`: the OeNB and the NLG run it refusing component parts and
+    reading no author identifiers, which is a configuration a decoding built
+    from the reader alone never has. So each arm takes the row's own
+    `Target.decoding` and asserts the row's own label came back out. Nothing in
+    a cover expression reads a knob today, and that is measured here rather
+    than assumed.
+
+    **What goes past it.** An arm compares one record against the same record
+    without its identifier, so it observes a cover keyed on an element those
+    records carry and not one keyed on an element they do not: a cover built
+    from a description was measured passing a minimal body. `SRU_PROBE_BODIES`
+    therefore carries more than the minimum and `ALSO_READ` pins that. The
+    residual blind spot is open by construction and **is not bounded here**,
+    because an arm's job is to fail on a change rather than to quantify what it
+    cannot see.
+
+    **Asserting the cover equals the derivation of the identifier is refused**,
+    and for a false refusal rather than for a miss: it would miss that same
+    plant, and `covers.candidates` already builds a DNB cover URL from a German
+    identifier, so an equality against one service's builder would redden a
+    reader that legitimately derived through the other.
+
+    **What this does not hold is the row that is actually scored.**
+    `_merge_matches` runs before `_ranked` and Open Library leads
+    `_MATCH_PRECEDENCE`, so a merged row can carry its identifier from one door
+    and its cover from another and score both on two facts. The derivation here
+    is the reader's. Whether the scored row double counts is a question about
+    the merge, and nothing in this tree observes the ordering.
+    """
+
+    #: Fields every body above is read for, beside the identifier and the
+    #: cover. Asserted on the bare row, so a body cut back to the minimum
+    #: reddens an arm instead of shrinking what it can see.
+    ALSO_READ = ("author", "publisher", "year", "language", "page_count")
+
+    #: The two search doors that take no element, named because each has its
+    #: own arm below rather than a record body.
+    BESPOKE_SEARCH_SOURCES = frozenset(
+        {CatalogueSource.OPEN_LIBRARY, CatalogueSource.GOOGLE_BOOKS}
+    )
+
+    GOOGLE_VOLUMES = targets.SEEDED[CatalogueSource.GOOGLE_BOOKS].base_url
+
+    def _element_row(self, target: targets.Target, identifier: str) -> Record:
+        """One row through `metadata.READERS`, the dispatch `_records` uses on
+        the search path, driven by this row's own decoding."""
+        body, _ = SRU_PROBE_BODIES[target.reader]
+        record = metadata.READERS[target.reader](
+            ElementTree.fromstring(body.format(identifier=identifier)),
+            target.decoding,
+        )
+        assert record is not None, target.source
+        return record
+
+    async def _open_library_row(self, doc: dict[str, Any]) -> Record:
+        """One row through the adapter `_FREE_SEARCHES` dispatches to, so a
+        change to how it builds a cover is visible here."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith="https://openlibrary.org/search.json").mock(
+                return_value=httpx.Response(200, json={"docs": [doc]})
+            )
+            rows = await metadata._open_library_search("a probe", 1)
+        assert len(rows) == 1, rows
+        return rows[0]
+
+    async def _google_row(self, volume: dict[str, Any]) -> Record:
+        """One row through the adapter `_METERED_SEARCHES` dispatches to.
+
+        Through `_google_search` and not `_google_record`, so both bespoke arms
+        drive the same layer as each other and as the door the dispatch names.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=self.GOOGLE_VOLUMES).mock(
+                return_value=httpx.Response(200, json={"items": [{"volumeInfo": volume}]})
+            )
+            rows = await metadata._google_search("a probe", 1, "a-key")
+        assert len(rows) == 1, rows
+        return rows[0]
+
+    def test_every_seeded_row_that_answers_a_search_is_graded_here(self):
+        """A catalogue that answers a title search and is measured nowhere here.
+
+        This is the door population. It is derived from the roster and the
+        capability rather than from the dispatch tables, so a row arriving over
+        a transport nothing here names still has to be placed.
+        """
+        graded = set(SEEDED_ELEMENT_SEARCH_SOURCES) | self.BESPOKE_SEARCH_SOURCES
+        seeded = {target.source for target in SEEDED_SEARCH_ROWS}
+
+        assert graded == seeded, sorted(graded ^ seeded)
+
+    def test_the_three_search_dispatch_tables_hold_no_reader_this_ignores(self):
+        """The reader half, because a reader can be in a table before a row names it.
+
+        **It reads exactly `_SEARCH_READERS`, `_FREE_SEARCHES` and
+        `_METERED_SEARCHES`, and it cannot see a fourth table.** That is what
+        the roster arm above is for, and saying so here is what stops this one
+        being read as covering every door.
+        """
+        dispatched = (
+            set(metadata._SEARCH_READERS)
+            | set(metadata._FREE_SEARCHES)
+            | set(metadata._METERED_SEARCHES)
+        )
+        graded = set(SRU_PROBE_BODIES) | {
+            decoders.Reader.OPEN_LIBRARY,
+            decoders.Reader.GOOGLE_BOOKS,
+        }
+
+        assert dispatched == graded, sorted(dispatched ^ graded)
+
+    @pytest.mark.parametrize("source", SEEDED_ELEMENT_SEARCH_SOURCES)
+    def test_a_row_read_from_an_element_carries_a_cover_where_it_carries_an_isbn(
+        self, source: CatalogueSource
+    ):
+        """One parse of the identifier moves both fields, on every row that
+        reads an element."""
+        target = targets.SEEDED[source]
+        carried = self._element_row(target, SRU_PROBE_BODIES[target.reader][1])
+        bare = self._element_row(target, "")
+
+        # **The row's own decoding reached the reader**, rather than a default
+        # built from the reader alone. The label is the one field of a
+        # `Decoding` that comes back out on the record.
+        assert carried.source == source.value
+        assert bare.source == source.value
+        # **Emptiness, and not `is None`.** `metadata.READERS` records
+        # `DUBLIN_CORE_BARE` as the reader that would decode to `isbn=""`, so a
+        # null check would report a promoted reader as carrying an identifier
+        # it does not have.
+        assert not bare.isbn, bare
+        assert not bare.cover_url, bare
+        assert carried.isbn
+        assert carried.cover_url
+        # **The body is not minimal, and the arm's reach is why.** See
+        # `SRU_PROBE_BODIES`.
+        assert [name for name in self.ALSO_READ if not getattr(bare, name)] == []
+
+    @pytest.mark.asyncio
+    async def test_an_open_library_row_carries_either_field_without_the_other(self):
+        """Its search index answers with its own `cover_i`, which resolves for
+        editions the cover service has no ISBN mapping for, so here the pair is
+        two facts and the score counts nothing twice."""
+        carried = await self._open_library_row(
+            {"title": "A Probe", "isbn": ["9783161484100"]}
+        )
+        covered = await self._open_library_row({"title": "A Probe", "cover_i": 12345})
+
+        assert carried.isbn
+        assert not carried.cover_url
+        assert covered.cover_url
+        assert not covered.isbn
+
+    @pytest.mark.asyncio
+    async def test_a_google_row_carries_either_field_without_the_other(self):
+        """Google supplies its own thumbnail, so the pair is two facts there too."""
+        carried = await self._google_row(
+            {
+                "title": "A Probe",
+                "industryIdentifiers": [
+                    {"type": "ISBN_13", "identifier": "9783161484100"}
+                ],
+            }
+        )
+        covered = await self._google_row(
+            {
+                "title": "A Probe",
+                "imageLinks": {"thumbnail": "https://books.google.com/probe.jpg"},
+            }
+        )
+
+        assert carried.isbn
+        assert not carried.cover_url
+        assert covered.cover_url
+        assert not covered.isbn
 
 
 class TestAHostileSourceCostsItsOwnRows:
@@ -2978,6 +3301,90 @@ class TestSearchDeadline:
         results = await metadata._within_deadline([quick(), slow()], 0.05)
 
         assert results == [[Record(title="Fast")]]
+
+    @pytest.mark.asyncio
+    async def test_the_budget_reaches_the_wait_and_not_only_the_call(self, monkeypatch):
+        """Every other arm reads the budget at the call boundary.
+
+        `TestSearchingHarder` spies on `_within_deadline` itself, so it records
+        the value handed in and any scaling applied inside the function is
+        behind its instrument. Measured: a timeout divided by a hundred inside
+        the fan out passes that class, and passes the slow ÖNB test with its
+        rows intact, because a deadline below the call's own cost is hidden
+        behind it. So the value is read here at the only place that consumes it.
+
+        **It reads what reached the wait and never a literal**, which is the
+        false refusal half: an arm written against the module constant would
+        redden on every test that patches it, the slow ÖNB one included.
+
+        **One source is still pending when the budget runs out, and without it
+        this arm is blind.** The fan out reaches a second wait only inside its
+        `if pending:` branch, so a roster that all answers at once leaves that
+        branch unrun and the sequence compared below can never hold more than
+        one element. Measured: a second wait on the pending set, which in
+        production turns the 4.0s deadline into 8.0s, is green against a roster
+        with nothing pending and red against this one.
+
+        **Named and refused.** This cannot see a mutant that hands the wait a
+        correct timeout and then defeats the deadline without calling the wait
+        again: not cancelling what came back pending, or dropping the split.
+        Those are other arms' subjects and nothing here reaches them.
+
+        **The cost is that the deadline's mechanism is pinned**, so moving the
+        fan out to a different timeout primitive reddens this while nothing is
+        broken. That is acceptable because `_within_deadline`'s own docstring
+        commits to this mechanism in writing, so the red reads as "update both"
+        rather than as a false alarm. **The cleanup's primitive is not pinned
+        and must not be**, which is why the spy below records only a wait
+        carrying a timeout: see the comment there.
+
+        **The residue that leaves.** A second wait added with **no** timeout is
+        invisible here, because it never enters the sequence. What it costs is
+        latency, which is the elapsed bound's subject in
+        `TestTheAustrianNationalLibrarySearch` and not this arm's.
+        """
+        seen: list[object] = []
+        real = asyncio.wait
+
+        async def spy(tasks, **kwargs):
+            # Only a wait that was handed a timeout, which is what this arm is
+            # about. Recording every wait pins the **cleanup's** primitive as
+            # well: with something pending, `asyncio.wait(pending)` in place of
+            # the fan out's gather is a legitimate refactor and would redden
+            # here, and nothing in the tree commits to a primitive for the
+            # cleanup the way `_within_deadline`'s docstring does for the
+            # deadline.
+            if "timeout" in kwargs:
+                seen.append(kwargs["timeout"])
+            return await real(tasks, **kwargs)
+
+        monkeypatch.setattr(asyncio, "wait", spy)
+
+        budget = 0.25
+
+        async def quick() -> list[Record]:
+            return [Record(title="Fast")]
+
+        async def pending_at_the_budget() -> list[Record]:
+            # Still unanswered when the budget runs out, so the fan out has
+            # something to cancel and every path after the wait runs. Delete it
+            # and a wait added in that branch is invisible here.
+            #
+            # **Finite, and not an `Event` that never fires.** Under the mutant
+            # this arm exists to catch, the budget dropped, a source that never
+            # answers makes the fan out wait for ever: measured, that plant hung
+            # the run and was killed with no test report, which is no verdict at
+            # all. Four times the budget is past it by more than any scheduling
+            # noise and still returns.
+            await asyncio.sleep(budget * 4)
+            return []
+
+        await metadata._within_deadline([quick(), pending_at_the_budget()], budget)
+
+        assert seen == [budget], (
+            f"the wait was given {seen} against a budget of {budget}: a timeout "
+            "scaled or dropped inside the fan out is invisible to a spy on the call"
+        )
 
     @pytest.mark.asyncio
     async def test_everything_that_answers_in_time_is_kept_in_order(self):
@@ -4653,12 +5060,34 @@ class TestTheAustrianNationalLibrarySearch:
     #: `_DEADLINE` stands in for `metadata.SEARCH_DEADLINE_SECONDS`, which is 4.0; the
     #: sleep stands in for nothing in the application, because no production value says
     #: how slow a slow source is. The deadline is small so the suite does not pay for it.
-    #: The sleep is then
-    #: set so the midpoint between the two clears the good case's own overhead, which is
-    #: what `_MARGIN` records; it is not the real sleep reduced by the same factor.
-    #: The two constraints are that the sleep outlasts the deadline by enough for a
-    #: broken deadline to miss the bound widely, and that the deadline is long enough for
-    #: the five other mocked sources to finish inside it.
+    #: The sleep is set so a deadline that stopped working misses the bound by seconds
+    #: rather than by scheduler noise; it is not the real sleep reduced by the same
+    #: factor. The other constraint is that the deadline is long enough for the rest of
+    #: the roster to finish inside it, and the headroom is **about sixfold**: measured
+    #: 2026-09-29 on builder at four workers over five samples, the fan out runs eight
+    #: tasks and the last of the seven that answer is done **0.0711s to 0.0797s** after
+    #: `asyncio.wait` starts its timer, against `_DEADLINE` of 0.5s. **That is
+    #: builder's headroom and the suite takes whichever node is free**, so it is the
+    #: wider of the two readings available and not a floor.
+    #:
+    #: **The `_DEADLINE / 100` diagonal reads as a hundredfold and cannot support it.**
+    #: With the fan out's timeout divided by a hundred the rows are still right, which
+    #: reads as the fan out finishing inside five milliseconds; the figures above refute
+    #: that, and the mechanism is that nothing in the fan out yields to the event loop
+    #: before about 0.07s, so a 5ms timer cannot fire until every source has already
+    #: answered. Measured on the same tree at a timeout of 0.005s: the slow source's
+    #: handler is still entered at 0.0503s to 0.0576s and all eight tasks still finish.
+    #: **And the row assertion is sensitive to one source**: one of the eight returns
+    #: the record whose title it checks and the rest answer empty, answer 500 or are
+    #: silenced, so it cannot tell whether any of them finished.
+    #:
+    #: **The control figure below is not that number either**, because it times the
+    #: whole call, of which the merge, the ranking and the surrounding work are most.
+    #:
+    #: **The sleep's size is free in wall clock, and that is what refuses lowering it to
+    #: make the suite faster.** It is abandoned rather than awaited whenever the deadline
+    #: works, so the three seconds are spent only by a run that is already red. Shortening
+    #: it buys nothing and moves the detection threshold, which the margin below prices.
     #:
     #: **The old numbers made this test nearly unable to fail.** It slept 5 against the
     #: real 4.0 deadline and asserted `elapsed < 5`. A working deadline returns at about
@@ -4674,70 +5103,182 @@ class TestTheAustrianNationalLibrarySearch:
     _DEADLINE = 0.5
     _SLOWER_THAN_THE_DEADLINE = 3.0
 
-    #: What the five mocked sources, the merge and the ranking are allowed on top of the
-    #: deadline.
+    #: The slack the elapsed bound allows on top of the deadline. **It is an inherited
+    #: constant with a corrected justification, not a new one**, and keeping those two
+    #: apart is the whole reason this block is long.
     #:
-    #: **The bound is the midpoint of the two modelled return times**, `_DEADLINE` and
-    #: `_SLOWER_THAN_THE_DEADLINE`, so 1.75s. That is the point furthest from both, which
-    #: is the only thing a single number can be chosen to be, and it is half of the 2.5s
-    #: the regression costs.
+    #: **The overhead it used to budget for does not land on top of the deadline.** The
+    #: five mocked sources run inside the deadline's own window, so their cost is hidden
+    #: by the wait rather than added to it, and only the merge and the ranking land after
+    #: it. Measured 2026-09-29 on builder at four workers over **75 pairs in three runs**,
+    #: one targeted, one inside a whole backend suite and one re-taken: the same call
+    #: with the slow source answering instantly takes **0.0691s to 0.1079s**, while the
+    #: slow case's elapsed exceeds `_DEADLINE` by **0.0013s to 0.0042s**.
     #:
-    #: **The two directions are not equally slack, and the good case is the tight one.**
-    #: A broken deadline returns at `_SLOWER_THAN_THE_DEADLINE` and misses by 1.25s. A
-    #: working one is modelled at `_DEADLINE` but has been **observed at 1.0589s**, on the
-    #: run that reddened this test on 2026-09-18 against the bound of 1.0 it then had, so
-    #: the five mocks, the merge and the ranking cost about 0.56s of real time. Measured
-    #: against that observation the bound leaves about 0.69s rather than 1.25s.
+    #: **So the control case was built, measured and refused.** The smallest control
+    #: drawn is sixteen times the largest excess drawn, so subtracting it moves the bound
+    #: by more than an order of magnitude more than the signal it would isolate, and the
+    #: difference is negative at all 75 samples: the subtraction loosens the bound by the
+    #: whole control rather than tightening it.
     #:
-    #: **Sized against that observation is not the same as sized against the tail.** The
-    #: 1.0589s is one draw and it is the draw that failed, so nothing here bounds the
-    #: overhead above it. What is known about the shape is that this pod is quota bound at
-    #: 2 CPUs and throttled in a third to a half of all periods, so a burst loses up to a
-    #: full 100ms period at a time: 0.69s is about seven such periods where the previous
-    #: bound left about two. Every source here answers instantly, so all of this is slack
-    #: against a throttled worker rather than against any work.
+    #: **That argument is stated on magnitudes because the variance ratio will not carry
+    #: it.** Two seats measured that ratio on this node at this worker count and came out
+    #: ten times apart, sd of the difference 0.0142 against 0.0015, the difference being
+    #: whether the pairs include the process's first search, which is cold. Their excess
+    #: figures agreed within 1.5x. A control case is itself timing, and the quantity it
+    #: would cancel here is smaller than the disagreement between two measurements of the
+    #: instrument.
     #:
-    #: **What raising `_SLOWER_THAN_THE_DEADLINE` to 3.0 cost, stated rather than waved
-    #: past.** The bound detects an overrun beyond itself, so moving it from 1.25s to
-    #: 1.75s moves the detection threshold from 2.5x `_DEADLINE` to 3.5x, and a partial
-    #: overrun landing inside the new band goes unseen. **`_DEADLINE` and not the real
-    #: deadline**, which is `metadata.SEARCH_DEADLINE_SECONDS` at 4.0 and against which
-    #: this bound is 0.44x. The distinction is worth the words because this block uses the
-    #: word real for the production constant twice. It is free in wall clock, because the
-    #: sleep is abandoned
-    #: rather than awaited whenever the deadline works, so only an already red run pays the
-    #: extra second.
+    #: **1.25 did not move and is not derived from the stall.** It is the leftover of the
+    #: midpoint construction this block used to carry, 1.75 minus `_DEADLINE`. It happens
+    #: to be 2.2x the only recorded stall, the 1.0589s red of 2026-09-18, itself 0.5589s
+    #: past `_DEADLINE` and 133 times the worst excess above. Work that small cannot
+    #: produce that red; a pod losing the CPU for half a second can, and the mechanism is
+    #: recorded rather than assumed. **That red is a pipeline backend job's, which is not
+    #: the pod the figures above were taken in**: this block carries readings from both,
+    #: so each names its own. The pipeline's job pod is quota bound at 2 CPUs and
+    #: throttled in a third to a half of all periods, read from its own cgroup on
+    #: 2026-09-20, so a burst loses up to a full 100ms period at a time and 0.5589s is
+    #: about six such periods. **That is the ceiling and not the average**: the same
+    #: reading's throttled time over its throttled periods is 4.5ms and 7.1ms in the two
+    #: jobs, so the figure needs six consecutive worst cases and the mechanism bounds it
+    #: rather than predicting it. The suite pod is sized per node instead and has not been
+    #: that shape since 2026-08-29, which is why the pod is named rather than implied:
+    #: read as the suite pod, this evidence dates itself three weeks before the red it
+    #: explains. One draw bounds nothing, so the
+    #: number stays where it was rather than being re-derived from it, and lowering it
+    #: on the fixture measurement would buy detection with flakes.
     #:
-    #: **And most of that threshold is a floor rather than a choice.** The bound has the
-    #: form `_DEADLINE` plus overhead, and the overhead alone was observed at 0.5589s,
-    #: which is 1.12x `_DEADLINE`, so no value of this constant reaches below about 2.1x.
-    #: Lowering the sleep again does not buy back 2.5x. That is what makes the sentence
-    #: below a bound rather than an opinion.
-    #:
-    #: **The constant is the wrong instrument for this and a ticket says so.** Budgeting
-    #: for the mocks, the merge and the ranking *inside* the bound is what forces the
-    #: choice between headroom and detection. Subtracting them, by measuring the overhead
-    #: in a control case with no slow source and bounding only the part attributable to
-    #: the deadline, ends the class; moving this number only relocates it.
+    #: **What that costs is wider than it reads, and it is the second line now rather
+    #: than the only one.** A bound catches an overrun past itself and nothing under
+    #: itself, so this one is green **at least from about 0.01x, and up to 3.49x
+    #: `_DEADLINE`**, not from 1x: elapsed is floored at the call's own cost, the 0.0691s
+    #: to 0.1079s above, which every deadline below that is hidden behind. **At least
+    #: from**, because 0.01x is the one point drawn, `_DEADLINE / 100`: it says the band
+    #: includes 0.01x, not that the band begins there. Nothing below it was drawn.
+    #: The mutant living down there is concrete rather than hypothetical: a timeout
+    #: divided inside `_within_deadline`,
+    #: which in production cuts 4.0s to a fraction of it and drops healthy catalogues.
+    #: Measured at `/ 100`, it passes all three assertions here with the rows intact,
+    #: **and passes `TestSearchingHarder`'s budget assertion too**, because that records
+    #: the argument handed in rather than the timeout used. **It is invisible to this
+    #: bound rather than uncovered**: re-measured with the arms this block now carries,
+    #: the only thing that reddens on it is
+    #: `TestSearchDeadline::test_the_budget_reaches_the_wait_and_not_only_the_call`.
+    #: **Closing the low end was
+    #: tried and collapsed**: a second slow source sitting in the band would have to
+    #: sleep above the stall tail to be safe, which is where the elapsed bound already
+    #: is. Against the production `metadata.SEARCH_DEADLINE_SECONDS` of 4.0 this bound
+    #: is 0.44x.
     _MARGIN = 1.25
 
     @pytest.mark.asyncio
     async def test_a_slow_oenb_does_not_extend_the_shared_deadline(self, monkeypatch):
         """User story 5. The deadline degrades the results, never the latency.
 
-        **Bounded against the deadline, not against the sleep.** A broken deadline misses
-        by 1.25s rather than by microseconds, and the number in the assertion says what is
-        being tested. `_MARGIN` is the slack for five mocked sources and the merge, and it
-        is half the 2.5s a regression would cost.
+        **Two arms, and only one of them is a duration.** The slow source records how
+        its own task ended, so a deadline that waits for it is caught by a fact rather
+        than by a clock: the sleep runs to completion and `outcome` reads `answered`,
+        with no clock consulted to say so. **That reading is load independent between
+        two edges and not outside them, and both edges are named below.** A stall before
+        the source is asked empties the list; a stall past
+        `_SLOWER_THAN_THE_DEADLINE` completes the sleep, so the arm reads `answered` for
+        a deadline that never waited. The elapsed figure in the message is what
+        separates either from the thing it imitates, and how often either happens is
+        deliberately not stated.
+
+        **`entered` is what tells this arm's own target from the environment.** `_crawl`
+        records it as its first statement, so a leak reads `['entered']` where a source
+        that was never asked, or one cancelled before its handler was entered, reads
+        `[]`. Without that first statement the two families differ only in when they
+        return, which is a clock, and not being one is this arm's whole purpose.
+        Measured: the cancellation dropped from
+        `_within_deadline` and the pending set discarded records `['entered']` at
+        0.502s, against `[]` at 0.070s for a roster that never asks the source.
+
+        **What the arm holds is that the cancellation was delivered and awaited to the
+        end.** The case earning the first half is a leak rather than a latency defect:
+        drop the cancellation and discard the pending set, and every assertion this test
+        carried before this arm existed passes, the rows right and the call returning at
+        the deadline. No clock here can see that.
+
+        **`unwound` is the second half, and it is why the fixture's handler yields once
+        before re-raising.** One event loop tick in place of the gather is enough for the
+        sleep to raise, so a source whose own cleanup awaits is left unfinished against a
+        closing transport, which is the leak the gather's comment exists to stop. The
+        gather resumes the handler past that yield and `unwound` is appended; one tick
+        does not. Measured with the gather replaced by a single tick: this test fails on
+        `['entered', 'cancelled']`, and reads no clock to do it.
+
+        **What that second half costs, in both directions.** It pins the depth of the
+        unwinding rather than the primitive: `asyncio.wait(pending)` in place of the
+        gather stays green, and so does a pending task cancelled twice, both measured.
+        What it does not survive is a yield between the fan out's cleanup and this
+        assertion, because the leftover task would then be resumed by something other
+        than the gather. There is none today: `_merge_matches` and `_ranked` are both
+        synchronous, `search()` awaits nothing after `_within_deadline` returns, and this
+        test awaits nothing after `search()` returns. **If that changes this arm goes
+        green rather than red**, which is the direction nobody notices. Two of the three
+        places such a yield would go are in `metadata.py` rather than here, so the
+        constraint is written at each of them as well: a reader adding one sees it
+        where they are typing, which this paragraph cannot do.
+
+        **An empty `outcome` has two causes now that a leak has its own reading, and the
+        message carries the elapsed time to tell them apart.** The source may never have
+        been asked, which is what moving it into the slow set does, and that returns in
+        milliseconds. **The other is load dependent**: if the process loses the CPU
+        between the wait starting its timer and the request being issued, for longer
+        than `_DEADLINE`, the task is cancelled before the handler is entered, the
+        handler never runs, and the list is empty for a working deadline. A stall of
+        that magnitude is the 1.0589s red recorded above. **How often is deliberately
+        not stated**: every attempt in this repository to bound a blind spot has
+        measured something adjacent and written it down as the bound.
+
+        **The arm is not purely additive, and how much it newly refuses is refused
+        rather than stated.** Before it existed, the elapsed bound passed any run
+        returning inside `_DEADLINE` plus `_MARGIN`, so a run that cancelled the source
+        before its handler was entered was tolerated. That run is red now and the
+        refusal is wanted, because a run that never asked the source never exercised
+        the deadline.
+
+        **The band this used to name was reasoned and is not reproducible.** It said
+        every stall from `_DEADLINE` to about 1.68s had changed verdict. Planted inside
+        it, the mechanism named here is **green**: a 0.7s blocking stall in the fan
+        out's first task holds the loop well past the deadline, and the handler is still
+        entered and the full outcome still recorded, because the mock reaches its side
+        effect before the cancellation is honoured. The only thing measured to produce
+        an empty list is a roster that never asks the source, which is a configuration
+        and not a stall. So the cost is stated as a mechanism and `['entered']` against
+        `[]` in the message is what says which one arrived.
+
+        **The elapsed bound is the user story's other half**, and it is about the caller
+        rather than the source: a deadline is worth nothing if the fan out drops the slow
+        catalogue on time and then spends seconds merging. It is loose on purpose, and
+        `_MARGIN` says what it covers and what it therefore cannot see.
 
         **Proved to discriminate rather than asserted to**: with the deadline raised
-        above the sleep, this test is the one that fails, and it fails on the elapsed
-        bound rather than on the row assertion.
+        above the sleep, this test is the one that fails, and it fails on the
+        cancellation arm rather than on the row assertion.
         """
         monkeypatch.setattr(metadata, "SEARCH_DEADLINE_SECONDS", self._DEADLINE)
+        outcome: list[str] = []
 
         async def _crawl(request):
-            await asyncio.sleep(self._SLOWER_THAN_THE_DEADLINE)
+            # First statement, so an empty `outcome` means this handler never ran.
+            # Without it a leak and a stall before the request is issued both record
+            # `[]` and the arm cannot tell its own target from the environment.
+            outcome.append("entered")
+            try:
+                await asyncio.sleep(self._SLOWER_THAN_THE_DEADLINE)
+            except asyncio.CancelledError:
+                outcome.append("cancelled")
+                # A cleanup that awaits. Delete this yield and one event loop tick in
+                # place of the fan out's gather passes the arm, which is the leak the
+                # gather exists to stop.
+                await asyncio.sleep(0)
+                outcome.append("unwound")
+                raise
+            outcome.append("answered")
             return _xml(OENB_SEARCH)
 
         with respx.mock(assert_all_called=False) as mock:
@@ -4761,9 +5302,19 @@ class TestTheAustrianNationalLibrarySearch:
             rows = await search("great gatsby")
             elapsed = asyncio.get_running_loop().time() - started
 
+        assert outcome == ["entered", "cancelled", "unwound"], (
+            f"the slow source ended as {outcome} rather than entered, cancelled and "
+            f"unwound, after {elapsed:.3f}s against a deadline of "
+            f"{self._DEADLINE}s: `answered` is a deadline that waited, or a stall past "
+            f"{self._SLOWER_THAN_THE_DEADLINE}s; `['entered']` is a task left running; "
+            "`['entered', 'cancelled']` is a cancellation delivered but not awaited to "
+            "the end; an empty list is a source that was never asked, or one cancelled "
+            "before its handler was entered, which a stall past the deadline does"
+        )
         assert elapsed < self._DEADLINE + self._MARGIN, (
-            f"the search took {elapsed:.3f}s against a deadline of {self._DEADLINE}s; "
-            f"a source sleeping {self._SLOWER_THAN_THE_DEADLINE}s was waited for"
+            f"the search took {elapsed:.3f}s against a deadline of {self._DEADLINE}s "
+            f"and a margin of {self._MARGIN}s; the fan out returned late even though "
+            "the slow source was dropped on time"
         )
         assert [row.title for row in rows] == ["The Great Gatsby"]
 

@@ -107,6 +107,49 @@ describe("reading a Kindle or Mobipocket file", () => {
     expect(reading.ok && reading.metadata.authors).toEqual(["Amy Brown"]);
   });
 
+  it("reads one subject per record and folds none of them", async () => {
+    // 62 of the 69 real files carry 105, usually several records, and a repeat
+    // is two assertions rather than one: which of them the request may carry
+    // is `lib/bookRequest.boundCategories`' question and not this reader's.
+    // The contrast with `authors` two arms above is the whole arm: that one
+    // folds because two records naming one person are one author.
+    const reading = await read({
+      exth: [
+        { type: SUBJECT, value: "Fiction" },
+        { type: SUBJECT, value: "Science Fiction" },
+        { type: SUBJECT, value: "Fiction" },
+      ],
+    });
+
+    expect(reading.ok && reading.metadata.categories).toEqual([
+      "Fiction",
+      "Science Fiction",
+      "Fiction",
+    ]);
+  });
+
+  it("splits no subject record, whatever separator it contains", async () => {
+    // `readAuthors`' measurement one field over: the format says two of a
+    // thing by writing two records, so a splitter would be guessing at a value
+    // containing its own separator. A subject is where that guess is likeliest
+    // to be wrong, this column's own values containing commas.
+    const reading = await read({
+      exth: [{ type: SUBJECT, value: "Fiction, general" }],
+    });
+
+    expect(reading.ok && reading.metadata.categories).toEqual([
+      "Fiction, general",
+    ]);
+  });
+
+  it("states no subject for a file carrying no such record", async () => {
+    // The other side, without which the arms above are satisfied by a reader
+    // answering the empty list to everything. 7 of the 69 carry none.
+    const reading = await read(PUBLISHED_BOOK);
+
+    expect(reading.ok && reading.metadata.categories).toEqual([]);
+  });
+
   it("supplies neither a series nor a subtitle, because the format has none", async () => {
     const reading = await read(PUBLISHED_BOOK);
 

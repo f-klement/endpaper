@@ -166,14 +166,16 @@ def _every_python_file(root: Path = BACKEND) -> list[Path]:
     _test_sources() + something for the migrations`, which is a list of three
     directory names whose fourth member nobody would remember to add.
 
-    **The boundary is `backend/` rather than the repository.** Eleven tracked
-    `.py` files live outside it, one under `frontend/scripts/` and ten under
-    tooling directories this suite does not own. All eleven compile clean,
-    measured 2026-09-02 on CPython 3.14.0, so the gap is worth knowing about
-    rather than urgent. It is deliberately not closed from here: `BACKEND`
-    anchors every walk in this file, and a rule reaching out of its own tree
-    would report against code this suite has no claim on, in a checkout that may
-    not even contain it.
+    **The boundary is `backend/` rather than the repository, and no count of
+    what lies outside it belongs here.** The one that stood in this paragraph
+    was measured once and was short by five the next time anybody counted,
+    which is the failure the class at the foot of this file already records
+    against its own corpus. Tracked Python outside `backend/` is compiled by a
+    guard of its own, which this file may not name: that guard is stripped from
+    the public mirror and this one publishes. The boundary stays here because
+    `BACKEND` anchors every walk in this file, and a rule reaching out of its
+    own tree would report against code this suite has no claim on, in a
+    checkout that may not even contain it.
 
     **`rglob`, so this is the working tree and not what git tracks.** An
     untracked file under `backend/` is compiled and reported, which is wanted:
@@ -332,6 +334,50 @@ WHAT_EACH_WALK_REACHES: Final = {
     "test_roster_counts::candidates": set(FIRST_PARTY) - {".gitignore"},
     "test_roster_counts::scope": set(FIRST_PARTY) - {".gitignore"},
 }
+
+
+#: The sentence the publish gate demands of a file it strips. Spelled here as a
+#: cross check on the partition below and not as a second home for that rule,
+#: which is the gate's: a match broader than the gate's is the safe direction.
+INTERNAL_DECLARATION: Final = "**This file is internal.**"
+
+
+def _declares_itself_internal(module: str) -> bool:
+    source = (BACKEND / "tests" / f"{module.replace('.', '/')}.py").read_text(encoding="utf-8")
+    return INTERNAL_DECLARATION in (ast.get_docstring(ast.parse(source)) or "")
+
+
+def _the_whole_table(walks: frozenset[str]) -> dict[str, set[str]]:
+    """The table above, plus the row an internal module states about its own walk.
+
+    **This file publishes and a published file may not name a stripped one.** A
+    row keyed on an internal module's name fails in a mirror clone, printing a
+    path the mirror does not carry, and the publish gate cannot catch it: its
+    pointer arm matches path spellings and this is a bare stem. So an internal
+    module states what its own walk reaches, under this attribute name, and the
+    row is collected here rather than written here. The next internal guard
+    with a walk then needs no edit to a published file.
+
+    **Which modules those are is read off the declaration they already carry**
+    for the gate, never off a list, which is the coverage register's own answer
+    to the same question: a file earns a row or declares itself internal.
+
+    **The module states the expectation and this drives it**, which is weaker
+    than a published row and is not nothing. A walk that lost a group or
+    answered with nothing still fails here, and a module that states no row
+    fails the set comparison by name rather than dropping out of the diagonal.
+    """
+    table = dict(WHAT_EACH_WALK_REACHES)
+    for qualified in walks:
+        module, _, _ = qualified.partition("::")
+        if qualified in table or not _declares_itself_internal(module):
+            continue
+        stated = getattr(
+            importlib.import_module(f"tests.{module}"), "WHAT_MY_WALKS_REACH", {}
+        )
+        if qualified in stated:
+            table[qualified] = stated[qualified]
+    return table
 
 
 #: Both ways a module defines a function, because a rule reading one of them reads a
@@ -1384,12 +1430,15 @@ class TestTheSourceWalkSeesOnlyThisProject:
         for vendored in VENDORED_KINDS.values():
             _a_backend_with_vendored_code_in_it(root, vendored)
         walks = _every_walk()
+        table = _the_whole_table(walks)
 
-        assert walks == set(WHAT_EACH_WALK_REACHES), (
-            "a walk was added or renamed and nothing here says what it is for: "
-            f"{sorted(walks ^ set(WHAT_EACH_WALK_REACHES))}"
+        assert walks == set(table), (
+            "a walk was added or renamed and nothing says what it is for: "
+            f"{sorted(walks ^ set(table))}. A walk in a module that declares "
+            "itself internal says so in that module, under WHAT_MY_WALKS_REACH, "
+            "and not in the table here, which is published and may not name it."
         )
-        assert {name: _reached(name, root) for name in walks} == WHAT_EACH_WALK_REACHES
+        assert {name: _reached(name, root) for name in walks} == table
 
     def test_no_other_test_module_defines_one_of_these_walks(self) -> None:
         """The next copy of this walk is what the diagonal cannot be run against.
@@ -1943,10 +1992,8 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **120** models under `schemas/`, **43** of
-    them reachable from a request. The two added are `BookColumns` and
-    `ViewerFields`, which are the halves `BookOut` was split into and neither is
-    a request body.
+    Measured on the tree as it stands: **122** models under `schemas/`, **43** of
+    them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
     first is `_schema_models`: every class under `schemas/` that reaches
@@ -10147,3 +10194,189 @@ class TestNoDocstringCarriesTheCharacterItDescribes:
             "`_python_sources` now reaches the migrations, so the reason this rule "
             "uses the wider walk no longer holds and the comment above is stale"
         )
+
+
+def _user_construction_sites(sources: Iterable[Path]) -> dict[Path, list[int]]:
+    """Where the given modules build a `models.User` row, keyed by the path given.
+
+    **The population is a call to the model class, derived from the source, not
+    a grep for `username=`.** A door added tomorrow is in it the moment the call
+    is written.
+
+    **It takes the corpus rather than a root**, so it decides nothing about what
+    a walk reaches and the caller says which modules are in scope. The rule
+    below hands it `_python_sources()`, which drops two things its own
+    docstring names: the test tree, where the fixtures build `User` rows
+    constantly, and the migrations, which call the model class nowhere.
+
+    **What it does not reach, stated rather than left to be found.** It reads
+    the callee's spelling, `User(...)` or `<anything>.User(...)`, so a row built
+    through a name this cannot see, an alias, a `getattr`, or a Core
+    `insert()`, is outside it. The live example is `backup.restore`, which
+    writes `users` through `table.insert()`: the rule below carries that as an
+    open hole rather than as something this helper covers.
+
+    **It reports how many sites each module holds, not merely which modules
+    hold one.** A door added to a module that already has one moves the count
+    and nothing else, so a caller comparing paths alone cannot see it.
+    """
+    found: dict[Path, list[int]] = {}
+    for path in sources:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            callee = node.func
+            if (isinstance(callee, ast.Name) and callee.id == "User") or (
+                isinstance(callee, ast.Attribute) and callee.attr == "User"
+            ):
+                found.setdefault(path, []).append(node.lineno)
+    return found
+
+
+@dataclasses.dataclass(frozen=True)
+class _Door:
+    """One module that builds `User` rows.
+
+    `sites` is how many calls it holds, carried beside the note rather than in
+    a second mapping: two structures keyed the same way drift, and the count is
+    the half a comparison of paths alone cannot see.
+    """
+
+    sites: int
+    bound: str
+
+
+class TestEveryDirectoryDoorWritesThroughOneFunnel:
+    """Every site that **calls the model class** to build a `User` row is one
+    of three, each with its username bounded, and the bound is written down
+    beside the site here.
+
+    **It does not prove any of the three bounds**, and saying so is the point.
+    What it proves is that a site cannot be added or removed without this list
+    moving, which is the failure that produced the defect this class was
+    written for: the LDAP door resolved a name from a directory attribute and
+    handed it to a write with nothing between, and SQLite does not enforce
+    `String(USERNAME_MAX)`, so the row was written at whatever width the
+    directory returned.
+
+    **The census is per site, not per module.** It compares how many calls each
+    module holds, because a fourth door added to a module that already has one
+    moves no path: a rule comparing the set of paths is green on it, and the
+    arm below plants exactly that.
+
+    **A row can still arrive without calling the class at all**, and that is an
+    open hole rather than a narrowing: `backup.restore` writes `users` through
+    `table.insert()`, which no spelling of this census reads. Only a column
+    constraint would bound that one, and `docs/decisions.md` records why this
+    branch declined it.
+
+    **The bound each note records is per auth mode.** Local mode never reaches
+    the funnel, so a stored row wider than the column signs in through the
+    local door and is served in full, while the directory modes refuse the same
+    row. The three notes say what bounds each door, not that every row in
+    `users` is bounded.
+
+    **Not an arm of `TestEveryTextCeilingComesFromTheColumn`.** That class is
+    about a Pydantic `max_length` deriving from a column constant and carries a
+    careful argument about which populations it may widen over. This rule adds
+    no Pydantic field and would break that argument.
+
+    **The notes below are judged by a reader and not by this class**, which is
+    the residue rather than an omission: a rule matching words in them would
+    pass on a sentence that says nothing and fail on one that says the right
+    thing in other words. It was written the second way first and reddened on a
+    healthy note. What is mechanical here is that a site cannot appear without
+    somebody writing one.
+    """
+
+    #: Each module that builds a `User` row, how many sites it holds, and how
+    #: each one's `username` is bounded. A new entry, or a moved count, is the
+    #: whole point of the rule: either is the moment somebody has to write down
+    #: what bounds the name their door lets in.
+    EXPECTED: dict[str, _Door] = {
+        "auth_backends.py": _Door(
+            sites=1,
+            bound=(
+                "the directory funnel. `upsert_directory_user` refuses a name "
+                "longer than `USERNAME_MAX` and returns None. That is the LDAP "
+                "door's bound, where the name is a directory attribute nothing "
+                "checked. The proxy door had it already, in `_PROXY_USERNAME`, "
+                "whose repeat derives from the same constant; the funnel is its "
+                "backstop rather than its bound. Neither door is on the local "
+                "mode's path, so this bounds what a directory writes and says "
+                "nothing about a row already in the table."
+            ),
+        ),
+        "routers/auth.py": _Door(
+            sites=1,
+            bound=(
+                "local registration. `schemas.user.UserCreate` carries "
+                "`max_length=USERNAME_MAX`, so Pydantic answers 422 to a wider one."
+            ),
+        ),
+        "routers/users.py": _Door(
+            sites=1,
+            bound=(
+                "an admin creating an account. The same model, the same ceiling, "
+                "the same 422."
+            ),
+        ),
+    }
+
+    def test_the_three_doors_are_the_only_ones(self) -> None:
+        """Counted per site, so a door appended to a module already holding one
+        moves the census rather than hiding inside its path."""
+        census = {
+            path.relative_to(BACKEND).as_posix(): len(lines)
+            for path, lines in _user_construction_sites(_python_sources()).items()
+        }
+        expected = {path: door.sites for path, door in self.EXPECTED.items()}
+
+        assert census == expected, (
+            "a `User(...)` site appeared, moved or went. Bound its username, "
+            "then record here what bounds it and how many sites the module "
+            "holds: the rule is that nobody adds a door without writing that "
+            f"down. walked {census}, expected {expected}"
+        )
+
+    def test_every_door_carries_a_note(self) -> None:
+        """The half that is mechanical. What the note says is a reader's."""
+        assert all(door.bound.strip() for door in self.EXPECTED.values())
+
+    def test_a_fourth_door_in_a_new_module_is_reported(self, tmp_path: Path) -> None:
+        """The diagonal. A census is worth what it sees when the thing it
+        exists to catch is there, and this tree has three sites whether the
+        census works or not."""
+        planted = tmp_path / "doorman.py"
+        planted.write_text(
+            "from models import User\n\n\ndef make(name):\n    return User(username=name)\n"
+        )
+
+        assert _user_construction_sites([planted]) == {planted: [5]}
+
+    def test_a_fourth_door_in_a_module_that_already_has_one_is_reported(
+        self, tmp_path: Path
+    ) -> None:
+        """The other diagonal, and the one that decides whether this is a
+        census.
+
+        Planting the new door in a new file exercises the easy case: the path
+        is new either way, so a rule reading paths alone is red on it. The
+        case that separates the two is a second call appended to a module
+        already in the list, which moves the count and nothing else.
+        """
+        planted = tmp_path / "doorman.py"
+        planted.write_text(
+            "from models import User\n\n\n"
+            "def make(name):\n    return User(username=name)\n\n\n"
+            "def make_again(name):\n    return User(username=name)\n"
+        )
+
+        assert _user_construction_sites([planted]) == {planted: [5, 9]}
+
+    def test_a_module_building_no_row_is_not_a_door(self, tmp_path: Path) -> None:
+        """Without this the census above is satisfied by reporting every file."""
+        quiet = tmp_path / "quiet.py"
+        quiet.write_text("from models import User\n\n\ndef read(db):\n    return db.query(User)\n")
+
+        assert _user_construction_sites([quiet]) == {}

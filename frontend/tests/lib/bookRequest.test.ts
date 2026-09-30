@@ -17,7 +17,14 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { BookIdentifierScheme } from "../../src/api/generated/model";
-import { boundIdentifiers, boundRecord } from "../../src/lib/bookRequest";
+import {
+  boundCategories,
+  boundIdentifiers,
+  boundRecord,
+} from "../../src/lib/bookRequest";
+// The reader's own cap, so the element count below is derived from the bound
+// a package document actually has rather than from a number written here.
+import { MAX_PACKAGE_BYTES } from "../../src/lib/epub";
 import type { SourceRecord } from "../../src/lib/sourceRecord";
 import type { StoreIdentifierScheme } from "../../src/lib/stores";
 
@@ -63,6 +70,32 @@ const IDENTIFIER_LIMIT = (
     identifiers: { maxItems: number };
   }
 ).identifiers.maxItems;
+
+/**
+ * The two numbers `boundCategories` has to keep, read off the committed schema.
+ *
+ * **Driven into the function rather than compared to a constant.** The
+ * generated model carries both in a JSDoc comment only, which is not a value
+ * and not a type and is unreachable at runtime, so reading them out of its
+ * source text would be a guard selecting by spelling. Neither literal in
+ * `lib/bookRequest.ts` is exported, and these arms never see them: a source
+ * literal that drifts from the schema turns the arms below red because the
+ * function stops answering what the schema says it must.
+ *
+ * Both a 422 for the **whole book** if they are exceeded, which is what makes
+ * a drifted literal a lost book rather than a lost subject.
+ */
+const CATEGORY_CEILING = (
+  SCHEMA.components.schemas.BookCreate.properties as {
+    categories: { items: { maxLength: number } };
+  }
+).categories.items.maxLength;
+
+const CATEGORY_LIMIT = (
+  SCHEMA.components.schemas.BookCreate.properties as {
+    categories: { maxItems: number };
+  }
+).categories.maxItems;
 
 /**
  * A source that stated everything, and one that stated nothing.
@@ -428,6 +461,374 @@ describe("the mapping from a source record to the wire has one home", () => {
     );
 
     expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * How many subjects one package document may declare.
+ *
+ * **Derived from the reader's own cap and from the element's own width**,
+ * neither of which is written here: `epub.MAX_PACKAGE_BYTES` is the bound on
+ * what a package document may inflate to, and the minimal element below is
+ * measured with `.length` rather than counted by a reader. A number written
+ * here instead would stop being this cap the day this cap moved, and the cap
+ * is the whole reason the figure is interesting.
+ *
+ * It comes out at the same figure `opf.readAuthors` carries for `dc:creator`,
+ * the two elements being the same width under the same cap, which is a cross
+ * check on the arithmetic rather than a coincidence to lean on.
+ *
+ * **One cross check and not two.** An earlier version of this said
+ * `mobi.readAuthors` carries it as well. That reader's figure is 95,301, from
+ * a different cap, for an EXTH record rather than for an element its format
+ * has at all, so a reader trusting that sentence instead of recomputing would
+ * have been agreeing with nothing.
+ */
+const MINIMAL_SUBJECT_ELEMENT = "<dc:subject>x</dc:subject>";
+const ELEMENTS_A_PACKAGE_DECLARES = Math.floor(
+  MAX_PACKAGE_BYTES / MINIMAL_SUBJECT_ELEMENT.length,
+);
+
+describe("the subjects a file stated, bounded for the wire", () => {
+  it("keeps what a real file says, in the file's own order", () => {
+    expect(boundCategories(["Fiction", "Science Fiction"])).toEqual([
+      "Fiction",
+      "Science Fiction",
+    ]);
+  });
+
+  it("drops a subject carrying the separator rather than the book", () => {
+    // **The rule the recipe was one short of, and the one that costs a book.**
+    // `BookCreate`'s validator raises for an entry containing the separator,
+    // and a raising field validator refuses the whole request: one subject
+    // reading `Juvenile Fiction; General` is a 422 in the middle of somebody's
+    // folder. Dropped, never split: splitting invents a boundary the file did
+    // not state.
+    expect(boundCategories(["Juvenile Fiction; General", "Fiction"])).toEqual([
+      "Fiction",
+    ]);
+  });
+
+  // **The five spellings the server's own arm drives**, taken from it rather
+  // than invented here: the refusal is on the bare character, so a browser
+  // rule written against the two character joined form would refuse none of
+  // these. `backend/tests/schemas/test_book.py` names the same five.
+  it.each([["A;B"], ["A; B"], ["A ;B"], [";A"], ["A;"]])(
+    "drops %s, however the separator is spelled",
+    (value) => {
+      expect(boundCategories([value])).toEqual([]);
+    },
+  );
+
+  it("drops a subject the column cannot hold rather than cutting it", () => {
+    // `lib/bookBounds.ts`' split: a cut value has to still be an instance of
+    // what it was, and a prefix of "Fiction / Science Fiction / Space Opera"
+    // names a different subject. Dropping is also what makes the surrogate
+    // pair hazard not arise here at all.
+    expect(
+      boundCategories(["x".repeat(CATEGORY_CEILING + 1), "Fiction"]),
+    ).toEqual(["Fiction"]);
+  });
+
+  it("keeps a subject spending the whole budget", () => {
+    // The other side, without which the drop above is satisfied by a rule that
+    // drops everything. Exactly on the boundary the schema declares.
+    expect(boundCategories(["x".repeat(CATEGORY_CEILING)])).toHaveLength(1);
+  });
+
+  it("measures the budget in code points, never in UTF-16 units", () => {
+    // The ceiling belongs to a Python `str` and to a SQLite column, both of
+    // which count code points, so measuring in units refuses half of what the
+    // server would take. Every one of these is two UTF-16 units.
+    expect(
+      boundCategories(["\u{1f4d6}".repeat(CATEGORY_CEILING)]),
+    ).toHaveLength(1);
+  });
+
+  it("trims a reader's own padding before it measures", () => {
+    // The server normalises before it measures and this measures what it is
+    // about to send, so a value the file indented would otherwise be refused
+    // for a width it does not have once it arrives.
+    expect(boundCategories(["  Fiction  "])).toEqual(["Fiction"]);
+    expect(
+      boundCategories([" ".repeat(20) + "x".repeat(CATEGORY_CEILING) + " "]),
+    ).toHaveLength(1);
+  });
+
+  it("collapses every member of the set it claims, swept not listed", () => {
+    // **The false refusal direction, which is the one a mutation sweep never
+    // plants**: it plants defects, and a collapse narrowed to the two
+    // characters a fixture happens to use is not a defect any input reveals.
+    // Nothing else here drives a subject that is over the ceiling **only**
+    // because of an uncollapsed run, so narrowing the set was invisible.
+    //
+    // **What it promotes is coverage of the set, and that is worth more than
+    // the count.** An earlier version of this comment claimed it promoted the
+    // size of the set from a sentence to a measurement; it did not, because
+    // the figure was swept and then discarded with nothing compared to it.
+    // The size is pinned one assertion below, and the sweep is here so that
+    // every member is driven rather than the two a fixture happens to use.
+    const whitespace: string[] = [];
+    for (let point = 0; point < 0x110000; point += 1) {
+      if (point >= 0xd800 && point <= 0xdfff) continue;
+      const character = String.fromCodePoint(point);
+      if (/\s/u.test(character)) whitespace.push(character);
+    }
+
+    // The membership the whole exclusion rests on, and the one the filter
+    // below removes. `backend/tests/schemas/test_common.py` holds the other
+    // half of it, that the server keeps this code point.
+    expect(whitespace).toContain("\ufeff");
+
+    // **The size, pinned against a literal, which is the one place here a
+    // literal is right**, and the anchor that stops a sweep finding nothing or
+    // everything from leaving the loop below asserting over an empty set. The line this replaces compared the filtered length
+    // to `whitespace.length - 1`, which is an identity: the sweep visits each
+    // code point once so it holds no duplicates, and the anchor above has
+    // already established the one entry the filter removes. It was dead behind
+    // that anchor rather than unfalsifiable on its own, and either way it
+    // asserted nothing.
+    //
+    // **Swept on both runtimes the suite can run under**, so the anchor cannot
+    // flake between them: 25 on node v24.10.0 and 25 on bun 1.4.2. A
+    // disagreement between the two is itself the finding, which is why this is
+    // a number and not a range.
+    expect(whitespace).toHaveLength(25);
+
+    const collapsible = whitespace.filter((one) => one !== "\ufeff");
+
+    // One value per member, each over the ceiling on its raw text and exactly
+    // at it once the run is collapsed, so a member left out of the set is a
+    // subject silently dropped rather than a subject sent.
+    for (const character of collapsible) {
+      const value =
+        "x".repeat(CATEGORY_CEILING - 2) + character.repeat(3) + "y";
+
+      expect([...value].length).toBe(CATEGORY_CEILING + 2);
+      expect(boundCategories([value])).toEqual([
+        "x".repeat(CATEGORY_CEILING - 2) + " y",
+      ]);
+    }
+  });
+
+  it("collapses a subject a pretty printed file wrapped over two lines", () => {
+    // **A false refusal that was silent, and it is the ordinary shape rather
+    // than a crafted one.** No reader collapses, so a package document that
+    // indents its elements hands the bound the newline and the indentation.
+    // Trimming alone measured this at the raw width and dropped it; the
+    // server splits on that whitespace before measuring, so it would have
+    // taken it.
+    const wrapped =
+      "x".repeat(CATEGORY_CEILING - 50) + "\n      " + "y".repeat(49);
+
+    expect([...wrapped].length).toBeGreaterThan(CATEGORY_CEILING);
+    expect(boundCategories([wrapped])).toEqual([
+      "x".repeat(CATEGORY_CEILING - 50) + " " + "y".repeat(49),
+    ]);
+  });
+
+  // **Two fixtures for one rule, and which mutant each holds is the point.**
+  // U+FEFF is the one member of JavaScript's `\s` that Python's `str.split`
+  // does not break on, so the server preserves it and this must not touch it.
+  // Both values are one over the ceiling and both have to be dropped.
+  //
+  // **What a wider rule costs is a rewrite and not a 422.** What the bound
+  // measures is what it pushes, so the server is handed the already normalised
+  // value and can only shorten it: no transform here can lose a book. A
+  // `/\s+/` instead replaces the run with a space and sends that, and the app
+  // stores a subject the file never stated.
+  //
+  // **The placement is load bearing and the two are not interchangeable**,
+  // measured rather than reasoned: with the run at the end, a plain `.trim()`
+  // leaves 118 and keeps it, so the edge fixture reddens for the trim as well
+  // as for the collapse. Mid word the trim leaves all 121 and is green, so
+  // only the second fixture isolates the collapse. An arm with the edge case
+  // alone would have had half its coverage standing for a different mutant.
+  // Both are one over the ceiling, derived from it rather than written out, so
+  // a ceiling that moves moves the fixtures with it. Under a bare collapse the
+  // run becomes one space: at the end it is then trimmed away as well, leaving
+  // two under the ceiling, and mid word it leaves one under. Either way the
+  // value is kept and this arm reddens.
+  const KEPT_RUN = "\ufeff".repeat(3);
+  const BODY = CATEGORY_CEILING + 1 - [...KEPT_RUN].length;
+  it.each([
+    ["at the end, where a trim reaches it too", "x".repeat(BODY) + KEPT_RUN],
+    [
+      "mid word, where only the collapse reaches it",
+      "x".repeat(Math.floor(BODY / 2)) +
+        KEPT_RUN +
+        "x".repeat(BODY - Math.floor(BODY / 2)),
+    ],
+  ])(
+    "collapses no run of a character the server keeps, %s",
+    (_where, value) => {
+      expect([...value].length).toBe(CATEGORY_CEILING + 1);
+      expect(boundCategories([value])).toEqual([]);
+    },
+  );
+
+  it("drops an entry with nothing in it", () => {
+    expect(boundCategories(["   ", "", "Fiction"])).toEqual(["Fiction"]);
+  });
+
+  it("folds an exact repeat and folds nothing on its case", () => {
+    // Paired with the ceiling below: the ceiling truncates, so a file filing
+    // one subject forty times would spend every slot on one fact. **Exact and
+    // never case folded**, because a subject has no issuing authority whose
+    // alphabet could say which spelling is canonical, so there is nothing to
+    // fold to and "Fiction" and "fiction" are two assertions a producer
+    // distinguished.
+    expect(
+      boundCategories(["Fiction", "Fiction", "fiction", "FICTION"]),
+    ).toEqual(["Fiction", "fiction", "FICTION"]);
+  });
+
+  it("sends no more subjects than one request may carry", () => {
+    const many = Array.from(
+      { length: CATEGORY_LIMIT + 5 },
+      (_, index) => `Subject ${index}`,
+    );
+
+    expect(boundCategories(many)).toHaveLength(CATEGORY_LIMIT);
+  });
+
+  it("counts the limit against what it kept, never against what it saw", () => {
+    // **The one ordering a reimplementation gets wrong in silence**, and both
+    // orders are green against any fixture whose bad entries are at the back.
+    // Slicing to the count first lets the refused entries at the front hide
+    // every good subject behind them: here the whole budget is spent on
+    // entries the endpoint would refuse, and the real subject is last.
+    const refused = Array.from(
+      { length: CATEGORY_LIMIT },
+      (_, index) => `Refused; ${index}`,
+    );
+
+    expect(boundCategories([...refused, "Fiction"])).toEqual(["Fiction"]);
+  });
+
+  it("applies every rule at once and leaves nothing the endpoint refuses", () => {
+    // **One record rather than several**, because the count rule and the drop
+    // rules interact: separate fixtures would not see the ordering above.
+    const hostile = [
+      "   ",
+      "Fiction; General",
+      "x".repeat(CATEGORY_CEILING + 1),
+      "\u{1f4d6}".repeat(CATEGORY_CEILING + 1),
+      "  Fiction  ",
+      "Fiction",
+      ...Array.from({ length: CATEGORY_LIMIT + 10 }, (_, i) => `Subject ${i}`),
+    ];
+
+    const bound = boundCategories(hostile);
+
+    expect(bound).toHaveLength(CATEGORY_LIMIT);
+    expect(bound.filter((one) => one.includes(";"))).toEqual([]);
+    expect(bound.filter((one) => one.trim() !== one)).toEqual([]);
+    expect(bound.filter((one) => one === "")).toEqual([]);
+    expect(bound.filter((one) => [...one].length > CATEGORY_CEILING)).toEqual(
+      [],
+    );
+    expect(new Set(bound).size).toBe(bound.length);
+  });
+
+  it("stops reading the list once the request is full", () => {
+    // **The one arm the fold is written for, and it is a count rather than a
+    // duration.** How many elements there are is the file's choice: `kept` is
+    // capped, so a scan over it looks bounded, but the loop runs once per
+    // element the **file** declared unless it breaks. Written as
+    // `map(trim).filter(...).slice(0, limit)` every one of the elements below
+    // is trimmed and spread into an array of code points, on the browser's
+    // main thread, in a loop over every picked file in turn.
+    //
+    // **Named for when it stops rather than for how much it reads**, because
+    // the break fires on `kept` and so fires only for a file whose subjects
+    // fill a request. The arm below this one holds what happens otherwise.
+    //
+    // **Counted rather than timed**, by asking the list how many times it was
+    // read. A count is what the rule actually says, and it neither flakes on a
+    // busy node nor goes quiet on a fast one.
+    let reads = 0;
+    const counted = new Proxy(
+      Array.from(
+        { length: ELEMENTS_A_PACKAGE_DECLARES },
+        (_, index) => `Subject ${index}`,
+      ),
+      {
+        get(target, key, receiver) {
+          if (typeof key === "string" && /^\d+$/.test(key)) reads += 1;
+          return Reflect.get(target, key, receiver) as unknown;
+        },
+      },
+    ) as readonly string[];
+
+    expect(boundCategories(counted)).toHaveLength(CATEGORY_LIMIT);
+    // **The limit and one, and the one is the iterator rather than the
+    // bound.** Every entry is legal and distinct, so the loop keeps one per
+    // element and the break fires on the first iteration that finds the list
+    // full: the array iterator has already read that element to hand it over.
+    // Measured rather than reasoned, because the first version of this line
+    // said the limit and was wrong by exactly that element. Written against
+    // the schema's own number, so the day the endpoint takes more subjects
+    // this says so rather than refusing.
+    expect(reads).toBe(CATEGORY_LIMIT + 1);
+    // And the population was worth reading: a fixture that shrank to nothing
+    // would satisfy the line above with any implementation at all.
+    expect(ELEMENTS_A_PACKAGE_DECLARES).toBeGreaterThan(100_000);
+
+    // **A wall clock arm was written beside this one, measured, and taken
+    // out**, which is worth recording because the same arm is right one field
+    // over in `tests/lib/mobi.test.ts` and somebody will propose it here
+    // again. Planting the break after the fold, this line reported 161,319
+    // against 33 and the timed arm reported 55 ms against a 50 ms ceiling: a
+    // margin of 1.1, on builder, where the sibling's is 3.9. The defect is
+    // cheap in absolute terms because the per element work is a trim and a
+    // spread, so any ceiling loose enough not to flake on a busy node is
+    // loose enough to pass it on a quicker one. No mutation grows the per
+    // element cost without growing the read count on this path, so nothing is
+    // left uncovered by its absence here. The arm below is where the cost of
+    // the other path is written down.
+  });
+
+  it("reads the whole list when nothing in it fills the request", () => {
+    // **The residue of the arm above, pinned rather than claimed away.** The
+    // break tests `kept`, so an input that keeps nothing never reaches it and
+    // the loop runs once per element the file declared. Four shapes do that,
+    // measured over this many entries on the machine this repository is
+    // developed on: all blank, all separator bearing, all identical and all
+    // over width each read every element, and the over width shape took
+    // 587 ms, where the cost is spreading each value into code points.
+    //
+    // **An unclosed hole and not a narrowing.** Capping the scan would drop a
+    // real subject sitting behind a file's worth of refused ones, so it is a
+    // behaviour change and a proposal rather than a line in the bound. What
+    // this arm buys is that the hole is a number somebody can read rather
+    // than a sentence saying the loop is bounded, which is what the arm above
+    // used to claim on its own.
+    // Each shape with what it keeps, because the fourth keeps one where the
+    // other three keep nothing: a loop expecting an empty answer would have
+    // left the fold's own shape out of the arm.
+    const shapes: [string, string[]][] = [
+      ["   ", []],
+      ["Fiction; general", []],
+      ["x".repeat(CATEGORY_CEILING + 1), []],
+      ["Fiction", ["Fiction"]],
+    ];
+
+    for (const [entry, kept] of shapes) {
+      let reads = 0;
+      const counted = new Proxy(
+        Array.from({ length: ELEMENTS_A_PACKAGE_DECLARES }, () => entry),
+        {
+          get(target, key, receiver) {
+            if (typeof key === "string" && /^\d+$/.test(key)) reads += 1;
+            return Reflect.get(target, key, receiver) as unknown;
+          },
+        },
+      ) as readonly string[];
+
+      expect(boundCategories(counted)).toEqual(kept);
+      expect(reads).toBe(ELEMENTS_A_PACKAGE_DECLARES);
+    }
   });
 });
 

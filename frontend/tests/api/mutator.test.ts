@@ -546,6 +546,12 @@ describe("401 handling", () => {
   });
 });
 
+const SCHEMA = import.meta.glob("../../openapi.json", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
 describe("downloadFile", () => {
   const objectUrl = "blob:mock-url";
 
@@ -554,19 +560,91 @@ describe("downloadFile", () => {
     URL.revokeObjectURL = vi.fn();
   });
 
-  it("asks for the types a download can actually be", async () => {
-    // Not `application/json`, which is what `customFetch` sends and would be a
-    // lie about a CSV or a ZIP, and not a wildcard, which is what puts a
-    // request back on the redirecting side of the portal's content
-    // negotiation. Those are the two mistakes available here, so both are
-    // named.
+  /**
+   * Read against the committed schema rather than a list kept here.
+   *
+   * **The population is a property of the operation, not a list of route
+   * names**: a download is a response that declares a `Content-Disposition`,
+   * which is what makes a browser save it rather than render it. The cover
+   * routes send image bytes into an `<img>`, declare no disposition, and are
+   * correctly outside this set; a route added later that does declare one is
+   * inside it without anybody remembering this file.
+   *
+   * **What this does not see, so nobody reads it as more**: an operation that
+   * sends an attachment and declares neither the header nor the type is
+   * invisible here. `backend/tests/test_declared_media_types.py` is the arm on
+   * that side, and it refuses a body-carrying route that declares nothing.
+   */
+  function declaredDownloadTypes(): string[] {
+    // Read through the bundler rather than `node:fs` and a `URL`: this file
+    // runs under a DOM environment, whose own `URL` refuses a `file:` base and
+    // throws `Invalid URL` on the idiom the node environment tests use.
+    const raw = SCHEMA["../../openapi.json"] ?? "";
+    // A glob that matched nothing would make every assertion below pass for
+    // ever, including the vacuity arm.
+    expect(raw.length).toBeGreaterThan(1000);
+
+    const schema = JSON.parse(raw) as {
+      paths: Record<
+        string,
+        Record<
+          string,
+          {
+            responses?: Record<
+              string,
+              {
+                headers?: Record<string, unknown>;
+                content?: Record<string, unknown>;
+              }
+            >;
+          }
+        >
+      >;
+    };
+
+    const types = new Set<string>();
+    for (const operations of Object.values(schema.paths)) {
+      for (const operation of Object.values(operations)) {
+        for (const response of Object.values(operation.responses ?? {})) {
+          if (!response.headers?.["Content-Disposition"]) continue;
+          for (const type of Object.keys(response.content ?? {}))
+            types.add(type);
+        }
+      }
+    }
+    return [...types].sort();
+  }
+
+  async function sentAcceptHeader(): Promise<string> {
     const api = mockApi().on("/api/books/export", { body: "Title,Author" });
     await downloadFile("/api/books/export");
-    const accept = (api.fetch.mock.calls[0]![1].headers as Headers).get(
-      "Accept",
-    )!;
-    expect(accept).toContain("text/csv");
-    expect(accept).toContain("application/zip");
+    return (api.fetch.mock.calls[0]![1].headers as Headers).get("Accept")!;
+  }
+
+  it("has downloads in the schema to be about", () => {
+    // The vacuity arm. The rule below passes over an empty set, and the set
+    // goes empty the day a regeneration drops the header declaration, which is
+    // the same edit that would make the rule stop mattering without saying so.
+    expect(declaredDownloadTypes().length).toBeGreaterThan(1);
+  });
+
+  it("asks for every type a download is declared to be", async () => {
+    const accept = await sentAcceptHeader();
+    for (const type of declaredDownloadTypes()) expect(accept).toContain(type);
+  });
+
+  it("asks for the error body as well, which no operation declares", async () => {
+    // The one entry the schema cannot supply: a refused download answers JSON,
+    // and `errorDetail` reads it to put the server's own sentence in front of
+    // the reader.
+    expect(await sentAcceptHeader()).toContain("application/json");
+  });
+
+  it("is neither a wildcard nor a document type", async () => {
+    // The two mistakes available here. A wildcard puts the request back on the
+    // redirecting side of the portal's content negotiation; `text/html` is what
+    // that redirect would be.
+    const accept = await sentAcceptHeader();
     expect(accept).not.toContain("text/html");
     expect(accept).not.toContain("*/*");
   });

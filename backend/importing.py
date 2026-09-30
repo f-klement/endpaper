@@ -347,13 +347,15 @@ class Import:
         """
         index = _CatalogueIndex.build(self._db, self._member_id)
         tally = _Tally()
-        # Built whether or not tags are wanted, because a Mint reads nothing
+        # Built whether or not tags are wanted, because nothing behind it reads
         # until it is asked: the branch this replaced existed only to keep the
         # query off an import that applies no tags.
-        mint = tags.Mint(self._db, budget=tags.MAX_NEW_TAGS_PER_IMPORT)
+        naming = tags.Naming.for_member(
+            self._db, self._member_id, budget=tags.MAX_NEW_TAGS_PER_IMPORT
+        )
 
         for row in parsed.rows:
-            self._apply_one(row, index, tally, mint, create_missing, apply_tags)
+            self._apply_one(row, index, tally, naming, create_missing, apply_tags)
 
         self._db.commit()
 
@@ -373,6 +375,7 @@ class Import:
             # what this instance holds, so it is not an oracle and does not have
             # to hide inside a wider count. See `csv_import.ParsedFile.excluded`.
             excluded=parsed.excluded,
+            tags_dropped=tally.tags_dropped,
             unmatched_titles=tally.unmatched,
         )
 
@@ -381,7 +384,7 @@ class Import:
         row: csv_import.ImportRow,
         index: _CatalogueIndex,
         tally: _Tally,
-        mint: tags.Mint,
+        naming: tags.Naming,
         create_missing: bool,
         apply_tags: bool,
     ) -> None:
@@ -400,7 +403,7 @@ class Import:
             return
 
         if apply_tags and row.tags:
-            self._apply_tags(book, row.tags, mint)
+            tally.tags_dropped += self._apply_tags(book, row.tags, naming)
 
         if self._apply_reading_record(index, book_id=book.id, row=row):
             tally.updated += 1
@@ -439,12 +442,13 @@ class Import:
         index.remember(book)
         return book
 
-    def _apply_tags(self, book: Book, names: list[str], mint: tags.Mint) -> None:
-        """Put the file's tags on the Book, inventing the new ones.
+    def _apply_tags(self, book: Book, names: list[str], naming: tags.Naming) -> int:
+        """Put the file's tags on the Book. How many names did not go on it.
 
         **Every rule this used to carry lives in `tags.py` now**, which is the
         point of that module: the fold, the ordering a case differing pair is
-        resolved by, the normalisation, the truncation and both caps. This is
+        resolved by, the normalisation, the truncation, both caps and, since
+        the attach by name door, who a matched Tag may be handed to. This is
         the loop and nothing else, and what it must not do is reimplement any of
         them for the import's convenience.
 
@@ -453,19 +457,58 @@ class Import:
         the import's new tag budget on names it is then refused, so a later Book
         in the same file loses tags to one that could not carry them.
 
-        Takes the Mint rather than a cache and a tally: the budget is spent and
-        counted in one object instead of being threaded out of the caller and
-        back in.
+        Takes the Naming rather than a cache and a tally: the budget, the
+        index and the viewer are spent and counted in one object instead of
+        being threaded out of the caller and back in.
+
+        **Four causes, one number, and the fold is the whole reason there is a
+        number at all.** A name is not put on the Book when it normalises to
+        nothing, when the mint budget is spent, when the Book is already at
+        `MAX_TAGS_PER_BOOK`, and when the Tag it names is not this Member's to
+        use. Reporting the fourth apart from the other three would answer
+        "does a Tag by this name exist on a Book I cannot see" for every name
+        in an upload at once, which is the channel the refusal exists to
+        narrow.
+
+        **The number counts what reached this loop, which is not what the file
+        held**, and the difference is three things upstream of here:
+        `csv_import.MAX_TAGS_PER_ROW` cuts a cell before it is parsed into a
+        row, `_split_tags` drops a part that is only whitespace, and a row
+        settled to no Book never reaches this at all. None of those is a
+        refusal and none is counted; `ImportResultOut.tags_dropped` says so
+        where a reader of the response meets it.
+
+        **And the fold is a narrowing rather than a closure, stated because a
+        published file must not imply otherwise.** A caller writes the file,
+        so they control the first three: send one well formed name against an
+        empty Book with budget to spare and the count reads the fourth
+        directly. What the fold costs them is that they cannot read a batch,
+        which is the same protection `tags.Naming` describes and the same
+        residue.
         """
-        for raw in names:
+        dropped = 0
+        for position, raw in enumerate(names):
             if not tags.room_on(book):
+                # The rest of this row's cell goes with it, and every one of
+                # those names is one the file asked for and did not get.
+                # Counted off the position rather than the value, because a
+                # cell may list one name twice and `list.index` would answer
+                # for the first of them.
+                dropped += len(names) - position
                 break
 
-            tag = mint.get_or_mint(raw)
+            tag = naming.tag(raw)
             if tag is None:
+                dropped += 1
                 continue
 
+            # False here is the ceiling, which `room_on` has already refused
+            # above, so it is unreachable from this loop and the count does
+            # not read it. `attach` keeps the check because it is what makes
+            # the ceiling true of every writer, not only of this one.
             tags.attach(book, tag)
+
+        return dropped
 
     def _keep_review(self, index: _CatalogueIndex, *, book_id: int, text: str) -> None:
         """Keep the review the export carried, as this Member's private note.
@@ -573,6 +616,12 @@ class _Tally:
     #: these: the other two importers get the number from their parser, which
     #: has already dropped a titleless row before this class is built.
     skipped_untitled: int = 0
+    #: Tag names a run tried to put on a Book and did not. Four causes and
+    #: one number, argued at `Import._apply_tags`, and **not** a count of what
+    #: the source held: `csv_import.MAX_TAGS_PER_ROW` cuts the cell before this
+    #: loop sees it. Only the CSV importer counts these, because it is the only
+    #: one that reads tags at all.
+    tags_dropped: int = 0
     #: Capped at `MAX_UNMATCHED_REPORTED` by the caller, not here: this is a
     #: tally, and where the ceiling comes from is the report's business.
     unmatched: list[str] = field(default_factory=list)

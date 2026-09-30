@@ -196,6 +196,260 @@ const CANONICAL_VALUE: Record<
 };
 
 /**
+ * How wide one subject the column takes.
+ *
+ * **Not in `lib/bookBounds.ts`**, for `IDENTIFIER_VALUE_MAX`' reason exactly:
+ * that module holds `BookCreate`'s scalar `maxLength`s keyed by field name, and
+ * this is a bound on an entry inside a list. Its own guard has an arm refusing
+ * any `maxItems` bearing field a place in either of its tables, so putting this
+ * there turns that arm red rather than quietly disagreeing.
+ *
+ * Recomputed from `openapi.json` by this module's tests rather than restated.
+ */
+const CATEGORY_VALUE_MAX = 120;
+
+/**
+ * How many subjects one request may carry.
+ *
+ * `BookCreate.categories` declares `maxItems`, and a payload over it is a 422
+ * for the **whole book**. Recomputed beside the width above, for its reason.
+ */
+const CATEGORY_LIMIT = 32;
+
+/**
+ * The whitespace the server also collapses, which is not all of it.
+ *
+ * **`\s` minus U+FEFF, and the exclusion is the whole of why this is not
+ * `/\s+/`.** The server normalises with `" ".join(value.split())`, and
+ * Python's `str.split()` breaks on `str.isspace()`. Measured over all
+ * 1,112,064 non surrogate code points, on both engines: JavaScript's `\s` has
+ * 25 members and `isspace()` has 29; **the one member JavaScript has and
+ * Python does not is U+FEFF**, and the five Python has and JavaScript does not
+ * are U+001C to U+001F and U+0085.
+ *
+ * **Both halves of that are asserted rather than only written here.** The 25
+ * and the membership are re-swept by `tests/lib/bookRequest.test.ts`, which
+ * also drives one value per member so a narrowing reddens;
+ * `backend/tests/schemas/test_common.py` holds that the server keeps U+FEFF,
+ * which is what makes the exclusion the right way round.
+ *
+ * **What the exclusion buys is that the value sent is one the file stated,
+ * and it is not a 422.** A 422 is structurally unreachable from here whatever
+ * this collapses, because what `boundCategories` measures is what it pushes:
+ * the server never sees the raw string, and its own normalisation only ever
+ * shortens what it is handed. An earlier version of this comment said a
+ * `/\s+/` would cost the whole book, and that was wrong in the safe
+ * direction, which is the direction a reader stops checking.
+ *
+ * **The real cost is a rewrite.** A `/\s+/` replaces a run of U+FEFF with a
+ * space and sends that, so the app stores a subject the file never stated and
+ * the server would never have produced from it. That is the rule
+ * `boundCategories` already states about `Cf` one screen down, applied to the
+ * collapse instead of to a strip: a rule wider than the server's does not let
+ * a bad value through, it invents a value.
+ *
+ * **So the invariant is an equality and not an inequality.** Every transform
+ * this applies is one the server applies too, so normalising what this sends
+ * gives exactly what normalising the file's own text would have given.
+ *
+ * **That equality is pinned rather than stated**, by the shared cases in
+ * `conformance/cases/subject.json`: every one of them carries this function's
+ * answer and the server's, and the Python side asserts the server's rule over
+ * the value this sends gives the server's own answer about the file. Widening
+ * this regex reddens the shapes carrying U+FEFF, and the two repairs to the
+ * case file that would green the browser arm redden the Python side instead.
+ * **Rewriting a case's input under its own id is a third repair and nothing
+ * catches it**, which `conformance/subject.md` says at length rather than this
+ * comment: the reason beside each case is written to be read. That file also
+ * has which shapes and why position rather than presence is the axis; the
+ * enumeration that used to stand here was a list in prose that nothing ran.
+ *
+ * The five the other way cost nothing for the same reason: the server
+ * collapses them and this does not, so the server finishes the job.
+ */
+const SERVER_COLLAPSES = /[^\S\uFEFF]+/gu;
+
+/**
+ * The character a stored subject may not contain.
+ *
+ * **A literal, and the one fact here that nothing recomputes today.**
+ * `openapi.json` carries no `pattern` for this field, so unlike the two
+ * numbers above it cannot be read off the wire. The server's own separator is
+ * `google_books.CATEGORY_SEPARATOR`, and the refusal is on the **bare**
+ * character rather than on the two character joined form, so a rule written
+ * against `"; "` would refuse nothing.
+ *
+ * **Pinned by behaviour, in `conformance/cases/subject.json`.** Two cases there
+ * carry an entry with this character in it, one spaced and one bare, and record
+ * that this drops it and the server refuses it. Both runners read the file, so
+ * either side ceasing to refuse `;` is a failing test rather than a silent
+ * drift. A `pattern` on the field would close the same residue and costs a
+ * schema regeneration; the case file costs neither.
+ *
+ * **What the cases cannot see**, stated rather than claimed away: they pin the
+ * behaviour on `;`. `CATEGORY_SEPARATOR` changing value while this literal does
+ * not is visible to them only through the behaviour on `;`, which reddens on
+ * the server side first.
+ */
+const SEPARATOR_INSIDE_A_SUBJECT = ";";
+
+/**
+ * The subjects the endpoint will take, out of what a file said.
+ *
+ * **Six rules and not five, and the missing one loses the book rather than the
+ * subject.** `BookCreate`'s `one_subject_per_entry` **raises** for an entry
+ * containing the separator, and a `field_validator` raising refuses the whole
+ * request: one subject reading `Juvenile Fiction; General` costs a member the
+ * book. So the rule is **drop**, never split and never fail the file. Splitting
+ * would invent a boundary the file never stated; `google_books.join_categories`
+ * drops for the two upstream joins, and this is the same rule's third producer.
+ * That is `boundIdentifiers`' lesson one field over, and its own comment says
+ * it in as many words.
+ *
+ * In order, per entry: trim, drop what is empty, drop what carries the
+ * separator, drop what is over the width, fold a repeat of one already kept,
+ * stop at the count.
+ *
+ * **Every drop runs before the limit and the limit counts what was kept**,
+ * which is the one ordering a reimplementation gets wrong in silence: slicing
+ * to the count first lets bad entries at the front hide good subjects behind
+ * them, and both orders are green against any fixture whose bad entries are at
+ * the back. `join_categories` states the same reason on the server.
+ *
+ * **Drop rather than cut an over wide entry.** `lib/bookBounds.ts`' split: a
+ * cut value has to still be an instance of what it was, and "Fiction / Science
+ * Fiction / Space Opera" cut at the ceiling names a different subject. Dropping
+ * also means no cut can land between the halves of a surrogate pair, which is a
+ * `string_unicode` 422 and the whole book.
+ *
+ * **Code points, never UTF-16 units**, `bookBounds.boundText`'s measurement:
+ * the ceiling belongs to a Python `str` and to a SQLite column and both count
+ * code points.
+ *
+ * **The fold is on the exact trimmed value and never case folded.**
+ * `CANONICAL_VALUE` above carries the measurement for why `toUpperCase` is not
+ * one function across engines; the reason it does not apply here is simpler
+ * than that one and decides on its own. A subject has no issuing authority
+ * whose alphabet could say what the canonical spelling is, so there is nothing
+ * to fold **to**, and folding "Fiction" onto "fiction" would merge two
+ * assertions a producer distinguished. It is paired with the ceiling for
+ * `boundIdentifiers`' reason: the ceiling truncates, so a file filing one
+ * subject forty times would otherwise spend every slot on one fact.
+ *
+ * **One transform of the server's is rebuilt here and the rest are not, and
+ * which one is a measurement rather than a line drawn somewhere.** The server
+ * runs `one_line_without_invisible_characters` before it measures: it deletes
+ * 55 control characters, collapses every run of whitespace to one space and
+ * strips the ends. This collapses and strips, over `SERVER_COLLAPSES`, and
+ * deletes nothing.
+ *
+ * **What that buys is a false refusal closed, and it was a real one.** No
+ * reader collapses, so a pretty printed package document states a subject
+ * carrying the newline and indentation it was wrapped on. A hundred character
+ * subject over two lines is 126 characters here and 101 there, so trimming
+ * alone dropped it with nothing said.
+ *
+ * **What the exclusion keeps is that this sends a value the file stated.**
+ * Every transform here is one the server applies too, so normalising what is
+ * sent gives exactly what normalising the file's own text would have given:
+ * the stored subject is the server's own answer about the file, reached one
+ * step early. A `/\s+/` breaks that equality rather than the bound, because
+ * JavaScript's `\s` holds U+FEFF and Python's `str.split` does not: it would
+ * replace a run of them with a space and send that, and the app would store a
+ * subject the file never stated.
+ *
+ * **It would not cost a book, and saying that it would was the error worth
+ * naming here.** What is measured is what is pushed, so the server is handed
+ * the already normalised value and can only shorten it further: no transform
+ * this applies can produce a 422. The wrong reason was the comfortable one,
+ * and it survived a round because nobody re-derives a hazard that sounds
+ * severe. `SERVER_COLLAPSES` carries the sweep.
+ *
+ * What is left, stated rather than discovered: an entry of nothing but the 55
+ * characters the server deletes survives here, spends a slot and is dropped
+ * there, one slot and no book. **A deliberate narrowing**, and it is a case in
+ * `conformance/cases/subject.json` rather than a sentence: the equality still
+ * holds over it, because the server's answer about what this sends and about
+ * the file's own text are both nothing. The shared schema refuses the mirror
+ * image, where this drops what the server would have stored. Deleting the 55
+ * here instead is the unclosed hole and is not taken: it is the cross language
+ * divergence `conformance/README.md` measured on ISBN, and a value this app
+ * rewrote is worse than a slot.
+ *
+ * **Nothing here strips a format character, though a bidi override in a subject
+ * is a real spoofing surface.** The server keeps the `Cf` category on purpose,
+ * a joiner being part of a name in several scripts, so a rule stripping it here
+ * would be **wider** than the server and would silently rewrite a legitimate
+ * subject. The remedy belongs at the render site or at the server's normaliser,
+ * and neither is this function.
+ *
+ * **None of this is a control.** It runs in a browser a member owns, and a
+ * member can POST any value the column holds. What it buys is that an honest
+ * member's book is not lost to a 422 over a subject a stranger's file wrote.
+ */
+export function boundCategories(subjects: readonly string[]): string[] {
+  const kept: string[] = [];
+  const folded = new Set<string>();
+  for (const subject of subjects) {
+    // **The break is before the fold, and what it bounds is narrower than it
+    // looks.** `kept` is capped, so a scan over it looks bounded; the
+    // **input** is not, because the loop runs once per element the file
+    // declared. A minimal `<dc:subject>x</dc:subject>` is 26 bytes and
+    // `epub.MAX_PACKAGE_BYTES` is 4 MiB, so one package may declare 161,319 of
+    // them. That is the same figure `opf.readAuthors` carries for `dc:creator`
+    // under the same cap, the two elements being the same width, which is a
+    // cross check on the arithmetic. **`mobi.readAuthors` is not a second
+    // one**, and an earlier version of this comment said it was: that reader's
+    // 95,301 comes from a different cap for a record the format has and this
+    // one does not.
+    //
+    // **The break fires on `kept`, so it fires only for a file whose subjects
+    // fill a request.** For an input that yields nothing, all blank, all
+    // separator bearing, all identical or all over width, this reads the whole
+    // list and there is no early exit at all. Measured over 161,319 entries on
+    // the machine this repository is developed on: 33 reads for the full
+    // request, 161,319 for each of those four, and up to 587 ms for the over
+    // width shape, where the cost is spreading each value into code points.
+    // **That is an unclosed hole and not a narrowing.** Capping the scan is a
+    // behaviour change, since it would drop a real subject sitting behind a
+    // file's worth of refused ones, so it is a proposal rather than a line
+    // here.
+    //
+    // What the break does buy is the honest path: written as
+    // `subjects.map(trim).filter(...).slice(0, CATEGORY_LIMIT)` even a file
+    // whose subjects are all good costs 161,319 normalisations on the
+    // browser's main thread, in a loop over every picked file in turn.
+    // **Invisible in a green test over a three subject fixture**, so
+    // `tests/lib/bookRequest.test.ts` counts the elements this reads on both
+    // paths, against an element count derived from `epub.MAX_PACKAGE_BYTES`
+    // rather than written down. A timing arm was written beside it and taken
+    // out; that test records the measurement and why.
+    if (kept.length >= CATEGORY_LIMIT) break;
+    // **Collapsed and not merely trimmed, which is a false refusal closed.**
+    // No reader collapses, and a pretty printed package document hands this a
+    // subject carrying the newline and the indentation it was wrapped on: a
+    // hundred character subject over two lines measures 126 here and 101 at
+    // the server, so trimming alone dropped it silently. `SERVER_COLLAPSES` is
+    // why this is not `/\s+/`, and the trim that follows is the same class,
+    // because a collapse leaves any leading or trailing run as one space.
+    const value = subject.replace(SERVER_COLLAPSES, " ").replace(/^ | $/g, "");
+    if (value.length === 0) continue;
+    if (value.includes(SEPARATOR_INSIDE_A_SUBJECT)) continue;
+    if ([...value].length > CATEGORY_VALUE_MAX) continue;
+    // **A `Set` and not a scan over `kept`, and the honest reason is not
+    // speed.** `kept` is capped immediately above, so `kept.includes(value)`
+    // would be at most 32 comparisons and the break already bounds the loop:
+    // there is no quadratic term here to remove. What the set buys is that the
+    // fold's bound is its own rather than a neighbouring rule's, which is the
+    // reason `boundIdentifiers` gives for the same choice one field over.
+    if (folded.has(value)) continue;
+    folded.add(value);
+    kept.push(value);
+  }
+  return kept;
+}
+
+/**
  * How wide an identifier the column takes.
  *
  * **Not in `lib/bookBounds.ts`**, and the split is where that module's own rule

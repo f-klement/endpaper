@@ -43,7 +43,11 @@ from schemas.classification import (
     ClassificationIn,
     ClassificationOut,
 )
-from schemas.common import RowIdField, one_line_without_invisible_characters
+from schemas.common import (
+    MAX_PAGE_SIZE,
+    RowIdField,
+    one_line_without_invisible_characters,
+)
 from schemas.identifier import (
     MAX_IDENTIFIERS_PER_BOOK,
     BookIdentifierIn,
@@ -154,6 +158,123 @@ CATEGORIES_MAX: Final = MAX_CATEGORIES_PER_BOOK * CATEGORY_MAX + (
 #: however narrow the validator is. `schemas/common.RowIdField` is the house
 #: spelling of the same move.
 CategoryField = Annotated[str, Field(max_length=CATEGORY_MAX)]
+
+
+def subject_for_storage(entry: str) -> str | None:
+    """One subject as the column would hold it, `None` where there is nothing left.
+
+    Raises `ValueError` for an entry carrying the separator.
+    `normalised_subjects` is the one caller and its docstring carries the
+    reasoning: why a separator is a refusal rather than a drop, why an emptied
+    entry is a drop rather than a refusal, and which producers reach this at
+    all. **Both request bodies that write this column reach this through that
+    function rather than calling it**, so there is one place the per entry rule
+    is composed into a list and one place the argument for it lives.
+
+    **Module level so that something other than a request can ask it.**
+    `conformance/cases/subject.json` pins this rule against the browser's, and
+    the runner over it needs the rule itself: reaching it through
+    `BookCreate.model_validate` would run every other validator on the model, so
+    an unrelated failure would report as a cross language divergence. Writing
+    the three steps out again in the runner is worse still, because a case file
+    exists to stop a rule having a second home and a reimplementation is the
+    third.
+    """
+    tidied = one_line_without_invisible_characters(entry)
+    if not tidied:
+        return None
+    if CATEGORY_SEPARATOR.strip() in tidied:
+        raise ValueError(
+            f"A subject may not contain {CATEGORY_SEPARATOR.strip()!r}, which "
+            "separates subjects in storage. Send them as separate entries."
+        )
+    return tidied
+
+
+def normalised_subjects(value: object) -> object:
+    """Normalise each subject, and refuse one carrying the separator.
+
+    **A function rather than a validator body, because two bodies write this
+    column.** `BookCreate` and `BookDetailsUpdate` each call it from a
+    `mode="before"` validator named `one_subject_per_entry`. The rule is
+    re-applied rather than restated: it is one column's rule, and the
+    paragraphs below are the argument for it, which is the thing that would
+    have gone stale in the copy.
+
+    **The ground is that the value is unrepresentable, not that it is risky.**
+    `google_books.split_categories` splits on a **bare** separator, so a stored
+    `"Fiction; general"` is served as two subjects to every reader of this
+    column, including the member who typed it. So the refusal says "this column
+    cannot hold that value", which is true whoever produced it and however many
+    other writers exist.
+
+    **A 422 here and a drop at a parser is this tree's existing arrangement for
+    a body a caller composed, not a choice made for this field.**
+    `classifications.bounded_headings` states it: a bad entry is dropped and
+    logged there, because nothing in a record is worth failing a whole lookup
+    for, while `ClassificationIn.number` is a hard 422 on the create route.
+    `google_books.join_categories` drops a separator bearing subject for the two
+    upstream joins, and the scan flow's own file readers drop one in the browser
+    before the request is built, which is the parser layer this column used to
+    lack.
+
+    **This refuses the whole request and not the entry**, which is what a
+    `field_validator` raising means. That still costs nothing, because no honest
+    producer reaches it, checked per producer rather than argued: four file
+    readers now emit a subject and the scan flow forwards the field, and its
+    browser side bound drops a separator bearing entry rather than sending it;
+    the MARC import's field list excludes this column and its gap filler assigns
+    by plain `setattr`, so no validator of any model runs; and the CSV and OPDS
+    imports read bounds only to truncate. **The first of those is the one held
+    up by a bound rather than by an absence**, so it is the one that becomes a
+    lost book rather than a lost subject if that bound goes. **The update door
+    has no producer at all yet**: nothing in the browser sends this field, so
+    the only caller is one somebody wrote by hand.
+
+    `BookMatch.rejoin_categories` splits instead, and the divergence is
+    deliberate: **it is forced there rather than chosen.** That door is handed
+    one already joined string, in which the separator is structural and
+    indistinguishable from a typed one, so a refusal would refuse every record
+    carrying two or more subjects.
+
+    **This is a correctness control, not a security control.** A hostile client
+    can store any value the column holds through any door onto it.
+
+    Both validators are `mode="before"`, so the per entry width on
+    `CategoryField` applies to the normalised value rather than to what arrived.
+    Normalising only ever shortens, so an entry made wide by characters that
+    have no width would otherwise be refused before they were removed.
+
+    **`renderable_cover` is the contrast and not the precedent.** It has no
+    `mode`, so it runs after, and its own comment says the width bounded what
+    arrived while the value it hands on is one character longer, which is why
+    `_a_cover_url_the_column_can_hold` exists at all. Here normalisation only
+    shortens, so running before needs no second bound.
+    """
+    if not isinstance(value, list):
+        return value
+    kept: list[str] = []
+    for entry in value:
+        if not isinstance(entry, str):
+            # Left to pydantic, which names the offending index. **This
+            # returns the whole list unnormalised**, so it skips the refusal
+            # for every entry, which is only safe while nothing coercible to
+            # a string can arrive: measured, pydantic coerces `bytes` in lax
+            # mode and refuses `int` and `None`, and JSON carries neither, so
+            # no HTTP payload reaches this line.
+            return value
+        # The per entry rule is `subject_for_storage`, at module level, so the
+        # shared conformance cases can run the rule itself rather than a copy of
+        # it: reaching it through `model_validate` would run every other
+        # validator on the model, so an unrelated failure would report as a
+        # cross language divergence. `None` is the drop, tested by identity
+        # rather than truthiness, so an empty string would be kept if that
+        # signal ever changed.
+        tidied = subject_for_storage(entry)
+        if tidied is None:
+            continue
+        kept.append(tidied)
+    return kept
 
 
 def _a_cover_url_the_column_can_hold(url: str | None) -> str | None:
@@ -369,82 +490,15 @@ class BookCreate(BaseModel):
     @field_validator("categories", mode="before")
     @classmethod
     def one_subject_per_entry(cls, value: object) -> object:
-        """Normalise each subject, and refuse one carrying the separator.
+        """The rule is `normalised_subjects` above, applied rather than
+        restated.
 
-        **The ground is that the value is unrepresentable, not that it is risky.**
-        `google_books.split_categories` splits on a **bare** separator, so a stored
-        `"Fiction; general"` is served as two subjects to every reader of this
-        column, including the member who typed it. So the refusal says "this column
-        cannot hold that value", which is true whoever produced it and however many
-        other writers exist.
-
-        **A 422 here and a drop at a parser is this tree's existing arrangement for
-        this body, not a choice made for this field.**
-        `classifications.bounded_headings` states it: a bad entry is dropped and
-        logged there, because nothing in a record is worth failing a whole lookup
-        for, while `ClassificationIn.number` is a hard 422 on this same route. This
-        column has no parser layer yet, because no reader emits a subject, so the
-        drop has nowhere to live yet: `google_books.join_categories` drops a
-        separator bearing subject for the two upstream joins, and the browser side
-        bound is a **shipping precondition** of the work that makes a reader emit
-        one, exactly as `bounded_headings` is what keeps `ClassificationIn`'s 422
-        off an honest client.
-
-        **This refuses the whole request and not the entry**, which is what a
-        `field_validator` raising means. Today that costs nothing, because no honest
-        producer can reach it, checked per producer rather than argued: no file
-        reader emits a subject; the scan flow does not forward the field and its
-        own exclusion row names it; the MARC import's field list excludes this
-        column and its gap filler assigns by plain `setattr`, so no validator of
-        any model runs; and the CSV and OPDS imports read bounds only to truncate.
-        The day a reader emits one, the browser side bound above is what keeps it
-        unreachable, and without that this becomes a lost book rather than a lost
-        subject.
-
-        `BookMatch.rejoin_categories` splits instead, and the divergence is
-        deliberate: **it is forced there rather than chosen.** That door is handed
-        one already joined string, in which the separator is structural and
-        indistinguishable from a typed one, so a refusal would refuse every record
-        carrying two or more subjects.
-
-        **This is a correctness control, not a security control.** A hostile client
-        can store any value the column holds through either door.
-
-        `mode="before"`, so the per entry width on `CategoryField` applies to the
-        normalised value rather than to what arrived. Normalising only ever
-        shortens, so an entry made wide by characters that have no width would
-        otherwise be refused before they were removed.
-
-        **`renderable_cover` is the contrast and not the precedent.** It has no
-        `mode`, so it runs after, and its own comment says the width bounded what
-        arrived while the value it hands on is one character longer, which is why
-        `_a_cover_url_the_column_can_hold` exists at all. Here normalisation only
-        shortens, so running before needs no second bound.
-        """
-        if not isinstance(value, list):
-            return value
-        kept: list[str] = []
-        for entry in value:
-            if not isinstance(entry, str):
-                # Left to pydantic, which names the offending index. **This
-                # returns the whole list unnormalised**, so it skips the refusal
-                # for every entry, which is only safe while nothing coercible to
-                # a string can arrive: measured, pydantic coerces `bytes` in lax
-                # mode and refuses `int` and `None`, and JSON carries neither, so
-                # no HTTP payload reaches this line.
-                return value
-            tidied = one_line_without_invisible_characters(entry)
-            if not tidied:
-                # An entry with nothing left in it is not a subject. Dropped
-                # rather than refused: there is no assertion to lose.
-                continue
-            if CATEGORY_SEPARATOR.strip() in tidied:
-                raise ValueError(
-                    f"A subject may not contain {CATEGORY_SEPARATOR.strip()!r}, which "
-                    "separates subjects in storage. Send them as separate entries."
-                )
-            kept.append(tidied)
-        return kept
+        It lived here, and four files outside this module cite this name for
+        it, which is why the name stays where they point while the body moves:
+        `BookDetailsUpdate` is the second door onto this column and a second
+        copy of that paragraph is the fact in two files the writing rule is
+        about."""
+        return normalised_subjects(value)
 
 
 #: Fields of `BookCreate` the `Book` constructor is never handed, because every
@@ -535,21 +589,28 @@ def admits_a_container(annotation: object) -> bool:
     return issubclass(subject, _CONTAINER_ORIGINS)
 
 
-def _unconstructable_create_fields(
+def _unconstructable_fields(
     child_rows: Iterable[str],
     reshaped: Iterable[str],
     fields: Mapping[str, object],
     columns: Iterable[str],
 ) -> dict[str, str]:
-    """Every `BookCreate` field the create route cannot write as it stands.
+    """Every field of one request body its writer cannot write as it stands.
+
+    **Two doors read this, so the faults name no writer.** `BookCreate` reaches
+    the `Book` constructor and `BookDetailsUpdate` reaches an assignment onto a
+    row that already exists; the partition is the same either way, and the two
+    call sites say which writer they are about. It was the create door's alone
+    until the update door grew a reshaped field, at which point the missing
+    half was not the field but the refusal.
 
     Five faults with five different remedies, so the answer names the fault per
     field rather than returning a set: a name popped for the wrong reason teaches
-    the next reader the wrong rule, and a field reaching the constructor as a
-    list is a failed INSERT rather than a mistake in a comment.
+    the next reader the wrong rule, and a field written to the row as a list is a
+    failed write rather than a mistake in a comment.
 
     The two arms over the remainder are the ones that fire for somebody who has
-    not read this: a twentieth scalar field whose name is a column needs no edit
+    not read this: a further scalar field whose name is a column needs no edit
     anywhere and nothing here fires, which is the common case and is why this is
     a derivation rather than a list of names. **The container arm is what makes
     the column arm more than a name check**, since a field that shares a name
@@ -561,7 +622,7 @@ def _unconstructable_create_fields(
     container arm. And `admits_a_container` answers False for the abstract
     supertypes above `Collection`: measured, `abc.Iterable[str]`,
     `abc.Collection[str]` and `abc.Iterator[str]` all read as scalars, pydantic
-    accepts them as annotations, and the failure would be the INSERT rather than a
+    accepts them as annotations, and the failure would be the write rather than a
     report. They are absent from the set on purpose, for the reason
     `_CONTAINER_ORIGINS` carries, so this is a cost rather than an oversight.
 
@@ -573,7 +634,7 @@ def _unconstructable_create_fields(
     held = set(columns)
     faults: dict[str, str] = {}
     for name in sorted(popped - set(fields)):
-        faults[name] = "is popped before the constructor but is not a field of the body"
+        faults[name] = "is popped before the write but is not a field of the body"
     # Both cells subtract the names already reported above, so a name the body does
     # not have keeps the "not a field" remedy rather than acquiring a second, wrong
     # one. Without this subtraction on the child row cell, such a name was reported
@@ -591,11 +652,11 @@ def _unconstructable_create_fields(
         )
     for name in sorted(set(fields) - popped):
         if name not in held:
-            faults[name] = "reaches the constructor but is not a column of `books`"
+            faults[name] = "is written to the row unchanged but is not a column of `books`"
         elif admits_a_container(fields[name]):
             faults[name] = (
-                "reaches the constructor as a container, which no column of "
-                "`books` can be handed"
+                "is written to the row unchanged as a container, which no column "
+                "of `books` can be handed"
             )
     return faults
 
@@ -606,7 +667,10 @@ def _unconstructable_create_fields(
 #: that matter most are silent rather than loud: a pop with no write is a 201 that
 #: accepted a field and stored nothing. This fires on the machine of whoever added
 #: the field and stops every test run until the route says what to do with it.
-_UNCONSTRUCTABLE = _unconstructable_create_fields(
+#:
+#: `_UNASSIGNABLE`, beneath `BookDetailsUpdate`, is the same partition read
+#: against the other writer of these columns.
+_UNCONSTRUCTABLE = _unconstructable_fields(
     CARRIED_AS_CHILD_ROWS,
     RESHAPED_FOR_ITS_COLUMN,
     {name: field.annotation for name, field in BookCreate.model_fields.items()},
@@ -1139,18 +1203,18 @@ class BookMatch(BaseModel):
         string containing the bare character, so a refusal would refuse every record
         carrying two or more subjects. Nothing about a pre joined string
         distinguishes a structural separator from a typed one, so this is the only
-        rule this door can implement. `BookCreate.one_subject_per_entry` carries why
-        that door refuses instead.
+        rule this door can implement. `normalised_subjects` carries why the two
+        request bodies refuse instead.
 
         **The producer differs per path rather than per door, which is why the
         forcing reason above is the one that holds.** `routers/books._bounded_match`
         builds this model server side on `POST /enrich`, and
         `POST /api/books/{book_id}/enrich/apply` validates a body the **client**
-        sent, which is the same producer class the other door refuses. So a producer
-        argument would not separate the two doors; the wire shape does.
+        sent, which is the same producer class the other doors refuse. So a producer
+        argument would not separate these doors; the wire shape does.
 
         **A correctness control, not a security control.** A hostile caller can
-        store any value the column holds through either door. What this closes is
+        store any value the column holds through any door onto it. What this closes is
         the looseness one route apart that `max_length` alone left: 3,902 characters
         is 1,951 subjects when they are two characters each, against the 32 the
         member's own door allows, and `merge_into` writes the column from here.
@@ -1291,6 +1355,10 @@ class BookDetailsUpdate(BaseModel):
     send only what changed. An explicit `null` clears, which is how a series is
     unset; the two cases are distinguished with `model_fields_set`. A column
     that refuses null refuses the clear too: see the validator at the foot.
+
+    **`categories` is the one field whose clear is not a null**, for the reason
+    written at it, and it is the one field whose request shape is not the
+    stored shape.
     """
 
     title: str | None = Field(default=None, min_length=1, max_length=TITLE_MAX)
@@ -1315,6 +1383,56 @@ class BookDetailsUpdate(BaseModel):
     )
     purchased_at: date | None = None
     purchase_source: str | None = Field(default=None, max_length=PURCHASE_SOURCE_MAX)
+
+    #: The subjects on this book, replaced wholesale. **An empty list clears
+    #: them, and this is the only removal in the product that is not deleting
+    #: the book.**
+    #:
+    #: **Empty clears and absent leaves alone, and null is not a spelling of
+    #: either.** Every other field here is `X | None` because its column holds
+    #: one value and a null is how that value goes away. This one arrives as a
+    #: list and is stored as one joined string, and `google_books.join_categories`
+    #: already answers `None` for `[]`, so an empty list **is** the cleared
+    #: column and a null beside it would be a second spelling of one act.
+    #: Refused rather than accepted as a synonym: two spellings reaching one
+    #: column is how the two of them eventually reach it differently, and it
+    #: would also give the create body and this one different types for one
+    #: field in the generated client.
+    #:
+    #: **The clear reaches this column and nothing else.** Not a copy already
+    #: served to a public reader, not `book_tags`, not the classifications:
+    #: those are separate tables behind their own doors, and a member clearing
+    #: subjects should not be told more than the clear does.
+    #:
+    #: **Why the column needed one at all.** Three writes and no removal: the
+    #: create route, the catalogue gap fill and the merge's absorb. Even an
+    #: overwriting enrich cannot empty it, because `google_books.merge_into`
+    #: skips an incoming value in `(None, "", [])`. And it publishes:
+    #: `schemas/public.PublicBookOut` serves this field to a reader with no
+    #: account, so flipping a book public and folding a private row into a
+    #: public keeper each carry a subject across that boundary with no undo.
+    #: The cover beside it in that payload is withheld on the ground that
+    #: publishing it is a decision nobody made; a subject had the opposite
+    #: treatment and no way back.
+    #:
+    #: Bounded exactly as `BookCreate.categories` is, and by the same two
+    #: constants, so the list shaped doors onto this column cannot accept
+    #: different things. `BookMatch` is bounded differently on purpose, being
+    #: handed one already joined string.
+    categories: list[CategoryField] = Field(
+        default=[], max_length=MAX_CATEGORIES_PER_BOOK
+    )
+
+    @field_validator("categories", mode="before")
+    @classmethod
+    def one_subject_per_entry(cls, value: object) -> object:
+        """The second door onto this column, applying the same rule.
+
+        `normalised_subjects` holds it and the argument for it. Called rather
+        than restated: a copy here would be the one that goes stale, because
+        the paragraph a reader checks is the one at the older door.
+        """
+        return normalised_subjects(value)
 
     @field_validator("purchase_currency")
     @classmethod
@@ -1352,6 +1470,52 @@ class BookDetailsUpdate(BaseModel):
         return self
 
 
+#: What `routers/books.update_book_details` takes out of the dump before its
+#: assignment loop, for the reason `RESHAPED_FOR_ITS_COLUMN` gives.
+#:
+#: **The intersection of that cell with this body, not the cell whole.** The
+#: two bodies carry different fields on purpose, and a name reshaped on create
+#: that this one does not offer is not a fault: it is a field this door does
+#: not edit. Derived, so a second reshaped column added to both bodies is
+#: popped here on the day it is added rather than assigned as a list.
+POPPED_BEFORE_THE_ASSIGNMENT: Final[tuple[str, ...]] = tuple(
+    name for name in RESHAPED_FOR_ITS_COLUMN if name in BookDetailsUpdate.model_fields
+)
+
+#: Refused at import, the same partition read against the other door.
+#:
+#: **The create route had this and the update route did not, which is the
+#: defect underneath the subject clear rather than the missing field.**
+#: `update_book_details` assigns every field of the dump straight onto the row,
+#: so a container field added to this body was not a report: measured on
+#: SQLAlchemy over SQLite, assigning a list to a `Text` column raises
+#: `sqlite3.ProgrammingError: Error binding parameter 1: type 'list' is not
+#: supported` at the flush. That is a 500 on somebody's library rather than a
+#: red on the machine of whoever added the field, which is exactly what the
+#: create side's refusal was built to retire, at the door it was not written
+#: for.
+#:
+#: No child row cell: this door writes no child tables, so the tuple is empty
+#: rather than absent, which is what keeps the two arms over it live.
+_UNASSIGNABLE = _unconstructable_fields(
+    (),
+    POPPED_BEFORE_THE_ASSIGNMENT,
+    {name: field.annotation for name, field in BookDetailsUpdate.model_fields.items()},
+    Book.__table__.c.keys(),
+)
+if _UNASSIGNABLE:
+    raise RuntimeError(
+        "`BookDetailsUpdate` and the update route disagree about what is "
+        "assigned to the row: "
+        + "; ".join(f"`{name}` {fault}" for name, fault in sorted(_UNASSIGNABLE.items()))
+        + ". Every field of that body either names a column of `books` and is "
+        "assigned unchanged, or is named in `RESHAPED_FOR_ITS_COLUMN` above. A "
+        "name in the second of those needs an assignment at "
+        "`routers/books.update_book_details` as well as the pop: a pop with no "
+        "write stores nothing and answers 200."
+    )
+
+
 class SeriesOut(BaseModel):
     """One series, as the browse list shows it."""
 
@@ -1371,6 +1535,58 @@ class LocationOut(BaseModel):
     book_count: int = Field(ge=0)
 
 
+#: The most Books one merge may name, and therefore the most members one
+#: duplicate group is allowed to show.
+#:
+#: **The two are one constant because they were two numbers once and the pair
+#: was a dead button.** The card sends every id it renders, so a group of 21
+#: rendered 21 buttons and every one of them answered 422. Reachable from a
+#: catalogue import of many same titled rows sharing no copy group.
+#: `tests/routers/test_books_duplicates.py::TestTheMemberCap` holds the
+#: diagonal, a group one larger than this.
+MERGE_BOOKS_MAX = 20
+
+#: The most Books one duplicates answer carries, across all its groups.
+#:
+#: `MAX_PAGE_SIZE` rather than a number of its own: it is already this
+#: repository's justified ceiling for how many Books one response may hold, and
+#: a second figure here would be a second thing to argue about. Groups are
+#: accumulated whole, so the answer may stop below this and never above it.
+#:
+#: **It is a cap and deliberately not a page.** Nothing resumes: a duplicates
+#: view is a worklist whose rows the viewer is there to delete, so an offset
+#: names a different group on every request, and a cursor is an address that
+#: would have to refuse an invisible group and an absent one identically.
+DUPLICATE_BOOKS_SHOWN = MAX_PAGE_SIZE
+
+
+class DuplicateMember(BaseModel):
+    """One entry in a duplicate group: what the card shows and nothing else.
+
+    **Not a `BookOut`.** A person choosing which of two rows survives reads the
+    cover, the title and what tells the two apart, which is the format, the
+    publisher, the year and the ISBN. Carrying the rest cost this route a
+    hydration of the whole visible shelf and a serialisation pass over every
+    duplicate in it, for fields nothing rendered.
+
+    The trade, stated so the next reader sees a decision rather than an
+    omission: the card can no longer grow a field without a column here and a
+    client regeneration. The fields it would want are small scalars and adding
+    one is two lines.
+
+    `copy_group` is read by the collapse and is deliberately absent: a group
+    token on a payload is a fact about another member's copies.
+    """
+
+    id: int
+    title: str
+    format: BookFormat | None = None
+    publisher: str | None = None
+    year: int | None = None
+    isbn: str | None = None
+    cover_url: str | None = None
+
+
 class DuplicateGroup(BaseModel):
     """Books that look like the same work.
 
@@ -1382,10 +1598,86 @@ class DuplicateGroup(BaseModel):
     **Deliberate copies are not duplicates and never appear here.** They share
     a `copy_group`, and the endpoint collapses each group to one row before
     deciding whether anything is left over.
+
+    **`books` carries at least two members, refused here rather than trusted.**
+    `key` is readable plaintext of the form `dune|frank herbert`, so a group
+    standing on one visible row plus one the viewer cannot see would publish
+    that row's title and author. The route builds groups only out of a shelf,
+    which is what makes that impossible. `min_length` is the second latch:
+    it fires when the group is **built**, so a future route that grouped
+    before it filtered would raise here rather than answer 200.
     """
 
     key: str
-    books: list[BookOut]
+    #: Members the grouping produced, before the member cap, so a group larger
+    #: than `MERGE_BOOKS_MAX` says so rather than looking complete.
+    #:
+    #: **It counts rows this viewer can see, after deliberate copies are
+    #: collapsed**, which is fewer than the Books behind it: three visible
+    #: rows, two of them sharing a copy group, are a size of two. That is the
+    #: right number for the card, because the collapsed row is not on offer.
+    #: Said exactly, because "what this viewer can see" is a different and
+    #: larger number and was what this line used to claim.
+    size: int = Field(ge=2)
+    books: list[DuplicateMember] = Field(min_length=2, max_length=MERGE_BOOKS_MAX)
+
+    @model_validator(mode="after")
+    def _the_size_is_what_the_membership_says(self) -> DuplicateGroup:
+        """`size` and `len(books)` are two spellings of one fact.
+
+        **The relation is what the card reads**, as `size - books.length`, and
+        neither field's own bound constrains it: a size of 999 beside two
+        members passed, and so did a size of 2 beside three, which renders a
+        negative "left for a second pass". Bounding each field separately is
+        not bounding the pair.
+
+        Below the cap the two are equal, because nothing was withheld. At the
+        cap the size may be larger, because that is what withholding is. There
+        is no third case: `books` cannot exceed the cap.
+
+        **The input boundary and the branch boundary are not the same
+        boundary**, which is worth saying because the arms are parametrised on
+        the first. Below the cap the second `if` never decides anything on its
+        own: the equality above has already refused every input that reaches
+        it. The only membership at which it does work alone is exactly the
+        cap, which the capped arm holds. So a reader checking coverage by
+        counting parameters will conclude the branch is covered from below,
+        and it is not.
+        """
+        shown = len(self.books)
+        if shown < MERGE_BOOKS_MAX and self.size != shown:
+            raise ValueError(
+                f"an uncapped group of {shown} cannot claim a size of {self.size}"
+            )
+        if self.size < shown:
+            raise ValueError(
+                f"a group of {shown} cannot claim a size of {self.size}"
+            )
+        return self
+
+
+class DuplicateReport(BaseModel):
+    """The duplicates worth working on, and how many there are in all.
+
+    `groups` is capped by `DUPLICATE_BOOKS_SHOWN`. `total_groups` is not: it is
+    what the scan found, so a member whose import ran twice is told the size of
+    what happened instead of being handed it.
+
+    **A count is a disclosure, and this route had never carried one.** Both
+    numbers count the groups this viewer **can see**, so neither can be moved
+    by a Book the viewer cannot see.
+
+    **Can see, not owns**, and the two are separate in this data model on
+    purpose. A member looking at two public Books somebody else added is
+    counted one group and is offered the merge, which is intended and is what
+    `merge_books` reasons about: `visible_to` yields exactly the set a caller
+    may write, because a public Book is a shared shelf. This sentence used to
+    say the viewer's own shelf, which reads as ownership and is the opposite
+    of the rule.
+    """
+
+    groups: list[DuplicateGroup]
+    total_groups: int = Field(ge=0)
 
 
 class MergeRequest(BaseModel):
@@ -1396,7 +1688,7 @@ class MergeRequest(BaseModel):
     row sorted first.
     """
 
-    book_ids: list[RowIdField] = Field(min_length=2, max_length=20)
+    book_ids: list[RowIdField] = Field(min_length=2, max_length=MERGE_BOOKS_MAX)
     keep_id: RowIdField
 
 

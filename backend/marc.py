@@ -80,8 +80,8 @@ MAX_RECORDS: Final = 20_000
 #: than assumed.**
 #: `tests/routers/test_imports_marc.py::TestThePageSizeThatBoundsTheExport`
 #: builds the widest record a write through the API can produce, reading every
-#: bound off its declaration rather than retyping it, and fails past 12 MiB a
-#: page:
+#: bound off its declaration rather than retyping it, and pins the page to the
+#: byte:
 #:
 #: | a record of | one record | a page of 100 |
 #: |---|---|---|
@@ -100,13 +100,21 @@ MAX_RECORDS: Final = 20_000
 #: 36% over a ceiling taken on the third, and both critic seats found it
 #: independently in the round that had just fixed the first question.
 #:
-#: **The 12 MiB is a tripwire on the record's shape, not a platform limit.**
-#: Nothing enforces it at runtime and no deployment was measured against it.
-#: What it does is fail when a field is added to the writer, or made
-#: repeatable, or given a wider bound, so that the numbers above stop being
-#: quietly wrong. The room it leaves is **a quarter**, not a half: 12 MiB
-#: admits 123 of today's widest record against the 100 written here, which is
-#: the same 1.23 either way.
+#: **The pin is on the record's shape, not a platform limit.** Nothing
+#: enforces it at runtime and no deployment was measured against it. What it
+#: does is fail when the widest record's bytes move, which is what a wider
+#: bound or a repeated field does, so that the numbers above stop being
+#: quietly wrong. **The arm beside it names a field added or removed, by its
+#: tag, and only that**: it compares a set, so a repetition and a widened
+#: bound move the figure and are named by nothing, measured on the SRU twin at
+#: 129,050 bytes moved with no arm red. A field fed by a relation this fixture
+#: leaves empty renders nothing and is outside both.
+#:
+#: **It leaves no room at all, and the room was the defect.** The ceiling read
+#: 12 MiB against a 10,210,803 byte page, and the arm was green on both a
+#: small field added to the writer and `SUBTITLE_MAX` widened tenfold, because
+#: 2,372,109 bytes of slack absorbed each of them. The pin is an equality now,
+#: at `TestThePageSizeThatBoundsTheExport.PAGE_BYTES`.
 #:
 #: **The page's bytes are not its peak.** Building it holds every record's
 #: string and the joined result at once, measured at 24.01 MiB for the 9.74

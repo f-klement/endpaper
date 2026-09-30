@@ -403,6 +403,92 @@ def _refusals() -> list[tuple[str, int, set[int] | None]]:
     return found
 
 
+class TestTheDocumentEnumeratesNoRefusal:
+    """The fact two published docstrings rest on, asserted rather than described.
+
+    `routers/books.export_books` and `routers/backup.download_backup` both say,
+    in prose the mirror publishes, that this document enumerates no refusal
+    anywhere, and give that as the reason the 429 they can answer is not
+    declared on them alone. **A described reason rots silently and an asserted
+    one reddens**, so the day somebody declares a refusal on any operation,
+    those two paragraphs stop being true and this says so by name.
+
+    **This is a pin, not a policy.** It does not say declaring refusals is
+    wrong; it says the two routes above are arguing from a property of the whole
+    document, and that property has changed. The right answer to a red here may
+    well be to declare them everywhere and rewrite both paragraphs.
+
+    422 is excluded because FastAPI writes it from the route's own parameter
+    validation rather than anybody declaring it, which is the distinction the
+    class below turns on as well.
+    """
+
+    @staticmethod
+    def _declared_keys() -> set[str]:
+        """Every response key this document declares, spelled as it spells it.
+
+        **The raw string, never `int`.** An OpenAPI response key is not always
+        a number: `4XX`, `5XX` and `default` are all valid, and FastAPI writes
+        whichever one a route hands it straight through. This walk filtered on
+        `status.isdigit()` and therefore could not see any of them, so a
+        refusal declared in the spelling the failure message below asks for
+        left the arm green. Measured 2026-09-29 against a standalone app
+        declaring `4XX` on one operation, `default` on a second and `429` on a
+        third: the digit filter returned `[200, 429]`.
+        """
+        return {
+            status
+            for path in _schema()["paths"].values()
+            for operation in path.values()
+            if isinstance(operation, dict)
+            for status in operation.get("responses", {})
+        }
+
+    @staticmethod
+    def _is_a_refusal(status: str) -> bool:
+        """Whether one response key is a refusal, decided by what it is not.
+
+        A plain success number is not, and 422 is not, for the reason the class
+        docstring gives. **Everything else is**, which is what keeps a spelling
+        this rule has never seen on the side that reddens: a ranged key,
+        `default`, and whatever a later version of the specification adds. A
+        ranged *success* such as `2XX` reddens it as well, so does `3XX`, and
+        that is the direction a pin belongs on: the arm prints the key it
+        found, so the answer is to read the two paragraphs again rather than
+        to widen this.
+
+        **Widening it is not local, and that is why the line is here rather
+        than only at the other end.**
+        `tests/test_declared_media_types.py::_carries_a_representation` steps
+        over any response key that is not a plain number, and what makes that
+        a safe skip rather than a silent one is that this rule reddens on such
+        a key first. Allow a ranged key here and that walk goes quiet over the
+        route carrying it.
+        """
+        return status != "422" and not (status.isdigit() and int(status) < 400)
+
+    def test_the_document_declares_statuses_at_all(self) -> None:
+        """The vacuity arm. An empty set, from a schema that failed to load or
+        a walk that stopped matching the document's shape, satisfies the rule
+        below over any tree at all."""
+        assert len(self._declared_keys()) > 2, self._declared_keys()
+
+    def test_no_declared_status_is_a_refusal(self) -> None:
+        refusals = sorted(
+            status for status in self._declared_keys() if self._is_a_refusal(status)
+        )
+
+        assert refusals == [], (
+            f"This document now declares {refusals}, and two published route "
+            "docstrings argue from it declaring none: `export_books` and "
+            "`download_backup` each say their 429 is left undeclared because "
+            "declaring one refusal on one operation would make it look "
+            "deliberate and the rest accidental. Rewrite both paragraphs, or "
+            "declare the refusals across the surface, which is what they say "
+            "the whole decision is."
+        )
+
+
 class TestNoRefusalBorrowsAStatusTheSchemaTypesDifferently:
     """A hand raised refusal carries a sentence; 422 is declared as an array.
 
@@ -418,10 +504,13 @@ class TestNoRefusalBorrowsAStatusTheSchemaTypesDifferently:
     wrote it, so neither a rename of the envelope nor a new spelling of the
     constant walks past this.
 
-    What it does not say is that a refusal is **documented**. No route in this
-    tree declares a `responses` entry, so every hand raised status is
-    undocumented and `response_schema_conformance` has nothing to compare;
-    `docs/decisions.md` records why declaring one was refused.
+    What it does not say is that a refusal is **documented**. Four routes declare
+    a `responses` entry since 2026-09-29 and every one of them declares only the
+    media type of its own 200, so no refusal anywhere in this tree is documented
+    and `response_schema_conformance` still has nothing to compare against one;
+    `docs/decisions.md` records why declaring one was refused, and
+    `routers/books.export_books` records why a 429 added that day was not the
+    exception.
     """
 
     def test_the_schema_types_a_status_this_rule_can_be_about(self) -> None:

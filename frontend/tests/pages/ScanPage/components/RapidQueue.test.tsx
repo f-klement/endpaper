@@ -86,6 +86,7 @@ function renderQueue(
     onKeepAllForNow: vi.fn(),
     onLookUpKept: vi.fn(),
     onSplit: vi.fn(),
+    onDropSubject: vi.fn(),
     ...rest,
   };
   const { container, rerender } = renderLocalised(<RapidQueue {...props} />, {
@@ -218,6 +219,107 @@ describe("RapidQueue", () => {
     );
 
     expect(props.onSplit).toHaveBeenCalledWith(props.entries[0]!.key);
+  });
+
+  it("shows the subjects a picked file stated, and how many", () => {
+    // **The last moment a subject is reversible.** No route clears
+    // `books.categories` once the batch has written it: enrichment replaces
+    // the list and never empties it, and `BookDetailsUpdate` has no such
+    // field, so the remedy afterwards is deleting the book.
+    renderQueue({
+      entries: [
+        picked(
+          {
+            state: "found",
+            draft: {
+              isbn: "",
+              title: "Dune",
+              suggested_tag_ids: [],
+              categories: ["Fiction", "Science Fiction"],
+            },
+          },
+          "dune.epub",
+        ),
+      ],
+    });
+
+    expect(
+      screen.getByText("Subject words from the file: 2. Show them."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Fiction")).toBeInTheDocument();
+    expect(screen.getByText("Science Fiction")).toBeInTheDocument();
+  });
+
+  it("names the subject and the row it is on, not just Remove", () => {
+    // A folder pick draws several hundred of these, so an accessible name of
+    // "Remove" alone repeats across all of them and names nothing. The split
+    // control above carries the row for the same reason.
+    renderQueue({
+      entries: [
+        picked(
+          {
+            state: "found",
+            draft: {
+              isbn: "",
+              title: "Dune",
+              suggested_tag_ids: [],
+              categories: ["Fiction"],
+            },
+          },
+          "dune.epub",
+        ),
+      ],
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: "Remove the subject Fiction from dune.epub",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("takes off the subject the member pressed, named by its value", () => {
+    const props = renderQueue({
+      entries: [
+        picked(
+          {
+            state: "found",
+            draft: {
+              isbn: "",
+              title: "Dune",
+              suggested_tag_ids: [],
+              categories: ["Fiction", "Science Fiction"],
+            },
+          },
+          "dune.epub",
+        ),
+      ],
+    });
+
+    return userEvent
+      .click(
+        screen.getByRole("button", {
+          name: "Remove the subject Fiction from dune.epub",
+        }),
+      )
+      .then(() => {
+        // The value and not an index: the row is rendered from the same list,
+        // so an index would remove the wrong subject after any reorder.
+        expect(props.onDropSubject).toHaveBeenCalledWith(
+          props.entries[0]!.key,
+          "Fiction",
+        );
+      });
+  });
+
+  it("says nothing of it for a row whose file stated none", () => {
+    // The other side, without which the arms above are satisfied by a queue
+    // that draws the block on every row. A barcode carries no subject at all.
+    renderQueue({ entries: [found] });
+
+    expect(
+      screen.queryByText(/Subject words from the file/),
+    ).not.toBeInTheDocument();
   });
 
   it("says none of it for a row that is one file", () => {

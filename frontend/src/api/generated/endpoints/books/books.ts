@@ -64,7 +64,7 @@ import type {
   CustomFieldValueUpdate,
   DigitalReferenceIn,
   DigitalReferenceOut,
-  DuplicateGroup,
+  DuplicateReport,
   EnrichBookParams,
   ExportBooksParams,
   HTTPValidationError,
@@ -3166,12 +3166,20 @@ export const getListDuplicatesUrl = () => {
  * (casefold, strip punctuation, drop a leading article) is not something
  * SQLite can express, and the catalogue is small enough that scanning it is
  * cheaper than maintaining a normalised column.
+ *
+ * **The scan is unpaginated and the answer is capped, which are two
+ * different statements.** Every request reads one row per visible Book,
+ * because a page of the catalogue cannot be grouped on its own: a pair split
+ * across two pages is two singletons. What the cap cuts is the finished
+ * grouping, never the population it ran over, so a group is never split by
+ * it and the answer never depends on a grouping computed in an earlier
+ * request. The work is unbounded; the answer is not.
  * @summary List Duplicates
  */
 export const listDuplicates = async (
   options?: Parameters<typeof customFetch>[1],
-): Promise<DuplicateGroup[]> => {
-  return customFetch<DuplicateGroup[]>(getListDuplicatesUrl(), {
+): Promise<DuplicateReport> => {
+  return customFetch<DuplicateReport>(getListDuplicatesUrl(), {
     ...options,
     method: "GET",
   });
@@ -3314,6 +3322,24 @@ export const getExportBooksUrl = (params?: ExportBooksParams) => {
 
 /**
  * The shelf this member can see, as a file.
+ *
+ * **CSV is `text/csv`, plain text is `text/plain` and MARCXML is
+ * `application/marcxml+xml`.** All three are declared for the 200 because the
+ * document has no way to say which of them `?format=` selects.
+ *
+ * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
+ * `Retry-After`. It is not declared here because this document enumerates no
+ * refusal on any operation: not a 401, which every secured operation can
+ * answer, nor a 403, a 404 or a 429. So declaring one here would make this
+ * refusal look deliberate and every other operation's look accidental, which
+ * is a decision about the whole error surface rather than about this route.
+ * `docs/decisions.md` records that reasoning, having refused the same move
+ * once already, and
+ * `tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` is what this
+ * paragraph rests on rather than a reader's memory of it. The mechanism behind
+ * the refusal is shared by every route in `ratelimit.py`, so what would make
+ * declaring it honest is declaring it at all of them. The counter is not:
+ * this route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.
  *
  * **MARCXML needs library mode and the other two do not.** A CSV export is a
  * household reading its own shelf in a spreadsheet. A MARC record is a
@@ -4652,7 +4678,14 @@ export const getListTagsUrl = () => {
 };
 
 /**
- * The curated vocabulary plus whatever the library has invented.
+ * The curated vocabulary plus the invented tags this member can already see.
+ *
+ * **Not every tag the library holds.** A tag carries no member of its own, so
+ * what decides who may be told it exists is the books carrying it: this
+ * answers with the seeded vocabulary, which is published in the source, plus
+ * every tag on a book the caller can see. An invented tag whose only books
+ * are other people's private ones is absent, because listing it would publish
+ * a name somebody typed against a book this caller may not read.
  *
  * The **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`
  * in the frontend), because that is a presentation decision and it needs the
@@ -4663,7 +4696,8 @@ export const getListTagsUrl = () => {
  *
  * `book_count` is one grouped query for the whole list rather than one per
  * tag: this is fetched on nearly every page, so an N+1 here is an N+1
- * everywhere.
+ * everywhere. It is the same query the row filter reads, so the number and
+ * the presence of the row cannot disagree.
  * @summary List Tags
  */
 export const listTags = async (
@@ -4809,6 +4843,13 @@ export const getCreateTagUrl = () => {
  * "cookbooks" cannot both appear. A collision returns the existing tag rather
  * than a 409: somebody typing a name that is already there wants that tag,
  * and an error would send them to find it by hand.
+ *
+ * **A tag invented here is not in `GET /api/books/tags` until a book the
+ * caller can see carries it**, which is that route's rule and not an
+ * omission: a tag on no book is a name and nothing else, and publishing it to
+ * the whole library is the disclosure this route's two step use was part of.
+ * Putting it on a book is what makes it part of the vocabulary, and the
+ * clients do that in the same gesture.
  * @summary Create Tag
  */
 export const createTag = async (
@@ -5522,6 +5563,14 @@ export const getUpdateBookDetailsUrl = (bookId: number) => {
  * classic PATCH bug. A null for a column the database will not leave empty is
  * refused by `BookDetailsUpdate` before it reaches here, because it used to
  * reach the flush and answer 500.
+ *
+ * **`categories` clears on an empty list rather than on a null**, because its
+ * request shape is a list and its column is one joined string. This is the
+ * only route that removes a subject: the create route writes them, the
+ * catalogue gap fill and the merge's absorb add them, and an overwriting
+ * enrich cannot empty the column because the merge skips an empty incoming
+ * value. Before this the only removal was deleting the book, and the column
+ * is served to readers with no account.
  * @summary Update Book Details
  */
 export const updateBookDetails = async (
@@ -9807,6 +9856,146 @@ export const useUpdateStatus = <
   TContext
 > => {
   return useMutation(getUpdateStatusMutationOptions(options), queryClient);
+};
+export const getAddBookTagByNameUrl = (bookId: number) => {
+  return `/api/books/${bookId}/tags`;
+};
+
+/**
+ * Put a tag with this name on this book, inventing it if it is new.
+ *
+ * One request where typing a name used to be two, and the two were a
+ * different question each: inventing a tag hands back an id, and attaching
+ * that id is asked of somebody who might have guessed it. Typing a name is
+ * neither. Somebody typing a tag name while looking at a book means "this
+ * book is that", so this is the one gesture and the one answer.
+ *
+ * **The book as it stands, always, and never a 409, a 201 or a 404 for the
+ * name.** A status that told a minted name from a matched one would answer
+ * "does this name already exist" in the status line, which is the question
+ * a member may not have answered about a tag they cannot see. A name that
+ * is not this member's to use is left off the book, in the same shape as a
+ * name that is: `tags.Naming` decides it and carries what that does and does
+ * not close.
+ *
+ * Refused only for what the caller can already see: a name that is not a
+ * name, by `TagCreate`, and a book already carrying
+ * `MAX_TAGS_PER_BOOK` tags, with the sentence and the reasoning of the
+ * attach by id route beside this one.
+ * @summary Add Book Tag By Name
+ */
+export const addBookTagByName = async (
+  bookId: number,
+  tagCreate: TagCreate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<BookOut>(getAddBookTagByNameUrl(bookId), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(tagCreate),
+  });
+};
+
+export const getAddBookTagByNameMutationKey = () =>
+  ["addBookTagByName"] as const;
+
+export const getAddBookTagByNameMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof addBookTagByName>>,
+    TError,
+    AddBookTagByNameMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof addBookTagByName>>,
+  TError,
+  AddBookTagByNameMutationVariables,
+  TContext
+> => {
+  const mutationKey = getAddBookTagByNameMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof addBookTagByName>>,
+    AddBookTagByNameMutationVariables
+  > = (props) => {
+    const { bookId, data } = props ?? {};
+
+    return addBookTagByName(bookId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AddBookTagByNameMutationResult = NonNullable<
+  Awaited<ReturnType<typeof addBookTagByName>>
+>;
+export type AddBookTagByNameMutationBody = TagCreate;
+export type AddBookTagByNameMutationError = HTTPValidationError;
+export type AddBookTagByNameMutationVariables = {
+  bookId: number;
+  data: TagCreate;
+};
+
+/**
+ * @summary Add Book Tag By Name
+ */
+export const useAddBookTagByName = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof addBookTagByName>>,
+      TError,
+      AddBookTagByNameMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof addBookTagByName>>,
+  TError,
+  AddBookTagByNameMutationVariables,
+  TContext
+> => {
+  return useMutation(getAddBookTagByNameMutationOptions(options), queryClient);
 };
 export const getRemoveBookTagUrl = (bookId: number, tagId: number) => {
   return `/api/books/${bookId}/tags/${tagId}`;

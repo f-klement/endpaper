@@ -52,6 +52,7 @@ The rest of the file tests behaviour.
 
 import ast
 import importlib
+import re
 
 import pytest
 from sqlalchemy import event
@@ -257,6 +258,218 @@ class TestReadingIsTheOnlyWayIn:
         source = "def fold(db):\n    db.resolve_merge(1)\n"
 
         assert _named_way_callers({"other.py": source})["resolve_merge"] == []
+
+
+#: Receivers of a `.of(...)` in this tree that are not a `Reading`.
+#:
+#: **Stated as an exclusion rather than an inclusion**, which is the whole
+#: mechanism of the census below: a `.of(` whose receiver is neither a
+#: `Reading` nor named here is a failure rather than a row the pass quietly
+#: drops. So a caller binding a `Reading` to a local (`reading = Reading.by(
+#: ...)` and then `reading.of(...)`) reddens, which is the spelling an
+#: inclusion list would have missed.
+NOT_A_READING = {"_AliasIndex"}
+
+
+def _receiver_root(node: ast.expr) -> str | None:
+    """The leftmost `Name` of an attribute or call chain, or None."""
+    while True:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            node = node.value
+        elif isinstance(node, ast.Call):
+            node = node.func
+        else:
+            return None
+
+
+def _classify(
+    node: ast.AST,
+    module: str,
+    scope: list[tuple[str, str]],
+    found: dict[str, list[str]],
+) -> None:
+    """One node, then its children, carrying the scope it was reached through.
+
+    **The scope holds classes as well as functions**, and that is not
+    bookkeeping: keyed on the innermost function name alone, two methods of
+    the same name in one module were one row, and a decoy class carrying a
+    `books_to_out` method that calls here left both census arms green.
+    """
+    pushed = False
+    if isinstance(node, ast.ClassDef):
+        scope.append(("class", node.name))
+        pushed = True
+    elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        scope.append(("function", node.name))
+        pushed = True
+    elif (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "of"
+    ):
+        root = _receiver_root(node.func.value)
+        path = ".".join(name for _kind, name in scope)
+        where = f"{module}.{path}" if path else f"{module}:{node.lineno}"
+        inside_reading = any(
+            kind == "class" and name == "Reading" for kind, name in scope
+        )
+        if root == "Reading" or (root == "self" and inside_reading):
+            found["readings"].append(where)
+        elif root not in NOT_A_READING:
+            found["strangers"].append(f"{where} (receiver {root})")
+
+    for child in ast.iter_child_nodes(node):
+        _classify(child, module, scope, found)
+
+    if pushed:
+        scope.pop()
+
+
+def _of_call_sites(sources: dict[str, str]) -> tuple[list[str], list[str]]:
+    """Every `.of(...)` in the app, split into Reading's and everything else.
+
+    A site is its **qualified** name, `<dotted module>.<every enclosing class
+    and function>`, which is what the caller table in `Reading.of` names. A
+    call outside any of those has no such name and is reported by line, so it
+    cannot pass silently either.
+    """
+    found: dict[str, list[str]] = {"readings": [], "strangers": []}
+    for name, source in sources.items():
+        module = name.removesuffix(".py").replace("/", ".")
+        _classify(ast.parse(source), module, [], found)
+    return sorted(set(found["readings"])), sorted(set(found["strangers"]))
+
+
+def _tabled_callers() -> list[str]:
+    """The first column of the caller table in `Reading.of`'s own docstring."""
+    doc = Reading.of.__doc__ or ""
+    return sorted(re.findall(r"^\s*\| `([\w.]+)` \|", doc, re.MULTILINE))
+
+
+class TestEveryCallerOfOf:
+    """The caller table in `Reading.of` is derived, not maintained.
+
+    That docstring is the only home of the bound parameter ceiling analysis,
+    and its conclusion is about **which** callers can be the size of the
+    library. Two earlier versions of the sentence under the table were wrong,
+    one counting two library sized callers and one claiming none, and nothing
+    anywhere read the table back.
+
+    **What this checks is the first column and the count above it.** The
+    second column is prose: a caller that stays in the table while quietly
+    losing the bound named beside it is outside what this sees, and outside
+    what any test here sees.
+    """
+
+    def test_the_table_names_exactly_the_call_sites_in_the_tree(self):
+        readings, _ = _of_call_sites(_source_modules())
+
+        assert readings == _tabled_callers()
+
+    def test_no_call_of_that_name_goes_unclassified(self):
+        """The belt, and the reason the table can be trusted as complete: a
+        `.of(` whose receiver this pass cannot recognise is a failure rather
+        than a row it drops."""
+        _, strangers = _of_call_sites(_source_modules())
+
+        assert strangers == []
+
+    def test_a_reading_bound_to_a_local_is_not_silently_missed(self):
+        """The spelling that beats an inclusion list. It is not in the tree
+        today, and the pass has to redden rather than shrink when it is."""
+        source = "def page(db):\n    reading = Reading.by(db, 1)\n    reading.of([1])\n"
+
+        readings, strangers = _of_call_sites({"other.py": source})
+
+        assert readings == []
+        assert strangers == ["other.page (receiver reading)"]
+
+    def test_a_method_of_that_name_on_something_else_is_not_a_caller(self):
+        """`_AliasIndex.of` shares the name and is not this function."""
+        readings, strangers = _of_call_sites(
+            {"other.py": "def build(rows):\n    return _AliasIndex.of(rows)\n"}
+        )
+
+        assert (readings, strangers) == ([], [])
+
+    def test_two_callers_of_one_name_in_one_module_are_two_rows(self):
+        """The decoy that beat the first version of this pass.
+
+        Keyed on the innermost function name, a method sharing a module level
+        function's name collapsed into it and the census stayed green with a
+        caller it had never seen. Both belong in the roster, so both have to
+        be nameable.
+        """
+        source = (
+            "def books_to_out(db):\n"
+            "    return Reading.by(db, 1).of([1])\n"
+            "\n"
+            "class Decoy:\n"
+            "    def books_to_out(self, db):\n"
+            "        return Reading.by(db, 1).of([1])\n"
+        )
+
+        readings, _ = _of_call_sites({"other.py": source})
+
+        assert readings == ["other.Decoy.books_to_out", "other.books_to_out"]
+
+    def test_the_count_above_the_table_is_the_size_of_the_table(self):
+        """The sentence, not only the rows: it is the sentence that went wrong
+        both previous times.
+
+        It says **callers** and not call sites, which is what the pass counts:
+        `mark_each` and `_records_for` are one row each however many times
+        each body calls.
+        """
+        doc = Reading.of.__doc__ or ""
+        [stated] = re.findall(r"\*\*(\d+)\*\* callers", doc)
+
+        assert int(stated) == len(_tabled_callers())
+
+    def test_the_conclusions_own_number_is_the_schemas(self):
+        """The one figure in the concluding paragraph, read off the schema.
+
+        **Both historical failures of this analysis were in the bound column
+        and in the sentence under it, not in the roster**, so pinning the
+        roster alone leaves the half that has actually gone wrong unpinned.
+        This is the only number down there that a constant can answer for;
+        the rest of that column stays prose and this test says nothing about
+        it.
+        """
+        from schemas import BulkRequest
+
+        doc = Reading.of.__doc__ or ""
+        [stated] = re.findall(r"a bulk mark of \*\*(\d+)\*\* ids", doc)
+        [bound] = [
+            item.max_length
+            for item in BulkRequest.model_fields["book_ids"].metadata
+            if getattr(item, "max_length", None) is not None
+        ]
+
+        assert int(stated) == bound
+
+    def test_the_bulk_bound_appears_in_this_docstring_exactly_once(self):
+        """A pin reaches the copy it was written for and no other.
+
+        The table cell used to carry a second spelling of the same number and
+        the arm above read only the paragraph, so the cell could say anything.
+        Counting occurrences closes that by property rather than by listing
+        the spellings a future copy might take: any second mention of the
+        figure, anywhere in this docstring, reddens here.
+        """
+        from schemas import BulkRequest
+
+        [bound] = [
+            item.max_length
+            for item in BulkRequest.model_fields["book_ids"].metadata
+            if getattr(item, "max_length", None) is not None
+        ]
+
+        doc = Reading.of.__doc__ or ""
+
+        assert len(re.findall(rf"\b{bound}\b", doc)) == 1
 
 
 class TestAbsenceMeansUnread:

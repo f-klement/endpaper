@@ -658,8 +658,11 @@ unit made the **cheap** shape look like the worst case. Measured against 3,000 b
 | `dc.title="one phrase"` | 1 | 7 to 11 ms |
 
 The shape with **three times** the comparisons is a third of the cost, because `title`,
-`author` and `isbn` are short columns while `description` has no length limit and
-`subject` is a correlated `EXISTS` over a join. Behind one 120 a minute counter this
+`author` and `isbn` are short columns while `description` is bounded on the way in and not
+on the column, and `subject` is a correlated `EXISTS` over a join. **That partition is
+three ways and it matters twice below**: the column is `Text` and bounds nothing, every
+write through a schema is held to 10,000 characters, and a restore inserts through Core and
+is bounded by neither. Behind one 120 a minute counter this
 document itself describes as closer to a global cap than a per client one, the first row is
 about four minutes of work per one minute window from a single address.
 
@@ -685,8 +688,32 @@ change rather than a correction.
 All of it scales with the catalogue, which is why it is quoted against a named size rather
 than stated as a property of the server.
 
-**It is applied on top of the parse bounds and never instead of them, so nothing it admits
-was previously refused**: it is strictly tighter, and what it now refuses that it used to
+**And once on what the answer costs to emit, which is the other half of the same budget.**
+The bounds above are all about what a query costs to compile and run. None of them says how
+many bytes leave, and the response is assembled as one string before it is sent, so the peak
+is the document plus the tree it was printed from. What a single request with no session can
+ask for is `maximumRecords` rows of whatever the MARCXML writer produces, and at the widest
+a write through the API can produce that is **5,117,485 bytes for a page of 50**, measured
+rather than estimated. Widest counts two things a member may legitimately post and an
+earlier version of this figure left out: a heading whose kind is declared, which lengthens
+the vocabulary code on every heading, and a page of rows declared to be copies of one
+title, which share an ISBN and so each carry one at its full length. The suite holds the
+figure to the byte and with no headroom, and reads it back out of this document, so
+widening a column bound or raising the page size fails a test before it reaches a
+deployment. A field added to the record fails a different test, which watches the fields the widest
+record carries rather than its size; a field fed by a relation that record does not carry
+renders nothing and is watched by neither.
+
+**Two things that number is not.** It is not a platform limit: nothing enforces it at
+runtime and no deployment was measured against it. And it is not a worst case, because the
+restore path is the third part of the partition above: a row inserted through Core is
+bounded by nothing, one description of 3,000,256 bytes is already recorded as having reached
+a table that way, and this door serves such a row to a stranger at the page size like any
+other. Rationing the surface is still the 120 a minute counter, which this document already
+describes as closer to a global cap than a per client one.
+
+**The comparison budget is applied on top of the parse bounds and never instead of them, so
+nothing it admits was previously refused**: it is strictly tighter, and what it now refuses that it used to
 allow is the whole of rows one to three above. A query naming four indexes, or eight words
 anywhere, or a description phrase, is well inside it.
 
@@ -822,7 +849,7 @@ is how a secret reaches a log aggregator.
 
 ## Rate limiting
 
-**Eleven counters, for five different reasons.** The count is not read off this
+**Thirteen counters, for five different reasons.** The count is not read off this
 page: the names `backend/ratelimit.py` binds to a limiter are counted on every
 run, pinned against a parse of the limiters that module constructs, which is
 why no date is attached to it. The method was added on 2026-08-28,
@@ -847,6 +874,8 @@ paragraph.
 | `/auth/reset/request`, `/auth/verify/request` | 5 / hour | address | The fifth reason, and both of these rows are it: getting back into an account, from a caller who by definition holds no session. One budget across both routes, because they are the same act (ask for a one time code to be produced) and splitting it would let a caller spend five of each. **Charged on the address so a botnet cannot queue a hundred requests against one member** |
 | `/auth/reset/request`, `/auth/verify/request` | 5 / hour | account | The other half of the same charge, and both halves are needed: an address limit alone leaves one address free to work through the roster slowly, one member at a time. **The key is caller chosen, so this is a denial of service on recovery**, stated rather than argued away. What bounds the damage is that the thing being rationed is already bounded: at most one live request exists per account however many times it is asked for. **The wider residual, stated because it is a property of this window rather than of the key**: the limiter refuses a key it has never seen once its table is full rather than evicting a live one, so 4,096 distinct account keys held live deny recovery to every account not already tracked, for an hour. Filling them takes 4,096 requests across about 820 addresses at five each. Refusing rather than evicting is still right, because every eviction policy lets an attacker choose which key leaves |
 | `/auth/reset/redeem`, `/auth/verify` | 10 / hour | username + address | Guessing a one time code. The code is 60 bits, so the keyspace is not what is doing the work here and this is: an approved reset code lives one hour. Keyed like a sign in rather than on the account alone, because an account-only key would let anybody lock a member out of the recovery they had just been granted |
+| `GET /api/books/export` | 5 / min | username | **The import row's reason, not a new one**: the cost lands on this deployment's own resources rather than on a credential, a supplier or a stranger, which is the cost the `/api/imports/*` row above states and measures. One call walks the whole of one member's visible shelf, `marc.EXPORT_PAGE_RECORDS` rows at a time, holding a worker thread and a database session for the life of the response. Five a minute because the menu offers three formats and a member comparing all three spends three. **It counts starts, not responses in flight**, so five concurrent walks by one member are inside it and nothing counts across members at all; bounding that is a concurrency limit, which this is not. Keyed on the authenticated username rather than the address, because behind a reverse proxy an address collapses a household into one bucket and the retry hint is computed from that bucket's first hit, so a shared bucket would tell one member when another last exported |
+| `GET /api/backup` | 3 / min | username | The same reason and a different unit, which is why it is a second counter rather than a share of the one above: this builds the whole database and every cover image in one pass and holds the result in memory before a byte is sent. Sharing a budget would let a member's exports ration the administrator's backup. Three a minute is the impatient second click plus one. **It bounds how often an archive is built and neither how large one is nor how many are built at once**: the archive byte ceiling is the restore upload's cap and is not read on the way out, so the download is capped by nothing |
 
 The last three of the first six are the ones that are not about this deployment: spending somebody else's
 quota is a way to get this deployment's address rate-limited upstream, which loses
@@ -931,8 +960,29 @@ whole catalogue in memory. Measured through the route with descriptions of 200 c
 `tracemalloc` peak above the baseline: 55.05 MiB against 1.02 at 10,000 books and 219.06
 against 1.05 at 40,000, where the first rises with the shelf and the second does not. The
 download and the wall clock are not bounded, and neither is the number of concurrent
-exports, which is the open item below. **The CSV arm of the same route still resolves the
-whole shelf**, is not gated by library mode, and carries the description too.
+exports. **The CSV and txt arms of the same route walk the same pages**, and they had to:
+neither is gated by library mode, so any authenticated member reaches them, and the CSV
+arm carries the description column as well.
+
+**So the concurrency hazard is not behind a feature flag any more.** It is stated here
+rather than pointed at: nothing else in this document covers it. Each export holds its
+pooled connection for the whole download, and `database.py` passes no pool arguments, so
+the limit is the library default of five plus ten overflow: fifteen concurrent exports
+exhaust it. **That number did not move with the paging**: a
+streamed body held the connection under the old shape too. What moved is who can reach the
+shape, from an instance with library mode on to every authenticated account.
+
+**What a mid walk failure leaves is a truncated file rather than an error.** The status
+line goes out before the first page, so a failure at page k answers 200 and stops. For
+MARCXML the artefact self invalidates, because an unclosed `<collection>` is refused by
+every parser. **A short CSV is a valid CSV**, and it is the file `POST /api/imports/csv`
+reads back, so the same failure loses member data quietly on the backup path. It needs no
+privilege to induce: the work is spread across the download now, so a write holding the
+lock for longer than the five second `busy_timeout` raises under the walk instead of
+before it, and `database.py` names an import, a restore and emptying the trash as the
+writes that are not short. The chunked terminator is the
+signal that is left, and a buffering reverse proxy sits in front of many deployments;
+whether one erases or restores that signal here is unmeasured.
 
 **The writer drops what XML 1.0 cannot carry.** `ElementTree` serialises a
 control character verbatim, so one `\x0c` in a member typed description would

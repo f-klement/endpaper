@@ -85,7 +85,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | GET | `/api/books` | user | Paginated. Filter with `q`, `status`, `ownership`, `format`, `lending`, `discuss`, `series`, `author`, `location`, `collection_id`, `unfiled`, `unrated`, `tags`, `sort` |
 | POST | `/api/books` | user | **409** on an ISBN already in the catalogue |
 | POST | `/api/books/scan` | user | Same, named for the scan flow |
-| GET | `/api/books/tags` | user | The seeded vocabulary plus this library's own |
+| GET | `/api/books/tags` | user | The seeded vocabulary plus the invented tags the caller can already see |
 | POST | `/api/books/tags` | user | Invent a tag. Returns the existing one on a name clash |
 | DELETE | `/api/books/tags/{id}` | user | Only a custom tag. **400** for a seeded one |
 | GET | `/api/books/lookup?isbn=` | user | Metadata lookup, **404** if unknown |
@@ -298,6 +298,16 @@ catch is the one it cannot see: a hardback and a paperback are the same book and
 legitimately different ISBNs. Matching is deliberately lossy, because this is a suggestion a
 person confirms.
 
+**The scan is unpaginated and the answer is capped**, which are two different statements.
+Grouping needs the whole catalogue, because a pair split across two pages is two singletons,
+so every request reads one row per visible book. What the cap cuts is the finished grouping:
+`{groups, total_groups}`, where `total_groups` is everything the scan found and `groups`
+carries at most 200 books in all. **It is a cap and not a page.** Nothing resumes, because
+the rows here are the ones the caller is there to delete, so an offset would name a
+different group on every request. A group is never split by the cap, and a group is shown
+with at most the 20 members `POST /merge` accepts, with `size` saying how many there really
+are: the card sends every id it renders, so showing more would be a button that cannot work.
+
 **Deliberate copies never appear here.** Each `copy_group` is collapsed to one row before
 the matching runs, so two paperbacks of one title are not offered for merge. They would
 otherwise be the strongest match this endpoint can produce, and merging them destroys a
@@ -371,9 +381,9 @@ and another's. A book is in **one** or in none.
 
 | Method | Path | Access | Notes |
 |---|---|---|---|
-| GET | `/api/collections` | user | Every collection, with the caller's own `book_count` |
+| GET | `/api/collections` | user | Every collection the caller may be told about, with their own `book_count` |
 | POST | `/api/collections` | user | **201**. A name that already exists returns that collection |
-| PATCH | `/api/collections/{id}` | user | Rename. **409** if another collection has that name |
+| PATCH | `/api/collections/{id}` | user | Rename. **404** for an id the caller may not be told about, **409** if another collection has that name |
 | DELETE | `/api/collections/{id}` | **admin** | 204. Its books are unfiled, never deleted |
 
 Names are unique **case insensitively** and outside ASCII too, enforced by a unique index on
@@ -388,9 +398,29 @@ reason: creating is additive and undone by deleting, while deleting strips a lab
 book in the house at once with no undo.
 
 **A collection is shelving, never permission.** Filing a book into one changes nothing about
-who can see it: a book's visibility is `is_private` and nothing else. Every count here is
-filtered by the caller's visibility, because the count is the one thing a library wide
-label could otherwise disclose.
+who can see it: a book's visibility is `is_private` and nothing else.
+
+**The label is filtered, not only the count.** A collection is listed to a member when a book
+they can see is filed in it, when a book they can see in the trash is, or when no book at all
+is:
+the name of a shelf holding only books you cannot see is the evidence that those books exist.
+The same question answers the rename and every write that files a book, so an id the caller
+may not be told about gets the answer an unused id gets. Deleting is the exception and stays
+open to any id: it is admin only, it returns no name, and refusing there would strand a
+collection holding only another member's private books with nobody able to remove it. A collection with nothing in it is listed
+to everybody, because it names no book and so discloses none, which is also what keeps the
+shelf you just made on the page you made it on. One consequence: a `book_count` of 0 now means
+empty or holding only books you can see in the trash, and no longer "or holding books you
+cannot see".
+
+A collection is hidden while it holds one book you cannot see and listed again once that book
+is destroyed. That reads backwards and is correct: the rule tracks what there is to disclose.
+
+Two things this does not close. A name that is already taken is still answered by the create
+with the existing row and by the rename with a 409, so a guessed **name** still confirms a
+collection exists; what it no longer buys is filing anything into it. And `id` is published
+and is a consecutive integer, so a filtered list reading 1, 2, 5, 9 still says rows exist
+between them or were deleted.
 
 `BookOut` carries `collection_id` and `collection_name`. The name is a projection of the row
 the id names, assembled per request in one statement for the whole page, so a rename is
@@ -863,6 +893,33 @@ curate, and a vocabulary only an admin can extend is one nobody uses. A name
 that already exists returns that tag rather than a 409, because somebody typing
 a name that is already there wants that tag.
 
+**A custom tag is listed to a member only once a book they can see carries
+it.** A tag row carries no member, so what decides who may be told it exists is
+the books carrying it: without that rule, a name somebody typed against a
+private book, or that an import minted from one, reached every member on their
+next page load with a `book_count` of zero. The seeded group is exempt because
+its names are in the source. The same rule answers `POST
+/api/books/{id}/tags/{tag_id}` and the bulk tag verbs with a **404** for a tag
+whose every book is hidden from the caller, which is the answer an unused id
+already gets: attaching a guessed id to a book you own used to return the book
+with that tag's name on it.
+
+**What it does not close.** The name space is globally unique and a create
+answers a collision with the existing row, so guessing a **name** still
+confirms a tag exists. A tag no book carries is attachable by id, which is what
+lets a member put a tag they have just invented onto a book, so guessing the id
+of one confirms its name too.
+
+**And one thing it breaks.** Creating a tag whose name collides with one you
+cannot see answers **201** with that tag, as a collision always does, and
+attaching it then answers 404, because a colliding name is carried by a book
+you cannot see. The name is unusable through the picker and nothing says so.
+A CSV import still does the whole of it, and does more: it matches by folded
+name against every tag with no viewer, its per upload cap bounds **minting**
+and not matching, and it completes the attach. So the refusal withholds
+nothing it is protecting. This is a regression and it is recorded here rather
+than described as a narrowing.
+
 A seeded tag **cannot be deleted**. `seed_tags()` would put it back at the next
 restart, so the delete would appear to work and then quietly undo itself.
 
@@ -905,10 +962,12 @@ calibre-web instance.
 destroys, in one request with no undo, content every member typed by hand, on
 books the caller may not see.
 
-**No usage count is published**, unlike `TagOut.book_count`. A count of the books
-carrying a field is drawn across books the caller may not see, so it would have to
-be scoped to the viewer, and a viewer-scoped number in a delete confirmation would
-understate what is about to be destroyed.
+**No usage count is published.** A count of the books carrying a field is drawn
+across books the caller may not see, so it would have to be scoped to the viewer,
+and a viewer-scoped number in a delete confirmation would understate what is about
+to be destroyed. `TagOut.book_count` is not the exception this used to name it as:
+it is the reader's count, deleting a tag is library wide, and that confirmation
+says "every book" for the same reason this one does.
 
 **A field's `kind` is chosen once and never changed.** Changing it would
 reinterpret every value already under it in both directions. Delete and redefine

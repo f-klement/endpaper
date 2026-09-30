@@ -90,6 +90,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "pytest-asyncio>=0.25.2",
     "pytest-xdist>=3.6.1",
+    "pytest-timeout>=2.4.0",
     "respx>=0.22.0",
     "schemathesis>=4.27.5",
     "ruff>=0.9.4",
@@ -154,7 +155,68 @@ pythonpath = ["."]
 # `--dist loadfile` keeps a file's tests on one worker. `load` scatters them,
 # and this suite has files whose tests share a module-level counter
 # (covers.reset_counts) or build on one another within the file.
-addopts = "-q --strict-markers --import-mode=importlib -n 2 --dist loadfile"
+#
+# ── A hung test fails as a named test ────────────────────────────────────────
+#
+# `--timeout` bounds every test, so a hang arrives as a named failure rather than
+# as a job timeout naming nothing. Nothing here bounded a wait before it:
+# measured 2026-09-26, a worker parked nine minutes with no verdict, and
+# `-o faulthandler_timeout=60` dumped tracebacks without aborting the run.
+#
+# **The value has a floor derived from what this test tree declares, rather than
+# a number chosen from what it has been observed to take.** Durations alone
+# would put it near 60: the
+# worst reading over five recent backend jobs is a 28s stall on a test that costs
+# 0.05s on every other run. But the tree declares its own ceilings, and measured
+# on this base the largest is 300, at twelve subprocess waits. A global below
+# that silently overrides a declared ceiling at exactly the sites whose subject
+# is a process that will not stop. So the rule is: **strictly above the largest
+# ceiling the test tree declares.** `tests/test_a_hung_test_is_named.py` asserts
+# that relation by walking the tree, so a test that later declares a longer wait
+# reddens a guard and forces a decision instead of being halved by a line nobody
+# re-read. The floor is a fact about the tree rather than somebody's judgement
+# about a distribution, which is why no duration is written beside it.
+#
+# **What that guard does not hold, said here rather than left to be found.** It
+# is a floor with no upper term: nothing in it stops this value being raised
+# until the ceiling never fires, and 36000 would be as green as 360. What makes
+# a high ceiling safe is not that guard, it is the reconciliation named below,
+# which refuses a session that lost a test to anything at all, a bound that
+# never fired included. And the floor is necessary rather than sufficient: a
+# test that legitimately spends its declared 300 seconds and then does anything
+# else is still cut by a global one second above it, and its escape is the
+# marker at its own site like any other long test's.
+#
+# **`--timeout-method=signal`, pinned rather than left to the plugin default.**
+# Measured: the signal method fails the hanging test by name and the worker
+# survives, so the rest of the run completes. The thread method calls `os._exit`,
+# which is indistinguishable from a crash: nine restarts, the same test reported
+# failed nine times, 20 report entries for 13 collected tests. The default
+# behaves like the first of those today, which is exactly why leaving it implicit
+# is wrong: it is one command line flag, or one platform without SIGALRM, away
+# from the second, and the second looks like a crash rather than like a
+# configuration mistake.
+#
+# **`--max-worker-restart=0`, and it is not belt and braces.** xdist defaults to
+# `numprocesses * 4`, so 8 here, and under `--dist loadfile` a dead worker hands
+# its item to the replacement, which dies on it too. Measured at the default: ten
+# workers consumed, one test reported failed ten times, 35 report entries for 31
+# collected tests, five tests never run, and a reader who checks the count sees
+# it go **up**. Deleting this line does not restore a tolerant run, it restores
+# that.
+#
+# **All three here rather than as ini keys, because that is what keeps them
+# armed.** With the plugin absent, `--timeout` on the command line is a usage
+# error and the run refuses; an unknown ini key is a warning and the run proceeds
+# unbounded. `--max-worker-restart` has no ini key at all.
+#
+# What restarts off costs is a louder failure after a genuine one off worker
+# death, against an old behaviour that was longer and more misleading. What makes
+# that trade safe is the reconciliation in `tests/conftest.py`, which turns a
+# short session into a named refusal. A test that legitimately needs longer takes
+# `@pytest.mark.timeout(n)` at its own site, which is a change to that test
+# rather than to this line.
+addopts = "-q --strict-markers --import-mode=importlib -n 2 --dist loadfile --max-worker-restart=0 --timeout=360 --timeout-method=signal"
 # `--strict-markers` is on, so a marker exists here or it is an error rather
 # than a silent typo that deselects nothing.
 #

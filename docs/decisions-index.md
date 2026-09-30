@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 31,192 |
+|  | [Backend](decisions.md#backend) | 33,350 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -60,7 +60,7 @@ repeat the argument.
 | Backend | [Lending willingness is a third axis, and it is on the book](decisions.md#lending-willingness-is-a-third-axis-and-it-is-on-the-book) | 178 |
 | Backend | [A book marked never lent is refused once, not forbidden](decisions.md#a-book-marked-never-lent-is-refused-once-not-forbidden) | 249 |
 | Backend | ["Ask me about this book" is on the member, and everybody can see it](decisions.md#ask-me-about-this-book-is-on-the-member-and-everybody-can-see-it) | 212 |
-| Backend | [`categories` is joined with a semicolon, not a comma](decisions.md#categories-is-joined-with-a-semicolon-not-a-comma) | 47 |
+| Backend | [`categories` is joined with a semicolon, not a comma](decisions.md#categories-is-joined-with-a-semicolon-not-a-comma) | 210 |
 | Backend | [A classification is stored whole, and its number is what gets matched](decisions.md#a-classification-is-stored-whole-and-its-number-is-what-gets-matched) | 329 |
 | Backend | [The DDC projection is a suggestion, and "suggestion" means pre-selected](decisions.md#the-ddc-projection-is-a-suggestion-and-suggestion-means-pre-selected) | 284 |
 | Backend | [Division level, not the full Dewey schedule](decisions.md#division-level-not-the-full-dewey-schedule) | 125 |
@@ -104,10 +104,10 @@ repeat the argument.
 | Backend | [Every row id a caller supplies is bounded at both ends](decisions.md#every-row-id-a-caller-supplies-is-bounded-at-both-ends) | 462 |
 | Backend | [A book belongs to one collection, not many](decisions.md#a-book-belongs-to-one-collection-not-many) | 323 |
 | Backend | [Every book that existed before collections is unfiled, and no default was invented](decisions.md#every-book-that-existed-before-collections-is-unfiled-and-no-default-was-invented) | 151 |
-| Backend | [A collection is per library, and is never a privacy boundary](decisions.md#a-collection-is-per-library-and-is-never-a-privacy-boundary) | 270 |
+| Backend | [A collection is never a privacy boundary, and its label is not per library](decisions.md#a-collection-is-never-a-privacy-boundary-and-its-label-is-not-per-library) | 689 |
 | Backend | [Deleting a collection unfiles its books, and the database is what says so](decisions.md#deleting-a-collection-unfiles-its-books-and-the-database-is-what-says-so) | 107 |
 | Backend | [A copy carries its own collection, and the group spans them](decisions.md#a-copy-carries-its-own-collection-and-the-group-spans-them) | 387 |
-| Backend | [A collection is not an import option, and not a grant scope](decisions.md#a-collection-is-not-an-import-option-and-not-a-grant-scope) | 163 |
+| Backend | [A collection is not an import option, and not a grant scope](decisions.md#a-collection-is-not-an-import-option-and-not-a-grant-scope) | 162 |
 | Backend | [A copy is a row, not a count column](decisions.md#a-copy-is-a-row-not-a-count-column) | 418 |
 | Backend | [Deliberate copies and accidental duplicates are told apart by a token](decisions.md#deliberate-copies-and-accidental-duplicates-are-told-apart-by-a-token) | 172 |
 | Backend | [The copy group is a shared label, not a self-referencing foreign key](decisions.md#the-copy-group-is-a-shared-label-not-a-self-referencing-foreign-key) | 223 |
@@ -143,8 +143,12 @@ repeat the argument.
 | Backend | [Python 3.14 is a hard requirement, and PEP 649 is why](decisions.md#python-314-is-a-hard-requirement-and-pep-649-is-why) | 34 |
 | Backend | [The test suites were slow for reasons nobody had measured](decisions.md#the-test-suites-were-slow-for-reasons-nobody-had-measured) | 451 |
 | Backend | [The per-test reset deletes rows, and two faster designs were refused](decisions.md#the-per-test-reset-deletes-rows-and-two-faster-designs-were-refused) | 450 |
+| Backend | [The per test ceiling is derived from the tree, not chosen from a distribution](decisions.md#the-per-test-ceiling-is-derived-from-the-tree-not-chosen-from-a-distribution) | 274 |
+| Backend | [A verdict is a claim about a denominator, and the layer everyone reads had none](decisions.md#a-verdict-is-a-claim-about-a-denominator-and-the-layer-everyone-reads-had-none) | 502 |
 | Backend | [The remote test runner was reporting on a tree nobody had](decisions.md#the-remote-test-runner-was-reporting-on-a-tree-nobody-had) | 167 |
 | Backend | [A seeded tag is identified by a key, not by its name](decisions.md#a-seeded-tag-is-identified-by-a-key-not-by-its-name) | 366 |
+| Backend | [Who may be told a tag exists is a question about books, answered in one module](decisions.md#who-may-be-told-a-tag-exists-is-a-question-about-books-answered-in-one-module) | 285 |
+| Backend | [The tag name index has no viewer, and the viewer sits on the hand off instead](decisions.md#the-tag-name-index-has-no-viewer-and-the-viewer-sits-on-the-hand-off-instead) | 448 |
 | Backend | [The Catalogue record is a type, and the two dialects are gone](decisions.md#the-catalogue-record-is-a-type-and-the-two-dialects-are-gone) | 856 |
 | Backend | [The Austrian National Library is a third MARCXML source, and the probe is why it works](decisions.md#the-austrian-national-library-is-a-third-marcxml-source-and-the-probe-is-why-it-works) | 645 |
 | Backend | [Where it sits](decisions.md#where-it-sits) | 126 |
@@ -161,7 +165,7 @@ repeat the argument.
 | Backend | [A payload's per viewer half is a type, and it carries no defaults](decisions.md#a-payloads-per-viewer-half-is-a-type-and-it-carries-no-defaults) | 275 |
 | Backend | [`LoanOut.book` is `BookColumns`, and it stops there rather than at four fields](decisions.md#loanoutbook-is-bookcolumns-and-it-stops-there-rather-than-at-four-fields) | 245 |
 | Backend | [A measured number lives where the column is declared](decisions.md#a-measured-number-lives-where-the-column-is-declared) | 231 |
-|  | [Frontend](decisions.md#frontend) | 14,581 |
+|  | [Frontend](decisions.md#frontend) | 14,679 |
 | Frontend | [Page-centric colocation](decisions.md#page-centric-colocation) | 18 |
 | Frontend | [`useLibrary` has one door for filters, not a setter per field](decisions.md#uselibrary-has-one-door-for-filters-not-a-setter-per-field) | 559 |
 | Frontend | [A stored preference has one owner, and the subscription is what retired the counter](decisions.md#a-stored-preference-has-one-owner-and-the-subscription-is-what-retired-the-counter) | 1,169 |
@@ -171,7 +175,7 @@ repeat the argument.
 | Frontend | [`includeHttpResponseReturnType: false`](decisions.md#includehttpresponsereturntype-false) | 36 |
 | Frontend | [`api/mutator.ts` throws on 401, except on the credential endpoints](decisions.md#apimutatorts-throws-on-401-except-on-the-credential-endpoints) | 103 |
 | Frontend | [The multipart path does not set `Content-Type`](decisions.md#the-multipart-path-does-not-set-content-type) | 22 |
-| Frontend | [Every request declares `Accept`, and a download declares something else](decisions.md#every-request-declares-accept-and-a-download-declares-something-else) | 202 |
+| Frontend | [Every request declares `Accept`, and a download declares something else](decisions.md#every-request-declares-accept-and-a-download-declares-something-else) | 300 |
 | Frontend | [The endless spinner was two faults, and neither was wrong on its own](decisions.md#the-endless-spinner-was-two-faults-and-neither-was-wrong-on-its-own) | 395 |
 | Frontend | [`isRedirect()` is `opaqueredirect` only](decisions.md#isredirect-is-opaqueredirect-only) | 110 |
 | Frontend | [The reload is counted, and an uncountable one is not taken](decisions.md#the-reload-is-counted-and-an-uncountable-one-is-not-taken) | 331 |
@@ -232,7 +236,7 @@ repeat the argument.
 | A write names what it made stale | [Deleting a custom field is admin only, defining one is not](decisions.md#deleting-a-custom-field-is-admin-only-defining-one-is-not) | 68 |
 | A write names what it made stale | [`MAX_CUSTOM_FIELDS` is the only ceiling the feature needs](decisions.md#max_custom_fields-is-the-only-ceiling-the-feature-needs) | 57 |
 | A write names what it made stale | [Settings is an index of six routes, and the descriptions are the page](decisions.md#settings-is-an-index-of-six-routes-and-the-descriptions-are-the-page) | 433 |
-|  | [Tooling](decisions.md#tooling) | 4,669 |
+|  | [Tooling](decisions.md#tooling) | 5,164 |
 | Tooling | [Bun, not npm](decisions.md#bun-not-npm) | 27 |
 | Tooling | [`bunfig.toml` configures a security scanner](decisions.md#bunfigtoml-configures-a-security-scanner) | 66 |
 | Tooling | [`--import-mode=importlib` for pytest](decisions.md#--import-modeimportlib-for-pytest) | 10 |
@@ -249,7 +253,9 @@ repeat the argument.
 | Tooling | [A schema driven run over every operation, and what it is allowed to claim](decisions.md#a-schema-driven-run-over-every-operation-and-what-it-is-allowed-to-claim) | 639 |
 | Tooling | [Three ways a response contradicted the schema that declares it, and one 500](decisions.md#three-ways-a-response-contradicted-the-schema-that-declares-it-and-one-500) | 588 |
 | Tooling | [Every hand raised refusal is a sentence, so none of them may use 422](decisions.md#every-hand-raised-refusal-is-a-sentence-so-none-of-them-may-use-422) | 429 |
-| Tooling | [A route that answers with no body documents none](decisions.md#a-route-that-answers-with-no-body-documents-none) | 312 |
+| Tooling | [A route that answers with no body documents none](decisions.md#a-route-that-answers-with-no-body-documents-none) | 311 |
+| Tooling | [A route declares every answer it files, and no rule chooses between them](decisions.md#a-route-declares-every-answer-it-files-and-no-rule-chooses-between-them) | 277 |
+| Tooling | [The truth about a partial answer is a second media type, not a second copy of the first](decisions.md#the-truth-about-a-partial-answer-is-a-second-media-type-not-a-second-copy-of-the-first) | 186 |
 | Tooling | [Findings answered rather than fixed](decisions.md#findings-answered-rather-than-fixed) | 455 |
 |  | [Reference implementations: what may be read, and what may not be copied](decisions.md#reference-implementations-what-may-be-read-and-what-may-not-be-copied) | 239 |
 |  | [Product](decisions.md#product) | 2,230 |
@@ -346,11 +352,12 @@ repeat the argument.
 | Open, and not resolved in this ticket | [A source that cannot answer says which of two things is wrong](decisions.md#a-source-that-cannot-answer-says-which-of-two-things-is-wrong) | 63 |
 | Open, and not resolved in this ticket | [An evasion attempt is bounded by the shapes its author imagines](decisions.md#an-evasion-attempt-is-bounded-by-the-shapes-its-author-imagines) | 180 |
 | Open, and not resolved in this ticket | [A paragraph describing behaviour is not re-read when the behaviour changes](decisions.md#a-paragraph-describing-behaviour-is-not-re-read-when-the-behaviour-changes) | 181 |
-|  | [MARC21 import and export](decisions.md#marc21-import-and-export) | 9,513 |
+|  | [MARC21 import and export](decisions.md#marc21-import-and-export) | 10,289 |
 | MARC21 import and export | [MARC is read through `metadata.py`'s parser, not a second one](decisions.md#marc-is-read-through-metadatapys-parser-not-a-second-one) | 209 |
 | MARC21 import and export | [What `marc.py` refuses is deliberately narrower than what a lookup refuses](decisions.md#what-marcpy-refuses-is-deliberately-narrower-than-what-a-lookup-refuses) | 110 |
 | MARC21 import and export | [An oversized MARC file is refused, where an oversized CSV is truncated](decisions.md#an-oversized-marc-file-is-refused-where-an-oversized-csv-is-truncated) | 62 |
-| MARC21 import and export | [The MARCXML export is paged rather than capped](decisions.md#the-marcxml-export-is-paged-rather-than-capped) | 990 |
+| MARC21 import and export | [The MARCXML export is paged rather than capped](decisions.md#the-marcxml-export-is-paged-rather-than-capped) | 1,035 |
+| MARC21 import and export | [Every export arm walks the same pages](decisions.md#every-export-arm-walks-the-same-pages) | 723 |
 | MARC21 import and export | [Library mode is enforced on the server for MARC, at 403](decisions.md#library-mode-is-enforced-on-the-server-for-marc-at-403) | 83 |
 | MARC21 import and export | [One line a member typed: three rules, and which field takes which](decisions.md#one-line-a-member-typed-three-rules-and-which-field-takes-which) | 844 |
 | MARC21 import and export | [`classifications.py` exists because a ceiling with two implementations is not one](decisions.md#classificationspy-exists-because-a-ceiling-with-two-implementations-is-not-one) | 48 |
@@ -437,13 +444,14 @@ repeat the argument.
 |  | [Four figures in the roster census are snapshots rather than recomputed, deliberately](decisions.md#four-figures-in-the-roster-census-are-snapshots-rather-than-recomputed-deliberately) | 172 |
 |  | [`merge_into` takes a `BookMatch`, not a dictionary](decisions.md#merge_into-takes-a-bookmatch-not-a-dictionary) | 183 |
 |  | [The enrichment door drops the field; the search door drops the row](decisions.md#the-enrichment-door-drops-the-field-the-search-door-drops-the-row) | 360 |
-|  | [The two doors over `books.categories`, and why they differ](decisions.md#the-two-doors-over-bookscategories-and-why-they-differ) | 1,820 |
-| The two doors over `books.categories`, and why they differ | [The 422 is unreachable from an honest producer today, and that is a precondition rather than a note](decisions.md#the-422-is-unreachable-from-an-honest-producer-today-and-that-is-a-precondition-rather-than-a-note) | 141 |
-| The two doors over `books.categories`, and why they differ | [The frequency measurement was withdrawn, and where a split would live if it is ever run](decisions.md#the-frequency-measurement-was-withdrawn-and-where-a-split-would-live-if-it-is-ever-run) | 113 |
-| The two doors over `books.categories`, and why they differ | [The bound is two named factors, and both are literals](decisions.md#the-bound-is-two-named-factors-and-both-are-literals) | 263 |
-| The two doors over `books.categories`, and why they differ | [The write has no unwrite](decisions.md#the-write-has-no-unwrite) | 133 |
-| The two doors over `books.categories`, and why they differ | [One demand declined, with the reason, because its only other home is deleted](decisions.md#one-demand-declined-with-the-reason-because-its-only-other-home-is-deleted) | 76 |
-| The two doors over `books.categories`, and why they differ | [`categories` is deliberately absent from the MARC importer's field list](decisions.md#categories-is-deliberately-absent-from-the-marc-importers-field-list) | 91 |
+|  | [The three doors over `books.categories`, and why they differ](decisions.md#the-three-doors-over-bookscategories-and-why-they-differ) | 2,290 |
+| The three doors over `books.categories`, and why they differ | [The 422 is unreachable from an honest producer today, and that is a precondition rather than a note](decisions.md#the-422-is-unreachable-from-an-honest-producer-today-and-that-is-a-precondition-rather-than-a-note) | 141 |
+| The three doors over `books.categories`, and why they differ | [The frequency measurement was withdrawn, and where a split would live if it is ever run](decisions.md#the-frequency-measurement-was-withdrawn-and-where-a-split-would-live-if-it-is-ever-run) | 113 |
+| The three doors over `books.categories`, and why they differ | [The bound is two named factors, and both are literals](decisions.md#the-bound-is-two-named-factors-and-both-are-literals) | 263 |
+| The three doors over `books.categories`, and why they differ | [The write has an unwrite, and it is an empty list](decisions.md#the-write-has-an-unwrite-and-it-is-an-empty-list) | 344 |
+| The three doors over `books.categories`, and why they differ | [The second writer of a reshaped column arrives at a door with no refusal on it](decisions.md#the-second-writer-of-a-reshaped-column-arrives-at-a-door-with-no-refusal-on-it) | 184 |
+| The three doors over `books.categories`, and why they differ | [One demand declined, with the reason, because its only other home is deleted](decisions.md#one-demand-declined-with-the-reason-because-its-only-other-home-is-deleted) | 76 |
+| The three doors over `books.categories`, and why they differ | [`categories` is deliberately absent from the MARC importer's field list](decisions.md#categories-is-deliberately-absent-from-the-marc-importers-field-list) | 91 |
 |  | [A guard that names two enforcers and has one](decisions.md#a-guard-that-names-two-enforcers-and-has-one) | 160 |
 |  | [The series ceiling is applied at the reader as well as at the writers](decisions.md#the-series-ceiling-is-applied-at-the-reader-as-well-as-at-the-writers) | 234 |
 |  | [The record's own carrier code decides, and prose is the fallback](decisions.md#the-records-own-carrier-code-decides-and-prose-is-the-fallback) | 257 |
@@ -472,6 +480,7 @@ repeat the argument.
 |  | [The column boundary for a MARC record is `marc.py`'s field mapping, and it is now pinned](decisions.md#the-column-boundary-for-a-marc-record-is-marcpys-field-mapping-and-it-is-now-pinned) | 173 |
 |  | [Masking is supported because SQLite's LIKE does not backtrack](decisions.md#masking-is-supported-because-sqlites-like-does-not-backtrack) | 304 |
 |  | [The query bound is a cost budget, because a count of predicates is not a cost](decisions.md#the-query-bound-is-a-cost-budget-because-a-count-of-predicates-is-not-a-cost) | 238 |
+|  | [The SRU response bound is charged in bytes, and the row count is not that bound](decisions.md#the-sru-response-bound-is-charged-in-bytes-and-the-row-count-is-not-that-bound) | 1,006 |
 |  | [An integer the storage engine cannot hold was three unauthenticated 500s](decisions.md#an-integer-the-storage-engine-cannot-hold-was-three-unauthenticated-500s) | 216 |
 |  | [A filter is a read of its column, and only the record writer was guarded](decisions.md#a-filter-is-a-read-of-its-column-and-only-the-record-writer-was-guarded) | 93 |
 |  | [`explain` reads the `Host` header directly, and not `request.url`](decisions.md#explain-reads-the-host-header-directly-and-not-requesturl) | 170 |
@@ -500,6 +509,8 @@ repeat the argument.
 |  | [A batch relink is one transaction, and a decision is never repointed](decisions.md#a-batch-relink-is-one-transaction-and-a-decision-is-never-repointed) | 571 |
 |  | [A catalogue credential's source is constrained, and that is not the foreign key by another name](decisions.md#a-catalogue-credentials-source-is-constrained-and-that-is-not-the-foreign-key-by-another-name) | 417 |
 |  | [`conformance/` is published, and the fixtures are the specification](decisions.md#conformance-is-published-and-the-fixtures-are-the-specification) | 107 |
+|  | [A conformance case pins the intermediate when the rule spans two functions](decisions.md#a-conformance-case-pins-the-intermediate-when-the-rule-spans-two-functions) | 309 |
+|  | [One conformance document per domain, because the guard anchors on a header](decisions.md#one-conformance-document-per-domain-because-the-guard-anchors-on-a-header) | 160 |
 |  | [The ASCII guard in `isbn.normalise` widens the backend rather than narrowing it](decisions.md#the-ascii-guard-in-isbnnormalise-widens-the-backend-rather-than-narrowing-it) | 73 |
 |  | [The candidate list sets column priority, and the pool is kept though it is inert](decisions.md#the-candidate-list-sets-column-priority-and-the-pool-is-kept-though-it-is-inert) | 219 |
 |  | [Encoding is decided per byte where the file is UTF-8, and per file where it is not](decisions.md#encoding-is-decided-per-byte-where-the-file-is-utf-8-and-per-file-where-it-is-not) | 594 |
@@ -585,6 +596,8 @@ repeat the argument.
 | A plausible year and a storable year are two questions, and the plausible one is a function | [Seven modules read a publication year, and they apply three different rules](decisions.md#seven-modules-read-a-publication-year-and-they-apply-three-different-rules) | 267 |
 | A plausible year and a storable year are two questions, and the plausible one is a function | [One defect, two seats, two instruments, and it was already fixed](decisions.md#one-defect-two-seats-two-instruments-and-it-was-already-fixed) | 83 |
 |  | [A file's subject is a category, not a tag, and the library says so by 1.058](decisions.md#a-files-subject-is-a-category-not-a-tag-and-the-library-says-so-by-1058) | 328 |
+|  | [A file's subject is shown where it is still reversible, not where the design round put it](decisions.md#a-files-subject-is-shown-where-it-is-still-reversible-not-where-the-design-round-put-it) | 167 |
+|  | [What the browser rebuilds of the server's normaliser, and what keeps it one directional](decisions.md#what-the-browser-rebuilds-of-the-servers-normaliser-and-what-keeps-it-one-directional) | 355 |
 |  | [Excluding Calibre's tags is a scope decision, and the request figure was wrong](decisions.md#excluding-calibres-tags-is-a-scope-decision-and-the-request-figure-was-wrong) | 358 |
 |  | [A Calibre library's `metadata.opf` is a stale copy of the index, not a second source](decisions.md#a-calibre-librarys-metadataopf-is-a-stale-copy-of-the-index-not-a-second-source) | 156 |
 |  | [The 57 books are the undefined date, and the correction runs the other way](decisions.md#the-57-books-are-the-undefined-date-and-the-correction-runs-the-other-way) | 444 |
@@ -706,6 +719,9 @@ repeat the argument.
 |  | [The rule that one module writes a shelf in bulk is two assertions, not one](decisions.md#the-rule-that-one-module-writes-a-shelf-in-bulk-is-two-assertions-not-one) | 334 |
 |  | [oxlint is adopted as a ratchet, and the suppression list is two lists](decisions.md#oxlint-is-adopted-as-a-ratchet-and-the-suppression-list-is-two-lists) | 524 |
 |  | [Three more ruff families, and what each suppression is standing on](decisions.md#three-more-ruff-families-and-what-each-suppression-is-standing-on) | 1,904 |
+|  | [The tooling tree's disciplines run in the backend suite, not in a job step](decisions.md#the-tooling-trees-disciplines-run-in-the-backend-suite-not-in-a-job-step) | 250 |
+|  | [Turning a linter on is not the same as fixing what it finds](decisions.md#turning-a-linter-on-is-not-the-same-as-fixing-what-it-finds) | 282 |
+|  | [A floor that nothing drives is not a floor](decisions.md#a-floor-that-nothing-drives-is-not-a-floor) | 164 |
 |  | [The working notes are split by how often a rule fires, not by how important it is](decisions.md#the-working-notes-are-split-by-how-often-a-rule-fires-not-by-how-important-it-is) | 543 |
 |  | [A claim about a file is verified by reading the file back, in the call that makes it](decisions.md#a-claim-about-a-file-is-verified-by-reading-the-file-back-in-the-call-that-makes-it) | 231 |
 |  | [The container rule took five review rounds, and four of them were one defect](decisions.md#the-container-rule-took-five-review-rounds-and-four-of-them-were-one-defect) | 466 |
@@ -724,7 +740,7 @@ repeat the argument.
 | The structural house rules stay in the test tree, and both contract tools are refused | [What would change the answer](decisions.md#what-would-change-the-answer) | 92 |
 |  | [An absence is not a verdict, and the ratchet now proves its report arrived](decisions.md#an-absence-is-not-a-verdict-and-the-ratchet-now-proves-its-report-arrived) | 1,686 |
 |  | [The publish gate's forbidden list cannot hold every node name](decisions.md#the-publish-gates-forbidden-list-cannot-hold-every-node-name) | 100 |
-|  | [A documented command is validated, not generated](decisions.md#a-documented-command-is-validated-not-generated) | 783 |
+|  | [A documented command is validated, not generated](decisions.md#a-documented-command-is-validated-not-generated) | 1,128 |
 |  | [The house rule learned what the revision beside it already knew](decisions.md#the-house-rule-learned-what-the-revision-beside-it-already-knew) | 568 |
 |  | [A `GLOB` rule claims only what a NUL lets it read](decisions.md#a-glob-rule-claims-only-what-a-nul-lets-it-read) | 452 |
 |  | [A bound on a confined column is written in bytes, once, not in both units](decisions.md#a-bound-on-a-confined-column-is-written-in-bytes-once-not-in-both-units) | 528 |
@@ -739,14 +755,14 @@ repeat the argument.
 |  | [Every CHECK is compared as text, and a fourth premise arm asks a boot what it built](decisions.md#every-check-is-compared-as-text-and-a-fourth-premise-arm-asks-a-boot-what-it-built) | 810 |
 |  | [An enum list in a CHECK is derived from its enum, so growing the enum names the missing revision](decisions.md#an-enum-list-in-a-check-is-derived-from-its-enum-so-growing-the-enum-names-the-missing-revision) | 1,220 |
 |  | [The diagonal that drives a walk reads the test tree, not one file](decisions.md#the-diagonal-that-drives-a-walk-reads-the-test-tree-not-one-file) | 732 |
-|  | [The mutation sweep takes its own interrupt back](decisions.md#the-mutation-sweep-takes-its-own-interrupt-back) | 417 |
+|  | [The mutation sweep takes its own interrupt back](decisions.md#the-mutation-sweep-takes-its-own-interrupt-back) | 611 |
 |  | [The fold is one thing and the predicate is another](decisions.md#the-fold-is-one-thing-and-the-predicate-is-another) | 433 |
 |  | [Whitespace is stripped after punctuation is removed, never before](decisions.md#whitespace-is-stripped-after-punctuation-is-removed-never-before) | 234 |
 |  | [The reading history title takes half the fold and refuses the other half](decisions.md#the-reading-history-title-takes-half-the-fold-and-refuses-the-other-half) | 1,814 |
 | The reading history title takes half the fold and refuses the other half | [A provenance claim is the most quotable sentence in a module and the least checked](decisions.md#a-provenance-claim-is-the-most-quotable-sentence-in-a-module-and-the-least-checked) | 1,368 |
 |  | [A leading article is a title's, never a credit's](decisions.md#a-leading-article-is-a-titles-never-a-credits) | 84 |
 |  | [`identity.py` is kept although the depth instrument argues against it](decisions.md#identitypy-is-kept-although-the-depth-instrument-argues-against-it) | 361 |
-|  | [The two completeness scores are two questions, not one list](decisions.md#the-two-completeness-scores-are-two-questions-not-one-list) | 462 |
+|  | [The two completeness scores are two questions, not one list](decisions.md#the-two-completeness-scores-are-two-questions-not-one-list) | 671 |
 |  | [An arm compared against itself survives every mutant, and the sweep cannot see it](decisions.md#an-arm-compared-against-itself-survives-every-mutant-and-the-sweep-cannot-see-it) | 257 |
 |  | [An arm that pins the wrong thing, and the seat that withdrew its own finding](decisions.md#an-arm-that-pins-the-wrong-thing-and-the-seat-that-withdrew-its-own-finding) | 314 |
 |  | [A guard for the general components folder names no domain word](decisions.md#a-guard-for-the-general-components-folder-names-no-domain-word) | 125 |
@@ -779,4 +795,26 @@ repeat the argument.
 |  | [One fact, several homes, and the sweep for the others is part of the change](decisions.md#one-fact-several-homes-and-the-sweep-for-the-others-is-part-of-the-change) | 169 |
 |  | [The field a heading goes in and the code naming its vocabulary are one decision](decisions.md#the-field-a-heading-goes-in-and-the-code-naming-its-vocabulary-are-one-decision) | 351 |
 |  | [A generated export of the lockfile is not committed, because the scanner already reads the lock](decisions.md#a-generated-export-of-the-lockfile-is-not-committed-because-the-scanner-already-reads-the-lock) | 597 |
+|  | [`UserCreate.username` is the only username field in the application carrying a pattern](decisions.md#usercreateusername-is-the-only-username-field-in-the-application-carrying-a-pattern) | 479 |
+|  | [A recovery phrase is told from prose by its glue, not by its checksum](decisions.md#a-recovery-phrase-is-told-from-prose-by-its-glue-not-by-its-checksum) | 372 |
+|  | [A fixture that must be a valid phrase is derived, never written down](decisions.md#a-fixture-that-must-be-a-valid-phrase-is-derived-never-written-down) | 125 |
+|  | [An exclusion arm pins the predicate's shape and says nothing about its argument](decisions.md#an-exclusion-arm-pins-the-predicates-shape-and-says-nothing-about-its-argument) | 121 |
+|  | [An unreachable fixture pins a state the server cannot produce](decisions.md#an-unreachable-fixture-pins-a-state-the-server-cannot-produce) | 171 |
+|  | [The death signal an arm carries is the uncatchable one](decisions.md#the-death-signal-an-arm-carries-is-the-uncatchable-one) | 486 |
+|  | [What a killed suite run leaves is three things, and the third had no owner](decisions.md#what-a-killed-suite-run-leaves-is-three-things-and-the-third-had-no-owner) | 556 |
+|  | [A gate whose hostile input is rejected by an earlier gate has no test](decisions.md#a-gate-whose-hostile-input-is-rejected-by-an-earlier-gate-has-no-test) | 211 |
+|  | [A deadline test turns on a fact, because every clock available to it is wider than the thing it measures](decisions.md#a-deadline-test-turns-on-a-fact-because-every-clock-available-to-it-is-wider-than-the-thing-it-measures) | 545 |
+|  | [A row count is a second instrument, and the two numbers are read together](decisions.md#a-row-count-is-a-second-instrument-and-the-two-numbers-are-read-together) | 595 |
+|  | [A liveness guard on an instrument reads the magnitude, never the key](decisions.md#a-liveness-guard-on-an-instrument-reads-the-magnitude-never-the-key) | 125 |
+|  | [An instrument's reach is bounded by the container types its walker knows](decisions.md#an-instruments-reach-is-bounded-by-the-container-types-its-walker-knows) | 353 |
+|  | [The directory username is bounded where the row is written, not by a column constraint](decisions.md#the-directory-username-is-bounded-where-the-row-is-written-not-by-a-column-constraint) | 777 |
+|  | [A refused name is logged in full, and a dict of directory results is not clipped](decisions.md#a-refused-name-is-logged-in-full-and-a-dict-of-directory-results-is-not-clipped) | 191 |
+|  | [The one username log line an unauthenticated caller reaches composes both bounds](decisions.md#the-one-username-log-line-an-unauthenticated-caller-reaches-composes-both-bounds) | 247 |
+|  | [A receiver of the public tree blocks the publish, or says at its own site why it does not](decisions.md#a-receiver-of-the-public-tree-blocks-the-publish-or-says-at-its-own-site-why-it-does-not) | 797 |
+|  | [One function scans the commit and sends it, because two of them cannot be kept in step](decisions.md#one-function-scans-the-commit-and-sends-it-because-two-of-them-cannot-be-kept-in-step) | 482 |
+|  | [The commit subject is a publication channel, and the publish fails rather than rewriting it](decisions.md#the-commit-subject-is-a-publication-channel-and-the-publish-fails-rather-than-rewriting-it) | 265 |
+|  | [The outbound commit message is an artefact, so there is one evaluation and nothing to compare](decisions.md#the-outbound-commit-message-is-an-artefact-so-there-is-one-evaluation-and-nothing-to-compare) | 366 |
+|  | [A secret scanner that asks a library inherits the library's blind spots](decisions.md#a-secret-scanner-that-asks-a-library-inherits-the-librarys-blind-spots) | 279 |
+|  | [The sentence wider than its measurement is written by the careful seat, not the careless one](decisions.md#the-sentence-wider-than-its-measurement-is-written-by-the-careful-seat-not-the-careless-one) | 1,117 |
+|  | [A guard's verdict can be a property of the tree rather than of the guard](decisions.md#a-guards-verdict-can-be-a-property-of-the-tree-rather-than-of-the-guard) | 567 |
 <!-- index: end -->

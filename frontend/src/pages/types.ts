@@ -7,6 +7,13 @@
  * tag editor through the one `TagPicker` all three draw, so it belongs at this
  * level rather than inside any of them.
  *
+ * **A constant also lives here when a rule outside the page has to read it**,
+ * which is the second criterion and the one `STATUS_STYLES` is here on: the
+ * card is its only consumer, so the paragraph above would send it back down.
+ * The paragraph at that constant says what reads it and why. Moving it back
+ * is a compile error wherever those rules import it rather than a silent
+ * regression, which is the property that makes this safe to state once.
+ *
  * Wire types (BookOut, LoanOut, ...) are NOT redeclared here. They are
  * generated from the OpenAPI schema into `src/api/generated/model`.
  */
@@ -101,6 +108,73 @@ export const STATUS_LABELS: Record<ReadStatus, MessageKey> = {
   [ReadStatus.reading]: "status.reading",
   [ReadStatus.read]: "status.read",
   [ReadStatus.did_not_finish]: "status.did_not_finish",
+};
+
+/**
+ * What each reading status looks like.
+ *
+ * Here for the reason `STATUS_LABELS` above is: the card drew it and nothing
+ * else could see it, while its two siblings in this file were already the
+ * house shape for a keyed table of classes.
+ *
+ * **A named export rather than inline JSX, and that is a constraint on this
+ * file now.** `tests/theme/palettes.test.ts::the status pill's ink, as it
+ * draws` imports this table and measures, over every palette, the two rows
+ * whose pill sits on the paper ramp: `unread` and `did_not_finish`. The other
+ * three are bloom, amber and accent and are not read at all: handed one, that
+ * rule would refuse it, naming the role and the string, rather than measure
+ * it, and no path hands it one. A class string folded into the card's markup
+ * is a pairing that rule can no longer see, so it would go green on a pill
+ * nobody checks. The constraint is written here because the alternative is
+ * somebody simplifying the export away as unnecessary indirection: it is not
+ * indirection, it is the seam the measurement reads. What holds the card to
+ * actually drawing it is `tests/pages/components/BookCard.test.tsx::draws the
+ * %s pill from the shared table`, which is the one thing an import cannot tell
+ * you. The `%s` is the label that arm writes, not a placeholder for this
+ * sentence: it is driven over every status and expands to one arm per row.
+ *
+ * The rule reads the classes as tokens, so on the two rows it reads the order
+ * of the pair, a variant sitting between them and any further utility are
+ * free. **One exception, and it is a refusal rather than a miss**: a second
+ * unprefixed `bg-paper-*` or `text-paper-*` on either of those rows makes that
+ * rule refuse, naming both tokens, because which of the two paints is decided
+ * by stylesheet order and not by the string. A variant of the same utility is
+ * not a second one.
+ */
+export const STATUS_STYLES: Record<ReadStatus, string> = {
+  // **Below the floor, and pre-existing.** As it actually draws, the ink on
+  // this tint composited over the paper-0 card, it falls under the 4.5 every
+  // text pair in `tests/theme/palettes.test.ts` is held to, on palettes where
+  // the same ink on the card clears it. That is recomputed there by `the
+  // status pill's ink, as it draws`, over every palette and with the tint
+  // composited; `docs/decisions.md` carries the figures, and its table is held
+  // against the stylesheets by the same file. Not changed here, because a
+  // status pill's colour is a design decision across five values and this
+  // change owns one of them. The test added with `did_not_finish` pins that
+  // pill only.
+  [ReadStatus.unread]:
+    "bg-paper-200/70 text-paper-600 dark:bg-paper-800 dark:text-paper-300",
+  // Bloom, not danger. Wanting to read something is the pleased note, and the
+  // two were one rose until they were split: see --color-danger-* in index.css.
+  [ReadStatus.want_to_read]:
+    "bg-bloom-100 text-bloom-700 dark:bg-bloom-700/25 dark:text-bloom-300",
+  [ReadStatus.reading]:
+    "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
+  [ReadStatus.read]:
+    "bg-accent-100 text-accent-800 dark:bg-accent-500/15 dark:text-accent-200",
+  // The paper ramp, not a semantic one. Giving up on a book is neither an
+  // error nor an achievement, and a rose or an amber pill would make the shelf
+  // look like it was reporting a problem.
+  //
+  // `paper-800` on `paper-200`, not the `paper-600` the `unread` pill uses.
+  // Flat, because this pill is `bg-paper-200` at full opacity, and it is the
+  // only rung from the `unread` pill's ink up to this one that clears 4.5 on
+  // every palette: recomputed by `tests/theme/palettes.test.ts::the status
+  // pill's ink, as it draws`, which reads both ends off the two class strings
+  // here rather than restating them. The pair itself is in that file's
+  // contract, in both modes.
+  [ReadStatus.did_not_finish]:
+    "bg-paper-200 text-paper-800 dark:bg-paper-800 dark:text-paper-200",
 };
 
 /**

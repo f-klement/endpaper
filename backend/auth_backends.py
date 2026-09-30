@@ -43,6 +43,7 @@ from config import (
     proxy_user_header,
 )
 from enums import AuthMode, VerificationProvenance
+from logvalues import clipped
 from models import USERNAME_MAX, User
 
 logger = logging.getLogger("endpaper.auth")
@@ -102,10 +103,10 @@ def _move_test_account_aside(db: Session, user: User, source: AuthMode) -> None:
     taken = user.username
     user.username = _free_username(db, taken)
     logger.warning(
-        "Renamed the test account %r to %r: a %s identity of that name signed in, "
+        "Renamed the test account %s to %s: a %s identity of that name signed in, "
         "and a test account is never adopted by a directory",
-        taken,
-        user.username,
+        clipped(taken),
+        clipped(user.username),
         source.value,
     )
     db.flush()
@@ -188,8 +189,12 @@ def upsert_directory_user(
     is_admin: bool,
     source: AuthMode,
     email: str | None = None,
-) -> User:
+) -> User | None:
     """Find or create the local row backing a directory identity.
+
+    `None` means the identity was refused and no row exists for it: today the
+    one cause is a name wider than the column, argued at that check. Both
+    callers already answer `User | None`, so a refused sign-in is a failed one.
 
     Admin status is re-applied on every sign-in, so removing someone from the
     admin group in the directory takes effect the next time they log in rather
@@ -234,6 +239,70 @@ def upsert_directory_user(
     back. `.env.example`, `README.md` and `DOCKERHUB.md` all say so, because
     the person who turns the attribute on is the one who needs to know.
     """
+    # **Refused, not truncated, and this is where both doors meet.** The
+    # column is `String(USERNAME_MAX)` and SQLite does not enforce a VARCHAR
+    # length, so a directory returning a longer identifier used to write the
+    # row and log it at that size.
+    #
+    # Truncating instead would be worse than storing it. The match below is on
+    # `User.username`, which is unique, so two directory identities sharing a
+    # `USERNAME_MAX` character prefix would land on one row and the second
+    # sign-in would inherit the first's books, loans and notes, with a 200 and
+    # nothing in the log. `catalogue._drop_unstorable` already ruled that way
+    # for a catalogue record: half a value is an assertion nobody made.
+    #
+    # Here rather than at either resolution site, because this is the single
+    # `User(...)` construction site the directory modes reach.
+    # `tests/test_house_rules.py::TestEveryDirectoryDoorWritesThroughOneFunnel`
+    # counts those sites per module, so a door appended here moves the census
+    # rather than hiding behind a path that was already in it. It sees a call
+    # to the model class and nothing else: a row written through Core, which
+    # `backup.restore` does, is past it and past this check, and only the
+    # column constraint `docs/decisions.md` declined would have bound that.
+    #
+    # **Only the LDAP door reaches this refusal, and saying so is the point.**
+    # `_PROXY_USERNAME` derives its repeat from `USERNAME_MAX`, so the proxy
+    # door already refused a wider name before this existed and returns None
+    # without ever calling here. What is new is the LDAP door, where the value
+    # is a directory attribute nothing bounded. This is the backstop for the
+    # proxy door rather than its bound: widening that regex past the column
+    # lands here instead of writing a row.
+    #
+    # **It also refuses a sign-in a stored row used to get.** The check sits
+    # above the lookup, so a row already wider than the column, written before
+    # this or restored through Core, no longer matches and its owner is locked
+    # out until somebody renames it. Deliberate: that is the 2026-08-18 row as
+    # well as a legitimate long directory name, and the line below names the
+    # width and the name so an operator can find which.
+    #
+    # **And the lockout is per mode, which is the half that reads as a
+    # contradiction otherwise.** Local mode never calls here, so the same wide
+    # row signs in through `authenticate_local` and is served in full by the
+    # member list, whose schema carries no ceiling. Switching a deployment
+    # from local to a directory mode is therefore what turns that row from
+    # working into locked out.
+    #
+    # `USERNAME_MAX` rather than a written width, for the reason
+    # `_free_username` gives: a literal goes on refusing at the old width after
+    # the column moves.
+    if len(username) > USERNAME_MAX:
+        # **Wording that shares no prefix with the proxy door's refusal, on
+        # purpose.** With `source.value` at the front this reads `Refused a
+        # proxy identity`, which is also how the header refusal opens, and an
+        # alert rule or log filter keyed on that would conflate an
+        # unauthenticated header event with a directory attribute one.
+        # `tests/test_auth_backends.py::TestADirectoryNameWiderThanTheColumnIsRefused`
+        # holds the two apart.
+        logger.warning(
+            "Refused a name users.username cannot hold: %d characters "
+            "against %d, from a %s identity. %s",
+            len(username),
+            USERNAME_MAX,
+            source.value,
+            clipped(username),
+        )
+        return None
+
     user = db.query(User).filter(User.username == username).first()
 
     # Never adopt a test account. See `_move_test_account_aside`.
@@ -251,15 +320,16 @@ def upsert_directory_user(
     if user is None and db.query(User).count() == 0:
         # Same rule registration uses, for the same reason.
         logger.warning(
-            "Making %r an admin: it is the first account in this library", username
+            "Making %s an admin: it is the first account in this library",
+            clipped(username),
         )
         is_admin = True
 
     if user is not None and user.is_admin and not is_admin and not _admin_group_set(source):
         logger.warning(
-            "Keeping admin rights for %r: no admin group is configured for %s, "
+            "Keeping admin rights for %s: no admin group is configured for %s, "
             "so there is nothing to demote them on",
-            username,
+            clipped(username),
             source.value,
         )
         is_admin = True
@@ -290,8 +360,8 @@ def upsert_directory_user(
         # proxy auth it happens on an ordinary GET. The one record of the
         # 2026-08-18 incident was an INFO line in a stream nobody reads.
         logger.warning(
-            "Created account %r from a %s identity, admin=%s",
-            username,
+            "Created account %s from a %s identity, admin=%s",
+            clipped(username),
             source.value,
             is_admin,
         )
@@ -316,8 +386,8 @@ def upsert_directory_user(
     if changed:
         if user.is_admin != is_admin:
             logger.warning(
-                "Admin rights for %r changed to %s by a %s identity",
-                username,
+                "Admin rights for %s changed to %s by a %s identity",
+                clipped(username),
                 is_admin,
                 source.value,
             )
@@ -327,10 +397,10 @@ def upsert_directory_user(
             # keeping out of one. `mailer._deliver` logs a refused recipient
             # count for the same reason.
             logger.info(
-                "The %s directory %s the address for %r",
+                "The %s directory %s the address for %s",
                 source.value,
                 "cleared" if asserted is None else "set",
-                username,
+                clipped(username),
             )
             user.email = asserted
         user.is_admin = is_admin
@@ -442,6 +512,48 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
     # metacharacters cannot rewrite the query.
     search_filter = ldap_user_filter().format(username=escape_filter_chars(username))
 
+    # **Every log line below that names the value typed at the login screen
+    # passes it through `clipped`, and removing one lets an unauthenticated
+    # caller write a log line of their own.** `username` is the one value in
+    # this function that arrives straight off the wire: `LoginRequest` bounds
+    # its length and deliberately carries no pattern, so a newline in it
+    # reaches here.
+    #
+    # **The quantifier is narrow on purpose.** Two log lines below name no
+    # username at all, or name one that did not come off the wire: the service
+    # bind failure logs the directory's result, and the refused address line
+    # logs `resolved_username`, which the directory supplied. That second one
+    # is clipped now too, as is every site in `upsert_directory_user`, which
+    # both directory doors funnel through and which refuses a name the column
+    # cannot hold rather than storing or truncating it.
+    #
+    # **The service bind failure is bare, and what makes it safe is
+    # `dict.__repr__`, not the site.** `Connection.result` is a dict, so `%s`
+    # reprs each member and a directory `message` carrying a newline comes out
+    # escaped. Clipping it instead would cut a realistic Active Directory bind
+    # failure from 206 characters to 203 and take the operator's only
+    # diagnostic with it. **So logging a member of that dict directly, the
+    # obvious readability improvement, loses the escaping and needs `clipped`.**
+    #
+    # **What still goes past, stated rather than left to be found**: the
+    # refused address line in `user_from_proxy_headers` names a value
+    # `_PROXY_USERNAME` has already bounded, and the refusal line above it
+    # names one the regex has just refused, which is why it clips. Each says
+    # at its own site why it is spelled the way it is. Nothing here bounds a
+    # username once it is stored: `schemas/user.py`'s `UserOut.username` is a
+    # bare `str`, so the member list serialises a row of any width in full,
+    # and `auth._encode` writes the same value into the token's `username`
+    # claim. Both are named by path because a reader of this note has to be
+    # able to reach them.
+    #
+    # `clipped` is `repr` then a slice, and **what does the work at these two
+    # sites is the repr**, which escapes the newline that would otherwise forge
+    # a second entry. The slice is dead here, the schema having already bounded
+    # the value.
+    # `tests/routers/test_auth.py::TestAnUntrustedUsernameCannotForgeALogLine`
+    # fails if a log line from an auth route starts carrying a control
+    # character.
+
     try:
         with _connect(ldap_bind_dn(), ldap_bind_password()) as search_connection:
             if not search_connection.bind():
@@ -470,7 +582,7 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
                 logger.error(
                     "LDAP filter matched %d entries for %s",
                     len(search_connection.entries),
-                    username,
+                    clipped(username),
                 )
                 return None
 
@@ -495,10 +607,39 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
             if not user_connection.bind():
                 return None
 
-    except LDAPException:
-        # Directory unreachable or misconfigured. Logged with the traceback,
-        # reported to the caller as an ordinary failed login.
-        logger.exception("LDAP authentication failed for %s", username)
+    except LDAPException as failure:
+        # Directory unreachable or misconfigured, reported to the caller as an
+        # ordinary failed login.
+        #
+        # **`error` rather than `exception`, and the traceback is the price.**
+        # Traded 2026-09-28, deliberately. `logger.exception` emits `exc_info`
+        # as well as the interpolated argument, and ldap3 puts the assertion
+        # value verbatim into the message of the `LDAPInvalidValueError` it
+        # raises when the attribute the filter names has a strict schema
+        # validator. `uid`, the shipped default, has none; `uidNumber` on an
+        # RFC 2307 schema does, which is what a numeric login site configures.
+        # `escape_filter_chars` leaves CR and LF alone, so the traceback wrote
+        # the caller's forged line as a line of its own, past the `clipped` on
+        # the argument beside it.
+        #
+        # **What is given up is the site, and that is more than "some ldap3
+        # frames".** The `try` opens at the service bind, so a traceback from
+        # it always began with this function and often `_connect` as well.
+        # Three places raise into this handler, the service bind, the search
+        # and the user re bind, and the one message below is now identical for
+        # all three: a socket error at the first and the same class at the
+        # third were told apart by line number and no longer are.
+        #
+        # `repr` keeps the exception **class**, so the kind survives and the
+        # place does not. That is the trade, taken deliberately, because a
+        # forged log line is worse than a coarser one. The alternative that
+        # keeps both is validating the value before the search, which is a
+        # larger change than this one.
+        # `tests/routers/test_auth.py` asserts the class is still named; it
+        # asserts nothing about the site, because the site is gone.
+        logger.error(
+            "LDAP authentication failed for %s: %s", clipped(username), clipped(failure)
+        )
         return None
 
     if _address_was_refused(resolved_email):
@@ -506,10 +647,10 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
         # There is no peer: the value came from the directory this deployment
         # configured, so the attribute is what identifies it.
         logger.warning(
-            "Refused the %r attribute for %r: %d characters, not an address. "
+            "Refused the %r attribute for %s: %d characters, not an address. "
             "The stored address is cleared.",
             email_attribute,
-            resolved_username,
+            clipped(resolved_username),
             len(resolved_email or ""),
         )
 
@@ -595,9 +736,51 @@ def user_from_proxy_headers(db: Session, request: Request) -> User | None:
         # WARNING, and it names the peer: a rejected identity assertion is the
         # signature of either a misconfigured proxy or somebody reaching the
         # pod directly, and both are worth waking up for.
+        # **Both bounds, composed, and neither alone is enough.** The slice
+        # bounds the input; `clipped` reprs and bounds that repr at
+        # `LOGGED_VALUE_MAX`. An escape costs up to four characters per
+        # character, so a slice of 80 reprs to 322, and `clipped` on its own
+        # sees the whole header and spends its whole 203 even on an ordinary
+        # one. Measured over a 4000 character header, emitted characters:
+        #
+        #     input       slice under %r   clipped alone   composed
+        #     ordinary                82             203         82
+        #     newlines               162             203        162
+        #     NULs                   322             203        203
+        #
+        # Composed is tightest or equal on all three. **Where it is not
+        # tightest it costs two characters, at a repr of 201, and one at
+        # 202**: those are the widths where the repr passes `LOGGED_VALUE_MAX`
+        # by less than the three characters the ellipsis adds, so the clip
+        # spends 203 where the slice alone would have spent 201 or 202. Both
+        # are reachable from an eighty character slice, 201 from twenty NULs,
+        # fifty nine newlines and one ordinary character, 202 from forty NULs
+        # and forty ordinary ones. **Escape widths are mixed**: over all of
+        # Unicode a character reprs to one, two, four, six or ten characters,
+        # so the repr does not step uniformly, and reading 201 as unreachable
+        # because a four-character escape steps the length by three holds only
+        # while one width is used throughout.
+        #
+        # **This is the one username log line an unauthenticated caller
+        # reaches, and it fires only where the regex has just refused the
+        # value**, so the hostile rows are the ones it sees and the ordinary
+        # row is the one it never does: an argument for dropping either bound
+        # that rests on the ordinary row rests on the wrong row.
+        #
+        # What composing gives up: past 203 characters of repr the operator
+        # sees a truncated refused header rather than all 80 escaped
+        # characters. It is a header the regex already refused, and 203 is
+        # enough to recognise what arrived.
+        #
+        # `%s`, because `clipped` has already repr'd. A site left at `%r`
+        # escapes twice, and
+        # `tests/test_auth_backends.py::TestTheDirectorySuccessPathCannotForgeALogLine`
+        # collects every argument this module reprs and refuses any but the
+        # two it records as deliberately bare, whatever spelling carries the
+        # argument.
         logger.warning(
-            "Refused a proxy identity that does not look like a username: %r (%d chars) from %s",
-            username[:80],
+            "Refused a proxy identity that does not look like a username: %s (%d chars) from %s",
+            clipped(username[:80]),
             len(username),
             _peer(request),
         )
@@ -626,6 +809,9 @@ def user_from_proxy_headers(db: Session, request: Request) -> User | None:
         # `mailer._deliver` logs a count of refused recipients rather than a
         # list for the same reason; what an operator needs from this line is
         # that the upstream sent something unusable, and from where.
+        # `username` is bare rather than clipped: `_PROXY_USERNAME` matched it
+        # above, so it is at most `USERNAME_MAX` characters of
+        # `[A-Za-z0-9._@-]` and clipping would change nothing it can carry.
         logger.warning(
             "Refused the %s header for %r: %d characters, not an address, from %s. "
             "The stored address is cleared.",

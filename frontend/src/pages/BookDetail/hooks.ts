@@ -49,7 +49,7 @@ import {
   useGetQuotes,
   useListLocations,
   useListTags,
-  useCreateTag,
+  useAddBookTagByName,
   useDeleteTag,
   getListTagsQueryKey,
   useRefreshMetadata,
@@ -199,14 +199,24 @@ export function useBookActions(
     },
   });
 
-  const createTag = useCreateTag({
+  // Somebody typing a tag name while looking at a book means "this book is
+  // that", not "add a word to the list", so it is one request that invents
+  // the tag if it is new and puts it on the book either way.
+  //
+  // **This replaced a create followed by an attach, and what went with the
+  // second request is the reason to prefer this shape.** The two answered
+  // different questions, the create by name and the attach by id, and the
+  // attach refused a name colliding with a tag on a book the reader cannot
+  // see: the member was shown "Tag not found" one beat after typing a name
+  // they had never been told about. The ordering between the attach and the
+  // tag list refetch went too, along with the paragraph explaining it, since
+  // there is now nothing to order.
+  const createTag = useAddBookTagByName({
     mutation: {
-      onSuccess: (tag) => {
-        // Straight onto the book. Somebody typing a tag name while looking at
-        // a book means "this book is that", not "add a word to the list".
-        addTag.mutate({ bookId, tagId: tag.id });
-        // The tag list is its own cache entry, and the new tag has to appear
-        // in the picker as well as on the book.
+      onSuccess: () => {
+        invalidateBook();
+        // The tag list is its own cache entry, and a newly invented tag has
+        // to appear in the picker as well as on the book.
         void queryClient.invalidateQueries({ queryKey: getListTagsQueryKey() });
       },
     },
@@ -283,12 +293,15 @@ export function useBookActions(
     setPrivacy: (isPrivate) =>
       privacy.mutate({ bookId, data: { is_private: isPrivate } }),
     addTag: (tagId) => addTag.mutate({ bookId, tagId }),
-    createTag: (name) => createTag.mutate({ data: { name } }),
+    createTag: (name) => createTag.mutate({ bookId, data: { name } }),
     isCreatingTag: createTag.isPending,
     deleteTag: (tag) => {
-      // Library wide and not undoable, unlike deleting a book. The count is
-      // in the message because "delete this tag" and "take this off 214 books"
-      // are different decisions.
+      // Library wide and not undoable, unlike deleting a book, and the message
+      // says "every book" rather than a number. `book_count` is the reader's
+      // count and the delete is not: an admin was told to take a tag off 3
+      // books when it was on two hundred, and the gap is exactly other members'
+      // private books, so publishing a true count is not available either.
+      // `customFields.deleteConfirm` settled the same question first.
       if (
         confirm(
           t("tags.deleteConfirm", {
@@ -296,7 +309,6 @@ export function useBookActions(
             // typed. Through `tagName` all the same, because the rule is that
             // no tag reaches a reader by any other road.
             name: tagName(tag, locale),
-            count: tag.book_count ?? 0,
           }),
         )
       )
@@ -337,6 +349,10 @@ export function useBookActions(
       status.error ??
       privacy.error ??
       addTag.error ??
+      // Surfaced where the create's was not: it used to be swallowed by the
+      // chain that followed it, and the one refusal this door has is the tag
+      // ceiling, which is about this book and worth saying.
+      createTag.error ??
       removeTag.error ??
       removeIdentifier.error ??
       cover.error ??

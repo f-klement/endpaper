@@ -236,6 +236,13 @@ interface RapidQueueProps {
    * reason this is not the refused "Keep every name".
    */
   onKeepAllForNow: () => void;
+  /**
+   * Take one subject off one queued book, before the batch writes it.
+   *
+   * Named for what it removes rather than for the row, because the row's own
+   * removal is `onRemove` one line up and the two are different remedies.
+   */
+  onDropSubject: (key: string, subject: string) => void;
   /** Ask the catalogues again about every name kept in bulk. */
   onLookUpKept: () => void;
   /**
@@ -278,6 +285,7 @@ export default function RapidQueue({
   onKeepAllForNow,
   onLookUpKept,
   onSplit,
+  onDropSubject,
 }: RapidQueueProps) {
   const { t } = useTranslation();
   // Read out here so every figure below is spelled the way the hook spells it.
@@ -452,6 +460,63 @@ export default function RapidQueue({
                 </button>
               </div>
             )}
+
+            {/* **The subjects the file stated, and the only place they can be
+                taken off.** Nothing here is written until "Add all", and no
+                route clears `books.categories` afterwards: enrichment can
+                replace the list and never empty it, and `BookDetailsUpdate`
+                has no such field, so the remedy after the batch is deleting
+                the book. That is the same argument the grouped audio block
+                above makes for the same moment, one field over.
+
+                **Folded away behind a summary rather than always open**, the
+                grouping block's shape, because a folder pick is several
+                hundred rows and a file states up to the endpoint's whole
+                budget: open, this queue would be unreadable. The summary
+                carries the count, so a member scanning the list sees that
+                there is something to look at without opening it.
+
+                `key={subject}` is safe because `lib/bookRequest.ts` folded
+                the exact repeats out before the draft was built, which is the
+                one thing this render leans on. */}
+            {entry.draft?.categories !== undefined &&
+              entry.draft.categories.length > 0 && (
+                <div className="mt-1.5 text-xs">
+                  <details>
+                    <summary className="cursor-pointer text-paper-600 dark:text-paper-400">
+                      {t("rapid.subjects", {
+                        count: entry.draft.categories.length,
+                      })}
+                    </summary>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {entry.draft.categories.map((subject) => (
+                        <span
+                          key={subject}
+                          className="min-w-0 text-paper-600 bg-paper-100 px-2 py-0.5 rounded break-words dark:text-paper-400 dark:bg-paper-800"
+                        >
+                          {subject}
+                          <button
+                            type="button"
+                            onClick={() => onDropSubject(entry.key, subject)}
+                            disabled={busy}
+                            // Both the subject and the row, the reason the
+                            // split control one block up names the row: a
+                            // folder pick draws several hundred of these and
+                            // "Remove Fiction" repeats across all of them.
+                            aria-label={t("rapid.removeSubject", {
+                              subject,
+                              label: entry.label,
+                            })}
+                            className="ml-1 opacity-60 hover:opacity-100 disabled:opacity-30 leading-none"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+              )}
 
             {/* Accept or reject, per file. The ranking already put the likeliest
                 record first, and the rest are here to be disagreed with.

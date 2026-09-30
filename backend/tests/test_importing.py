@@ -511,6 +511,95 @@ class TestTheTagCaps:
         invented = db.query(Tag).filter(Tag.name.like("tag%")).count()
         assert invented <= tags.MAX_NEW_TAGS_PER_IMPORT
 
+    def test_a_full_book_says_how_many_names_it_left_off(self, db, member):
+        """A drop nobody can see is a loss with nowhere to read it off, which
+        is why there is a number at all. Four causes fold into it: this arm
+        drives the ceiling, which is the one a member can act on."""
+        book = Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id)
+        db.add(book)
+        for index in range(tags.MAX_TAGS_PER_BOOK):
+            filler = Tag(name=f"filler {index}", category=TagCategory.CUSTOM)
+            db.add(filler)
+            book.tags.append(filler)
+        db.commit()
+
+        result = Import.for_member(db, member.id).apply(
+            parse(row("Dune", isbn="9780441013593", shelves="one,two,three")),
+            apply_tags=True,
+        )
+
+        assert result.tags_dropped == 3
+
+    def test_and_counts_the_rest_of_a_cell_the_ceiling_cut_off_mid_way(
+        self, db, member
+    ):
+        """**The break is at position two and the cell repeats a name**, which
+        is the only shape where counting the remainder off the position and
+        searching for the name disagree.
+
+        The arm above puts the break at position zero, where every derivation
+        of "how many are left" gives the same answer, and an arm sitting where
+        its own subject cannot vary is an arm that cannot see it. Here
+        `list.index` would answer for the **first** "one" rather than the
+        third name, and report four dropped out of four where two went on.
+        """
+        book = Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id)
+        db.add(book)
+        for index in range(tags.MAX_TAGS_PER_BOOK - 2):
+            filler = Tag(name=f"filler {index}", category=TagCategory.CUSTOM)
+            db.add(filler)
+            book.tags.append(filler)
+        db.commit()
+
+        result = Import.for_member(db, member.id).apply(
+            parse(row("Dune", isbn="9780441013593", shelves="one,two,one,three")),
+            apply_tags=True,
+        )
+
+        assert result.tags_dropped == 2
+        db.refresh(book)
+        assert {"one", "two"} <= {tag.name for tag in book.tags}
+
+    def test_and_counts_nothing_where_every_name_went_on(self, db, member):
+        """The other edge of the same number, because a count that is never
+        zero is not a count."""
+        db.add(Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id))
+        db.commit()
+
+        result = Import.for_member(db, member.id).apply(
+            parse(row("Dune", isbn="9780441013593", shelves="one,two")),
+            apply_tags=True,
+        )
+
+        assert result.tags_dropped == 0
+
+    def test_one_new_name_on_two_rows_lands_on_both(self, db, member):
+        """**The false refusal the viewer on the hand off would otherwise
+        introduce into every ordinary upload.** `Vocabulary.counts` is read
+        once per import, so the first Book this name goes on is not in it when
+        the second row asks, while the live check for a carrier answers yes.
+        `tags.Naming` remembers what it has handed this writer, which is also
+        the true answer: the name is on their own Book by then.
+        """
+        db.add(Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id))
+        db.add(Book(title="Piranesi", isbn="9781635575637", added_by_user_id=member.id))
+        db.commit()
+
+        result = Import.for_member(db, member.id).apply(
+            parse(
+                row("Dune", isbn="9780441013593", shelves="bookclub"),
+                row("Piranesi", isbn="9781635575637", shelves="bookclub"),
+            ),
+            apply_tags=True,
+        )
+
+        assert result.tags_dropped == 0
+        carried = [
+            sorted(tag.name for tag in book.tags)
+            for book in db.query(Book).order_by(Book.title).all()
+        ]
+        assert carried == [["bookclub"], ["bookclub"]]
+
     def test_tags_are_off_unless_asked_for(self, db, member):
         db.add(Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id))
         db.commit()
@@ -520,6 +609,22 @@ class TestTheTagCaps:
         )
 
         assert db.query(Tag).filter(Tag.name.in_(["one", "two"])).count() == 0
+
+    def test_and_nothing_counts_as_dropped_when_no_tag_was_tried(self, db, member):
+        """**The shape the endpoint is used in unless a caller opts in**, and
+        the one a count of what the run was *handed* would have to report as a
+        loss. Applying tags is off by default, so a full shelves column is
+        nothing tried and nothing dropped, and `ImportResultOut.tags_dropped`
+        says tried rather than handed because of this arm.
+        """
+        db.add(Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id))
+        db.commit()
+
+        result = Import.for_member(db, member.id).apply(
+            parse(row("Dune", isbn="9780441013593", shelves="one,two"))
+        )
+
+        assert result.tags_dropped == 0
 
 
 class TestTheReview:

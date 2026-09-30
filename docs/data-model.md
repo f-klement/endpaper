@@ -145,7 +145,23 @@ below.
 as a list.
 **The delimiter is a semicolon, not a comma**, and that is load bearing: Google's own
 category names contain commas ("Fiction, general"). `google_books.join_categories` and
-`split_categories` are the only two places that know this.
+`split_categories` are the only two places on the server that know this.
+
+**A third place knows it, and it is in the browser.** `BookCreate` refuses an entry
+carrying the delimiter, and a `field_validator` raising refuses the whole request, so a
+subject with a semicolon in it costs a member the book rather than the subject. The file
+readers emit subjects a stranger's file wrote, so `frontend/src/lib/bookRequest.ts` drops
+such an entry before the request is built. It is a literal there, and the residue is
+stated at that site: the schema carries no `pattern` for the field, so nothing recomputes
+the character the way the width and the count are recomputed.
+
+**That residue is closed by behaviour rather than by spelling.**
+`conformance/cases/subject.json` carries two entries with the delimiter in them, one
+spaced and one bare, and records that the browser drops and the server refuses. Both
+runners read the file, so either side ceasing to refuse it is a failing test. What the
+cases cannot see is the server's constant changing value while the browser's literal does
+not, except through the behaviour on the bare character, which reddens on the server side
+first. A `pattern` on the field would close that too and costs a schema regeneration.
 
 **`tags`.** 105 rows seeded at startup from `PREDEFINED_TAGS` in `main.py`, in three
 categories: `type` (10), `genre` (88) and `age` (7), plus a fourth category, `custom`, for
@@ -181,8 +197,10 @@ book drops its tag links without touching the tags themselves. That cascade did 
 until `PRAGMA foreign_keys` was turned on: it is off by default in SQLite, which made every
 `ForeignKey` in `models.py` a comment. See *Connection settings* below.
 
-**`collections`.** Named parts of the shelf, pointed at by `books.collection_id`. Library
-wide, one per book or none, and never a privacy boundary. See *Collections* below.
+**`collections`.** Named parts of the shelf, pointed at by `books.collection_id`. One per
+book or none, and never a privacy boundary: filing changes nothing about who can see a book.
+Which collections a member is told about is decided by the books in them. See *Collections*
+below.
 
 **`user_books`.** Per-person read status, rating, reading dates (`unread` / `want_to_read` /
 `reading` / `read` / `did_not_finish`) and the "ask me about this book" flag. This is the table
@@ -868,9 +886,10 @@ author whose every book is private therefore appears for nobody else: nothing th
 credited to a spelling that resolves to that person. Merging an author nobody can see is
 **404**, not 403.
 
-The **mapping** is library wide, like a collection's name: every member resolves a spelling
-to the same person, so identity does not fork per reader and an old link resolves the same way
-for everybody. What is filtered beside the shelf is what a member has evidence for: a folded
+The **mapping** is library wide: every member resolves a spelling to the same person, so
+identity does not fork per reader and an old link resolves the same way for everybody. A
+collection's name is **not** the comparison it used to be here, because which collections a
+member is told about depends on the books in them. What is filtered beside the shelf is what a member has evidence for: a folded
 spelling is listed, and its undo offered, only where it appears on a book they can see.
 
 ## Copies
@@ -933,16 +952,24 @@ for libraries that never asked for the feature, and renaming a seeded string lat
 migration. So "in no collection" is an ordinary permanent state, like a null `format` or
 `lending`, and the API names it: `GET /api/books?unfiled=true`.
 
-**Library wide, and never a privacy boundary.** Any member may create one, rename it, and
-file any book they can write to. Filing changes nothing about who can see the book: a
-book's visibility is decided by `visible_to()` alone, which is not given a collection to
-consult. `Collection.created_by_user_id` is provenance and no query reads it, which is
-what keeps that true rather than merely intended.
+**Never a privacy boundary.** Any member may create one, rename it, and file any book they
+can write to. Filing changes nothing about who can see the book: a book's visibility is
+decided by `visible_to()` alone, which is not given a collection to consult.
+`Collection.created_by_user_id` is provenance and no query reads it, which is what keeps that
+true rather than merely intended, and it is why the rule below is written over books rather
+than over an owner.
 
-The one thing a library wide label could disclose is a **count**, so every count is
-filtered: `routers/collections._counts` and the `by_collection` statistic both apply
-`visible_to`. A member filing a private book onto a shared shelf does not thereby tell
-everybody it exists.
+**A label is not library wide, and the count was never the only thing it could disclose.** A
+collection is named to a member when a book they can see is filed in it, when a book they can
+see in the trash is, or when no book at all is. The excluded case is the one that leaked: a shelf
+holding books none of which that member may see, whose name told them those books exist. Both
+the count and the row set apply the same question now; `backend/shelving.py` is the one place
+it is answered, for the list, for the rename and for every write that files a book.
+
+An empty collection is named to everybody, because it names no book and so discloses none.
+That is also what keeps a shelf a member just made on the page they made it on, and it makes a
+`book_count` of 0 mean empty, or holding only books you can see in the trash, rather than "or
+holding books you cannot see".
 
 **Deleting a collection unfiles its books and destroys none.** `ON DELETE SET NULL` in the
 database rather than a loop in the handler, because a restore and a hand-edited row reach

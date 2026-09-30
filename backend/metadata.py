@@ -3490,15 +3490,34 @@ _SECONDARY_PENALTY: Final = 1
 #:   records; see `_dnb_record`. Scoring them would rank by source under a name
 #:   promising to rank by the row.
 #:
-#: **What this list costs is the opposite lean, accepted rather than unnoticed.**
-#: `_marc_record` builds a search row with no ISBN, so no row from a MARC search
-#: scores on either of these two, whichever catalogue answered, where an Open
-#: Library row may score both. Said by the decoder rather than by a list of
-#: source names, which is what goes stale the day a fifth MARC catalogue is
-#: added. A member reading a list of results is choosing something to scan and
-#: something with a cover, which is the answer the product wants; that the pair
-#: is also a source signal is the price. `docs/decisions.md` holds the argument,
-#: under *The two completeness scores are two questions, not one list*.
+#: **What this list costs is a double count, and `isbn` and `cover_url` are
+#: where it is.** A title search asks no ISBN, so `_marc_build` is handed `None`
+#: and both MARC readers fall back to the record's own 020; `_bnf_record` and
+#: `_loc_record` take no ISBN at any time and parse one out of the record. None
+#: of the three SRU serialisations is read for a cover, so every reader on that
+#: door then builds `cover_url` from the ISBN it just read and from nothing
+#: else, and on such a row the two fields are one fact scored twice. That is the
+#: objection this comment already makes for `language` and `series_name`, and
+#: the ground `catalogue._SCORED` excludes `cover_url` on. The two bespoke
+#: search doors carry a cover of their own, and there the pair is two facts.
+#:
+#: **The derivation is the reader's row and the score reads a merged one, so
+#: the two are not the same row.** `_merge_matches` runs before `_ranked` and
+#: Open Library leads `_MATCH_PRECEDENCE`, so a book it holds with a cover id
+#: of its own, folded with an SRU row that carries the identifier, scores both
+#: fields off two different doors and counts nothing twice. Measured in
+#: process, both input orders. **How much of a live ranking the double count
+#: reaches is therefore not claimed here**, and nothing in this tree observes
+#: the ordering that would answer it.
+#:
+#: **Said by the door rather than by a list of source names**, which is what
+#: goes stale the day a fifth MARC catalogue is added, and held by
+#: `tests/test_metadata.py::TestASearchRowsCoverIsDerivedFromItsOwnIsbn` rather
+#: than by this sentence. A member reading a list of results is choosing
+#: something to scan and something with a cover, which is the answer the product
+#: wants; that the pair is also a source signal is the price.
+#: `docs/decisions.md` holds the argument, under *The two completeness scores
+#: are two questions, not one list*.
 _PICKABLE_FIELDS: Final = (
     "author",
     "year",
@@ -3777,6 +3796,10 @@ async def title_search(
         if harder_now:
             _HARDER_AT_ONCE.release()
 
+    # No await between the fan out above and the return below: the deadline
+    # test reads the slow source's unwinding and a yield here would resume the
+    # leftover task in the gather's place, sending that arm green. The gather in
+    # `_within_deadline` carries why.
     merged = _merge_matches([row for tier in tiers for row in tier])
 
     ranked = _ranked(merged, terms, prefer_language)
@@ -3982,6 +4005,19 @@ async def _within_deadline(
     if pending:
         # Awaited so the cancellations are actually delivered rather than left
         # to be reported later as "task was destroyed but it is pending".
+        #
+        # **Nothing may await between this gather and the caller's next
+        # assertion**, which is a live constraint and not a style note.
+        # `tests/test_metadata.py::TestTheAustrianNationalLibrarySearch
+        # ::test_a_slow_oenb_does_not_extend_the_shared_deadline` holds the
+        # awaiting half by reading the slow source's own cleanup: that cleanup
+        # yields once, and on a healthy tree only this gather resumes it. Any
+        # later yield resumes it too, so adding one sends that arm green with the
+        # leak in place. Measured: this gather replaced by a single event loop
+        # tick is red, and the same tick with one `await asyncio.sleep(0)` after
+        # the fan out is green. The guard behind that pointer resolves its last
+        # segment alone, so renaming the test reddens it and renaming the class,
+        # or moving the file, does not.
         await asyncio.gather(*pending, return_exceptions=True)
         logger.info("%d catalogue(s) missed the search deadline", len(pending))
 

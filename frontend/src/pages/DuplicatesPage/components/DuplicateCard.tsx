@@ -1,6 +1,10 @@
-import type { BookOut, DuplicateGroup } from "../../../api/generated/model";
-import { useTranslation } from "../../../i18n";
+import type {
+  DuplicateGroup,
+  DuplicateMember,
+} from "../../../api/generated/model";
+import { useTranslation, type Translate } from "../../../i18n";
 import { CoverImage } from "../../components";
+import { FORMAT_LABELS } from "../../types";
 
 interface DuplicateCardProps {
   group: DuplicateGroup;
@@ -8,9 +12,23 @@ interface DuplicateCardProps {
   onMerge: (bookIds: number[], keepId: number) => void;
 }
 
-/** A short line describing what distinguishes one entry from its twin. */
-function describe(book: BookOut): string {
-  return [book.publisher, book.year, book.isbn].filter(Boolean).join(" · ");
+/**
+ * A short line describing what distinguishes one entry from its twin.
+ *
+ * **The format leads it**, because a hardback and a paperback are the case
+ * this whole feature exists for: two legitimately different ISBNs for one
+ * book. Leaving it out left two visually identical rows where the publisher,
+ * the year and the ISBN are all empty, and asked somebody to destroy one.
+ */
+function describe(book: DuplicateMember, t: Translate): string {
+  return [
+    book.format ? t(FORMAT_LABELS[book.format]) : null,
+    book.publisher,
+    book.year,
+    book.isbn,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /**
@@ -47,7 +65,7 @@ export default function DuplicateCard({
                 {book.title}
               </p>
               <p className="text-xs text-paper-600 truncate dark:text-paper-400">
-                {describe(book)}
+                {describe(book, t)}
               </p>
             </div>
 
@@ -73,6 +91,17 @@ export default function DuplicateCard({
           </li>
         ))}
       </ul>
+
+      {/* A group larger than one merge may name is shown cut to what a merge
+          accepts. Saying so is what stops the card reading as complete: the
+          remainder is a second pass, not a loss. */}
+      {group.size > group.books.length && (
+        <p className="text-xs text-paper-600 dark:text-paper-400">
+          {t("duplicates.moreInGroup", {
+            count: group.size - group.books.length,
+          })}
+        </p>
+      )}
     </div>
   );
 }

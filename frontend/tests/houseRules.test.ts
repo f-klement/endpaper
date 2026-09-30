@@ -52,6 +52,10 @@ import { langOf, withoutProse } from "./withoutProse";
 // cycle.
 import ownSource from "./houseRules.test.ts?raw";
 
+// The config that decides which files are tests at all. Read so the one
+// spelling of that suffix below is checked against it rather than repeated.
+import viteConfig from "../vite.config.ts?raw";
+
 const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
   query: "?raw",
   import: "default",
@@ -5768,6 +5772,904 @@ describe("every exported hook declares its return type", () => {
         .filter((row) => !row.callable)
         .map((row) => `${row.path}:${row.hook}`)
         .sort(),
+    ).toEqual([]);
+  });
+});
+
+/**
+ * A comment continuation joined back up.
+ *
+ * **Because the thing being read wraps and the formatter is what wraps it.**
+ * Prose here is reflowed to eighty columns, so a citation long enough to be
+ * worth writing is usually split across two lines and sometimes three. A line
+ * by line scan reads half a path and half a label and finds nothing, which is
+ * the quiet failure: it reports clean over a tree it never read.
+ */
+function unwrapped(source: string): string {
+  return source.replace(/\n[ \t]*(?:\*|\/\/)?[ \t]*/g, " ");
+}
+
+/**
+ * A citation: a code span holding a test file's path, `::`, and a name.
+ *
+ * **The population is this shape, never a list of the files that write it.**
+ * Every guard here whose population came from naming its members has been
+ * wrong at least once, so what decides membership is a property of the cited
+ * thing: the path ends in the suffix `vite.config.ts` collects tests by. That
+ * is what keeps the rest of the tree out by construction rather than by
+ * exception, and the rest is most of it. This tree cites a source module's
+ * export in the same two colon shape, and cites backend tests by class and by
+ * function, and none of those is a vitest label or this rule's business.
+ *
+ * **The code span is required, and it is not decoration.** It is how every
+ * citation in the repository is already written, counted over the versioned
+ * tree, so requiring it costs nothing; and it leaves an author a way to write
+ * the shape without asserting it, which is what the probes below need and
+ * what a blanket exemption for this file would otherwise have to buy. What
+ * the span costs is a silent gap, so an unfenced one is its own arm.
+ *
+ * **One fence or two, because a label may hold a delimiter of its own.** Four
+ * test names in this tree already do, counted off the parse. Under a single
+ * fence the label stops at the first one and the rule reports a name nobody
+ * wrote, so a correct citation is refused and a publish waits on an unrelated
+ * sentence being rewritten. Two backticks is markdown's own escape for it, and
+ * the fence width is matched rather than guessed.
+ */
+const TEST_FILE = String.raw`[\w./-]+\.test\.tsx?`;
+const CITATION = new RegExp("(``?)(" + TEST_FILE + ")::(.+?)\\1", "g");
+
+/** A path under the test tree, by the one spelling of the suffix above. */
+const IS_TEST = new RegExp("^tests/" + TEST_FILE + "$");
+
+/** The bare shape, for the arm refusing one written outside a span. */
+const UNFENCED = new RegExp("(" + TEST_FILE + ")::", "g");
+
+/**
+ * A printf token, which is what vitest expands and an author copies.
+ *
+ * A citation has to be spelled the way the source writes the name, and what a
+ * reader sees in a run is the expansion. Thirty three declared names in this
+ * tree carry one, counted off the parse, and the orphan that bought this rule
+ * was reported in its expanded form, so the rule as first written would have
+ * refused the report that motivated it. Read on the miss path only, so nothing
+ * that already resolves literally can move.
+ */
+const PRINTF = /%[sdifjo#]/;
+
+/** The cited path with `.` and `..` resolved, and the repository root off. */
+function normalised(from: string, cited: string): string {
+  const parts = cited.startsWith(".") ? from.split("/").slice(0, -1) : [];
+  for (const part of cited.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  return parts.join("/").replace(/^frontend\//, "");
+}
+
+/**
+ * Every string constant a module holds, folded where folding is exact.
+ *
+ * A literal, a template with nothing interpolated, and a concatenation of
+ * those: the three spellings a test name is written in here. Read off the
+ * parse rather than matched out of the text, for the reason `withoutProse`
+ * exists: a name inside a comment is not a node, so a stale name quoted in
+ * prose cannot satisfy a citation to it.
+ */
+function constantsIn(source: string, lang: "ts" | "tsx"): Set<string> {
+  const found = new Set<string>();
+
+  const fold = (node: Node): string | null => {
+    if (node.type === "Literal") return text(node.value);
+    if (node.type === "TemplateLiteral") {
+      const parts = node.expressions as unknown[];
+      if (parts.length > 0) return null;
+      return (node.quasis as Node[])
+        .map(
+          (quasi) => text((quasi.value as { cooked?: unknown }).cooked) ?? "",
+        )
+        .join("");
+    }
+    if (node.type === "BinaryExpression" && node.operator === "+") {
+      const left = isNode(node.left) ? fold(node.left) : null;
+      const right = isNode(node.right) ? fold(node.right) : null;
+      return left === null || right === null ? null : left + right;
+    }
+    return null;
+  };
+
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+      return;
+    }
+    if (!isNode(value)) return;
+    const folded = fold(value);
+    if (folded !== null) found.add(folded);
+    for (const key of Object.keys(value)) walk(value[key]);
+  };
+
+  walk(parseAst(source, { lang }) as unknown as Node);
+  return found;
+}
+
+/**
+ * The citations in `files` that resolve to nothing, as sentences.
+ *
+ * Pure and handed its whole world, so the probe below drives the same code the
+ * rule does rather than a second implementation of it.
+ *
+ * **What is checked is that the name is still a string constant in the file
+ * cited, which is weaker than that it is still a test's name**, and the
+ * difference is stated rather than closed: a name that survives as some other
+ * literal in that file satisfies this. Closing it means deciding which call is
+ * a declaration, and the spellings are open, `each`, `only`, `skip`, `for` and
+ * whatever the next version adds, so the arm would refuse a legitimate one
+ * before it caught anything. The class this exists for is a rename, and a
+ * rename takes the old string out of the file altogether.
+ *
+ * **An unqualified basename matching several files is checked against their
+ * union.** One citation in the tree is of that shape. The lenient direction is
+ * deliberate: a name found in a sibling satisfies it, and nothing here can
+ * tell which of five files somebody meant.
+ *
+ * **A full name is split on the separator vitest joins with**, so a citation
+ * naming an enclosing block and its arm is read as both rather than as one
+ * name no call writes.
+ *
+ * **Three leniencies on the miss path.** A name matching no constant
+ * literally is tried again against any constant whose printf tokens stand for
+ * anything, so the expansion a reader copies out of a run resolves. A cited
+ * path is resolved against the citing file when it is written relatively,
+ * which is how every import in these files is written. And a single fenced
+ * name that is a prefix of a real one is reported as **cut at a delimiter**
+ * rather than as missing, because the fix is a second backtick and telling an
+ * author their test is gone sends them the wrong way.
+ *
+ * **What the first of those accepts, stated rather than bounded.** A template
+ * is a wildcard, so `reads %s` accepts `reads anything`, including names no
+ * case in that table produces. That is the leniency being bought and it is
+ * held in check only by the template's own fixed text, which is why
+ * `isTemplate` refuses a constant that has none. An earlier version of this
+ * paragraph claimed no leniency here could turn green a citation that was not
+ * already pointing somewhere real; the bare token was its counterexample, and
+ * the remedy is this sentence rather than a better claim.
+ */
+/**
+ * Whether a constant is a template that still constrains what it matches.
+ *
+ * **A name that is nothing but a token is not a template, it is a hole.**
+ * `"%s"` expands to an anchored match-anything, and since every string
+ * constant in a cited file is tried, one such literal makes **every** citation
+ * to that file resolve. Two files here declare exactly that name, this one and
+ * `withoutProse.test.ts`, both as the label of an `each`, so the file the rule
+ * lives in was the file it had stopped guarding: measured, renaming an arm
+ * this file's own callers cite left the run green.
+ *
+ * **Non whitespace, not merely non empty**, which is the part worth deriving
+ * rather than copying: `"%s %s"` keeps a space between its tokens and matches
+ * any label containing a space, which is very nearly all of them. Measured
+ * both ways against the string "literally any label at all", which `"%s"` and
+ * `"%s %s"` accept and which `"reads %s"` refuses.
+ */
+function isTemplate(constant: string): boolean {
+  return PRINTF.test(constant) && /\S/.test(constant.split(PRINTF).join(""));
+}
+
+/** One constant's printf tokens standing for anything, anchored whole. */
+function expansionOf(constant: string): RegExp {
+  return new RegExp(
+    `^${constant
+      .split(PRINTF)
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`))
+      .join(String.raw`[\s\S]*`)}$`,
+  );
+}
+
+/**
+ * Every citation these files hold, read but not yet resolved.
+ *
+ * Split out so the diagonal below plants from the tree rather than from a
+ * list written beside it. A citation added tomorrow is planted too.
+ */
+function citationsIn(
+  files: Record<string, string>,
+): { from: string; fence: string; cited: string; label: string }[] {
+  const out: { from: string; fence: string; cited: string; label: string }[] =
+    [];
+  for (const [from, source] of Object.entries(files)) {
+    CITATION.lastIndex = 0;
+    // A citation spelled from the repository root, or relative to the citing
+    // file, resolves the same way. Leniency in the direction that cannot
+    // refuse a citation that is doing its job.
+    for (const match of unwrapped(source).matchAll(CITATION))
+      out.push({
+        from,
+        fence: match[1]!,
+        cited: normalised(from, match[2]!),
+        label: match[3]!,
+      });
+  }
+  return out;
+}
+
+/**
+ * The constant a name is read through, if any of them reads it.
+ *
+ * **One resolver, because two of them contradicted each other.** The rule
+ * asked the parse and the wildcard; the plant below asked a raw text search
+ * for the same thing. A citation written in the expanded form a run prints,
+ * against a source declaring the template, resolves here and is held by no
+ * text search, so the plant's accounting called a healthy citation a silent
+ * dropout and reddened on it. Accepting that form is the whole reason the
+ * wildcard exists, so the two rounds of machinery were refusing each other.
+ *
+ * Returning the constant rather than a boolean is what collapses them: the
+ * plant needs to know **which** name to rename, and that is the same question
+ * the rule answers to decide whether the citation reads at all.
+ */
+function resolvedBy(constants: Set<string>, part: string): string | undefined {
+  if (constants.has(part)) return part;
+  return [...constants].find(
+    (one) => isTemplate(one) && expansionOf(one).test(part),
+  );
+}
+
+function unwritten(files: Record<string, string>): string[] {
+  const tests = Object.keys(files).filter((path) => IS_TEST.test(path));
+  const constants = new Map<string, Set<string>>();
+  const constantsOf = (path: string): Set<string> => {
+    const had = constants.get(path);
+    if (had) return had;
+    const made = constantsIn(files[path] ?? "", langOf(path));
+    constants.set(path, made);
+    return made;
+  };
+
+  const found: string[] = [];
+  for (const { from, fence, cited, label } of citationsIn(files)) {
+    {
+      const targets = tests.filter(
+        (path) => path === cited || path.endsWith(`/${cited}`),
+      );
+      if (targets.length === 0) {
+        // **The label belongs in this message even though nothing resolved
+        // it.** Without it every citation from one document to one absent
+        // path produces the same sentence, so the outstanding list below keys
+        // on a class rather than an instance and one entry absorbs the next
+        // dead citation written beside it. Measured: a second, new dead
+        // citation to the same absent file survived. It also says which
+        // sentence is waiting on repair, which the entry could not.
+        found.push(
+          `${from} names ${cited} for the test ${label}, ` +
+            `and there is no such test file here`,
+        );
+        continue;
+      }
+      const written = new Set(
+        targets.flatMap((path) => [...constantsOf(path)]),
+      );
+      if (
+        label
+          .split(" > ")
+          .every((part) => resolvedBy(written, part) !== undefined)
+      )
+        continue;
+      const cutShort = [...written].find(
+        (one) => one !== label && one.startsWith(label),
+      );
+      found.push(
+        fence === "`" && cutShort !== undefined
+          ? `${from} names ${cited} and a name cut at a code span ` +
+              `delimiter, "${label}": write it in a double fence`
+          : `${from} names ${cited} and the test ${label}, unwritten`,
+      );
+    }
+  }
+  return found;
+}
+
+/**
+ * Everything that can carry a citation: both code trees, this file, and the
+ * documents.
+ *
+ * **The markdown is not an extra, it is the family the rule exists for.** The
+ * reason written above is that the citing files publish and the mirror does
+ * not unpublish, and `docs/` is the published prose. Left out of the first
+ * version of this rule, and the cost was immediate: a citation there names a
+ * test file that exists nowhere in the tree, it predates this branch, and it
+ * is on the mirror now. That is the second of the two shapes this rule
+ * reddens, and the rule could not see it.
+ *
+ * **A document declaring itself internal is not read**, by the same helper
+ * and for the same reason the published prose rule above uses it: this rule's
+ * subject is what reaches the mirror, and an internal document does not.
+ *
+ * **That is the whole of what the filter does, and the sentence here used to
+ * claim more.** It said the filter also keeps out whatever an agent's working
+ * directory holds. It does not: such a document is excluded only when it
+ * carries the declaration, and measured against the gate's own pattern over
+ * the eight documents in one, six are read. The exposure is the glob's rather
+ * than this rule's, and the rule above reads the same six. The property that
+ * would actually close it is what the repository versions, since an untracked
+ * document reaches no mirror, and that names no stripped path either; it is
+ * not done here because it is a change to a glob three rules share.
+ *
+ * **Named by the declaration rather than by directory on purpose.** The
+ * publish gate refuses a published file that spells a stripped path, and this
+ * file publishes, so the first version of this filter was rejected by the gate
+ * for writing the directory's name.
+ */
+function citingFiles(): Record<string, string> {
+  return {
+    ...Object.fromEntries(
+      entries().map(([path, source]) => [`src/${path}`, source]),
+    ),
+    ...Object.fromEntries(
+      Object.entries(TEST_SOURCES).map(([path, source]) => [
+        path.replace("./", "tests/"),
+        source,
+      ]),
+    ),
+    ...Object.fromEntries(
+      Object.entries(DOCUMENTS)
+        .map(([path, source]): [string, string] => [
+          path.replace("../../", ""),
+          source,
+        ])
+        .filter(([, source]) => !declaresItselfInternal(source)),
+    ),
+    "tests/houseRules.test.ts": ownSource,
+  };
+}
+
+/**
+ * The dead citations this branch is not allowed to repair, and their expiry.
+ *
+ * **`docs/decisions.md` is a shared register**, and the working agreement for
+ * this wave is that a branch drafts against one and never edits it, because
+ * several branches would otherwise write the same file. So the entry sits
+ * here, in the rule, where it is read on every run, rather than as a sentence
+ * somebody has to find.
+ *
+ * **It is a ratchet and not a suppression list**, which is the difference the
+ * oxlint config's own two lists turn on: the arm below fails when an entry
+ * stops describing something live, so this cannot outlive the repair. The
+ * label that citation means is written in
+ * `AboutSettingsPage.test.tsx`, under a name the file no longer has.
+ */
+const NOT_OURS_TO_REPAIR: string[] = [];
+
+describe("a test cited by name still carries that name", () => {
+  /**
+   * **Bought by a live one, on the branch that added this.** Two files pointed
+   * at an arm in the card's suite by name. The arm was renamed when it grew
+   * from one reading status to every one, the two pointers did not move, and
+   * both of those files publish while the mirror does not unpublish. So a
+   * pointer to a test that no longer exists shipped.
+   *
+   * **Nothing was going to catch it and the backend guard says so itself.**
+   * The name anchor guard over there states in its own docstring that a vitest
+   * label is outside its population by spelling, neither covered nor refused,
+   * and that closing it belongs to the house rules here. It is named rather
+   * than linked because the publish gate strips it and refuses a published
+   * file that spells a stripped path: this sentence cited it by path in its
+   * first draft and the gate rejected the tree, which is the second thing on
+   * this branch found by the check rather than by the author. A green backend
+   * suite is silent about this class, which is the worst shape a gap can have:
+   * a guard next door that looks like it covers you.
+   *
+   * ## What this rule sees, and what goes past it
+   *
+   * **A narrowing is a decision; a hole is a thing nobody has closed.** Kept
+   * apart on purpose: the first list is not work waiting, the second is.
+   *
+   * **Seen.** A citation in a code span, of one or two backticks, naming a
+   * path ending in the suffix the config collects tests by, in either code
+   * tree, in this file, and in the published documents. The path resolved
+   * exactly or by suffix, relative segments resolved against the citing file,
+   * a repository root prefix stripped. The name matched against the string
+   * constants of the cited file's parse, folding a template with nothing
+   * interpolated and a concatenation of literals, and against a printf
+   * template's expansion. A full name split on the separator vitest joins
+   * with.
+   *
+   * **Narrowed on purpose.**
+   *
+   * - **A constant, not a test's name.** A name surviving as some other
+   *   literal in the cited file satisfies this. Deciding which call is a
+   *   declaration means enumerating spellings that are open, and the arm
+   *   would refuse a legitimate one before it caught anything.
+   * - **An ambiguous basename is checked against the union** of the files it
+   *   could mean. Nothing here can tell which one somebody meant.
+   * - **A template is a wildcard**, so `reads %s` accepts `reads anything`,
+   *   including names no case in that table produces. It is bounded only by
+   *   the template's own fixed text, which is why a constant with none is
+   *   not treated as a template at all.
+   * - **A document declaring itself internal is not read**, because the
+   *   subject is what reaches the mirror.
+   *
+   * **Open, and these are holes.**
+   *
+   * - **A citation inside a fenced code block reads as unfenced** and is
+   *   reported by the arm below rather than resolved, because the unwrapper
+   *   joins the fence line to the next. None today; the documents are in the
+   *   population now, where code blocks are ordinary.
+   * - **An untracked document that does not declare itself internal is
+   *   read.** Measured over one working directory: six of eight. What would
+   *   close it is what the repository versions, and that is a change to a
+   *   glob three rules share rather than to this one.
+   * - **One dead citation is outstanding rather than repaired**, in a shared
+   *   register this branch may not edit, carried below with a ratchet.
+   */
+  it("leaves no cited test name unwritten", () => {
+    expect(
+      unwritten(citingFiles()).filter(
+        (one) => !NOT_OURS_TO_REPAIR.includes(one),
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps no entry that has stopped describing a live one", () => {
+    // What makes the list above a ratchet. Without this an entry outlives the
+    // repair it is waiting on, and the rule is then quiet about a shape it
+    // reddens everywhere else.
+    const live = unwritten(citingFiles());
+
+    expect(NOT_OURS_TO_REPAIR.filter((one) => !live.includes(one))).toEqual([]);
+  });
+
+  it("is reading citations in all three families, not an empty set", () => {
+    // A pattern whose subject was respelled passes by matching nothing, which
+    // is how this file's column rule once passed while asserting the opposite
+    // of what it meant. All three, because the documents were the family left
+    // out of the first version and the only one carrying a live defect.
+    const citing = Object.entries(citingFiles())
+      .filter(([, source]) => {
+        CITATION.lastIndex = 0;
+        return CITATION.test(unwrapped(source));
+      })
+      .map(([path]) => path);
+    CITATION.lastIndex = 0;
+
+    expect(citing.length).toBeGreaterThan(5);
+    expect(citing.some((path) => path.startsWith("src/"))).toBe(true);
+    expect(citing.some((path) => path.startsWith("tests/"))).toBe(true);
+    expect(citing.some((path) => path.endsWith(".md"))).toBe(true);
+  });
+
+  it("refuses a citation written outside a code span", () => {
+    // **The gap the span requirement opens, converted from silent to loud.**
+    // A dead citation with no span was reported as nothing at all, which is
+    // the worst of the three outcomes: the rule is not merely unable to
+    // resolve it, it never sees it. Costs nothing today, counted over the
+    // versioned tree: every citation in the repository is already fenced.
+    //
+    // **A citation inside a fenced code block reports here**, because the
+    // unwrapper joins the fence line to the next one and the span delimiters
+    // stop lining up. None today, and the documents are now in the population
+    // where code blocks are ordinary, so the next author to hit it is being
+    // told the fix rather than left to hunt: write the citation inline, in a
+    // span of its own.
+    const loose = Object.entries(citingFiles()).flatMap(([path, source]) => {
+      const flat = unwrapped(source);
+      CITATION.lastIndex = 0;
+      const spans = [...flat.matchAll(CITATION)].map(
+        (match) => [match.index, match.index + match[0].length] as const,
+      );
+      UNFENCED.lastIndex = 0;
+      return [...flat.matchAll(UNFENCED)]
+        .filter(
+          (match) =>
+            !spans.some(
+              ([from, to]) => from <= match.index && match.index < to,
+            ),
+        )
+        .map((match) => `${path}: ${match[1]}`);
+    });
+
+    expect(loose).toEqual([]);
+  });
+
+  it("is built for the suffix the config still collects tests by", () => {
+    // **The suffix was written out three times and read from nowhere.** A
+    // `.spec` include added to the config would leave this rule reading a
+    // shrinking tree with nothing red anywhere, which is the shape of a guard
+    // that stops guarding without failing. One spelling now, checked here
+    // against the config that decides it.
+    expect(viteConfig).toContain('include: ["tests/**/*.test.{ts,tsx}"]');
+    expect(IS_TEST.test("tests/theme/palettes.test.ts")).toBe(true);
+    expect(IS_TEST.test("tests/theme/palettes.spec.ts")).toBe(false);
+  });
+
+  it("is reading this file, which is where its own subject lives", () => {
+    // Unlike the address rule above, this one is not exempt from itself: vite
+    // keeps the importing module out of its own glob, so the source is added
+    // back by hand and the file is an ordinary member. It has to be, because
+    // it carries a citation of its own. What lets the probe below write the
+    // shape without asserting it is the code span, not an exemption.
+    expect(Object.keys(citingFiles())).toContain("tests/houseRules.test.ts");
+  });
+
+  it("reports the shapes it exists for", () => {
+    // **Assembled rather than written out**, so none of these is a citation in
+    // this file's own source and the rule above reads this file for real.
+    const cite = (path: string, label: string) =>
+      "`" + path + "::" + label + "`";
+    const probe = (test: string, comment: string) =>
+      unwritten({
+        "tests/a.test.ts": test,
+        "src/x.ts": `// ${comment}\nexport const x = 1;`,
+      });
+
+    // The two it is for. A renamed arm, which is the live one, and a cited
+    // file that is not there.
+    expect(
+      probe(
+        `it("the new name", () => {});`,
+        cite("tests/a.test.ts", "the old name"),
+      ),
+    ).toEqual([
+      "src/x.ts names tests/a.test.ts and the test the old name, unwritten",
+    ]);
+    expect(
+      probe(
+        `it("still here", () => {});`,
+        cite("tests/gone.test.ts", "still here"),
+      ),
+    ).toEqual([
+      "src/x.ts names tests/gone.test.ts for the test still here, " +
+        "and there is no such test file here",
+    ]);
+
+    // And the legitimate spellings, every one of which a stricter reading
+    // refuses. A rule that refuses these is worse than none, because the next
+    // author deletes it rather than obeying it.
+    const accepted: [string, string][] = [
+      [`it.each([[1, 2]])("labels %s as %s", () => {});`, "labels %s as %s"],
+      [
+        `it("a label written " + "in two halves", () => {});`,
+        "a label written in two halves",
+      ],
+      [`it(\`a template label\`, () => {});`, "a template label"],
+      [
+        `it.each([{ n: 1 }])("handles $n cleanly", () => {});`,
+        "handles $n cleanly",
+      ],
+      [
+        `const NAME = "a hoisted label"; it(NAME, () => {});`,
+        "a hoisted label",
+      ],
+      [`describe("outer", () => { it("inner", () => {}); });`, "outer > inner"],
+      [`describe("outer", () => { it("inner", () => {}); });`, "inner"],
+    ];
+    for (const [test, label] of accepted)
+      expect(probe(test, cite("tests/a.test.ts", label))).toEqual([]);
+  });
+
+  it("resolves a name a reader copied out of a run", () => {
+    // The expansion, not the template. Thirty three declared names here carry
+    // a printf token, and the orphan this rule was bought by was reported to
+    // its author in exactly this form, so a rule refusing it would have
+    // refused the report that motivated it.
+    const cite = (path: string, label: string) =>
+      "`" + path + "::" + label + "`";
+    const declared = `it.each(["a"])("draws the %s pill", () => {});`;
+    const probe = (label: string) =>
+      unwritten({
+        "tests/a.test.ts": declared,
+        "src/x.ts": `// ${cite("tests/a.test.ts", label)}\nexport const x = 1;`,
+      });
+
+    expect(probe("draws the unread pill")).toEqual([]);
+    expect(probe("draws the %s pill")).toEqual([]);
+    // And it is a wildcard rather than a hole: the rest still has to match.
+    expect(probe("paints the unread pill")).toEqual([
+      "src/x.ts names tests/a.test.ts and the test paints the unread pill, unwritten",
+    ]);
+  });
+
+  it("reads a name carrying a delimiter of its own, in a double fence", () => {
+    // Four names in this tree hold one. Under a single fence the label stops
+    // there and the rule names something nobody wrote, so a correct citation
+    // is refused and an unrelated sentence has to be rewritten to publish.
+    const label = "counts the `n` rows";
+    const declared = `it(${JSON.stringify(label)}, () => {});`;
+    // Assembled, path and separator included, for the reason the arm above
+    // enforces: written out, this fixture is an unfenced citation in this
+    // file's own source, and that arm reddened on it.
+    const probe = (fence: string) =>
+      unwritten({
+        "tests/a.test.ts": declared,
+        "src/x.ts":
+          "// " +
+          fence +
+          "tests/a.test.ts" +
+          "::" +
+          label +
+          fence +
+          "\nexport const x = 1;",
+      });
+
+    expect(probe("``")).toEqual([]);
+    // The single fence cannot carry it, and says which fix is wanted rather
+    // than reporting a test that is right there as gone.
+    expect(probe("`")).toEqual([
+      "src/x.ts names tests/a.test.ts and a name cut at a code span " +
+        'delimiter, "counts the ": write it in a double fence',
+    ]);
+  });
+
+  it("refuses a name that is only a token, which resolved everything", () => {
+    // **The hole the wildcard opened, and it is not hypothetical here.** Two
+    // files declare `%s` as the label of an `each`, this one among them, and
+    // every string constant of a cited file is tried, so one such name made
+    // every citation to that file resolve. The file the rule lives in was the
+    // file it had stopped guarding.
+    const cite = (path: string, label: string) =>
+      "`" + path + "::" + label + "`";
+    const probe = (declared: string, label: string) =>
+      unwritten({
+        "tests/a.test.ts": declared,
+        "src/x.ts": `// ${cite("tests/a.test.ts", label)}\nexport const x = 1;`,
+      });
+    const gone = [
+      "src/x.ts names tests/a.test.ts and the test a name nobody wrote, unwritten",
+    ];
+    const holes = [
+      `it.each(["a"])("%s", () => {});`,
+      `it.each(["a"])("%s %s", () => {});`,
+    ];
+
+    for (const hole of holes) {
+      const declared = `${hole} it("the real name", () => {});`;
+      expect(probe(declared, "the real name")).toEqual([]);
+      expect(probe(declared, "a name nobody wrote")).toEqual(gone);
+    }
+    // Non whitespace rather than non empty, which is the half worth deriving:
+    // a name almost always holds a space, so a fixed part that is only a
+    // space constrains nothing.
+    expect(isTemplate("%s")).toBe(false);
+    expect(isTemplate("%s %s")).toBe(false);
+    expect(isTemplate("reads %s")).toBe(true);
+  });
+
+  // **The timeout is explicit because the default is not a measurement.** This
+  // arm re runs `unwritten()` over the whole file set once per citation, so it
+  // costs citations times files and grows with the tree rather than staying
+  // put. Measured 2026-09-29 in isolation on the eight core worker: 1,863 ms,
+  // which is the figure the comment below quotes. Under the full parallel run
+  // on the four core worker it went past the 5,000 ms default, reproducibly,
+  // two runs of two there against zero of two on the other node, which is why
+  // the number here is not a node's timing plus a margin.
+  //
+  // **30 seconds is chosen to survive ordinary growth, not to sit above
+  // today's cost.** A number close to the measurement re breaks on the next
+  // wave that adds citations, and the failure it produces says `timed out`
+  // rather than naming a rule, which reads as a defect in the tree. The cost
+  // to a healthy run is nothing, because the arm never waits.
+  //
+  // **A red here also suppresses the coverage register**, whose reporter
+  // returns early unless the run passed, so a timeout costs a silent check
+  // as well as this one. That is the reason this is pinned rather than left
+  // to the default.
+  it(
+    "reddens on a rename of any name this tree cites",
+    { timeout: 30_000 },
+    () => {
+      // **The cheapest diagonal in the file, and the one that caught the bare
+      // token.** Every citation the tree actually holds, planted one at a time
+      // by renaming the name it is read through, which is exactly the class
+      // this rule exists for. Derived from the tree rather than from a list, so
+      // a citation added tomorrow is planted too.
+      //
+      // **It finds that name through the parse, using the rule's own
+      // resolver.** It used to search the source text for the label, which is a
+      // second answer to a question the rule had already answered differently:
+      // a citation written in the form a run prints, against a source declaring
+      // the template, resolves for the rule and is invisible to a text search,
+      // so the accounting below called a healthy citation a dropout and went
+      // red on it. Sharing `resolvedBy` makes that a plant instead, and the
+      // silent skip the accounting was added to name cannot occur, because a
+      // citation the rule can read is by construction one this can rename.
+      //
+      // **It is the slowest arm here, about a second and a half, and that is
+      // the price of the instrument rather than an accident.** Trimming it to a
+      // sample would leave the rule certified by whichever citations the sample
+      // happened to take.
+      //
+      // **Accounted against the population, never against a floor.** This said
+      // `planted.length` was above five while planting 22 of 23, so sixteen
+      // citations could have stopped being planted with nothing red.
+      const files = citingFiles();
+      const all = citationsIn(files);
+      const tests = Object.keys(files).filter((path) => IS_TEST.test(path));
+      const reported = unwritten(files);
+      const constants = new Map<string, Set<string>>();
+      const constantsOf = (path: string): Set<string> => {
+        const had = constants.get(path);
+        if (had !== undefined) return had;
+        const made = constantsIn(files[path] ?? "", langOf(path));
+        constants.set(path, made);
+        return made;
+      };
+
+      const planted: string[] = [];
+      const unreadable: typeof all = [];
+      const selfCited: string[] = [];
+      const survived: string[] = [];
+
+      for (const one of all) {
+        const targets = tests.filter(
+          (path) => path === one.cited || path.endsWith(`/${one.cited}`),
+        );
+        // Every name, in every file, the citation is read through. All of them,
+        // because a basename matching several files resolves against their
+        // union, so renaming one copy would leave the citation reading another
+        // and this arm would call a working plant a survival.
+        const through = one.label.split(" > ").flatMap((part) =>
+          targets.flatMap((path) => {
+            const constant = resolvedBy(constantsOf(path), part);
+            return constant === undefined
+              ? []
+              : [[path, constant] as [string, string]];
+          }),
+        );
+        const readable = one.label
+          .split(" > ")
+          .every((part) =>
+            targets.some((path) => resolvedBy(constantsOf(path), part)),
+          );
+
+        if (!readable) {
+          unreadable.push(one);
+          continue;
+        }
+        if (through.some(([path]) => path === one.from)) {
+          selfCited.push(`${one.from} to ${one.cited}`);
+          continue;
+        }
+        planted.push(`${one.from} to ${one.cited}`);
+        const renamed = { ...files };
+        for (const [path, constant] of through)
+          renamed[path] = renamed[path]!.split(constant).join(
+            "a name nobody wrote",
+          );
+        if (!unwritten(renamed).some((report) => report.includes(one.label)))
+          survived.push(`${one.from} to ${one.cited}`);
+      }
+
+      expect(survived).toEqual([]);
+      // Nothing falls out of the walk unaccounted for.
+      expect(planted.length + unreadable.length + selfCited.length).toBe(
+        all.length,
+      );
+      // A citation this cannot plant is one the rule cannot read, so the rule
+      // is already reporting it. Both sides now answer through `resolvedBy`, so
+      // this is the two branches agreeing rather than one instrument checking
+      // another, and what it still catches is a classification drifting apart
+      // from the message it produces.
+      expect(
+        unreadable
+          .filter(
+            (one) => !reported.some((report) => report.includes(one.label)),
+          )
+          .map((one) => `${one.from} to ${one.cited}`),
+      ).toEqual([]);
+      // A file citing a name it declares itself would need a different plant,
+      // since renaming the declaration rewrites the citation with it. None
+      // today, and one appearing is worth reading rather than skipping.
+      expect(selfCited).toEqual([]);
+    },
+  );
+
+  it("is watching a population that has not collapsed", () => {
+    // **The only absolute number this describe holds, and it has to exist
+    // before the outstanding entry below leaves.** That entry is currently
+    // the one arm that reddens if the citations come back empty: the
+    // resolution arm and the plant arm both pass over an empty population and
+    // the fixture arms drive maps written here. The merge repairs the
+    // register and removes the entry in the same commit, and the backstop
+    // would leave with it.
+    //
+    // **Counted on citations rather than on citing files**, because one file
+    // can carry several and the file count is the looser of the two. 23 over
+    // the versioned tree today. The floor is set for a collapse, a glob that
+    // stops matching or a pattern respelled, and **not** for erosion: it says
+    // nothing about citations disappearing a few at a time, and nothing here
+    // does.
+    expect(citationsIn(citingFiles()).length).toBeGreaterThan(10);
+  });
+
+  it("keeps one outstanding citation from covering the next one", () => {
+    // **The entry was keyed on a message carrying no label**, so every
+    // citation from one document to one absent path produced the same
+    // sentence and one entry filtered all of them. Measured: a second, new
+    // dead citation to the same absent file survived, in the largest register
+    // in the repository, which is where citations are written.
+    const cite = (path: string, label: string) =>
+      "`" + path + "::" + label + "`";
+
+    expect(
+      unwritten({
+        "tests/a.test.ts": `it("the real name", () => {});`,
+        "docs/notes.md":
+          cite("gone.test.ts", "one name") +
+          " and " +
+          cite("gone.test.ts", "another name"),
+      }),
+    ).toEqual([
+      "docs/notes.md names gone.test.ts for the test one name, " +
+        "and there is no such test file here",
+      "docs/notes.md names gone.test.ts for the test another name, " +
+        "and there is no such test file here",
+    ]);
+  });
+
+  it("resolves a path written the way an import here is written", () => {
+    const cite = (path: string, label: string) =>
+      "`" + path + "::" + label + "`";
+
+    expect(
+      unwritten({
+        "tests/theme/a.test.ts": `it("the name", () => {});`,
+        "src/pages/x.ts": `// ${cite("../../tests/theme/a.test.ts", "the name")}\nexport const x = 1;`,
+      }),
+    ).toEqual([]);
+    expect(
+      unwritten({
+        "tests/theme/a.test.ts": `it("the name", () => {});`,
+        "docs/notes.md": cite("../frontend/tests/theme/a.test.ts", "the name"),
+      }),
+    ).toEqual([]);
+  });
+
+  it("reads a citation the formatter wrapped, at any depth", () => {
+    // The shape that makes a line by line scan report clean over a tree it
+    // never read. Three lines, because two is what an author writes on purpose
+    // and three is what the reflow produces without being asked.
+    //
+    // **Assembled, and this arm is why that rule is written down.** Its first
+    // draft spelled the opening of the citation in a string literal, which put
+    // a real citation in this file's own source pointing at a fixture that
+    // does not exist, and the rule above went red naming it. Caught by the
+    // thing it is testing, which is the only reason it is not still there.
+    const label = "a name long enough that the reflow puts it on its own lines";
+    const words = ("`" + "tests/a.test.ts" + "::" + label + "`").split(" ");
+    const wrapped = [
+      "/**",
+      " * see " + words.slice(0, 5).join(" "),
+      " * " + words.slice(5, 9).join(" "),
+      " * " + words.slice(9).join(" ") + " for the rest.",
+      " */",
+      "export const x = 1;",
+    ].join("\n");
+
+    expect(
+      unwritten({
+        "tests/a.test.ts": `it(${JSON.stringify(label)}, () => {});`,
+        "src/x.ts": wrapped,
+      }),
+    ).toEqual([]);
+  });
+
+  it("leaves everything else spelled with two colons alone", () => {
+    // The false refusal that would have made this rule unlivable: the tree
+    // cites a source module's export, and a backend test's class, in the same
+    // shape. Neither is a vitest label and neither is read here.
+    const cite = (path: string, label: string) =>
+      "`" + path + "::" + label + "`";
+
+    expect(
+      unwritten({
+        "tests/a.test.ts": `it("only this", () => {});`,
+        "tests/helper.ts": `export const thing = 1;`,
+        "src/x.ts":
+          `// ${cite("tests/helper.ts", "thing")} and ` +
+          `${cite("src/lib/kobo.ts", "isTrue")} and ` +
+          `${cite("backend/tests/test_shelf.py", "TestTheShelfIsTheOnlyWayIn")}\n` +
+          `export const x = 1;`,
+      }),
     ).toEqual([]);
   });
 });

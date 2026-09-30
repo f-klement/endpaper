@@ -238,6 +238,289 @@ from database import Base, SessionLocal, engine  # noqa: E402
 from models import User  # noqa: E402
 from tests.helpers import cover_resolver  # noqa: E402
 
+# ── The session's own denominator, reconciled on the controller ───────────────
+#
+# **A verdict is a claim about a denominator, and this session had none.** The
+# summary line counts what ran. Nothing anywhere compared it with what was
+# collected, so a session that lost tests reported a smaller number rather than
+# a failure.
+#
+# Measured on this base under `-n 2 --dist loadfile`, with one test killing its
+# own worker mid file:
+#
+# | arrangement | report entries | collected | never ran | anything said so |
+# |---|---|---|---|---|
+# | worker restarts at their default | 35 | 31 | 5 | no |
+# | `--max-worker-restart=0` | 16 | 31 | 15 | no |
+#
+# The default arrangement is worse than a silent reduction: under `--dist
+# loadfile` the crashed item goes back on the queue, the replacement worker dies
+# on it too, and a reader who checks the count sees it go **up**.
+#
+# **This is also what makes an existing comment true.** The note over
+# `_WAITED_PAST_EVERY_DEADLINE_SECONDS` in
+# `tests/routers/test_books_identifier_backfill.py` says a test that hangs is
+# worse than one that is missing, because a missing one is visible in a count.
+# It was not. The coverage register's census, which is the count a reader would
+# reach for, builds its population from collection, and collection is complete
+# before anything runs, so it is green on exactly the failure that sentence
+# claims it would catch. No claim is made here about what else in the tree
+# counts; what is checked is stated below.
+#
+# The per test ceiling in `pyproject.toml` bounds the hang. This bounds
+# everything else that loses a test, and it is the half that makes the ceiling
+# safe to get wrong: a ceiling set too high still ends in a named refusal rather
+# than in a job timeout naming nothing.
+#
+# `tests/test_a_hung_test_is_named.py` is the guard over both halves.
+
+#: Every nodeid this session collected, in collection order.
+_COLLECTED: list[str] = []
+
+#: Which hook supplied that population.
+#:
+#: **An empty population with tests reported is a check that was never armed**,
+#: which is the shape this repository pays for: a guard whose arming is data
+#: disarms with no diff and no tell. So the source is recorded and the empty
+#: case is a refusal below rather than a silent pass.
+_COLLECTED_FROM = "nothing"
+
+#: Every nodeid that produced at least one terminal report.
+_REPORTED: set[str] = set()
+
+#: How many missing nodeids to name before summarising the rest. A truncated
+#: session can be missing thousands, and a wall of them buries the count that
+#: says how bad it is.
+_MISSING_NAMES_SHOWN = 20
+
+#: Whether a given exit status is a claim about the whole collection.
+#:
+#: **One partition over every member of `pytest.ExitCode`, refused at import
+#: when a member is classified nowhere**, so a pytest that grows a status
+#: reddens here instead of joining the reconciled set unnoticed.
+#:
+#: **This is half the exemption and not all of it**, and the half it is not was
+#: bought by getting this wrong. An early stop does **not** reliably arrive as
+#: `INTERRUPTED`: `-x` and `--maxfail` set `session.shouldfail`, which raises
+#: `Session.Failed` and lands on `TESTS_FAILED`, so keying on the status alone
+#: refuses the ordinary debugging run. `pytest_sessionfinish` below therefore
+#: asks the session's own stop state **first**, and this table second. What each
+#: one catches that the other does not is measured beside that check.
+#:
+#: What this table is for is the shape the ceiling exists for: the truncation
+#: exits `TESTS_FAILED` with no stop flag set, because the crash items are real
+#: failures, so it is reconciled rather than exempted.
+_CLAIMS_THE_WHOLE_COLLECTION: dict[pytest.ExitCode, bool] = {
+    pytest.ExitCode.OK: True,
+    pytest.ExitCode.TESTS_FAILED: True,
+    # **Classified but unreachable here, and the difference is the point.** The
+    # terminal reporter sets this one inside its own `pytest_sessionfinish`
+    # **hookwrapper, after the yield**, so every non wrapper implementation
+    # including the one below has already run and been handed the status the
+    # session had before it. Measured: `--max-warnings=1` over three passing
+    # tests gives a process exit of 6 and an `exitstatus` of **0** at this hook.
+    # Such a run is therefore reconciled, under `OK`, and never under this.
+    #
+    # It stays classified because the partition has to be total, and True is
+    # what it would mean: the run completed. The first draft of this comment
+    # claimed the hook receives it, which was the process exit code read as the
+    # hook's argument. The code was right and the reason was the wrong shape.
+    #
+    # What the partition did buy is real and is not this: it refused at import
+    # on a member no design document for this change knew about.
+    pytest.ExitCode.MAX_WARNINGS_ERROR: True,
+    # Stopped on purpose before the end: `-x`, `--maxfail`, a bare
+    # `pytest.exit(reason)`, an interrupt. Short by request, and the caller
+    # already knows.
+    pytest.ExitCode.INTERRUPTED: False,
+    # The run is not a verdict about anything.
+    pytest.ExitCode.INTERNAL_ERROR: False,
+    pytest.ExitCode.USAGE_ERROR: False,
+    # Nothing was collected, so the two numbers agree at zero anyway.
+    pytest.ExitCode.NO_TESTS_COLLECTED: False,
+}
+
+_UNCLASSIFIED_EXIT_CODES = set(pytest.ExitCode) - set(_CLAIMS_THE_WHOLE_COLLECTION)
+if _UNCLASSIFIED_EXIT_CODES:
+    raise RuntimeError(
+        "this file partitions every pytest exit status into one that claims the "
+        "whole collection and one that does not, and this pytest carries a status "
+        f"it classifies nowhere: {sorted(code.name for code in _UNCLASSIFIED_EXIT_CODES)}"
+    )
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Take the population from the session, which is the path with no xdist.
+
+    **After the whole of `pytest_collection_modifyitems`, rather than last
+    inside it.** `trylast` orders an implementation only among the **non
+    wrapper** ones, and the cache plugin registers that hook as a
+    `wrapper=True, tryfirst=True` which applies the `--lf` deselection **after**
+    the yield, so after every non wrapper implementation however late it asks to
+    be. Measured under `-n 0 --lf` with one cached failure: taken in
+    `modifyitems` the population is the whole file and the session runs one
+    test, which is a false refusal naming the rest; taken here it is one and
+    one. A `-k` filter is deselected in a non wrapper implementation and was the
+    half `trylast` won, which is why the first version looked correct.
+
+    **This is also where xdist takes the ids it sends**, so the two arms now read
+    one definition of what was collected instead of two that can disagree.
+
+    Under xdist this fires in each worker and **not on the controller**, which
+    bypasses collection entirely. Measured: the controller records zero calls to
+    this hook. The worker's copy is never read, because the reconciliation
+    returns early there.
+
+    **Guarded on there being items**, so a session that collected nothing leaves
+    the source at its initial value rather than claiming to have filled the
+    population with nothing.
+    """
+    global _COLLECTED_FROM
+    if not _COLLECTED and session.items:
+        _COLLECTED.extend(item.nodeid for item in session.items)
+        _COLLECTED_FROM = "the session"
+
+
+def pytest_xdist_node_collection_finished(ids: list[str]) -> None:
+    """Take the population from the first worker to report its collection.
+
+    Every worker collects the whole suite and the controller refuses a run whose
+    workers disagree, so the first one is the session's population. Deselection
+    is applied before this fires: measured under `-n 2 -k`, collected and
+    reported agree at ten.
+
+    **Naming a hook xdist owns is what keeps this arm armed.** With the plugin
+    gone pytest refuses an unknown hook rather than running with this population
+    empty, which is the same self enforcing shape as `-n 2` living in `addopts`.
+    """
+    global _COLLECTED_FROM
+    if not _COLLECTED:
+        _COLLECTED.extend(ids)
+        _COLLECTED_FROM = "xdist"
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    """Tick a nodeid off as having reported at all.
+
+    Setup, call and teardown each arrive here, and a test that errors in setup
+    or is skipped still reports. What never arrives is a test whose worker died
+    while holding it, and a test the session never dispatched.
+    """
+    _REPORTED.add(report.nodeid)
+
+
+def _refuse_the_short_session(session: pytest.Session, lines: list[str]) -> None:
+    """Say it where a reader will see it, and make the status say it too.
+
+    The terminal reporter is asked for by name rather than written to directly,
+    because `addopts` carries `-q` and a bare print at session finish lands
+    among the dots. Without a reporter, which is a run with `-p no:terminal`,
+    stderr still carries it.
+    """
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    for line in lines:
+        if reporter is None:
+            print(line, file=sys.stderr)
+        else:
+            reporter.write_line(line)
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Refuse a session that reported fewer tests than it collected.
+
+    Named, so the refusal says which tests went missing rather than leaving a
+    reader to diff two counts they do not have.
+    """
+    config = session.config
+    if hasattr(config, "workerinput"):
+        # An xdist worker. It collects the whole suite and runs a slice of it,
+        # so its own denominator is short by construction and says nothing about
+        # the session's. Without this the check fires in every worker on every
+        # green run.
+        return
+    if config.option.collectonly:
+        # Nothing was dispatched, so there is nothing to reconcile. Measured:
+        # `--collect-only` exits OK carrying the full population and no reports,
+        # which is a false refusal without this line.
+        return
+    if session.shouldfail or session.shouldstop:
+        # **Stopped early on purpose, said by the session rather than by a
+        # status.** `-x` and `--maxfail` set `shouldfail`; `--stepwise` sets
+        # `shouldstop`. Each is assigned at exactly one site in the
+        # distribution, neither is ever unset, and both are still true here.
+        #
+        # This is the instrument the status cannot replace. Measured on a five
+        # test project, reading what this hook is handed: `-n 0 -x` arrives as
+        # `TESTS_FAILED` with four tests unreported, so a status only rule
+        # refuses the ordinary debugging run, and `--pdb` forces `-n 0`, so that
+        # run is the reachable one rather than a corner. Under xdist the same
+        # stop arrives as `INTERRUPTED`, which is the distributor re-raising and
+        # not a property of stopping early. Asking the session makes the two
+        # paths answer the same way.
+        #
+        # **Residue, and it is the price of this exemption rather than a fault
+        # in it.** A genuine loss that shares a run with a deliberate stop is
+        # swallowed here: measured, `-x` with a real failure **and** a test
+        # dropped before it could report is silent under both `-n 0` and
+        # `-n 2`, and that drop is exactly the shape this whole check exists
+        # for. The version keyed on the status alone had the same hole, and
+        # this one is **strictly wider**, because it also covers the failure
+        # status with the flag set. Closing it needs a per item account of why
+        # each test went unreported, which is a different mechanism rather than
+        # a further condition here.
+        return
+    try:
+        status = pytest.ExitCode(exitstatus)
+    except ValueError:
+        # A status pytest does not define, which `pytest.exit(reason,
+        # returncode=N)` produces **only for an N outside the enum**. One
+        # inside it is an ordinary status and reaches the table below, which
+        # is the case the two comments about that call used to argue past
+        # between them.
+        return
+    if not _CLAIMS_THE_WHOLE_COLLECTION[status]:
+        # **And the status is the instrument the stop flags cannot replace**,
+        # which is why both are here and neither was enough. Measured: an
+        # interrupt, and a **bare** `pytest.exit(reason)` from inside a test,
+        # set neither flag and arrive as `INTERRUPTED` with the rest of the
+        # session unreported. Dropping this check for the flags alone turns
+        # every `Ctrl-C` into a wall of names.
+        #
+        # **The claim is narrow on purpose, because the same call given a
+        # `returncode` is a different thing.** `pytest.exit(reason,
+        # returncode=1)` sets no flag either and arrives as `TESTS_FAILED`, so
+        # it is reconciled and a loss inside it is refused by name. That is the
+        # reachable middle between this branch and the `ValueError` one above,
+        # and reading it as an ordinary run of the status it names is what a
+        # caller choosing a status is asking for. Nothing in this tree calls it.
+        return
+
+    if not _COLLECTED and _REPORTED:
+        _refuse_the_short_session(
+            session,
+            [
+                f"endpaper reconciliation: {len(_REPORTED)} tests reported against an "
+                "empty collected population, so nothing was reconciled: neither "
+                "population hook fired",
+            ],
+        )
+        return
+
+    missing = [nodeid for nodeid in _COLLECTED if nodeid not in _REPORTED]
+    if not missing:
+        return
+
+    shown = missing[:_MISSING_NAMES_SHOWN]
+    lines = [
+        f"endpaper reconciliation: collected {len(_COLLECTED)} from {_COLLECTED_FROM}, "
+        f"{len(_REPORTED)} reported, {len(missing)} produced no report at all",
+        *(f"endpaper reconciliation: missing {nodeid}" for nodeid in shown),
+    ]
+    if len(missing) > len(shown):
+        lines.append(f"endpaper reconciliation: and {len(missing) - len(shown)} more")
+    _refuse_the_short_session(session, lines)
+
 
 def pytest_terminal_summary(terminalreporter: Any) -> None:
     """Say which filesystem the databases went to.

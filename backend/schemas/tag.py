@@ -48,9 +48,12 @@ class TagOut(BaseModel):
     #: offer a delete, since deleting a seeded tag would only bring it back at
     #: the next restart.
     is_predefined: bool = False
-    #: How many books carry it. Present so the confirmation can say what is
-    #: about to happen: "delete this tag" and "take this off 214 books" are
-    #: different decisions and only one of them is obvious from the name.
+    #: How many books carry it, **as this reader may see them**, which is what
+    #: stops it counting other members' private books. Not what the delete
+    #: confirmation says: deleting is library wide, so a reader scoped number
+    #: understates it by exactly the books they cannot see, and that
+    #: confirmation says "every book". What this is for is the picker, which
+    #: shows how used a tag is on the shelf the reader has.
     book_count: int = 0
     model_config = {"from_attributes": True}
 

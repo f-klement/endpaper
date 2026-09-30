@@ -6,7 +6,7 @@ import {
   ExportFormat,
   type UserOut,
 } from "../../api/generated/model";
-import { Icon } from "../../components";
+import { ErrorState, Icon } from "../../components";
 import type { IconName } from "../../components";
 import { useTranslation, type MessageKey } from "../../i18n";
 import { useExportLibrary, useLibraryMode } from "../hooks";
@@ -120,7 +120,13 @@ export default function NavBar({
   const [exportOpen, setExportOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const { exportLibrary } = useExportLibrary();
+  // **All three, and reading only the first is what made a refused export
+  // silent.** The hook has always returned the error and the pending flag and
+  // this component destructured neither, so a 403 on MARCXML outside library
+  // mode, a 401 past the edge handling and the 429 the route now answers all
+  // showed the reader nothing at all: the button simply stopped working. The
+  // backup door renders its equivalent through `ErrorState` and always has.
+  const { exportLibrary, isExporting, error: exportError } = useExportLibrary();
   // MARCXML is offered only in library mode. The server refuses the format
   // without it, so this decides what a household is shown rather than what it
   // may do.
@@ -278,15 +284,30 @@ export default function NavBar({
                 {exportFormats(libraryMode).map((format) => (
                   <button
                     key={format}
-                    onClick={() => {
-                      exportLibrary(format);
-                      setMenuOpen(false);
-                    }}
-                    className="flex-1 text-center py-1.5 text-xs font-medium rounded-lg border border-paper-200 bg-paper-0 text-paper-700 hover:border-accent-300 hover:text-accent-700 transition-colors uppercase tracking-wide dark:border-paper-700 dark:bg-paper-900 dark:text-paper-200 dark:hover:text-accent-300"
+                    // **The menu stays open, where it used to close on this
+                    // click.** Closing it unmounted the only place the outcome
+                    // could be shown, which is half of why a refusal was
+                    // invisible. It still closes on Escape, on a click outside
+                    // and on every navigation item, which is how every other
+                    // popover here closes.
+                    onClick={() => exportLibrary(format)}
+                    disabled={isExporting}
+                    aria-busy={isExporting}
+                    className="flex-1 text-center py-1.5 text-xs font-medium rounded-lg border border-paper-200 bg-paper-0 text-paper-700 hover:border-accent-300 hover:text-accent-700 transition-colors uppercase tracking-wide disabled:opacity-60 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-200 dark:hover:text-accent-300"
                   >
                     {format}
                   </button>
                 ))}
+              </div>
+            )}
+
+            {exportOpen && exportError != null && (
+              <div className="border-t border-paper-200 px-4 py-2.5 dark:border-paper-800">
+                {/* No fallback of its own: what a reader needs to see here is
+                    the server's own sentence, which `ErrorState` renders
+                    verbatim, and the shared wording covers the case where
+                    nothing usable was thrown. */}
+                <ErrorState error={exportError} />
               </div>
             )}
 

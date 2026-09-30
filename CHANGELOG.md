@@ -59,9 +59,9 @@
   121.10s from an ignoring one, where 121s is the stub arm's own sleep finishing. The tool
   takes SIGINT back at startup, from an inherited ignore and from an inherited block, and says
   which it found. A second stop can no longer unwind the escalation between the TERM and the
-  KILL. **The remaining window, a stop arriving before the escalation is entered, is not
-  closed**: an arm asserting it was written, measured and deleted rather than shipped green,
-  and `docs/decisions.md` records what is covered and what is not.
+  KILL. **The window that left, a stop arriving before the escalation is entered, is closed
+  further down this section**, by giving the two stops that had no handler a disposition of
+  their own; `docs/decisions.md` records what is covered and what still is not.
 
 - **The rule deciding what a test walk may read is driven over every walk in the test tree,
   not over the six in the file that owns it.** A walk that recurses `backend/` reads the cache
@@ -789,6 +789,372 @@
   the code that says which, which is the field and the code the source itself used. A heading in
   a vocabulary that issued no such code keeps its heading and loses the mark, because there is
   nothing to write and inventing one would be a worse answer than an honest gap.
+- **A mutation sweep that is asked to stop now takes its suite run down with it, whatever
+  asked.** An interrupt already did: the tool installs a handler for it and kills the arm's
+  whole process group on the way out. A termination signal and a hangup did not, because
+  neither had any handler at all, so the kernel ended the tool wherever it stood, nothing ran
+  on the way out, and the suite run it had started carried on holding a worker node's lock and
+  a multi gigabyte pod with nobody reading its output. That is the shape of the run that once
+  sat at 8.6 GB for 53 minutes. Both now unwind the same way an interrupt does, and a closing
+  terminal is the common way the second one arrives. The tool still reports the signal that
+  stopped it rather than an exit code of its own, and it prints, on the way in, which stops
+  this run answers for and the one command that still ends it instantly, because a stop that is
+  answered politely looks for a moment like a stop that was ignored.
+- **A sweep started so that it outlives its terminal still does.** A run launched with the
+  hangup already ignored, which is what the usual wrappers for a long job over ssh set, keeps
+  that ignore rather than having it overridden by the change above. A sweep is a suite run per
+  mutant plus one, so the long unattended run is the ordinary one, and killing it at the one
+  signal it was told to survive would have been a worse bargain than the orphan the change
+  prevents.
+- **An export no longer holds the whole shelf in memory, whichever format was asked for.** The
+  MARCXML arm was paged already; the CSV and txt arms of the same route resolved every book the
+  member could see, plus a reading status for each, and built the whole file as one string
+  before answering. They are the two an ordinary account can reach, where MARCXML is offered
+  only in library mode, and the CSV arm carries the description column, so they were the worse
+  two. All three now walk the shelf a page at a time and write one chunk a page, so the peak is
+  a page whatever the shelf holds. **The CSV and text files come out in catalogued order rather
+  than title order**, which is what paging costs: a title is a key an edit can move, so a walk
+  resuming on one drops a book silently, and a spreadsheet sorts a column back in one click.
+- **A username typed at the login screen could write a line of its own into the server log.**
+  The two LDAP failure paths interpolated it unescaped, and the traceback beside one of them
+  carried it a second way. Both are escaped now, and the unreachable directory case is logged
+  without its traceback, so nothing the caller sent can reach the log unescaped. The field's
+  missing pattern, which is where the report started, is refused rather than restored: measured
+  against the validator this application runs it accepts a carriage return and a NUL, so it was
+  never the control it looked like, and adding it would refuse stored names the sign in route
+  has to match. `docs/decisions.md` carries the measurement.
+- **The reading status pill colours are a table the theme rule reads, not text it matches.**
+  They now sit beside their two siblings in the shared page types module and are exported, and
+  the contrast measurements import that table instead of scanning the card's source for class
+  strings. The binding is a `Record` over the status type, so a status added with no colour, or
+  a colour renamed out from under the rule, is a type error rather than a measurement that
+  quietly moves to the wrong subject. Every evasion the text reading route had to be defended
+  against goes with it. No colour changes.
+- **A recovery phrase committed anywhere in the tree now fails a build.** A phrase is the key,
+  and it carries no prefix, no header and no label, so a general purpose secret scanner cannot
+  tell one from a sentence. The new check reads the wordlists the application already depends
+  on and asks for the standard's own checksum, and it separates a phrase from prose by what
+  stands **between** the words rather than by the words themselves, because a quarter of the
+  ordinary English in this repository is wordlist words and a run of them that happens to
+  checksum is the expected result rather than a surprise. It runs twice: in the test suite over
+  every versioned file, and again over the published tree, where the same rule is set narrower
+  because a refusal there would block a release.
+
+- **The duplicates page no longer holds the whole library to tell you it found nothing.** Finding
+  duplicates needs the whole catalogue, because a page of it cannot be grouped on its own, but the route
+  was loading every visible book as a full record and serialising every duplicate through the same path
+  the book listing uses, so a library with no duplicates paid all of that for an empty answer on every
+  visit. It reads nine columns per book in one query now and serialises nothing: an entry carries the
+  cover, the title, the format, the publisher, the year and the ISBN, which is what the card shows.
+  **The answer is capped and says what it left out**, up to two hundred books across whole groups, never
+  a group cut in half, with the number of groups found beside them, so a library where an import ran
+  twice is told the size of what happened instead of being handed it. **And a group larger than one
+  merge can take now works**: a merge accepts twenty entries, a group could be any size, and every
+  button on such a card was a guaranteed refusal, so a group is shown with at most the twenty a merge
+  accepts and says how many more there are. **The card names the format**, which is the case the feature
+  exists for: a hardback and a paperback are one book and two ISBNs, and the line under the title used
+  to leave that out.
+- **A mutation sweep that is killed outright now takes its suite run down with it.** The dispositions it
+  grew last month cover every stop that lets Python run, and cover none of the ones that do not: an
+  outright kill, a segfault, or the kernel's out of memory killer left the suite run going with nobody
+  waiting on the result. A healthy run left that way finished by itself and then tidied up, releasing
+  the node lock, its pod and its working copy after one run's duration. What never cleared is the
+  conjunction, a sweep stopped that way **and** a run that has hung, which nothing in the harness could
+  reach: the orphan reaper spares any pod whose creating process is still alive, and a hung run's
+  process is alive. The kernel is now told, at the run's own spawn, to kill it when the sweep dies,
+  which is the one mechanism that needs no code to survive. Measured against the real spawn: a kill
+  landing half a second into a run left 40 of 40 runs going before and 0 of 40 after, and a stop swept
+  across the spawn itself left 12 of 120 and then none. It **adds to** the existing escalation rather
+  than replacing it, since the kernel signals one process and a grandchild that ignores the stop still
+  needs the group kill. The price is that the run cannot tidy up on the way out, so its pod waits for
+  the next run's reaper pass and its working copy for the next run's sweep on that node, both of which
+  run at the start of every suite run. Where the kernel offers no such mechanism the sweep refuses to
+  start rather than running a layer short and saying nothing, and its own banner no longer offers the
+  outright kill as the immediate out without saying what that costs.
+- **A suite run now clears the working copies that killed runs left on the node.** Each run unpacks the
+  repository into a directory of its own on a disk the node keeps between runs, and removes it on the
+  way out; the stops that skip that cleanup are the ones that happen, a tool timeout, the out of memory
+  killer and an outright kill, and nothing had ever looked at that disk, so those copies stayed for
+  good. Measured on `builder` on 2026-09-29: **11 abandoned copies holding 1.6 GB, the oldest a month
+  old**, beside one live copy at 27 MB. Every run now lists what is there, asks the cluster which of
+  those runs still holds a pod, and removes only the rest. Three things fall outside it: the one shared
+  copy from before per run copies existed, at a name the listing does not match; a pod the cluster is
+  still taking down, which goes on claiming its copy; and a run in another namespace, since the listing
+  covers one while the disk is per node. Above all, a run only gets this far once its own pod is
+  running, so the node whose disk is already full is the one node this never reaches: it bounds the
+  ordinary pile, and a disk alarm on the node is what covers the case it is named for.
+- **A directory identity whose name is wider than the column no longer writes a row.** The name a
+  directory returns went straight into `users.username`, which is a sized text column SQLite does not
+  enforce, so a deployment pointing its username attribute at a distinguished name wrote a row at
+  whatever width the directory sent and logged it at that size, once per account. The LDAP door now
+  meets a check that refuses such a name and fails the sign in; the proxy door already refused one, and
+  the same check is now its backstop. **Refused rather than shortened**, because the match that finds an
+  existing member is on the username and it is unique: two identities sharing a fifty character prefix
+  would have landed on one row, and the second person to sign in would have inherited the first's books,
+  loans and notes, with no error anywhere. The refusal is at WARNING and names both the width and the
+  name, because it is a lockout somebody has to go and fix. Every log line that could name an unbounded
+  username now bounds it, including the refusal a proxy header reaches without authenticating, which is
+  the only one of them an unauthenticated caller can provoke.
+- **In a directory mode, a member whose stored username is already wider than the column can no longer
+  sign in**, and will see an ordinary failed login until an operator renames the row. The check is
+  applied before the member is looked up, so it refuses a leftover row of the 2026-08-18 class and a
+  legitimate long directory name by one mechanism. There is no endpoint that renames an account, so the
+  remedy is the database row. **In local mode nothing changes**: that door does not go through the
+  check, so the same row signs in and is still served in full.
+- **A commit subject can no longer carry an internal name onto the public mirror.** The snapshot
+  published on every push to the default branch copies the internal commit subject verbatim, and nothing
+  read it: six of this repository's 1,877 subjects hold a string the publish gate refuses in any
+  published file, five of them on the default branch's own first parent line. The publish now stops on
+  one rather than substituting a safe sentence, because substituting would rewrite what the public
+  history says. Nothing is lost by stopping: the mirror is a snapshot rather than a replay, so the next
+  commit publishes a tree carrying the blocked one, and the refusal says so. **The commit identity and
+  the branch name are scanned too**, since the author and the address are written into the commit object
+  and into the annotated tag's tagger and the branch is the ref that is pushed, and all three are
+  configured through the same environment prefix as the credential, which is where an internal hostname
+  would be typed. All three defaults measure clean, so the scan refuses nothing today and covers the
+  next edit.
+- **Every job that reads the tree about to be published now blocks the publish, or records why it does
+  not.** The image push waited for neither scan over that tree: both could still be running, or already
+  red, while the image built from it was promoted. It waits for both now. The rule behind it is derived
+  from the artefact graph rather than from a list of job names, so a scan added later is covered by
+  existing rather than by somebody remembering to wire it in.
+
+- **A tag invented against a book you cannot see is no longer in your vocabulary.**
+  `GET /api/books/tags` scoped its `book_count` through the shelf and served every row
+  unscoped, so a tag minted off a private book, by a CSV import or by creating one and
+  attaching it, reached every member on their next page load with a count of zero. The list
+  now answers with the seeded vocabulary plus the tags on books the caller can see. Attaching
+  a tag by an id you may not see, singly or in bulk, answers the same 404 an unused id
+  answers: attaching a guessed id to a book you own used to return that book with the tag's
+  name on it. **Not closed, and stated rather than implied**: tag names are globally unique
+  and creating one answers a name that already exists with the existing tag, so guessing a
+  **name** still confirms a tag exists, and a tag no book carries is attachable by id, so
+  guessing the **id** of such a tag confirms its name too. **And one thing this breaks, which
+  is a regression and not a narrowing**: typing a tag name that collides with one you cannot
+  see answers with that tag, as a collision always has, and putting it on a book then fails
+  with nothing on screen to say why. On the scan form the book is still saved and the tag is
+  dropped from the selection with no message, so the name is unusable from the picker. A CSV
+  import still does all of it and is not limited the same way, matching names against the
+  whole vocabulary under a cap that limits new tags rather than matched ones, so nothing is
+  protected by the refusal. The repair is a route that attaches a tag by name, which is not in
+  this release.
+- **The tag delete confirmation says "every book" instead of a number.** The number it carried
+  was the reader's own count and the delete is library wide, so it understated the action by
+  exactly the books the reader cannot see. The custom field confirmation already said "every
+  book" for the same reason.
+- **A recovery phrase in a commit message can no longer reach the public mirror, and the
+  message is built once instead of twice.** Everything the mirror push sends that is not the
+  exported tree, the commit subject, its body and the tag name, is derived in the job that
+  builds that tree and carried to the push as one artefact. The scan that already reads the
+  tree reads the same bytes, and the job that pushes derives nothing at all. Before this the
+  subject was recomputed at the point of sending, in an image with no Python and no wordlists,
+  so no arm had ever read one: a phrase pasted into a commit subject published, and the mirror
+  does not unpublish. The scan of the exported tree is unchanged.
+- **The recovery phrase scan could not see a Turkish phrase, and missed most Russian ones.** It
+  asked the mnemonic library whether a run of words checksums, and that library folds the
+  phrase to a decomposed form before looking each word up in a list holding the language's own
+  spelling. Where the two differ the lookup fails and the phrase reads as invalid: **649 of
+  Turkish's 2,048 words move under that fold and 276 of Russian's**, so a real 24 word Turkish
+  phrase was read correctly about one time in ten thousand. The scan computes the checksum
+  itself now, off the same lists. Measured in both directions before it was changed: over
+  12,000 phrases the library itself wrote, twelve languages at all five lengths, the old rule
+  missed 1,900 and the new one misses none; over 48,000 drawn sequences the new one refuses
+  nothing the old one accepted. The scanned tree is clean either way.
+- **The release gate in front of the mirror stopped installing the development toolchain.** The
+  job that scans the exported tree for a recovery phrase was materialising the test runner, the
+  type checker, the linter and four more, none of which it imports: 112 packages against 43,
+  and 226.4 MB installed against 83.2 MB.
+- **A release that lost its tag on the way to the mirror published untagged and said so in one
+  line of a job log.** The message the push sends carries three parts, and whether to tag was
+  read from one of them being absent. An absent file is also what a lost artefact looks like,
+  so a tag pipeline that lost that part published the release commit, never tagged the public
+  mirror, and succeeded. The message now always carries a third part saying which kind of
+  publish it is, and a push that cannot tell refuses. The cost of refusing is one deferred
+  release; the cost of guessing was a release the mirror has no tag for.
+- **A backend or Postgres suite that produced no test report no longer passes quietly.** Both
+  jobs declare a report and neither proved it had written one, which the report collector only
+  warns about. The frontend job has asserted this since a replaced reporter lost a whole
+  suite's record with every job green.
+- **A check attributed to a job that does not exist is now refused.** A colon qualified name
+  whose first segment opens a pipeline key must name a job or template the pipeline has, a
+  script the frontend manifest declares, or a job the file itself defines while also importing
+  the pipeline reader. The defect that bought it was live in five places. A name belonging to
+  another project's pipeline is refused too, and the failure message says how to write one so
+  it is not read as ours.
+- **An accepted command in a published document now carries which authority proved it**: a job
+  step names it, no job step names it but the tree runs it, or nothing invokes it and it is
+  accepted on its declaration. The set that no job step runs is pinned with a reason per
+  member, so a new member fails by name and a member that becomes a job step fails too.
+- **A comment inside a fenced code block is no longer read as a command offer, and a `#` inside
+  a quoted string is no longer read as a comment.** The repair the failure message recommends,
+  rewriting an offer as a mention, did not work inside a fence before this; and reading every
+  `#` as a comment hid every command written after a quoted one.
+- **A command written in a document now ends at a closing quote**, as it already ended at a
+  closing backtick, so a real command quoted inside another is offered without the quote riding
+  on its last token.
+- **The pipeline reader now refuses a value naming content written elsewhere in every position
+  it hands a value back from**, rather than in the positions somebody listed. Listing them was
+  wrong twice: once for a list item, and then for a mapping key inside a list item, which is
+  where the file actually writes them.
+- **What the pipeline runs, and in which job, is one asserted list rather than a sentence.**
+  Each row is checked against the pipeline, so deleting a step reds by name.
+- **A book file's own subject words reach the book, and you can take them off before it is
+  written.** Four of the five file readers were already parsing a subject out of the file and
+  throwing it away, because the record they all answer had no field for one: `dc:subject` in an
+  EPUB, `<genre>` in a FictionBook, record 105 in a Kindle file, `Genre` in a comic archive.
+  They now reach `books.categories`, the same column a catalogue lookup fills. A PDF still
+  states none, deliberately: that format's `Subject` key is the description and is already read
+  as one. **The subjects show on the queue row before anything is written, with a cross on
+  each.** Nothing in that queue is saved until "Add all", and no route clears that column
+  afterwards: enriching a book replaces the list and never empties it, so the only way to take
+  a subject off a book that already has one is to remove the book. That is the reason the
+  control is there rather than on the book's own page, and the pick panel now says so before
+  the press that starts it, in both catalogues. **What the browser refuses before it sends**:
+  the column stores its subjects joined on a semicolon, so the endpoint refuses an entry
+  containing one, and it refuses the whole book rather than the entry, which would have cost
+  somebody the book over one subject reading `Juvenile Fiction; General` in their file. Such an
+  entry is dropped now, never split and never failed. So is an empty one, one wider than the
+  column holds, and a repeat of one already kept; and the count stops at what one request may
+  carry, counting what was kept rather than what the file offered, so entries the endpoint
+  would refuse cannot hide good subjects behind them.
+- **A test that hangs now fails as a named test, and a run that quietly lost tests fails too.**
+  A hanging test used to end the whole job with nothing naming it: measured on 2026-09-26, a
+  worker parked nine minutes with no verdict and nothing in the repository bounded the wait.
+  Every test is now bounded, the bound fails that one test by name and leaves its worker alive
+  so the rest of the run still reports, and one worker death can no longer become nine.
+  Underneath all of it the session reconciles itself: it compares the tests it collected
+  against the ones that produced a report and refuses a short run, naming what went missing.
+  That half is what covers everything a per test bound cannot reach, which is a worker that
+  dies for any other reason, a truncated session, and a report that never arrived. Measured
+  with one test killing its worker mid file: at the parallel runner's default restart limit,
+  ten workers were consumed, the same test was reported failed ten times, the report carried 35
+  entries for 31 collected tests and five tests never ran; with restarts off, fifteen tests
+  disappeared. Neither shape said anything before this.
+- **What the catalogue protocol can be made to send is now measured in bytes rather than in
+  records, and the test that said so was checking a number it had been given.** The server caps
+  a response at fifty records and the comment beside that cap said a record had no size anybody
+  could have derived, because the book description is a column with no length limit. That was
+  wrong on the day it was written: every write through the application bounds a description to
+  ten thousand characters, and only a restore from a backup goes past it. The test standing
+  behind the cap built its page from a description typed into the test rather than read off
+  that bound, so it measured a page a thirtieth of the widest one a legitimate write can
+  produce, and the record count could have risen by 64% without it noticing. It now builds
+  every field at the width the application actually allows, in three different characters
+  because a character limit is not a byte limit, and with one credited author and with two
+  hundred and fifty, because no length says how many fields a record has. The figure it holds
+  is the page itself with nothing rounded off, so widening any field, adding one to the record,
+  or raising the page size fails a test rather than quietly changing what a stranger can ask
+  this server for, and a second test watches the record's fields by their MARC tags, so a field
+  added to the record is named whether or not it moves the size. The same slack was found in
+  the sibling test for the authenticated export page and is closed the same way. **No record
+  changes shape**: nothing about what the server sends is different, only what is known and
+  asserted about it.
+- **The export and the backup now declare what they actually send.** `GET /api/books/export`
+  declares `text/csv`, `text/plain` and `application/marcxml+xml`, `GET /api/backup` declares
+  `application/zip`, and both cover routes declare the three image types they serve. Every one
+  of them declared `application/json` with an empty schema before, so the published document,
+  the generated client and anything validating against it were wrong about all four. Both
+  downloads also declare the `Content-Disposition` they send.
+- **The browser asks for the types a download can actually be.** Its `Accept` header named a
+  JSON export, which does not exist, and a generic byte stream, which nothing sends, while
+  omitting two of the three export formats. It is now pinned against the committed schema
+  rather than maintained by hand.
+- **The export and the backup are rate limited**, five and three a minute per account. The
+  refusal carries `Retry-After`. **The limit bounds how often each is started and neither how
+  large the result is nor how many run at once**, and the archive download has no size bound at
+  all; both are written at the routes.
+- **A refused export says so.** The navigation bar read neither the error nor the pending flag
+  from the hook behind its export menu, so a refusal of any kind, including the one added here,
+  was a button that silently stopped working.
+- **A shelf name out of somebody's CSV can no longer publish a tag they were never shown.**
+  Importing a file matched each tag name against every tag in the library with no viewer in the
+  question, and then **put it on the book**. Where that name belonged to a tag whose only books
+  are another member's private ones, the import attached it to a book that is public by default,
+  which counted it for every member and so listed it to all of them, permanently and with no way
+  for a member to undo it; on a library publishing its catalogue it reached a reader with no
+  account. One rule now decides who a matched tag may be handed to, and both places that resolve
+  a name from a member ask it: the import and the new endpoint below. A name the member may not
+  use is left off, and the result says how many names did not go on a book without saying which
+  of the four reasons applied to each, because separating them out would answer the question the
+  refusal exists to narrow. The matching itself is unchanged and deliberately so: narrowing it
+  would make an invisible name miss, and the insert that follows a miss is the one that used to
+  take a whole upload down with it.
+- **Typing a tag name on a book is one request, and it can no longer fail after appearing to
+  succeed.** `POST /api/books/{book_id}/tags` takes a name and answers with the book. It used to
+  be two requests, one to invent the tag and one to attach it by id, and the second refused a
+  name that collided with a tag on a book the reader cannot see: the member typed a word, was
+  told the tag had been created, and then saw "Tag not found". On the scan form that refusal was
+  swallowed and the chip disappeared with it. The endpoint answers the same status whether the
+  tag was invented or already existed, so nothing in the answer reports whether a name was
+  already taken.
+- **A cancelled scan no longer leaves a tag behind.** Typing a tag name into the scan form asked
+  the server to invent the tag straight away, and that row was written whether or not the book
+  was ever saved. It stayed in the library carried by no book, invisible in the tag list,
+  holding its name against every future use of it, and removable only by an admin. The form now
+  holds the name until the book is saved and applies it then, so cancelling asks the server for
+  nothing at all.
+- **A collection's name is no longer served to members who can see nothing in it, and filing a
+  book into a guessed one no longer works.** The list handed every member every collection in
+  the library, so the name of a shelf holding only somebody's private books was the evidence
+  that those books exist, and naming its id at a write then succeeded and answered with the
+  name. A collection is now listed, renameable and fileable when a book you can see is in it,
+  when a book you can see in the trash is, or when no book at all is. An empty one is listed for
+  everybody, which is what keeps a shelf you just made on the page you made it on, and it means
+  a count of 0 says the shelf is empty rather than possibly hiding books. A collection hidden
+  while it holds one book you cannot see comes back once that book is destroyed. Two things are
+  unchanged and said out loud rather than implied: typing a name that is already taken still
+  tells you it is taken, and the ids are still consecutive.
+- **Known limitation: an empty collection can be taken off your list by somebody else.** Because
+  an empty one is listed for everybody, any member can file a book you cannot see into it, and
+  it then stops being listed, renameable or fileable for you and for its maker. Typing the name
+  again still answers with the row, and filing into that row then fails as an unknown id does.
+  Clearing it needs an admin, and the only thing an admin can do is delete the collection.
+- **The document now says that a cover can be fetched in pieces, and what arrives when it is.**
+  Both cover routes have honoured a `Range` header since the day they existed, because the
+  response they build does it for them, and they have advertised that in a header on every
+  reply. The published document said they answer 200 only, and the TypeScript client is
+  generated from that document. It now declares the partial answer too, including the multipart
+  envelope that arrives when a caller asks for two pieces at once, which is a different media
+  type from the one a single piece arrives under. The malformed and unsatisfiable range refusals
+  stay undeclared, because this document declares no refusal anywhere and two published route
+  descriptions argue from that.
+- **A book's subjects can be removed.** Three things wrote that column and nothing removed it:
+  adding the book, filling a gap from a catalogue, and absorbing a duplicate. Even an enrichment
+  asked to overwrite could only replace it with another catalogue's list, never empty it, so the
+  only removal in the product was deleting the book. The column is served to a reader with no
+  account whenever a book is public, and two ordinary acts carry a subject across that boundary:
+  making a private book public, and folding a private row into a public one. Editing a book now
+  takes a subject list, and an empty one clears it. **The browser cannot do this yet**: the API
+  takes it and the edit form has no control for it.
+- **A subject that reaches the column is now the server's own answer about the file, and two
+  suites hold it there.** The browser tidies a subject before it sends it and the server tidies
+  it again on the way in, by two rules that are deliberately not the same: the browser collapses
+  whitespace and trims, the server does that and deletes the control characters that have
+  nothing to show. What has to hold between them is that the browser never changes the server's
+  answer, and nothing held it. A browser rule one character wider than the server's does not let
+  a bad value through, it stores a subject the file never stated. That equality is now a shared
+  fixture set both suites read, with each case carrying the input and both implementations'
+  answers, so the two arms lock each other and a case cannot be edited to make a failure go
+  away. The semicolon that may not appear inside a stored subject rides in the same file: it was
+  a hand written literal in the browser and a constant on the server, pinned by nothing.
+- Corrected two published statements about how a title search row is scored. A MARC, Dublin Core
+  or MODS search row carries the identifier off its own record and a cover derived from it,
+  where the documentation said it carried neither.
+- **The Python that builds, scans and publishes this repository is now linted and type checked
+  like the rest of it, and one hole it left open is closed.** Sixteen tracked Python files, nine
+  and a half thousand lines including the secret scanner, the mutation harness and the gate that
+  decides an unattended release, were outside the linter, outside the type check and outside the
+  compile walk, because all three are anchored to the application's own directory. They are
+  inside all three now. Nothing was repaired to get there: every rule firing on the day the
+  tools went on is recorded with the count it stood at, in a list a test re-derives from the
+  linter on every run, so an entry cannot outlive the findings that justified it. What the tools
+  would **not** have caught is recorded beside them: seven defect classes were planted in the
+  outbound scanner and three went past both, all three the polarity of a refusal.
+- **The outbound scanner now fails when it scans nothing.** Its refusal to report a tree clean
+  when it has read almost no files was tested thoroughly and its entry point was tested not at
+  all, so replacing that refusal with a null left every check green while the scan ran over an
+  empty export and exited 0, one rung before a push to a mirror that does not unpublish.
+  Inverting the refusal was green the same way. Four arms now drive the entry point itself.
 
 ## v0.17.2
 

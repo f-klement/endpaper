@@ -368,6 +368,78 @@ describe("export", () => {
     );
   });
 
+  it("says so when the server refuses", async () => {
+    // **The blocking half of the rate limit change.** The bar read only the
+    // trigger from a hook that also returns the error, and the click closed
+    // the menu, so a refused export was a button that silently stopped
+    // working. A 429 added on top of that ships a regression rather than a
+    // feature.
+    api.on("/api/books/export", {
+      status: 429,
+      body: { detail: "Too many attempts. Please wait and try again." },
+    });
+    renderNav();
+
+    const { user, menu } = await openMenu();
+    await user.click(menu.getByRole("menuitem", { name: /Export Library/ }));
+    await user.click(screen.getByRole("button", { name: "csv" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Too many attempts",
+    );
+  });
+
+  it("keeps the format panel open so a refusal has somewhere to appear", async () => {
+    // **Driven on the success path deliberately.** Asserting it beside a
+    // refusal would wait for the alert first, and would then redden whenever
+    // the alert did, which is the arm above twice rather than a claim of its
+    // own. The claim here is only that the click does not unmount the place a
+    // message would go.
+    //
+    // **Asserted on the format panel, not on the dropdown.** The `menu` role
+    // is on the outer popover, which `menuOpen` gates; the error region and
+    // these buttons are gated by `exportOpen`. Closing the second alone
+    // unmounts the place a message goes and leaves the `menu` in the
+    // document, so an assertion on the role was green over the defect this
+    // arm is named for.
+    api.on("/api/books/export", {
+      body: "Title,Author",
+      headers: { "content-type": "text/csv" },
+    });
+    renderNav();
+
+    const { user, menu } = await openMenu();
+    await user.click(menu.getByRole("menuitem", { name: /Export Library/ }));
+    await user.click(screen.getByRole("button", { name: "csv" }));
+
+    await waitFor(() =>
+      expect(api.lastCall("/api/books/export")).toBeDefined(),
+    );
+    expect(screen.getByRole("button", { name: "csv" })).toBeInTheDocument();
+  });
+
+  it("marks the format buttons busy while one is running", async () => {
+    // The hook's other unread value. Without it a slow export looks like a
+    // click that did nothing, which is the same complaint one refusal deeper.
+    let release: (() => void) | undefined;
+    api.on("/api/books/export", async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { body: "Title,Author", headers: { "content-type": "text/csv" } };
+    });
+    renderNav();
+
+    const { user, menu } = await openMenu();
+    await user.click(menu.getByRole("menuitem", { name: /Export Library/ }));
+    await user.click(screen.getByRole("button", { name: "csv" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "csv" })).toBeDisabled(),
+    );
+    release?.();
+  });
+
   it("exports MARCXML when it is chosen", async () => {
     stubFlags(true);
     api.on("/api/books/export", {

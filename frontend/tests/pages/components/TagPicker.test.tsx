@@ -344,4 +344,52 @@ describe("TagPicker, inventing a tag", () => {
     );
     expect(screen.getByText("Your tags")).toBeInTheDocument();
   });
+
+  it("shows a name with no row of its own, as typed and with no category", () => {
+    // The scan form's case: there is no book yet, so there is no row either,
+    // and the name has to be visible before it exists. Rendered raw and never
+    // through `tagName`, because a name with no row has no key to translate.
+    renderLocalised(
+      <TagPicker
+        tags={makeTagSet()}
+        selectedIds={[]}
+        onToggle={vi.fn()}
+        onCreate={vi.fn()}
+        pending={{ names: ["Loft finds"], onForget: vi.fn() }}
+      />,
+      { locale: Locale.de },
+    );
+
+    expect(screen.getByText("Loft finds")).toBeInTheDocument();
+  });
+
+  it("offers to take one of those names off again", () => {
+    // One prop carrying both halves: a chip that cannot be removed is a
+    // trap, and the name is not on a book yet so nothing else can undo it.
+    const onForget = vi.fn();
+    renderLocalised(
+      <TagPicker
+        tags={makeTagSet()}
+        selectedIds={[]}
+        onToggle={vi.fn()}
+        onCreate={vi.fn()}
+        pending={{ names: ["Loft finds"], onForget }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Loft finds" }));
+
+    expect(onForget).toHaveBeenCalledWith("Loft finds");
+  });
+
+  it("renders no such group for a picker given no pending names", () => {
+    // Home's filter panel and BookDetail's editor pass no `pending` at all:
+    // both always have somewhere to put a tag, so nothing is ever pending
+    // there.
+    renderLocalised(
+      <TagPicker tags={makeTagSet()} selectedIds={[]} onToggle={vi.fn()} />,
+    );
+
+    expect(screen.queryByText("Once saved")).not.toBeInTheDocument();
+  });
 });

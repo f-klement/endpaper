@@ -189,11 +189,18 @@ class TestTheExportIsPagedRatherThanWhole:
     list to a writer that built one `Element` tree over all of it. Nothing
     bounded either, and the library in library mode is the instance with the
     most books: this arm materialised every one of them for an ordinary
-    account, and the CSV arm beside it still does. What replaced it walks the
-    shelf a page at a time, so
-    what these tests are about is the two things paging can get wrong: a book
-    that falls between two pages while the shelf moves under the walk, and a
-    page that quietly holds the whole shelf again.
+    account, and so did the CSV and txt arms beside it. What replaced it walks
+    the shelf a page at a time, and **that walk is now the one every arm
+    uses**, so what is covered here through the MARCXML route is the shared
+    behaviour rather than one format's. **It is not the whole of it**: these
+    arms drive one format, and
+    `tests/routers/test_books.py::TestNoExportArmResolvesMoreBooksThanAPage`
+    is what holds the walk against every member of `ExportFormat`. Measured:
+    a walk resolving the shelf once and slicing it reddens four arms there and
+    none here. What these tests are about is the two
+    things paging can get wrong: a book that falls between two pages while the
+    shelf moves under the walk, and a page that quietly holds the whole shelf
+    again.
     """
 
     #: A page a test can build a shelf around. Every test here that uses it
@@ -512,9 +519,19 @@ class TestThePageSizeThatBoundsTheExport:
     """What one page weighs at the widest a write through the API can produce.
 
     This is what says whether `EXPORT_PAGE_RECORDS` is a page or the whole
-    shelf arriving under another name. `tests/test_sru.py` measures
-    `sru.MAX_RECORDS` the same way, against a 2,000 character description
-    rather than a declaration.
+    shelf arriving under another name.
+    `tests/test_sru.py::TestTheCostOfTheWidestLegalResponseIsBounded` does the
+    same job for the unauthenticated door and is **not** built the same way,
+    which is worth saying because the difference runs against this class.
+    **It derives its columns by rendering a record full of sentinels; this one
+    retypes its seven.** So a column the writer starts emitting joins that
+    fixture on its own and does not join this one, and this class has no arm
+    that would say so. Porting the derivation is a change to a file the export
+    door trio is live in rather than a small fix, so it is stated here rather
+    than taken.
+
+    **It also stores its page where this one does not**, so it meets a
+    uniqueness this fixture never meets and prices the serial that costs.
 
     **Widest is two questions and this class exists because the second one was
     missed twice.** The first is how wide a field may be, which is a
@@ -558,15 +575,36 @@ class TestThePageSizeThatBoundsTheExport:
     be measuring the fixtures.
     """
 
-    #: What a full page of the widest records may weigh.
+    #: What a full page of the widest records weighs, to the byte.
     #:
-    #: Twelve mebibytes against a measured 9.74, which is 102,107 bytes for one
-    #: such record. **A tripwire on the record's shape and not a platform
-    #: limit**: nothing enforces it at runtime and no deployment was measured
-    #: against it. What it does is fail when a field is added to the writer, or
-    #: made repeatable, or given a wider bound, so that the table at
-    #: `marc.EXPORT_PAGE_RECORDS` stops being quietly wrong.
-    CEILING_BYTES = 12_582_912
+    #: 102,107 bytes for one such record and 103 for the wrapper. **A tripwire
+    #: on the record's shape and not a platform limit**: nothing enforces it at
+    #: runtime and no deployment was measured against it.
+    #:
+    #: **Named for what it is rather than for a ceiling, because after the
+    #: repair below it is not one.** It refuses a page that is **different**,
+    #: not a page that is large, and nothing here refuses a page of any size
+    #: at all. The class is still called what `marc.EXPORT_PAGE_RECORDS`
+    #: points at, so the name stays and this says what it means.
+    #:
+    #: **No headroom, and the assertion is equality, because the headroom was
+    #: the defect.** This was twelve mebibytes against the same measured page,
+    #: 2,372,109 bytes of slack, and the docstring above claimed the arm fails
+    #: when a field is added to the writer or given a wider bound. Measured, it
+    #: failed on neither: a `500 $a` carrying the subtitle, and `SUBTITLE_MAX`
+    #: widened tenfold, both left it green, because a hundred records of the
+    #: extra width fit inside the slack. A bound with slack in it is a number
+    #: nobody can re-derive, which is `docs/decisions.md` §The envelope's
+    #: ceiling is derived from the two routes that can fill it, applied here.
+    #:
+    #: **And equality records what slack used to hide, which is a passenger
+    #: rather than a measurement.** These Books are never saved, so `book.id`
+    #: is `None` and `001` carries the four characters `None` in every record:
+    #: 400 of the bytes below. Correcting that would read as a regression
+    #: here, so it is named rather than left for somebody to discover through
+    #: this arm. It is the **second** difference from the SRU page's own
+    #: figure, which stores its rows; the serial is the first.
+    PAGE_BYTES = 10_210_803
 
     #: The fills, and what each is here to show. `w` is the number a careless
     #: version of this class would have taken; `&` is what escaping does to the
@@ -577,7 +615,36 @@ class TestThePageSizeThatBoundsTheExport:
     #: `x,x,x,...`: one character a name and one separator.
     MOST_CREDITS = AUTHOR_LINE_MAX // 2
 
-    def widest_book(self, n: int, fill: str, credits: int = 1) -> Book:
+    #: Every MARC field the widest record carries, by tag.
+    #:
+    #: **The byte figure above cannot name a field and this can**, for a
+    #: field **the widest record renders**. Read off the rendered document
+    #: rather than off the writer's source, so how the value was reached does
+    #: not matter.
+    #:
+    #: **What it does not reach**, because every arm here reads one record: a
+    #: field fed by a relation this fixture leaves empty renders nothing,
+    #: moves no bytes and is named by nothing in this class. Measured on the
+    #: SRU twin, a `590` fed from `book.tags` reddens neither class.
+    #:
+    #: **A set, so a field repeating an existing tag does not change it**, and
+    #: neither does a widened bound: both move the figure above and are named
+    #: by no arm. The credited names arm below is the one shape of repetition
+    #: that is covered.
+    FIELD_TAGS = (
+        "001",
+        "020",
+        "041",
+        "100",
+        "245",
+        "264",
+        "300",
+        "520",
+        "650",
+        "700",
+    )
+
+    def widest_book(self, fill: str, credits: int = 1) -> Book:
         """Every length bounded field at its maximum, and `credits` names.
 
         `credits` is separate from the fill because the two answer the two
@@ -624,22 +691,57 @@ class TestThePageSizeThatBoundsTheExport:
 
     def page_bytes(self, fill: str, credits: int = 1) -> int:
         page = [
-            self.widest_book(n, fill, credits)
-            for n in range(marc.EXPORT_PAGE_RECORDS)
+            self.widest_book(fill, credits)
+            for _ in range(marc.EXPORT_PAGE_RECORDS)
         ]
         written = "".join(marc.stream([page]))
         assert written.count("<record>") == marc.EXPORT_PAGE_RECORDS
         return len(written.encode())
 
-    def test_a_full_page_of_the_widest_records_stays_under_the_ceiling(self):
+    def test_a_full_page_of_the_widest_records_is_what_the_constant_says(self):
         """The assertion is on the finished page, which is not the peak.
 
         Building it holds every record's string and the joined result at once:
         measured, 24.01 MiB for this 9.74 MiB page, 2.47 times. The route
         level table at `marc.EXPORT_PAGE_RECORDS` is a typical page rather
         than this one, so it is the shelf independence it demonstrates and not
-        the worst case. What this number bounds is the record's shape."""
-        assert self.page_bytes("&", self.MOST_CREDITS) < self.CEILING_BYTES
+        the worst case. What this number bounds is the record's shape.
+
+        **Equality rather than an inequality**: see `PAGE_BYTES`, which carries
+        what the inequality cost and what the equality now records.
+
+        **This arm cannot say what changed**, because it is one number against
+        another, so its message does not instruct a repair it has no way to
+        know is the right one."""
+        measured = self.page_bytes("&", self.MOST_CREDITS)
+        assert measured == self.PAGE_BYTES, (
+            f"a full page weighs {measured} bytes against the "
+            f"{self.PAGE_BYTES} this figure was measured at, a change of "
+            f"{measured - self.PAGE_BYTES}. What moved is not in this number: "
+            "the table at `marc.EXPORT_PAGE_RECORDS` is what the figure feeds, "
+            "and the two arms below separate a width from a field count."
+        )
+
+    def test_the_record_carries_the_fields_this_page_was_measured_over(self):
+        """The arm that names a field the widest record renders.
+
+        Read off the rendered document rather than off the writer's source, so
+        how the value was reached does not matter. **What it reaches is one
+        record**, so a field fed by a relation this fixture leaves empty
+        renders nothing and is named by nothing here; the constant's own
+        comment has that and the measurement behind it. For
+        `classifications`, the one relation the fixture populates, a field is
+        named.
+        """
+        record = marc.record_element(self.widest_book("&", self.MOST_CREDITS))
+        # The walrus is what narrows `Element.get` from `str | None` for the
+        # type checker; a truthiness filter in the comprehension does not.
+        tags = {tag for field in record if (tag := field.get("tag")) is not None}
+        assert tags == set(self.FIELD_TAGS), (
+            "the widest record's fields are not the ones this page was "
+            f"measured over. Gained {sorted(tags - set(self.FIELD_TAGS))}, "
+            f"lost {sorted(set(self.FIELD_TAGS) - tags)}."
+        )
 
     def test_the_fill_character_is_part_of_what_decides_the_page(self):
         """The first of the two questions: a `max_length` is characters."""

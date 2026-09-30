@@ -252,28 +252,39 @@ class TestAMistypedPhraseFailsAtInput:
             credentials.phrase_to_key(" ".join([*words[:-1], "endpaper"]))
         assert "endpaper" not in str(refusal.value)
 
-    #: A phrase whose last two words, swapped, fail the checksum. It is a
-    #: fixture generated for this test and opens nothing.
+    #: The sentence the fixture's entropy is the digest of.
+    #:
+    #: **A label and not a key.** Anybody can recompute the phrase from it, and
+    #: that is the property being bought: there is nothing here to leak.
+    #: Writing the 32 bytes out as hex instead was considered and refused,
+    #: because the hex **is** the entropy: `key_to_phrase` turns it straight
+    #: back into the phrase, so hex obscures the exposure rather than removing
+    #: it.
+    SWAP_FIXTURE_LABEL = b"endpaper: the swap fixture, not a key"
+
+    #: A phrase whose last two words, swapped, fail the checksum. It opens
+    #: nothing, and it exists only while this file is running.
     #:
     #: **Fixed, so that one case of this is reproducible.** Swapping two words
     #: breaks the checksum for most phrases and not for all, at the rate
     #: `_a_swap_the_checksum_rejects` records, so asking `generate_phrase()`
     #: for one asserted something untrue of 1 draw in 226. The two tests after
     #: this one keep the fresh phrase and derive the swap from the rule.
-    SWAP_BREAKS_THE_CHECKSUM = (
-        "cry verb canal remove range near afraid hollow upgrade foam deputy "
-        "letter front aisle melody hammer donkey perfect eternal pledge cross "
-        "kidney cheap dolphin"
+    #:
+    #: **Never spell a phrase here.** Any phrase this fixture can use is
+    #: checksum valid by definition, so written out it is indistinguishable
+    #: from a leaked key to any scanner and to any reader. Deriving it keeps
+    #: both properties the literal was bought for, one phrase and one pair,
+    #: and puts neither in the tree.
+    #:
+    #: **Nothing asserts the derived phrase is valid or that its last two words
+    #: differ**, and neither wants an assertion. `key_to_phrase` refuses
+    #: anything but a whole key, and `test_the_round_trip_is_exact` is what
+    #: says its output reads back; an unlucky label would make the swap below a
+    #: no op, which fails the test after this one by name on its first run.
+    SWAP_BREAKS_THE_CHECKSUM = credentials.key_to_phrase(
+        hashlib.sha256(SWAP_FIXTURE_LABEL).digest()
     )
-
-    def test_the_swap_fixture_is_itself_a_valid_phrase(self):
-        """Otherwise the swap below is refused for the wrong reason.
-
-        A fixture that stopped being valid would leave the test green while it
-        asserted nothing, which is the failure a fixed phrase trades for the
-        flake it removes.
-        """
-        credentials.phrase_to_key(self.SWAP_BREAKS_THE_CHECKSUM)
 
     def test_two_swapped_words_fail_the_checksum(self):
         words = self.SWAP_BREAKS_THE_CHECKSUM.split()

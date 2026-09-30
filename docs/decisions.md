@@ -803,9 +803,21 @@ half of what it claims to select.
 ### `categories` is joined with a semicolon, not a comma
 
 Google's own category names contain commas ("Fiction, general"), so a comma-joined list
-cannot be split back apart. `google_books.join_categories` / `split_categories` are the only
-two places that know the delimiter, and the API serves the field as a **list** so no client
-has to know it at all.
+cannot be split back apart. `google_books.join_categories` and `split_categories` are the only
+two places **on the server** that know the delimiter, and the API serves the field as a
+**list** so no client has to know it to read one.
+
+**A client that writes one does.** `frontend/src/lib/bookRequest.ts` drops an entry carrying
+the character before it builds the request, because `BookCreate` refuses the whole body over
+one and the file readers emit whatever a stranger's file wrote. It is a literal there: the
+schema carries no `pattern` for the field, so nothing recomputes that character the way the
+width and the count are recomputed. **The residue is closed by behaviour rather than by spelling.**
+`conformance/cases/subject.json` carries two entries with the character in them, one spaced
+and one bare, and records that the browser drops and the server refuses. Both runners read
+the file, so either side ceasing to refuse it is a failing test. What the cases cannot see is
+the server's constant changing value while the browser's literal does not, except through the
+behaviour on the bare character, which reddens on the server side first. A `pattern` on the
+field would close that too and costs a schema regeneration.
 
 ### A classification is stored whole, and its number is what gets matched
 
@@ -1681,7 +1693,7 @@ so out loud rather than leaving it implicit: `GET /api/books?unfiled=true` is it
 parameter, and the library filter offers it as its own option, because "what have I not
 filed yet" is the question the feature creates.
 
-### A collection is per library, and is never a privacy boundary
+### A collection is never a privacy boundary, and its label is not per library
 
 Any member may make one, rename it, and file any book they can write to into it. Filing a
 book changes **nothing** about who can see it.
@@ -1696,10 +1708,41 @@ an implementation already in the tree.
 So the separation is kept mechanical rather than intended. `visible_to()` is not given a
 collection to consult. `Collection.created_by_user_id` is recorded for provenance and no
 query reads it, which is what keeps the previous sentence true rather than merely meant.
-Every count served with a collection applies `visible_to` (`routers/collections._counts`,
-the `by_collection` statistic), because the count is the one thing a library wide label
-could disclose: a member who files a private book onto a shared shelf must not thereby
-announce it to everybody as a number.
+Every count served with a collection applies `visible_to`, and so does the row set. The
+count was recorded here as the one thing a label could disclose, and that was wrong: the
+name of a shelf holding only books a member cannot see is itself the evidence that those
+books exist, served on every page load and confirmed by a write. So the same question
+decides both, in one place, `backend/shelving.py`: a collection is named to a member when
+a book they can see is filed in it, when a book they can see in the trash is, or when no
+book at all is.
+
+**That narrows an axis the response was already on rather than adding one**, which is what
+keeps the paragraph above true. The count has always been the caller's own, so the list
+has always been viewer dependent; what changed is how far the dependence goes. Nothing
+about a collection is per member, no field says whose it is, and the rule reads no owner:
+`Collection.created_by_user_id` is still consulted by no query, and the arm for a
+collection nothing carries is what makes reading it unnecessary.
+
+**An empty collection is named to everybody**, because it names no book and so discloses
+none. That is not a convenience: withholding it would take the shelf a member just made off
+the only page they can make one on, and retyping the name would reproduce it exactly, which
+is a loop rather than a recoverable state. It also means a `book_count` of 0 has stopped
+being ambiguous.
+
+**Two things stay open and are written down rather than claimed closed.** A name that is
+already taken is answered by the create with the existing row and by the rename with a 409,
+so a guessed name still confirms a collection exists; the index behind that is global, so
+the check cannot take a viewer without racing the rule it fronts, and answering any other
+way is a new status code on a route that declares 201. And `id` is published and
+consecutive, so a filtered list still says rows exist between the ones it shows. What the
+guess no longer buys is the write.
+
+**What is uncovered, stated rather than waved past**: a member makes a shelf, files nothing
+on it, and somebody else files a private book onto it. The author then loses a shelf they
+made. One request from any member takes any empty collection away from everybody, so this is
+neither narrow nor intermittent; and the create answering 201 with the same id while the
+write into it answers 400 is the same loop the empty arm was admitted to prevent. It is the
+price of not reading the provenance column, and it is written at the site as well as here.
 
 A member who wants a shelf nobody else sees already has one: mark the books private. That
 is one rule, enforced in one predicate, tested by an AST walk over every module.
@@ -1768,7 +1811,7 @@ a second thing to keep in step with the first.
 **Peer sync does not carry it.** A collection is shelf taxonomy, which the peer sync design
 already refuses to send for `location`, and a collection named after a member would leak
 a member's name besides. It is also not a *scope* for a grant: scopes come from
-the stored grant and there are exactly two, and a third keyed on a library wide label that
+the stored grant and there are exactly two, and a third keyed on a shelving label that
 any member can rename or delete would silently widen or narrow what a peer sees through an
 edit made for shelving reasons. The amendment recording this is A5 in that document.
 
@@ -2543,6 +2586,73 @@ two worker wall clock, so the division halved a figure that direct measurement
 puts at 58.8ms. A derived number that nobody measured is the kind this
 repository is meant to catch.
 
+### The per test ceiling is derived from the tree, not chosen from a distribution
+
+The obvious way to size a hang bound is from how long tests take. Over five recent backend jobs
+the slowest test read 17s to 18s, and the worst reading of all, 28.43s, belongs to a test
+costing 0.05s on every other run: it stalled by a factor of about five hundred on a green run.
+So durations would have given a bound near 60, and **nothing bounds a stall in principle**,
+which is the first reason that number is not a judgement anybody should be asked to make twice.
+
+The second reason is decisive. This test tree **declares** its own ceilings, and the largest of
+them is 300 seconds, at twelve subprocess waits whose subject is a process that will not stop. A
+global bound of 60 would silently override twelve declared ceilings at exactly the sites a hang
+bound must not cut.
+
+So the rule is a relation rather than a number: **the global ceiling is strictly above the
+largest ceiling the test tree declares**, and `backend/tests/test_a_hung_test_is_named.py`
+asserts that by walking the tree. The virtue is not the value. It is that the value stops being
+somebody's opinion about a distribution and becomes a fact about the tree, so a test that later
+declares a longer wait reddens a guard and forces a decision instead of being halved by a line
+nobody re-read. A test that legitimately needs longer takes a timeout marker at its own site.
+
+What this costs, stated: one hanging test now costs six minutes rather than one. Against the job
+ceiling it replaces, and against a job that ended naming no test at all, that is the trade.
+
+### A verdict is a claim about a denominator, and the layer everyone reads had none
+
+This repository states that rule in several places and already enforced it in the instruments
+that report on a run. The mutation sweep asks for a machine readable report and refuses a run
+that produced none. The coverage register refuses to compare when its census is short. The frontend test config fails a run whose
+reporter set was replaced. **The ordinary suite run, which is the one every contributor and every
+job reads, had two verdicts and no denominator**: it counted what ran and compared it with
+nothing.
+
+That is one invariant at three depths, not three defects. A hanging test has no outcome of its
+own; a session can report fewer tests than it collected; a run can produce no report at all.
+Each is the same sentence with the denominator set differently.
+
+`backend/tests/conftest.py` now holds the missing half at the layer that produces the verdict: at
+session finish, on the controller, the tests collected are compared against the tests that
+produced a terminal report, and a difference no deliberate stop explains fails the session **by
+name**. A run stopped early on purpose is exempt, and so is a collect only run.
+
+**How that exemption is keyed took two goes, and the error was in the observer rather than in the
+reasoning.** The first version keyed it on the exit status, on a measurement showing
+`session.shouldstop` false at session finish under `-x`. That measurement was correct and about
+the wrong attribute: `-x` and `--maxfail` set `shouldfail`, not `shouldstop`, and with no xdist
+they arrive as an ordinary `TESTS_FAILED`. So a status only rule refused the commonest debugging
+run there is, and `--pdb` forces no xdist, which makes that run the reachable shape rather than a
+corner.
+
+It now asks the session's own stop state first, `shouldfail` or `shouldstop`, each with exactly
+one assignment site in the distribution and never unset. The status is still asked after it,
+because an interrupt and a bare `pytest.exit(reason)` set neither flag and arrive as
+`INTERRUPTED`: **neither instrument alone is the exemption, and each is the witness the other
+misses.** The same call given a `returncode` inside pytest's own set is read as an ordinary run
+of that status, so a test lost in one is still refused.
+
+**Residue, stated because the exemption is wider than the hole it replaced.** A genuine loss
+sharing a run with a deliberate stop is swallowed: `-x` with a real failure and a dropped test is
+silent, under either distributor arrangement. The version keyed on the status alone had the same
+hole and this one also covers the failure status with the flag set, so it is strictly wider.
+Closing it needs a per item account of why each test went unreported, which is a different
+mechanism rather than a further condition.
+
+Residue, deliberately: a hang nothing ever kills produces no session finish, so this check cannot
+fire on it. That is what the ceiling above is for, and it is why the two are one change rather
+than two.
+
 ### The remote test runner was reporting on a tree nobody had
 
 It ships the working tree by piping `tar` into `tar -xf` on a **persistent
@@ -2602,6 +2712,71 @@ model growing a `key`, and it checks the validator **is** `known_key` rather
 than that some before validator exists: written the loose way it passed clean
 against a model with its own validator, which is the shape it will actually
 meet.
+
+### Who may be told a tag exists is a question about books, answered in one module
+
+A tag row carries no member and `tags` has no foreign key to `books`, so
+`models.children_of_books` does not derive it and no arm of the shelf rule could have caught
+the disclosure. The answer is whoever may read a book carrying it, which is a shelf question,
+so it is asked once in `tags.Vocabulary`, beside the module that already owned every tag write.
+
+**Two predicates rather than one, and the second is why.** `listable` is what the server
+volunteers unasked, so a tag on no book is out: minting and attaching are two requests, and
+that gap is the route the disclosure was also reachable through. `writable` is asked about an
+id the caller supplied, so a tag on no book is in: every create sits in that gap, and one
+predicate for both answers 404 to the member who typed the name one request ago, silently on
+the scan form. A false refusal is invisible to a mutation sweep.
+
+**`Tag.created_by_user_id` was refused**, and not on size. The owner arm buys only a tag of
+your own that no visible book carries; the count arm closes the channel for every row that
+exists. The two client regressions that argued for it are fixed where they live, one line each.
+
+**The seeded exemption is keyed on `key`, not on `is_predefined`.** The flag survives a rename,
+so a household's own word on a renamed seeded row would ride into the exempt set, and nothing
+enforces that no route renames a tag. `Tag._drop_the_key_on_a_rename` clears the key, so the
+derivation is enforced by the validator rather than by a paragraph asking for it. The residue
+is the three writes that skip the validator, named in that validator's own docstring.
+
+### The tag name index has no viewer, and the viewer sits on the hand off instead
+
+The ticket asked twice for `Mint._by_folded_name` to be scoped to what the caller may see, so
+that a CSV import could not match a tag whose every book is hidden. **It cannot be built that
+way, and both spellings of the failure are worse than the thing being repaired.**
+
+`tags.name` is `unique=True` and the index behind it is binary. Scope the match and a name the
+caller may not see stops resolving, so `get_or_mint` falls through to the minting branch and
+inserts a name the table already holds:
+
+| The caller types | The stored row | What happens |
+|---|---|---|
+| `Divorce Law` | `Divorce Law` | `IntegrityError`, inside the import's single commit, so **the whole upload is lost** |
+| `divorce law` | `Divorce Law` | the insert **succeeds**, and the library gains the case split pair `tags._first_wins` exists to repair |
+
+The first is not a prediction. It is the incident `tags.py`'s own module docstring records: a
+member with one German shelf name imported nothing, every time, for the same reason by a
+different road. And neither outcome withholds anything, because `create_tag` answers that same
+name with that same row in one request.
+
+**So the match stays whole and the viewer is applied one step later**, on the decision to hand
+a matched row to a writer. That is `tags.Naming`, which both name resolving writers ask: the
+CSV import and `POST /api/books/{book_id}/tags`. The reason is written at `Mint.get_or_mint`
+as well, because the premise arrives as a ticket rather than as a question about this file.
+
+**What this repair closes is the attach, which was the harm.** The import used to put a hidden
+name on a book that defaults to public, which counted it for every member and so published it
+through the tag list, permanently, with no member level undo, and on an instance publishing
+its catalogue to a reader with no session.
+
+**What it does not close is confirmation by guess, and nothing available does.** The name
+space is globally unique of necessity, so refusing, attaching and dropping are three answers
+and each of them is an answer. `create_tag` still hands back the colliding row. Closing that
+means tag identity ceasing to be global, which is a `unique=True` removal, a composite index,
+an owner column and a data migration over every library in the field.
+
+**Refused with it, and recorded so neither is re-proposed:** widening `Vocabulary.writable` to
+admit a tag whose only carriers are hidden, which reopens exactly the channel that predicate
+was built to close; and a cap on distinct names resolved per import, which was proposed with
+no number because there is no corpus of real exports to set one from.
 
 ### The Catalogue record is a type, and the two dialects are gone
 
@@ -3217,13 +3392,20 @@ sends `*/*` unless told otherwise, so the wildcard was measured twice and one of
 the two was recorded as "absent". Re-measured with the header genuinely removed:
 401.
 
-`customFetch` therefore sends `application/json`, which is also simply true: every
-operation in the schema declares a JSON response.
+`customFetch` therefore sends `application/json`, which is also simply true **of what it
+fetches**: each of those operations either declares a JSON response or answers 204 with no
+body. Of the whole schema it was never true. `GET /api/backup` declares `application/zip`
+alone, and `POST /auth/logout` answers 204 and declares no body at all. What would make the
+header false is a caller rather than a schema change, and the three generated ones that
+would are called by nothing.
 
-`downloadFile` sends `application/octet-stream, application/zip, text/csv,
-application/json` instead. Its two callers fetch a CSV or JSON export and a ZIP backup, so
-`application/json` would be a lie, and a wildcard would put the request back on the
-redirecting side of the same negotiation.
+`downloadFile` sends `text/csv, text/plain, application/marcxml+xml, application/zip,
+application/json` instead. Its two callers fetch the three export formats and the archive,
+so `application/json` alone would be a lie, and a wildcard would put the request back on
+the redirecting side of the same negotiation. The list is pinned against the committed
+document, as the media types of the operations whose 200 declares a `Content-Disposition`;
+`application/json` is the one entry the document does not supply, being the error body a
+refused download answers with.
 
 ### The endless spinner was two faults, and neither was wrong on its own
 
@@ -4171,7 +4353,7 @@ by a hairline rather than by their own difference, and a contrast ratio cannot e
 so the test asserts the separation rather than a ratio.
 
 It lives in the page folder rather than `src/components/`, whose bar is domain freedom.
-`AboutSection.test.tsx::states the version and the source once, not twice` holds that the row
+`AboutSettingsPage.test.tsx::states the version and the source once, not twice` holds that the row
 replaced the sentence rather than duplicating it.
 ### Name lists are ordered in the browser, not by the database
 
@@ -4927,6 +5109,47 @@ type the definition does not carry, which is why neither was among the 31. Both 
 `StreamingResponse` whose media type is chosen at runtime from a query parameter, so the
 declaration is a `responses` entry listing the media types rather than a `response_class`,
 and that is a change to what those two operations promise rather than a correction.
+
+### A route declares every answer it files, and no rule chooses between them
+
+The media type walk read one response key per route and refused to choose when a route declared
+two, which was every route until a cover route declared a 206. Two replacements were refused
+before this one: reading the key off the route's own status, which is absent for the ordinary
+spelling and is the measured failure the previous repair of that helper already fell into; and
+an exemption list of routes allowed a second key, which is a guard enumerating something open.
+
+What ships is four cells over every response key, defined so that they are disjoint and total by
+construction rather than by a list somebody keeps current: the key the framework writes from
+parameter validation; the keys at or above 400 and the ones that are not plain numbers, which
+are the refusal rule's population and are recognised by calling that rule's own predicate; the
+body carrying successes, which must declare content and must not declare JSON unless the class
+sends it; and the remainder below 400, which must declare none.
+
+**The interlock between the two rules is now one object rather than a paragraph at each end.**
+It was described in prose at both, and the helper that was replaced had to add a sentence saying
+its own refusal was the exception to the sentence next door.
+
+**What the plural rule accepts that the singular one refused**: two success keys that each
+declare something. **What it newly refuses**: a redirect or a 304 declared beside a success and
+carrying content, which the singular helper skipped along with the whole route. Both are driven
+on a throwaway application, because no live route reaches either.
+
+### The truth about a partial answer is a second media type, not a second copy of the first
+
+A single range request answers the file's own image type. Two or more answer a multipart
+envelope, which no table in the module names and which nothing serves a file as. So the obvious
+declaration, the success key's content set repeated under the partial key, is true for the
+request somebody checking the change would type and false for the ordinary one.
+
+**Bounding the route to a single range was refused, and not on taste.** It would change what the
+route sends in order to simplify what the document says, on a change whose whole subject is the
+document telling the truth about the route. It also carries a measured trap: the range count is
+read from a class method, so setting it on a response instance is ignored and the wrong version
+of the change passes green.
+
+The envelope is declared under the partial key and deliberately kept out of the table that
+decides what a file on disk is labelled, whose safety claim is about types a browser executes
+and whose keys are asserted to be exactly the extensions the store hands back.
 
 ---
 
@@ -7170,7 +7393,7 @@ in ASCII and 74,971 in ampersands. **How many fields a record has is not a lengt
 bounds the count inside its 500 characters, so the real worst is 250 names at 102,107 bytes
 a record, 36% over a ceiling taken on the escaping alone. Both were found by a critic seat
 attacking a fixture that had just been fixed for the other one.
-`marc.EXPORT_PAGE_RECORDS` carries the table and the 12 MiB tripwire taken from it.
+`marc.EXPORT_PAGE_RECORDS` carries the table and the byte pin taken from it.
 
 **Refusing would have been the same shape as the entry above and is wrong here.** An
 upload is volume a stranger chose and the cataloguer can split the file. A shelf is the
@@ -7201,8 +7424,11 @@ of it. Both are silent, both answer 200, and both are the failure this section's
 neighbouring entry refuses. A primary key can do neither.
 
 **The file is therefore in catalogued order rather than title order.** A MARCXML
-`<collection>` has no ordering contract and nothing asserted the old one. It does now
-differ from the CSV arm of the same route, which still sorts by title.
+`<collection>` has no ordering contract and nothing asserted the old one. The CSV and txt
+arms followed, and gave up title order for the same reason rather than as a side effect:
+sorting by a key and paging on it are the same walk, so keeping title order there would have
+kept exactly the loss the paragraph above describes. A spreadsheet sorts a column back; a
+book in no page at all is invisible.
 
 **What paging gives up, which is one thing.** The opening tag is written before the walk
 is touched and a streamed response sends its status line before it pulls a chunk, so every
@@ -7223,6 +7449,63 @@ slow readers can hold the pool while the rest of the app waits to check a connec
 The trade is still right and the failure is quieter than the one it replaced, which is why
 the rate limit is now the open item rather than a nicety. `docs/security.md` carries the
 measurement.
+
+### Every export arm walks the same pages
+
+The entry above paged one of three arms and said so: the CSV and txt arms of the same route
+still resolved the whole visible shelf, and they are the arms that matter more. MARCXML is
+refused unless library mode is on; these two answer any authenticated member, and the CSV arm
+carries the description column, which is the widest thing a book row holds.
+
+**One walk rather than three.** `routers/books.py::_export_pages` is the keyset walk and every
+arm reads it. `_marcxml_pages` survives as a function of its own because it binds
+`Loading.PUBLISHED`, which is the one thing that arm decides for itself; that it is also the
+name the MARCXML tests reach for is a consequence rather than the reason. The page size stays
+`marc.EXPORT_PAGE_RECORDS`, read inside the walk rather than passed in, so one knob moves every
+arm together. A MARCXML page is the dearest of the three per row, so a number measured against
+it is not tight for the other two.
+
+**What is bounded is three channels, not one**, and each was added because a mutant walked past
+the others. Rows through the shelf is the obvious one. A second is the query a caller runs
+itself: a full pass added beside an intact walk resolves at the caller and is invisible to
+anything wrapping the shelf, and the pull towards writing one is real now that the file is in
+catalogued order. The third is this member's reading records, which are not Book rows and so
+are counted by nothing that watches books: lifting the status batch off the page loads the
+member's whole history and holds it for the download.
+
+**What was measured, and what was not.** The peak is driven through the route for every member
+of `ExportFormat`: over a shelf of seven at a page of three, the largest single resolution on
+any channel is three, and the same arm against a walk restored to resolving the whole shelf
+reports seven. **Completeness is read off the file rather than off a total of the resolutions**,
+and an earlier draft of this entry credited a total that no longer exists. Summing the
+resolutions couples the walk's correctness to the whole request touching no other row: a one
+row probe anywhere in it made the sum read eight for a shelf of seven while the walk was
+correct, so the arm went red and named the wrong thing. Each title's occurrences in the body is
+the observable instead, and it is exactly one in all three formats.
+
+**The MiB figures in the entry above are MARCXML's and were not remeasured here**: the shape is
+the same walk, and what supports the claim for these two arms is the row count rather than an
+inherited number.
+
+**What the trade actually is.** Peak memory for duration, and it is a net improvement rather
+than an even swap. What went away is 219 MiB on a single authenticated GET at 40,000 books,
+roughly five of which exhaust a 1 GiB container, needing no slow client and no privilege. What
+did not change is the pooled connection held across a slow download: `get_db` closes in a
+`finally` after the response is sent, the old shape's body was `iter([content])` and streamed
+too, and fifteen concurrent exports exhausted the default pool before this change and exhaust
+it after.
+
+**What it costs is a truncation, and this is the arm where the MARCXML precedent does not
+carry.** That entry justified streaming on the artefact self invalidating: an unclosed
+`<collection>` is refused by every parser. A short CSV is a valid CSV, and it is the file
+`POST /api/imports/csv` reads back, so the same failure is member data lost on the data
+portability path. It is inducible by the exporting member with two ordinary requests: the work
+is spread across the download now, so a write held past the five second `busy_timeout`, which
+`database.py` names as an import, a restore or emptying the trash, turns `database is locked`
+at page k into a truncated 200 where it used to be a 500 before the first byte. The chunked
+terminator is the remaining receiver side signal and a buffering reverse proxy may erase it;
+whether one does here is **unmeasured**, and buffering the file back to get a better signal
+would restore the peak this entry removes.
 
 ### Library mode is enforced on the server for MARC, at 403
 
@@ -9404,15 +9687,16 @@ loop for 53 minutes at 8.6 GB on the machine that runs etcd.
 
 ---
 
-## The two doors over `books.categories`, and why they differ
+## The three doors over `books.categories`, and why they differ
 
-**`books.categories` has two request bodies and a third writer, and the rules differ. The
+**`books.categories` has three request bodies and a fourth writer, and the rules differ. The
 deciding fact is the wire shape, not the producer.**
 
-`BookCreate.categories` is a list and **refuses** a subject containing the separator, with a 422.
-`BookMatch.categories` is one joined string and **splits and rejoins**.
-`google_books.join_categories` **drops** such a subject. None of the three is a relaxation of
-another.
+`BookCreate.categories` and `BookDetailsUpdate.categories` are lists and **refuse** a subject
+containing the separator, with a 422. They are one rule rather than two, applied from
+`schemas.book.normalised_subjects`, which both call. `BookMatch.categories` is one joined string
+and **splits and rejoins**. `google_books.join_categories` **drops** such a subject. None of the
+four is a relaxation of another.
 
 **The ground for refusing is that the value is unrepresentable, not that it is risky.**
 `split_categories` splits on a **bare** separator, so a stored `"Fiction; general"` is served as
@@ -9422,20 +9706,23 @@ says "this column cannot hold that value", which is true whoever produced it.
 **A 422 at the request and a drop at the producer is this tree's existing arrangement, not a
 choice made for this field.** `classifications.bounded_headings` states it: a bad entry is
 dropped and logged there, because nothing in a record is worth failing a whole lookup for, while
-`ClassificationIn.number` is a hard 422 on the same route. This column has no parser layer yet,
-because no reader emits a subject, so the drop lives at `join_categories`, which is the one place
-that knows the separator and so reaches every producer.
+`ClassificationIn.number` is a hard 422 on the same route. This column's parser layer is the browser:
+`frontend/src/lib/bookRequest.boundCategories` drops a separator bearing subject out of what a
+file said, which is the same rule `join_categories` applies to the two upstream joins and the
+same arrangement `classifications.bounded_headings` has against `ClassificationIn.number`'s 422.
+The refusal at the request stays what it is, because the ground for it is that the value is
+unrepresentable rather than that no honest producer exists.
 
 **The split on the match door is forced rather than chosen.** `catalogue.Record.as_match` joins
 with a string containing the bare separator, so a refusal there would refuse every record
 carrying two or more subjects, and nothing about a pre joined string distinguishes a structural
-separator from a typed one. **A producer argument does not separate the two doors**:
+separator from a typed one. **A producer argument does not separate them**:
 `POST /{book_id}/enrich/apply` validates a body the client sent, which is the same producer class
-the other door refuses. An earlier version of this entry argued from the producer and was wrong
+the refusing doors reject. An earlier version of this entry argued from the producer and was wrong
 at both sites.
 
-**All three are correctness controls and none is a security control.** A hostile client can store
-any value the column holds through either door.
+**Every one of them is a correctness control and none is a security control.** A hostile client can store
+any value the column holds through any of the request doors.
 
 **The match door stays a string rather than becoming a list**, on three measured grounds:
 `google_books.merge_into` assigns this column by name off `book_columns.WORK_DETAIL`, so a list
@@ -9537,19 +9824,51 @@ field taking `BookCreate`'s number, a field taking its column's width, and `sour
 column. This field takes neither: both bodies name the column in two shapes, and one bound is the
 product of what the other is computed from.
 
-### The write has no unwrite
+### The write has an unwrite, and it is an empty list
 
-**Nothing clears `books.categories` and nothing did before this change.** `BookDetailsUpdate` has
-never named the column, so the hand edit route cannot touch it, and `google_books.merge_into`
-skips an incoming value that is null, empty or an empty list, so **enrich apply with `overwrite`
-replaces the value and never clears it**. Recorded explicitly so nobody can later argue a removal
-route already exists.
+**`BookDetailsUpdate.categories` clears the column on an empty list.** Absent still leaves it
+alone, which `model_fields_set` distinguishes, and **an explicit null is refused with a 422
+rather than accepted as a second spelling of the clear.** Every other field of that body clears
+on a null, because its column holds one value and a null is how that value goes away; this one
+arrives as a list and is stored as one joined string, and `google_books.join_categories` already
+answers `None` for an empty list, so an empty list **is** the cleared column. Two spellings
+reaching one column is how the two of them eventually reach it differently, and it would give
+the create body and the update body different types for one field in the generated client.
 
-**The unwrite is a precondition of the emitter work, not a note beside it.** The moment a file's
-own two or three words occupy the column at creation, they occupy it permanently and block a
-catalogue's better list from ever filling it, on every imported book. Whether an empty list
-clears the column is its own question, under the model validator that already refuses to clear a
-column that cannot be null.
+**What has not changed is the rest of the write side**, which is why the removal mattered:
+`google_books.merge_into` still skips an incoming value that is null, empty or an empty list, so
+an enrich apply with `overwrite` replaces the value and cannot clear it, and
+`folding._absorb_fields` only ever fills a gap. So the hand edit route is the **only** removal,
+and before it the only removal was deleting the book.
+
+**Why that was worth closing rather than recording.** The column is a field of `PublicBookOut`,
+served to a reader with no account whenever the book is on the public shelf, and two ordinary
+member acts carry a subject across that boundary: flipping a private book public, and folding a
+private row into a public keeper. The cover beside it in that payload is withheld on the ground
+that publishing it is a decision nobody made. A subject had the opposite treatment and no way
+back.
+
+**The precondition argument for the emitter work still holds and is unchanged by this**: a
+file's own two or three words occupying the column at creation still block a catalogue's better
+list from filling it, on every imported book, and the queue control is still the cheaper place
+to take one off. What has changed is only that being late is no longer permanent.
+
+### The second writer of a reshaped column arrives at a door with no refusal on it
+
+`books.categories` has a request shape, a list, and a stored shape, one joined string. The
+create body is refused at import when a field of it is neither a column nor named in one of two
+cells, and a field arriving as a container is one of the five faults that refusal names. Its
+population is the create body. The update route assigns every field of its payload straight onto
+the row and had no such refusal, so a container field added to that body was not a report:
+measured, assigning a list to a text column raises at the flush, which is a failure on
+somebody's library rather than a red on the machine of whoever added the field.
+
+So the partition is one derivation read against both doors, and the faults it reports name no
+writer. **The missing piece was the refusal, not the field.** Adding the field without it would
+have been the same defect one door along.
+
+**The clear's own spelling is settled in the subsection above**, not here, so the two do not
+argue one thing in two places.
 
 ### One demand declined, with the reason, because its only other home is deleted
 
@@ -10395,6 +10714,84 @@ bounds work, which is CPU. Neither is the other, and the budget is applied on to
 strictly tighter and admits nothing that used to be refused. What it now refuses that it
 used to allow is named in `docs/security.md`, because a bound in a different unit is a
 different bound rather than a tighter one.
+
+## The SRU response bound is charged in bytes, and the row count is not that bound
+
+`MAX_RECORDS` is 50 and the comment beside it derived the number from a claim: that `520 $a`
+carries a description no schema limits, so no record size could have been derived. The claim was
+false when it was written. `DESCRIPTION_MAX` landed six days before the three sites that call the
+bound absent, and the honest statement is a three way partition: the column is `Text` and bounds
+nothing, every write through a schema is held to 10,000 characters, and `backup.py` inserts
+through Core so a restored row is bounded by neither. A 3,000,256 byte description is already
+recorded as having reached the table that way.
+
+**So the record has a derivable worst case and the constant was not derived from it.** Measured
+through `sru.respond` on a stored page of fifty, every column a fill can widen filled at what an
+API write holds it to, escaped fill, 250 credited names, a declared heading kind and a declared
+copy group: **5,117,485 bytes**.
+
+**Widest is easy to under measure, and two things a member may legitimately post were missed on
+the first pass.** A heading carries a declared kind, which moves `$2` from `gnd` to
+`gnd-content`: eight bytes on each of eight headings. And `uq_books_isbn_single_copy` is
+**partial** on `copy_group IS NULL`, so a page of rows declared copies of one title holds fifty
+identical ISBNs at the declared maximum with no serial. Measured, the two are 3,600 bytes a page,
+and without them a published document stated a figure as the widest a write can produce when it
+was not. The shipped arm asserted a quarter of a mebibyte against a fixture measuring 159,035, so
+`MAX_RECORDS` could rise from 50 to 82 with it green, and the class of change it could not see at
+all was a widened column bound, because its fixture carried a literal.
+
+**The bound belongs beside the cost budget rather than beside the row count.** The module has
+already replaced a ceiling stated in `LIKE` occurrences with a budget measured in time, on the
+ground that a count is not a cost. `MAX_RECORDS` is the same shape one level over: it counts rows
+and what it bounds is bytes. The two halves now sit together in the module comment and in the
+suite, each measured in its own unit.
+
+**A byte pin names nothing, and that is a property of its shape.** It is an equality on one
+integer, so every change it is meant to catch and every change it is not produce the same
+failure, separated only by a difference a reader interprets. Measured by a review seat: deleting
+an unrelated language field, touching no bound, no count and no fill, reddened it at minus 4,200
+bytes and read exactly like a widened column. **So the naming is done by the arms beside it**:
+the record's field tags, the columns whose value reaches a record, the row identifiers and the
+published figure. A failure message instructing a re-pin is part of the defect, because it trains
+the response the arm exists to prevent; both pins now say what they know and prescribe nothing.
+
+**Zero headroom, and equality rather than an inequality.** Following §The envelope's ceiling is
+derived from the two routes that can fill it. The cost of the other choice was measured on the
+sibling arm for the export page in the same pass: 12 MiB against a 10,210,803 byte page is
+2,372,109 bytes of slack, and that arm was green on both of the changes its own docstring claimed
+it caught, a small field added to the writer and a column bound widened tenfold. Both arms now
+pin their page to the byte.
+
+**The fixture's columns are derived by rendering rather than by reading source.** A record is
+built with a distinct sentinel in every column a value could make long, and the columns whose
+sentinel comes back are the ones a fill can widen. **Two earlier derivations were tried and both
+failed, in opposite directions.** Reading the width off the column declaration missed
+`description`, which is `Text` and declares no length: the partition again, one layer down.
+Reading the columns off an AST walk of the writer over reported, because that walk collects every
+attribute name, so a `str.format` anywhere in the writer contributes `format`, which is a `Book`
+column: the arm then refused a page over a column nothing reads and prescribed a repair to a
+production file. A rendered value is a property of the record; an attribute name is a spelling.
+
+**The walk stays where it was, with its defence narrowed.** It is right for the class that owns
+it, whose allowlist holds every column name a method call can contribute, and that is a property
+of the consumer rather than of the walk. The sentence saying the widening costs nothing is true
+of that one caller and is no longer offered to anybody else.
+
+**What a stored page costs that an unstored one does not, and the honest figure is smaller than
+the first draft's.** The SRU arm answers from a query, so its fifty books are rows. Exactly one
+column forces a serial and the uniqueness that forces it is total: `(book_id, scheme, number)` on
+a classification. 32 bytes a record at the widest fill, so the figure understates by about 1,600
+bytes a page. `books.isbn` forces none, because its uniqueness is partial and a page of declared
+copies is outside the predicate.
+
+**And the unstored page carries a passenger that slack was hiding.** The export fixture never
+saves its books, so `book.id` is `None` and `001` carries the four characters `None` in every
+record: 400 bytes of the figure now pinned. Named at the site, because under an equality
+correcting the writer would otherwise read as a regression. It is the second difference between
+the two arms; the serial is the first.
+
+**Not closed.** A restored row beats any figure either arm can name, and neither is a platform
+limit: nothing enforces either at runtime and no deployment was measured against them.
 
 ## An integer the storage engine cannot hold was three unauthenticated 500s
 
@@ -11259,6 +11656,50 @@ The decision was taken deliberately rather than by default. `conformance/` is a
 new top level directory, so it publishes unless it is added to `DENY` in the
 publish gate, and it was checked against the forbidden string scan before being
 left off that list.
+
+## A conformance case pins the intermediate when the rule spans two functions
+
+The ISBN cases are one operation implemented twice: an input, one expected answer, both
+runners run every case. The subject rule is not that shape. What must hold is
+`server(browser(x)) == server(x)`, over two **different** functions, one per language, and
+neither suite can run the other runtime.
+
+Carrying the operation over and giving each side its own cases fails on its own terms:
+nothing would ever evaluate the composition, so both expectations can be correct while the
+property is broken, and half the file would be unexercised on each side, which needs the per
+implementation opt out `conformance/README.md` refuses by name.
+
+**So a case carries the input and both answers**, each as a kind plus a value. The frontend
+arm holds that the browser emits the browser value. The backend holds that the server's rule
+over the input gives the server value, **and** that the server's rule over the browser's
+value gives the same answer. That third arm is the equality, run in Python against a literal,
+with neither suite crossing a runtime.
+
+**The two arms lock each other, which is what makes it a guard rather than a golden file.**
+Widen the browser and the frontend arm reddens; edit the browser value to green it and the
+backend equality arm reddens; edit the server value as well and the backend absolute arm
+reddens. Measured over all seven cases carrying a zero width mark. The directory's rule that
+a case may not be edited to make a test pass stops being a request.
+
+**The scope rule falls out of the same shape.** Both answers are required, so a case whose
+assertion can be made in one suite alone cannot be expressed. The rules above one entry, the
+fold, the count limit and the width, are where the two implementations are deliberately
+unequal, and they stay tested where they live.
+
+## One conformance document per domain, because the guard anchors on a header
+
+Each runner finds its guard dropping table by matching a header line in the Markdown and
+reading the rows under it. A second domain's table under the same header in one shared README
+means first match wins: the ISBN runner would either fail its row count or, worse, pass
+against the subject rows while the table it was written to guard went unchecked.
+
+That is a guard disarmed by a data change with no diff to the guard, which is the ignore file
+pin's failure one directory over, and the remedy recorded there applies: select by the
+property the subject depends on, never by position. A document per domain makes the anchor
+unique by construction. `conformance/README.md` keeps the directory's argument and the index;
+`conformance/isbn.md` and `conformance/subject.md` hold each domain's field table, guard table
+and measurements. It cost one constant in the ISBN runner, and both Markdown walks derive
+membership from what the repository versions, so neither needed a list edited.
 
 ## The ASCII guard in `isbn.normalise` widens the backend rather than narrowing it
 
@@ -13150,6 +13591,52 @@ stays a deliberate act on one book, which is what a curated vocabulary means.
 
 **Incidental and it re-scopes the readers' work**: the measured library holds 931 epub and 244
 opf, and **zero fb2, zero cbz and one mobi**.
+
+## A file's subject is shown where it is still reversible, not where the design round put it
+
+**The confirm card is not on the file path, and three seats' proposals rested on it being
+there.** `ScanPage.pickFiles` settles every picked file, single or whole folder, into the rapid
+queue; `LookupResult` is fed only by the barcode, the manual ISBN and the search box, and no
+draft any of those three produces carries a subject. A block on that card would have compiled,
+passed a component test written against it, and shown nobody anything. Measured while building
+the change, by reading which hook feeds which component.
+
+So the chips and their crosses are on the queue row, which is the surface a file actually reaches
+and is also the one the security vantage cared about: a folder pick is several hundred rows behind
+one confirmation. The grouped audiobook block one line above it makes the same argument for the
+same moment, in the same words: nothing is written until "Add all", so this is where a member can
+see that something is wrong and undo it.
+
+## What the browser rebuilds of the server's normaliser, and what keeps it one directional
+
+**One transform of `one_line_without_invisible_characters` is rebuilt in the browser and the
+other is not, and the split is a sweep rather than a line drawn somewhere.** `boundCategories`
+collapses whitespace and strips the ends before it measures a subject, and deletes none of the 55
+control characters the server deletes.
+
+**Collapsing was bought by a measured false refusal.** No file reader collapses, so a pretty
+printed package document states a subject carrying the newline and the indentation it was wrapped
+on: a hundred character subject over two lines is 126 characters in the browser and 101 at the
+server, so a bound that only trimmed dropped it with nothing said.
+
+**What the exclusion keeps is an equality, and it is not a bound.** Measured over all 1,112,064
+non surrogate code points on both engines: JavaScript's `\s` has 25 members, Python's
+`str.isspace()` has 29, and **the one member JavaScript has and Python does not is U+FEFF**.
+Every transform the browser applies is therefore one the server applies too, so normalising what
+the browser sends gives exactly what normalising the file's own text would have given: the stored
+subject is the server's own answer, reached one step early.
+
+**A `/\s+/` would break that equality and could not lose a book, and the first version of this
+entry said it would.** What the bound measures is what it pushes, so the server is handed the
+already normalised value and can only shorten it further: no transform the browser applies can
+reach a 422. What a wider rule costs is that the browser replaces a character the server
+preserves with a space and sends that, so the app stores a subject the file never stated. That is
+the same rule this module already applies to `Cf` at a different site, and the wrong reason
+survived a round because a severe sounding hazard is one nobody re-derives.
+
+**Deleting the control characters is the transform not taken.** It would make the browser rewrite
+a value rather than refuse one, which is the cross language divergence `conformance/README.md`
+measured on ISBN, and what it buys is a wasted slot rather than a lost book.
 
 ## Excluding Calibre's tags is a scope decision, and the request figure was wrong
 
@@ -16393,6 +16880,64 @@ comment and says nothing about one in a string, so it is a partial instrument an
 replacement for the rule; it is recorded because the first draft of this change put two en
 dashes into `bibliographic.py`'s comments and `RUF003` is what found them.
 
+## The tooling tree's disciplines run in the backend suite, not in a job step
+
+The application's linter and type check run with the application's directory as their working
+directory, so the Python that builds and publishes this repository is outside both. The obvious
+repairs are all unavailable and the reason is the publish gate rather than taste: a
+configuration at the repository root, a widened command in the two published tables that carry
+it, and a script named in those tables each require a **published** file to name a **stripped**
+path, which the gate refuses. Its own comment records that the one character repair to that
+failure, dropping a trailing slash, is what turns a loud build failure into a silent leak.
+
+So the check lives in the backend suite and the two configurations live inside the directory
+they configure, where they are stripped with the code they describe. That adds no new home for
+the fact: the suite is already a documented command, already a pipeline step and already the
+thing a local run calls. It is the same move, in the same job, that the schema drift check made
+on 2026-09-27, and for the same stated reason: a local run answers before a push, where a job
+step answers after one.
+
+**The cost is real and is named.** A lint finding in those files now surfaces after a suite
+rather than in about a second. The application's own linter step is deliberately unchanged, so
+the fast fail is kept where the tight edit loop is and only these files pay the latency.
+
+## Turning a linter on is not the same as fixing what it finds
+
+The suppression list that landed with it is two lists in one file that age differently, which is
+the shape the frontend's linter ratchet already uses here. A **backlog** entry is work nobody
+has done and carries the count it stood at; a **refusal** says why a rule is wrong about a
+particular file and carries no expectation that anybody will ever fix it. A test re-derives the
+backlog from the linter on every run and fails when an entry no longer has a finding, because a
+suppression list that only grows is how a ratchet stops being one.
+
+**The refusals are stated per file rather than over the whole directory, and that is a
+measurement.** The security family's premise is production code handling a stranger's input. It
+fails outright in a test file and in a tool whose whole job is to run other programs. It does
+**not** fail in the client that talks to the forge, and a refusal over the whole directory would
+have turned that client's four real findings off under a reason that is not true of them. Those
+four are in the backlog with their count instead, and the repair they point at is its own
+change.
+
+**Two files were deliberately not repaired**: the secret scanner and the client that routes
+alerts into the monitor. Running a read only check over them is not a change to them, but making
+a must be green check green forces a repair at every finding, and a silent change to either is
+how an alert stops arriving and nobody learns it stopped. Their findings are suppressed with a
+count and each repair is its own change with explicit confirmation.
+
+## A floor that nothing drives is not a floor
+
+The outbound scanner refuses to call a tree clean when it has read almost nothing, because the
+two arms that read an artefact did not build it and an export that arrived empty reports no hit.
+That refusal had a thousand line guard beside it, and every arm of it called the refusal
+directly. **Nothing asserted that the entry point read the answer.** Replacing the call with a
+null left the guard green at exit 0, with the linter and the type checker green beside it.
+
+The lesson generalises past this file: a guard that tests a predicate exhaustively and never
+tests the caller certifies the predicate and not the behaviour. The arms that close it drive the
+entry point over an empty population, over a healthy one, over a healthy one carrying a planted
+subject, and over a second placement whose floor is a different shape, which is what catches an
+entry point that reaches for one fixed answer whatever it was handed.
+
 ## The working notes are split by how often a rule fires, not by how important it is
 
 `CLAUDE.md` is loaded on every turn of every session, so a line in it is paid for by every
@@ -16915,7 +17460,7 @@ authority per part: a `bun run` script name against the scripts `frontend/packag
 declares, which is the registry bun itself resolves against; a program under `uv run`
 against the distributions `backend/pyproject.toml` declares or a command this repository
 invokes; a verb after such a program against the invocation. The verb is the arm that
-catches the defect: `ruff` is declared and its lint verb is run by the lint job, while
+catches the defect: `ruff` is declared and its lint verb is run by a step of `test:backend`, while
 `ruff format` is a verb nothing here runs.
 
 **An invocation no arm claims fails rather than passes**, which is the whole design. The
@@ -16923,7 +17468,7 @@ sketch this replaced was an inclusion list: a command had to appear in the front
 manifest, the CI definition or the agent gate. Measured against the 53 offers the published
 documents make, matched verbatim it refuses 16 of them, including 4 of the 9 rows in
 `docs/testing.md`'s own table, so it could not ship unsoftened; softened to the longest
-matching prefix it refuses 2 and **accepts the defect**, because the lint job's own command
+matching prefix it refuses 2 and **accepts the defect**, because the lint step's own command
 shares its first three tokens. An inclusion list here is either unshippable or blind to the
 command it was written for.
 
@@ -16954,6 +17499,31 @@ and build directories, where the bound this replaced excluded a directory of eit
 anywhere; zero such paths exist today. Both widen the corpus, which is permissive evidence,
 so both fail no test rather than failing loudly. Closing either needs the tracked list,
 which means the suite runner shipping it.
+
+**That sentence was itself the defect it describes, and it survived four prose
+instruments.** A check was attributed to a job that does not exist, five times across three
+files, twice in this entry. Four instruments reading the attributing **sentence** were built
+independently across two seats and every one was dead on false refusals: 94%, 65%, a precision
+near a quarter, and one that refused 69 of 69, every one ordinary English. An attribution has
+no property in the text. What does have one is the venue's **name**, so what ships is an arm
+over the name: a colon qualified token whose first segment opens a pipeline key must be a key
+of the pipeline, a script the frontend manifest declares, or a job the naming file itself
+defines while also importing the reader. Nothing in the tree is refused by it today, and a job
+rename reds by name in every file that named it.
+
+**The arm catches a name and not an attribution, which is less than the defect bought it.**
+The repair happened to choose a colon qualified venue, so the repaired sentence is checkable;
+the sentence as it was written said "the lint job", which carries no name, and planted back it
+reds nowhere. That is the same measurement pointing the other way, and it is written at the arm
+rather than implied by it.
+
+**The when half of a venue claim stays unguarded, and the reason is a refusal rather than a
+limit.** "On every push and on every merge request" is a claim about the `rules` key, which the
+pipeline writes largely as references to content held elsewhere in the document. Each of those
+references names a key the reader already walks to, so resolving one is the lookup it already
+performs; it refuses because resolving turns a raise into an answer, and a wrong answer there is
+silent where a raise is a sentence. The cost of that choice is the schedule, and it is stated at
+the refusal rather than described as the file being unreadable.
 
 ## The house rule learned what the revision beside it already knew
 
@@ -17531,10 +18101,23 @@ cannot unwind it between the TERM and the KILL; blocked rather than ignored, tho
 first such signal is delivered afterwards, because a standard signal is not queued. The mask
 is acquired inside the `try` that restores it, because a stop landing on the blocking call
 itself would otherwise leak the mask for the life of the process and be inherited by every
-later arm. **A stop arriving before the escalation is entered is not covered**: measured at
-gaps of 0.02s and 0.2s the sweep dies `rc=-15` with the arm still running, and at 2.5s, past
-the whole escalation, it passes. An arm asserting that property was written, measured and
-deleted rather than shipped green, and it has its own ticket.
+later arm. It now sits at `_kill_group`'s first statement rather than at the escalation's, so
+the group lookup and the group check are held too.
+
+**The approach to the escalation was the uncovered half, and what closed it was a disposition
+rather than a wider mask.** SIGTERM and SIGHUP had no Python level disposition at all, so a
+stop anywhere in an arm's life ended the process where it stood and left the arm running:
+measured at gaps of 0.02s and 0.2s after a first stop, the sweep died `rc=-15` with the arm
+still going, and at 2.5s, past the whole escalation, it left nothing behind. Widening the mask over the spawn is refused instead, because a mask is inherited across fork
+and exec and every later arm would then start with SIGTERM blocked, the polite signal never
+landing and the runner's own exit trap never deleting its pod. **What is still not covered is
+the interior of the spawn**, where a stop between the fork and the binding of the child leaves
+a group nothing holds a reference to; what closing it would cost is written at the site.
+
+**SIGQUIT and SIGKILL are left permanently undeferred, and it is the refusal a later reader is
+most likely to undo for symmetry.** A tool that defers stops has to leave one stop it cannot
+defer, and one is not enough to rest on: both still end a sweep instantly at every point,
+including inside the escalation's mask where everything else is held.
 
 
 ## The fold is one thing and the predicate is another
@@ -17813,10 +18396,11 @@ over rows that may not be the same book at all.
 
 **Why the search score carries `isbn` and `cover_url` and the record score does not.** At a
 lookup the query supplies both, so across a candidate set for one ISBN they are constant and
-separate nothing. A title query supplies no ISBN, so there both are the row's own. Seven
-decoders sit in three shapes: four stamp the ISBN that was asked, two parse one out of the
-record, and one prefers its own and falls back to the asked one. **So wherever a record's own
-ISBN is read, scoring these fields ranks by which catalogue printed a parseable one.**
+separate nothing. That is the frame the census in `catalogue._SCORED` is written in, where four
+decoders stamp the ISBN that was asked, two parse one out of the record and one prefers its own.
+**On the search path there is nothing to stamp.** A title query supplies no ISBN, so every
+reader writes the row's own, and scoring these fields ranks by which catalogue printed a
+parseable one.
 
 **Why the record score carries `language`, `series_name`, `description` and a subjects bonus
 and the search score does not.** `language` and `series_name` are already scored in the
@@ -17825,10 +18409,25 @@ counts one fact twice in the weaker of the two places. `description` and the sub
 **which catalogue answered** rather than what the book is: the Open Library search writes
 neither, and the DNB carries a 520 on 1 of 85 live records.
 
-**The cost, stated rather than hidden.** A MARC search row is built with no ISBN, so every such
-row scores zero on both fields the search score adds where an Open Library row may score two.
-That is a source lean in the opposite direction to the one refused above. Folding would trade
-this lean for the other one **and** add the double count: two costs for one tidy.
+**The cost, stated rather than hidden, and it is a double count rather than a source lean.** A
+title search asks no ISBN, so `metadata._marc_build` is handed `None` and both MARC readers fall
+back to the record's own 020; the Dublin Core and MODS readers take no ISBN at any time and
+parse one out of the record. None of the three SRU serialisations is read for a cover, so every
+reader on that door then derives `cover_url` from the ISBN it just read and from nothing else,
+and on such a row the two fields the search score adds are one fact scored twice. The two
+bespoke search doors carry a cover of their own, so there the pair is two facts.
+
+**The derivation is the reader's row, and the score reads a merged one.** `_merge_matches` runs
+before `_ranked` and Open Library leads `_MATCH_PRECEDENCE`, so a book it holds with a cover id
+of its own, folded with an SRU row that carries the identifier, scores both fields off two
+different doors and counts nothing twice. **So the double count is the SRU row's and not the
+scored row's**, and how much of a live ranking it reaches is not claimed: nothing in this tree
+observes the ordering that would answer it.
+`tests/test_metadata.py::TestASearchRowsCoverIsDerivedFromItsOwnIsbn` holds the derivation at
+the reader, which is the half that can be tested. The sentence says what the reader does and
+refuses to say what the ranking does, because the first replacement for this paragraph
+overstated in the other direction, calling the pair one fact for the scored row when the merge
+had already made it two for the commonest shape.
 
 **One list with a flag is refused too**, the same refusal the identity predicates took.
 
@@ -18723,3 +19322,726 @@ closes it is the test.
 
 **What a reader of the published tree loses** is a pin list in a familiar format.
 `backend/uv.lock` carries the same set.
+
+## `UserCreate.username` is the only username field in the application carrying a pattern
+
+Six models declare a username. `UserCreate` mints an account and is the only one that carries
+the pattern; `LoginRequest`, `ResetRequest`, `ResetRedeem`, `VerificationRequest` and
+`VerificationRedeem` all name an account that already exists. A pattern belongs on the one that
+decides what a new name may be, and is a liability on the five that have to match names already
+stored. Re examined on 2026-09-28 and the asymmetry kept, on two legs.
+
+**A pattern on a field that names an existing account can refuse a name the database already
+holds**, and the set is not empty by construction: a restore writes the `users` table through
+Core, where no model validates anything. That member would then get a 422 where every other
+failed sign in answers 401. The login route gives one answer to every failure so that nobody
+can tell an account that exists from one that does not, and a 422 naming the shape of a name is
+a second answer.
+
+**It would also not buy what it looks like it buys.** Measured against pydantic's own
+validator, `^\S.*$` refuses a newline and **accepts a carriage return and a NUL**, so it is not
+a log injection control. That control belongs at the log site, where `logvalues.clipped`
+escapes the value whatever it contains. The engine matters and is the reason the measurement
+was taken twice: the Rust regex crate pydantic runs matches `$` only at end of input, where
+Python `re` also matches before a trailing newline, so the pattern is a partial accidental
+control that reads as a working one.
+
+**One leg that does not hold, recorded because it reads as though it should.** The directory is
+not a reason: ldap3 strips an assertion value in `evaluate_match`, so a directory name carrying
+leading whitespace is unsearchable and that member cannot sign in today whether or not the
+field has a pattern.
+
+The reasoning sits at `LoginRequest.username`, with a pointer above `ResetRequest` covering the
+other four, and
+`tests/routers/test_auth.py::TestALoginNameIsNotCheckedAgainstTheRegistrationPattern` is what
+goes red if the pattern is added back. Before that arm existed, re adding it kept the suite
+green: every username in the login tests matches the pattern.
+
+**And why the unreachable directory path logs without a traceback.** `logger.exception` emits
+`exc_info`, and ldap3 puts the assertion value verbatim into the message of the
+`LDAPInvalidValueError` it raises when the attribute the filter names has a strict schema
+validator. `uid`, the shipped default, has none; `uidNumber` on an RFC 2307 schema does.
+`escape_filter_chars` leaves CR and LF alone, so the traceback wrote the caller's forged line
+as a line of its own, past the escaping on the argument beside it. Every frame in that
+traceback is inside ldap3 and `repr` keeps the exception class, which is the half worth
+reading, so the trade is bounded. The alternative that keeps the traceback is validating the
+value before the search, which is a larger change.
+
+## A recovery phrase is told from prose by its glue, not by its checksum
+
+A test fixture has to hold a checksum valid 24 word phrase. Any phrase written into a file is
+indistinguishable from a leaked key, so the tree needs a check for one, and the obvious check
+is "twelve or more wordlist words whose checksum holds".
+
+**Measured, that check is unusable.** The tree holds 2.74M alphabetic tokens and 25.9% of them
+are BIP-39 English words. Sweeping every window at the five legal lengths gives 80 candidates,
+against 3.26 checksum valid ones expected by chance, and a checksum valid run does occur in
+ordinary application source: one of them is an XML attribute list. **So the checksum is not the
+discriminator**: an accidental valid phrase is the expected value, and a check that reddens on
+one blocks the build until somebody rewords code that is not wrong.
+
+**A mnemonic is flat and code is a tree.** The rule is therefore about the characters permitted
+between two adjacent words. Under it the nearest legitimate run in the tree is seven words,
+against a threshold of twelve. A second, independent condition helps: a token is an identifier,
+so a name with an underscore in it does not yield the word inside it, which drops the XML run
+to six words on its own. Concatenation is glue, because concatenation is how a long phrase gets
+wrapped, and it costs nothing: the nearest legitimate run is the same length with it and
+without it.
+
+**The checksum is kept anyway, as a damper rather than as the rule.** The noisier of the two
+settings permits prose punctuation as well, and under it the nearest legitimate run in the tree
+is ten words, in the translation catalogue, two short of the threshold. Without the checksum,
+two more single word keys in that weekly edited file would be a **certain** false refusal; with
+it, roughly one in sixteen. A check that certainly false refuses is one somebody switches off.
+
+**What it accepts is stated at the rule rather than bounded here**: a phrase glued by call or
+markup syntax, a phrase with one word wrong, an encoded phrase, and CJK, which is not covered
+at all. The first is the price of the tolerance above and it is the largest hole.
+
+## A fixture that must be a valid phrase is derived, never written down
+
+Any phrase a swap fixture can use is checksum valid by definition, so a literal one is
+indistinguishable from a leaked key to any scanner and to any reader.
+
+**Storing the 32 bytes as hex instead was proposed and refused: the hex is the entropy.**
+Anyone can put it back through the phrase encoder and read the phrase, so hex obscures the
+problem rather than removing it.
+
+The fixture is the digest of a plain English sentence saying what it is, fed to the phrase
+encoder. The input is transparently not a key, the phrase exists only while the test runs, and
+both properties the literal was bought for are kept: one phrase on every machine, and one pair
+of words swapped with no fallback.
+
+## An exclusion arm pins the predicate's shape and says nothing about its argument
+
+Every arm over the duplicates route asked whether somebody **else's** book was absent. A shelf
+narrowed to any wrong viewer satisfies that exactly as well as one narrowed to the right viewer:
+`Shelf.seen_by(db, current_user.id)` replaced by `current_user.id + 10_000` left the duplicates
+and copies files at 84 passed.
+
+**The failure hiding there is an erasure rather than a leak.** The member's own private duplicates
+vanish from their own page, silently, and no arm can see it because no arm asserts that something
+of the viewer's own is **present**.
+
+So a rule applied by construction still needs an arm in the positive direction. The general form
+is the title: an exclusion test fixes what the predicate is and leaves its argument free.
+
+## An unreachable fixture pins a state the server cannot produce
+
+Twice on one branch, in the same paragraph of the same fix round. A group of two members claiming
+a size of twenty one, which the member cap makes impossible, was caught. The capped line's arm
+showed one group of ninety seven against a floor of ten, because a budget of two hundred books and
+a member cap of twenty mean nine whole groups can never exhaust the budget, and that one survived.
+
+**It survived a review looking for exactly this class, cleared by an argument about the wrong
+quantity.** The clearing argument was that the screen holds at least one group. That is true, it
+is about the plural in the sentence, and it is not the floor on the number.
+
+So state which quantity a floor is a floor on. The cap and the member cap are at their sites in
+`backend/schemas/book.py`, the scan at the route and the ceiling analysis in `backend/reading.py`;
+this entry is about how the arms are written rather than about what the route does.
+
+## The death signal an arm carries is the uncatchable one
+
+A polite signal would let a suite run delete its own pod on the way out, which is strictly nicer,
+and it does not arrive in time to do it. The run's direct child is a shell whose final act is a
+foreground command lasting the whole suite, and a shell defers a trapped signal until that command
+returns: measured at 4.63s for a five second child under both common shells, 0.00s where the same
+child is backgrounded or replaced, and 20.04s against the real runner with the cluster stubbed and
+a twenty second suite call. A polite death signal sits pending for exactly as long as the thing it
+was meant to cut short.
+
+**What makes the uncatchable one cheap is what that shell holds.** The worker node's lock is an
+open file descriptor, which the kernel closes whatever killed the process, so the lock goes in
+milliseconds; and the shell records its own process id against its pod in the register the orphan
+reaper reads, so its death hands the pod to a reaper that runs at the start of every suite run.
+
+**It adds to the escalation rather than replacing it.** The kernel signals one process, so a
+grandchild that ignores the stop still needs the group kill, and an assertion says so rather than a
+sentence. Two layers outside the process reach the same row and are not replaced either: the orphan
+pod reaper, and the pod's own ceiling, which ends it whatever happened to the machines either side.
+Both are slower, and neither releases the node lock, which is what this buys over them.
+
+**What it is worth is a conjunction, not the headline count.** 40 of 40 runs left going before and
+0 of 40 after measures **left running** rather than **leaked**: a healthy run left that way
+finishes in one run's duration and releases the lock, the pod and its working copy by itself. What
+never clears is a sweep stopped with no Python running **and** a run that has hung, which the
+reaper cannot reach either, because it spares any pod whose registered process is alive and a hung
+run's process is alive. Against every other case the layer buys promptness, which is the smaller
+claim.
+
+**Backgrounding that final foreground command** takes the deferral to zero and would make a polite
+signal viable, which buys back the whole cleanup rather than the pod delete alone. It is not done
+here: it changes the suite runner and the test that pins its status, it leaves the run's other
+foreground calls deferring by up to three minutes at the readiness wait, and it reaches none of the
+abandoned working copies the entry below is about. It is an optimisation on top of that sweep, not
+a substitute for it.
+
+Where the kernel offers no such mechanism the sweep refuses to start rather than running a layer
+short and saying nothing.
+
+## What a killed suite run leaves is three things, and the third had no owner
+
+The cleanup a killed run skips does three things: it deletes the pod, it drops the run's line from
+the register the reaper reads, and it removes the run's working copy from the node. **Naming only
+the pod under priced it.** The pod delete does not remove the copy, because the copy lives on the
+node rather than in the pod, and nothing in the tree had ever looked at that disk: the reaper
+deletes pods, and the wrapper's own sweep clears the caller's temporary directory, which is a
+different machine. Measured on `builder` on 2026-09-29: **11 abandoned copies holding 1.6 GB, the
+oldest a month old.** So this was an existing, unowned and unbounded leak rather than a hazard the
+death signal introduced; the death signal would have added one more case to it.
+
+**The owner is now the start of every suite run**, for the same reason the reaper sits there: it is
+the one moment a pod on that node certainly exists with that disk mounted, and it is the moment the
+room is needed. The staleness decision is taken in the runner's own shell rather than inside the
+command it sends to the pod, which is the reasoning the reaper already gives for listing pod phases
+in the open: a rule inside a remote string cannot be exercised by anything. **The copies are listed
+before the pods, and that order is the safety**: a copy exists only once its run has shipped, which
+is after that run claimed its pod, so anything in the first listing had a pod by the time the second
+is taken. The other order would delete a copy out from under a live run.
+
+**The sweep cannot run in the state it exists to prevent.** It is gated behind its own pod becoming
+ready, and the wait is above it under a shell that exits on the first failure. A node whose disk has
+filled evicts and carries the disk pressure taint, the pod stays pending, the wait fails, and the run
+is gone before the first listing. **The one condition that makes the copies matter is the one that
+disables their removal.** So what this buys is a bounded pile in the ordinary case, and the cover for
+a node that is actually out of room is a disk alarm on the node, which this script cannot be.
+
+**Three copies sit outside its reach and each is a narrowing rather than a hole**: the one shared
+copy from before per run copies existed, at a name the listing does not match and therefore absent
+from the 11 above; a pod still terminating, which claims its copy for as long as the object lasts,
+a node going away being exactly the event that both abandons a copy and strands a pod that way; and
+a run in another namespace, since the listing is scoped to one while the disk is per node.
+
+**One narrow leak is new** and is written at its site: a run killed while its pod creation is still
+in flight leaves a register line whose process is gone and whose pod the reaper cannot yet see, so
+the line is dropped and the pod, once it appears, is claimed by nobody until it finishes by itself
+and the finished pod arm takes it.
+
+## A gate whose hostile input is rejected by an earlier gate has no test
+
+Two gates on the sweep's destructive path were written with an arm each and neither arm reached the
+gate it was named for.
+
+The shape check on a copy's name is two gates in series, a prefix and a character class, and the
+only hostile name driven through it failed the prefix. The character class never ran: deleting it
+left every case green while admitting a wildcard, which removes every copy on the node including
+live ones, and a command separator, which is a second command in the remote shell. The fail closed
+check on the cluster listing was driven only with an empty listing, so what it pinned was that the
+listing is non empty rather than that it names this run; a listing naming somebody else's run and
+omitting this one went straight through and deleted.
+
+**The earlier gate is what hides the later one**, which is why a green says nothing here: the input
+has to be hostile to the specific gate under test, and where two gates sit in series each needs an
+input the one before it accepts. It generalises past shell.
+
+A match against a listing also states whether it is a whole line, because a loose one silently reads
+one run's name inside another's.
+
+## A deadline test turns on a fact, because every clock available to it is wider than the thing it measures
+
+`test_a_slow_oenb_does_not_extend_the_shared_deadline` patches a small deadline in, puts a longer
+sleep behind one source, and proved the deadline with a wall clock bound alone: the deadline plus a
+margin sized to cover the rest of the roster, the merge and the ranking. A ticket proposed
+subtracting that overhead with a measured control case instead of budgeting for it.
+
+**The control case was built, measured and refused, and the ticket's premise with it.** The overhead
+does not land on top of the deadline, because the sources run inside the deadline's own window and
+only the merge and the ranking land after it. Measured 2026-09-29 on `builder` at four workers over
+75 pairs in three runs: the smallest control drawn is sixteen times the largest excess drawn and the
+difference is negative at every sample, so subtracting the control loosens the bound by the whole
+control. The argument is stated on magnitudes on purpose, because two seats measured the variance
+ratio of the same quantity ten times apart on the same node: a control case is itself timing, and
+what it would cancel here is smaller than the disagreement between two measurements of the
+instrument.
+
+**The margin did not move.** It is the leftover of a midpoint construction, it happens to be about
+twice the only recorded stall, and one draw bounds nothing. Lowering it on the fixture measurement
+would buy detection with flakes.
+
+**What ends the class is discrimination that is not a duration.** The slow source records how its own
+task ended, and only a cancellation delivered and awaited to the end passes: drop the cancellation
+and discard the pending set, and every assertion the test carried before still passes with the rows
+right and the call returning at the deadline, while this arm reddens; replace the fan out's gather
+with a single event loop tick, and it reddens again on the unwinding. No clock the test can read sees
+either. A second arm reads the budget where `asyncio.wait` consumes it rather than at the call
+boundary, because a timeout scaled inside the fan out passed every arm that recorded it at the call.
+
+**An assertion cited as proof of a timing claim is only as sensitive as the narrowest input that can
+move it.** A hundredfold headroom rested on a row assertion that only one source can move, so it
+could not see whether the others had finished; measured directly they finish at 0.0711s to
+0.0797s against a 0.5s deadline, which is about six.
+
+**Two things about the residue, and the rest is at the site.** The elapsed bound is blind below the
+call's own cost as well as above the margin, so it is a band rather than a floor. And the arm reading
+the task's own ending is not purely additive: it newly reddens on a run that never asked the source,
+which is wanted, because such a run never exercised the deadline. How much more it refuses is refused
+rather than stated, the band first written for that cost having been reasoned rather than measured.
+The measurements, the blind band and both edges of what each arm holds are in the constants' comments
+and the test's docstring in `backend/tests/test_metadata.py`, which is where the standing decision
+puts the evidence behind a stated bound.
+
+## A row count is a second instrument, and the two numbers are read together
+
+The export guard records what a member **hands back**, so a member that resolves the whole table
+inside itself and returns one page is outside every reading it has. The instrument that sees that
+counts rows where they cross the driver.
+
+**`cursor.rowcount` is refused.** It is `-1` for every SELECT on this driver and a real number only
+for writes, so a budget summing it counts nothing while appearing to measure something.
+`before_cursor_execute` cannot carry the count either, because it fires before the statement runs.
+What works is a `sqlite3` row factory set from that same event, which is handed the cursor with
+every row, so the statement recorder and the row count share one seam and the unit is per statement.
+
+**Per execute, never per fetch.** A streaming walk of 500 rows shows no fetch above ten and a per
+statement total of 500, so a per fetch reading is green on anything that streams.
+
+**Keyed on the mapper, never on statement text.** The ORM execution carries the entity it is loading
+and whether it is loading a relationship, and the reading is keyed on the pair. A correct page of ten
+over a shelf with three tags a book is ten rows of `Book` against thirty of `Tag`; unkeyed, an
+**absolute** page bound reddens on that healthy walk before it ever meets a defect. **That is an
+argument against an absolute reading and it does not carry over to a relative one**: a fan out
+constant in the shelf cancels between two shelf sizes, so a collection load lifted off the page onto
+the whole table is outside every reading that dropped relationship loads first. So the growth reading
+runs over both halves of the key, and the one absolute reading is narrow to the entities an export
+reads once a page, `Book` and `UserBook`, and says so at its own arm. Narrower than that was
+convenient rather than forced: with `Book` left out, a constant over read of five rows against a page
+of three passed the whole class.
+
+**What it costs, and the term that figure does not separate.** Armed for a whole backend suite rather
+than per window, which is the pessimistic shape, it is **+1.32%** on one pair of runs; the arms arm it
+per window, so that is the bound and not the bill. The figure does not separate the counting from
+merely **having** a `before_cursor_execute` listener installed, which takes SQLAlchemy off a dispatch
+fast path and was measured separately at the same order per statement. The third half, the listener
+installed with no row factory, would separate them and was not run, so nothing here attributes the
+delta to the counting, and a second instrument's figure landing close to this one is a reason to look
+at what the two share rather than a check on either.
+
+**And it is one of two numbers.** The rows are what crossed the driver, before the ORM folds a joined
+result back into entities. A join under a limit returns the rows asked for and fewer books than that:
+measured on this tree, a page of ten through a manual join came back as ten rows and four books. The
+row counter reads the ten and finds nothing, so a shortfall behind a page is seen only by counting
+books. That is why the eager load question is a second instrument rather than a corollary of the
+first, and why the books channel in the export guard was kept while the reading records channel was
+retired into the row counter.
+
+## A liveness guard on an instrument reads the magnitude, never the key
+
+An arm reading an instrument has to refuse an empty reading, or it passes on an instrument that has
+stopped working. The check that reads naturally, that the thing being measured is **present**, is not
+that refusal: a statement recorded under its entity with a count of zero rows satisfies it.
+
+Measured with every count in the row counter forced to zero: seven arms across the two classes
+reddened and the four carrying their own liveness guard stayed green, and those four were the ones
+whose prose promised the strongest thing, that at least one format had **loaded** something. What
+separates them is asking for the number, which the arms over the shelf did by summing rows and the
+arms over the export did not.
+
+## An instrument's reach is bounded by the container types its walker knows
+
+The books channel wraps each shelf resolver and counts the `Book` rows it handed back, by walking into
+what it recognises. It walked lists and tuples, so a resolver handing back a mapping of id to `Book`
+over the whole table was recorded as zero books three times over, every arm reading the channel stayed
+green, and only the row counter beside it fired. **Zero is the number an unwatched member also reads
+as**, which is what makes this silent rather than wrong.
+
+It matters because the two instruments answer different questions: the row counter reads what crossed
+the driver and cannot see a page that comes back short, and the books channel is what can. A short page
+handed back in a container the walk skips is invisible to both.
+
+**A wider walk alone does not close it**, because the next container type does the same thing again.
+What closes it is a reading over the resolvers' declared return types that fails when one names a
+container the walk does not open, probed against the walk itself rather than against a second list of
+container names written beside it.
+
+**The same shape has a second door, one level up in the matcher.** A matcher that walks type arguments
+reads a `type` alias as declaring nothing, because an alias object carries none, so a member annotated
+through one leaves the population without being refused and the reading above cannot see it either.
+Resolve the alias before anything walks it, **and its sibling with it**: `NewType` is the same idea in
+the other spelling, carries its target on a different attribute, and closing one and leaving the other
+is where the next error hides.
+
+**And the reading admits concrete containers only.** An abstract annotation does not say what arrives,
+so the walk's answer would depend on what does; admitting the sequence and collection families would
+readmit a `deque`, which is the container the reading's own diagonal is built on. That refusal is
+written as a rule with its own message rather than left to fall out of an abstract class being
+impossible to instantiate.
+
+## The directory username is bounded where the row is written, not by a column constraint
+
+`users.username` is `String(USERNAME_MAX)` and carries no `CheckConstraint`. That is deliberate, and
+the reasons are ordered.
+
+**A constraint is reached after the line it would have to prevent.** The warning naming the resolved
+value is emitted before the write that a constraint would refuse, so the wide log line is already
+written when the insert fails. It is the wrong instrument rather than a costlier one.
+
+**`users` carries no CHECK at all, and two functions rely on that.** `models.app_holds_the_password`
+and `auth_backends.directory_owns_email` are written to survive a column holding anything, which is
+what a table with no constraint has to assume. Adding the first CHECK on that table asserts a
+convention the tree does not hold: of the sized text columns in the schema, most carry no length
+check, including the book title, the tag name and eight other columns of this same table.
+
+**And the upgrade would abort on exactly the deployments carrying the defect.** A SQLite batch rebuild
+copies the rows through the new constraint, so a database already holding a wide username fails the
+migration, leaves a temporary table behind and the application does not start.
+
+**Not shortening it either.** `upsert_directory_user` matches on `username` and the column is unique,
+so a shortened name can land on another member's row and hand over their books with a 200 and nothing
+in the log. `catalogue._drop_unstorable` already ruled the same way for a catalogue record: half a
+value is an assertion nobody made.
+
+**So the bound is at the funnel.** `upsert_directory_user` is the only place the directory modes
+construct a `User`, both doors return its result directly, and it answers `None` for a name the column
+cannot hold. `test_house_rules.TestEveryDirectoryDoorWritesThroughOneFunnel` is what says a fourth door
+cannot appear without somebody writing down what bounds its name. It counts the sites each module holds
+rather than which modules hold one, because the first spelling compared paths and a door appended to a
+module already in the list moved nothing it looked at.
+
+**The funnel is the LDAP door's bound, not the proxy door's.** `_PROXY_USERNAME` derives its repeat
+from `USERNAME_MAX`, so a header wider than the column was already refused before the funnel existed
+and never reaches it. Reading the funnel as closing a proxy hole is the wrong history: what it closes
+is the LDAP door, where the value is a directory attribute nothing checked, and for the proxy door it
+is a backstop against somebody widening that regex past the column. The refusal's own wording is
+deliberately distinct from the header refusal's for the same reason: both opened `Refused a proxy
+identity`, so one grep matched an unauthenticated header event and a directory attribute event alike.
+
+**The bound is therefore per auth mode, and that is what makes the lockout look inconsistent.**
+`upsert_directory_user` is on the LDAP and proxy paths and on neither local one, so one stored row
+wider than the column behaves two ways in the same build: in local mode it signs in through
+`authenticate_local`, is never measured against the column, and is serialised in full by the member
+list, whose schema carries no ceiling; in a directory mode the same row is refused before it is looked
+up and its owner sees a generic failed login. Switching a deployment from local to a directory mode is
+what turns that row from working into locked out. **The narrowing is deliberate and is stated because
+it is a behaviour change on the sign in path**: the check sits above the lookup, which is wanted for a
+leftover row of the 2026-08-18 class and unwanted for a legitimate long directory name, and it is one
+mechanism, so it is both. Moving the check below the lookup so it bound creation only is a different
+design and was not chosen: it would leave the wide row signing in and writing its own log lines.
+
+**So "every site that builds a `User` row has its username bounded" is a claim about the three writes,
+not about the table.** A row already in `users` is bounded by nothing. What stays open, and each is a
+hole rather than a narrowing: a restore through Core can still write any username, which only the
+declined constraint would have bound and which is a class of columns rather than this one; the member
+list serialises a stored username with no ceiling, so a row written before this change is still served
+in full; and the username claim in the access token and the cover cookie is unbounded and is written
+but never read. The funnel comment, the house rules class heading and the arm pinning the lockout each
+say which of the two they mean.
+
+## A refused name is logged in full, and a dict of directory results is not clipped
+
+Two sites in the directory path look inconsistent and are not.
+
+**The refused name is logged in full, clipped.** The refusal is a lockout of a legitimate member and a
+width alone does not say which directory entry is broken. A username is not a credential here, and the
+same value is logged clipped on the success path. Forgery is handled by the repr inside `clipped`,
+volume by its ceiling, and rate by a full bind and search per attempt.
+
+**`Connection.result` is logged bare, and what makes that safe is `dict.__repr__` rather than anything
+at the site.** `%s` of a dict reprs each member, so a directory `message` carrying a newline comes out
+escaped. Clipping the dict instead would cut a realistic Active Directory bind failure from 206
+characters to 203 and take the operator's only diagnostic for a misconfigured service bind with it, to
+close a channel that is not open: the caller controls the rate there and the configured directory
+controls the size. **The consequence to carry forward is the readability improvement that would break
+it**: logging a member of that dict directly loses the escaping, and needs `clipped`.
+
+## The one username log line an unauthenticated caller reaches composes both bounds
+
+The proxy door's refusal logs `clipped(username[:80])` under `%s`. The slice bounds the input;
+`clipped` reprs and bounds that repr. Neither alone is tightest, because an escape costs up to four
+characters per character: over a 4000 character header the slice under `%r` emits 82, 162 and 322
+characters for an ordinary, newline and NUL input, the clipper alone emits 203 for all three, and the
+composition emits 82, 162 and 203.
+
+**Where composing is not tightest it costs two characters**, at a repr of 201, and one at 202. Those
+are the widths where the repr passes the logged value ceiling by less than the three characters the
+ellipsis adds, so the clip spends 203 where the slice alone would have spent 201 or 202. Both are
+reachable from an eighty character slice: 201 from twenty NULs, fifty nine newlines and one ordinary
+character, 202 from forty NULs and forty ordinary ones. Over all of Unicode a character reprs to one,
+two, four, six or ten characters, so the repr does not step uniformly.
+
+**The row that decides it is the hostile one.** This line fires only where the regex has just refused
+the value, so the ordinary header is the one input it never sees, and the hand slice is looser by 119
+characters on the input it does. Composing also puts the line inside the population of the module rule
+pairing every `clipped` argument with its conversion, which skipped it while the argument was
+unwrapped.
+
+## A receiver of the public tree blocks the publish, or says at its own site why it does not
+
+Two jobs scan the tree that is about to be published and a third builds an image from it. Asking which
+of them is "a scan" cannot be answered from the pipeline's own text: a name, a stage and a tool were
+each measured wrong in both directions, and the job that builds the image reads the same bytes while
+gating nothing.
+
+**So the population is the receivers of that tree, which is a graph fact**, and the obligation is
+inverted: every receiver is reachable from every publisher over needs edges that actually gate, or it
+carries a written exemption naming that publisher.
+
+**The publishers are the whole of the last stage, and the stage is the effective one.** Not the subset
+that handles the tree: the job that only rewrites a public description holds the highest privilege
+credential in the pipeline, and the ordinary maintenance edit on it detaches it from the graph
+entirely. And not the stage a job declares for itself, because the platform lets a job inherit one from
+any template or job it extends, so a publisher added that way is invisible to a rule reading the key
+and says nothing while it publishes. A new scan lands in the population by existing, and reds until
+somebody wires it in or writes down that it does not gate. **The one outcome forbidden is silence**,
+which is what the previous scan shipped with.
+
+**An optional edge is not counted.** A need marked optional on a job the pipeline does not create is
+dropped, so a receiver reachable only through one gates nothing on that pipeline. That is what puts the
+image builder on the exemption list rather than in the graph: it runs on a tag only, while the mirror
+push runs on every push to the default branch, so a hard edge there would make every such pipeline
+invalid.
+
+**The exemption list is safe only because it is asserted to be a subset of the derived population**,
+and to be redundant if the gap it excuses is ever closed. It records a decision already visible in the
+graph; it cannot grant anything.
+
+**Key resolution is one function in the reader, and the third round is what settled that.** The walk
+that follows what a job inherits was written for the stage; `needs` still read the job's own block, so
+a job taking its edge from a template received the export, sat outside the population, carried no
+exemption and said nothing, which is the outcome this rule forbids. Each per key fix was correct and
+each landed in the commit after the one that built the mechanism for the key before: **rounds of per
+key fixes are the evidence that the class was open, not the instances.** So `scalar`, `entries` and
+`declares` answer what reaches a job rather than what its own block says, the readers that do not
+resolve are private to the walk, and one normaliser serves all three keys, taking a trailing comment
+and either quote off each. A YAML merge key is plain YAML rather than a platform rule and can carry a
+stage and a whole needs list; this reader cannot name the node behind an alias, and it raises.
+
+**The extent of the class arm, said rather than implied.** The mechanism closes the class for the three
+resolving readers, which is what every rule here reads through. The raw block reader is public and
+unresolved, and an inherited key answers through the scalar reader while being invisible to anything
+reading the block itself. That is the deliberate exception: bypassing all three readers is a choice,
+and the one place that makes it reads the block for a comment, which is not inherited, so resolving it
+would grant a template's exemption to every job extending it.
+
+**The premise under the resolution is bounded rather than trusted.** Whether the platform carries needs
+across an `extends` is the one fact in this change nobody here could verify offline. **No needs answer
+moves at all** on this tree, own block read against resolved, across every job and every template, so
+the premise has zero blast radius today and bears only on planted or future configurations. Three
+answers do move and all three are the resolution working, one inherited stage and two script
+declarations, while the derivation is unchanged in every part: same producer, three publishers, five
+receivers, one exemption, nothing ungated.
+
+**And a reading that is loud still has to name somebody.** An unreadable needs key reached the rule as
+twelve errors, the only assertion failure being another arm's anchor breaking, which names neither the
+job nor the key. The artefact key has had a naming arm since the first round; the needs key has one
+now, so the two match.
+
+## One function scans the commit and sends it, because two of them cannot be kept in step
+
+The first version computed the strings, scanned them in a loop, and committed with its own `-m`
+arguments a hundred lines further down. A guard read both sites and asserted the second was a subset of
+the first, and it looked sound.
+
+**Nine spellings passed that guard while publishing an unscanned string**, four of them confirmed
+against a real git run landing in the published message body. Two causes, and neither is a regex that
+could be widened: the send side was recovered from a single matched line, and the comparison was
+between expansion **names**, so any literal written straight into the commit was absent from both
+readings. The case the guard was written for, a third `-m "$EXTRA"`, does red, which is exactly why the
+arm read as sound.
+
+**A guard comparing two readings of the same fact is the defect, not the reading.** So the scan and the
+commit are one function: it refuses each of its own arguments, then rotates those same arguments into
+the commit's message chunks, and the script holds no other commit call. Nothing is left to keep in
+step, and the argument rotation is what stops a literal riding beside the scanned words.
+
+**It also removed two false refusals rather than trading them.** Both existed only because two text
+reads were being compared: the scan loop was pinned to one exact line, so wrapping it or moving it into
+a function reddened, and the vacuity arm reddened on eight reformats that changed nothing.
+
+**And the guard over it is a pin rather than a reading.** Four arms stated properties of those six
+lines, and the last of them collected the double quoted words: a single quoted `-m`, a bare word, a
+`$'...'`, a single quoted `--trailer` and an unquoted global each rotated a literal into the published
+commit with all four green. The six lines are written down now, so the question a reader asks is
+whether the send path is these lines rather than whether it has a property somebody thought to check.
+
+**Pinning the text of a call site does not pin the meaning of the names it calls.** A second definition
+of either name those six lines call, spelled with the space POSIX sh allows, overrode the first at call
+time with every arm green and the scan doing nothing; so did a one line redefinition, and so did
+defining `grep`, which made the alternation match nothing at all. The population is every definition in
+the script, found by the property of being one, and held as a sorted sequence rather than a set,
+because a set swallows a second definition of a name already there.
+
+**Residue, stated rather than closed.** A note added to a commit is not a commit, and it publishes
+nothing anyway: the script pushes two refspecs, the branch head and one tag, and a note rides neither.
+
+## The commit subject is a publication channel, and the publish fails rather than rewriting it
+
+The public snapshot commit carries the internal subject verbatim on the default branch path, and the
+tag name on the tag path, where it publishes three times over: in the generated subject, as the tag
+ref, and in the annotated tag's message. The commit identity and the branch name publish as surely:
+the author and the address are written into the commit object and into the annotated tag's tagger, the
+branch is the ref that is pushed, and all three are configured through the same environment prefix as
+the credential, which is where an internal hostname would be typed.
+
+**The class that has actually travelled is the labelled one.** Six of 1,877 subjects carry a string the
+gate already refuses in every published file; none is shaped like a recovery phrase, the longest
+wordlist run in any subject being six against a threshold of twelve. So the arm is the gate's own
+alternation applied to one string, which needs no interpreter, and a phrase in a subject is left as a
+stated gap rather than given an arm.
+
+**Failing beats substituting.** A substituted subject publishes the content and silently rewrites what
+the public log says, in a repository whose discipline is that the mirror is honest and append only.
+Failing costs one deferred mirror update, because the mirror is a snapshot of the tip: the next commit
+publishes a tree carrying the blocked one. An arm whose remedy reads as impossible is one somebody
+switches off, so the refusal names the repairs that exist rather than offering a reword for a commit
+that already exists.
+
+## The outbound commit message is an artefact, so there is one evaluation and nothing to compare
+
+A commit message is a publication channel and nothing read one. The obstacle was not the rule:
+the phrase scanner already exposes a pure function over a string. It was that the job holding the
+bytes is not the job holding the interpreter, and the three obvious repairs all work around that
+instead of removing it.
+
+Giving the sending job an interpreter means an unpinned package fetch, or a new pinned image
+eleven times the size of the current one, executing beside the mirror credential, to close a gap
+measured at zero occurrences. Reimplementing the rule in shell means carrying 2,048 words per
+language into a tree where a committed wordlist reddens the scan on its own data, and it cannot
+do the Unicode fold at all: built as a prototype and diffed against the real rule over 58 cases,
+it disagreed on nine. Deriving the message a second time in the scanning job and guarding that the
+two derivations agree is the shape that has already failed here, where nine spellings passed such
+a guard while publishing an unscanned string.
+
+So the message stopped being derived where it is sent. It is built once, in the job that already
+builds the export and already holds the pipeline's own variables, and written as one file per
+outbound string. The scan reads every one of those files; the push reads them back and sends
+them. **What is sent is a subset of what was scanned, by construction**, and there is nothing to
+compare because there is only one evaluation. The tag name comes along as a file of its own,
+which closes the ref and the annotated tag's message with it.
+
+The honest cost is that a transport can fail where a local derivation cannot: the artefact may
+not arrive, a file may be absent, empty or not text. Each of those is a refusal with no fallback
+and all four are executed as tests, against the one silent agreement the rejected route would
+have had. The job that pushes now expands no pipeline variable at all, which is asserted rather
+than remembered: re-deriving one value there is a one line edit that restores the whole defect.
+
+## A secret scanner that asks a library inherits the library's blind spots
+
+The phrase rule asked the mnemonic library whether a window of words has a valid checksum. That
+library normalises the phrase to a decomposed form and then looks each word up in a list holding
+the language's own spelling; where the two differ the lookup raises and the answer is "not a
+phrase". Nothing about that is visible from the call site, and the scanner's own list of what it
+accepts did not mention it, so it was an extent claim that did not hold, in the gate standing in
+front of a history nothing unpublishes.
+
+**It is a property of a word, not of a language.** 649 of Turkish's 2,048 words decompose and 276
+of Russian's; no other list has one. That predicts all four of the round trip failure rates
+measured independently, which is what makes it the right description: a 12 word Russian phrase
+survived 17.6% of the time and a 24 word Turkish one about one time in ten thousand.
+
+The rule computes the eleven bit index itself now, off the same lists, and the arithmetic is the
+library's own with the raising lookup removed. That is not a second implementation of the rule,
+it is the same one with a defect taken out, and it was measured in both directions before it was
+written rather than after. **A miss in a secret scanner is silent**, which is why the unmodelled
+case, a word count the standard does not define, raises rather than answering no.
+
+The wider lesson is the one this wave keeps paying for: the sentence beside a rule claimed more
+than the rule held, and it was found by measuring something else.
+
+## The sentence wider than its measurement is written by the careful seat, not the careless one
+
+Every branch of one wave refused at least one, and none was careless: each sat in a sentence written to
+be scrupulous, and several sat in corrections that had themselves been measured. The standing entry is
+*The words beside a guard are read as its extent, and they were wrong in both directions*, and what
+this adds is that the shape is not confined to prose beside a guard and does not announce itself by
+sloppiness. The faces it wore:
+
+| the sentence | what was measured | where the detail lives |
+|---|---|---|
+| the death signal is the only layer that reaches that row | two outer layers reach it and are slower | *The death signal an arm carries is the uncatchable one* |
+| 40 of 40 runs left going, 0 after | runs left **running**, a wider population than runs leaked | the same entry |
+| a suite pod is quota bound at 2 CPUs, restored as evidence | the pipeline job pod is, and the suite pod had been resized | *A deadline test turns on a fact, because every clock available to it is wider than the thing it measures* |
+| a hundredfold headroom | about six, once the sources the row assertion cannot move are timed directly | the same entry |
+| keying on the mapper refutes counting relationship loads | it refutes an **absolute** reading only, and the relative one needs them | *A row count is a second instrument, and the two numbers are read together* |
+| the funnel bounds every directory door | it bounds the LDAP door; the proxy door was bounded before it existed | *The directory username is bounded where the row is written, not by a column constraint* |
+| composing the slice and the clipper costs at most one character | two, once the input family mixes escape widths | below |
+| one group on the screen clears the unreachable fixture | that is the plural in the sentence, not the floor on the number | *An unreachable fixture pins a state the server cannot produce* |
+| the guard refuses this family of spellings | one spelling, and the next one walks past | below |
+| the two published products are identical, by measurement | the wrong one of two ignore files was measured | below |
+
+**A correction inherits the defect.** The comment saying composition costs at most one character came
+from a correction that was itself measured, over strings of one escape width, where a four character
+escape does step the repr by three and 201 is unreachable. Mix the widths and every repr length between
+82 and 322 is reachable, so the true cost is two, and the first reading, which the correction
+overturned, was right. **The first replacement repeated the shape one level down**: it offered a closed
+form over two escape widths and claimed every length in the range reachable, where under that form
+exactly one is not, six and ten character escapes being missing from its terms. So ask what inputs a
+number was taken over before writing it into a published file, and then ask the same of the
+replacement: a closed form beats a sample only where its terms are complete, and where they are not,
+the witnesses the argument needs are worth more than a range.
+
+**Restoring deleted evidence re-dates it**, so a restoration is re-verified against the current system
+or it publishes a stale measurement under the banner of rigour, and the re-verification has to
+establish **which** system the evidence is about before it compares figures. Two readers checked the
+restored pod sentence against the suite pod, which had been resized three weeks before the red the
+sentence explains, and both concluded it was stale. The defect was the unqualified referent rather than
+the figure, and the fix was to name the pod rather than to drop the number.
+
+**A guard that enumerates spellings is the same failure written in code.** Every enumeration on one
+branch was beaten, and every widening of one was beaten again, the widening always being the fix that
+had just shipped: one flag form, then eight more; one quoting form, then four more; one route to a
+stage, then two more; a line mentioning a credential name, beaten by a comment mentioning it; a key
+read on its own line, beaten by the same key written as a list. **The residue somebody writes down is
+the smallest member of the family it names, not the family**, so a named residue reads as a bound and
+is a sample. **The repair is never a further case**: pin the thing where the subject is small and
+closed, derive the exclusion where the population is open, or assert the property where the shape is
+what matters. **The tell is the shape of the fix, not the shape of the defect**: a fix that adds a case
+to a list is the defect surviving, and it reads as diligence. *Every population derived by matching
+source text in this wave was wrong at least once* is the same finding over a narrower instrument, and
+*A guard that enumerates its own universe goes quiet without failing* is its other half.
+
+**A correct exception can still be implemented wider than its own reasoning.** The scan over the
+environment skips any line mentioning the credential, and the exception is earned, both live credential
+lines reddening without it. It was a substring test over a line that keeps its trailing comment, so a
+comment merely naming the credential exempted the line it sat on. It is about the names a line
+**expands**, which is what the reasoning was always about, and the comment comes off first.
+
+**And a measurement that replaces a false claim can measure the wrong thing.** A producer's comment
+claimed its two published products byte identical by construction. They are not, one artefact being
+filtered by a second ignore file. The claim was replaced by a measurement, which is the right move, and
+the measurement was of the wrong one of the two files: the export's own drops 0 of 1,007, so the
+sentence read "identical today by measurement", while the container's drops 360 of the same 1,007,
+being both test trees and the documentation directory, so the products are provably different and the
+sentence could not be made true by any figure. So a measurement replacing a claim names which
+instrument produced it and, where the claim is about two things, is taken on both. The comment gives
+both numbers now and asserts neither, which is an honest gap rather than a false one.
+
+## A guard's verdict can be a property of the tree rather than of the guard
+
+**A red that depends on the current configuration is not a guard.** The marker saying a need is
+optional was compared raw while the two keys beside it were normalised in the same file, so a trailing
+comment or either quote turned an optional edge into a hard one: on the live graph that grew the mirror
+push's hard closure from five jobs to nine and reported the release builder as gated when it is not,
+which is the precise sentence that design gives as the reason optional edges are not counted. It did
+red, and **the red was a coincidence**: the flip left nothing unexplained and reddened the redundancy
+arm only because exactly one exemption exists today, and deleting that one line made the identical flip
+completely green.
+
+**A probe can measure itself rather than its subject.** The reading over declared return types asked
+what a walk did with a container built from a list of pairs, which is one constructor convention: a
+`defaultdict` takes its factory first, so it raised and read as a container the walk cannot open, under
+a message telling the author to teach a walk that already knew. Guarding that construction on one
+exception type was the same mistake one level in, and keeping the construction wherever it succeeded
+still measured the **constructor** rather than the walk, because a list subclass whose init filters and
+a mapping whose init discards or re-keys what it is handed are opened by the walk and refused by any
+probe that builds one. **Three consecutive fixes to one probe, each opening a hole the diff did not
+show.** The question is the walk's own membership test, asked of the class: a container the walk opens
+is necessarily one of the names it holds, so a construction can never add a yes, only agree or be
+wrong. What the probe was worth is kept as an assertion driving the walk directly.
+
+**So re-plant the recorded diagonals after touching a fixture or a reader**, because a plant that starts
+passing is invisible in a diff. A job extending another now inherits that job's needs, which is the
+platform's own precedence and which the reader had wrong before, so the diagonal planting a publisher
+that extends the registry push had to declare empty needs to stay ungated: the plant had been passing on
+the reader's wrongness. Both placements of a YAML anchor are covered for the same reason, and only one
+of them reddened anything before: an anchor on a column zero key also breaks the partition arm, and an
+anchor on a nested node reddened nothing at all.
+
+**And a fixture whose termination depends on the code under test cannot be used to test a mutation
+of that termination.** A source that never answers is a good fixture against every mutant that keeps
+the timeout, and an infinite loop against the one that drops it: the recorded must-red for a dropped
+budget stopped terminating, held a worker node's lock, and returned an exit status with no test
+report. From the caller's side an unbounded run and a caught mutant are the same thing, which is why
+a run with no test report counts invalid here rather than caught. Making the source finite at four
+times the budget puts termination in the fixture's own hands, and that is the shape of the repair
+rather than a larger number.

@@ -29,6 +29,9 @@ from schemas.author import (
     RefusedAssertionOut,
 )
 from schemas.book import (
+    DUPLICATE_BOOKS_SHOWN,
+    MERGE_BOOKS_MAX,
+    POPPED_BEFORE_THE_ASSIGNMENT,
     POPPED_BEFORE_THE_CONSTRUCTOR,
     BookColumns,
     BookCreate,
@@ -46,6 +49,8 @@ from schemas.book import (
     CopyCreate,
     CoverBackfillOut,
     DuplicateGroup,
+    DuplicateMember,
+    DuplicateReport,
     IdentifierBackfillOut,
     LocationOut,
     MergeRequest,
@@ -165,13 +170,17 @@ LoanOut.model_rebuild()
 
 __all__ = [
     "DEFAULT_PAGE_SIZE",
+    "DUPLICATE_BOOKS_SHOWN",
     "MAX_CLASSIFICATIONS_PER_BOOK",
     "MAX_DIGITAL_REFERENCES_PER_BOOK",
     "MAX_IDENTIFIERS_PER_BOOK",
     "MAX_PAGE_SIZE",
     "MAX_ROW_ID",
-    # The create route's own pop list, read by `routers/books._create_book`.
-    # Exported because the route loops it rather than spelling one pop per name.
+    "MERGE_BOOKS_MAX",
+    # One pop list per write route, read by `_create_book` and by
+    # `update_book_details`. Exported because each route loops its own rather
+    # than spelling one pop per name.
+    "POPPED_BEFORE_THE_ASSIGNMENT",
     "POPPED_BEFORE_THE_CONSTRUCTOR",
     "AppearanceOut",
     "AppearanceUpdate",
@@ -226,6 +235,8 @@ __all__ = [
     "DigitalReferenceOut",
     "DivisionFacetOut",
     "DuplicateGroup",
+    "DuplicateMember",
+    "DuplicateReport",
     "EmailUpdate",
     "FeatureFlagsOut",
     "HeadingFacetOut",

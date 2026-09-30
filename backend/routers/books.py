@@ -5,9 +5,18 @@ import logging
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, wait
 from datetime import UTC, date, datetime
-from typing import Annotated, Any, Final, Literal
+from typing import Annotated, Any, Final, Literal, NamedTuple, cast
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy import func, nullslast
@@ -22,6 +31,7 @@ import covers
 import custom_fields
 import ddc
 import deadline
+import downloads
 import folding
 import google_books
 import identity
@@ -57,6 +67,7 @@ from dependencies import (
 from dependencies import divisions as parse_divisions
 from dependencies import headings as parse_headings
 from enums import (
+    EXPORT_MEDIA_TYPES,
     AuthorityScheme,
     BookFormat,
     BookIdentifierScheme,
@@ -96,11 +107,15 @@ from models import (
 from ratelimit import (
     authority_limiter,
     cover_backfill_limiter,
+    export_limiter,
 )
 from reading import Reading
 from schemas import (
+    DUPLICATE_BOOKS_SHOWN,
     MAX_DIGITAL_REFERENCES_PER_BOOK,
     MAX_ROW_ID,
+    MERGE_BOOKS_MAX,
+    POPPED_BEFORE_THE_ASSIGNMENT,
     POPPED_BEFORE_THE_CONSTRUCTOR,
     AuthorBatchMergeOut,
     AuthorIdentifierOut,
@@ -138,6 +153,8 @@ from schemas import (
     DigitalReferenceOut,
     DivisionFacetOut,
     DuplicateGroup,
+    DuplicateMember,
+    DuplicateReport,
     HeadingFacetOut,
     IdentifierBackfillOut,
     LocationOut,
@@ -168,7 +185,8 @@ from shelf import (
     order_for,
     whole_table_for_uniqueness,
 )
-from tags import MAX_TAGS_PER_BOOK, Mint, attach
+from shelving import Shelving
+from tags import MAX_TAGS_PER_BOOK, Mint, Naming, Vocabulary, attach
 from uploads import read_image_upload
 
 logger = logging.getLogger("endpaper.books")
@@ -181,7 +199,14 @@ router = APIRouter(prefix="/api/books", tags=["books"])
 
 @router.get("/tags", response_model=list[TagOut])
 def list_tags(db: DbSession, current_user: CurrentUser) -> list[TagOut]:
-    """The curated vocabulary plus whatever the library has invented.
+    """The curated vocabulary plus the invented tags this member can already see.
+
+    **Not every tag the library holds.** A tag carries no member of its own, so
+    what decides who may be told it exists is the books carrying it: this
+    answers with the seeded vocabulary, which is published in the source, plus
+    every tag on a book the caller can see. An invented tag whose only books
+    are other people's private ones is absent, because listing it would publish
+    a name somebody typed against a book this caller may not read.
 
     The **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`
     in the frontend), because that is a presentation decision and it needs the
@@ -192,20 +217,15 @@ def list_tags(db: DbSession, current_user: CurrentUser) -> list[TagOut]:
 
     `book_count` is one grouped query for the whole list rather than one per
     tag: this is fetched on nearly every page, so an N+1 here is an N+1
-    everywhere.
+    everywhere. It is the same query the row filter reads, so the number and
+    the presence of the row cannot disagree.
     """
-    # Joined to Book and filtered, like every other query that counts books.
-    # Without it the count included other members' **private** books and
-    # trashed ones, and this endpoint is fetched on nearly every page, so a
-    # member could watch somebody else's private additions accrue in a number
-    # their own listing said was zero.
-    counts = dict(
-        Shelf.seen_by(db, current_user.id)
-        .select(book_tags.c.tag_id, func.count(book_tags.c.book_id))
-        .join(book_tags, book_tags.c.book_id == Book.id)
-        .group_by(book_tags.c.tag_id)
-        .all()
-    )
+    # `tags.Vocabulary` and not a clause here, because this route is not the
+    # only reader: the lookup and the search feed the whole table into
+    # `suggested_tag_ids`, which puts tag **ids** on the wire. Filtering here
+    # alone would hand a client an id it could no longer name.
+    vocabulary = Vocabulary.seen_by(db, current_user.id)
+    counts = vocabulary.counts
     return [
         TagOut(
             id=tag.id,
@@ -218,7 +238,7 @@ def list_tags(db: DbSession, current_user: CurrentUser) -> list[TagOut]:
             is_predefined=tag.is_predefined,
             book_count=counts.get(tag.id, 0),
         )
-        for tag in db.query(Tag).order_by(Tag.category, Tag.name).all()
+        for tag in vocabulary.listable()
     ]
 
 
@@ -234,6 +254,13 @@ def create_tag(payload: TagCreate, db: DbSession, current_user: CurrentUser) -> 
     "cookbooks" cannot both appear. A collision returns the existing tag rather
     than a 409: somebody typing a name that is already there wants that tag,
     and an error would send them to find it by hand.
+
+    **A tag invented here is not in `GET /api/books/tags` until a book the
+    caller can see carries it**, which is that route's rule and not an
+    omission: a tag on no book is a name and nothing else, and publishing it to
+    the whole library is the disclosure this route's two step use was part of.
+    Putting it on a book is what makes it part of the vocabulary, and the
+    clients do that in the same gesture.
     """
     # The fold, the order a case differing pair is resolved in, the
     # normalisation and the ceiling are `tags.py`'s, and every writer asks the
@@ -446,7 +473,10 @@ async def lookup_isbn(
     # suggestion and the response, and the two cannot disagree about what the
     # catalogues said.
     classifications = bounded_headings(record.headings)
-    all_tags = db.query(Tag).all()
+    # The tags this caller may be told about, not the table: a suggestion is a
+    # tag **id** on the wire, so an unfiltered feed here would pre-select an id
+    # the list route no longer names. `tags.Vocabulary` is the one answer.
+    all_tags = Vocabulary.seen_by(db, current_user.id).listable()
     return BookLookup(
         **record.as_lookup(),
         classifications=classifications,
@@ -637,7 +667,9 @@ async def search_books(
     # nothing and has nothing left to ask, and subtracting `asked` from the
     # roster here cannot tell that from a library whose catalogues are all slow.
     return BookSearchOut(
-        matches=_match_rows(found.matches, db.query(Tag).all()),
+        matches=_match_rows(
+            found.matches, Vocabulary.seen_by(db, current_user.id).listable()
+        ),
         asked=list(found.asked),
         unasked=list(found.unasked),
     )
@@ -657,12 +689,32 @@ async def search_books(
 _EXPORT_EXTENSIONS: Final[dict[ExportFormat, str]] = {ExportFormat.MARCXML: "xml"}
 
 
-def _marcxml_pages(db: Session, viewer_id: int) -> Iterator[list[Book]]:
-    """This viewer's whole shelf, in pages `marc.stream` can serialise and drop.
+def _export_pages(db: Session, viewer_id: int, load: Loading) -> Iterator[list[Book]]:
+    """This viewer's whole shelf, in pages a writer can serialise and drop.
+
+    **Every arm of `export_books` walks the shelf through this**, so the peak
+    is one page of rows whatever format was asked for, and everything below
+    is a guarantee all three arms hold rather than the MARCXML arm's.
+    `tests/routers/test_books.py::TestNoExportArmResolvesMoreBooksThanAPage`
+    drives every member of `ExportFormat` against it.
 
     **Every page is a fresh `Shelf.seen_by`**, so the privacy rule is applied
     by construction on each one rather than once on a list that is then sliced.
-    A book made private while this runs is gone from every later page.
+    A book made private while this runs is gone from every later page, which
+    `tests/routers/test_books.py::TestNoExportArmResolvesMoreBooksThanAPage::test_a_book_made_private_ahead_of_the_walk_is_in_no_page`
+    is the only arm anywhere to observe: every other one walks a shelf with
+    nothing hidden from it, so it cannot tell a walk of the shelf from a walk
+    of the table.
+
+    **What applies the rule per page is the fresh execution, not the fresh
+    construction, and the difference was measured rather than reasoned.**
+    `visible_to` rides in the query's own SQL, so hoisting this call above the
+    loop and reusing the object narrows and re-executes exactly the same
+    statement: that mutation survived the whole of `test_books.py`. The
+    contrast that is real is the one this sentence draws with a list resolved
+    once and sliced, and a walk built that way fails the arm above **and**
+    three book counting arms. The call stays inside the loop because that is
+    what makes the re-execution legible, not because moving it would leak.
 
     **Walked by `Book.id`, which is unique and immutable, and both of those
     are load bearing.** An export is many reads where it used to be one, so
@@ -678,15 +730,18 @@ def _marcxml_pages(db: Session, viewer_id: int) -> Iterator[list[Book]]:
       title writes a book twice when it is retitled behind the cursor and not
       at all when it is retitled ahead of it.
 
-    Both are silent, both answer 200, and a short catalogue exchange that
-    nobody can notice is what `docs/decisions.md` refuses under §An oversized
-    MARC file is refused. A primary key can do neither: a row that existed
-    when the export began and still exists is written exactly once.
+    Both are silent, both answer 200, and a short export that nobody can
+    notice is what `docs/decisions.md` refuses under §An oversized MARC file
+    is refused. A primary key can do neither: a row that existed when the
+    export began and still exists is written exactly once.
 
-    **So the file is in catalogued order rather than title order**, which is
-    what it was. Nothing is owed the other one: a MARCXML `<collection>` has
-    no ordering contract, and a receiving system files by its own rules. The
-    order was never asserted and is not what this route is for.
+    **So every file this route writes is in catalogued order**, which the
+    MARCXML arm always was and the CSV and txt arms were not: they sorted by
+    title. Sorting by a key and paging on it are the same walk, so keeping
+    title order here would be keeping the second bullet above, and
+    `tests/routers/test_imports_marc.py::TestTheExportIsPagedRatherThanWhole`
+    has the arm that shows what it costs. A spreadsheet sorts a column back in
+    one click; a book in no page at all is invisible.
 
     **No count, which is `Shelf.limited` rather than `Shelf.page`.** The
     measurement and the quadratic it avoids are in that method.
@@ -702,6 +757,65 @@ def _marcxml_pages(db: Session, viewer_id: int) -> Iterator[list[Book]]:
     drives more than one page through the real ASGI stack, which is what
     covers it.
 
+    **The page size is read here rather than passed in**, so one knob bounds
+    every arm and a test that moves it moves all of them together. A MARCXML
+    page is the dearest of the three per row: it carries the description in
+    `520 $a` as the CSV arm does and wraps every value in XML, so a number
+    measured against it is not tight for the other two.
+    """
+    after: int | None = None
+    while True:
+        shelf = Shelf.seen_by(db, viewer_id)
+        # Narrowed only once there is a row to resume after. A sentinel id
+        # standing for "before the first row" would be relying on the primary
+        # key never reaching it rather than saying so.
+        if after is not None:
+            shelf = shelf.where(Book.id > after)
+        # Read once per page into a local, because the two uses below have to
+        # be the same number: reading the constant twice is how a full page
+        # comes to look short, and a short page ends the walk.
+        size = marc.EXPORT_PAGE_RECORDS
+        books = shelf.limited(size, Book.id.asc(), load=load)
+        if not books:
+            return
+        # Read **before** the page is handed over rather than after it comes
+        # back, because the consumer streams and an unknown time passes inside
+        # that `yield`. Nothing commits on this session during a response, so
+        # nothing expires and the read is safe either way today; this costs a
+        # line and stops depending on that.
+        cursor = books[-1].id
+        short = len(books) < size
+        yield books
+        # A short page is the last page. A full one costs one more query that
+        # comes back empty, which is what a walk with no count pays instead of
+        # counting the shelf on every page.
+        if short:
+            return
+        after = cursor
+
+
+def _marcxml_pages(db: Session, viewer_id: int) -> Iterator[list[Book]]:
+    """The walk the MARCXML arm hands to `marc.stream`, bound to its loading.
+
+    **What this function decides is `Loading.PUBLISHED`**; the walk itself is
+    `_export_pages` and every arm shares it. **So the guarantees this arm
+    relies on are not this arm's**: the paging, the key it resumes on and the
+    privacy rule all belong to `_export_pages`, and the classes covering them
+    cover the CSV and txt arms too. Retiring MARCXML means deleting this
+    function, not that walk.
+
+    **"The privacy rule re-applied per page" is what this sentence used to
+    say, and it named the wrong thing as the guarantee.** What makes the export
+    private is `Shelf.seen_by`, whose predicate rides in each page's own SQL and
+    is carried by any narrowing of it; the per page rebuild is about the
+    statement rather than about the viewer, and `_export_pages` measured that.
+    A reviewer reading the old wording judges a change to that loop on privacy,
+    which is the wrong axis.
+
+    It also keeps a name of its own rather than being `_export_pages` called
+    at the route, because the tests that drive the walk alone and the one that
+    watches the route hand it over unstarted both reach it by this name.
+
     **`Loading.PUBLISHED` rather than `EXPORTED`**, and the name is about the
     payload rather than the audience: it is the one option that eagerly loads
     `classifications`, which is the half of a MARC record that makes it worth
@@ -715,42 +829,80 @@ def _marcxml_pages(db: Session, viewer_id: int) -> Iterator[list[Book]]:
     option would be another member of `shelf.Loading`, and that enum is not
     this change's to extend.
     """
-    after: int | None = None
-    while True:
-        shelf = Shelf.seen_by(db, viewer_id)
-        # Narrowed only once there is a row to resume after. A sentinel id
-        # standing for "before the first row" would be relying on the primary
-        # key never reaching it rather than saying so.
-        if after is not None:
-            shelf = shelf.where(Book.id > after)
-        books = shelf.limited(
-            marc.EXPORT_PAGE_RECORDS, Book.id.asc(), load=Loading.PUBLISHED
-        )
-        if not books:
-            return
-        # Read **before** the page is handed over rather than after it comes
-        # back, because the consumer streams and an unknown time passes inside
-        # that `yield`. Nothing commits on this session during a response, so
-        # nothing expires and the read is safe either way today; this costs a
-        # line and stops depending on that.
-        cursor = books[-1].id
-        short = len(books) < marc.EXPORT_PAGE_RECORDS
-        yield books
-        # A short page is the last page. A full one costs one more query that
-        # comes back empty, which is what a walk with no count pays instead of
-        # counting the shelf on every page.
-        if short:
-            return
-        after = cursor
+    return _export_pages(db, viewer_id, Loading.PUBLISHED)
 
 
-@router.get("/export")
+#: What the export's 200 promises, and it is three media types rather than one.
+#:
+#: **Derived from `EXPORT_MEDIA_TYPES` rather than listed**, so a fourth format
+#: is declared by the same line that makes it sendable and the document cannot
+#: be short a type while the route sends it.
+#:
+#: **Which one arrives depends on `?format=`, and OpenAPI cannot say that.**
+#: There is no expression for a response content type conditioned on a request
+#: parameter, so the honest declaration is all three under 200 with the mapping
+#: written into the route description below. Splitting the route into three, one exact type
+#: each, is the only shape that makes it exact and it changes three URLs and
+#: the client's URL builder to buy exactness in a document.
+#:
+#: **No schema under each type, which is the OpenAPI 3.1 spelling for opaque
+#: bytes** and not an omission: `format: binary` belonged to 3.0 and JSON Schema
+#: 2020-12 has no such format, so a media type object with nothing in it is what
+#: says "these bytes, unconstrained".
+_EXPORT_CONTENT: Final[dict[str, dict[str, Any]]] = {
+    media_type.split(";")[0]: {} for media_type in EXPORT_MEDIA_TYPES.values()
+}
+
+
+@router.get(
+    "/export",
+    # **Both halves, and either one alone is weaker than it reads.** Measured
+    # against this worktree's FastAPI: `responses=` alone leaves
+    # `application/json` in the 200 **beside** the real types, because FastAPI
+    # derives the 200's content from `response_class.media_type` and the
+    # default class is `JSONResponse`; `response_class=StreamingResponse` alone
+    # declares no content at all, trading a wrong promise for none.
+    # `Response.media_type` is `None`, so the plain class contributes nothing
+    # and the dictionary is left as the whole answer.
+    #
+    # **The handler stays annotated `-> StreamingResponse`**, which is load
+    # bearing:
+    # `tests/routers/test_auth.py::TestARouteThatSendsNoBodyDocumentsNone`
+    # selects the routes it forbids content to by the return **annotation**
+    # being exactly `Response`, so this does not recruit the route into a rule
+    # that says the opposite.
+    response_class=Response,
+    responses={
+        200: {
+            "content": _EXPORT_CONTENT,
+            "headers": downloads.DOWNLOAD_DISPOSITION,
+        }
+    },
+)
 def export_books(
     db: DbSession,
     current_user: CurrentUser,
     format: Annotated[ExportFormat, Query()] = ExportFormat.CSV,
 ) -> StreamingResponse:
     """The shelf this member can see, as a file.
+
+    **CSV is `text/csv`, plain text is `text/plain` and MARCXML is
+    `application/marcxml+xml`.** All three are declared for the 200 because the
+    document has no way to say which of them `?format=` selects.
+
+    **Rationed, and the schema does not say so.** The refusal is a 429 carrying
+    `Retry-After`. It is not declared here because this document enumerates no
+    refusal on any operation: not a 401, which every secured operation can
+    answer, nor a 403, a 404 or a 429. So declaring one here would make this
+    refusal look deliberate and every other operation's look accidental, which
+    is a decision about the whole error surface rather than about this route.
+    `docs/decisions.md` records that reasoning, having refused the same move
+    once already, and
+    `tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` is what this
+    paragraph rests on rather than a reader's memory of it. The mechanism behind
+    the refusal is shared by every route in `ratelimit.py`, so what would make
+    declaring it honest is declaring it at all of them. The counter is not:
+    this route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.
 
     **MARCXML needs library mode and the other two do not.** A CSV export is a
     household reading its own shelf in a spreadsheet. A MARC record is a
@@ -765,6 +917,51 @@ def export_books(
     closed, and there is nothing to conceal: `GET /api/settings/features`
     already tells any caller whether library mode is on.
     """
+    # **In the body, and the reason is not the one `ratelimit.py`'s docstring
+    # gives.** That one is about a key the body has to be parsed to know, and
+    # this key is `current_user.username`, which a dependency can see.
+    #
+    # The reason here is ordering, and it is narrower than "never a dependency",
+    # which is what this comment said first and is wrong. Measured against this
+    # worktree's FastAPI, a path operation dependency is inserted at the
+    # **front** of the route's dependency list, ahead of the endpoint's own
+    # parameters. So a charge placed there runs before authentication **unless
+    # the charging dependency itself depends on the authenticating one**, in
+    # which case FastAPI solves that first and a caller with no session gets 401.
+    # `auth.get_current_user` returns a `User` or raises and never returns
+    # `None`, so no shape of that dependency is satisfied by an absent session.
+    #
+    # **That narrowing is this route's, because authentication is its only
+    # gate.** Where the gate is authorisation the safe shape is a charge that
+    # depends on whichever dependency refuses, and depending on the
+    # authenticator alone charges a member who is then answered 403:
+    # `routers/backup.download_backup` carries that measurement at its own site.
+    # Both shapes were compiled and driven: keyed on `CurrentUser` a dependency
+    # answers 401 and never counts, and keyed on `client_address`, which needs no
+    # session and is therefore the shape somebody reaches for, it answers 429
+    # with the authentication never run.
+    #
+    # **That second shape is an oracle and a free denial.** A 429 keyed on a
+    # username tells a caller with no session that the username exists and has
+    # been active inside the window, and the same caller can spend a member's
+    # budget without holding one. The body is where the question cannot arise at
+    # all, which is why the call is here rather than in a dependency that would
+    # be equally safe today and one edit from not being.
+    # `TestTheExportDoorIsRationed::test_a_caller_with_no_session_is_401_and_spends_nothing`,
+    # in `tests/test_ratelimit.py`, is that claim rather than this paragraph.
+    #
+    # **Keyed on the authenticated username, never `client_address`.** Behind the
+    # reverse proxy this app is documented to sit behind, an address key collapses
+    # a household into one bucket, and `Retry-After` is computed from that
+    # bucket's first hit, so a shared bucket tells one member when another last
+    # exported.
+    #
+    # **Charged before the library mode gate below**, so a member probing MARCXML
+    # with the flag off spends their own export budget. That is self denial and
+    # nothing else: `GET /api/settings/features` answers `library_mode` to a
+    # caller with no token at all, so there is no oracle here to buy.
+    export_limiter.check(current_user.username)
+
     extension = _EXPORT_EXTENSIONS.get(format, format.value)
     filename = f"endpaper-export-{date.today().isoformat()}.{extension}"
 
@@ -776,48 +973,98 @@ def export_books(
             )
         return StreamingResponse(
             # **Paged, and the page is what bounds this route.** The shelf
-            # is never in memory whole: `_marcxml_pages` fetches
+            # is never in memory whole: `_export_pages` fetches
             # `marc.EXPORT_PAGE_RECORDS` rows at a time and `marc.stream`
             # writes one page of XML at a time, so the peak is a page of each
             # at any shelf size. The library in library mode is the instance
             # with the most books, and this arm used to materialise every one
-            # of them for an ordinary account. **The CSV arm below still
-            # does**, and is not gated by library mode either; it is a
-            # separate ticket and not a thing this comment has fixed. What
+            # of them for an ordinary account. The CSV and txt arms below walk
+            # the same pages: neither is gated by library mode, so an ordinary
+            # account reaches them, which made them the worse of the two. What
             # this constant is, and what refusing and truncating would each
             # have cost, is at `marc.EXPORT_PAGE_RECORDS`.
             marc.stream(_marcxml_pages(db, current_user.id)),
-            # The registered media type for MARCXML, per the Library of
-            # Congress. A cataloguer's tools dispatch on it.
-            media_type="application/marcxml+xml; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            media_type=EXPORT_MEDIA_TYPES[format],
+            headers=downloads.attachment(filename),
         )
 
-    books = Shelf.seen_by(db, current_user.id).all(Book.title.asc(), load=Loading.EXPORTED)
+    chunks = (
+        _csv_chunks(db, current_user.id)
+        if format is ExportFormat.CSV
+        else _text_chunks(db, current_user.id)
+    )
 
-    # Batched rather than queried per book, and empty costs no statement.
-    # `status_of` is what applies "absence means unread", so the writer below
-    # reads a value for every row rather than a default per cell.
-    statuses = Reading.by(db, current_user.id).of([book.id for book in books])
+    # Handed over unstarted. Both are generator functions, so the shelf is not
+    # read until the transport pulls the body, and neither holds more than the
+    # page it is writing.
+    return StreamingResponse(
+        chunks,
+        media_type=EXPORT_MEDIA_TYPES[format],
+        headers=downloads.attachment(filename),
+    )
 
-    if format is ExportFormat.CSV:
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(
-            [
-                "Title", "Author", "ISBN", "ISBN13", "Publisher",
-                "Year", "Pages", "Description", "Tags", "My Status",
-                "Rating", "Date Read", "Date Added", "Added By", "Format",
-                "Condition", "Location", "Collection", "Purchase Price",
-                "Purchase Currency", "Purchased On", "Purchased From",
-            ]
-        )
+
+def _drain(buffer: io.StringIO) -> str:
+    """Everything written since the last drain, and reset the buffer.
+
+    One buffer reused across pages rather than one per page: the peak is a
+    page of text, which is what the paging is for, and a fresh `csv.writer`
+    each time would be a second place the dialect is decided.
+    """
+    text = buffer.getvalue()
+    buffer.seek(0)
+    buffer.truncate(0)
+    return text
+
+
+def _csv_chunks(db: Session, viewer_id: int) -> Iterator[str]:
+    """The CSV export, one chunk a page.
+
+    The header is yielded before the first page, so an empty shelf still
+    downloads a file a spreadsheet can open rather than nothing at all.
+    """
+    # **Streaming buys the bound with a truncation, and the exporting member
+    # induces it with no privilege.** The status line goes out before page
+    # one, so a failure at page k is a 200 that ends early. `database is
+    # locked` mid walk truncates where it used to 500: it takes a write held
+    # past `database.py`'s five second `busy_timeout`, which that module names
+    # as an import, a restore or emptying the trash, so an import in one tab
+    # beside an export in another is the reproduction. The MARCXML arm
+    # took that trade on the artefact self invalidating, an unclosed
+    # `<collection>` being refused by every parser. **A short CSV is a valid
+    # CSV**, and `routers/imports.py::/csv` is what reads this file back, so
+    # here it is member data lost on the backup path. The chunked terminator
+    # is the only signal left, `docs/security.md` documents this app behind a
+    # reverse proxy, and whether one restores that signal here is
+    # **unmeasured**. Do not buffer the file back to get a better one: the
+    # peak this paging removed is what that costs.
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            "Title", "Author", "ISBN", "ISBN13", "Publisher",
+            "Year", "Pages", "Description", "Tags", "My Status",
+            "Rating", "Date Read", "Date Added", "Added By", "Format",
+            "Condition", "Location", "Collection", "Purchase Price",
+            "Purchase Currency", "Purchased On", "Purchased From",
+        ]
+    )
+    yield _drain(buffer)
+
+    for books in _export_pages(db, viewer_id, Loading.EXPORTED):
+        # Batched per page rather than queried per book, and empty costs no
+        # statement. `status_of` is what applies "absence means unread", so
+        # the writer below reads a value for every row rather than a default
+        # per cell. Per page rather than over the whole shelf, because a map
+        # of every row's status is the same unbounded thing the page bounds.
+        statuses = Reading.by(db, viewer_id).of([book.id for book in books])
         for book in books:
-            # This member's own row, or None where they never touched the book.
-            # Free: `statuses` was batched above, so the rating and the read
-            # date cost no statement. Without them a member who exports and
-            # imports their own shelf loses every rating and every read date,
-            # which is data the importer has always been able to read back.
+            # This member's own row, or None where they never touched the
+            # book. Free: `statuses` was batched for this page above, so the
+            # rating and the read date cost no statement. Without them a
+            # member who exports and imports their own shelf loses every
+            # rating and every read date, which is data the importer has
+            # always been able to read back.
             reading = statuses.get(book.id)
 
             # **Every cell goes through `_csv_safe`, with no exceptions and no
@@ -884,9 +1131,22 @@ def export_books(
                     _csv_safe(book.purchase_source),
                 ]
             )
-        content = output.getvalue()
-        media_type = "text/csv; charset=utf-8"
-    else:
+        yield _drain(buffer)
+
+
+def _text_chunks(db: Session, viewer_id: int) -> Iterator[str]:
+    """The `txt` export, one chunk a page.
+
+    The blank line between two records belongs to the pair rather than to
+    either one, so it leads every chunk after the first. A trailing separator
+    instead would put an empty record at the end of every file.
+    """
+    # Truncates the same way `_csv_chunks` does, for the same reason; that
+    # comment is the one home. No importer reads this format back.
+    separator = ""
+    for books in _export_pages(db, viewer_id, Loading.EXPORTED):
+        # Batched per page, for the reason `_csv_chunks` states.
+        statuses = Reading.by(db, viewer_id).of([book.id for book in books])
         blocks: list[str] = []
         for book in books:
             # **Every value goes through `_one_line`, with no exceptions and no
@@ -917,14 +1177,8 @@ def export_books(
                     ]
                 )
             )
-        content = "\n\n".join(blocks)
-        media_type = "text/plain; charset=utf-8"
-
-    return StreamingResponse(
-        iter([content]),
-        media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+        yield separator + "\n\n".join(blocks)
+        separator = "\n\n"
 
 
 #: Characters that make a spreadsheet treat a cell as a formula rather than as
@@ -1192,17 +1446,32 @@ def _store_cover(book: Book) -> bool:
     return True
 
 
-def _checked_collection(db: Session, collection_id: int | None) -> int | None:
-    """The id of a collection that exists, or None, or a 400.
+def _checked_collection(db: Session, collection_id: int | None, viewer_id: int) -> int | None:
+    """The id of a collection this caller may file into, or None, or a 400.
 
     Every write that files a book goes through here. Without it an unknown id
     reaches the foreign key and surfaces as a 500 from inside an add, which
     tells the caller nothing about what they got wrong.
 
     A 400 rather than a 404: the request is about a book, and the thing that
-    does not exist is a field in its body. It is also not a privacy question,
-    because collections are library wide, so there is nothing here to withhold
-    by answering vaguely.
+    does not exist is a field in its body.
+
+    **And the same 400 for a collection this caller may not be told about**,
+    which is `shelving.Shelving.assignable`. It is the harm this door carried
+    and it was the sharper half of the two: a tag attach against a guessed id
+    hands back the book, and this hands back the **name**, through
+    `collection_name` on the `BookOut` three of the four call sites return. So
+    a guessed name answered 201 with the row and filing into it then completed,
+    with no second gate anywhere, on a consecutive integer primary key and
+    under no rate limit. The docstring here used to argue that was fine,
+    because collections are library wide and there was nothing to withhold.
+    That was the ticket's premise stated as a justification. See
+    `shelving.Shelving`, and `_require_tag` below for the same repair one
+    entity over.
+
+    A fresh collection is still writable, which is what keeps the "make one and
+    file this book into it in a single press" flow working: nothing carries it,
+    so `Shelving`'s third arm admits it.
 
     The range check is not redundant with the schemas that bound this field.
     `BulkRequest.value` is deliberately loose (`str | int | None`, because which
@@ -1216,6 +1485,8 @@ def _checked_collection(db: Session, collection_id: int | None) -> int | None:
     if not 1 <= collection_id <= MAX_ROW_ID:
         raise HTTPException(status_code=400, detail="No such collection")
     if db.get(Collection, collection_id) is None:
+        raise HTTPException(status_code=400, detail="No such collection")
+    if not Shelving.seen_by(db, viewer_id).assignable(collection_id):
         raise HTTPException(status_code=400, detail="No such collection")
     return collection_id
 
@@ -1232,7 +1503,7 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # `_freeable` exists to resolve.
     # Before the ISBN walk below, which purges trashed rows to free the number.
     # A bad collection id refused afterwards would have destroyed them first.
-    _checked_collection(db, payload.collection_id)
+    _checked_collection(db, payload.collection_id, current_user.id)
 
     freed: list[int] = []
     if payload.isbn:
@@ -1454,7 +1725,7 @@ def bulk_action(
 def _bulk_add_tag(
     db: Session, books: list[Book], value: str | int | None, current_user: User
 ) -> tuple[int, int]:
-    tag = _require_tag(db, value)
+    tag = _require_tag(db, value, current_user.id)
     updated = unchanged = 0
     for book in books:
         # **A Book at its ceiling is counted unchanged, which is true of that
@@ -1474,7 +1745,7 @@ def _bulk_add_tag(
 def _bulk_remove_tag(
     db: Session, books: list[Book], value: str | int | None, current_user: User
 ) -> tuple[int, int]:
-    tag = _require_tag(db, value)
+    tag = _require_tag(db, value, current_user.id)
     updated = unchanged = 0
     for book in books:
         match = next((existing for existing in book.tags if existing.id == tag.id), None)
@@ -1559,7 +1830,7 @@ def _bulk_set_collection(
             raise HTTPException(
                 status_code=400, detail="A collection id is required"
             ) from None
-        _checked_collection(db, new_collection)
+        _checked_collection(db, new_collection, current_user.id)
 
     updated = unchanged = 0
     for book in books:
@@ -1584,7 +1855,7 @@ def _bulk_delete(
     return len(books), 0
 
 
-def _require_tag(db: Session, value: str | int | None) -> Tag:
+def _require_tag(db: Session, value: str | int | None, viewer_id: int) -> Tag:
     """The Tag a bulk verb names, or a refusal.
 
     The range check is not redundant, for the reason `_checked_collection`
@@ -1597,6 +1868,13 @@ def _require_tag(db: Session, value: str | int | None) -> Tag:
     404 rather than a third answer, because an id the column cannot hold is an
     id no row can carry: the caller learns exactly what they learn from an id
     that is merely unused, which is also all there is to tell them.
+
+    **And the same 404 for a Tag this caller may not be told about**, which is
+    `tags.Vocabulary.writable`. Before it, a Tag whose every Book is hidden
+    from the caller answered differently from an id nothing carries, so the
+    bulk verbs were an existence oracle over the whole table by id. The two
+    answers are now one, which is the sentence above made true rather than
+    extended.
     """
     try:
         tag_id = int(str(value))
@@ -1605,7 +1883,7 @@ def _require_tag(db: Session, value: str | int | None) -> Tag:
     if not 1 <= tag_id <= MAX_ROW_ID:
         raise HTTPException(status_code=404, detail="Tag not found")
     tag = db.get(Tag, tag_id)
-    if tag is None:
+    if tag is None or not Vocabulary.seen_by(db, viewer_id).writable(tag):
         raise HTTPException(status_code=404, detail="Tag not found")
     return tag
 
@@ -2376,8 +2654,29 @@ def list_classifications(
 # left the header describing 361 lines it no longer covered.
 
 
-@router.get("/duplicates", response_model=list[DuplicateGroup])
-def list_duplicates(db: DbSession, current_user: CurrentUser) -> list[DuplicateGroup]:
+class _DuplicateRow(NamedTuple):
+    """One catalogue row as this route reads it, and the whole of what it reads.
+
+    Four columns for the grouping (`id`, `title`, `author`, `copy_group`) and
+    five more for the card. Nothing here is an ORM `Book`, and that is the
+    point rather than tidiness: once no entity survives the scan, no attribute
+    read downstream can lazily load a relationship and quietly re-widen the
+    query into the per book N+1 this route has already paid for once.
+    """
+
+    id: int
+    title: str
+    author: str | None
+    copy_group: str | None
+    format: BookFormat | None
+    publisher: str | None
+    year: int | None
+    isbn: str | None
+    cover_url: str | None
+
+
+@router.get("/duplicates", response_model=DuplicateReport)
+def list_duplicates(db: DbSession, current_user: CurrentUser) -> DuplicateReport:
     """Books that look like the same work under different ids.
 
     Matched on normalised title plus author, NOT on ISBN. An accidental exact
@@ -2397,45 +2696,107 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> list[DuplicateG
     (casefold, strip punctuation, drop a leading article) is not something
     SQLite can express, and the catalogue is small enough that scanning it is
     cheaper than maintaining a normalised column.
+
+    **The scan is unpaginated and the answer is capped, which are two
+    different statements.** Every request reads one row per visible Book,
+    because a page of the catalogue cannot be grouped on its own: a pair split
+    across two pages is two singletons. What the cap cuts is the finished
+    grouping, never the population it ran over, so a group is never split by
+    it and the answer never depends on a grouping computed in an earlier
+    request. The work is unbounded; the answer is not.
     """
-    # Two nested N+1s used to live here, measured at 4002 statements and 5.5
-    # seconds over 2000 books, on an endpoint that is unpaginated and backs a
-    # UI page. `BookOut.tags` lazy-loaded once per book, and `books_to_out`
-    # was called once per group rather than once for the lot.
-    books = Shelf.seen_by(db, current_user.id).all(load=Loading.SERIALISED)
-
-    groups: dict[str, list[Book]] = {}
-    for book in _one_per_copy_group(books):
-        groups.setdefault(_duplicate_key(book), []).append(book)
-
-    duplicated = {key: members for key, members in groups.items() if len(members) > 1}
-    if not duplicated:
-        return []
-
-    # One serialisation pass for every duplicate, then partitioned back into
-    # groups. For a page fetched with `Loading.SERIALISED`, `books_to_out`
-    # costs a constant number of statements whatever the size of the page, so
-    # calling it per group is what made this linear in groups.
+    # One statement over `books`, whatever the shelf holds, pinned by
+    # `test_books_duplicates.py::TestTheScanCostsOneStatement`. The route used
+    # to hydrate the whole visible shelf and then put every duplicate in it
+    # through `books_to_out`, for a row the card reads seven fields of.
     #
-    # **The qualification is load bearing rather than pedantry.** Without the
-    # option `books_to_out` pays one more statement per distinct author, so the
-    # cost would grow with the shelf and not with the groups; the fetch above
-    # is what supplies it.
+    # What that cost is deliberately not repeated here: it is stated once, in
+    # `books_to_out`, where a test reads it back out of the docstring and
+    # measures against it. This comment used to carry its own copy of that
+    # figure and it went stale with nothing failing anywhere.
     #
-    # The number itself is deliberately not repeated here. It is stated once,
-    # in `books_to_out`, where a test reads it back out of the docstring and
-    # measures against it. This line used to carry its own copy of the figure,
-    # and it went stale with nothing failing anywhere.
-    flat = [book for members in duplicated.values() for book in members]
-    serialised = {out.id: out for out in books_to_out(flat, current_user, db)}
-
-    return [
-        DuplicateGroup(key=key, books=[serialised[book.id] for book in members])
-        for key, members in sorted(duplicated.items())
+    # `Shelf.select` rather than a bare query, and not as a formality: it
+    # rebuilds from `seen_by`'s own criteria tuple, so this projection and the
+    # entity read it replaced are narrowed by the same object and cannot
+    # diverge. `importing.MarcIndex.build` scans on the same predicate the
+    # same way.
+    rows = [
+        _DuplicateRow(*row)
+        for row in cast(
+            "list[tuple[int, str, str | None, str | None, BookFormat | None, "
+            "str | None, int | None, str | None, str | None]]",
+            Shelf.seen_by(db, current_user.id)
+            .select(
+                Book.id,
+                Book.title,
+                Book.author,
+                Book.copy_group,
+                Book.format,
+                Book.publisher,
+                Book.year,
+                Book.isbn,
+                Book.cover_url,
+            )
+            .tuples()
+            .all(),
+        )
     ]
 
+    groups: dict[str, list[_DuplicateRow]] = {}
+    for row in _one_per_copy_group(rows):
+        groups.setdefault(_duplicate_key(row), []).append(row)
 
-def _one_per_copy_group(books: list[Book]) -> list[Book]:
+    # **`len(members) > 1` counts visible rows and is the whole privacy rule of
+    # this feature.** `key` is readable plaintext of the title and the author,
+    # so a group standing on one visible row plus a sibling the viewer cannot
+    # see would publish that sibling's title. Nothing the viewer cannot see is
+    # in `rows` at all, so such a group cannot arise here; `DuplicateGroup`
+    # refuses to be constructed with one if it ever does.
+    duplicated = sorted(
+        (key, members) for key, members in groups.items() if len(members) > 1
+    )
+
+    shown: list[DuplicateGroup] = []
+    remaining = DUPLICATE_BOOKS_SHOWN
+    for key, members in duplicated:
+        # Whole groups only. The merge action sends every id the card renders,
+        # so a group cut by the budget would be a merge offered over a subset
+        # nobody chose. A group contributes at most `MERGE_BOOKS_MAX`, which is
+        # below the budget, so the first group always fits and the answer can
+        # stop below the budget but never above it.
+        members_shown = members[:MERGE_BOOKS_MAX]
+        if len(members_shown) > remaining:
+            break
+        remaining -= len(members_shown)
+        shown.append(
+            DuplicateGroup(
+                key=key,
+                size=len(members),
+                books=[_duplicate_member(row) for row in members_shown],
+            )
+        )
+
+    return DuplicateReport(groups=shown, total_groups=len(duplicated))
+
+
+def _duplicate_member(row: _DuplicateRow) -> DuplicateMember:
+    """The card's view of one row. `author` and `copy_group` stay behind.
+
+    The author is the half of the key the group already carries, and the copy
+    group token is a fact about another member's copies.
+    """
+    return DuplicateMember(
+        id=row.id,
+        title=row.title,
+        format=row.format,
+        publisher=row.publisher,
+        year=row.year,
+        isbn=row.isbn,
+        cover_url=row.cover_url,
+    )
+
+
+def _one_per_copy_group(rows: list[_DuplicateRow]) -> list[_DuplicateRow]:
     """One row per set of deliberate copies, and every ungrouped row as it is.
 
     The representative is the lowest id in the group, which is stable between
@@ -2443,19 +2804,22 @@ def _one_per_copy_group(books: list[Book]) -> list[Book]:
     group that survives the collapse alone is dropped from the result, and a
     group that lands beside a genuine duplicate is being offered as a book, not
     as a copy.
+
+    The id order it leaves behind is also the order the member cap cuts at, so
+    which members a group over the cap shows is stable between two reads.
     """
     seen: set[str] = set()
-    kept: list[Book] = []
-    for book in sorted(books, key=lambda row: row.id):
-        if book.copy_group is not None:
-            if book.copy_group in seen:
+    kept: list[_DuplicateRow] = []
+    for row in sorted(rows, key=lambda candidate: candidate.id):
+        if row.copy_group is not None:
+            if row.copy_group in seen:
                 continue
-            seen.add(book.copy_group)
-        kept.append(book)
+            seen.add(row.copy_group)
+        kept.append(row)
     return kept
 
 
-def _duplicate_key(book: Book) -> str:
+def _duplicate_key(row: _DuplicateRow) -> str:
     """Normalise a book to something two editions of it will share.
 
     `identity.work_key` is the implementation, and it is there rather than here
@@ -2464,7 +2828,7 @@ def _duplicate_key(book: Book) -> str:
     two different books at this one, so which sites share a predicate is that
     module's subject rather than this route's.
     """
-    return identity.work_key(book.title, book.author)
+    return identity.work_key(row.title, row.author)
 
 
 @router.post("/merge", response_model=BookOut)
@@ -3870,7 +4234,7 @@ def add_copy(
     re-picking six of them for a second paperback is exactly the friction this
     feature exists to remove.
     """
-    _checked_collection(db, payload.collection_id)
+    _checked_collection(db, payload.collection_id, current_user.id)
 
     if book.copy_group is None:
         book.copy_group = copy_group_token()
@@ -3974,7 +4338,7 @@ def set_collection(
     **Per book row, so per copy.** Filing one paperback does not file the
     other, which is the point of two rows: see `models.Book.collection_id`.
     """
-    book.collection_id = _checked_collection(db, payload.collection_id)
+    book.collection_id = _checked_collection(db, payload.collection_id, current_user.id)
     db.commit()
     db.refresh(book)
     return book_to_out(book, current_user, db)
@@ -4163,6 +4527,65 @@ def delete_progress(
 # ── Tagging ───────────────────────────────────────────────────────────────────
 
 
+@router.post("/{book_id}/tags", response_model=BookOut)
+def add_book_tag_by_name(
+    payload: TagCreate,
+    book: BookForWrite,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> BookOut:
+    """Put a tag with this name on this book, inventing it if it is new.
+
+    One request where typing a name used to be two, and the two were a
+    different question each: inventing a tag hands back an id, and attaching
+    that id is asked of somebody who might have guessed it. Typing a name is
+    neither. Somebody typing a tag name while looking at a book means "this
+    book is that", so this is the one gesture and the one answer.
+
+    **The book as it stands, always, and never a 409, a 201 or a 404 for the
+    name.** A status that told a minted name from a matched one would answer
+    "does this name already exist" in the status line, which is the question
+    a member may not have answered about a tag they cannot see. A name that
+    is not this member's to use is left off the book, in the same shape as a
+    name that is: `tags.Naming` decides it and carries what that does and does
+    not close.
+
+    Refused only for what the caller can already see: a name that is not a
+    name, by `TagCreate`, and a book already carrying
+    `MAX_TAGS_PER_BOOK` tags, with the sentence and the reasoning of the
+    attach by id route beside this one.
+    """
+    # **No `Vocabulary` call in this handler, and the absence is the design.**
+    # The gate on the route below is about an id the caller may have guessed;
+    # here the caller supplied a name they typed, which is a different
+    # question with a different answer, and asking both would be the two
+    # cooperating rules `tags.Naming` exists to be instead of.
+    #
+    # **And no query for a Tag here either.** A hand rolled lookup would be a
+    # read of the tag table with no viewer, needing its own entry in
+    # `tests/test_tags.py::TAG_READERS` and its own reason; going through the
+    # Naming reads through the Mint's index, which is already classified.
+    #
+    # **The ceiling refusal below is conditional on the name resolving, and
+    # that is a residue rather than something to close here.** A member who
+    # fills their own book to the ceiling first reads a 400 for a name they
+    # may use against a 200 for one they may not. It is the answer
+    # `create_tag` already gives in one request with no setup, so it opens no
+    # channel; asking `room_on` before resolving would instead refuse a name
+    # the book already carries, which is a false refusal on a request that
+    # changes nothing.
+    tag = Naming.for_member(db, current_user.id).tag(payload.name)
+    if tag is not None and tag not in book.tags:
+        if not attach(book, tag):
+            raise HTTPException(
+                status_code=400,
+                detail=f"A book can carry {MAX_TAGS_PER_BOOK} tags, and this one already does.",
+            )
+        db.commit()
+        db.refresh(book)
+    return book_to_out(book, current_user, db)
+
+
 @router.post("/{book_id}/tags/{tag_id}", response_model=BookOut)
 def add_book_tag(
     tag_id: RowId,
@@ -4171,7 +4594,13 @@ def add_book_tag(
     current_user: CurrentUser,
 ) -> BookOut:
     tag = db.get(Tag, tag_id)
-    if tag is None:
+    # **The name confirmation this route used to be.** `book_to_out` returns
+    # the Book with its tags, so attaching a guessed id to a Book you own
+    # handed back the name of a Tag whose every Book was hidden from you: a
+    # stronger channel than the list ever was, because it answers for a chosen
+    # id rather than dumping the table. `tags.Vocabulary.writable` collapses
+    # that into the 404 an unused id already gets.
+    if tag is None or not Vocabulary.seen_by(db, current_user.id).writable(tag):
         raise HTTPException(status_code=404, detail="Tag not found")
     if tag not in book.tags:
         # **Refused rather than dropped, which is where this differs from the
@@ -4199,6 +4628,13 @@ def remove_book_tag(
     current_user: CurrentUser,
 ) -> BookOut:
     tag = db.get(Tag, tag_id)
+    # **Not gated by `tags.Vocabulary`, and that is the measurement rather than
+    # an oversight.** This answers 200 with the unchanged Book for an id no row
+    # carries and for an id the caller may not be told about alike, so it
+    # confirms nothing today. Refusing the second with a 404 would *create* the
+    # tell: a 404 here would mean "that id is a Tag you cannot see" against the
+    # 200 everything else gets. The bulk verb is gated because its own refusal
+    # already existed and the gate collapses two answers into one.
     if tag is not None and tag in book.tags:
         book.tags.remove(tag)
         db.commit()
@@ -5162,9 +5598,35 @@ def update_book_details(
     classic PATCH bug. A null for a column the database will not leave empty is
     refused by `BookDetailsUpdate` before it reaches here, because it used to
     reach the flush and answer 500.
+
+    **`categories` clears on an empty list rather than on a null**, because its
+    request shape is a list and its column is one joined string. This is the
+    only route that removes a subject: the create route writes them, the
+    catalogue gap fill and the merge's absorb add them, and an overwriting
+    enrich cannot empty the column because the merge skips an empty incoming
+    value. Before this the only removal was deleting the book, and the column
+    is served to readers with no account.
     """
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    fields = payload.model_dump(exclude_unset=True)
+    # The loop rather than one `pop` per name, for the reason `_create_book`
+    # gives at its own pop: this list and the import time refusal beneath
+    # `BookDetailsUpdate` are the same object, so a container field added to
+    # that body stops every test run there rather than reaching this `setattr`
+    # and failing the flush on somebody's library.
+    reshaped = [name for name in POPPED_BEFORE_THE_ASSIGNMENT if name in fields]
+    for name in reshaped:
+        fields.pop(name)
+
+    for field, value in fields.items():
         setattr(book, field, value)
+
+    # Paired with the pop deliberately, exactly as at the create door: a pop
+    # with no write is a 200 that accepted a field and stored nothing, which is
+    # the quietest failure available here.
+    # `tests/schemas/test_book.py::TestEveryReshapedFieldIsWrittenAtTheRoute`
+    # reads this function's source and holds both halves.
+    if "categories" in reshaped:
+        book.categories = google_books.join_categories(payload.categories)
 
     db.commit()
     db.refresh(book)

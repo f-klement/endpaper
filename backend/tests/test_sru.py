@@ -21,11 +21,24 @@ from xml.etree import ElementTree
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from sqlalchemy import Text
 
 import marc
 import sru
+from bibliographic import BIBLIOGRAPHIC_CODES
+from catalogue import _TEXT_CEILINGS
 from enums import ClassificationScheme, HeadingKind, TagCategory
-from models import Book, Classification, Tag
+from models import (
+    AUTHOR_LINE_MAX,
+    CLASSIFICATION_LABEL_MAX,
+    CLASSIFICATION_NUMBER_MAX,
+    DESCRIPTION_MAX,
+    Book,
+    Classification,
+    Tag,
+    copy_group_token,
+)
+from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.public import PublicBookOut, PublicClassificationOut
 from tests.strategies import invisible_characters, text_around, witness
 
@@ -84,6 +97,39 @@ def number_of_records(root: ElementTree.Element) -> int:
     element = root.find(f"{SRW}numberOfRecords")
     assert element is not None and element.text is not None
     return int(element.text)
+
+
+def book_columns_marc_reads() -> set[str]:
+    """Every `Book` column name `marc.py` reads, taken off the parse.
+
+    **Every attribute access whose name is a Book column, whatever it is read
+    off.** The first version tested `node.value.id == "book"`, which is one
+    receiver name out of four: a rebound local, a helper parameter and
+    `getattr` all walked past it, and `marc.py` already has two helpers that
+    take a Book. Measured, both versions read the identical twelve columns
+    today, so widening it costs nothing and closes three shapes.
+
+    **`getattr(book, name)` is invisible to this pass**, and the caller says
+    what that costs at its own site.
+
+    **Widening it to every attribute name is safe only for a consumer whose
+    allowlist already holds every column name a method call can contribute**,
+    and that condition is a property of the consumer rather than of this walk.
+    `TestTheRecordCarriesNoColumnThePublicPayloadWithholds` meets it: a
+    `str.format` in the writer contributes `format`, which is a `Book` column
+    and is also a `PublicBookOut` field, so nothing is refused. A second
+    consumer was added here with a ten name allowlist, did not meet it, and
+    refused a page over a column nothing reads. It was removed and derives from
+    the rendered record instead. **So this is one caller by design**: the
+    sentence "widening it costs nothing" is true of that caller and is not a
+    property anybody else may borrow.
+    """
+    read = {
+        node.attr
+        for node in ast.walk(ast.parse(Path(marc.__file__).read_text()))
+        if isinstance(node, ast.Attribute)
+    }
+    return read & {column.key for column in Book.__table__.columns}
 
 
 # ── The shelf every visibility test is asserted against ──────────────────────
@@ -638,6 +684,658 @@ class TestTheCostOfTheWorstLegalQueryIsBounded:
         four words each cannot each spend sixty four."""
         with pytest.raises(sru.SruError):
             sru.criteria(sru.parse(self._widest("dc.title", 16, 8)))
+
+
+class TestTheCostOfTheWidestLegalResponseIsBounded:
+    """The other half of the budget above, charged in the unit it is paid in.
+
+    `MAX_COMPARISON_BUDGET` bounds what a stranger's query costs to **run**.
+    This bounds what the answer costs to **emit**, and until this class it was
+    the one bound in `sru.py` stated in a unit it is not paid in: `MAX_RECORDS`
+    counts rows, a response costs bytes, and a narrow row makes the count look
+    like a worst case. The module has already paid for that mistake once, which
+    is the class above: a ceiling counted in `LIKE` occurrences, replaced by a
+    measured budget. `_serialise` builds the whole document as one string
+    before a response exists, so the figure here is what one request carrying
+    no session can make this server hold at once.
+
+    **The byte pin names nothing, and that is a property of its shape rather
+    than a gap to close.** It is an equality on one integer, so every change it
+    is meant to catch and every change it is not produce the same failure,
+    distinguishable only by a difference a reader has to interpret. Measured by
+    a review seat: deleting an unrelated language field, touching no bound, no
+    count and no fill, reddened it at minus 4,200 bytes and read exactly like a
+    widened column. **So the naming is done by the arms beside it**, which
+    report the field by its MARC tag, the column by its name, the row
+    identifiers by their digits and the published figure by its document, and
+    the pin's own message says only what it knows.
+
+    **What bounds `description` is a three way partition, and the sentence this
+    class replaced collapsed it to one part.** The column is `Text` and bounds
+    nothing. Every write through a schema is held to `models.DESCRIPTION_MAX`,
+    which is where the fixture reads it from. `backup.py` inserts through Core,
+    so `@validates` never fires and a restored row is bounded by nothing at
+    all: `models.py` records a 3,000,256 byte description that reached the
+    table that way. And a `max_length` counts characters where a response
+    counts bytes, so neither half of the partition is a byte figure by itself.
+
+    **The fixture's columns are derived by rendering, not by reading source.**
+    A record is built with a distinct sentinel in every column a value could
+    make long, and the columns whose sentinel comes back in the document are
+    the ones a fill can widen. That answers three questions with one
+    instrument: which columns to fill, whether each one's value really reaches
+    the record, and whether a column arrives that no write path bounds.
+
+    **It replaced an AST walk over `marc.py` and the reason is worth keeping.**
+    That walk collects every attribute name, so `str.format` anywhere in the
+    writer contributes `format`, which is a `Book` column: the fixture then
+    refused a page over a column nothing reads, and prescribed a repair to a
+    production file for a column that does not exist in that sense. The walk is
+    right for the class it was written for, whose allowlist holds every column
+    name a method call can contribute; it is wrong here. A rendered value is a
+    property of the record. An attribute name is a spelling.
+
+    **Three fills and two credit counts, because a page is not a length.**
+    `ElementTree` writes `&` as five bytes, so the same declared maxima make a
+    page several times over; and `700` repeats once per credited name inside
+    `AUTHOR_LINE_MAX` with nothing bounding the count, so the same 500
+    characters is one name or 250 of them. Both are asserted below rather than
+    stated here, because a described reason rots and an asserted one reddens.
+
+    **Widest means widest, and two things a client may legitimately post were
+    missing from an earlier version of this fixture.** A heading carries a
+    declared kind, which moves `$2` from `gnd` to `gnd-content`, eight bytes on
+    each of eight headings. And `uq_books_isbn_single_copy` is **partial** on
+    `copy_group IS NULL`, so a page of rows a member has declared to be copies
+    of one title holds fifty identical ISBNs at the declared maximum and needs
+    no serial there at all. Measured, the two are worth 3,600 bytes a page, and
+    without them this class pinned a figure and `docs/security.md` published it
+    as the widest a write can produce when it was not.
+
+    **So exactly one column still forces a serial**, and the uniqueness that
+    forces it is total rather than partial: `(book_id, scheme, number)` on a
+    classification. Measured at the widest fill, 32 bytes a record, so the
+    figure below **understates** the true widest by about 1,600 bytes a page.
+    The serial width is derived from the count it separates rather than chosen.
+
+    **What it does not hold**, stated rather than closed:
+
+    * A restored row beats it, and no figure here could fail to be beaten by
+      one. That is the third part of the partition above.
+    * **The rendering derivation sees `Book` columns and nothing else**, and
+      a field the writer sources from a relation is outside it. That is the
+      unbounded shape rather than the mild one, since a relation's row count
+      is not a column bound.
+    * **Every arm here reads one record, so a field the fixture's own record
+      does not render is outside all of them.** The tag arm covers a field fed
+      by a relation for `classifications`, the one relation this fixture
+      populates, and measured, a `590` fed from `book.tags` reddens nothing
+      here and moves neither pin. So the tag arm names a field **the widest
+      record renders**, and that is the whole of what it claims.
+    * **The tag arm reads the set of tags**, so a field repeating an existing
+      tag does not change it and neither does a widened bound. Measured, a
+      second `520` moves this page by 129,050 bytes and reddens no arm at all:
+      the pin sees it and cannot name it. Those two shapes have no arm.
+    * **Two mechanisms make a column invisible to a sentinel and they are a
+      false negative pair**, so neither reads as the instrument working on its
+      own. `language` is looked up in `bibliographic.BIBLIOGRAPHIC_CODES` and
+      an arbitrary string writes no `041`; that one is harmless, and measured
+      rather than argued: all 20 codes are three characters, so `041 $a` is
+      three bytes whatever `LANGUAGE_MAX` says, and the control arm asserts it.
+      `cover_url` is the other half and is **not** harmless: a `@validates`
+      hook rewrites it on `setattr`, so the sentinel never reaches the column
+      at all and a field fed from it would be invisible here. `emitted_columns`
+      checks the write separately and names any other column a hook touches;
+      `WRITE_HOOK_DISCARDS` carries the one exemption and what it costs.
+    * It is a tripwire on the record's shape and not a platform limit. Nothing
+      enforces this figure at runtime and no deployment was measured against
+      it.
+    * **It refuses a page that is different, not a page that is large.** That
+      is the price of zero headroom, taken deliberately: a bound with slack in
+      it is a number nobody can re-derive.
+    * `isbn` filled with 20 characters of `&` is past what ISBN validation
+      accepts. Deliberate, and the same exception the export arm takes for the
+      same reason: it is the cheapest demonstration that the column's bound and
+      the write path's bound are two different rules.
+    """
+
+    #: The widths this fixture fills to, which is the catalogue import's
+    #: ceiling table and **not** the API's write bound.
+    #:
+    #: `catalogue._TEXT_CEILINGS` is live configuration for the import path,
+    #: where a value past its entry is **dropped** from an external record.
+    #: The API's own bounds are `max_length` on the schemas in
+    #: `schemas/book.py`, and the two are different sets: the schemas also
+    #: bound `location`, `purchase_source`, `categories` and
+    #: `purchase_currency`, which this table does not carry.
+    #:
+    #: **The seven columns this class fills coincide under both**, because
+    #: each side reads the same `models.*_MAX` constants, so the widths here
+    #: are the API's. This table is read rather than four schema models
+    #: because it is one mapping, and the refusal below says plainly that
+    #: adding a column to it is not the repair for a missing bound.
+    CEILINGS = _TEXT_CEILINGS
+
+    #: The one wide column whose sentinel a write hook destroys before a
+    #: record is ever rendered.
+    #:
+    #: `Book`'s `@validates("cover_url")` runs `covers.https_url` on every
+    #: write, so a sentinel that is not a renderable URL is stored as `None`.
+    #: The derivation then sees a column that reached no record, where what
+    #: happened is that no value was ever stored, and **the two are
+    #: indistinguishable from the document**. Measured: of the nineteen wide
+    #: columns this is the only one a hook touches.
+    #:
+    #: **What the exemption costs, which is not nothing.** An `856 $u` fed
+    #: from `cover_url` would be invisible to every arm in this class and to
+    #: both pins, on a column that may legitimately hold 500 characters. No
+    #: such field is written today, and nothing here would say so if one were.
+    WRITE_HOOK_DISCARDS = frozenset({"cover_url"})
+
+    #: What a full page of the widest records an API write can produce weighs.
+    #:
+    #: Measured rather than rounded, and asserted as equality. It names
+    #: nothing on its own: see the class docstring, and the arms beside it.
+    WIDEST_RESPONSE_BYTES = 5_117_485
+
+    #: How many digits of row identifier the figure above carries, in `001`.
+    #:
+    #: **Not a decoration.** Fifty rows numbered from one is nine single digit
+    #: identifiers and forty one double, and the figure moves by one byte for
+    #: every digit. It holds because the engine under the fixtures restarts the
+    #: table; a sequence on another engine does not, and this file is outside
+    #: the selection that runs there today. Asserted so that arriving on such
+    #: an engine is a failure that says what happened rather than a page that
+    #: quietly weighs something else.
+    IDENTIFIER_DIGITS = 91
+
+    #: Every MARC field this fixture's record carries, by tag.
+    #:
+    #: **The arm that names a field the widest record renders**, which the
+    #: byte pin cannot: the pin sees a number move and the column derivation
+    #: sees `Book` columns only. Read off the rendered document rather than
+    #: off the writer's source, so it does not care how the value was reached.
+    #:
+    #: **It reaches a field fed by a relation only where this fixture
+    #: populates that relation**, which is `classifications` and nothing else.
+    #: A field fed by an empty relation renders nothing, moves no bytes and is
+    #: outside every arm in this class.
+    FIELD_TAGS = (
+        "001",
+        "020",
+        "041",
+        "100",
+        "245",
+        "264",
+        "300",
+        "520",
+        "655",
+        "700",
+    )
+
+    #: The language the fixture's records carry, in the column's own spelling.
+    #:
+    #: **One reader, the builder, and that is deliberate.** An earlier version
+    #: had the control arm read it too, which coupled two sites with nothing
+    #: enforcing the coupling: measured, moving this onto a six character key
+    #: while the builder kept a hardcoded one left every arm green and the
+    #: page understating by 150 bytes. The arm reads the code out of the
+    #: rendered record instead, so this constant decides what is written and
+    #: the record decides what is checked.
+    #:
+    #: The column is left out of the derived set for the reason in the class
+    #: docstring, and what makes that safe is that the code this key renders
+    #: is as wide as any code in the table, which is asserted rather than
+    #: described.
+    FIXTURE_LANGUAGE = "de"
+
+    #: The vocabulary the fixture's headings are in.
+    #:
+    #: A choice rather than a derivation, and the reason is in
+    #: `marc._subject_fields`: an LCSH row stores the authorised heading as its
+    #: number and has no separate caption, so one such row carries one value
+    #: where a GND row carries a caption and an identifier both. The kind is
+    #: derived below; the scheme is not, and no comparison between schemes is
+    #: claimed here.
+    SCHEME = ClassificationScheme.GND
+
+    #: The fills, and what each is here to show. `w` is the number a careless
+    #: version of this class would have taken; `&` is what escaping does to the
+    #: same declared maximum.
+    FILLS = ("w", "ä", "&")
+
+    #: The most credited names `AUTHOR_LINE_MAX` characters can hold, as
+    #: `x,x,x,...`: one character a name and one separator.
+    MOST_CREDITS = AUTHOR_LINE_MAX // 2
+
+    #: What one extra credited name costs a record, net and conservatively.
+    #:
+    #: The `700` scaffolding is the **writer's** property rather than SRU's,
+    #: and `tests/routers/test_imports_marc.py` derives the figure from the
+    #: field's own subfields at the site that owns it. Asserted as a difference
+    #: rather than a ratio for the reason given there: a ratio has the one name
+    #: page underneath it and falls as any other bound widens.
+    SCAFFOLDING_PER_CREDIT = 100
+
+    @staticmethod
+    def wide_columns() -> set[str]:
+        """Book columns a value could make long: a declared length, or `Text`.
+
+        The population the derivation below draws from. `Text` is in it because
+        the one column this whole class is about declares no length, which is
+        the partition one layer down.
+        """
+        return {
+            column.key
+            for column in Book.__table__.columns
+            if getattr(column.type, "length", None) or isinstance(column.type, Text)
+        }
+
+    @classmethod
+    def sentinels(cls) -> dict[str, str]:
+        """A distinct value per wide column, so no column is credited by another.
+
+        Distinctness is the whole of it. An earlier version filled every column
+        with the same character and asked whether each value appeared in the
+        record: a 10,000 character run of `w` contains every shorter run of
+        `w`, so one column reaching the document answered for all of them.
+        """
+        return {
+            key: f"reaches{index}therecord"
+            for index, key in enumerate(sorted(cls.wide_columns()))
+        }
+
+    @classmethod
+    def emitted_columns(cls) -> set[str]:
+        """The wide columns whose own value reaches a rendered record."""
+        sentinels = cls.sentinels()
+        # A transient Book, never added to a session, so a CHECK constraint on
+        # `ownership` or `condition` cannot refuse a sentinel. `id` is set
+        # because `001` is written from it and a `None` there is a value of its
+        # own. The same arrangement the column boundary class uses.
+        book = Book(id=1)
+        for key, value in sentinels.items():
+            setattr(book, key, value)
+        # **Checked before rendering, because a column that never took the
+        # sentinel and a column that took it and was not written look the same
+        # in the document.** Without this the derivation reports the second
+        # where the first happened, which is how `cover_url` fell out silently.
+        rewritten = {
+            key for key, value in sentinels.items() if getattr(book, key) != value
+        }
+        # **Equality, not a subtraction.** A subtraction can only ever find the
+        # exemption too small: remove the hook and the entry's whole stated
+        # reason goes with it while nothing here reddens, leaving a published
+        # file asserting a mechanism that no longer exists. The frontend's lint
+        # ratchet is bought against the same shape and for the same reason.
+        assert rewritten == cls.WRITE_HOOK_DISCARDS, (
+            "the set of columns a write hook rewrites before rendering is "
+            f"{sorted(rewritten)} and the exemption names "
+            f"{sorted(cls.WRITE_HOOK_DISCARDS)}. For a column that is "
+            "rewritten and not named, this derivation cannot tell whether the "
+            "writer emits it: name it here and say either what the exemption "
+            "costs, the way `cover_url` does, or why it costs nothing, and a "
+            "column no record could carry at its width costs nothing. For a "
+            "column that is named and no longer rewritten, the exemption has "
+            "outlived its reason and comes out."
+        )
+        rendered = ElementTree.tostring(marc.record_element(book), encoding="unicode")
+        return {key for key, value in sentinels.items() if value in rendered}
+
+    @classmethod
+    def filled(cls) -> dict[str, int]:
+        """Every column a fill can widen, at what an API write holds it to."""
+        return {
+            key: width
+            for key, width in sorted(cls.CEILINGS.items())
+            if key in cls.emitted_columns()
+        }
+
+    @classmethod
+    def widest_kind(cls) -> HeadingKind | None:
+        """The declared kind whose `$2` is longest, off the writer's own table.
+
+        A kind is something a client posts, and the writer turns it into a
+        different vocabulary code as well as a different tag. Derived rather
+        than named, so a kind added with a longer code joins the fixture the
+        day it lands; `None` where the scheme has no kinded entry at all, which
+        is what a scheme with no `_HEADING_KIND_FIELD` row means.
+        """
+        kinded = {
+            kind: source
+            for (scheme, kind), (_tag, source) in marc._HEADING_KIND_FIELD.items()
+            if scheme is cls.SCHEME
+        }
+        if not kinded:
+            return None
+        return max(kinded, key=lambda kind: len(kinded[kind]))
+
+    @staticmethod
+    def serial_width(count: int) -> int:
+        """Digits enough to tell `count` things apart."""
+        return len(str(count - 1))
+
+    def widest_book(self, fill: str, credits: int, group: str) -> Book:
+        """Every column a fill can widen at its write bound, and `credits` names.
+
+        **Two values for `credits`, and a third is refused rather than
+        clamped**, which is the sibling arm's rule and the same trap: `x,`
+        three times is six characters, so a fixture asked for three credits
+        would quietly measure a narrow record while reading as a wide one.
+
+        **`group` is what lets the ISBN be at its declared maximum.** The
+        uniqueness on that column is partial on `copy_group IS NULL`, so a page
+        of declared copies needs no serial in it. The classification numbers
+        still do, and that uniqueness is total.
+        """
+        if credits not in (1, self.MOST_CREDITS):
+            raise ValueError(
+                f"credits is 1 or {self.MOST_CREDITS}: those are the two that "
+                "fill AUTHOR_LINE_MAX, and anything between them measures a "
+                "record narrower than this fixture claims to build"
+            )
+        values: dict[str, Any] = {}
+        for key, width in self.filled().items():
+            if key == "author":
+                values[key] = (
+                    fill * width if credits == 1 else (fill + ",") * (width // 2)
+                )
+            else:
+                values[key] = fill * width
+        book = Book(
+            # Validated for shape as well as length, so each carries a real
+            # value: a fill in one of these measures a record the API refuses,
+            # and `language` filled with `&` writes no `041` at all.
+            language=self.FIXTURE_LANGUAGE,
+            year=1974,
+            page_count=412,
+            series_index=1.0,
+            copy_group=group,
+            **values,
+        )
+        tag = self.serial_width(MAX_CLASSIFICATIONS_PER_BOOK)
+        kind = self.widest_kind()
+        book.classifications = [
+            Classification(
+                scheme=self.SCHEME,
+                number=fill * (CLASSIFICATION_NUMBER_MAX - tag) + f"{k:0{tag}d}",
+                label=fill * CLASSIFICATION_LABEL_MAX,
+                kind=kind,
+            )
+            for k in range(MAX_CLASSIFICATIONS_PER_BOOK)
+        ]
+        return book
+
+    @staticmethod
+    def empty_the_shelf(db: Any) -> None:
+        """So that a page is the fixture and nothing the fixtures seeded.
+
+        A test measuring two fills stores two pages, and a seeded row carrying
+        the fill character would join the page and the bytes would be of a
+        document nobody wrote.
+        """
+        db.query(Classification).delete()
+        db.query(Book).delete()
+        db.commit()
+
+    def page_bytes(self, db: Any, admin: dict, fill: str, credits: int = 1) -> int:
+        self.empty_the_shelf(db)
+        group = copy_group_token()
+        books = [
+            self.widest_book(fill, credits, group) for _ in range(sru.MAX_RECORDS)
+        ]
+        for book in books:
+            book.added_by_user_id = admin["user"]["id"]
+        db.add_all(books)
+        db.commit()
+        digits = sum(len(str(book.id)) for book in books)
+        assert digits == self.IDENTIFIER_DIGITS, (
+            f"this page carries {digits} digits of row identifier in `001` "
+            f"against the {self.IDENTIFIER_DIGITS} every figure here was "
+            "measured with, so it weighs "
+            f"{digits - self.IDENTIFIER_DIGITS} bytes more than it would have. "
+            "The identifiers are not the subject of this class and the byte "
+            "pin cannot tell you this is why it moved."
+        )
+        response = sru.respond(
+            urlencode(
+                {
+                    "operation": "searchRetrieve",
+                    # **The term is the fill character itself**, so the fixture
+                    # needs no searchable token of its own. A token would be
+                    # characters not at the column's bound, and the page would
+                    # measure narrower than it reads.
+                    "query": fill,
+                    "maximumRecords": str(sru.MAX_RECORDS),
+                },
+            ),
+            db,
+            SERVER,
+        )
+        root = ElementTree.fromstring(response)
+        assert len(record_ids(root)) == sru.MAX_RECORDS
+        # The control: the shelf holds the fixture and nothing else, so these
+        # bytes are the page this class claims to have measured.
+        assert number_of_records(root) == sru.MAX_RECORDS
+        return len(response.encode())
+
+    def test_the_derivation_finds_the_columns_a_fill_can_widen(self):
+        """The control, without which every arm below passes on an empty set.
+
+        Three things: the population it draws from is not empty, the sentinels
+        really are distinct, and something comes back from the record. The
+        second is the one that was wrong before: a shared fill made one
+        column's value answer for every shorter one.
+        """
+        sentinels = self.sentinels()
+        assert len(set(sentinels.values())) == len(sentinels)
+        assert self.wide_columns() - set(self.CEILINGS), (
+            "every wide column now has a write ceiling, so the refusal below "
+            "is drawn from an empty population and proves nothing"
+        )
+        emitted = self.emitted_columns()
+        assert emitted <= self.wide_columns()
+        assert self.filled(), "the derivation has stopped finding anything at all"
+        # **The fact the `language` exemption rests on, asserted rather than
+        # described, and it is not the one an earlier version asserted.** That
+        # one compared the widest code against the column's ceiling, which is
+        # `3 <= 10` and fires at eleven characters, a threshold with no
+        # relation to anything: every length from four to ten is the failure
+        # it was written for arriving green. The ceiling bounds what is
+        # **stored**, the key, and what reaches `041 $a` is the looked up
+        # **value**, so a two character key may map to an eleven character
+        # code with nothing violated.
+        #
+        # The fact is that the code this fixture renders is as wide as any
+        # code can be. Anything else and the page understates by the
+        # difference, whatever the column allows.
+        #
+        # **Read off the rendered record rather than off the constant**, which
+        # is the move this class already makes for columns and states as its
+        # own principle: a rendered value is a property of the record and a
+        # constant is a spelling. Reading the constant coupled two sites with
+        # nothing enforcing the coupling, so moving FIXTURE_LANGUAGE onto a
+        # six character key while the builder kept a hardcoded one passed
+        # every arm here with the page understating by 150 bytes. It also puts
+        # the lookup and its lowercasing back in the writer's hands, where
+        # they belong, and removes the bare `KeyError` a constant naming no
+        # key at all used to raise here.
+        #
+        # **An absent `041` fails with the message below** rather than
+        # raising, by the empty fallback, and that failure is correct: a
+        # fixture rendering no language field at all is a page measured
+        # without one. The fallback means exactly that and nothing else,
+        # because the writer drops an empty subfield and writes no element
+        # when none survives, so the field cannot exist carrying an empty one.
+        #
+        # **Reading the first subfield is exact because the writer emits one**,
+        # a single spec for that tag and one subfield per surviving spec.
+        # **That is a property of this writer and not of MARC**, which permits
+        # the field to repeat for a work in several languages. If a repeat
+        # landed, a fixture at one language would stop being the widest, the
+        # byte pin would redden without naming why, and the tag arm would not
+        # move at all, since the tag is unchanged. Stated rather than armed,
+        # which is this class's standard for a blind spot.
+        record = marc.record_element(self.widest_book("&", self.MOST_CREDITS, "copies"))
+        rendered_code = next(
+            (
+                subfield.text or ""
+                for field in record
+                if field.get("tag") == "041"
+                for subfield in field
+                if subfield.get("code") == "a"
+            ),
+            "",
+        )
+        widest_code = max(len(code) for code in BIBLIOGRAPHIC_CODES.values())
+        # **The two branches are not the same quantity, which is why the
+        # clause is branched rather than shared.** A narrower code is exactly
+        # its own characters fewer. An absent field is the whole field:
+        # measured on this fixture, 84 bytes a record and 4,200 a page, where
+        # a shared clause computing a code width difference would have
+        # printed 3. The absent branch quotes no figure at all, because this
+        # arm cannot compute that one.
+        shortfall = (
+            "The record carries no `041` at all, so what is missing is the "
+            "whole field rather than a few characters of it, and the field "
+            "tag arm reddens too and names it by its tag."
+            if not rendered_code
+            else "The page understates by "
+            f"{widest_code - len(rendered_code)} bytes a record."
+        )
+        assert len(rendered_code) == widest_code, (
+            f"this fixture renders `041 $a {rendered_code}`, "
+            f"{len(rendered_code)} characters, where the widest code in "
+            f"`BIBLIOGRAPHIC_CODES` is {widest_code}. {shortfall} Move "
+            "FIXTURE_LANGUAGE onto a key whose code is the widest one and "
+            "re-measure the figures; do not loosen this assertion, which "
+            "would be recording the understatement rather than removing it."
+        )
+
+    def test_every_emitted_column_a_fill_could_widen_has_a_width_here(self):
+        """A column the record carries that this fixture has no width for.
+
+        Then the page it measures is not the widest one. Named rather than
+        filled with nothing, and the message does not prescribe the repair it
+        used to: an earlier version told the reader to add the column to
+        `catalogue._TEXT_CEILINGS`, which is the import path's ceiling. Doing
+        that changes what an import drops from an external record, and for
+        `location`, which a schema does bound, it also reddens
+        `tests/test_catalogue.py`. **A refusal that misdirects its repair is
+        the shape already removed once from this class.**
+        """
+        loose = self.emitted_columns() - set(self.CEILINGS)
+        assert not loose, (
+            "the MARC record carries a Book column this fixture has no width "
+            f"for: {sorted(loose)}, so the page below is not the widest one. "
+            "Two repairs, and they are not interchangeable. If a write path "
+            "bounds the column, this fixture needs that bound: note that "
+            "catalogue._TEXT_CEILINGS is the catalogue import's ceiling and "
+            "not the API's, so adding a column there changes what an import "
+            "drops and is a different decision. If nothing bounds it, the "
+            "page has no widest and no figure here is one."
+        )
+
+    def test_the_record_carries_the_fields_this_page_was_measured_over(self):
+        """The arm that names a field the widest record renders.
+
+        Read off the rendered document rather than off the writer's source, so
+        how the value was reached does not matter. **What it reaches is one
+        record**, so a field fed by a relation this fixture leaves empty
+        renders nothing and is named by nothing here; the class docstring has
+        the measurement. For `classifications`, the one relation the fixture
+        populates, a field is named.
+        """
+        record = marc.record_element(self.widest_book("&", self.MOST_CREDITS, "copies"))
+        # The walrus is what narrows `Element.get` from `str | None` for the
+        # type checker; a truthiness filter in the comprehension does not.
+        tags = {tag for field in record if (tag := field.get("tag")) is not None}
+        assert tags == set(self.FIELD_TAGS), (
+            "the widest record's fields are not the ones this page was "
+            f"measured over. Gained {sorted(tags - set(self.FIELD_TAGS))}, "
+            f"lost {sorted(set(self.FIELD_TAGS) - tags)}."
+        )
+
+    def test_the_published_figure_is_this_one(self):
+        """`docs/security.md` §SRU tells an operator what this door can emit.
+
+        A number written in prose does not recount itself, and the class above
+        exists because a figure this same document published was the wrong one.
+        So the two are tied by an arm rather than by somebody remembering.
+        """
+        published = (
+            Path(__file__).resolve().parents[2] / "docs" / "security.md"
+        ).read_text(encoding="utf-8")
+        assert f"{self.WIDEST_RESPONSE_BYTES:,} bytes" in published, (
+            f"docs/security.md does not carry {self.WIDEST_RESPONSE_BYTES:,} "
+            "bytes, which is what a page of the widest records weighs. That "
+            "document is where an operator is told what a stranger can make "
+            "this door emit."
+        )
+        # The description bound is quoted earlier in the section, in the
+        # partition paragraph rather than beside the figure, and it is the
+        # fact the figure rests on, so it is recounted rather than left as the
+        # one number there that nothing reads back.
+        #
+        # **Both read-backs are whole document searches with no section
+        # anchor.** The byte figure is distinctive enough for that to be
+        # sound; the character figure is a round number, occurring once today
+        # and with a near twin elsewhere in the tree, so a match here is
+        # weaker evidence than the one above it.
+        assert f"{DESCRIPTION_MAX:,} characters" in published, (
+            f"docs/security.md does not carry {DESCRIPTION_MAX:,} characters, "
+            "which is what a write through a schema holds a description to "
+            "and is half of why the figure above is a figure at all."
+        )
+
+    def test_a_full_page_of_the_widest_records_still_weighs_what_it_did(
+        self, db, admin
+    ):
+        """Equality rather than an inequality: the headroom is the defect.
+
+        **This arm cannot say what changed** and its message does not pretend
+        to. It is one integer against another, so a widened column bound, a new
+        field and a deleted one are the same failure with different arithmetic,
+        and a message instructing a re-pin would train exactly the response the
+        arm exists to prevent. The arms above name the field, the column and
+        the identifiers; this one says the document moved.
+
+        The assertion is on the finished document, which is not the peak:
+        `_serialise` holds the `ElementTree` and the string at once, measured at
+        2.47 times for the export's own page.
+        """
+        measured = self.page_bytes(db, admin, "&", self.MOST_CREDITS)
+        assert measured == self.WIDEST_RESPONSE_BYTES, (
+            f"the widest page weighs {measured} bytes against the "
+            f"{self.WIDEST_RESPONSE_BYTES} this figure was measured at, a "
+            f"change of {measured - self.WIDEST_RESPONSE_BYTES}. What moved is "
+            "not in this number: read the arms above, which name a field by "
+            "its tag, a column by its name and the row identifiers by their "
+            "digits."
+        )
+
+    def test_the_fill_character_is_part_of_what_decides_the_page(self, db, admin):
+        """A `max_length` is characters and a response is bytes."""
+        one_byte, two_byte, escaped = (
+            self.page_bytes(db, admin, fill) for fill in self.FILLS
+        )
+
+        assert one_byte < two_byte < escaped
+        assert escaped > 4 * one_byte
+
+    def test_the_number_of_credited_names_is_the_other_half(self, db, admin):
+        """Same column, same declared length, more fields.
+
+        No length answers how many fields a record has, so a fixture of one
+        long name measures the fewest `700` fields there can be.
+        """
+        one_name = self.page_bytes(db, admin, "&")
+        many_names = self.page_bytes(db, admin, "&", self.MOST_CREDITS)
+
+        extra_names = self.MOST_CREDITS - 1
+        assert many_names - one_name > (
+            sru.MAX_RECORDS * extra_names * self.SCAFFOLDING_PER_CREDIT
+        )
 
 
 class TestMaximumRecordsIsClamped:
@@ -1330,26 +2028,14 @@ class TestTheRecordCarriesNoColumnThePublicPayloadWithholds:
         one fact, because agreement between two readings of the same route is
         not evidence.
         """
-        source = (Path(marc.__file__)).read_text()
-        # **Every attribute access whose name is a Book column, whatever it is
-        # read off.** The first version tested `node.value.id == "book"`, which
-        # is one receiver name out of four: a rebound local, a helper parameter
-        # and `getattr` all walked past it, and `marc.py` already has two
-        # helpers that take a Book. Measured, both versions read the identical
-        # twelve columns today, so widening it costs nothing and closes three
-        # shapes.
-        #
-        # `getattr(book, name)` is still invisible to this pass and is left to
-        # the rendering test above, which does not read source at all.
-        read = {
-            node.attr for node in ast.walk(ast.parse(source))
-            if isinstance(node, ast.Attribute)
-        }
-        columns = {column.key for column in Book.__table__.columns}
-        assert read & columns, "this guard has stopped finding anything at all"
-        assert (read & columns) <= set(PublicBookOut.model_fields), (
+        # The walk is `book_columns_marc_reads`, which carries what it sees and
+        # what it cannot. `getattr(book, name)` is invisible to it and is left
+        # to the rendering test above, which does not read source at all.
+        read = book_columns_marc_reads()
+        assert read, "this guard has stopped finding anything at all"
+        assert read <= set(PublicBookOut.model_fields), (
             "marc.py reads a Book column the public payload withholds: "
-            f"{sorted((read & columns) - set(PublicBookOut.model_fields))}"
+            f"{sorted(read - set(PublicBookOut.model_fields))}"
         )
 
 
@@ -1419,57 +2105,6 @@ class TestTheRecordCarriesNoClassificationColumnThePublicPayloadWithholds:
         # the absences above are about the boundary and not about an empty field.
         assert "CD-ROM" in rendered
         assert "gnd-carrier" in rendered
-
-
-class TestTheRecordSizeThatDecidedTheCap:
-    """What `MAX_RECORDS` costs, measured against the writer rather than guessed.
-
-    `520 $a` carries the description and no schema bounds it, so a record has no
-    size the constant could have been derived from. What can be measured is a
-    realistic worst case, and that is what decides whether 50 is a page or a
-    download.
-    """
-
-    #: A description at the long end of what a publisher supplies.
-    DESCRIPTION_CHARS = 2000
-
-    #: What a full page of such records may weigh.
-    #:
-    #: A quarter of a mebibyte. Not a bound the code enforces: it is the number
-    #: this test fails on, so that raising `MAX_RECORDS` or adding a large field
-    #: to the writer is a decision somebody makes rather than one that happens.
-    CEILING_BYTES = 262_144
-
-    def test_a_full_page_of_fat_records_stays_under_the_ceiling(self, db, admin):
-        db.add_all(
-            Book(
-                title=f"Chartreuse Windmill {n:03d}",
-                subtitle="a study of the keepers of the windmills",
-                author="Ada Example, Bertha Example",
-                publisher="Gemini Press",
-                year=1974,
-                language="de",
-                page_count=412,
-                isbn=f"978000000{n:04d}",
-                description="w" * self.DESCRIPTION_CHARS,
-                added_by_user_id=admin["user"]["id"],
-            )
-            for n in range(sru.MAX_RECORDS)
-        )
-        db.commit()
-        response = sru.respond(
-            urlencode(
-                {
-                    "operation": "searchRetrieve",
-                    "query": "Chartreuse",
-                    "maximumRecords": str(sru.MAX_RECORDS),
-                }
-            ),
-            db,
-            SERVER,
-        )
-        assert len(record_ids(ElementTree.fromstring(response))) == sru.MAX_RECORDS
-        assert len(response.encode()) < self.CEILING_BYTES
 
 
 class TestTheParametersClientsActuallySend:

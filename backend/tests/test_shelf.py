@@ -87,12 +87,20 @@ caught would prove nothing about the new one. What is *still* not caught:
   names no `Book` at all.
 * **A child table that carries a user.** `notes`, `quotes`, `user_books`,
   `reading_progress` and `loans` are outside the fourth pass on purpose: each
-  has a viewer of its own. Re-measured 2026-09-17 by running this pass over the
-  tree with that entity set: **45 statements across 9 modules**, or 40 across 8
-  outside `shelf.py`, against **25 across 5** for the book-owned tables, or 20
-  across 4 outside it, out of the **89** modules `_source_modules()` returns. Both halves of that
+  has a viewer of its own. Re-measured 2026-09-30 by running this pass over the
+  tree with that entity set: **42 statements across 10 modules**, or 37 across 9
+  outside `shelf.py`, against **24 across 6** for the book-owned tables, or 19
+  across 5 outside it, out of the **97** modules `_source_modules()` returns.
+  **All four pairs were re-derived on this tree together and none of them
+  moved.** The module count did, from 95: that figure was right the day it was
+  written, the tree reached 96 before this work began, and `shelving.py` made
+  it 97. Both halves of that
   comparison are this pass's own output, on the same day; an earlier statement
-  of it compared two different methods and neither number reproduced.
+  of it compared two different methods and neither number reproduced. All four
+  were re-derived together rather than the two the tag disclosure work moved,
+  because a comparison whose halves carry different dates is the drift this
+  paragraph is already about: on 2026-09-17 they read 45 across 9, 40 across 8,
+  25 across 5 and 20 across 4, over 89 modules.
 
   **The figure this replaces did not reproduce either**: the same method
   answers 49 across 8 at `0a8bb0b`, where the line above said 45 across 8. The
@@ -154,12 +162,14 @@ caught would prove nothing about the new one. What is *still* not caught:
   with no predicate. Not caught by passes 1 to 3, and **the reason is a cost,
   measured**: `Book` in a narrowing clause is **14 statements across 5 modules**
   outside `shelf.py` and off a shelf-rooted chain, and **22 across 9** counting
-  those, measured 2026-09-17, against the **17 across 4** the fourth pass
-  carries, summed from `BOOK_OWNED_READERS` on 2026-09-20. That sum read 20
+  those, measured 2026-09-17, against the **19 across 5** the fourth pass
+  carries, summed from `BOOK_OWNED_READERS` on 2026-09-29. That sum read 20
   until `95693de`, where the three `.book_id.in_(loser_ids)` reads left
-  `routers/books.py` for `folding.py` and a shape rule took them, which is what
-  a count of hand classified statements does when the code moves. Extending the
-  clause rule to `Book` means classifying every one of them by hand.
+  `routers/books.py` for `folding.py` and a shape rule took them, then 17, and
+  the fifth module is `tags.py`, which gained the Tag index and two arms of the
+  rule deciding who may be told a Tag exists. That is what a count of hand
+  classified statements does when the code moves. Extending the clause rule to
+  `Book` means classifying every one of them by hand.
 
   That last pair said **7 across 3** until 2026-09-10 and both halves were
   wrong: an `ast` walk over `BOOK_OWNED_READERS` answered 10 across 4 before a
@@ -209,6 +219,7 @@ The rest of the file tests the Shelf's behaviour.
 """
 
 import ast
+import functools
 import importlib
 import inspect
 import re
@@ -229,7 +240,7 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Query
+from sqlalchemy.orm import Query, contains_eager
 
 import ddc
 import filing
@@ -240,7 +251,7 @@ import shelf as shelf_module
 # which re-exports it. mypy refuses an implicit re-export and is right to:
 # the two would drift the day `models` stopped importing it.
 from database import Base
-from enums import BookSort, ClassificationScheme, ReadStatus
+from enums import BookSort, ClassificationScheme, ReadStatus, TagCategory
 from models import (
     Book,
     Classification,
@@ -264,6 +275,7 @@ from shelf import (
     rereading_filtered_rows,
     whole_table_for_uniqueness,
 )
+from tests.helpers import peak_rows, rows_at_the_engine
 
 # The corpus lives beside the rules it measures, in `tests/test_filing.py`, and
 # is read from here, from `tests/test_schema.py` and from `tests/test_backup.py`.
@@ -671,17 +683,6 @@ BOOK_OWNED_READERS = {
     ],
     "routers/books.py": [
         (
-            "counts = dict( Shelf.seen_by(db, current_user.id) .select(book_tags.c.tag_id, "
-            "func.count(book_tags.c.book_id)) .join(book_tags, book_tags.c.book_id == Book.id) "
-            ".group_by(book_tags.c.tag_id) .all() )",
-            "the Tag index: every Tag with a count of the Books carrying it, "
-            "written through `Shelf.select()` and joined to `books`. "
-            "**Correct, and reported anyway**, which is the cost this list pays "
-            "for not trying to recognise a correct join. Verified by reading "
-            "the SQL: the FROM is the filtered `books` and the join is on "
-            "`book_tags.book_id == books.id`.",
-        ),
-        (
             "db.execute(book_tags.delete().where(book_tags.c.tag_id == tag_id))",
             "deletes the association rows for a Tag being removed. A write, and "
             "reported for the `where` clause on it rather than for being one.",
@@ -706,7 +707,7 @@ BOOK_OWNED_READERS = {
             "the shelf-wide listing. Written through `Shelf.select()` and joined "
             "outward to `books`, so the count is scoped by the same predicate as "
             "the rows: an unscoped total announces how many rows are hidden. "
-            "**Correct, and reported anyway**, like the Tag index above, and the "
+            "**Correct, and reported anyway**, like the Tag index in `tags.py`, and the "
             "join is the load bearing half here rather than the filter, since "
             "`Shelf.select()` documents that a missing one is a cartesian "
             "product and not an error.",
@@ -783,8 +784,55 @@ BOOK_OWNED_READERS = {
             # one: measured, the split cost this entry its line and the grep
             # answered one where the answer is two.
             "**Correct, and reported anyway**"
-            ", for the same reason as the Tag index above and verified "
+            ", for the same reason as the Tag index in `tags.py` and verified "
             "the same way.",
+        ),
+    ],
+    "tags.py": [
+        (
+            "self._counts = dict( Shelf.seen_by(self._db, self._viewer_id) "
+            ".select(book_tags.c.tag_id, func.count(book_tags.c.book_id)) "
+            ".join(book_tags, book_tags.c.book_id == Book.id) "
+            ".group_by(book_tags.c.tag_id) .all() )",
+            "the Tag index: every Tag with a count of the Books carrying it, "
+            "written through `Shelf.select()` and joined to `books`. "
+            # Kept on one line, for the reason the `routers/stats.py` entry
+            # below states at its own copy of this marker.
+            "**Correct, and reported anyway**"
+            ", which is the cost this list pays for not trying to recognise a "
+            "correct join. Verified by reading the SQL: the FROM is the "
+            "filtered `books` and the join is on `book_tags.book_id == "
+            "books.id`. It was `routers/books.list_tags`'s statement until the "
+            "tag disclosure work; it moved here because the row set beside it "
+            "needed the same scoping and four other readers needed the same "
+            "answer, and the entry moved with the statement.",
+        ),
+        (
+            "return bool( Shelf.trashed_by(self._db, self._viewer_id) "
+            ".select(func.count(book_tags.c.book_id)) "
+            ".join(book_tags, book_tags.c.book_id == Book.id) "
+            ".filter(book_tags.c.tag_id == tag.id) .scalar() )",
+            "whether a deleted Book **this Member may see** carries this "
+            "Tag, written through `Shelf.trashed_by()` and joined to `books`, "
+            "so the rows counted are this Member's own trashed Books and every "
+            "Member's trashed public ones, which is `in_trash_for` and no "
+            "wider. **Not \"this Member's own trash\"**, which this entry said "
+            "until 2026-09-30 and which no predicate here tests. The number "
+            "never leaves the method: `bool` is what the caller gets, so no "
+            "count of hidden Books is published even to the member whose trash "
+            "listing it describes.",
+        ),
+        (
+            "return bool( self._db.query(func.count(book_tags.c.book_id)) "
+            ".filter(book_tags.c.tag_id == tag.id) .limit(1) .scalar() )",
+            "**Unscoped on purpose, and the only statement here that is.** "
+            "Every other read asks what one Member may see; this asks whether "
+            "any Book at all carries the Tag, which is the question that "
+            "separates a Tag naming somebody's hidden Book from a Tag naming "
+            "no Book. Scoping it would answer that question wrongly by "
+            "construction. It is a `bool` and never a count, and it is reached "
+            "only after the two scoped arms have already declined, so nothing "
+            "about how many hidden Books carry the Tag can leave it.",
         ),
     ],
 }
@@ -848,6 +896,55 @@ def _entries_off_their_statements(
     return off
 
 
+@functools.cache
+def _backend_module_names() -> frozenset[str]:
+    """Every dotted name an import of a module in this backend can spell.
+
+    **Derived from `_source_modules()`, never listed.** An inclusion list is
+    one of the four tells this repository names, and this one would go stale
+    the day somebody adds a module.
+
+    **It is the import resolution this process performs, rather than an
+    approximation of it.** `pyproject.toml` puts the backend root on
+    `sys.path`, so a dotted name the corpus holds is the module an import of
+    that name binds, whatever else on the path shares the name. That is also
+    why `shelving.py` is not called `collections.py`: its own docstring
+    records the shadowing that name would cause, and this is a second reason
+    it must not be. **A module here named after something installed would stop
+    the subtraction applying to imports written for the installed one, and the
+    false refusal this subtraction exists to prevent would come back for that
+    name.** Measured 2026-09-30: of the 99 names this returns, none collides
+    with the 297 standard library names or with the 126 top level names
+    installed in this environment.
+
+    Parent packages are included because `routers` is importable even where
+    the walk only ever saw `routers/books.py`.
+
+    **What it leaves out is what `_source_modules()` leaves out**: `tests/`,
+    `migrations/` and anything a tool owns. An entity imported from a test
+    helper therefore still loses its alias. No module under `backend/` outside
+    those directories imports one that way, and the subtraction is the safe
+    direction for a test helper in any case.
+
+    Cached because `_entity_aliases` runs once per module inside loops over
+    that corpus, and the derivation reads every file under `backend/`.
+
+    **The cache is off the real filesystem, while the passes are driven
+    against in memory corpora** by the registry plants, which hand the offence
+    walk a dict of sources. A plant that invents a module resolves against the
+    tree on disk and not against its own corpus, so an import from the
+    invented module is treated as coming from outside this backend and its
+    alias is subtracted: an arm expecting a report then fails loudly, and an
+    arm expecting none passes for the wrong reason. No arm does either today.
+    """
+    names: set[str] = set()
+    for path in _source_modules():
+        dotted = path.removesuffix(".py").replace("/", ".").removesuffix(".__init__")
+        parts = dotted.split(".")
+        names.update(".".join(parts[:cut]) for cut in range(1, len(parts) + 1))
+    return frozenset(names)
+
+
 def _entity_aliases(
     tree: ast.Module, roots: frozenset[str], module: str = "models"
 ) -> set[str]:
@@ -875,11 +972,58 @@ def _entity_aliases(
     `book = Book(...)` would make `book` an alias and
     `"; ".join(tag.name for tag in book.tags)` is then a join offence. The
     three literal forms give zero.
+
+    **A root name the module binds from outside this backend is not this
+    entity**, and that is a binding question rather than a spelling one. The
+    seeding below starts from the bare root, because most modules use the plain
+    name and never rebind it; a module importing the same name from elsewhere
+    has a different object under it. `Collection` is the live case:
+    `models.Collection` is a table and `collections.abc.Collection` is a typing
+    protocol, and **five** modules outside the tests bind the bare name to the
+    second one, `shelf.py` among them, counted off the `ast` and agreed by a
+    grep. A rule matching the name would refuse one of those the first time it
+    appeared in a reading call. Measured on this tree the subtraction moves no
+    reported line for any entity set in use, and it removes the false alias
+    from exactly those five modules; it is here for the refusal nobody looks
+    for rather than for a miss.
+
+    **Outside the backend, and not merely outside `models`: the difference was
+    a tree wide hole.** `shelf.py`, `shelving.py` and `serialisation.py` each
+    re-export these names at run time, so `from shelf import Book` bound the
+    real entity under a name the earlier spelling struck out, and **every pass
+    in this file went blind for that whole module, silently**. Measured
+    2026-09-30 before the fix: that import with a `db.query(Book)` under it
+    reported nothing where the same read imported from `models` reported one
+    line, and `from shelving import Collection` left the collection rule green.
+    A re-export is a spelling somebody writes by accident, so the miss is
+    reached more cheaply than the false refusal the subtraction exists for.
+
+    **What it costs, stated rather than bounded.** A module doing both, an
+    `import models` reaching `models.Collection` **and** a `from collections.abc
+    import Collection`, loses the qualified spelling too, because the qualified
+    form is matched on the attribute name alone. No module does both today. The
+    mechanism is what is written down; the extent is not claimed.
     """
     names = set(roots)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == module:
-            names |= {a.asname or a.name for a in node.names if a.name in roots}
+    from_this_module = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == module
+        for alias in node.names
+        if alias.name in roots
+    }
+    # A relative import cannot leave this backend, so `level` alone settles it
+    # and `node.module` is None exactly there.
+    from_outside_the_backend = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.level == 0
+        and node.module not in _backend_module_names()
+        for alias in node.names
+    }
+    names -= from_outside_the_backend - from_this_module
+    names |= from_this_module
 
     # A second pass, because an alias may be assigned above or below the import
     # in file order and this rule does not care which.
@@ -1273,8 +1417,18 @@ def _enclosing_statements(tree: ast.Module) -> dict[int, ast.stmt]:
     return owner
 
 
-def _book_owned_offences(source: str) -> list[int]:
-    """Statement line numbers where this module reads a book-owned table.
+def _book_owned_offences(
+    source: str, entities: frozenset[str] = BOOK_OWNED
+) -> list[int]:
+    """Statement line numbers where this module reads one of these entities.
+
+    **`entities` defaults to `BOOK_OWNED` and the default is the rule this file
+    is about.** It is a parameter because `tests/test_tags.py` asks the same
+    question of the tag vocabulary, which is reachable **from** books without
+    being a child **of** books, so no foreign key puts it in the set above and
+    a second copy of this walk would be a second instrument to keep in step.
+    Passing anything else does not widen this file's rule: the callers below
+    pass nothing.
 
     The fourth pass, and the one the other three cannot take: they all ask
     whether a statement names `Book`, and
@@ -1307,7 +1461,7 @@ def _book_owned_offences(source: str) -> list[int]:
     not.
     """
     tree = ast.parse(source)
-    aliases = _entity_aliases(tree, BOOK_OWNED)
+    aliases = _entity_aliases(tree, entities)
     select_names, module_names = _sqlalchemy_names(tree)
     owner = _enclosing_statements(tree)
 
@@ -2355,6 +2509,51 @@ class TestTheShelfIsTheOnlyWayIn:
         assert _book_owned_offences(stats), "a correct index stopped being reported"
         assert _book_owned_offences(headings), "a correct index stopped being reported"
 
+    def test_a_root_name_bound_to_another_package_is_not_the_entity(self):
+        """The false refusal half of the resolver, which no sweep can see.
+
+        `collections.abc.Collection` and `models.Collection` are the same
+        seven letters and different objects, and five modules outside the
+        tests bind the first. A rule seeded from the bare root refuses the
+        first one it meets in a reading call, which is a red nobody can
+        explain from the statement it points at.
+
+        **Three directions in one arm**, because a subtraction that fires on
+        everything is as wrong as one that fires on nothing, and the middle
+        case is where this was actually wrong.
+
+        The third is the re-export, and it is the one that shipped broken.
+        `shelving.py` does `from models import Book, Collection`, so
+        `from shelving import Collection` binds the real table; keyed on the
+        source not being `models`, the resolver struck the name out and the
+        whole module went unreportable with nothing red. Keyed on the source
+        being outside the backend corpus, it does not.
+        """
+        stdlib = (
+            "from collections.abc import Collection\n"
+            "def f(db, ids: Collection[int]):\n"
+            "    return db.query(Collection).all()\n"
+        )
+        model = (
+            "from models import Collection\n"
+            "def f(db):\n"
+            "    return db.query(Collection).all()\n"
+        )
+        # The subject is the import's SOURCE being a module this backend has,
+        # not anything inside it, so what arms this is `shelving.py` existing.
+        # Renaming that file reddens this arm rather than quietly disarming it,
+        # which is the direction a data dependency has to fail in.
+        re_exported = (
+            "from shelving import Collection\n"
+            "def f(db):\n"
+            "    return db.query(Collection).all()\n"
+        )
+        entity = frozenset({"Collection"})
+
+        assert _book_owned_offences(stdlib, entity) == []
+        assert _book_owned_offences(model, entity) == [3]
+        assert _book_owned_offences(re_exported, entity) == [3]
+
     def test_a_statement_is_reported_once_however_many_lines_it_takes(self):
         """An allowlist entry counts something a person wrote.
 
@@ -2936,14 +3135,15 @@ class TestTheShelfIsTheOnlyWayIn:
         """The counting the deleted guard did, kept.
 
         `test_the_exemptions_are_still_the_known_ones` existed so the list of
-        opt-outs could not grow quietly. The opt-outs became two named
-        functions, and the counting has to survive that or the same drift
-        happens with a different spelling. Growing either list is allowed;
-        growing it without saying so here is not.
+        opt-outs could not grow quietly. The opt-outs became named functions,
+        and the counting has to survive that or the same drift happens with a
+        different spelling. Growing any of these lists is allowed; growing one
+        without saying so here is not.
         """
         calls: dict[str, list[str]] = {
             "whole_table_for_uniqueness": [],
             "rereading_filtered_rows": [],
+            "collections_any_book_is_filed_in": [],
         }
         for name, source in _source_modules().items():
             if name == "shelf.py":
@@ -2971,6 +3171,13 @@ class TestTheShelfIsTheOnlyWayIn:
         # here is the same as before and the module count fell.
         assert len(calls["whole_table_for_uniqueness"]) == 4, calls
         assert len(calls["rereading_filtered_rows"]) == 1, calls
+        # **One, and it is the arm that keeps the third way past a viewer
+        # narrow.** It answers whether a collection has anything to disclose at
+        # all, which is a question no viewer can be applied to without turning
+        # it into a different one, and it hands back ids rather than a count so
+        # nothing about how many hidden Books carry one crosses the boundary. A
+        # second caller is a decision about that boundary rather than an edit.
+        assert len(calls["collections_any_book_is_filed_in"]) == 1, calls
 
 
 class TestWhoSeesWhat:
@@ -3002,6 +3209,19 @@ class TestWhoSeesWhat:
 
         assert Shelf.trashed_by(db, user.id).count() == 1
         assert Shelf.trashed_by(db, other.id).count() == 0
+
+    def test_another_members_trashed_public_book_is_in_your_trash(self, db, user, other):
+        """The positive direction of the same predicate, which no arm held.
+
+        `in_trash_for` is trashed **and visible**, never trashed **and
+        theirs**: there is no column recording who deleted a row. With only the
+        refusal above pinned, "has trashed away" read as true, and four
+        docstrings downstream had copied it by 2026-09-30.
+        """
+        db.add(_trashed(title="Gone", added_by_user_id=user.id, is_private=False))
+        db.commit()
+
+        assert Shelf.trashed_by(db, other.id).count() == 1
 
 
 class TestNarrowing:
@@ -3490,6 +3710,212 @@ class TestStatementCost:
 
         page(25)()
         assert len(self._count(db, page(25))) == len(self._count(db, page(1)))
+
+
+class TestAPageIsWholeHoweverTheLoadingJoins:
+    """Two numbers behind one page, and the defect is where they diverge.
+
+    The driver's row count is the number **before** the ORM folds a joined
+    result back into entities; `len(books)` is the number **after**. A
+    loading option that joins a collection under a limit returns one row per
+    related row, and the limit applies to the rows, so the page comes back
+    short while every row the caller asked for arrived. **The row counter
+    reads the first number and is blind here by construction**, which is why
+    this is a second instrument and not a reading over the first.
+
+    Measured on this tree, page of ten, three tags a book: `contains_eager`
+    over a manual join returned **ten rows and four Books**.
+    `shelf.py:229` states the mechanism in the repository's own words, that a
+    join "returns that Book once per row", and until now nothing measured it.
+
+    **The premise holds today and that is a measurement rather than a
+    reading of the options.** SQLAlchemy wraps the primary select in a
+    subquery when a `joinedload` of a collection meets a limit, so the limit
+    counts entities and the page is whole. Every member of `Loading` is
+    driven through the arms below, so a member added arrives under them.
+
+    **A join written at a call site rather than in `Loading` is outside
+    every arm here**, and the coverage above is stated so often that the
+    exclusion has to be stated beside it. These arms are driven off the enum,
+    so what they reach is what the enum spells; `shelf.py` writes no such
+    join today, which makes this an open hole rather than a live defect, and
+    the arm below on `contains_eager` is the counter example rather than
+    cover for it. A third reading, over the statements a route issues rather
+    than over the enum's members, is what would close it.
+
+    **Both arms expunge, and that is a dependency rather than hygiene.** A
+    relationship already in the session's identity map is answered with no
+    statement at all, measured at one statement for five Books, so a reading
+    taken without expunging counts what the reading before it left behind
+    rather than what this member loads. `TestStatementCost` pays the same
+    price for the same reason. **An arm over a route cannot pay it**: the
+    request opens its own session and there is nowhere to stand between its
+    statements, which `tests/routers/test_books.py` states where it reads the
+    driver.
+
+    **What a short page costs, which is why it is worth an arm at all.**
+    `routers/books.py` ends an export walk when a page comes back short, so
+    an option that shortens a full page truncates the export to one page and
+    answers 200.
+
+    The warm up outside the counted window is `TestStatementCost`'s, for the
+    reason that class records: a commit inside the window makes the session
+    open a savepoint on its next statement.
+    """
+
+    #: A page, and a fan out wide enough that a joined collection could not
+    #: fill it. With three tags a book, a page of three fits one book's rows.
+    PAGE = 3
+    TAGS = 3
+
+    def a_shelf(self, db, viewer_id: int, count: int, titled: str = "Book") -> None:
+        """`count` visible books, with tags and a collection on all but two.
+
+        **The owner arrives as an id rather than as the fixture's `User`.**
+        One arm expunges between two measurements, for the reason
+        `TestStatementCost` records, and reading an attribute off a detached
+        instance raises rather than reloading.
+
+        The tags are what make a fan out exist at all: without them every
+        loading option costs one row a book and the two numbers cannot come
+        apart, so an arm over them would be green on an arrangement that is
+        an accident of the fixture.
+
+        **The first book has no collection and the second has no tags, and
+        that is the half a fixture usually gets wrong.** A shelf where every
+        book satisfies every join is a shelf on which an inner join loses
+        nothing, so an arm over it cannot see the change that reads most like
+        an optimisation: `innerjoin=True` on a `joinedload` of a nullable
+        relationship. Both gaps land inside the first page.
+        """
+        collection = Collection(name=f"{titled} collection")
+        db.add(collection)
+        db.commit()
+        books = [
+            Book(
+                title=f"{titled} {n:02d}",
+                added_by_user_id=viewer_id,
+                collection_id=None if n == 0 else collection.id,
+            )
+            for n in range(count)
+        ]
+        db.add_all(books)
+        db.commit()
+        for book in books[2:] + books[:1]:
+            book.tags.extend(
+                Tag(
+                    key=f"{titled}-{book.id}-{n}",
+                    name=f"{titled} {book.id} {n}",
+                    category=TagCategory.CUSTOM,
+                )
+                for n in range(self.TAGS)
+            )
+        db.commit()
+
+    @pytest.mark.parametrize("load", list(Loading))
+    def test_a_page_is_whole_however_this_member_loads(self, db, user, load):
+        """One book more than a page, and the page still holds a page.
+
+        This is the claim the enum rested on and nobody had measured: that
+        no current option can shorten a page. It is driven off `Loading`
+        itself, so a member added is measured by construction rather than by
+        somebody remembering this file.
+
+        **The page is read by its ids rather than by its length**, because
+        the two failures an option can cause are different. A join over a
+        collection makes the page **short**; an inner join over a nullable
+        relationship keeps it full and **skips** the rows that do not match,
+        which a length cannot see and which loses a book from a walk
+        entirely.
+        """
+        viewer_id = user.id
+        self.a_shelf(db, viewer_id, self.PAGE + 1)
+        db.expunge_all()
+        expected = [
+            book.id
+            for book in db.query(Book).order_by(Book.id.asc()).limit(self.PAGE).all()
+        ]
+        db.expunge_all()
+
+        with rows_at_the_engine() as seen:
+            books, total = Shelf.seen_by(db, viewer_id).page(
+                0, self.PAGE, Book.id.asc(), load=load
+            )
+
+        assert total == self.PAGE + 1
+        assert [book.id for book in books] == expected, (
+            f"{load.name} filled a page of {self.PAGE} with {len(books)} books "
+            f"out of {sum(statement.rows for statement in seen)} rows, and the "
+            "page was not the first page of the shelf. A join under a limit "
+            "counts rows rather than books, and an inner join drops the rows "
+            "with nothing on the other side."
+        )
+
+    @pytest.mark.parametrize("load", list(Loading))
+    def test_the_rows_behind_a_page_do_not_grow_with_the_shelf(self, db, user, load):
+        """What a page's eager loads pull behind it, pinned as a relative number.
+
+        **Relative because the absolute is unbounded in the fan out**: the
+        tags behind a correct page grow with tags a book, and no page size
+        makes it otherwise. What must not happen is the number following the
+        **shelf**, which is what a load that escaped the page would do.
+
+        **The sum here rather than the peak**, and the two readings answer
+        different questions. The peak is what tells a second full pass from a
+        correct walk, and `tests/routers/test_books.py` reads it that way over
+        a whole request. This is one page of one query, and the quantity the
+        enum's docstring is about is everything that page dragged behind it.
+        """
+        viewer_id = user.id
+        self.a_shelf(db, viewer_id, self.PAGE + 1)
+
+        def page() -> int:
+            db.expunge_all()
+            with rows_at_the_engine() as seen:
+                Shelf.seen_by(db, viewer_id).page(0, self.PAGE, Book.id.asc(), load=load)
+            return sum(statement.rows for statement in seen)
+
+        page()  # warm up outside the window
+        small = page()
+        self.a_shelf(db, viewer_id, self.PAGE + 1, titled="Extra")
+        grown = page()
+
+        assert small, "no rows were recorded, so this arm watched nothing."
+        assert grown == small, (
+            f"{load.name} pulled {small} rows behind a page of {self.PAGE} on a "
+            f"shelf of {self.PAGE + 1} and {grown} on one of "
+            f"{(self.PAGE + 1) * 2}, so what it loads follows the shelf rather "
+            "than the page."
+        )
+
+    def test_the_rows_cannot_see_a_short_page_and_the_books_can(self, db, user):
+        """The counter example that keeps these two instruments apart.
+
+        **Nothing in `shelf.py` writes this shape**, so this is an open hole
+        rather than a live defect, and it is driven here because the claim
+        it falsifies is the one that would otherwise close the second ticket
+        with the first one's arm. `contains_eager` over a manual join is not
+        wrapped in a subquery, so the limit lands on the rows.
+
+        A row counter compares the page it asked for against the rows it
+        got, finds them equal, and passes. The books are the reading that
+        fails.
+        """
+        self.a_shelf(db, user.id, self.PAGE + 1)
+        db.expunge_all()
+
+        with rows_at_the_engine() as seen:
+            books = (
+                db.query(Book)
+                .join(Tag, Book.tags)
+                .options(contains_eager(Book.tags))
+                .order_by(Book.id)
+                .limit(self.PAGE)
+                .all()
+            )
+
+        assert peak_rows(seen)[Book, False] == self.PAGE
+        assert len(books) < self.PAGE
 
 
 class TestTheAnchoringFixesDirectionNotPresence:

@@ -21,7 +21,7 @@ import { decodeFromStream, emitBarcode } from "../../doubles/zxing";
 import ScanPage from "../../../src/pages/ScanPage";
 import { makeBook, makeTagSet, resetIds } from "../../factories";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
-import { epubFile } from "../../zipFixtures";
+import { epubFile, packageDocument } from "../../zipFixtures";
 
 const LOOKUP = {
   isbn: "9780441013593",
@@ -102,6 +102,47 @@ describe("ScanPage", () => {
       expect(
         screen.getByRole("button", { name: "Add all" }),
       ).toBeInTheDocument();
+    });
+
+    it("puts the file's own subjects in front of the member, removably", async () => {
+      // **The whole wiring, end to end, because the middle of it is where a
+      // design round put the control on a surface a file never reaches.** A
+      // picked file settles into this queue and never into the confirm card,
+      // so this is the one screen where a subject is visible while it is
+      // still reversible: `BookDetailsUpdate` has no `categories`, and the
+      // remedy after "Add all" is deleting the book.
+      const user = userEvent.setup();
+      const file = await epubFile("dune.epub", {
+        opf: packageDocument(
+          `<dc:identifier id="pub-id">urn:uuid:1</dc:identifier>` +
+            `<dc:title>Dune</dc:title>` +
+            `<dc:subject>Fiction</dc:subject>` +
+            `<dc:subject>Science Fiction</dc:subject>`,
+        ),
+      });
+      renderWithProviders(<ScanPage />);
+
+      await user.upload(screen.getByLabelText("Book files"), file);
+
+      await waitFor(() =>
+        expect(
+          screen.getByText("Subject words from the file: 2. Show them."),
+        ).toBeInTheDocument(),
+      );
+
+      await user.click(
+        screen.getByRole("button", {
+          name: "Remove the subject Fiction from dune.epub",
+        }),
+      );
+
+      // The count is what says the row's own draft changed rather than the
+      // chip merely disappearing from a list the component keeps.
+      await waitFor(() =>
+        expect(
+          screen.getByText("Subject words from the file: 1. Show them."),
+        ).toBeInTheDocument(),
+      );
     });
 
     it("keeps a file it could not read, under the name it had", async () => {
@@ -438,6 +479,46 @@ describe("ScanPage", () => {
           api.lastCall(`/api/books/12/tags/${tags[1]!.id}`, "POST"),
         ).toBeDefined(),
       );
+    });
+
+    it("holds a typed tag name until the book exists, and posts it by name", async () => {
+      const tags = makeTagSet();
+      api.on("/api/books/tags", { body: tags });
+      api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
+      api.on("/api/books/12/tags", { body: makeBook({ id: 12 }) });
+      renderWithProviders(<ScanPage />);
+
+      const user = await scan();
+      await user.type(await screen.findByLabelText("New tag"), "Loft finds");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      // **Nothing has been asked of the server yet**, which is the whole
+      // change: this form used to invent the tag on this keystroke and leave
+      // the row behind if the scan was then cancelled.
+      expect(api.lastCall("/api/books/tags", "POST")).toBeUndefined();
+
+      await user.click(screen.getByRole("button", { name: "Add to Library" }));
+
+      await waitFor(() =>
+        expect(api.lastCall("/api/books/12/tags", "POST")?.body).toEqual({
+          name: "Loft finds",
+        }),
+      );
+    });
+
+    it("and cancelling the scan asks the server for nothing at all", async () => {
+      const tags = makeTagSet();
+      api.on("/api/books/tags", { body: tags });
+      renderWithProviders(<ScanPage />);
+
+      const user = await scan();
+      await user.type(await screen.findByLabelText("New tag"), "Loft finds");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      // The reset clears the name with the rest of the draft, and there was
+      // never a row to leave behind: `blankPending` is the whole cleanup.
+      expect(api.lastCall("/api/books/tags", "POST")).toBeUndefined();
     });
 
     it("still navigates when tagging fails", async () => {

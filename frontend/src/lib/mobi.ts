@@ -219,11 +219,13 @@ const EXTH_RECORD_HEADER_BYTES = 8;
  *   9 name the person who produced the edition, one of whom appears in 6 of
  *   those 9. Neither is the author, and a reader taking it for one would file
  *   six books under the same typesetter.
- * * **105, the subject.** 62 of 69 carry it, usually several records. Read by
- *   nothing, because `FileMetadata` declares no field for a subject: see that
- *   type for the reason.
+ * 105 is read and is the one type here whose repeats all mean something:
+ * 62 of 69 files carry it, usually several records, and each record is one
+ * subject the producer asserted. `readSubjects` says why nothing here folds or
+ * splits them.
  */
 const AUTHOR = 100;
+const SUBJECT = 105;
 const PUBLISHER = 101;
 const DESCRIPTION = 103;
 const ISBN = 104;
@@ -490,6 +492,34 @@ function readIsbn(exth: ExthRecords, decode: TextDecoder): string | null {
   return parseIsbn(text(exth, ISBN, decode));
 }
 
+/**
+ * The subjects, one per record, in the order the file wrote them.
+ *
+ * **Nothing splits a record and nothing folds a repeat**, which is
+ * `readAuthors`' first rule and a different second one. Not splitting is the
+ * same measurement: the format says two of a thing by writing two records, so
+ * a splitter would be guessing at a value containing its own separator, and a
+ * subject is where that guess is likeliest to be wrong because this column's
+ * own values contain commas.
+ *
+ * **Not folding is where this differs from `readAuthors`, and it is the
+ * destination that decides.** Two records naming one person are one author and
+ * only this module can tell; two records naming one subject are two assertions,
+ * and whether the request may carry both is `lib/bookRequest.boundCategories`'
+ * question. So there is no `Set` here and no quadratic scan either: this pushes
+ * without looking at what it has pushed. How many records there are is still
+ * the file's choice, 95,301 fitting inside `MAX_RECORD_ZERO_BYTES`, which is
+ * why the bound breaks out of its loop rather than mapping over this.
+ */
+function readSubjects(exth: ExthRecords, decode: TextDecoder): string[] {
+  const subjects: string[] = [];
+  for (const value of exth.get(SUBJECT) ?? []) {
+    const subject = clean(decode.decode(value));
+    if (subject !== null) subjects.push(subject);
+  }
+  return subjects;
+}
+
 function readIdentifiers(
   exth: ExthRecords,
   decode: TextDecoder,
@@ -588,6 +618,7 @@ export async function readMobi(file: Blob): Promise<MobiReading> {
       title: readTitle(record, exth, decode),
       subtitle: null,
       authors: readAuthors(exth, decode),
+      categories: readSubjects(exth, decode),
       identifiers: readIdentifiers(exth, decode),
       isbn: readIsbn(exth, decode),
       publisher: text(exth, PUBLISHER, decode),

@@ -33,7 +33,7 @@ interface LookupResultProps {
   onToggleTag: (tagId: number) => void;
   /** Invent a tag mid-scan. Cataloguing a new shelf is when one is needed. */
   onCreateTag: (name: string) => void;
-  isCreatingTag?: boolean;
+  onForgetTagName: (name: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
   /** Record it as another copy of the book the 409 named. */
@@ -63,14 +63,15 @@ export default function LookupResult({
   error,
   onToggleTag,
   onCreateTag,
-  isCreatingTag = false,
+  onForgetTagName,
   onConfirm,
   onCancel,
   onAddCopy,
   isAddingCopy,
 }: LookupResultProps) {
   const { t } = useTranslation();
-  const { draft, coverFile, isPrivate, location, format, tagIds } = pending;
+  const { draft, coverFile, isPrivate, location, format, tagIds, tagNames } =
+    pending;
   return (
     <div className="bg-paper-0 rounded-2xl border border-paper-100 shadow-sm overflow-hidden dark:bg-paper-900 dark:border-paper-800">
       {/* The outer condition stays: a book with no cover at all shows nothing
@@ -152,9 +153,14 @@ export default function LookupResult({
           <div className="mt-4">
             <p className="text-sm font-medium text-paper-700 mb-2 dark:text-paper-200">
               {t("library.tags")}
-              {tagIds.length > 0 && (
+              {tagIds.length + tagNames.length > 0 && (
                 <span className="ml-1.5 text-xs text-paper-600 dark:text-paper-400">
-                  {t("scan.tagsSelected", { count: tagIds.length })}
+                  {/* Both, because a typed name is as selected as a chip is
+                      and counting only the ids read as the typing having
+                      been lost. */}
+                  {t("scan.tagsSelected", {
+                    count: tagIds.length + tagNames.length,
+                  })}
                 </span>
               )}
             </p>
@@ -163,7 +169,7 @@ export default function LookupResult({
               selectedIds={tagIds}
               onToggle={onToggleTag}
               onCreate={onCreateTag}
-              isCreating={isCreatingTag}
+              pending={{ names: tagNames, onForget: onForgetTagName }}
             />
           </div>
         )}

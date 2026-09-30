@@ -124,6 +124,59 @@ The configured production values are pinned separately in `TestLimitsAreSane`.
   it aborts before checking anything at all. These two make it derive module names from the
   path instead.
 
+### Every test is bounded, and the local bound is still the rule
+
+`addopts` carries `--timeout`, `--timeout-method=signal` and `--max-worker-restart=0`,
+and the three are one mechanism. A test that hangs used to end the whole job with nothing
+naming it. The ceiling turns it into a named failure, the signal method keeps the worker
+alive so the rest of the run still reports, and zero restarts stops one worker death
+becoming nine: under `--dist loadfile` a dead worker hands its item to the replacement,
+which dies on it too.
+
+**Turning the parallel runner off is now `-n 0`, and `-p no:xdist` is not the way to do
+it.** Measured three ways, because the reason matters more than the refusal. Typed plainly
+it is a usage error, exit 4, `unrecognized arguments: -n --dist --max-worker-restart=0`:
+the flags above are in `addopts`, so argument parsing refuses before anything else can.
+Neutralise `addopts` as well and it becomes an internal error, exit 3, because
+`conftest.py` names a hook the parallel runner owns and pytest refuses an unknown one. The
+control says that is the reason: the same run with the plugin left in place and `-n 0`
+passes. Both layers are the self enforcing property the flags were put in `addopts` for,
+and neither is a graceful degradation, so `-n 0` is the shape to use.
+
+**The ceiling is a backstop, not a deadline.** Its value has a floor derived from the tree:
+strictly above the largest ceiling anything in the test tree declares, which
+`tests/test_a_hung_test_is_named.py` asserts by walking the tree. A test that later
+declares a longer wait reddens that guard and forces a decision, instead of being halved
+by a line nobody re-read. A test that legitimately needs longer takes
+`@pytest.mark.timeout(n)` at its own site.
+
+**Anything with a real deadline of its own bounds itself, in its own fixture**, and the
+global must not become the reason nobody writes a local one.
+`_WAITED_PAST_EVERY_DEADLINE_SECONDS` in `tests/routers/test_books_identifier_backfill.py`
+is the shape: a wait justified as ten times the largest deadline any arm sets, so it never
+fires while the deadline is where it belongs and it accuses the handler when it is not.
+
+**What the ceiling does not reach**, so nobody reads it as a bound on hangs in general: a
+test that blocks SIGALRM, a hang inside a C call that never returns to the interpreter, a
+hang during collection or module import, and a hang in the controller itself. Each of those
+still ends the job rather than a test.
+
+**Under all of it, the session reconciles itself.** `conftest.py` compares the tests the
+session collected against the ones that produced a report and refuses a short run, naming
+what went missing. A worker that dies for any other reason, a truncated session and a
+report that never arrived are the same defect one level up from a hang, and this is what
+makes them loud rather than a smaller number nobody compares. A run stopped early on
+purpose is exempt, and so is `--collect-only`.
+
+**How that exemption is decided is worth one line, because the obvious answer is wrong.**
+It asks the session's own stop state, `shouldfail` for `-x` and `--maxfail` and
+`shouldstop` for `--stepwise`, and not the exit status: `-x` with no xdist arrives as an
+ordinary `TESTS_FAILED`, so a status only rule refuses the commonest debugging run there
+is, and `--pdb` forces no xdist. The status is still asked afterwards, for the stops that
+set neither flag, which are an interrupt and a bare `pytest.exit(reason)`. The same call
+given a `returncode` inside pytest's own set arrives as an ordinary run of that status, so
+a test lost in one is still refused.
+
 ### Properties, and what they are allowed to spend
 
 Some rules are not a list of cases. The character classes two schema validators refuse, the
@@ -299,17 +352,21 @@ the better assertion regardless: it says the reader arrived at the book.
 
 Some rules have to give the same answer in Python and in TypeScript. Those rules
 are pinned by one language neutral fixture set in
-[`conformance/`](../conformance/README.md), run by
-`backend/tests/conformance/test_isbn.py` and
-`frontend/tests/conformance/isbn.test.ts`. Both read the same JSON, so a
+[`conformance/`](../conformance/README.md). Each domain there has a case file, a
+schema, a document and a runner in each of `backend/tests/conformance/` and
+`frontend/tests/conformance/`. Both runners read the same JSON, so a
 disagreement between the two implementations is a failing test on the side that
 is wrong rather than a support ticket a year later.
 
+**Named as a directory and not as a list of domains**, because the list grows
+and a list written here is the copy that stops being edited.
+
 **Adding a case is editing JSON, not either test file.** Each runner holds the
-mapping from an operation name onto its own spelling, plus the guards that stop
-it passing while testing nothing. Changing an expectation is changing the
-protocol, and lands on both sides together. `conformance/README.md` has the
-rules, the measurements, and why the directory exists at all.
+mapping onto its own spelling, plus the guards that stop it passing while
+testing nothing. Changing an expectation is changing the protocol, and lands on
+both sides together. `conformance/README.md` has the rules, the measurements,
+and why the directory exists at all; each domain's own document has what a case
+is there and what each one pins.
 
 ## Conventions
 

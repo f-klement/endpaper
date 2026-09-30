@@ -19,10 +19,9 @@ import {
   getSearchBooksQueryKey,
   lookupIsbn,
   searchBooks,
-  getListTagsQueryKey,
   useAddBookTag,
   useAddCopy,
-  useCreateTag,
+  useAddBookTagByName,
   useListLocations,
   useListTags,
   useLookupIsbn,
@@ -181,12 +180,14 @@ export interface UseScanFlowResult {
    */
   toggleTag: (tagId: number) => void;
   /**
-   * Invent a tag and select it for this book. Nothing is attached yet: the
-   * book does not exist until confirm, so the new tag joins `pending.tagIds`
-   * and is applied with the rest.
+   * Hold a typed tag name for this book. **Nothing reaches the server**: the
+   * book does not exist until confirm, so the name joins `pending.tagNames`
+   * and is applied with the rest, and a cancelled scan leaves the library
+   * exactly as it found it.
    */
   createTag: (name: string) => void;
-  isCreatingTag: boolean;
+  /** Drop one of those names again, before the book is saved. */
+  forgetTagName: (name: string) => void;
 
   /** Shelves already in use, for the suggestions. */
   locations: LocationOut[];
@@ -226,7 +227,6 @@ export function useScanFlow(
     [],
   );
 
-  const queryClient = useQueryClient();
   const invalidate = useInvalidate();
   const tags = useListTags();
   const locations = useKnownLocations();
@@ -259,19 +259,7 @@ export function useScanFlow(
   const addAnotherCopy = useAddCopy();
   const uploadCover = useUploadCover();
   const addTag = useAddBookTag();
-
-  const createTag = useCreateTag({
-    mutation: {
-      onSuccess: (tag) => {
-        setPending((current) =>
-          current.tagIds.includes(tag.id)
-            ? current
-            : { ...current, tagIds: [...current.tagIds, tag.id] },
-        );
-        void queryClient.invalidateQueries({ queryKey: getListTagsQueryKey() });
-      },
-    },
-  });
+  const addTagByName = useAddBookTagByName();
 
   function reset() {
     setIsbn(null);
@@ -279,6 +267,13 @@ export function useScanFlow(
     // Everything except the shelf. It is the one field that is the same for
     // the next book far more often than not, and clearing it here would undo
     // the carry-over on every cancel.
+    //
+    // **The typed names go with it and nothing survives in the library**,
+    // which is what this form used to leave behind. It asked the server to
+    // invent a tag the moment somebody typed one, and that row was committed:
+    // a cancelled scan left a tag carried by no book, absent from the
+    // vocabulary listing, holding its globally unique name for good and
+    // attachable by any member. Nothing here commits until confirm now.
     setPending((current) => blankPending(current.location));
   }
 
@@ -305,17 +300,37 @@ export function useScanFlow(
           .mutateAsync({ bookId: book.id, data: { file: pending.coverFile } })
           .catch(() => undefined);
       }
-      await Promise.all(
-        pending.tagIds.map((tagId) =>
+      await Promise.all([
+        ...pending.tagIds.map((tagId) =>
           addTag.mutateAsync({ bookId: book.id, tagId }).catch(() => undefined),
         ),
-      );
+        // The names typed on this form, applied now that there is a book to
+        // apply them to. One request each, the same one `BookDetail` sends,
+        // and the server invents the tag if the library has none.
+        ...pending.tagNames.map((name) =>
+          addTagByName
+            .mutateAsync({ bookId: book.id, data: { name } })
+            .catch(() => undefined),
+        ),
+      ]);
 
       // The catalogue, not the whole cache. A keyless invalidate here also
       // refetched `/api/settings/features` and, worse, `/api/books/search`,
       // which is a billed Google Books call the query's own `staleTime` exists
       // to avoid re-spending. Measured: 4 requests, of which 2 were about a
       // book having been added.
+      //
+      // **A typed name can still be left off, and it is quieter than it was
+      // rather than closed.** The attaches above are best effort by design,
+      // so a network failure leaves the book saved without that tag; and the
+      // by name door answers 200 with the book either way, so a name the
+      // server will not hand this member is dropped there too. What went is
+      // the 404 the old create then attach pair produced when the typed name
+      // collided with a tag the member cannot see: the create handed back
+      // that row and the attach by id then refused it.
+      // `backend/tests/routers/test_books_tags.py::TestANameTypedAgainstAHiddenTagIsNotAttached`
+      // holds why the refusal is silent and what it does not close. The
+      // member lands on the saved book, where its tags are what they are.
       invalidate.catalogue();
       onAdded(book.id);
     } catch (error) {
@@ -391,8 +406,22 @@ export function useScanFlow(
     },
     isLookingUp: isbn !== null && pending.draft === null,
 
-    createTag: (name) => createTag.mutate({ data: { name } }),
-    isCreatingTag: createTag.isPending,
+    createTag: (name) =>
+      setPending((current) =>
+        // Folded rather than appended, so pressing the button twice does not
+        // send the same name twice. The comparison is the client's own and is
+        // deliberately not the server's fold: what it prevents is a duplicate
+        // chip, and what decides which names are one tag is `tags.folded`, on
+        // the server, where the whole vocabulary is visible.
+        current.tagNames.includes(name)
+          ? current
+          : { ...current, tagNames: [...current.tagNames, name] },
+      ),
+    forgetTagName: (name) =>
+      setPending((current) => ({
+        ...current,
+        tagNames: current.tagNames.filter((held) => held !== name),
+      })),
     toggleTag: (tagId) =>
       setPending((current) => ({
         ...current,
@@ -1272,6 +1301,26 @@ export interface UseRapidIntakeResult {
    * Does nothing for anything that is not a group of several.
    */
   splitApart: (key: string) => void;
+  /**
+   * Take one subject off one queued book before anything is written.
+   *
+   * **The only route that ever removes a subject, and this is the last moment
+   * it exists.** `BookDetailsUpdate` has no `categories`, so once `addAll`
+   * has run the column can be replaced by enriching and cleared by nothing:
+   * the remedy afterwards is deleting the book. A file states a subject a
+   * stranger wrote, a folder pick is several hundred files behind one press,
+   * and this is the row where that is still reversible.
+   *
+   * **Here rather than on the confirm card, which was where the design round
+   * put it and is a surface a file never reaches**: measured while building
+   * this, `pickFiles` settles every picked file into this queue and
+   * `LookupResult` is fed only by the barcode, the manual ISBN and the search
+   * box, none of which carries a subject. A block on that card would have
+   * been consent nobody was ever shown.
+   *
+   * Does nothing for a row with no draft or no such subject.
+   */
+  dropSubject: (key: string, subject: string) => void;
   /** Take one of the records the catalogue offered for a file. */
   chooseFor: (key: string, match: BookMatch) => void;
   /** Reject all of them and keep what the name said. */
@@ -2219,6 +2268,19 @@ export function useRapidIntake(): UseRapidIntakeResult {
     remove: (key) =>
       setEntries((current) => current.filter((entry) => entry.key !== key)),
     splitApart: (key) => void splitTheGroup(key),
+    dropSubject: (key, subject) =>
+      setEntries((current) =>
+        current.map((entry) => {
+          if (entry.key !== key || entry.draft === null) return entry;
+          // **Filtered by value and not by index**, because the row is
+          // rendered from this same list: an index would be the renderer's
+          // and would remove the wrong subject the moment anything reordered.
+          // `boundCategories` folded the exact repeats out, so one value names
+          // one chip.
+          const kept = entry.draft.categories?.filter((one) => one !== subject);
+          return { ...entry, draft: { ...entry.draft, categories: kept } };
+        }),
+      ),
     clear: () => {
       setEntries([]);
       // The count goes with the queue it described. Leaving it would tell

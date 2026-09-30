@@ -631,6 +631,7 @@ class TestConfirmationDoesNotApplyToADirectoryAccount:
         user = upsert_directory_user(
             db, "kim", is_admin=False, source=AuthMode.LDAP
         )
+        assert user is not None
         assert user.email_verification_source == VerificationProvenance.DIRECTORY.value
 
 

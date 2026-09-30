@@ -421,10 +421,11 @@ export const de: Messages = {
   "tags.newLabel": "Neues Schlagwort",
   "tags.newPlaceholder": "Urlaubslektüre",
   "tags.add": "Schlagwort hinzufügen",
+  "tags.pending": "Nach dem Speichern",
   "tags.create": "Anlegen",
   "tags.delete": "{name} löschen",
   "tags.deleteConfirm":
-    'Das Schlagwort "{name}" löschen? Es verschwindet bei {count} Büchern, für alle, und lässt sich nicht rückgängig machen.',
+    'Das Schlagwort "{name}" löschen? Es verschwindet bei jedem Buch, für alle, und lässt sich nicht rückgängig machen.',
   "tags.builtInHint": "Eingebaute Schlagwörter lassen sich nicht löschen.",
 
   // ── Anmeldung ───────────────────────────────────────────────────────────
@@ -960,7 +961,7 @@ export const de: Messages = {
   "collections.emptyHint":
     "Eine Sammlung teilt das Regal auf: gedruckt und digital, behalten und verkauft, Mein und Dein. Ein Buch liegt in genau einer Sammlung, also die wichtigste Aufteilung wählen; für alles andere gibt es Schlagwörter.",
   "collections.explain":
-    "Eine Sammlung gruppiert Bücher. Sie versteckt keines: wer ein Buch sehen kann, hängt weiterhin davon ab, ob es privat ist.",
+    "Eine Sammlung gruppiert Bücher. Sie versteckt keines: wer ein Buch sehen kann, hängt weiterhin davon ab, ob es privat ist. Eine Sammlung selbst erscheint in der Liste, wenn sie ein sichtbares Buch enthält, wenn ein sichtbares Buch daraus im Papierkorb liegt oder wenn sie leer ist.",
   "collections.newName": "Name",
   "collections.newPlaceholder": "E-Books",
   "collections.create": "Sammlung anlegen",
@@ -1039,6 +1040,12 @@ export const de: Messages = {
   "duplicates.merged": "Zu einem Eintrag zusammengeführt.",
   "duplicates.confirm":
     '{count} Einträge in "{title}" zusammenführen? Das lässt sich nicht rückgängig machen.',
+  "duplicates.capped":
+    "{shown} von {total} Gruppen werden angezeigt. Nach dem Zusammenführen erscheinen die nächsten.",
+  // Klammern wie bei `fallback.keepAllForNow`: "1 weitere Einträge" wäre
+  // falsch, und der kleinste Wert hier ist eins.
+  "duplicates.moreInGroup":
+    "Weitere Einträge in dieser Gruppe, für einen zweiten Durchgang ({count})",
   "duplicates.couldNotLoad": "Die Prüfung auf Doppelte ist fehlgeschlagen.",
 
   // ── Sammelaktionen ──────────────────────────────────────────────────────
@@ -1080,12 +1087,14 @@ export const de: Messages = {
   "rapid.unreferenced":
     "Bei {count} davon wurde nicht gespeichert, wo die Datei liegt. Den Ordner noch einmal auswählen speichert es.",
   "rapid.removeFromQueue": "{label} aus der Liste entfernen",
+  "rapid.subjects": "Schlagwörter aus der Datei: {count}. Anzeigen.",
+  "rapid.removeSubject": "Das Schlagwort {subject} von {label} entfernen",
   "rapid.nothingScanned": "Noch nichts gescannt",
 
   // ── Bücher aus ihren Dateien hinzufügen ─────────────────────────────────
   "file.title": "Aus einer Datei hinzufügen",
   "file.explain":
-    "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht. Die Dateien werden hier im Browser gelesen und niemals hochgeladen. Bei einem Ordner wird für ein Buch aus einer einzigen Datei auch deren Name samt der Ordner darüber beim Buch gespeichert, damit die Datei wiederzufinden ist, und alle, die das Buch sehen, sehen auch das.",
+    "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht. Die Dateien werden hier im Browser gelesen und niemals hochgeladen. Bei einem Ordner wird für ein Buch aus einer einzigen Datei auch deren Name samt der Ordner darüber beim Buch gespeichert, damit die Datei wiederzufinden ist, und alle, die das Buch sehen, sehen auch das. Auch die Schlagwörter aus der Datei werden beim Buch gespeichert: bei einem einzelnen Buch lassen sie sich vorher entfernen, bei einem ganzen Ordner geht das hinterher nur noch, indem das Buch entfernt wird.",
   "file.pickLabel": "Buchdateien",
   "file.readingFiles": "Die ausgewählten Dateien werden gelesen...",
   "file.notAnEpub": "Keine EPUB-Datei.",

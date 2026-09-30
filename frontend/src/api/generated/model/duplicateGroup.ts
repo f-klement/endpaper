@@ -5,7 +5,7 @@
  * Catalogue, lend and track a collection of books, on the shelf and in files, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
-import type { BookOut } from "./bookOut.ts";
+import type { DuplicateMember } from "./duplicateMember.ts";
 
 /**
  * Books that look like the same work.
@@ -18,8 +18,22 @@ import type { BookOut } from "./bookOut.ts";
  * **Deliberate copies are not duplicates and never appear here.** They share
  * a `copy_group`, and the endpoint collapses each group to one row before
  * deciding whether anything is left over.
+ *
+ * **`books` carries at least two members, refused here rather than trusted.**
+ * `key` is readable plaintext of the form `dune|frank herbert`, so a group
+ * standing on one visible row plus one the viewer cannot see would publish
+ * that row's title and author. The route builds groups only out of a shelf,
+ * which is what makes that impossible. `min_length` is the second latch:
+ * it fires when the group is **built**, so a future route that grouped
+ * before it filtered would raise here rather than answer 200.
  */
 export interface DuplicateGroup {
-  books: BookOut[];
+  /**
+   * @minItems 2
+   * @maxItems 20
+   */
+  books: DuplicateMember[];
   key: string;
+  /** @minimum 2 */
+  size: number;
 }

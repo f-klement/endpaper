@@ -84,6 +84,36 @@ class LoginRequest(BaseModel):
     an attacker something about the stored password.
     """
 
+    # **No pattern, deliberately, and `UserCreate` above having one is not an
+    # oversight here.** This field is checked against accounts that already
+    # exist, and `UserCreate` is not the only thing that mints one: `backup`
+    # restores the `users` table through Core, where no model validates
+    # anything. Such a row can hold a name `^\S.*$` refuses, and a pattern here
+    # would lock that member out of their own library while answering 422 where
+    # every other bad sign in answers 401. The login route gives one answer to
+    # every failure so that nobody can tell an account that exists from one
+    # that does not, and a 422 naming the shape of a name is a second answer.
+    #
+    # **The directory is not a second reason, though it reads like one.**
+    # ldap3 strips an assertion value in `evaluate_match`, so a directory name
+    # carrying leading whitespace is unsearchable and that member cannot sign
+    # in today whether or not this field has a pattern.
+    #
+    # It would also not buy what it looks like it buys: measured 2026-09-28,
+    # `^\S.*$` accepts a carriage return and a NUL, so it is not a log injection
+    # control. That control is at the log site, where `logvalues.clipped` escapes
+    # the value; see the comment in `auth_backends.authenticate_ldap`.
+    # `tests/routers/test_auth.py::TestALoginNameIsNotCheckedAgainstTheRegistrationPattern`
+    # is what goes red if the pattern is added back.
+    #
+    # **And if you add it anyway, fix the log line sweep in the same change.**
+    # `TestAnUntrustedUsernameCannotForgeALogLine` registers under the
+    # fallback forged name and signs in under the primary one, and it uses two
+    # only because `UserCreate` refuses the primary. Give this field the same
+    # pattern and both legs use one name, so the sign in answers 200 against the
+    # account the registration just made, with the same filler password. Every
+    # arm in that class is written to measure an unauthenticated request and
+    # would then be measuring an authenticated one, silently.
     username: str = Field(min_length=1, max_length=USERNAME_MAX)
     password: str = Field(min_length=1, max_length=MAX_PASSWORD_BYTES)
 
@@ -250,6 +280,9 @@ class RegistrationOut(BaseModel):
 MAX_CODE_LENGTH = 64
 
 
+# The username on this model and on the three below carries no pattern either,
+# for the reason given at `LoginRequest.username`: each names an account that
+# already exists rather than minting one.
 class ResetRequest(BaseModel):
     """A member, signed out, asking to be let back in.
 

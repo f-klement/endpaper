@@ -1773,6 +1773,15 @@ export async function readPdf(file: Blob): Promise<PdfReading> {
         // title with a colon in it.
         subtitle: null,
         authors: readAuthors(await field("Author"), xmp),
+        // **The one reader of the five that states no subject, and the
+        // exclusion is worth keeping exact.** `/Subject` is this format's
+        // description and is read as one six lines above; a reader taking
+        // "every format states a subject" literally would file the blurb
+        // twice, once as prose and once as a heading. `/Keywords` is the key
+        // that would be a candidate and is prose too, which
+        // `readIdentifiers` already records: whether a PDF's keywords are
+        // subjects is a decision about that field and not about this one.
+        categories: [],
         identifiers: readIdentifiers(xmp),
         isbn: firstIsbn(xmp),
         publisher: xmp?.publisher ?? null,

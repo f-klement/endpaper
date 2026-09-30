@@ -120,6 +120,13 @@ describe("the ceilings agree with the schema they describe", () => {
     // **A future list ceiling wants its own agreement arm and does not get one
     // from this**, which is stated rather than implied, because the cost of the
     // last version of this sentence was believing three numbers were covered.
+    //
+    // **Two of the three are now bounded and this arm still says nothing about
+    // them**, which is the sentence to keep exact rather than the arm to
+    // widen: `identifiers` and `categories` are bounded in
+    // `src/lib/bookRequest.ts`, each against a number
+    // `tests/lib/bookRequest.test.ts` reads off this same schema. What is
+    // checked here is only that neither joined a table it does not belong in.
     const lists = Object.entries(bookCreate()).filter(
       ([, property]) => property.maxItems !== undefined,
     );

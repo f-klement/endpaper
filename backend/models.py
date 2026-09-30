@@ -215,18 +215,26 @@ class Collection(Base):
     **partitions**, which is why a book carries one collection rather than a
     list of them: see `Book.collection_id`.
 
-    **Library wide, and never a privacy boundary.** Any member may make one,
-    rename it or delete it, and filing a book into one changes nothing about
-    who can see it. `visible_to()` decides that on its own and is not given a
-    collection to consult, and this is deliberately not a second scoping axis
-    beside privacy: a label that sometimes hides rows is a label somebody will
-    eventually mistake for permission, and the mistake is silent.
-    `docs/decisions.md` records the argument.
+    **Never a privacy boundary.** Any member may make one and rename it, and
+    filing a book into one changes nothing about who can see it. `visible_to()`
+    decides that on its own and is not given a collection to consult, and this
+    is deliberately not a second scoping axis beside privacy: a label that
+    sometimes hides rows is a label somebody will eventually mistake for
+    permission, and the mistake is silent. `docs/decisions.md` records the
+    argument.
+
+    **The label is not library wide, and that half used to be stated here as
+    though it followed.** A collection whose every book is hidden from a member
+    is not named to them, because its name is their only evidence that
+    somebody's books are filed somewhere. That narrows an axis the row set was
+    already on, since the count has always been the caller's own; it adds none.
+    `shelving.Shelving` is the rule.
 
     `created_by_user_id` is provenance and nothing else. No query consults it,
-    which is what keeps the previous paragraph true rather than merely
-    intended. Nullable, so deleting an account does not cascade away the
-    library's shelving.
+    which is what keeps the paragraph above true rather than merely intended,
+    and it is why the rule is written over books rather than over an owner.
+    Nullable, so deleting an account does not cascade away the library's
+    shelving.
     """
 
     __tablename__ = "collections"
@@ -331,10 +339,16 @@ class AuthorAlias(Base):
     `tests/routers/test_books_authors.py::test_one_lookup_is_always_enough`
     asserts the invariant after three merges in a ring.
 
-    **The mapping is library wide and so are the names in it**, exactly like
-    a collection's name: every member resolves a spelling to the same person,
-    and `canonical_name` is not withheld from anybody. What is filtered is the
-    shelf, not the mapping. An author appears for a member only because that
+    **The mapping is library wide and so are the names in it**: every member
+    resolves a spelling to the same person, and `canonical_name` is not
+    withheld from anybody. What is filtered is the shelf, not the mapping.
+
+    **A collection's name used to be the comparison here and is no longer
+    one.** That label is withheld from a member who can see nothing filed
+    under it (`shelving.Shelving`), so the two are now different answers to
+    the same question and the simile pointed the wrong way. What holds this
+    paragraph up on its own is the sentence after it: a row here proves no
+    book exists. An author appears for a member only because that
     member can see a book credited to a spelling resolving to them, so an
     author whose every book is private appears for nobody else, and a row here
     proves no book exists: it outlives the book it was created for.
@@ -2959,7 +2973,17 @@ def visible_to(user_id: int) -> ColumnElement[bool]:
 
 
 def in_trash_for(user_id: int) -> ColumnElement[bool]:
-    """The mirror image: books this account may see **and** has trashed away.
+    """The mirror image of `visible_to`: the deleted books this account may see.
+
+    **This account's own trashed books and every account's trashed public
+    ones.** That is `visible_to` with the `deleted_at` arm turned over and
+    nothing else changed, and it is the set a trash listing is served for.
+
+    **It is not an ownership test, and reading it as one is how a widening
+    gets proposed.** Nothing below tests who deleted the row: there is no
+    `deleted_by` column, and the only account this predicate names is the one
+    being asked. This docstring said "has trashed away" until 2026-09-30, and
+    four sentences downstream had copied that, `Shelf.trashed_by` among them.
 
     Deliberately a separate function rather than a flag on `visible_to`. A
     predicate that sometimes means "on the shelf" and sometimes means "in the

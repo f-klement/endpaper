@@ -295,6 +295,29 @@ describe("BookDetail", () => {
       );
     });
 
+    it("invents a tag and puts it on the book in one request", async () => {
+      const tags = makeTagSet();
+      stubLoad({ book: makeBook({ id: 1, tags: [], added_by: OWNER }), tags });
+      api.on("/api/books/1/tags", { body: makeBook({ id: 1 }) });
+      renderDetail();
+
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "+ Add" }));
+      await user.type(screen.getByLabelText("New tag"), "Loft finds");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      await waitFor(() =>
+        expect(api.lastCall("/api/books/1/tags", "POST")?.body).toEqual({
+          name: "Loft finds",
+        }),
+      );
+      // **The create that used to come first is gone**, not merely reordered:
+      // it answered with a tag id the attach then had to be trusted with, and
+      // a name colliding with a tag on a book this reader cannot see made the
+      // second request 404 after the first had answered 201.
+      expect(api.lastCall("/api/books/tags", "POST")).toBeUndefined();
+    });
+
     it("removes a tag", async () => {
       const tags = makeTagSet();
       stubLoad({

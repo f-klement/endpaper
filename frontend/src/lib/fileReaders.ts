@@ -62,12 +62,12 @@ export interface FileIdentifier {
  * What a reader says one book is, whichever format it read.
  *
  * **Not one format's record, which is what a sixth reader has to know before
- * it fills any of this in.** 10 of the 11 fields go through
- * `ScanPage/types.draftFromFile` into `BookLookup`, and only `identifiers` does
- * not, so what a field holds is decided by what this app stores rather than by
- * what any format spells. 6 of them carry a Dublin Core element's name, and
- * every one is normalised rather than copied. The other 5 name nothing in OPF
- * at all: `subtitle` is a `title-type` refinement resolved, `isbn` is a parsed
+ * it fills any of this in.** 10 of the 12 fields go through
+ * `ScanPage/types.draftFromFile` into `BookLookup`, and `identifiers` and
+ * `categories` do not, so what a field holds is decided by what this app stores
+ * rather than by what any format spells. 7 of them carry a Dublin Core
+ * element's name, and every one is normalised rather than copied. The other 5
+ * name nothing in OPF at all: `subtitle` is a `title-type` refinement resolved, `isbn` is a parsed
  * and check digit tested ISBN drawn from the identifiers whatever labelled
  * them, `year` is a single number windowed out of whichever date the format
  * offers, and the two series fields are Calibre's own `meta` names or an EPUB 3
@@ -88,21 +88,13 @@ export interface FileIdentifier {
  * back from here for the same reason: the format that shaped this record is a
  * producer of it like any other, not its owner.
  *
- * **No field here holds a subject, and the wall is this type rather than the
- * server.** Every format in the family states one and every reader passes over
- * it: `dc:subject` in OPF, `<genre>` in FB2, EXTH 105 in MOBI, `Genre` in
- * ComicInfo. Stated once here rather than four times, because the reason is not
- * any format's: it is that this record declares no field for one, so nothing a
- * reader read could travel, and `ScanPage/types.draftFromFile` has nothing to
- * put anywhere.
- *
- * **The column it would go to is not the Tag system**, which is the distinction
- * that decides what a field here would mean. `books.categories` is uncontrolled
- * free text a producer supplied and nothing is minted from it; tags are the
- * small vocabulary a library curates. `docs/data-model.md` carries the three
- * layers and which is which. A field here would therefore be the file's own
- * words and never a tag, and adding one means this type, the readers that fill
- * it, and `lib/bookRequest.ts`, which maps a record onto a request.
+ * **Four of the five readers state a subject and `categories` is where it
+ * lands**: `dc:subject` in OPF, `<genre>` in FB2, EXTH 105 in MOBI, `Genre` in
+ * ComicInfo. **The fifth is `pdf.ts` and it states none**, which is the trap
+ * worth keeping exact: that reader takes `/Subject` for the **description**,
+ * because in PDF that key is prose about the document rather than a heading.
+ * A sixth reader taking "every format states a subject" literally would file a
+ * blurb as a subject.
  */
 export interface FileMetadata extends SourceRecord {
   /**
@@ -114,6 +106,38 @@ export interface FileMetadata extends SourceRecord {
    */
   readonly subtitle: string | null;
   readonly identifiers: readonly FileIdentifier[];
+  /**
+   * The subject words the file itself stated, in the file's own order.
+   *
+   * **The file's own words and never a tag**, which is the distinction that
+   * decides what this field means. `books.categories` is uncontrolled free
+   * text a producer supplied and nothing is minted from it; tags are the small
+   * vocabulary a library curates. `docs/data-model.md` carries the three
+   * layers and which is which. A reader that turned one of these into a tag
+   * would mint vocabulary out of a stranger's file.
+   *
+   * **Stated here once and in no reader**, which is the duplication that
+   * produced this work: four modules had written one reason nearly verbatim.
+   * `tests/lib/fileReaders.test.ts` holds the one home.
+   *
+   * **Here rather than on `SourceRecord`** for `subtitle`'s reason: a store's
+   * catalogue states none, and whether a Calibre `tags` row is a curated word
+   * or free text is a separate decision `lib/calibre.ts` records at its own
+   * site. Moving this up would make both write a value their sources have no
+   * notion of.
+   *
+   * **Required rather than optional, and empty rather than absent.** This type
+   * exists so the author of a sixth reader meets the questions at the type, and
+   * an optional field is one a sixth reader never answers. A file that stated
+   * none answers `[]`, which is the same shape `identifiers` uses and is not
+   * the `null` the scalar fields use: an empty list already says "none stated".
+   *
+   * **Unbounded here, on purpose.** A reader reports what the file says and
+   * `lib/bookRequest.boundCategories` is the one place that knows what the
+   * endpoint will take. How many entries there are is the file's choice, which
+   * is why that function breaks out of its loop rather than mapping over this.
+   */
+  readonly categories: readonly string[];
 }
 
 export type FileReading =

@@ -117,6 +117,7 @@ from schemas.book import (
     CATEGORIES_MAX,
     CATEGORY_MAX,
     MAX_CATEGORIES_PER_BOOK,
+    MERGE_BOOKS_MAX,
     BookCreate,
     BookMatch,
 )
@@ -1962,7 +1963,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
         """The baseline. Without it every arm below scores a pass it did not
         earn, because a predicate reporting everything reports these too."""
         assert (
-            schemas_book._unconstructable_create_fields(
+            schemas_book._unconstructable_fields(
                 ["kids"],
                 ["joined"],
                 {"title": str, "kids": list[str], "joined": list[str]},
@@ -1974,7 +1975,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
     def test_a_popped_name_that_is_not_a_field_of_the_body_is_reported(self) -> None:
         """A pop claiming a field nobody sends. Silent today, because `pop` with
         a default does not raise on a name that is not there."""
-        reported = schemas_book._unconstructable_create_fields(
+        reported = schemas_book._unconstructable_fields(
             ["gone"], [], {"title": str}, ["title"]
         )
 
@@ -1983,7 +1984,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
     def test_a_child_row_cell_naming_a_real_column_is_reported(self) -> None:
         """A name popped as a child row that IS a column would pass through or be
         reshaped, and popping it stores nothing."""
-        reported = schemas_book._unconstructable_create_fields(
+        reported = schemas_book._unconstructable_fields(
             ["shelf_mark"], [], {"title": str, "shelf_mark": str}, ["title", "shelf_mark"]
         )
 
@@ -2003,7 +2004,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
             ([], ["ghost"]),
         )
         for child_rows, reshaped in both_cells:
-            reported = schemas_book._unconstructable_create_fields(
+            reported = schemas_book._unconstructable_fields(
                 child_rows, reshaped, {"title": str}, ["title", "ghost"]
             )
 
@@ -2013,7 +2014,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
     def test_a_reshaped_cell_naming_no_column_is_reported(self) -> None:
         """The symmetric half. A name in the reshape cell with no column behind it
         is a child row, and a reshape assignment for it would raise."""
-        reported = schemas_book._unconstructable_create_fields(
+        reported = schemas_book._unconstructable_fields(
             [], ["kids"], {"title": str, "kids": list[str]}, ["title"]
         )
 
@@ -2024,7 +2025,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
     ) -> None:
         """The ruling's own case: a twentieth field added to the body and to
         nothing else is a `TypeError` on the constructor."""
-        reported = schemas_book._unconstructable_create_fields(
+        reported = schemas_book._unconstructable_fields(
             [], [], {"title": str, "shelf_mark": str}, ["title"]
         )
 
@@ -2039,7 +2040,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
         correctly for `RowIdField | None` for the wrong reason, that
         `typing.Annotated` is not a `type`.
         """
-        reported = schemas_book._unconstructable_create_fields(
+        reported = schemas_book._unconstructable_fields(
             [],
             [],
             {"title": str, "subjects": Annotated[list[str], Field(max_length=1)] | None},
@@ -2052,7 +2053,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
         """A field may be annotated with the abstract type rather than the concrete
         one, and `get_origin` answers the abstract one, so an enumeration of `list`,
         `set`, `dict` and `tuple` looks straight past it."""
-        reported = schemas_book._unconstructable_create_fields(
+        reported = schemas_book._unconstructable_fields(
             [], [], {"title": str, "subjects": abc.Sequence[str]}, ["title", "subjects"]
         )
 
@@ -2064,7 +2065,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
         types without excluding these three reports every string field on the body
         and stops the schema module importing."""
         assert (
-            schemas_book._unconstructable_create_fields(
+            schemas_book._unconstructable_fields(
                 [],
                 [],
                 {"title": str, "raw": bytes, "buf": bytearray, "opt": str | None},
@@ -2080,7 +2081,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
         column arm and still cannot be constructed: the constructor takes the
         keyword and the INSERT fails on it, which is a 500 rather than a 422.
         """
-        reported = schemas_book._unconstructable_create_fields(
+        reported = schemas_book._unconstructable_fields(
             [], [], {"title": str, "subjects": list[str]}, ["title", "subjects"]
         )
 
@@ -2090,7 +2091,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
         """The common case, and why this is a derivation rather than a list. The
         arms above are worth nothing if every new field fires them."""
         assert (
-            schemas_book._unconstructable_create_fields(
+            schemas_book._unconstructable_fields(
                 [], [], {"title": str, "shelf_mark": str | None}, ["title", "shelf_mark"]
             )
             == {}
@@ -2099,7 +2100,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
     def test_each_report_says_which_of_the_faults_it_is(self) -> None:
         """A set of names cannot say which remedy a fault wants, and the two cells
         exist because the remedies differ. So the answer is keyed by name."""
-        reported = schemas_book._unconstructable_create_fields(
+        reported = schemas_book._unconstructable_fields(
             ["shelf_mark"], ["kids"], {"shelf_mark": str, "kids": list[str]}, ["shelf_mark"]
         )
 
@@ -2108,7 +2109,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
 
     def test_the_live_body_and_the_live_table_are_clean(self) -> None:
         assert (
-            schemas_book._unconstructable_create_fields(
+            schemas_book._unconstructable_fields(
                 schemas_book.CARRIED_AS_CHILD_ROWS,
                 schemas_book.RESHAPED_FOR_ITS_COLUMN,
                 {
@@ -2135,6 +2136,88 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
         ) | set(schemas_book.RESHAPED_FOR_ITS_COLUMN)
 
 
+class TestEveryUpdateFieldEitherReachesTheRowOrIsReshaped:
+    """The same partition read against the other writer of these columns.
+
+    `update_book_details` assigns every field of its dump straight onto the
+    row, so the create door's refusal said nothing about it: its population is
+    `BookCreate`. A container field added to the update body was a
+    `sqlite3.ProgrammingError` at the flush on somebody's library rather than
+    a report on the machine of whoever added the field, which is the failure
+    the create side's refusal exists to retire.
+
+    The generic arms live one class up and drive the same function. What is
+    here is the live update body, the pop list derived for it, and the one
+    fault that door can have which the other cannot.
+    """
+
+    def test_the_live_update_body_and_the_live_table_are_clean(self) -> None:
+        assert (
+            schemas_book._unconstructable_fields(
+                (),
+                schemas_book.POPPED_BEFORE_THE_ASSIGNMENT,
+                {
+                    name: field.annotation
+                    for name, field in schemas_book.BookDetailsUpdate.model_fields.items()
+                },
+                _book_columns(),
+            )
+            == {}
+        )
+
+    def test_a_container_field_added_to_the_update_body_is_reported(self) -> None:
+        """The arm the whole half rests on. Unpopped and unreshaped, a list
+        field over a `Text` column reaches `setattr` and fails the flush."""
+        reported = schemas_book._unconstructable_fields(
+            (),
+            (),
+            {"title": str, "subjects": list[str]},
+            ["title", "subjects"],
+        )
+
+        assert set(reported) == {"subjects"}
+
+    def test_the_pop_list_is_the_reshaped_cell_this_body_carries(self) -> None:
+        """The intersection, and both directions of it.
+
+        Not the reshape cell whole: the two bodies offer different fields on
+        purpose, so a name reshaped on create and absent here is not a fault.
+        Not a list of its own either: a second reshaped column added to both
+        bodies has to be popped here without anybody remembering to.
+        """
+        carried = {
+            name
+            for name in schemas_book.RESHAPED_FOR_ITS_COLUMN
+            if name in schemas_book.BookDetailsUpdate.model_fields
+        }
+
+        assert set(schemas_book.POPPED_BEFORE_THE_ASSIGNMENT) == carried
+        assert carried, "this body reshapes nothing, so the pop list is about nothing"
+
+    def test_a_reshaped_name_this_body_does_not_offer_is_not_a_fault(self) -> None:
+        """The false refusal the derivation avoids, driven both ways.
+
+        Handed the reshape cell whole, the partition reports a name this body
+        does not carry as popped and never sent, which is the wrong
+        instruction for a field this door simply does not edit. Handed the
+        intersection, it reports nothing. **An arm showing only the clean side
+        would pass over a hardcoded tuple**, which is what the derivation
+        exists instead of.
+        """
+        body = {"title": str}
+        columns = ["title", "joined"]
+        cell = ("joined",)
+
+        whole = schemas_book._unconstructable_fields((), cell, body, columns)
+        intersected = schemas_book._unconstructable_fields(
+            (), tuple(name for name in cell if name in body), body, columns
+        )
+
+        assert set(whole) == {"joined"}
+        assert "is not a field of the body" in whole["joined"]
+        assert intersected == {}
+
+
 class TestEveryReshapedFieldIsWrittenAtTheRoute:
     """The half the import refusal cannot see, and it is the fault it calls worst.
 
@@ -2142,12 +2225,19 @@ class TestEveryReshapedFieldIsWrittenAtTheRoute:
     constructor never sees it and **nothing raises** if the route forgets to write
     it: the create answers 201 having stored nothing. Measured: deleting the
     `categories=` keyword from `_create_book` leaves
-    `_unconstructable_create_fields` returning `{}`, the module importing clean and
+    `_unconstructable_fields` returning `{}`, the module importing clean and
     every partition arm green.
 
     So this reads the route's own source. The security seat asked for it in the
     design round, shaped on `TestTheSignatureIsTheBound`, which partitions a model's
     fields against the names a writer's loop walks.
+
+    **Both write routes, because both pop.** The create route hands the
+    reshaped value to a constructor and the update route assigns it onto a row
+    that already exists, so the two need different finders over the same
+    question. Each finder has its own baseline arm: the two cannot share one,
+    and a finder that matched nothing would certify the route it could not
+    read.
     """
 
     @staticmethod
@@ -2194,6 +2284,86 @@ class TestEveryReshapedFieldIsWrittenAtTheRoute:
             f"{unwritten}. Each needs a keyword on the `Book(...)` call."
         )
 
+    @staticmethod
+    def _attributes_written_by(function: Any, receiver: str) -> set[str]:
+        """Every attribute this function assigns **onto `receiver`** by name.
+
+        The update route has no constructor call: it writes onto a row that
+        already exists. A `setattr(book, field, value)` in a loop is not an
+        `ast.Assign` to an attribute, so this finds the spelled out writes and
+        not the generic one, which is exactly the distinction the pop is about.
+
+        **The receiver test is the guard rather than tidiness, and without it
+        this sat a rung below its twin.** Collecting targets by attribute name
+        alone, a write moved off the row onto the payload reads as a write:
+        measured, the arm below stayed green over
+        `payload.categories = join_categories(...)`, while the route stored
+        nothing and answered 200 with the caller's own edit echoed back, which
+        is precisely the fault that arm's message describes. The create side's
+        finder is anchored to the `Book(...)` call and cannot be fooled that
+        way.
+
+        **The receiver is asserted to be a parameter**, so renaming it reddens
+        here rather than quietly answering the empty set, which every arm
+        below would read as an unwritten field.
+
+        **Two legitimate spellings this refuses, and the list is two rather
+        than one.** A dynamic write keyed on the constant,
+        `setattr(book, name, ...)` inside a loop over the pop list, which this
+        reader cannot see; and a route that **resolves the row itself** rather
+        than taking it as a parameter, which the assertion below refuses even
+        though such a function does write onto a row. Both fail closed with a
+        message saying what to do, which is a confused minute. The alternative
+        is a reader that accepts any `setattr`, and that accepts the generic
+        loop which is the whole thing being distinguished.
+        """
+        assert receiver in inspect.signature(function).parameters, (
+            f"`{receiver}` is not a parameter of `{function.__name__}`. Either "
+            "the parameter was renamed, or the route resolves the row itself "
+            "rather than being handed it; in the second case this reader needs "
+            "that local name. Refused rather than answered, because the answer "
+            "would be the empty set and every arm below reads that as a field "
+            "the route never writes."
+        )
+        tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+        return {
+            target.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == receiver
+        }
+
+    def test_the_update_route_writes_an_attribute_at_all(self) -> None:
+        """The baseline. A reader matching nothing satisfies the arm below by
+        having no writes to disagree with, and this one is a different finder
+        from the constructor's, so it needs its own. It is also what the
+        receiver filter could break: a filter naming a receiver nothing is
+        written to answers the empty set for every route."""
+        written = self._attributes_written_by(books_router.update_book_details, "book")
+
+        assert written, "no spelled out attribute write found in the update route"
+
+    def test_every_name_popped_before_the_assignment_is_written_back(self) -> None:
+        """The same fault at the other door, and it is quieter here: the create
+        route's pop with no write answers 201 having stored nothing, and this
+        one answers 200 having left the stored value alone, so the caller sees
+        their own edit echoed back by nothing."""
+        written = self._attributes_written_by(books_router.update_book_details, "book")
+        unwritten = sorted(
+            name
+            for name in schemas_book.POPPED_BEFORE_THE_ASSIGNMENT
+            if name not in written
+        )
+
+        assert unwritten == [], (
+            "These fields are popped out of the update dump and never written "
+            f"back, so the route accepts them and stores nothing: {unwritten}. "
+            "Each needs an assignment onto the row beside the pop."
+        )
+
     def test_no_child_row_name_is_a_keyword_of_that_call(self) -> None:
         """The other direction, which the arm above cannot see. A name carried as
         child rows must NOT reach the constructor: `Book.classifications` is a
@@ -2238,6 +2408,45 @@ class TestTheSchemaModuleRefusesToImport:
         with pytest.raises(RuntimeError, match="categories"):
             _load_schemas_book()
 
+    def test_it_refuses_when_an_update_only_field_has_no_column(
+        self, monkeypatch
+    ) -> None:
+        """The second refusal, reached in isolation.
+
+        `purchase_source` is a field of `BookDetailsUpdate` and not of
+        `BookCreate`, so dropping its column leaves the create refusal clean
+        and only the update one fires. Without a column no `BookCreate` field
+        names, this arm would be green because the **first** block raised, and
+        the second could be deleted with nothing red.
+        """
+        monkeypatch.setattr(
+            models,
+            "Book",
+            _book_whose_table_has([c for c in _book_columns() if c != "purchase_source"]),
+        )
+        with pytest.raises(RuntimeError, match="update route") as refusal:
+            _load_schemas_book()
+
+        assert "purchase_source" in str(refusal.value)
+
+    def test_the_create_refusal_is_the_one_that_names_the_constructor(
+        self, monkeypatch
+    ) -> None:
+        """The pair the arm above needs. `isbn` is a field of `BookCreate` and
+        not of `BookDetailsUpdate`, so this fires the first block alone. Two
+        refusals in one module worded the same way would make "which block
+        raised" unanswerable, and that is the only thing distinguishing
+        them."""
+        monkeypatch.setattr(
+            models,
+            "Book",
+            _book_whose_table_has([c for c in _book_columns() if c != "isbn"]),
+        )
+        with pytest.raises(RuntimeError, match="constructor") as refusal:
+            _load_schemas_book()
+
+        assert "isbn" in str(refusal.value)
+
     def test_the_refusal_says_what_to_do_about_it(self, monkeypatch) -> None:
         """A refusal that does not say what to do is one somebody deletes. It has
         to name the pop and the write together, because the fault that costs most
@@ -2250,3 +2459,209 @@ class TestTheSchemaModuleRefusesToImport:
 
         assert "RESHAPED_FOR_ITS_COLUMN" in str(refusal.value)
         assert "pop" in str(refusal.value)
+
+
+class TestADuplicateGroupCannotBeBuiltWithOneMember:
+    """The second latch on the privacy rule of `GET /books/duplicates`.
+
+    The key is readable plaintext of the title and the author, so a group
+    standing on one visible row plus a sibling the viewer cannot see publishes
+    that sibling's title. The route cannot build one, because it groups over a
+    shelf and nothing else. This is what refuses it anyway, at the point the
+    group is constructed rather than at the point the rows were fetched, so a
+    future two phase route that grouped before it filtered raises here instead
+    of answering 200.
+    """
+
+    def _member(self, book_id: int):
+        from schemas import DuplicateMember
+
+        return DuplicateMember(id=book_id, title="Dune")
+
+    def test_two_members_is_a_group(self):
+        from schemas import DuplicateGroup
+
+        group = DuplicateGroup(
+            key="dune|frank herbert",
+            size=2,
+            books=[self._member(1), self._member(2)],
+        )
+
+        assert len(group.books) == 2
+
+    def test_one_member_is_refused(self):
+        from schemas import DuplicateGroup
+
+        with pytest.raises(ValidationError):
+            DuplicateGroup(key="dune|frank herbert", size=2, books=[self._member(1)])
+
+    def test_a_size_below_two_is_refused_by_the_field_and_not_by_the_relation(
+        self,
+    ):
+        """The count and the list are latched separately: a group of two rows
+        claiming a size of one would be a number nothing in the answer
+        supports.
+
+        **It asserts the error, not the refusal**, and that is the whole arm.
+        With `Field(ge=2)` deleted the input is still refused, by the relation
+        instead, so an arm that only caught `ValidationError` stayed green with
+        the floor gone: 101 passed under that plant. Since a field constraint
+        is evaluated before an after validator, the floor firing means exactly
+        one error, at `size`, and the relation was never consulted.
+
+        Load bearing rather than tidy: `UNCAPPED_SIZES_ABOVE_THE_FLOOR` starts
+        at three on the stated ground that the two member case is held here.
+        """
+        from schemas import DuplicateGroup
+
+        with pytest.raises(ValidationError) as refusal:
+            DuplicateGroup(
+                key="dune|frank herbert",
+                size=1,
+                books=[self._member(1), self._member(2)],
+            )
+
+        assert [
+            (error["type"], error["loc"]) for error in refusal.value.errors()
+        ] == [("greater_than_equal", ("size",))]
+
+    def test_no_more_members_than_one_merge_accepts(self):
+        """Tied to `MergeRequest`'s own bound rather than to a number beside
+        it: the card sends every id it renders, and the two drifting apart is
+        what made a large group's merge button a guaranteed refusal."""
+        from schemas import MERGE_BOOKS_MAX, DuplicateGroup, MergeRequest
+
+        # Ids from 1, because `RowIdField` refuses 0 and a refusal for the
+        # wrong reason would pass this test without the cap existing.
+        over = [self._member(index) for index in range(1, MERGE_BOOKS_MAX + 2)]
+
+        with pytest.raises(ValidationError):
+            DuplicateGroup(key="k", size=len(over), books=over)
+        with pytest.raises(ValidationError):
+            MergeRequest(book_ids=[m.id for m in over], keep_id=over[0].id)
+
+
+class TestTheAnswerCapIsBiggerThanOneGroup:
+    def test_a_whole_group_always_fits_in_the_budget(self):
+        """The route emits whole groups and stops when the next will not fit.
+
+        If the member cap ever exceeded the book budget the first group would
+        not fit either, the answer would be empty with a non zero
+        `total_groups`, and the page would show its empty state over work that
+        exists. The route's comment says the first group always fits; this is
+        what makes that sentence true rather than believed.
+        """
+        from schemas import DUPLICATE_BOOKS_SHOWN, MERGE_BOOKS_MAX
+
+        assert MERGE_BOOKS_MAX <= DUPLICATE_BOOKS_SHOWN
+
+    def test_a_truncated_answer_always_carries_more_than_one_group(self):
+        """How few groups a capped answer can hold, from the two constants.
+
+        A group shows at most `MERGE_BOOKS_MAX`, so the fewest groups an
+        answer can stop after is the budget divided by that, rounded down.
+        **Two things outside this file read that floor and neither can see
+        it.** The frontend fixture for the capped line derives its group
+        count from a copy of both numbers, and the capped string in both
+        catalogues is written plural throughout, in German with verb
+        agreement that cannot be repaired by interpolation.
+
+        So the property, not the figure: drop the floor to one and the
+        fixture becomes a response the server cannot produce, silently, and
+        both catalogue rows become wrong with no arm rendering them. This
+        branch has already shipped two fixtures pinned to a number nobody
+        derived, which is why this one is held rather than stated.
+        """
+        from schemas import DUPLICATE_BOOKS_SHOWN, MERGE_BOOKS_MAX
+
+        fewest_groups = DUPLICATE_BOOKS_SHOWN // MERGE_BOOKS_MAX
+
+        assert fewest_groups > 1
+
+
+#: The two ends of the range where `size` and the membership must be equal.
+#:
+#: The floor is the smallest group there is. The ceiling is one below the
+#: member cap, which is the boundary the first version of these arms left
+#: untested: 2 and 3 both sit far from it, so a validator comparing against
+#: `MERGE_BOOKS_MAX - 1` instead of `MERGE_BOOKS_MAX` passed them all.
+UNCAPPED_SIZES = [2, MERGE_BOOKS_MAX - 1]
+
+#: The same range, minus the smallest group, for the arm that claims **fewer**.
+#:
+#: At two members the claim below the membership is one, which `Field(ge=2)`
+#: refuses before the relation is consulted: the arm would pass without the
+#: relation existing. A refusal for the wrong reason is not a refusal this
+#: file can cite, so the floor moves up by one and the boundary above is
+#: where the work is done.
+UNCAPPED_SIZES_ABOVE_THE_FLOOR = [3, MERGE_BOOKS_MAX - 1]
+
+
+class TestTheSizeAgreesWithTheMembership:
+    """`size` and `len(books)` are two spellings of one fact.
+
+    Each field carried its own bound and the **relation** carried none, which
+    is the thing the card reads: it renders `size - books.length` as how many
+    entries are left for a second pass. Probed on the branch that shipped the
+    pair: a size of 999 beside two members was accepted, and so was a size of
+    2 beside three, which renders a negative.
+
+    **The uncapped arms are parametrised at both ends of their range**, two
+    members and one below the cap, because the first version used 2 and 3 and
+    left the boundary untested from below: changing the validator's
+    `shown < MERGE_BOOKS_MAX` to `- 1` let a group of nineteen claim any size
+    at all and every arm here stayed green.
+    """
+
+    def _members(self, how_many: int):
+        from schemas import DuplicateMember
+
+        return [
+            DuplicateMember(id=index, title="Dune")
+            for index in range(1, how_many + 1)
+        ]
+
+    @pytest.mark.parametrize("shown", UNCAPPED_SIZES)
+    def test_an_uncapped_group_says_exactly_what_it_carries(self, shown: int):
+        from schemas import DuplicateGroup
+
+        group = DuplicateGroup(key="k", size=shown, books=self._members(shown))
+
+        assert group.size == len(group.books)
+
+    @pytest.mark.parametrize("shown", UNCAPPED_SIZES)
+    def test_an_uncapped_group_claiming_more_is_refused(self, shown: int):
+        """Nothing was withheld below the cap, so there is nothing to claim."""
+        from schemas import DuplicateGroup
+
+        with pytest.raises(ValidationError):
+            DuplicateGroup(key="k", size=shown + 1, books=self._members(shown))
+
+    @pytest.mark.parametrize("shown", UNCAPPED_SIZES_ABOVE_THE_FLOOR)
+    def test_a_group_claiming_fewer_than_it_carries_is_refused(self, shown: int):
+        """The negative the card would render."""
+        from schemas import DuplicateGroup
+
+        with pytest.raises(ValidationError):
+            DuplicateGroup(key="k", size=shown - 1, books=self._members(shown))
+
+    def test_a_capped_group_may_claim_more_because_that_is_what_withholding_is(
+        self,
+    ):
+        from schemas import MERGE_BOOKS_MAX, DuplicateGroup
+
+        group = DuplicateGroup(
+            key="k", size=MERGE_BOOKS_MAX + 7, books=self._members(MERGE_BOOKS_MAX)
+        )
+
+        assert group.size - len(group.books) == 7
+
+    def test_a_capped_group_claiming_fewer_than_it_carries_is_refused(self):
+        """The cap is not a licence for any number: it lifts the ceiling on
+        `size` and leaves the floor where it was."""
+        from schemas import MERGE_BOOKS_MAX, DuplicateGroup
+
+        with pytest.raises(ValidationError):
+            DuplicateGroup(
+                key="k", size=MERGE_BOOKS_MAX - 1, books=self._members(MERGE_BOOKS_MAX)
+            )

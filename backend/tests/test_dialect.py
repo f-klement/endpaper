@@ -29,17 +29,36 @@ gets believed:
 * `TestNoSqliteArmLostAClause` is the per engine arm count. **It cannot see a
   clause deleted from both arms**, which is what the two engine corpus in
   `test_backup.py` is for.
+* `TestTheInstalledCheckIsTheModelsCheck` is the hole in the token scan,
+  closed by asking the server instead of scanning the text: the model's own
+  schema is built beside the migrated one and both are read back through the
+  same reflection, so the server's rendering cancels. It runs on both engines
+  and skips on neither; its own class docstring states what it sees and what
+  it does not.
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from itertools import pairwise
+from typing import Final
 
 import pytest
-from sqlalchemy import CheckConstraint, String, Text, create_engine, exc
+from sqlalchemy import (
+    CheckConstraint,
+    MetaData,
+    String,
+    Text,
+    create_engine,
+    exc,
+    inspect,
+    text,
+)
 from sqlalchemy.dialects import mysql, postgresql, sqlite
+from sqlalchemy.engine import Inspector
 from sqlalchemy.schema import CreateTable
 
-from database import Base
-from dialect import DialectSQL, SwappedRule
+from database import Base, engine
+from dialect import DialectSQL, SwappedRule, for_bind
 from migrations.versions import (
     b8f4c1a7e309_bound_the_bytes_three_columns_never_had as bound_the_bytes,
 )
@@ -560,3 +579,217 @@ class TestTheCatalogueTargetsBooleanIsSpelledPerEngine:
 
         assert element.sqlite == "requires_isbn_claim = 1 OR source = 'dnb'"
         assert element.postgresql == "requires_isbn_claim OR source = 'dnb'"
+
+
+# ── The database's own copy of every CHECK, against the model's own ──────────
+
+
+#: The namespace the model's schema is built into, beside the migrated one on
+#: the same server. One name for both engines: it is an attached database on
+#: SQLite and a schema on Postgres, and what makes it the right shape for both
+#: is that reflection addresses either through the same `schema=` argument.
+_SCRATCH: Final = "endpaper_round_trip"
+
+
+def _reflected_checks(inspector: Inspector, schema: str | None) -> dict[str, tuple[str, str]]:
+    """Every named CHECK one namespace carries, as `name -> (table, text)`.
+
+    **One walk for both sides of the comparison, and that is the whole
+    instrument.** Postgres does not store a CHECK's text: it stores a parsed
+    expression and hands back its own rendering, with parentheses inserted by
+    precedence, membership tests rewritten, ranges expanded and casts added
+    that depend on the column's type. Comparing that rendering against the
+    model's would be red on its first run, and the two repairs available are
+    both worse than the problem. A containment has already passed a dropped
+    floor in this schema once. A normaliser is a second implementation of the
+    server's own deparser, needs the column type table as well as the syntax
+    classes, and is wrong in the lenient direction by construction: every rule
+    it is missing makes two different expressions look the same, it is green,
+    and the next spelling passes silently.
+
+    **So both sides come out of this function and neither is written by
+    hand.** Whatever the server does to a rendering it does to both, and the
+    normalisation cancels with nothing between them.
+    """
+    found: dict[str, tuple[str, str]] = {}
+    for table in inspector.get_table_names(schema=schema):
+        for constraint in inspector.get_check_constraints(table, schema=schema):
+            name = constraint.get("name")
+            assert isinstance(name, str), (
+                f"{table} carries a CHECK with no name, which this comparison cannot "
+                f"address: {constraint['sqltext']}"
+            )
+            assert name not in found, (
+                f"`{name}` is installed twice in {schema!r}, so a comparison keyed on "
+                "the name reads one of the two"
+            )
+            found[name] = (table, " ".join(str(constraint["sqltext"]).split()))
+    return found
+
+
+@contextmanager
+def _the_servers_copy_of_the_model() -> Iterator[tuple[Inspector, str]]:
+    """The model's schema, built by this engine's own server into `_SCRATCH`.
+
+    **Built from `Base.metadata` and never from a table declared here.** The
+    casts the server inserts depend on a column's type, so a scratch column one
+    step off the model's renders differently and the comparison fails for a
+    reason that is not its subject. Copying the model's own `Table` objects
+    makes the types right by construction.
+
+    **The statements that make and unmake the namespace are the only per
+    engine text, and they go through `dialect.for_bind`** like every other
+    rule spelled twice here, so a third engine is refused where it arrives
+    rather than silently receiving one of the two.
+
+    **The namespace is cleared before it is made, and that is not
+    belt and braces on one of the two engines.** On Postgres a schema outlives
+    the connection and the worker database is reused between runs, so a kill
+    between the create and the cleanup leaves the namespace behind and every
+    later run of the job that owns this errors on the create until somebody
+    drops it by hand. That job is the release gate, so the cost of the leak is
+    a release that cannot be cut. On SQLite there is nothing to clear: the
+    attach makes a temporary database that no other connection can see and
+    that the detach or the disconnect destroys, so the arm there is a
+    statement with no effect rather than a second mechanism.
+    """
+    opened = False
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        try:
+            connection.execute(
+                text(
+                    for_bind(
+                        connection,
+                        sqlite="SELECT 1",
+                        postgresql=f"DROP SCHEMA IF EXISTS {_SCRATCH} CASCADE",
+                    )
+                )
+            )
+            connection.execute(
+                text(
+                    for_bind(
+                        connection,
+                        sqlite=f"ATTACH DATABASE '' AS {_SCRATCH}",
+                        postgresql=f"CREATE SCHEMA {_SCRATCH}",
+                    )
+                )
+            )
+            opened = True
+            target = MetaData(schema=_SCRATCH)
+            for table in Base.metadata.tables.values():
+                table.to_metadata(target, schema=_SCRATCH)
+            target.create_all(connection)
+            yield inspect(connection), _SCRATCH
+        finally:
+            if opened:
+                connection.execute(
+                    text(
+                        for_bind(
+                            connection,
+                            sqlite=f"DETACH DATABASE {_SCRATCH}",
+                            postgresql=f"DROP SCHEMA {_SCRATCH} CASCADE",
+                        )
+                    )
+                )
+
+
+class TestTheInstalledCheckIsTheModelsCheck:
+    """What the database in front of us holds, against what the model says.
+
+    **The instrument the file's own header calls for.** The token scan two
+    classes up is an enumeration of an open set, and the thing named there as
+    not having that hole is the pipeline's `test:postgres` job, which creates
+    a schema on a real server. That job creates the **revisions'** schema; the
+    model's arm reaches the server only as source compared against source. This
+    is the missing hop, and it is one comparison rather than two because both
+    copies are rendered by the server.
+
+    **It runs on both engines and skips on neither**, which is not an accident
+    of where it was put. On SQLite the round trip is the identity, because
+    SQLite stores a CHECK's source text, so here the comparison degenerates to
+    the equality the schema tests already make. Nothing in this test tree skips
+    on a dialect today, and a skip is how a test stops running without anybody
+    being told; the first one should not arrive as a side effect of this.
+
+    **The cheap engine's half is already owned elsewhere, and this does not
+    claim it.** `test_schema.py::TestTheMigrationsAndTheModelsAgree` compares
+    the model's declarations against the installed schema as two dicts and
+    catches, on SQLite, everything this catches there. **The delta is the
+    other engine**, because that class is not in the job's selection, and the
+    delta is exactly the deparser cancellation: there the model's text and the
+    server's rendering are different strings for the same rule, and only
+    putting both through the server makes them comparable.
+
+    **What it sees.** A constraint the chain installs on one engine and not on
+    the other. A constraint whose text in the migrated schema differs from the
+    model's, as this server renders each. A constraint the model declares that
+    no revision installed.
+
+    **Not a rewrite.** A rewrite the server applies to a rendering it applies
+    to both copies, so it cancels by construction; that is the instrument
+    rather than a hole in it, and naming it here as something seen would
+    promise the one thing the design gave up to get the comparison.
+
+    **What it cannot see.** A declared arm wrong in the same way in both
+    copies, which is textual comparison's standing blind spot on either engine;
+    the instrument for that is behavioural, and the hostile value corpus in
+    `test_backup.py` runs on both engines. And the two arms disagreeing in
+    **meaning**: `sqlite` and `postgresql` are different languages and only a
+    corpus can compare them, which is the same limit the token scan states.
+
+    **What the round trip itself does not reach.** Anything the copy is not
+    asked about: a server default, a trigger, a privilege. The namespace is
+    built for the CHECK comparison and reflected for that alone.
+    """
+
+    @staticmethod
+    def _declared_names() -> set[str]:
+        """Every named CHECK the model declares.
+
+        **An unnamed one is refused here rather than dropped.** Dropping it
+        leaves the reflection walk to hit it first and report a CHECK with no
+        name on a table, which is true and names the wrong end: the fix is at
+        the model's own site. This says so where the site can be found.
+        """
+        names = set()
+        for table in Base.metadata.tables.values():
+            for check in _checks(table):
+                assert check.name is not None, (
+                    f"{table.name} declares a CHECK with no name, which neither side of "
+                    f"this comparison can address: {check.sqltext}"
+                )
+                names.add(str(check.name))
+        return names
+
+    def test_the_servers_copy_carries_every_constraint_the_model_declares(self):
+        """The anti vacuity arm, and it is the one that keeps the next one
+        honest: a comparison over two empty walks agrees perfectly.
+        """
+        declared = self._declared_names()
+        assert declared, "no model in this schema declares a named CHECK"
+        with _the_servers_copy_of_the_model() as (inspector, schema):
+            copied = _reflected_checks(inspector, schema)
+        assert set(copied) == declared, (
+            f"the server's copy of the model holds {sorted(set(copied) ^ declared)} "
+            "differently from the model, so the comparison below is over a schema that "
+            "is not the one being asserted about"
+        )
+
+    def test_every_installed_check_is_what_the_model_renders(self):
+        # Through the name walk first, so an unnamed model constraint is
+        # reported at the site that declares it rather than at the reflection
+        # that reaches it. This arm never called it, so half the fix for that
+        # was in the other arm only.
+        self._declared_names()
+        with _the_servers_copy_of_the_model() as (inspector, schema):
+            model = _reflected_checks(inspector, schema)
+            installed = _reflected_checks(inspector, inspector.default_schema_name)
+        disagreeing = sorted(
+            name for name in set(model) | set(installed) if model.get(name) != installed.get(name)
+        )
+        shown = [(name, installed.get(name), model.get(name)) for name in disagreeing[:3]]
+        assert not disagreeing, (
+            f"{disagreeing} differ between the schema the revisions built and the schema "
+            "the model declares, as this server renders each of them. Installed against "
+            f"model: {shown}"
+        )

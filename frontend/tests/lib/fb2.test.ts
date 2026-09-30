@@ -66,6 +66,7 @@ describe("reading a FictionBook's description", () => {
       title: "Назад в юность",
       subtitle: null,
       authors: ["Александр Юрьевич Санфиров"],
+      categories: ["sf"],
       identifiers: [{ scheme: "isbn", value: "978-5-9922-1663-9" }],
       isbn: "9785992216639",
       publisher: "Альфа-книга",
@@ -145,6 +146,46 @@ describe("reading a FictionBook's description", () => {
       title: "История с кладбищем",
       authors: ["Гейман"],
     });
+  });
+});
+
+describe("the genres, which are this format's subjects", () => {
+  it("reads every genre element the file declared, in its own order", () => {
+    // Several `<genre>` elements is how the format says several genres, and
+    // the corpus carries 35 across 18 files. Folding a repeat and capping the
+    // count belong to the request, not here.
+    const record = read(
+      fb2(
+        "<title-info><genre>sf</genre><genre>det</genre><genre>sf</genre>" +
+          "<book-title>Пикник</book-title></title-info>",
+      ),
+    );
+
+    expect(record?.categories).toEqual(["sf", "det", "sf"]);
+  });
+
+  it("reads a genre out of title-info and never out of document-info", () => {
+    // The scoping rule this whole reader rests on, asked of the one field that
+    // was added to it last: `document-info` describes whoever produced the
+    // file, and a subtree search would file the converter's own genre.
+    const record = read(
+      fb2(
+        `<title-info><book-title>Т</book-title></title-info>` +
+          "<document-info><genre>nonfiction</genre><id>abc</id></document-info>",
+      ),
+    );
+
+    expect(record?.categories).toEqual([]);
+  });
+
+  it("states no genre for a file that declared none", () => {
+    // The other side, without which the arms above are satisfied by a reader
+    // that answers the empty list to everything.
+    const record = read(
+      fb2("<title-info><book-title>Т</book-title></title-info>"),
+    );
+
+    expect(record?.categories).toEqual([]);
   });
 });
 

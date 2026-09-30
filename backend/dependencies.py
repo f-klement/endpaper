@@ -305,7 +305,7 @@ def book_for_read(
     Eager-loads `added_by`, so resolving the book does not cost a query for the
     member who added it. The collections are not loaded here, and what happens
     to them next depends on the route rather than on this dependency: **20 of
-    the 36** routes fed from here serialise no Book at all, just over half,
+    the 37** routes fed from here serialise no Book at all, just over half,
     and those that do get their tags from `books_to_out`, which re-reads and
     loads them itself.
     `shelf.Loading` carries the measurement, including the one arm of one route

@@ -44,7 +44,7 @@ import isbn
 _ROOT = Path(__file__).resolve().parents[3]
 CASES_PATH = _ROOT / "conformance" / "cases" / "isbn.json"
 SCHEMA_PATH = _ROOT / "conformance" / "schema" / "isbn.schema.json"
-README_PATH = _ROOT / "conformance" / "README.md"
+DOC_PATH = _ROOT / "conformance" / "isbn.md"
 
 
 def _string(value: str | None, op: str) -> str:
@@ -133,14 +133,21 @@ def _load() -> list[dict[str, Any]]:
     return cases
 
 
-#: The header of the guard dropping table in `conformance/README.md`. Anchored on
-#: rather than inferred, because `README.md` holds a second two column table and a
-#: walk over every `|` line reads both. That is not cosmetic: it was the first
-#: version of this, and it made the anti vacuity count below pass on the six rows
-#: of the other table while the guard table itself could have been deleted whole.
+#: The header of the guard dropping table in `conformance/isbn.md`. Anchored on
+#: rather than inferred, because a walk over every `|` line reads every table in
+#: the file. That is not cosmetic: it was the first version of this, and it made
+#: the anti vacuity count below pass on the rows of another table while the guard
+#: table itself could have been deleted whole.
+#:
+#: **And this document is ISBN's own rather than the directory's.** The identical
+#: header stands in `conformance/subject.md`. Under one shared README a first match
+#: would have this runner reading the other domain's rows, which either fails the
+#: count below or, worse, passes against the wrong rows while this table goes
+#: unchecked: a guard disarmed by a data change with no diff to the guard. One
+#: document per domain is what makes the anchor unique by construction.
 _GUARD_TABLE_HEADER: Final = "| guard dropped | cases that catch it |"
 
-#: The one cell in that table naming no case, verbatim. `conformance/README.md`
+#: The one cell in that table naming no case, verbatim. `conformance/isbn.md`
 #: argues at length that the browser's checksum regexes cannot be caught by any
 #: case, because `Number("\u0660")` is `NaN` and the arithmetic refuses a non
 #: ASCII digit whatever the regex admits. Written out so that a row emptied by
@@ -172,7 +179,7 @@ _DELIBERATELY_UNCATCHABLE: Final = "**nothing, and it cannot**"
 _GUARD_TABLE_ROWS: Final = 6
 
 
-def _readme_guard_table() -> list[tuple[str, str, list[str]]]:
+def _doc_guard_table() -> list[tuple[str, str, list[str]]]:
     """Rows of that table, as (what was dropped, the cell verbatim, the case ids in it).
 
     **The cell comes back verbatim as well as parsed**, because a row that yields
@@ -188,7 +195,7 @@ def _readme_guard_table() -> list[tuple[str, str, list[str]]]:
     function name shaped exactly like a case id, so scanning the whole row would
     quietly compare a function against the case file and report it missing.
     """
-    lines = README_PATH.read_text(encoding="utf-8").splitlines()
+    lines = DOC_PATH.read_text(encoding="utf-8").splitlines()
     try:
         start = lines.index(_GUARD_TABLE_HEADER)
     except ValueError:
@@ -206,6 +213,25 @@ def _readme_guard_table() -> list[tuple[str, str, list[str]]]:
         identifiers = re.findall(r"`([a-z0-9]+(?:-[a-z0-9]+)*)`", columns[1])
         rows.append((columns[0], columns[1], identifiers))
     return rows
+
+
+def _header_occurrences() -> int:
+    """How many times the guard table's header stands in the document.
+
+    **The split across documents makes the anchor unique between domains and
+    does nothing within one.** Both runners take a `lines.index`, which is a
+    first match, so a second table under the same header in this one document
+    reproduces the defect the split closed one level down, and a table added
+    **above** the first is the silent direction: the count still matches, the
+    rows are somebody else's, and the table this runner was written to guard
+    goes unread.
+
+    **What this refuses that it should not**, stated rather than discovered: a
+    fenced example of the table format, which would put the header in the
+    document a second time legitimately. Neither conformance document has one,
+    so this arms immediately rather than needing the tree cleaned up first.
+    """
+    return DOC_PATH.read_text(encoding="utf-8").splitlines().count(_GUARD_TABLE_HEADER)
 
 
 CASES = _load()
@@ -229,18 +255,27 @@ class TestTheCaseFileIsWorthRunning:
             f"only in this runner {sorted(set(OPERATIONS) - declared)}"
         )
 
-    def test_every_case_the_readme_names_still_exists(self):
+    def test_the_guard_table_header_stands_exactly_once(self):
+        found = _header_occurrences()
+        assert found == 1, (
+            f"the guard dropping table's header stands {found} times in {DOC_PATH}, and "
+            "the extraction takes the first match. One document per domain makes this "
+            "anchor unique between domains and not within one, so a second table here, "
+            "above or below, silently moves which rows are guarded."
+        )
+
+    def test_every_case_the_document_names_still_exists(self):
         """The floor is a count, and a count cannot protect the cases that carry the reason.
 
         29 cases against a floor of 20 leaves nine deletable, and the ones worth
         deleting to make a failure go away are the non-ASCII ones this directory
         exists for: every operation would still be exercised and both suites
-        would stay green. `conformance/README.md` names the load bearing
+        would stay green. `conformance/isbn.md` names the load bearing
         cases by id in its guard dropping table, so binding that table to the
         case file makes deleting one of them a failure here, and makes a renamed
         case show up as a table pointing at nothing.
 
-        The ids are read out of the README rather than listed here, because a
+        The ids are read out of the document rather than listed here, because a
         list written in this file is a third place to keep the same fact in step.
 
         **Every row is checked, not just the set of ids they add up to, and the
@@ -248,14 +283,14 @@ class TestTheCaseFileIsWorthRunning:
         rows and compared only the union: deleting the two `is_valid_isbn10` rows
         left four rows and a green guard, after which the two cases those rows
         named were named nowhere and could be deleted with the suite still green.
-        A two step deletion, green at every step, of exactly the layers the
-        README argues must not go in silence. The second version closed that and
+        A two step deletion, green at every step, of exactly the layers
+        `conformance/isbn.md` argues must not go in silence. The second version closed that and
         left `>=`, which reopened it one row later, since a table grown to seven
         satisfies a floor of six and can then be cut back to six a row poorer.
         """
-        rows = _readme_guard_table()
+        rows = _doc_guard_table()
         assert len(rows) == _GUARD_TABLE_ROWS, (
-            f"the guard dropping table in {README_PATH} yielded {len(rows)} rows against "
+            f"the guard dropping table in {DOC_PATH} yielded {len(rows)} rows against "
             f"{_GUARD_TABLE_ROWS} expected. A row was deleted, taking the cases it named "
             "out of anything's sight; or a row was added and this number was not; or the "
             "extraction has stopped finding the table and this rule is vacuous."
@@ -267,7 +302,7 @@ class TestTheCaseFileIsWorthRunning:
             if not identifiers and cell != _DELIBERATELY_UNCATCHABLE
         ]
         assert silent == [], (
-            f"rows of {README_PATH}'s guard dropping table name no case and are not the "
+            f"rows of {DOC_PATH}'s guard dropping table name no case and are not the "
             f"one row allowed to: {silent}. A layer with no case is a layer that can be "
             "deleted in silence, which is the whole argument the table makes."
         )
@@ -275,7 +310,7 @@ class TestTheCaseFileIsWorthRunning:
         known = {case["id"] for case in CASES}
         named = {identifier for _, _, identifiers in rows for identifier in identifiers}
         assert named <= known, (
-            f"{README_PATH} names cases that are not in {CASES_PATH.name}: "
+            f"{DOC_PATH} names cases that are not in {CASES_PATH.name}: "
             f"{sorted(named - known)}. A case may not be deleted or renamed while the "
             "table that explains what it pins still points at it."
         )

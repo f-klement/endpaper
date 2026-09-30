@@ -1173,11 +1173,35 @@ function flattenedProse(source: string): string {
     .replace(/\s+/g, " ");
 }
 
-/** The reason, which lives once. No reader restates it. */
+/**
+ * The two sentences the field's arrival made false.
+ *
+ * **Both are asserted absent rather than deleted, which is the whole point of
+ * this pair.** Until the readers started emitting a subject, one arm here
+ * required all four of them to carry `THE_POINTER` and another required
+ * `THE_REASON` to appear exactly once. Correcting the readers turns both of
+ * those from a passing arm into a **passing arm about nothing**, and deleting
+ * them is indistinguishable in a diff from correcting them: a plant that
+ * starts passing is invisible where a plant that breaks is not. So they are
+ * inverted instead, and the arms below fail the day either sentence comes
+ * back.
+ */
 const THE_REASON = "the wall is this type rather than the server";
-
-/** What a reader says instead: the absence, and where the reason is. */
 const THE_POINTER = "`FileMetadata` declares no field for a subject";
+
+/**
+ * The distinction that decides what the field means, which lives once.
+ *
+ * It is the sentence the ticket was written about: four modules had written
+ * one reason nearly verbatim, and one home is what stopped a fifth copy.
+ *
+ * **The distinguishing clause and not a fragment of it.** The arm this file
+ * lost carried this tree's own record of what a short anchor costs, and the
+ * first version of this constant was three words, `never a tag`, which any
+ * module could write while saying something else entirely and which the seam
+ * could stop saying while still matching. A clause names the sentence.
+ */
+const THE_DISTINCTION = "The file's own words and never a tag";
 
 /** The half of the old sentence that went stale when the server grew the field. */
 const STALE_CLAIM = "takes no `categories`";
@@ -1189,15 +1213,22 @@ function modulesCarrying(phrase: string): string[] {
     .sort();
 }
 
-describe("where the missing destination for a subject is written down", () => {
+describe("what a reader says about a subject, and where it says it", () => {
   /**
-   * Three arms over phrases, and the blind spot is stated rather than left to be
-   * found.
+   * Arms over phrases, and the blind spot is stated rather than left to be found.
    *
    * **These match a phrase and not a claim, so a paraphrase evades them.** What
    * makes that affordable is the denominator: four modules wrote one sentence
    * nearly verbatim, so phrase matching would have caught every instance that has
    * ever existed. The duplication is what produced the ticket, not the wording.
+   *
+   * **What no arm here reaches is whether a reader actually emits what its
+   * format states**, which is a property of the code and is held where the code
+   * can be driven: `tests/lib/opf.test.ts`, `fb2.test.ts`, `cbz.test.ts` and
+   * `mobi.test.ts` each drive their own reader with a document stating a subject
+   * and assert it arrives. A reader that quietly stopped reading its element
+   * would be green here and red there, which is the direction that matters and is
+   * the reason these arms are about prose only.
    */
   it("says the server takes no categories in no module at all", () => {
     // A machine oracle for the only checkable half of the old sentence, which is
@@ -1220,33 +1251,26 @@ describe("where the missing destination for a subject is written down", () => {
     expect(modulesCarrying(STALE_CLAIM)).toEqual([]);
   });
 
-  it("gives the reason in exactly one module", () => {
+  it("keeps the distinction between a subject and a tag in one module", () => {
     // The arm that stops a sixth copy of the reasoning, which is the duplication
-    // that produced the ticket.
-    expect(modulesCarrying(THE_REASON)).toEqual([SEAM]);
+    // that produced the ticket. It was the same arm before the field existed,
+    // over the sentence that said the field did not: what a reader must not
+    // restate moved with the field rather than going away.
+    expect(modulesCarrying(THE_DISTINCTION)).toEqual([SEAM]);
   });
 
-  it("has every reader that passes over a subject point at the seam", () => {
-    // The other direction, which the arm above cannot see: a reader could state
-    // its own reason without repeating this one's words, and go quiet.
+  it("has no module still saying the record declares no field for one", () => {
+    // **The inversion of the arm this replaces, and the reason it is an arm at
+    // all.** Four readers carried that sentence and it is now false in all four.
+    // An arm requiring them to carry it would pass over nothing once they were
+    // corrected, and deleting it looks identical in a diff. This one fails the
+    // day the sentence comes back, which is the direction a reader going stale
+    // actually takes.
     //
-    // **Containment rather than equality, and the seam is excluded.** Equality made
-    // this refuse a fifth reader that pointed correctly, which is a false refusal
-    // bought for nothing: these four are the modules that had the sentence, so
-    // requiring them catches one going quiet, and a fifth that points is right and
-    // needs no edit here. The registry is not the population, checked: `epub.ts` is
-    // registered and `opf.ts`, which carries the pointer, is not.
-    const pointing = modulesCarrying(THE_POINTER);
-
-    expect(pointing).toEqual(
-      expect.arrayContaining([
-        "lib/cbz.ts",
-        "lib/fb2.ts",
-        "lib/mobi.ts",
-        "lib/opf.ts",
-      ]),
-    );
-    expect(pointing).not.toContain(SEAM);
+    // Both halves, because the seam's own reason went with them: the sentence a
+    // reader wrote, and the sentence the seam wrote for it to point at.
+    expect(modulesCarrying(THE_POINTER)).toEqual([]);
+    expect(modulesCarrying(THE_REASON)).toEqual([]);
   });
 
   it("finds a phrase wrapped across line comments too", () => {
@@ -1267,5 +1291,30 @@ describe("where the missing destination for a subject is written down", () => {
 
     expect(flattenedProse(wrapped)).toContain(THE_POINTER);
     expect(flattenedProse(block)).toContain(THE_POINTER);
+  });
+
+  it("matches each phrase it looks for against the sentence it came from", () => {
+    // **Every constant this file searches by, driven through the searcher.**
+    // The arms above assert two of them appear nowhere, which is satisfied by
+    // a typo as happily as by a corrected tree: a constant nothing can match
+    // is an arm about nothing, and only `THE_POINTER` had a probe. These are
+    // the sentences as their own sites spelled them, wrapped the way prettier
+    // wraps them, so the flattener is exercised rather than trusted.
+    const pointer = [
+      " * **`Genre`.** Read by nothing, because `FileMetadata` declares no",
+      " * field for a subject: see that type for the reason.",
+    ].join("\n");
+    const reason = [
+      " * **No field here holds a subject, and the wall is this type rather",
+      " * than the server.** Every format in the family states one.",
+    ].join("\n");
+    const distinction = [
+      "   * **The file's own words and never a tag**, which is the",
+      "   * distinction that decides what this field means.",
+    ].join("\n");
+
+    expect(flattenedProse(pointer)).toContain(THE_POINTER);
+    expect(flattenedProse(reason)).toContain(THE_REASON);
+    expect(flattenedProse(distinction)).toContain(THE_DISTINCTION);
   });
 });

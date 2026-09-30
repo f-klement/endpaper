@@ -12,6 +12,8 @@ import respx
 from fastapi import HTTPException
 
 from ratelimit import (
+    BACKUP_LIMIT,
+    EXPORT_LIMIT,
     LOGIN_LIMIT,
     MAX_TRACKED_KEYS,
     METADATA_LIMIT,
@@ -303,6 +305,100 @@ class TestTheMetadataLimit:
         assert res.status_code == 429
 
 
+class TestTheExportDoorIsRationed:
+    """Two counters over two routes, and they are not one counter.
+
+    A member walking their own shelf and an administrator building the whole
+    database are different units, so sharing a budget would let the first
+    ration the second. `test_a_members_exports_do_not_ration_the_backup` is
+    that claim rather than a description of it, and it is the arm that fails
+    if somebody merges the two to save a row in the documentation table.
+    """
+
+    @staticmethod
+    def _export(client, account):
+        return client.get("/api/books/export", headers=account["headers"])
+
+    def test_a_burst_of_exports_is_cut_off(self, client, admin):
+        codes = [
+            self._export(client, admin).status_code
+            for _ in range(EXPORT_LIMIT.max_attempts + 1)
+        ]
+
+        assert codes[-1] == 429
+        assert 429 not in codes[:-1]
+
+    def test_the_refusal_says_how_long_to_wait(self, client, admin):
+        """`Retry-After` is what a caller acts on, and it is stripped by any
+        handler that rebuilds the response rather than passing it through."""
+        for _ in range(EXPORT_LIMIT.max_attempts):
+            self._export(client, admin)
+
+        res = self._export(client, admin)
+
+        assert res.status_code == 429
+        assert int(res.headers["Retry-After"]) > 0
+
+    def test_one_member_burning_the_budget_does_not_ration_another(
+        self, client, admin, member
+    ):
+        """Keyed on the authenticated username, so the counter is the member's
+        own. An address key would collapse a household into one bucket behind
+        the reverse proxy this app is documented to sit behind, and the retry
+        hint would then tell one member when another last exported."""
+        for _ in range(EXPORT_LIMIT.max_attempts + 1):
+            self._export(client, admin)
+
+        assert self._export(client, member).status_code != 429
+
+    def test_a_caller_with_no_session_is_401_and_spends_nothing(self, client, admin):
+        """**The reason the check is in the handler body and not in
+        `dependencies=[...]`.** A limiter declared there is inserted ahead of
+        the route's own dependencies and answers 429 before anything
+        authenticates, which tells a stranger that a username exists and has
+        been active inside the window, and lets them spend that member's
+        budget. Both halves are asserted: the stranger gets 401, and the member
+        still has a full budget afterwards."""
+        for _ in range(EXPORT_LIMIT.max_attempts + 1):
+            assert client.get("/api/books/export").status_code == 401
+
+        assert self._export(client, admin).status_code == 200
+
+    def test_a_burst_of_backups_is_cut_off(self, client, admin):
+        codes = [
+            client.get("/api/backup", headers=admin["headers"]).status_code
+            for _ in range(BACKUP_LIMIT.max_attempts + 1)
+        ]
+
+        assert codes[-1] == 429
+        assert 429 not in codes[:-1]
+
+    def test_a_member_is_403_on_the_backup_and_spends_nothing(self, client, admin, member):
+        """The same ordering claim one gate further in: `require_admin` is a
+        parameter dependency, so it has already refused by the time the handler
+        body charges anything. A member hammering the backup cannot ration the
+        administrator."""
+        for _ in range(BACKUP_LIMIT.max_attempts + 1):
+            assert client.get("/api/backup", headers=member["headers"]).status_code == 403
+
+        assert client.get("/api/backup", headers=admin["headers"]).status_code == 200
+
+    def test_a_members_exports_do_not_ration_the_backup(self, client, admin):
+        """One counter over both routes was the cheap answer, and this is what
+        it would cost: the same account spending its exports would take the
+        administrator's backup with it."""
+        for _ in range(EXPORT_LIMIT.max_attempts + 1):
+            self._export(client, admin)
+
+        assert client.get("/api/backup", headers=admin["headers"]).status_code == 200
+
+    def test_the_backup_does_not_ration_the_export(self, client, admin):
+        for _ in range(BACKUP_LIMIT.max_attempts + 1):
+            client.get("/api/backup", headers=admin["headers"])
+
+        assert self._export(client, admin).status_code == 200
+
+
 class TestTheRateLimitTableInTheDocsIsTheModule:
     """`docs/security.md` states how many counters there are and lists them.
 
@@ -315,6 +411,12 @@ class TestTheRateLimitTableInTheDocsIsTheModule:
 
     #: The heading the table sits under, and the row separator that follows it.
     _SECTION = "## Rate limiting"
+    #: **Deliberately further than the module reaches**, because the counter
+    #: this map has no word for is the one nobody is looking at: a missing key
+    #: used to be a bare `KeyError` inside a guard about documentation, raised
+    #: at whoever added an unrelated limiter. The arm below now says what is
+    #: wrong instead, and this runs ahead of the module so the ordinary case
+    #: is one row rather than two edits.
     _WORDS = {
         4: "Four",
         5: "Five",
@@ -325,6 +427,12 @@ class TestTheRateLimitTableInTheDocsIsTheModule:
         10: "Ten",
         11: "Eleven",
         12: "Twelve",
+        13: "Thirteen",
+        14: "Fourteen",
+        15: "Fifteen",
+        16: "Sixteen",
+        17: "Seventeen",
+        18: "Eighteen",
     }
 
     @staticmethod
@@ -341,6 +449,19 @@ class TestTheRateLimitTableInTheDocsIsTheModule:
         """A guard that inspects nothing reads as coverage. If the module stops
         constructing limiters this way, everything below goes vacuous."""
         assert self._counters() >= 1
+
+    def test_this_rule_has_a_word_for_the_number_of_counters(self):
+        """A guard that raises rather than failing has stopped being a guard.
+
+        The arm below reads `_WORDS[count]`, so a counter past the end of that
+        map used to abort with a bare `KeyError` under a class about the
+        documentation table, which says nothing about what to do about it."""
+        count = self._counters()
+        assert count in self._WORDS, (
+            f"backend/ratelimit.py binds {count} counters and `_WORDS` stops at "
+            f"{max(self._WORDS)}. Extend it, and with it the count word and the "
+            "row in docs/security.md that the arms below are about."
+        )
 
     def test_the_stated_number_is_the_number_of_counters(self):
         count = self._counters()
@@ -361,10 +482,16 @@ class TestTheRateLimitTableInTheDocsIsTheModule:
         checked, not the cause**: an alias, an import and a subclass instance
         all produce it, and they do not want the same fix, since the first two
         are one counter twice over and a subclass is a real further counter the
-        fixture does reset. Measured, planting one of each direction: a
-        container leaves the walk at eleven
-        while the parse says twelve, and an alias leaves the walk at twelve
-        while the parse says eleven.
+        fixture does reset.
+
+        **Both directions re-planted on 2026-09-29**, after the export and
+        backup counters took the module from eleven to thirteen: a verdict
+        recorded against one population is not a verdict about another. A
+        container leaves the walk **one under** the parse and an alias leaves
+        it one over, and this arm reddened by name on each. The counts those
+        plants produced are deliberately not written here, because they are a
+        spelling of however many counters the module happens to have; the
+        relationship is the thing that is true.
         """
         bound = self._counters()
         constructed = _limiters_ratelimit_constructs()

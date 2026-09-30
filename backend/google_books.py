@@ -70,9 +70,9 @@ def join_categories(categories: list[str], *, limit: int | None = None) -> str |
     **Dropped and logged rather than raised**, which is
     `classifications.bounded_headings`' arrangement for the same shape: this runs
     inside a catalogue read, so raising would lose a whole record over one
-    subject. `schemas.book.BookCreate.one_subject_per_entry` is the door that
-    refuses instead, because there a caller chose the value and there is somebody
-    to tell.
+    subject. `schemas.book.normalised_subjects` is what refuses instead, at both
+    request bodies that carry this field, because there a caller chose the value
+    and there is somebody to tell.
 
     **`limit` caps the count, and a caller that produces a value for `BookMatch`
     has to pass it.** That model refuses past its own count, and

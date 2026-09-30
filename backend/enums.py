@@ -585,6 +585,41 @@ class ExportFormat(StrEnum):
     MARCXML = "marcxml"
 
 
+#: What each export format is sent as, and the **only** home for these strings.
+#:
+#: Read twice and that is the whole reason it exists: `routers/books.export_books`
+#: puts one of them on the `StreamingResponse`, and the same route's `responses`
+#: declares all of them so the published schema says what the route sends rather
+#: than `application/json`. A literal at each site is one promise and one delivery
+#: that can disagree, which is the defect the declaration was added to close.
+#:
+#: The charset rides along, because it is part of what the route actually sends
+#: and a declaration that dropped it would be a second, smaller version of the
+#: same disagreement.
+#:
+#: `application/marcxml+xml` is the registered type for MARC21 in XML, per the
+#: Library of Congress: a cataloguer's tools dispatch on it.
+EXPORT_MEDIA_TYPES: dict[ExportFormat, str] = {
+    ExportFormat.CSV: "text/csv; charset=utf-8",
+    ExportFormat.TXT: "text/plain; charset=utf-8",
+    ExportFormat.MARCXML: "application/marcxml+xml; charset=utf-8",
+}
+
+#: Refused at import rather than covered by a test, for `book_columns._MISFILED`'s
+#: reason and one of its own: the route reads this map with `[]`, so a format added
+#: without an entry is a `KeyError` on somebody's export, and the declaration would
+#: quietly be short by one media type with nothing raising at all.
+_FORMATS_WITHOUT_A_MEDIA_TYPE = set(ExportFormat) - set(EXPORT_MEDIA_TYPES)
+if _FORMATS_WITHOUT_A_MEDIA_TYPE:
+    raise RuntimeError(
+        "Every member of ExportFormat is sent under a media type and these have "
+        f"none: {sorted(_FORMATS_WITHOUT_A_MEDIA_TYPE)}. The export route reads "
+        "this map to set the response's type and the same route declares its "
+        "values in the published schema, so a missing entry is both a failed "
+        "export and a document that is short a promise."
+    )
+
+
 class BookSort(StrEnum):
     """Accepted values for `GET /api/books?sort=`.
 

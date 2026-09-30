@@ -473,10 +473,18 @@ export const en = {
   "tags.newLabel": "New tag",
   "tags.newPlaceholder": "Holiday reads",
   "tags.add": "Add a tag",
+  // The heading over names typed on the scan form, which have no row yet:
+  // there is no book to put them on until it is saved.
+  "tags.pending": "Once saved",
   "tags.create": "Create",
   "tags.delete": "Delete {name}",
+  // "every book" and not a number, for the reason `customFields.deleteConfirm`
+  // above gives. The count this used to carry was `TagOut.book_count`, which is
+  // the **reader's** count, and the delete is library wide: an admin was told
+  // to take a tag off 3 books when it was on two hundred, and the gap is other
+  // members' private books, so no true number can be published here either.
   "tags.deleteConfirm":
-    'Delete the tag "{name}"? It comes off {count} books, for everybody, and cannot be undone.',
+    'Delete the tag "{name}"? It comes off every book, for everybody, and cannot be undone.',
   "tags.builtInHint": "Built-in tags cannot be deleted.",
 
   // ── Login ───────────────────────────────────────────────────────────────
@@ -1095,7 +1103,7 @@ export const en = {
   "collections.emptyHint":
     "A collection splits the shelf: physical from ebook, kept from sold, yours from mine. A book is in one collection, so pick the split that matters most and use tags for the rest.",
   "collections.explain":
-    "A collection groups books. It never hides them: who can see a book is still up to whether it is private.",
+    "A collection groups books. It never hides them: who can see a book is still up to whether it is private. A collection itself is listed for you when it holds a book you can see, when it holds a deleted book you can still find in the trash, or when it holds nothing at all.",
   "collections.newName": "Name",
   "collections.newPlaceholder": "Ebooks",
   "collections.create": "Add collection",
@@ -1179,6 +1187,17 @@ export const en = {
   "duplicates.merged": "Merged into one entry.",
   "duplicates.confirm":
     'Fold {count} entries into "{title}"? This cannot be undone.',
+  // `total` is at least two wherever this shows, because the line is gated on
+  // there being more groups than the ones on screen and the screen has at
+  // least one. So the plural is safe here and is not in the row below.
+  "duplicates.capped":
+    "Showing {shown} of {total} groups. Merge these and the next ones appear.",
+  // **The count rides in parentheses**, the same remedy as
+  // `fallback.keepAllForNow`: this catalogue interpolates and does not
+  // inflect, and the smallest number this row can carry is one, because a
+  // group one over the member cap withholds exactly one entry.
+  "duplicates.moreInGroup":
+    "More entries in this group, left for a second pass ({count})",
   "duplicates.couldNotLoad": "Could not check for duplicates.",
 
   // ── Bulk actions ────────────────────────────────────────────────────────
@@ -1227,6 +1246,20 @@ export const en = {
   "rapid.unreferenced":
     "{count} of those were added without where their file is. Picking the folder again records it.",
   "rapid.removeFromQueue": "Remove {label} from the queue",
+  // **The words say what cannot be undone later, because this row is where it
+  // still can be.** No route clears the column once a book is written, so
+  // "Add all" is the last moment a member can take a subject off, and a
+  // summary saying only "Subjects" would not tell anybody that.
+  //
+  // **The count reads the same at one and at many**, this screen's convention
+  // and the reason the audiobook summary below renders only above one. It
+  // cannot do that here: one subject still has to be shown and taken off, so
+  // the count moves out of the leading position instead. `rapid.reviewTitle`
+  // above is an older offender and is left alone here.
+  "rapid.subjects": "Subject words from the file: {count}. Show them.",
+  // The whole subject in the label, `identifier.remove`'s reason: a bare
+  // "Remove" repeats on every chip, and one file states several.
+  "rapid.removeSubject": "Remove the subject {subject} from {label}",
   "rapid.nothingScanned": "Nothing scanned yet",
 
   // ── Adding books from their files ───────────────────────────────────────
@@ -1241,8 +1274,17 @@ export const en = {
   // a folder of chapters standing as one book, and nothing records where those
   // are: `ScannedEntry.reference` says why. A sentence promising it for every
   // book would be false on exactly the pick that has the most files in it.
+  //
+  // **The subject clause is here rather than on the confirm card because the
+  // card renders on one path and this panel renders on every one of them.**
+  // A folder pick writes several hundred books behind one confirmation and
+  // never draws the card at all, so a disclosure only on the card would be
+  // absent on exactly the path that stores the most. It says both halves,
+  // because they differ by path and a member choosing between them is choosing
+  // between those two outcomes: one book at a time is reversible before the
+  // press, a folder is not reversible afterwards at all.
   "file.explain":
-    "Pick book files, or a whole folder, and Endpaper reads what it can out of them. Anything a file does not say is looked up by its name. The files are read here in your browser and are never uploaded. From a folder, a book that is one file also gets that file's name and the folders above it saved on it, so you can find it again, and everyone who can see the book can see them.",
+    "Pick book files, or a whole folder, and Endpaper reads what it can out of them. Anything a file does not say is looked up by its name. The files are read here in your browser and are never uploaded. From a folder, a book that is one file also gets that file's name and the folders above it saved on it, so you can find it again, and everyone who can see the book can see them. A file's own subject words are saved on the book too: adding one book at a time you can take them off first, and from a folder the only way to take one off afterwards is to remove the book.",
   "file.pickLabel": "Book files",
   "file.readingFiles": "Reading the files you picked...",
   "file.notAnEpub": "Not an EPUB file.",

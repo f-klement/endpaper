@@ -228,6 +228,11 @@ def _safe(value: str) -> str:
 #
 # Six numbers: five bound the parse and `MAX_RECORDS` bounds the response.
 #
+# **`MAX_RECORDS` is the row half of a response bound whose other half is
+# bytes**, and the bytes are not a constant here: they are what the writer and
+# the column bounds produce, pinned by the suite rather than declared. See that
+# constant, and `MAX_COMPARISON_BUDGET` for the same split on the query side.
+#
 # **The product is what matters rather than any one of them, and the obvious
 # product is wrong.** `MAX_CLAUSES * MAX_WORDS_IN_A_TERM` is the ceiling for an
 # index over one column, and `cql.serverChoice` covers three, so the real figure
@@ -334,14 +339,37 @@ SQLITE_MAX_INTEGER: Final = 2**63 - 1
 #: `numberOfRecords` to find out how much is left. `explain` advertises this in
 #: `configInfo`, so a client can size its paging before it asks.
 #:
-#: 50 because a MARCXML record here is unbounded in one field: `520 $a` carries
-#: the description, which no schema limits, so there is no record size this
-#: number could have been derived from.
-#: `tests/test_sru.py::TestTheRecordSizeThatDecidedTheCap` is what makes it a
-#: measurement rather than a guess: it builds a full page of records with a
-#: 2,000 character description each and fails if the response passes a quarter
-#: of a mebibyte. Raising this constant, or adding a large field to the writer,
-#: is then a decision somebody makes rather than one that happens.
+#: **It counts rows, and what it bounds costs bytes.** That is the whole
+#: difficulty with this number and it is the same one `MAX_COMPARISON_BUDGET`
+#: was written to fix one level up: a count is not a cost, and a narrow record
+#: makes a count look like a worst case. So the two halves of the budget are
+#: measured rather than asserted, each in its own unit, and
+#: `tests/test_sru.py::TestTheCostOfTheWidestLegalResponseIsBounded` holds this
+#: one. It pins a full page of the widest records an API write can produce, to
+#: the byte and with no headroom, so that raising this constant or widening a
+#: column an API write bounds is a decision somebody makes rather than one
+#: that happens.
+#:
+#: **That pin says a page moved and cannot say what moved it**, which is a
+#: property of an equality on one number rather than a gap in it. The arm
+#: beside it reads the record's field tags, so a field **the widest record
+#: renders** is named whether or not it moves the byte count. A field fed by
+#: a relation that fixture does not populate renders nothing, moves nothing
+#: and is named by no arm there; so is a field that repeats a tag already in
+#: the set. Those two are stated at the site rather than covered.
+#:
+#: **What bounds the widest record is a three way partition and this comment
+#: used to state one part of it.** `520 $a` carries the description: the
+#: column is `Text` and bounds nothing, every write through a schema is held
+#: to `models.DESCRIPTION_MAX`, and `backup.py` inserts through Core, so a
+#: restored row is bounded by nothing at all and beats any figure this server
+#: could name. `models.py` records the row that arrived that way. A
+#: `max_length` also counts characters where a response counts bytes, which is
+#: the third reason the figure has to be measured rather than multiplied.
+#:
+#: 50 is unchanged by any of that: it is a page size a client is told about in
+#: `explain`'s `configInfo`, not a byte bound, and `docs/security.md` §SRU is
+#: where what one request can be made to emit is written down for an operator.
 MAX_RECORDS: Final = 50
 
 #: How many records a client gets without asking.

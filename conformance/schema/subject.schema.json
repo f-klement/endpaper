@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Endpaper subject conformance cases",
+  "description": "The shape of conformance/cases/subject.json. Every runner validates the case file against this before running a single case, so a file that has drifted from the format fails rather than silently running fewer cases than it looks like it has.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "domain", "cases"],
+  "properties": {
+    "$schema": {
+      "description": "Relative path to this file, so an editor can find it.",
+      "type": "string"
+    },
+    "domain": {
+      "description": "Which rule set these cases specify. One domain per file.",
+      "const": "subject"
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "outcome": {
+      "description": "What one implementation did with the entry. The browser drops or keeps; only the server refuses, because only the server can fail a request.",
+      "enum": ["kept", "dropped", "refused"]
+    },
+    "outcomeClass": {
+      "description": "The partition over a case's pair of outcomes. Every case belongs to exactly one class and every class holds at least one case, which each runner asserts against its own classifier. This replaces the operation list the ISBN schema carries: there is no operation choice here, because every case runs the same pipeline.",
+      "enum": [
+        "kept-by-both",
+        "dropped-by-the-server",
+        "dropped-by-the-browser",
+        "refused-by-the-server"
+      ]
+    },
+    "answer": {
+      "description": "What one implementation answered about the entry: a kind, plus the value where there is one. The value is pinned rather than derived, which is what lets each runner assert an equality across two languages without running the other one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/outcome" },
+        "value": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "description": "A kept entry has a value, and it is the whole point of the case: the backend runs the server's rule over the browser's value, so a null there would make the equality arm vacuous.",
+          "if": {
+            "properties": { "kind": { "const": "kept" } },
+            "required": ["kind"]
+          },
+          "then": { "properties": { "value": { "type": "string" } } }
+        },
+        {
+          "description": "A dropped or refused entry has no value. A string beside either kind would be read as an answer nobody produced.",
+          "if": {
+            "properties": { "kind": { "enum": ["dropped", "refused"] } },
+            "required": ["kind"]
+          },
+          "then": { "properties": { "value": { "type": "null" } } }
+        }
+      ]
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "input", "browser", "server", "why"],
+      "properties": {
+        "id": {
+          "description": "Unique within the file. Uniqueness is asserted by the runners: JSON Schema cannot express it across array items.",
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "input": {
+          "description": "One subject, exactly as a file stated it. Never a list: the rules above one entry are deliberately unequal between the two implementations, and a case about them would need the per implementation opt out conformance/README.md refuses by name.",
+          "type": "string"
+        },
+        "browser": {
+          "description": "What the browser's bound answers about the input.",
+          "allOf": [
+            { "$ref": "#/$defs/answer" },
+            {
+              "description": "The browser drops what it cannot send and never refuses. A refusal is a 422 and only the server issues one.",
+              "type": "object",
+              "properties": { "kind": { "enum": ["kept", "dropped"] } }
+            }
+          ]
+        },
+        "server": {
+          "description": "What the server's per entry rule answers about the input.",
+          "$ref": "#/$defs/answer"
+        },
+        "why": {
+          "description": "Why this case is in the file. A measurement or a rule, never an opinion. The minimum length is there because an empty why passes a presence check and says nothing.",
+          "type": "string",
+          "minLength": 30
+        }
+      },
+      "allOf": [
+        {
+          "description": "An entry the browser drops is one the server would have dropped or refused. The other way round is a false refusal: the browser loses a subject the server would have stored, silently, and it is the direction a mutation sweep never plants because it plants defects in code rather than in a fixture. Deliberately not the converse, which is why this arm is keyed on the browser: an entry of nothing but the control characters the server deletes is kept by the browser and dropped by the server, and that pair has to stay expressible.",
+          "if": {
+            "type": "object",
+            "properties": {
+              "browser": {
+                "type": "object",
+                "properties": { "kind": { "const": "dropped" } },
+                "required": ["kind"]
+              }
+            },
+            "required": ["browser"]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "server": {
+                "type": "object",
+                "properties": { "kind": { "enum": ["dropped", "refused"] } }
+              }
+            }
+          }
+        },
+        {
+          "description": "An entry the server refuses is one the browser dropped. A field_validator raising costs the member the whole book, so a case where the browser sends something the server refuses may not be written down at all.",
+          "if": {
+            "type": "object",
+            "properties": {
+              "server": {
+                "type": "object",
+                "properties": { "kind": { "const": "refused" } },
+                "required": ["kind"]
+              }
+            },
+            "required": ["server"]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "browser": {
+                "type": "object",
+                "properties": { "kind": { "const": "dropped" } }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

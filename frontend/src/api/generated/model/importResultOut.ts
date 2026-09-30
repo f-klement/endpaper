@@ -45,5 +45,10 @@ export interface ImportResultOut {
    * @minimum 0
    */
   statuses_updated: number;
+  /**
+   * Tag names this run tried to put on a book and did not: the name was empty, the book was already full, the run had invented all the tags it may, or the name is not one this member may use. Not a count of what the source held: a reader caps how many tag names it takes from one record, and a record acted on in no other way is not reached at all, so both lose names upstream of this number
+   * @minimum 0
+   */
+  tags_dropped?: number;
   unmatched_titles?: string[];
 }

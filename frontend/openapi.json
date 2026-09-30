@@ -1234,7 +1234,7 @@
         "type": "object"
       },
       "BookDetailsUpdate": {
-        "description": "The fields a person edits by hand after a book exists.\n\nEvery field is optional and absent means \"leave alone\", so the form can\nsend only what changed. An explicit `null` clears, which is how a series is\nunset; the two cases are distinguished with `model_fields_set`. A column\nthat refuses null refuses the clear too: see the validator at the foot.",
+        "description": "The fields a person edits by hand after a book exists.\n\nEvery field is optional and absent means \"leave alone\", so the form can\nsend only what changed. An explicit `null` clears, which is how a series is\nunset; the two cases are distinguished with `model_fields_set`. A column\nthat refuses null refuses the clear too: see the validator at the foot.\n\n**`categories` is the one field whose clear is not a null**, for the reason\nwritten at it, and it is the one field whose request shape is not the\nstored shape.",
         "properties": {
           "author": {
             "anyOf": [
@@ -1247,6 +1247,16 @@
               }
             ],
             "title": "Author"
+          },
+          "categories": {
+            "default": [],
+            "items": {
+              "maxLength": 120,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Categories",
+            "type": "array"
           },
           "condition": {
             "anyOf": [
@@ -2770,7 +2780,7 @@
         "type": "object"
       },
       "CollectionOut": {
-        "description": "A named part of the shelf, and how much of it the caller can see.\n\n`book_count` is filtered by `visible_to`, like every other count this API\nserves. An unfiltered one would announce, on a label everybody can read,\nthat somebody's private books exist and how many of them there are.",
+        "description": "A named part of the shelf, and how much of it the caller can see.\n\n**Both fields are the caller's view, and the row set is too.** `book_count`\nis filtered by `visible_to`, like every other count this API serves; an\nunfiltered one would announce that somebody's private books exist and how\nmany. The rows this appears in are filtered by the same question one level\nout, so a collection nothing the caller may see is filed in is absent\nrather than present with a zero. `shelving.Shelving` decides both.\n\nOne consequence for a reader of the wire: a `book_count` of 0 means the\ncollection is empty, or holds only books the caller can see in the trash.\nIt no longer means \"or holds books you cannot see\".",
         "properties": {
           "book_count": {
             "default": 0,
@@ -3349,25 +3359,129 @@
         "type": "object"
       },
       "DuplicateGroup": {
-        "description": "Books that look like the same work.\n\nMatched on normalised title plus author rather than ISBN: an accidental\nexact repeat is already refused by `uq_books_isbn_single_copy`, and the\ncase worth catching is a hardback and a paperback, which are legitimately\ntwo different ISBNs.\n\n**Deliberate copies are not duplicates and never appear here.** They share\na `copy_group`, and the endpoint collapses each group to one row before\ndeciding whether anything is left over.",
+        "description": "Books that look like the same work.\n\nMatched on normalised title plus author rather than ISBN: an accidental\nexact repeat is already refused by `uq_books_isbn_single_copy`, and the\ncase worth catching is a hardback and a paperback, which are legitimately\ntwo different ISBNs.\n\n**Deliberate copies are not duplicates and never appear here.** They share\na `copy_group`, and the endpoint collapses each group to one row before\ndeciding whether anything is left over.\n\n**`books` carries at least two members, refused here rather than trusted.**\n`key` is readable plaintext of the form `dune|frank herbert`, so a group\nstanding on one visible row plus one the viewer cannot see would publish\nthat row's title and author. The route builds groups only out of a shelf,\nwhich is what makes that impossible. `min_length` is the second latch:\nit fires when the group is **built**, so a future route that grouped\nbefore it filtered would raise here rather than answer 200.",
         "properties": {
           "books": {
             "items": {
-              "$ref": "#/components/schemas/BookOut"
+              "$ref": "#/components/schemas/DuplicateMember"
             },
+            "maxItems": 20,
+            "minItems": 2,
             "title": "Books",
             "type": "array"
           },
           "key": {
             "title": "Key",
             "type": "string"
+          },
+          "size": {
+            "minimum": 2.0,
+            "title": "Size",
+            "type": "integer"
           }
         },
         "required": [
           "key",
+          "size",
           "books"
         ],
         "title": "DuplicateGroup",
+        "type": "object"
+      },
+      "DuplicateMember": {
+        "description": "One entry in a duplicate group: what the card shows and nothing else.\n\n**Not a `BookOut`.** A person choosing which of two rows survives reads the\ncover, the title and what tells the two apart, which is the format, the\npublisher, the year and the ISBN. Carrying the rest cost this route a\nhydration of the whole visible shelf and a serialisation pass over every\nduplicate in it, for fields nothing rendered.\n\nThe trade, stated so the next reader sees a decision rather than an\nomission: the card can no longer grow a field without a column here and a\nclient regeneration. The fields it would want are small scalars and adding\none is two lines.\n\n`copy_group` is read by the collapse and is deliberately absent: a group\ntoken on a payload is a fact about another member's copies.",
+        "properties": {
+          "cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Url"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BookFormat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "isbn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isbn"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "DuplicateMember",
+        "type": "object"
+      },
+      "DuplicateReport": {
+        "description": "The duplicates worth working on, and how many there are in all.\n\n`groups` is capped by `DUPLICATE_BOOKS_SHOWN`. `total_groups` is not: it is\nwhat the scan found, so a member whose import ran twice is told the size of\nwhat happened instead of being handed it.\n\n**A count is a disclosure, and this route had never carried one.** Both\nnumbers count the groups this viewer **can see**, so neither can be moved\nby a Book the viewer cannot see.\n\n**Can see, not owns**, and the two are separate in this data model on\npurpose. A member looking at two public Books somebody else added is\ncounted one group and is offered the merge, which is intended and is what\n`merge_books` reasons about: `visible_to` yields exactly the set a caller\nmay write, because a public Book is a shared shelf. This sentence used to\nsay the viewer's own shelf, which reads as ownership and is the opposite\nof the rule.",
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/DuplicateGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "total_groups": {
+            "minimum": 0.0,
+            "title": "Total Groups",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "groups",
+          "total_groups"
+        ],
+        "title": "DuplicateReport",
         "type": "object"
       },
       "EmailUpdate": {
@@ -3731,6 +3845,13 @@
             "description": "Statuses actually changed",
             "minimum": 0.0,
             "title": "Statuses Updated",
+            "type": "integer"
+          },
+          "tags_dropped": {
+            "default": 0,
+            "description": "Tag names this run tried to put on a book and did not: the name was empty, the book was already full, the run had invented all the tags it may, or the name is not one this member may use. Not a count of what the source held: a reader caps how many tag names it takes from one record, and a record acted on in no other way is not reached at all, so both lose names upstream of this number",
+            "minimum": 0.0,
+            "title": "Tags Dropped",
             "type": "integer"
           },
           "unmatched_titles": {
@@ -4673,6 +4794,13 @@
             "description": "Statuses actually changed",
             "minimum": 0.0,
             "title": "Statuses Updated",
+            "type": "integer"
+          },
+          "tags_dropped": {
+            "default": 0,
+            "description": "Tag names this run tried to put on a book and did not: the name was empty, the book was already full, the run had invented all the tags it may, or the name is not one this member may use. Not a count of what the source held: a reader caps how many tag names it takes from one record, and a record acted on in no other way is not reached at all, so both lose names upstream of this number",
+            "minimum": 0.0,
+            "title": "Tags Dropped",
             "type": "integer"
           },
           "truncated": {
@@ -7107,16 +7235,22 @@
   "paths": {
     "/api/backup": {
       "get": {
-        "description": "The whole database and every cover, as a zip.\n\nNot paginated and not streamed row by row: the archive has to be internally\nconsistent, so it is built in one pass from one session and then sent.\nA library is megabytes, not gigabytes.",
+        "description": "The whole database and every cover, as a zip.\n\nNot paginated and not streamed row by row: the archive has to be internally\nconsistent, so it is built in one pass from one session and then sent.\nA library is megabytes, not gigabytes.\n\n**Rationed, and the schema does not say so.** The refusal is a 429 carrying\n`Retry-After`, undeclared for the reason `routers/books.export_books`\nstates: this document enumerates no refusal on any of its operations, so\ndeclaring one here would make it look deliberate and every other\noperation's look accidental.\n`tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` holds that fact,\nbecause a reason described in prose rots silently where an asserted one\nreddens.\n\n**The limit bounds how often an archive is built and nothing else.** It\ndoes not bound how large one is: `MAX_ARCHIVE_BYTES` is the *restore*\nupload cap and the body size middleware's, both on `/backup/restore`, and\nthe download reads neither, so `build_archive` returns the whole library as\n`bytes` with nothing above it. Nor does it bound how many are built at\nonce: a sliding window counts starts, not responses in flight, so three\nconcurrent builds are inside it. Both of those are a concurrency bound,\nwhich is a different instrument.",
         "operationId": "download_backup",
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "application/zip": {}
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "Content-Disposition": {
+                "description": "Names the saved file: `attachment; filename=\"...\"`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -8371,18 +8505,14 @@
     },
     "/api/books/duplicates": {
       "get": {
-        "description": "Books that look like the same work under different ids.\n\nMatched on normalised title plus author, NOT on ISBN. An accidental exact\nrepeat is already refused by `uq_books_isbn_single_copy`, so the case left\nto catch is the one it cannot see: a hardback and a paperback are the same\nbook and two legitimately different ISBNs.\n\n**A deliberate copy is not a duplicate, and this is where the two are told\napart.** Two paperbacks of one title are two rows sharing a `copy_group`\nand would otherwise be the strongest match this endpoint can produce: same\ntitle, same author, same everything. Offering them for merge would invite\nsomebody to destroy a book they own, so each group is collapsed to one row\nbefore the grouping runs. What survives is what the collapse could not\nexplain, which is exactly the accidental case.\n\nGrouping happens in Python rather than SQL because the normalisation\n(casefold, strip punctuation, drop a leading article) is not something\nSQLite can express, and the catalogue is small enough that scanning it is\ncheaper than maintaining a normalised column.",
+        "description": "Books that look like the same work under different ids.\n\nMatched on normalised title plus author, NOT on ISBN. An accidental exact\nrepeat is already refused by `uq_books_isbn_single_copy`, so the case left\nto catch is the one it cannot see: a hardback and a paperback are the same\nbook and two legitimately different ISBNs.\n\n**A deliberate copy is not a duplicate, and this is where the two are told\napart.** Two paperbacks of one title are two rows sharing a `copy_group`\nand would otherwise be the strongest match this endpoint can produce: same\ntitle, same author, same everything. Offering them for merge would invite\nsomebody to destroy a book they own, so each group is collapsed to one row\nbefore the grouping runs. What survives is what the collapse could not\nexplain, which is exactly the accidental case.\n\nGrouping happens in Python rather than SQL because the normalisation\n(casefold, strip punctuation, drop a leading article) is not something\nSQLite can express, and the catalogue is small enough that scanning it is\ncheaper than maintaining a normalised column.\n\n**The scan is unpaginated and the answer is capped, which are two\ndifferent statements.** Every request reads one row per visible Book,\nbecause a page of the catalogue cannot be grouped on its own: a pair split\nacross two pages is two singletons. What the cap cuts is the finished\ngrouping, never the population it ran over, so a group is never split by\nit and the answer never depends on a grouping computed in an earlier\nrequest. The work is unbounded; the answer is not.",
         "operationId": "list_duplicates",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/DuplicateGroup"
-                  },
-                  "title": "Response List Duplicates",
-                  "type": "array"
+                  "$ref": "#/components/schemas/DuplicateReport"
                 }
               }
             },
@@ -8402,7 +8532,7 @@
     },
     "/api/books/export": {
       "get": {
-        "description": "The shelf this member can see, as a file.\n\n**MARCXML needs library mode and the other two do not.** A CSV export is a\nhousehold reading its own shelf in a spreadsheet. A MARC record is a\ncatalogue record handed to another institution, which is what library mode\nis for, and offering it everywhere would put a format nobody in a household\ncan use in front of everybody. Enforced here rather than by hiding the menu\nentry: disabling a control in the browser is advice to one client, which is\nthe sentence `routers/public.py` already states about the public catalogue.\n\n**403, not 404.** The route exists and the member may call it; the format\nis switched off. That is the same answer registration gives when it is\nclosed, and there is nothing to conceal: `GET /api/settings/features`\nalready tells any caller whether library mode is on.",
+        "description": "The shelf this member can see, as a file.\n\n**CSV is `text/csv`, plain text is `text/plain` and MARCXML is\n`application/marcxml+xml`.** All three are declared for the 200 because the\ndocument has no way to say which of them `?format=` selects.\n\n**Rationed, and the schema does not say so.** The refusal is a 429 carrying\n`Retry-After`. It is not declared here because this document enumerates no\nrefusal on any operation: not a 401, which every secured operation can\nanswer, nor a 403, a 404 or a 429. So declaring one here would make this\nrefusal look deliberate and every other operation's look accidental, which\nis a decision about the whole error surface rather than about this route.\n`docs/decisions.md` records that reasoning, having refused the same move\nonce already, and\n`tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` is what this\nparagraph rests on rather than a reader's memory of it. The mechanism behind\nthe refusal is shared by every route in `ratelimit.py`, so what would make\ndeclaring it honest is declaring it at all of them. The counter is not:\nthis route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.\n\n**MARCXML needs library mode and the other two do not.** A CSV export is a\nhousehold reading its own shelf in a spreadsheet. A MARC record is a\ncatalogue record handed to another institution, which is what library mode\nis for, and offering it everywhere would put a format nobody in a household\ncan use in front of everybody. Enforced here rather than by hiding the menu\nentry: disabling a control in the browser is advice to one client, which is\nthe sentence `routers/public.py` already states about the public catalogue.\n\n**403, not 404.** The route exists and the member may call it; the format\nis switched off. That is the same answer registration gives when it is\nclosed, and there is nothing to conceal: `GET /api/settings/features`\nalready tells any caller whether library mode is on.",
         "operationId": "export_books",
         "parameters": [
           {
@@ -8418,11 +8548,19 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "application/marcxml+xml": {},
+              "text/csv": {},
+              "text/plain": {}
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "Content-Disposition": {
+                "description": "Names the saved file: `attachment; filename=\"...\"`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -8867,7 +9005,7 @@
     },
     "/api/books/tags": {
       "get": {
-        "description": "The curated vocabulary plus whatever the library has invented.\n\nThe **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`\nin the frontend), because that is a presentation decision and it needs the\nsame order in three places. This orders by name within the group so the\nresponse is deterministic. The order a reader sees is the client's too:\n`frontend/src/lib/nameOrder.ts` re-sorts with a collator, because no SQL\nfold moves `\u00c4`.\n\n`book_count` is one grouped query for the whole list rather than one per\ntag: this is fetched on nearly every page, so an N+1 here is an N+1\neverywhere.",
+        "description": "The curated vocabulary plus the invented tags this member can already see.\n\n**Not every tag the library holds.** A tag carries no member of its own, so\nwhat decides who may be told it exists is the books carrying it: this\nanswers with the seeded vocabulary, which is published in the source, plus\nevery tag on a book the caller can see. An invented tag whose only books\nare other people's private ones is absent, because listing it would publish\na name somebody typed against a book this caller may not read.\n\nThe **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`\nin the frontend), because that is a presentation decision and it needs the\nsame order in three places. This orders by name within the group so the\nresponse is deterministic. The order a reader sees is the client's too:\n`frontend/src/lib/nameOrder.ts` re-sorts with a collator, because no SQL\nfold moves `\u00c4`.\n\n`book_count` is one grouped query for the whole list rather than one per\ntag: this is fetched on nearly every page, so an N+1 here is an N+1\neverywhere. It is the same query the row filter reads, so the number and\nthe presence of the row cannot disagree.",
         "operationId": "list_tags",
         "responses": {
           "200": {
@@ -8896,7 +9034,7 @@
         ]
       },
       "post": {
-        "description": "Invent a tag.\n\nAny member, not just an admin. Public books are a shared shelf that anyone\nmay curate, and a vocabulary only an admin can extend is a vocabulary\nnobody uses.\n\nMatched case-insensitively against what already exists, so \"Cookbooks\" and\n\"cookbooks\" cannot both appear. A collision returns the existing tag rather\nthan a 409: somebody typing a name that is already there wants that tag,\nand an error would send them to find it by hand.",
+        "description": "Invent a tag.\n\nAny member, not just an admin. Public books are a shared shelf that anyone\nmay curate, and a vocabulary only an admin can extend is a vocabulary\nnobody uses.\n\nMatched case-insensitively against what already exists, so \"Cookbooks\" and\n\"cookbooks\" cannot both appear. A collision returns the existing tag rather\nthan a 409: somebody typing a name that is already there wants that tag,\nand an error would send them to find it by hand.\n\n**A tag invented here is not in `GET /api/books/tags` until a book the\ncaller can see carries it**, which is that route's rule and not an\nomission: a tag on no book is a name and nothing else, and publishing it to\nthe whole library is the disclosure this route's two step use was part of.\nPutting it on a book is what makes it part of the vocabulary, and the\nclients do that in the same gesture.",
         "operationId": "create_tag",
         "requestBody": {
           "content": {
@@ -9166,7 +9304,7 @@
         ]
       },
       "patch": {
-        "description": "Correct the catalogue entry by hand.\n\n`exclude_unset` is what makes a partial update partial: an absent field is\nleft alone and an explicit null clears where the column allows one. Without\nit every unsent field would arrive as None and wipe the record, which is the\nclassic PATCH bug. A null for a column the database will not leave empty is\nrefused by `BookDetailsUpdate` before it reaches here, because it used to\nreach the flush and answer 500.",
+        "description": "Correct the catalogue entry by hand.\n\n`exclude_unset` is what makes a partial update partial: an absent field is\nleft alone and an explicit null clears where the column allows one. Without\nit every unsent field would arrive as None and wipe the record, which is the\nclassic PATCH bug. A null for a column the database will not leave empty is\nrefused by `BookDetailsUpdate` before it reaches here, because it used to\nreach the flush and answer 500.\n\n**`categories` clears on an empty list rather than on a null**, because its\nrequest shape is a list and its column is one joined string. This is the\nonly route that removes a subject: the create route writes them, the\ncatalogue gap fill and the merge's absorb add them, and an overwriting\nenrich cannot empty the column because the merge skips an empty incoming\nvalue. Before this the only removal was deleting the book, and the column\nis served to readers with no account.",
         "operationId": "update_book_details",
         "parameters": [
           {
@@ -11123,6 +11261,66 @@
         ]
       }
     },
+    "/api/books/{book_id}/tags": {
+      "post": {
+        "description": "Put a tag with this name on this book, inventing it if it is new.\n\nOne request where typing a name used to be two, and the two were a\ndifferent question each: inventing a tag hands back an id, and attaching\nthat id is asked of somebody who might have guessed it. Typing a name is\nneither. Somebody typing a tag name while looking at a book means \"this\nbook is that\", so this is the one gesture and the one answer.\n\n**The book as it stands, always, and never a 409, a 201 or a 404 for the\nname.** A status that told a minted name from a matched one would answer\n\"does this name already exist\" in the status line, which is the question\na member may not have answered about a tag they cannot see. A name that\nis not this member's to use is left off the book, in the same shape as a\nname that is: `tags.Naming` decides it and carries what that does and does\nnot close.\n\nRefused only for what the caller can already see: a name that is not a\nname, by `TagCreate`, and a book already carrying\n`MAX_TAGS_PER_BOOK` tags, with the sentence and the reasoning of the\nattach by id route beside this one.",
+        "operationId": "add_book_tag_by_name",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Add Book Tag By Name",
+        "tags": [
+          "books"
+        ]
+      }
+    },
     "/api/books/{book_id}/tags/{tag_id}": {
       "delete": {
         "operationId": "remove_book_tag",
@@ -11243,7 +11441,7 @@
     },
     "/api/collections": {
       "get": {
-        "description": "Every collection in the library, with the caller's own counts.\n\nOrdered case insensitively by name: \"ebooks\" sorting after \"Zola\" because\nof its first letter's byte value is the kind of ordering a reader reads as\na bug.\n\n**Still `func.lower` here, deliberately.** The fold that decides uniqueness\nmoved into Python and into `name_folded`; this one only decides sort order,\nand switching it would change nothing a reader notices: both orderings sort\nby code point, so `\u00c4sthetik` lands past `z` either way. Putting it where a\nGerman reader expects needs a collation rather than a fold, which is a\ndifferent problem with a different owner. See `docs/decisions.md`.",
+        "description": "Every collection the caller may be told about, with their own counts.\n\n**Not every collection in the library**, which is what this used to be. A\ncollection whose every book is hidden from the caller is absent, because\nits name is the caller's first and only evidence that somebody's books are\nfiled somewhere. `shelving.Shelving` is the rule and carries the three arms,\nwhat stays uncovered, and why a row that vanishes and returns is correct.\n\nOne consequence worth knowing at this site: a listed row reading\n`book_count: 0` used to mean \"empty, or holding books you cannot see\", and\nnow means empty, or holding only books you can see in the trash. The count\nstopped being readable as a hidden total because the rows it could be read\nagainst are gone.",
         "operationId": "list_collections",
         "responses": {
           "200": {
@@ -11272,7 +11470,7 @@
         ]
       },
       "post": {
-        "description": "Invent a collection.\n\nAny member, like `POST /api/books/tags` and for the same reason: a shelf\nonly an admin can divide up is one nobody divides up.\n\nA name that already exists returns the existing collection rather than a\n409. Somebody typing a name that is already there means that collection,\nand an error would send them off to find it by hand. Renaming is the\nopposite case and does answer 409, because a rename onto an occupied name\nwould silently merge two shelves.",
+        "description": "Invent a collection.\n\nAny member, like `POST /api/books/tags` and for the same reason: a shelf\nonly an admin can divide up is one nobody divides up.\n\nA name that already exists returns the existing collection rather than a\n409. Somebody typing a name that is already there means that collection,\nand an error would send them off to find it by hand. Renaming is the\nopposite case and does answer 409, because a rename onto an occupied name\nwould silently merge two shelves.\n\n**So a guessed name still confirms a collection exists, and that is left\nopen deliberately.** `uq_collections_name_folded` is global, so the\ncollision check cannot take a viewer without racing the index it exists to\nfront, and answering a collision any other way is a new status code on a\nroute that declares 201. What the guess no longer buys is the write: the\ncaller gets the row and `shelving.Shelving` then refuses to file anything\ninto it, which is the answer an unused id gets. `Shelving`'s docstring\ncarries this under what is not closed.",
         "operationId": "create_collection",
         "requestBody": {
           "content": {
@@ -11319,7 +11517,7 @@
     },
     "/api/collections/{collection_id}": {
       "delete": {
-        "description": "Remove a collection. Its books are unfiled, never deleted.\n\n**Admin only, and deliberately asymmetric with creating one**, exactly like\n`DELETE /api/books/tags/{id}`. Creating is additive and undone by deleting;\ndeleting empties a shelf label off every book in the house at once, with no\nundo, and one member should not be able to unpick the library's filing on\ntheir own.\n\nNothing here nulls the column by hand, and two things do it instead. The\nORM nulls the loaded children, which is what this delete actually emits;\n`books.collection_id` is also `ON DELETE SET NULL`, which is what covers a\nrestore or a statement run by hand, neither of which passes through here.\nThe second is the one worth keeping: a row left pointing at a destroyed\ncollection is a dangling foreign key, and it is also why\n`PRAGMA foreign_keys=ON` is load bearing here.",
+        "description": "Remove a collection. Its books are unfiled, never deleted.\n\n**Admin only, and deliberately asymmetric with creating one**, exactly like\n`DELETE /api/books/tags/{id}`. Creating is additive and undone by deleting;\ndeleting empties a shelf label off every book in the house at once, with no\nundo, and one member should not be able to unpick the library's filing on\ntheir own.\n\nNothing here nulls the column by hand, and two things do it instead. The\nORM nulls the loaded children, which is what this delete actually emits;\n`books.collection_id` is also `ON DELETE SET NULL`, which is what covers a\nrestore or a statement run by hand, neither of which passes through here.\nThe second is the one worth keeping: a row left pointing at a destroyed\ncollection is a dangling foreign key, and it is also why\n`PRAGMA foreign_keys=ON` is load bearing here.\n\n**Deliberately not gated on `shelving.Shelving`, unlike the rename beside\nit, and the reason is what gating would cost.** An admin has no privilege\nover another member's private books, so a collection holding only those is\none no admin may be told about; refusing the delete there would make it\npermanently undeletable while it still holds its name against\n`uq_collections_name_folded`, and the only symptom would be a 409 nobody\ncan explain. What the ungated 404-or-204 discloses is an id, to an admin,\nwith no name in the response. That is the smaller of the two, and it is a\nchoice rather than an oversight.",
         "operationId": "delete_collection",
         "parameters": [
           {
@@ -11360,7 +11558,7 @@
         ]
       },
       "patch": {
-        "description": "Rename one. Any member: a rename moves no book and is undone by another.\n\nRefuses a name another collection already holds. The alternative is a merge\nof two shelves, which is a different operation with different consequences\nfor the books in both, and nobody asked for it by typing a name.\n\n**One migration does merge, and it is not this rule being bent.** The\nrevision that made the name fold outside ASCII found libraries already\nholding a pair like `\u00c4sthetik` and `\u00e4sthetik`, which the new index cannot\nboth keep, and there was nobody to ask: an upgrade has no caller to answer\n409 to. So it merges the pair once, into the lower id, and logs what it\nmoved. Here there is a caller, and a caller who typed a name has asked for\nthat name and not for two shelves to become one.",
+        "description": "Rename one. Any member: a rename moves no book and is undone by another.\n\nRefuses a name another collection already holds. The alternative is a merge\nof two shelves, which is a different operation with different consequences\nfor the books in both, and nobody asked for it by typing a name.\n\n**One migration does merge, and it is not this rule being bent.** The\nrevision that made the name fold outside ASCII found libraries already\nholding a pair like `\u00c4sthetik` and `\u00e4sthetik`, which the new index cannot\nboth keep, and there was nobody to ask: an upgrade has no caller to answer\n409 to. So it merges the pair once, into the lower id, and logs what it\nmoved. Here there is a caller, and a caller who typed a name has asked for\nthat name and not for two shelves to become one.\n\n**And the same 404 for a collection this caller may not be told about**,\nwhich is `shelving.Shelving.assignable`. This route is open to every member\nand answers over the whole id space, so before it the 404-or-200 was an\nexistence oracle by id on a table of consecutive integers: closing the list\nand leaving this would have moved a broadcast to a poll. The two answers\nare now one.\n\nThe 409 is the other half and is not closed: a taken name still answers\ndifferently from a free one, for the reason `create_collection` gives.",
         "operationId": "rename_collection",
         "parameters": [
           {
@@ -13981,11 +14179,20 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {}
             },
             "description": "Successful Response"
+          },
+          "206": {
+            "content": {
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {},
+              "multipart/byteranges": {}
+            },
+            "description": "Partial Content"
           },
           "422": {
             "content": {
@@ -14034,11 +14241,20 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {}
             },
             "description": "Successful Response"
+          },
+          "206": {
+            "content": {
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {},
+              "multipart/byteranges": {}
+            },
+            "description": "Partial Content"
           },
           "422": {
             "content": {

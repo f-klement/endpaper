@@ -226,6 +226,12 @@ class Authorship:
         columns rather than whole rows, so what comes back is one id and one
         string per Book.
 
+        **An unpaginated scan is not an unbounded answer, and `/duplicates`
+        is where the two were run together.** That route caps what it returns
+        while scanning the whole catalogue exactly as this does. Nothing here
+        needs a cap, because an author index is one row per author rather
+        than one per Book.
+
         **The shelf is asked for here and nowhere else in the feature.** Every
         author, every count and every book id downstream is derived from these
         rows, so a Private Book cannot reach an author page, a count, a
@@ -557,11 +563,15 @@ class Authorship:
         at a name that itself points elsewhere, and resolution would depend on
         the order the rows are read in.
 
-        Followed whoever the row belongs to: a canonical name is Library wide,
-        like a Collection's name, so there is nothing here to withhold. Gating
-        this on what the caller can see was tried and withdrawn: it made a chain
-        storable, and it disagreed with the `reachable` set above, which is a
-        different question with a different answer.
+        Followed whoever the row belongs to: a canonical name is Library wide
+        and is withheld from nobody, so there is nothing here to withhold.
+        **A collection's name used to stand here as the comparison and no
+        longer can**, because that label is now withheld from a member who can
+        see nothing filed under it; the claim above rests on `AuthorAlias`'s
+        own docstring instead, where it is argued rather than borrowed. Gating
+        this on what the caller can see was tried and withdrawn: it made a
+        chain storable, and it disagreed with the `reachable` set above, which
+        is a different question with a different answer.
 
         **But not a row naming one of the keys being merged.** Reversing a merge
         is folding A and B the other way round, which arrives as the same two

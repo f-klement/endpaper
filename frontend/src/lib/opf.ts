@@ -47,9 +47,9 @@
  * `ScanPage/types.ts`, because both are about the destination rather than about
  * the file.
  *
- * **`dc:subject` is read by nothing here**, because `FileMetadata` declares no
- * field for a subject. That type carries the reason and what adding one would
- * reach.
+ * **`dc:subject` is read, and it is reported rather than bounded.** What the
+ * endpoint will take is `lib/bookRequest.boundCategories`' question, for the
+ * reason above: this module may not name the API.
  */
 
 import { childrenNamed } from "./elementChildren";
@@ -156,6 +156,34 @@ function readTitles(
     title: text(main ?? titles[0]),
     subtitle: text(byType("subtitle")),
   };
+}
+
+/**
+ * The subjects, in the file's own order and with nothing folded.
+ *
+ * **No `Set` here, where `readAuthors` below needs one, and the difference is
+ * the destination rather than the loop.** Two `dc:creator` elements naming one
+ * person are one author, so this module is the only place that can tell; two
+ * `dc:subject` elements are two assertions a producer made, and folding a
+ * repeat is a property of what the request may carry.
+ * `lib/bookRequest.boundCategories` folds, and it breaks out of its own loop
+ * before it does, which is what keeps the count below off the main thread's
+ * budget: a minimal `<dc:subject>x</dc:subject>` is 26 bytes and
+ * `epub.MAX_PACKAGE_BYTES` is 4 MiB, so 161,319 of them fit inside every bound
+ * the EPUB reader declares. The same arithmetic as `readAuthors`, and the same
+ * number, because the two elements are the same width.
+ *
+ * **This walk is linear and the array it builds is transient.**
+ * `ScanPage/hooks.readFiles` drafts each file and drops its record, so a folder
+ * pick holds one file's subjects at a time rather than three hundred files'.
+ */
+function readSubjects(metadata: Element): string[] {
+  const subjects: string[] = [];
+  for (const element of dcChildren(metadata, "subject")) {
+    const subject = text(element);
+    if (subject !== null) subjects.push(subject);
+  }
+  return subjects;
 }
 
 /**
@@ -383,6 +411,7 @@ export function readOpf(xml: string): FileMetadata | null {
     title,
     subtitle,
     authors: readAuthors(metadata, index),
+    categories: readSubjects(metadata),
     identifiers,
     isbn: readIsbn(identifiers),
     publisher: text(dcChildren(metadata, "publisher")[0]),

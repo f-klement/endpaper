@@ -440,6 +440,28 @@ describe("the document itself", () => {
     ]);
   });
 
+  it("reads the genre whole and never splits it on its comma", () => {
+    // **The decision this reader had to take and the one a tidy up would
+    // reverse**, `Writer` two arms above being split on exactly that comma.
+    // The destination decides it: `books.categories` holds values that
+    // routinely contain a comma, Google's own subjects being "Fiction,
+    // general", which is why the column joins on a semicolon at all. A
+    // splitter here would cut the one shape the column exists to hold whole.
+    const record = readComicInfo(
+      comicInfo(`<Genre>Science Fiction, Space Opera</Genre>`),
+    );
+
+    expect(record?.categories).toEqual(["Science Fiction, Space Opera"]);
+  });
+
+  it("states no genre for a comic that declared none", () => {
+    // The other side, without which the arm above is satisfied by a reader
+    // that answers the empty list to everything.
+    expect(
+      readComicInfo(comicInfo(`<Series>Saga</Series>`))?.categories,
+    ).toEqual([]);
+  });
+
   it("is not answered from inside the page list", () => {
     // The page block holds one element per page and a reader searching the
     // whole subtree would let a crafted one answer for a field it does not
@@ -450,12 +472,15 @@ describe("the document itself", () => {
     const record = readComicInfo(
       comicInfo(
         `<Pages><Page Image="0"/><Series>Not Saga</Series>` +
-          `<Writer>Nobody</Writer></Pages>` +
+          `<Writer>Nobody</Writer><Genre>Not A Genre</Genre></Pages>` +
           `<Series>Saga</Series>`,
       ),
     );
 
     expect(record?.seriesName).toBe("Saga");
     expect(record?.authors).toEqual([]);
+    // The field added last, asked the same question: a subtree search would
+    // let a crafted page element assert a subject on somebody's book.
+    expect(record?.categories).toEqual([]);
   });
 });

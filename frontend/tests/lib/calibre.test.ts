@@ -413,6 +413,7 @@ const A_FILE: FileMetadata = {
   title: "Dune",
   subtitle: null,
   authors: ["Frank Herbert"],
+  categories: [],
   identifiers: [],
   isbn: null,
   publisher: null,
