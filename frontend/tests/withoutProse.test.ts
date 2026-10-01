@@ -25,12 +25,10 @@ import { describe, expect, it } from "vitest";
 import { parseAst } from "vite";
 
 import { langOf, withoutProse } from "./withoutProse";
-
-const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+// The one enumeration of `src/`, which refuses a corpus that is no longer the
+// tree. The pattern used to be written here, where narrowing it was one edit
+// in the file holding the rule it disarmed.
+import { directoriesIn, sourceEntries } from "./sourceModules";
 
 const TESTS = import.meta.glob("./**/*.{ts,tsx}", {
   query: "?raw",
@@ -135,10 +133,10 @@ describe("prose is stripped by the parser, not by a line shape", () => {
     // throws on takes down whichever of the fifteen readers reached it first.
     // This is where that arrives naming the file.
     //
-    // The floor that keeps this from passing over nothing is the arm below,
-    // which reads the same glob: with the stripper in its own module this file
-    // reads `src/` itself rather than borrowing `houseRules.test.ts`'s reader.
-    const refused = Object.entries(SOURCES)
+    // What keeps this from passing over nothing is `tests/sourceModules.ts`,
+    // which refuses a corpus that is not the tree and throws rather than
+    // handing back a short one.
+    const refused = sourceEntries()
       .filter(([path, source]) => {
         try {
           withoutProse(source, langOf(path));
@@ -153,8 +151,13 @@ describe("prose is stripped by the parser, not by a line shape", () => {
   });
 
   it("reads the source tree at all", () => {
-    // A glob that matched nothing would make the arm above pass for ever.
-    expect(Object.keys(SOURCES).length).toBeGreaterThan(50);
+    // **A floor used to stand here, and a floor is not an arming check.** It
+    // was fifty against a corpus of several hundred, so a pattern narrowed to
+    // one language, or to one directory, cleared it while this rule read a
+    // fraction of the tree and said nothing about the rest. The
+    // refusal lives in `tests/sourceModules.ts` now, and what is left to say
+    // here is that this file reaches it.
+    expect(() => sourceEntries()).not.toThrow();
   });
 });
 
@@ -414,8 +417,28 @@ describe("the stripping has one home", () => {
     expect(reactsToAMarker(String.raw`https?:\/\/[\w.]+`, "")).toBe(false);
   });
 
-  it("reads the test tree at all", () => {
-    // A glob that matched nothing would make the first arm pass for ever.
-    expect(Object.keys(TESTS).length).toBeGreaterThan(50);
+  it("reads every directory of the test tree", () => {
+    // **The second half of a floor taken out of `houseRules.test.ts`, and
+    // found by recounting rather than by reading.** Fifty, against a tree of
+    // 219 keys of which `tests/pages/` is 118: a pattern narrowed to exclude
+    // that directory clears it with every page test unread, and the ratchet
+    // above then re-derives itself over a tree it can no longer see all of.
+    //
+    // The directories rather than a count, which is how the source side of
+    // this file states the same thing: a new top level directory under
+    // `tests/` is a decision, and a narrowing is not.
+    expect(
+      directoriesIn(Object.keys(TESTS).map((path) => path.slice(2))),
+    ).toEqual([
+      "api",
+      "app",
+      "components",
+      "conformance",
+      "doubles",
+      "i18n",
+      "lib",
+      "pages",
+      "theme",
+    ]);
   });
 });

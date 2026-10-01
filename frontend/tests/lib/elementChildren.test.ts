@@ -6,6 +6,10 @@ import {
   firstNamed,
 } from "../../src/lib/elementChildren";
 import { langOf, withoutProse } from "../withoutProse";
+// The one enumeration of `src/`, which refuses a corpus that is no longer the
+// tree. The pattern used to be written here, where narrowing it was one edit
+// in the file holding the rules it disarmed.
+import { sourceEntries, sourceText } from "../sourceModules";
 
 function parse(xml: string): Element {
   const root = new DOMParser().parseFromString(
@@ -154,13 +158,7 @@ describe("walking the element children of one node", () => {
  * Named here so the next reader meets them as a decision.
  */
 describe("the sibling walk has one home", () => {
-  const SOURCES = import.meta.glob("../../src/**/*.{ts,tsx}", {
-    query: "?raw",
-    import: "default",
-    eager: true,
-  }) as Record<string, string>;
-
-  const HOME = "../../src/lib/elementChildren.ts";
+  const HOME = "lib/elementChildren.ts";
 
   /**
    * The modules outside the home that spell an anchor, and what each is.
@@ -184,15 +182,15 @@ describe("the sibling walk has one home", () => {
    */
   const SPELLS_AN_ANCHOR = [
     // Both still carry their own walk.
-    "../../src/lib/adobeDigitalEditions.ts",
-    "../../src/lib/cbz.ts",
+    "lib/adobeDigitalEditions.ts",
+    "lib/cbz.ts",
   ];
 
   const ANCHORS =
     /\b(?:first|last)ElementChild\b|\b(?:next|previous)ElementSibling\b/;
 
   const spellsAnAnchor = (): string[] =>
-    Object.entries(SOURCES)
+    sourceEntries()
       .filter(([path, source]) =>
         ANCHORS.test(withoutProse(source, langOf(path))),
       )
@@ -200,9 +198,15 @@ describe("the sibling walk has one home", () => {
       .sort();
 
   it("reads the source tree at all", () => {
-    // A glob that matched nothing would make every rule below pass for ever.
-    expect(Object.keys(SOURCES).length).toBeGreaterThan(100);
-    expect(Object.keys(SOURCES)).toContain(HOME);
+    // **A floor used to stand here, and a floor is not an arming check.** A
+    // hundred, against a corpus of several hundred, cleared on a pattern
+    // narrowed to one language, and the version that asserted the languages
+    // instead cleared on one narrowed by directory. The refusal is
+    // in `tests/sourceModules.ts` now, which enumerates the tree four ways
+    // and refuses them when they disagree. What is left here is that this
+    // rule reaches it, and that the home module is in what it hands back.
+    expect(() => sourceEntries()).not.toThrow();
+    expect(sourceText(HOME)).not.toBe("");
   });
 
   it("sees the walk in its own home, so the rule below is not vacuous", () => {
@@ -286,7 +290,7 @@ describe("the sibling walk has one home", () => {
     // nothing about a door reached some other way.** Three rounds on this file
     // have had the comment claim a family the assertion did not hold; the
     // remedy is to stop claiming rather than to claim better.
-    const source = withoutProse(SOURCES["../../src/lib/kindle.ts"]!, "ts");
+    const source = withoutProse(sourceText("lib/kindle.ts"), "ts");
     expect(source.match(/\bnamedChildren\b/g) ?? []).toHaveLength(2);
     expect(
       source.match(/import[^;]*from "\.\/elementChildren"/g) ?? [],

@@ -5991,7 +5991,7 @@ class TestTheCarrierTestIsTheOnlyWayIn:
     asks the same question of every module of ours and of both call spellings.
 
     **The walk is every module of ours, for the same reason and after the same
-    event.** While the parser was `metadata._marc_fields` a second module
+    event.** While the parser was a private name in `metadata.py` a second module
     building one had to spell a private name, which
     `tests/test_marc.py::TestNoModuleReadsAnotherModulesPrivateNames` refuses, so
     reading `metadata.py` alone was sound and that compensating control was

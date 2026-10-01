@@ -4589,7 +4589,7 @@ class TestNoModuleHardCodesASourceOrder:
     * `metadata._MATCH_PRECEDENCE`, which source is believed about a shared
       field, deliberately not reachable from the settings list.
 
-      **`metadata._BESPOKE_LOOKUPS` was exempted here and its entry is gone
+      **The bespoke lookup table was exempted here and its entry is gone
       because the table is**, which is recorded rather than quietly dropped
       because the reason is the same one `_METERED_SEARCHES` is unexempted for.
       It split into `_FREE_LOOKUPS` and `_KEYED_LOOKUPS`, one entry each, so
@@ -5334,7 +5334,7 @@ class TestOneReaderPerAmbiguousSubfield:
     **This class no longer guards which field is passed, and that is the
     correction rather than a narrowing.** Its first version counted **readers of
     the subfield** while its docstring claimed to enforce "a subject field
-    only", so `_subject_vocabulary(fields["082"][0])` was legal, was the exact
+    only", so `fields["082"][0].subject_vocabulary()` with no tag was legal, was the exact
     failure described, and left this green. That half is now the signature:
     `marc_fields.Subfields.subject_vocabulary` takes the tag and raises outside
     `_DNB_SUBJECT_TAGS`, which no source scan can be evaded past. What is left

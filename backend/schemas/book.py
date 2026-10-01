@@ -1131,7 +1131,7 @@ class BookMatch(BaseModel):
     #: `BookMatch`, so a catalogue supplying `1e9` was stored with a 200 where
     #: the identical value here was a 422: measured end to end, same book, one
     #: route apart. It is reachable from a catalogue rather than only from an
-    #: upload, because `metadata._marc_title` takes the first digit run of
+    #: upload, because `marc_fields.Fields.title_statement` takes the first digit run of
     #: `245 $n` and calls `float()` on it.
     #:
     #: So `importing.py`'s claim that this field is `ge=0, le=1000` on every

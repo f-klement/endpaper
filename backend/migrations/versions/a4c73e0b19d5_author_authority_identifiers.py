@@ -5,7 +5,7 @@ Revises: c1f8a7e3d240
 Create Date: 2026-08-27
 
 The DNB has been sending the author's GND number in MARC `100 $0` since the
-MARC21 switch on 2026-08-24, `metadata._gnd_identifier` has been parsing it, and
+MARC21 switch on 2026-08-24, `marc_fields.Subfields.gnd_identifier` has been parsing it, and
 it was thrown away for want of somewhere correct to put it.
 `docs/decisions.md`, "Storing an identifier and resolving one are different
 acts", recorded the two candidate homes as a column on `author_aliases` or

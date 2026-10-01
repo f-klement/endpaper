@@ -737,6 +737,23 @@ class TestReadingRealCatalogueShapes:
         )
         assert parsed.records[0].isbn == "9789602118962"
 
+    def test_a_qualifier_printed_inside_the_number_still_leaves_the_isbn(self):
+        """The spelling a library that has not moved to `$q` hands over, and
+        the one an upload meets most: the ISBN is this importer's primary match
+        key, so losing it drops the record to the weaker key silently.
+
+        The rule is `marc_fields.Subfields.stated_isbn`, which
+        `tests/test_marc_fields.py` holds. This arm is here because the
+        importer is the caller that pays for it.
+        """
+        parsed = marc.read(
+            a_record(
+                datafield("245", ("a", "T")),
+                datafield("020", ("a", "9783161484100 (pbk.)")),
+            )
+        )
+        assert parsed.records[0].isbn == "9783161484100"
+
     def test_the_older_260_is_read_where_a_record_has_no_264(self):
         parsed = marc.read(
             a_record(

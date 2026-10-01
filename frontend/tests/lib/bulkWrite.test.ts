@@ -18,6 +18,14 @@ import { describe, expect, it, vi } from "vitest";
 import { parseAst } from "vite";
 
 import { writeOneAtATime, type BulkProgress } from "../../src/lib/bulkWrite";
+// The one enumeration of `src/`, which refuses a corpus that is no longer the
+// tree. The pattern used to be written here, where narrowing it was one edit
+// in the file holding the rule it disarmed.
+import {
+  directoriesIn,
+  sourceDirectories,
+  sourceEntries,
+} from "../sourceModules";
 
 function items(count: number): string[] {
   return Array.from({ length: count }, (_, index) => `Book ${index + 1}`);
@@ -185,19 +193,8 @@ describe("writing a shelf one book at a time", () => {
  * nobody. Not a list of the loops that are known about, which is what goes
  * stale the day a fourth page grows one.
  */
-const SOURCES = import.meta.glob("../../src/**/*.{ts,tsx}", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
 function entries(): [string, string][] {
-  return Object.entries(SOURCES)
-    .map(
-      ([path, source]) =>
-        [path.replace("../../src/", ""), source] as [string, string],
-    )
-    .filter(([path]) => !path.startsWith("api/generated/"));
+  return sourceEntries().filter(([path]) => !path.startsWith("api/generated/"));
 }
 
 const langOf = (path: string) => (path.endsWith(".tsx") ? "tsx" : "ts");
@@ -437,8 +434,8 @@ function offences(
     // **It matches a name rather than a binding**, so a later declaration
     // shadowing an injected name inside the same function is read as injected
     // too. That is the loud direction, it reports rather than admits, and it
-    // fires on nothing in the tree: measured over the 261 files this rule
-    // covers, adding this step moved neither result.
+    // fires on nothing in the tree: measured over the files this rule covers
+    // when it was added, it moved neither result.
     if (
       value.type === "VariableDeclarator" &&
       rootOf(value.init) !== null &&
@@ -568,9 +565,20 @@ describe("a shelf is written in bulk in one place", () => {
     expect(writes).toBeGreaterThan(0);
   });
 
-  it("reads the source tree at all", () => {
-    // A glob that matched nothing would make everything above pass for ever.
-    expect(entries().length).toBeGreaterThan(50);
+  it("reads every directory of the tree and not a corner of it", () => {
+    // **A floor of fifty used to stand here, over a population of 265.** An
+    // empty glob is no longer what can go wrong: the corpus is armed in
+    // `tests/sourceModules.ts` and throws rather than coming back short.
+    // What that arming cannot see is the exclusion written here, one line
+    // up, and widening it is a narrowing by another route: `api/generated/`
+    // widened to `api/` takes 3 more modules, and widened further it can take
+    // every page while the floor clears on what is left.
+    //
+    // So this asks the relationship rather than a size: whatever the
+    // exclusion removes, every directory of the tree is still walked.
+    expect(directoriesIn(entries().map(([path]) => path))).toEqual(
+      sourceDirectories(),
+    );
   });
 });
 

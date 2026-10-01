@@ -21,17 +21,11 @@ import { describe, expect, it } from "vitest";
 import { MAX_OPF_BYTES } from "../../src/lib/calibre";
 import { MAX_CACHE_BYTES } from "../../src/lib/kindle";
 import { declaresEntities } from "../../src/lib/xmlEntities";
-
-/**
- * Every module under `src/lib/`, as source, for the derivation at the foot of
- * this file. Read with `import.meta.glob` rather than `node:fs` so this needs
- * no `@types/node`, which is `houseRules.test.ts`'s reason and the same one.
- */
-const SOURCES = import.meta.glob("../../src/lib/*.ts", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+// Every module under `src/lib/`, for the derivation at the foot of this file.
+// Taken from the one enumeration of `src/` rather than from a pattern of this
+// file's own: a directory corpus is a partition of the armed tree, so it
+// cannot be narrowed by editing a glob here.
+import { modulesUnder } from "../sourceModules";
 
 describe("a document that declares its own entities", () => {
   it("is refused for a declaration in the internal subset", () => {
@@ -220,8 +214,8 @@ describe("a reader that parses a whole document refuses a declaration first", ()
   const RULE = "lib/xmlEntities.ts";
 
   function modules(): [string, string][] {
-    return Object.entries(SOURCES).map(([path, source]) => [
-      path.replace("../../src/", ""),
+    return modulesUnder("lib").map(([path, source]) => [
+      path,
       withoutProse(source),
     ]);
   }

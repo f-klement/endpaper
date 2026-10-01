@@ -685,3 +685,34 @@ class TestARegistrationGroupNamesItsOwnPrefix:
         assert canonical is not None
         assert group_prefix(group) == canonical[:3]
         assert group.startswith(canonical[:3] + "-")
+
+
+class TestACatalogueQualifierIsNotThisModulesProblem:
+    """The interface boundary for the legacy `020 $a` spelling, pinned here.
+
+    `marc_fields.Subfields.stated_isbn` cuts the qualifier off before calling
+    `parse`. Moving that cut into `normalise` would put it in front of every
+    caller of this module, the barcode scanner and the manual entry box and the
+    CSV importer among them, and in one implementation of two: this module is
+    mirrored by `frontend/src/lib/isbn.ts` and the two are held to
+    `conformance/cases/isbn.json` case by case, so the browser would go on
+    refusing what the server had started accepting.
+
+    **The pair below is why the MARC reader cannot lean on this function.**
+    `normalise` keeps ASCII alphanumerics and drops the rest, so whether a
+    qualifier defeats a parse depends on whether its characters survive
+    normalisation. **The pair records behaviour nobody chose**, so it asserts
+    the asymmetry and not the second value: this module promises nothing about
+    what a qualified subfield yields, `conformance/cases/isbn.json` carries no
+    qualifier case, and pinning the value here would pin in one implementation
+    what the sentence above says is held in both.
+    """
+
+    QUALIFIED = "9783161484100 (pbk.)"
+    DELETED = "9789602118962 (χαρτόδετο)"
+
+    def test_a_qualifier_the_normaliser_keeps_defeats_the_parse(self):
+        assert parse(self.QUALIFIED) is None
+
+    def test_a_qualifier_the_normaliser_deletes_does_not(self):
+        assert parse(self.DELETED) is not None

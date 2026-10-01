@@ -25,17 +25,18 @@ import {
   withPalette,
   type PaletteId,
 } from "../../src/theme/palettes";
-
-const CSS = import.meta.glob("../../src/**/*.css", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+import { stylesheetText } from "../sourceModules";
 
 // Import order, which is also cascade order: `index.css` pulls the palettes in
 // first, so its own `:root.dark` sits after every palette block.
-const PALETTES_CSS = CSS["../../src/theme/palettes.css"] ?? "";
-const INDEX_CSS = CSS["../../src/index.css"] ?? "";
+//
+// **Asked for by name from the one enumeration of `src/`**, which holds the
+// stylesheets as the half of the tree that is not a module and refuses the
+// pair when it is not what the tree carries. A lookup defaulting to the empty
+// string used to stand here, and an empty stylesheet satisfies most of the
+// rules below.
+const PALETTES_CSS = stylesheetText("theme/palettes.css");
+const INDEX_CSS = stylesheetText("index.css");
 
 // ── Reading the stylesheets ──────────────────────────────────────────────────
 

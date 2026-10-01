@@ -11,6 +11,13 @@ already been through the Shelf.
 narrows to a viewer; this module is handed rows that were already narrowed, so
 taking one would put the privacy rule in two places.
 
+**Which definitions a Member may be told exist is therefore next door**, in
+`fields.py`, for the same reason `shelving.py` is not inside `collections`.
+The two questions are different: this module owns the table, its writes and
+what a value means, and `fields.Fields` owns who may be told a row is there.
+The one place they meet is `definitions`, which `Fields.listable` reads and
+narrows.
+
 ## Rendering a value as a link is an injection surface
 
 **The kind is declared, never detected**, so a value cannot become a link by
@@ -363,6 +370,14 @@ def rename(db: Session, field: CustomField, name: str) -> CustomField:
     silently, by an operation whose whole purpose is not losing any. Its own
     name in a different case is not a collision, so fixing the capitalisation
     of a field is a rename like any other.
+
+    **The refusal does not name the field it clashed with, and that is a
+    privacy rule reaching a string rather than a wording preference.** The
+    clash is found over the whole table, which it has to be or two Members mint
+    colliding names, so the row it finds may be one `fields.Fields` would not
+    list for this caller. Naming it handed a hidden name back to anybody who
+    guessed it, which is a scoped list defeated by a 409. What the caller loses
+    is the stored capitalisation of a name they have just typed.
     """
     folded = name.lower()
     clash = next(
@@ -374,7 +389,7 @@ def rename(db: Session, field: CustomField, name: str) -> CustomField:
         None,
     )
     if clash is not None:
-        raise Refused(f"This library already has a field called {clash.name}.")
+        raise Refused("This library already has a field with that name.")
     field.name = name
     return field
 

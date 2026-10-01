@@ -735,8 +735,8 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
     def test_every_reader_is_answered_by_something(self):
         """A reader missing from every dispatch table would be excluded silently
         rather than counted as building nothing, so the count would fall with no
-        finding anywhere. `metadata._check_readable` raises on this for a live
-        row; this is the same rule asked of the closed set."""
+        finding anywhere. `metadata.resolve` raises on this for a target
+        in the seeded roster; this is the same rule asked of the closed set."""
         assert set(_registered_entries()) == set(decoders.Reader)
 
     def test_the_walk_reaches_more_than_one_module(self):

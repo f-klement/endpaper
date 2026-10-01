@@ -29,20 +29,10 @@ async function opened(...statements: string[]) {
   return reading;
 }
 
-/**
- * Every module, read as text, for the import rule at the end of this file.
- *
- * `import.meta.glob` rather than `node:fs`, for the reason
- * `tests/houseRules.test.ts` gives at its own copy: a guard test is a poor
- * reason to add `@types/node` and widen the global types. Here rather than
- * beside that copy because the rule is about one module's vocabulary and this
- * is that module's test file.
- */
-const SOURCES = import.meta.glob("../../src/**/*.{ts,tsx}", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+// The one enumeration of `src/`, which refuses a corpus that is no longer the
+// tree. The pattern used to be written here, where narrowing it was one edit
+// in the file holding the rule it disarmed.
+import { sourceEntries } from "../sourceModules";
 
 describe("a cell read as a string", () => {
   it("is the value with its edges trimmed", () => {
@@ -227,9 +217,7 @@ describe("the one home of the untrusted row vocabulary", () => {
    * four sitting in a third reader, is silent and is what shipped twice.
    */
   it("is not copied by any other module that opens a database", () => {
-    const modules = Object.entries(SOURCES).map(
-      ([path, source]) => [path.replace("../../src/", ""), source] as const,
-    );
+    const modules = sourceEntries();
 
     const home = modules.find(([path]) => path === "lib/sqliteRow.ts")![1];
     // Derived from the module's own exports, so a fifth helper added there is

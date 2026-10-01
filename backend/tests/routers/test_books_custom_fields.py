@@ -8,7 +8,10 @@ to obey the same visibility rule as the book, and it is asserted through the
 API rather than through the ORM, because the API is where a leak would happen.
 """
 
+import logging
+
 import pytest
+from sqlalchemy import event
 
 
 @pytest.fixture
@@ -425,6 +428,37 @@ class TestRenamingAField:
 
         assert res.status_code == 409
 
+    def test_the_refusal_does_not_name_the_field_it_clashed_with(
+        self, client, admin, text_field, link_field
+    ):
+        """The clash is found over the whole table, which it has to be, so the
+        row it finds may be one the caller may not be told about. Naming it
+        handed a hidden name back to anybody who guessed it."""
+        res = client.patch(
+            f"/api/books/custom-fields/{text_field['id']}",
+            json={"name": "calibre-WEB"},
+            headers=admin["headers"],
+        )
+
+        assert "Calibre-web" not in res.text
+
+    def test_it_is_logged_with_both_names(self, client, admin, text_field, caplog):
+        """A `CustomField` records no author and no timestamp and any member
+        may rename one, so without this line the one verb that relabels
+        content other members typed leaves no trace at all."""
+        with caplog.at_level(logging.INFO, logger="endpaper.books"):
+            client.patch(
+                f"/api/books/custom-fields/{text_field['id']}",
+                json={"name": "Provenance"},
+                headers=admin["headers"],
+            )
+
+        renames = [r.getMessage() for r in caplog.records if "renamed" in r.getMessage()]
+        assert len(renames) == 1, renames
+        assert "'admin'" in renames[0]
+        assert "'Bought from'" in renames[0]
+        assert "'Provenance'" in renames[0]
+
     def test_any_member_may_rename(self, client, admin, member, text_field):
         res = client.patch(
             f"/api/books/custom-fields/{text_field['id']}",
@@ -541,18 +575,35 @@ class TestAFieldOnAPrivateBookIsInvisible:
 
         assert [row["value"] for row in res.json()] == ["A secret shop"]
 
-    def test_the_definition_itself_is_not_a_disclosure(
+    def test_the_definition_goes_with_it(
         self, client, member, private_book, text_field
     ):
-        """A field is library wide, exactly like a tag, and carries no count.
+        """**This asserted the opposite until the definitions were scoped.**
 
-        So listing them says which facts the household keeps and nothing about
-        which books hold one, which is why there is no `book_count` here and
-        `GET /api/books/tags` needs its count filtered through the Shelf.
+        It said a definition is library wide exactly like a tag, so listing
+        them discloses nothing about which books hold one. That was true of
+        the count and false of the name: a field name is free text somebody
+        typed, and here the only book holding a value in it is private, so
+        the name said a private book exists and what its owner keeps about it.
         """
         listed = client.get("/api/books/custom-fields", headers=member["headers"]).json()
 
+        assert listed == []
+
+    def test_the_owner_still_lists_it(self, client, admin, private_book, text_field):
+        """The other half, so the arm above is not satisfied by an empty list
+        for everybody."""
+        listed = client.get("/api/books/custom-fields", headers=admin["headers"]).json()
+
         assert [field["name"] for field in listed] == ["Bought from"]
+
+    def test_the_list_still_carries_no_count(self, client, admin, private_book):
+        """Scoping the list is not a licence to publish the number it would
+        now be scoped to. `docs/security.md` records why neither number is
+        worth having."""
+        listed = client.get("/api/books/custom-fields", headers=admin["headers"]).json()
+
+        assert listed
         assert all("count" not in key for field in listed for key in field)
 
 
@@ -611,3 +662,192 @@ class TestPurgingABook:
         client.delete(f"/api/books/{book['id']}/permanent", headers=admin["headers"])
 
         assert db.query(CustomFieldValue).count() == 0
+
+
+class TestNamingAHiddenFieldByItsId:
+    """The doors that take a field id, once the list is scoped.
+
+    **The write door is the one that matters**, and it defeats the scoped list
+    on its own: `PUT /api/books/{book}/custom-fields/{field}` answers with the
+    book's whole list and every entry carries `name`, so on a book of your own
+    an ungated write is a name oracle over a small integer id space.
+    """
+
+    @pytest.fixture
+    def hidden_field(self, client, member, make_book):
+        """A field whose only value sits on a member's private book.
+
+        Defined and filled by the member, so it is the **admin** it is hidden
+        from, which is what lets the delete arm say something.
+        """
+        field = client.post(
+            "/api/books/custom-fields",
+            json={"name": "Shelf photo", "kind": "text"},
+            headers=member["headers"],
+        ).json()
+        book = make_book(member["headers"], title="A diary")
+        assert (
+            client.patch(
+                f"/api/books/{book['id']}/privacy",
+                json={"is_private": True},
+                headers=member["headers"],
+            ).status_code
+            == 200
+        )
+        assert _set(
+            client, member["headers"], book["id"], field["id"], "On the landing"
+        ).status_code == 200
+        return field
+
+    def test_it_is_absent_from_the_other_members_list(self, client, admin, hidden_field):
+        listed = client.get("/api/books/custom-fields", headers=admin["headers"]).json()
+
+        assert [field["id"] for field in listed] == []
+
+    def test_renaming_it_is_a_404(self, client, admin, hidden_field):
+        res = client.patch(
+            f"/api/books/custom-fields/{hidden_field['id']}",
+            json={"name": "Anything"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 404
+        assert "Shelf photo" not in res.text
+
+    def test_the_404_is_the_one_an_absent_id_gets(self, client, admin, hidden_field):
+        """A different body would be a 404 that still answers the question."""
+        hidden = client.patch(
+            f"/api/books/custom-fields/{hidden_field['id']}",
+            json={"name": "Anything"},
+            headers=admin["headers"],
+        )
+        absent = client.patch(
+            "/api/books/custom-fields/99999",
+            json={"name": "Anything"},
+            headers=admin["headers"],
+        )
+
+        assert hidden.json() == absent.json()
+
+    def test_writing_a_value_by_its_id_is_a_404(
+        self, client, admin, make_book, hidden_field
+    ):
+        """The evasion this gate exists for: guess the id, write it on a book
+        you own, read the name off the 200."""
+        mine = make_book(admin["headers"], title="Mine")
+
+        res = _set(client, admin["headers"], mine["id"], hidden_field["id"], "Anything")
+
+        assert res.status_code == 404
+        assert "Shelf photo" not in res.text
+
+    def test_no_value_is_written_by_the_refused_call(
+        self, client, admin, make_book, hidden_field
+    ):
+        """A 404 that wrote the row first would be a worse answer than a 200."""
+        mine = make_book(admin["headers"], title="Mine")
+        _set(client, admin["headers"], mine["id"], hidden_field["id"], "Anything")
+
+        assert (
+            client.get(
+                f"/api/books/{mine['id']}/custom-fields", headers=admin["headers"]
+            ).json()
+            == []
+        )
+
+    def test_retyping_the_name_is_a_loop_rather_than_a_recovery(
+        self, client, admin, make_book, hidden_field
+    ):
+        """**The claim this branch shipped with, driven, and it is false.**
+
+        `define` was left returning the colliding row on the ground that it is
+        the way back: retype the name, get the definition, write a value, and
+        the first arm admits it again. It does not. `define` returns the
+        existing row and **writes nothing**, so no value moves, so the gate
+        answers exactly as before and the write is still a 404.
+
+        That is `shelving.Shelving`'s "loop rather than a recoverable state",
+        measured for collections a day earlier. Both steps are driven here,
+        because an arm on the write alone pins half of it and that half was
+        already green beside the sentence it refutes.
+        """
+        again = client.post(
+            "/api/books/custom-fields",
+            json={"name": "Shelf photo", "kind": "text"},
+            headers=admin["headers"],
+        )
+        assert again.status_code == 201
+        assert again.json()["id"] == hidden_field["id"]
+
+        mine = make_book(admin["headers"], title="Mine")
+        written = _set(
+            client, admin["headers"], mine["id"], again.json()["id"], "Anything"
+        )
+
+        assert written.status_code == 404
+        assert client.get(
+            "/api/books/custom-fields", headers=admin["headers"]
+        ).json() == []
+
+    def test_an_absent_id_and_a_hidden_one_cost_the_same_statements(
+        self, client, admin, db, hidden_field
+    ):
+        """The bodies are identical, so a clock must not separate them.
+
+        **`or` short circuits**, so with the row fetched first an absent id
+        never reaches the three arms: one statement against several, which is
+        a factor rather than a margin on a timer. The resolver asks the gate
+        first for that reason.
+
+        Counted rather than timed. A timing assertion on a node two other
+        suites share is a flake, and the count is the cause the timing was a
+        symptom of.
+        """
+        engine = db.get_bind()
+
+        def count(field_id: int) -> int:
+            seen: list[str] = []
+
+            def record(conn, cursor, statement, *rest):
+                seen.append(statement)
+
+            event.listen(engine, "before_cursor_execute", record)
+            try:
+                client.patch(
+                    f"/api/books/custom-fields/{field_id}",
+                    json={"name": "Anything"},
+                    headers=admin["headers"],
+                )
+            finally:
+                event.remove(engine, "before_cursor_execute", record)
+            return len(seen)
+
+        hidden = count(hidden_field["id"])
+        absent = count(99999)
+
+        assert hidden > 0, "nothing was counted, so this arm measured nothing"
+        assert absent == hidden, (
+            f"an absent field id costs {absent} statements and a hidden one "
+            f"{hidden}, so the two 404s are separable on a clock"
+        )
+
+    def test_an_admin_may_still_delete_it(self, client, admin, hidden_field):
+        """**Deliberately ungated.** An admin has no privilege over another
+        member's private books, so gating this would leave the field
+        undeletable for good, holding a slot in a vocabulary capped at 25."""
+        res = client.delete(
+            f"/api/books/custom-fields/{hidden_field['id']}", headers=admin["headers"]
+        )
+
+        assert res.status_code == 204
+
+    def test_its_owner_may_still_rename_it(self, client, member, hidden_field):
+        """The gate is the viewer's, not the field's: the member whose book
+        carries it reaches it exactly as before."""
+        res = client.patch(
+            f"/api/books/custom-fields/{hidden_field['id']}",
+            json={"name": "Where it lives"},
+            headers=member["headers"],
+        )
+
+        assert res.status_code == 200

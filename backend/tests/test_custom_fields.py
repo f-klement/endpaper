@@ -114,9 +114,20 @@ BACKEND = Path(__file__).resolve().parent.parent
 #: `models.py` defines it. `custom_fields.py` owns it. `backup.py` names it in
 #: `_TABLES` so a restore cannot lose a table, which is the same third way past
 #: a viewer `test_shelf.py` documents. Nothing else: a router asks
-#: `custom_fields.py`, and it holds only `CustomField`, the definition, which is
-#: Library wide and says nothing about any Book.
-VALUE_READERS = {"models.py", "custom_fields.py", "backup.py"}
+#: `custom_fields.py`, and it holds only `CustomField`, the definition.
+#:
+#: **`fields.py` is the fourth and it is a different question rather than an
+#: exemption**, which is why it needs saying here rather than being waved
+#: through. The three above read values; that module asks which **definitions**
+#: a Member may be told exist, and the only way to answer it is to ask which
+#: ones anything is filed under. Every one of its three reads selects
+#: `field_id` and nothing else, so no value, no `book_id` and no count crosses
+#: out of it, two of the three go through the Shelf, and
+#: `test_shelf.py::BOOK_OWNED_READERS` carries the statement and the reason for
+#: each. The sentence above that says a definition "says nothing about any
+#: Book" is what stopped being true: a definition carried only by Private Books
+#: says those Books exist, which is what `fields.Fields` closes.
+VALUE_READERS = {"models.py", "custom_fields.py", "backup.py", "fields.py"}
 
 #: The modules a `from ... import *` can bind the name through. Derived from the
 #: allowlist rather than written out, for the reason `test_reading.py` derives

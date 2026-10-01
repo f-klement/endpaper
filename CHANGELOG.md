@@ -1155,6 +1155,54 @@
   all, so replacing that refusal with a null left every check green while the scan ran over an
   empty export and exited 0, one rung before a push to a mirror that does not unpublish.
   Inverting the refusal was green the same way. Four arms now drive the entry point itself.
+- **A MARC record that prints its ISBN qualifier inside the subfield now yields the ISBN.**
+  `9783161484100 (pbk.)` is the spelling every catalogue used before subfield `$q` existed,
+  and it is the one a file another library hands over carries, where the ISBN is the
+  importer's primary match key. The same parenthesis now counts as qualification, so a cross
+  reference to another edition written that way cannot be taken as the record's own
+  identifier, and an entry that qualifies nothing but states no number cannot outrank one
+  that does.
+- **A catalogue name whose surname is a French role word no longer loses the surname.**
+  `Autrice, A A.` flips to `A A. Autrice`, and reading that form back, as an export and
+  import round trip does, took the manufactured full stop for the one a catalogue puts in
+  front of a role designation and returned `A A`. Silently: nothing said the surname had
+  gone.
+- **A custom field's name no longer reaches a member who can see nothing it was filled in
+  on.** The list of household defined fields was the whole table to everybody, so a field
+  filled in only on books the viewer cannot see published both its existence and whatever a
+  member chose to call it to the rest of the library. A definition is listed now when a book
+  the viewer can see holds a value in it, when a book in their trash does, or when no book
+  holds one at all, so a field just defined and not yet filled in is still listed to
+  everybody, its author included. The doors that take a field id agree with that list by
+  construction rather than by a second rule: renaming a field the caller may not be told
+  about, or writing a value into one, answers the same 404 an id that does not exist already
+  answered, and the refusal when a name is taken no longer says which name it clashed with.
+  Deleting a field is unchanged and stays an admin's. What a scoped list newly tells a member,
+  and the two doors no wording closes, are written down in `docs/security.md`.
+- **Renaming a custom field is recorded.** Any member may rename any field, library wide, and
+  the row carries no author and no timestamp, so the one verb that relabels content other
+  members typed, on books the renamer cannot see, was also the only one leaving no trace,
+  where deleting a field logs and is an admin's. The rename now logs the account and both
+  names. Who may rename is unchanged.
+- **Every rule that walks the frontend source reads one corpus, and narrowing it is refused
+  rather than obeyed.** Each tree wide rule carried its own file pattern, so disarming one
+  cost a single line in the file of whoever wanted that rule green, and the rule went on
+  reporting nothing with a real violation live. Measured twice over this tree: cut to one
+  extension the corpus loses every card and the rendering half of every page folder while
+  keeping enough files to clear any plausible floor, and narrowed by directory it keeps both
+  extensions and every exempted file and drops every page. The patterns live in one module
+  now, which holds four enumerations of the tree against each other and against two stated
+  lists, and refuses to hand over a corpus that is not the tree. Internal: no behaviour
+  changes.
+- **A reorganisation of the MARC21 field readers left their old names in prose that
+  publishes, and a reader cannot tell a name is gone.** Every surviving stale name is
+  repaired, across three documents, five backend modules, five test files and a migration,
+  and a new guard refuses a backticked `module.member` naming a member that module does not
+  have. The guard covers the qualified spelling only, and that bound is measured rather than
+  cautious: over the published tree a rule over bare private names reports names nothing
+  here defines, and reading them finds most are correct prose, third party internals, local
+  variables and names deliberately recorded as gone, so an unqualified rule would refuse by
+  accident. The escape for a name a document keeps on purpose is to drop the backticks.
 
 ## v0.17.2
 

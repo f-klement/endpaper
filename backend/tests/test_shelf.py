@@ -87,14 +87,17 @@ caught would prove nothing about the new one. What is *still* not caught:
   names no `Book` at all.
 * **A child table that carries a user.** `notes`, `quotes`, `user_books`,
   `reading_progress` and `loans` are outside the fourth pass on purpose: each
-  has a viewer of its own. Re-measured 2026-09-30 by running this pass over the
+  has a viewer of its own. Re-measured 2026-10-01 by running this pass over the
   tree with that entity set: **42 statements across 10 modules**, or 37 across 9
-  outside `shelf.py`, against **24 across 6** for the book-owned tables, or 19
-  across 5 outside it, out of the **97** modules `_source_modules()` returns.
-  **All four pairs were re-derived on this tree together and none of them
-  moved.** The module count did, from 95: that figure was right the day it was
-  written, the tree reached 96 before this work began, and `shelving.py` made
-  it 97. Both halves of that
+  outside `shelf.py`, against **27 across 7** for the book-owned tables, or 22
+  across 6 outside it, out of the **98** modules `_source_modules()` returns.
+  **All four pairs were re-derived on this tree together, and the book-owned
+  pair moved while the user-carrying one did not.** `fields.py` arrived with
+  three reads of `custom_field_values` and none of a table carrying a member,
+  so the halves move independently and only a joint re-derivation can say so.
+  The module count moved with it, from 95: that figure was right the day it was
+  written, the tree reached 96 before this work began, `shelving.py` made it 97
+  and `fields.py` 98. Both halves of that
   comparison are this pass's own output, on the same day; an earlier statement
   of it compared two different methods and neither number reproduced. All four
   were re-derived together rather than the two the tag disclosure work moved,
@@ -162,13 +165,15 @@ caught would prove nothing about the new one. What is *still* not caught:
   with no predicate. Not caught by passes 1 to 3, and **the reason is a cost,
   measured**: `Book` in a narrowing clause is **14 statements across 5 modules**
   outside `shelf.py` and off a shelf-rooted chain, and **22 across 9** counting
-  those, measured 2026-09-17, against the **19 across 5** the fourth pass
-  carries, summed from `BOOK_OWNED_READERS` on 2026-09-29. That sum read 20
+  those, measured 2026-09-17, against the **22 across 6** the fourth pass
+  carries, summed from `BOOK_OWNED_READERS` on 2026-10-01. That sum read 20
   until `95693de`, where the three `.book_id.in_(loser_ids)` reads left
-  `routers/books.py` for `folding.py` and a shape rule took them, then 17, and
-  the fifth module is `tags.py`, which gained the Tag index and two arms of the
-  rule deciding who may be told a Tag exists. That is what a count of hand
-  classified statements does when the code moves. Extending the clause rule to
+  `routers/books.py` for `folding.py` and a shape rule took them, then 17, then
+  19 when `tags.py` gained the Tag index and two arms of the rule deciding who
+  may be told a Tag exists. The sixth module is `fields.py`, which is the same
+  rule again for a custom field definition and whose three arms are its three
+  entries. That is what a count of hand classified statements does when the
+  code moves. Extending the clause rule to
   `Book` means classifying every one of them by hand.
 
   That last pair said **7 across 3** until 2026-09-10 and both halves were
@@ -679,6 +684,50 @@ BOOK_OWNED_READERS = {
             "the argument and so part of the key**: every row it reads is "
             "deleted or repointed on the spot, so this is a write that reads "
             "its own targets rather than a query with an audience.",
+        ),
+    ],
+    "fields.py": [
+        (
+            "rows = ( Shelf.seen_by(self._db, self._viewer_id) "
+            ".select(CustomFieldValue.field_id) .join(CustomFieldValue, "
+            "CustomFieldValue.book_id == Book.id) .distinct() .all() )",
+            "which definitions a Book **this Member can see** holds a value "
+            "in, written through `Shelf.select()` and joined to `books`. "
+            # Kept on one line, for the reason the `routers/stats.py` entry
+            # below states at its own copy of this marker.
+            "**Correct, and reported anyway**"
+            ", which is the cost this list pays for not trying to recognise a "
+            "correct join. What crosses is `field_id` and nothing else: no "
+            "value and no `book_id`. **`distinct()` rather than a count**, "
+            "which is the number `list_custom_fields` refuses to publish: how "
+            "many Books carry a field. Producing it needs a count or this read "
+            "without the `distinct`, and either is a changed statement, which "
+            "is what this key is on.",
+        ),
+        (
+            "rows = ( Shelf.trashed_by(self._db, self._viewer_id) "
+            ".select(CustomFieldValue.field_id) .join(CustomFieldValue, "
+            "CustomFieldValue.book_id == Book.id) .distinct() .all() )",
+            "the same read over `Shelf.trashed_by`, so the rows are this "
+            "Member's own trashed Books and every Member's trashed public "
+            "ones, which is `in_trash_for` and no wider. The arm exists "
+            "because a restore reinstates the value: without it, trashing the "
+            "last Book carrying a field takes the field off the settings page "
+            "of the Member who is about to bring it back. `field_id` and "
+            "nothing else crosses, as above.",
+        ),
+        (
+            "rows = self._db.query(CustomFieldValue.field_id).distinct().all()",
+            "**Unscoped on purpose, and the only statement here that is.** "
+            "The other two ask what one Member may see; this asks whether any "
+            "Book at all holds a value in a definition, which is the question "
+            "that separates a field naming somebody's hidden Book from a field "
+            "naming no Book. Scoping it would answer that question wrongly by "
+            "construction, and answering it wrongly hides a field from the "
+            "Member who has just defined it. It is a set of `field_id` and "
+            "never a count, so nothing about how many hidden Books carry one "
+            "can leave through it: the same bound "
+            "`shelf.collections_any_book_is_filed_in` states for collections.",
         ),
     ],
     "routers/books.py": [

@@ -700,3 +700,250 @@ class TestTheCarrierDecides:
         assert raw[23] == "o"
         assert marc_fields._marc_text(raw)[23] != "o"
         assert marc_fields._marc_carrier_is_book(_carrier_record(**{"008": raw})) is False
+
+
+def _isbn_fields(*entries: str) -> Fields:
+    """A record carrying one `020` per argument, each written as raw subfields."""
+    return Fields(_marc_element(
+        "".join(
+            f'<datafield tag="020" ind1=" " ind2=" ">{entry}</datafield>'
+            for entry in entries
+        )
+    ))
+
+
+def _a(value: str) -> str:
+    return f'<subfield code="a">{value}</subfield>'
+
+
+def _q(value: str) -> str:
+    return f'<subfield code="q">{value}</subfield>'
+
+
+class TestAnInlineQualifierIsAQualifier:
+    """`020 $a 9783161484100 (pbk.)` is the spelling that predates `$q`.
+
+    **Two halves, and each one alone loses a record the other keeps.** The
+    witnesses are different records and measured 2026-09-30, each against the
+    behaviour before any of this:
+
+    | half shipped alone | the arm below it loses |
+    |---|---|
+    | read the number, not the qualification | the cross reference |
+    | count the qualification, not the number | the mistyped sibling |
+
+    Naming one witness for both is what the first draft of this docstring did,
+    and the Dune record restates the old behaviour for the counting half rather
+    than failing on it.
+
+    **What the rules key on is a position and a property, never a word**, so no
+    arm here names a binding: `_ISBN_QUALIFIER_OPENER` says where the number
+    ends, and `_normalise_would_drop_an_alphanumeric` says when a residue that
+    parses is standing on deleted characters. The shapes outside both have arms
+    of their own below, because a boundary nothing pins is a boundary somebody
+    widens by accident.
+    """
+
+    def test_a_record_whose_only_isbn_is_inline_qualified_still_carries_it(self):
+        fields = _isbn_fields(_a("9783161484100 (pbk.)"))
+        assert fields.isbn() == "9783161484100"
+        assert fields.claims_isbn("9783161484100") is True
+
+    def test_several_qualifiers_in_one_parenthesis_are_one_qualifier(self):
+        """`0877547637 (pbk. : alk. paper)` is the Library of Congress form.
+        Two qualifiers, one parenthesis, and the rule counts parentheses."""
+        assert _isbn_fields(_a("0877547637 (pbk. : alk. paper)")).isbn() == (
+            "9780877547631"
+        )
+
+    def test_a_qualifier_the_normaliser_deletes_is_qualification_too(self):
+        """The half `isbn.parse` answered by alphabet rather than by rule.
+
+        `normalise` keeps ASCII alphanumerics, so `(pbk.)` survives into a
+        candidate too long to be an ISBN and a Greek one vanishes before any
+        length test runs. The Greek entry therefore parsed, counted as plain,
+        and could answer `claims_isbn` for a number the record only cross
+        references. The opener catches this one; the arms below catch the
+        brackets the opener does not.
+        """
+        fields = _isbn_fields(
+            _a("9780441013593 (αμερ. έκδοση)"),
+            _a("9789602118962"),
+        )
+        assert fields.isbn() == "9789602118962"
+        assert fields.claims_isbn("9780441013593") is False
+
+    def test_an_inline_cross_reference_is_not_this_records_own_isbn(self):
+        """The Dune shape in the legacy spelling: a translation naming the
+        American edition it was made from, beside its own plain number.
+
+        **This arm is green before the change and is the one that reddens on
+        half of it.** Reading the number without counting the parenthesis as
+        qualification makes both entries plain, and the cross reference is
+        first, so `isbn` returns the American edition and `claims_isbn` matches
+        it: the failure `_isbn_entries` exists for, reopened through a subfield
+        it did not read.
+        """
+        fields = _isbn_fields(
+            _a("9780441013593 (amerik. Original)"),
+            _a("9783446249974"),
+        )
+        assert fields.isbn() == "9783446249974"
+        assert fields.claims_isbn("9780441013593") is False
+
+    def test_the_two_spellings_are_one_rule(self):
+        """A record mixing `$q` and the inline form prefers the entry with
+        neither, rather than preferring whichever spelling the reader knows."""
+        fields = _isbn_fields(
+            _a("9780441013593") + _q("amerik. Original"),
+            _a("9789602118962 (χαρτόδετο)"),
+            _a("9783446249974"),
+        )
+        assert fields.isbn() == "9783446249974"
+
+    def test_a_record_whose_every_isbn_is_inline_qualified_answers_anyway(self):
+        """The fallback `_isbn_entries` already has for `$q`: a record with
+        nothing unqualified is still a record about a book, and catalogue order
+        is all there is to choose on."""
+        fields = _isbn_fields(
+            _a("9783161484100 (ePUB)"),
+            _a("9783446249974 (Broschur)"),
+        )
+        assert fields.isbn() == "9783161484100"
+        assert fields.claims_isbn("9783446249974") is True
+
+    def test_an_020_with_no_dollar_a_is_answered_rather_than_raising(self):
+        """`Subfields` is public and the readers promise None rather than an
+        exception, so the promise is tested rather than left to the one caller
+        that filters.
+
+        Found by the mutation sweep of 2026-09-30: dropping the default from
+        `self.get("a", "")` survived every arm, because `_isbn_entries` is the
+        only route in and it admits nothing without an `$a`.
+        """
+        entry = marc_fields.Subfields([("z", "9781111111111")])
+        assert entry.stated_isbn() is None
+        assert entry.isbn_is_qualified() is False
+
+    def test_a_qualified_entry_is_preferred_over_an_unqualified_one_stating_nothing(self):
+        """Preferring an entry is only safe while it has an answer to give.
+
+        `9783161484199` is a mistyped ISBN: it is plain, so it was preferred,
+        and its checksum fails, so the reader then found nothing and the
+        record's only usable identifier was lost. Measured 2026-09-30: the
+        behaviour before the qualifier rule answered `9789602118962` here and
+        the rule without its stating tier answered None, which is a loss rather
+        than a narrowing.
+        """
+        fields = _isbn_fields(
+            _a("9783161484199"),
+            _a("9789602118962 (χαρτόδετο)"),
+        )
+        assert fields.isbn() == "9789602118962"
+
+    def test_the_same_preference_holds_for_the_modern_spelling(self):
+        """The `$q` half of the tier above, which was open before any of this
+        and is closed by the same three lines."""
+        fields = _isbn_fields(
+            _a("9783161484199"),
+            _a("9789602118962") + _q("paperback"),
+        )
+        assert fields.isbn() == "9789602118962"
+
+    @pytest.mark.parametrize(
+        "bracket",
+        ["[{}]", "\uff08{}\uff09", "\u3010{}\u3011"],
+        ids=["square", "full-width-round", "lenticular"],
+    )
+    def test_a_qualifier_in_a_bracket_the_rule_does_not_open_still_qualifies(
+        self, bracket
+    ):
+        """The residue decides, not the bracket.
+
+        `normalise` deletes the qualifier's characters and leaves a number that
+        parses, so before `_normalise_would_drop_an_alphanumeric` each of these
+        read as an entry plainly stating the American edition's ISBN and won on
+        catalogue order. Full width parentheses are what CJK cataloguing
+        prints, which is where a qualifier the normaliser deletes lives, so the
+        bracket and the alphabet are correlated rather than independent.
+        """
+        fields = _isbn_fields(
+            _a("9780441013593 " + bracket.format("αμερ. έκδοση")),
+            _a("9783446249974"),
+        )
+        assert fields.isbn() == "9783446249974"
+        assert fields.claims_isbn("9780441013593") is False
+
+    def test_a_number_written_wholly_inside_parentheses_is_still_stated(self):
+        """The cut leaves nothing, so the whole subfield is read.
+
+        Not a spelling MARC defines and none has been measured here. It is kept
+        because reading `$a` whole is what this module did before the cut, and
+        losing an identifier is the harm the cut exists to stop.
+
+        **The third assertion is what it costs**, and it is asserted rather than
+        described because the second one alone reads as though the entry always
+        loses. It loses to a sibling stating a number **unqualified**. Where
+        every sibling is qualified it wins on catalogue order, exactly as before
+        the cut, and that is a worse answer than the rest of this rule gives.
+        """
+        assert _isbn_fields(_a("(9783161484100)")).isbn() == "9783161484100"
+        assert _isbn_fields(
+            _a("(9780441013593)"), _a("9783446249974")
+        ).isbn() == "9783446249974"
+        assert _isbn_fields(
+            _a("(9780441013593)"), _a("9783446249974 (pbk.)")
+        ).isbn() == "9780441013593"
+
+    def test_an_unbalanced_parenthesis_still_qualifies_and_still_reads(self):
+        """A truncated subfield is a real thing a file carries, and the rule
+        keys on the opener rather than on a matched pair."""
+        fields = _isbn_fields(_a("9783161484100 ("), _a("9783446249974"))
+        assert fields.isbn() == "9783446249974"
+        assert fields.claims_isbn("9783161484100") is False
+
+
+class TestWhatTheInlineQualifierRuleDeliberatelyDoesNotReach:
+    """The boundary, pinned so that widening it is a decision.
+
+    Each of these would need a rule about what may surround a number rather
+    than about where the qualifier starts, and MARC defines none of them.
+
+    **These three arms pass before the qualifier rule as well as after, so the
+    green has to be shown to be armed rather than assumed.** Measured
+    2026-09-30 against three implementations somebody might reach for instead
+    of the cut, all three of which also answer the ticket:
+
+    | instead of the cut | which arm below reddens |
+    |---|---|
+    | the leading run of ISBN characters | the trailer |
+    | the first run of ISBN characters anywhere | the trailer and the label |
+    | the first thirteen digit run anywhere | all three |
+
+    A search is the tempting alternative, because it finds the number wherever
+    it sits and needs no notion of a qualifier at all. Only the last row
+    reddens on the subfield holding two numbers, and the row above it does not:
+    its run swallows the space between them and comes out too long, which is
+    the accident rather than the rule.
+    """
+
+    def test_a_trailer_with_no_parenthesis_is_not_a_qualifier(self):
+        assert _isbn_fields(_a("9783161484100 pbk.")).isbn() is None
+
+    def test_a_label_in_front_of_the_number_is_not_stripped(self):
+        assert _isbn_fields(_a("ISBN 9783161484100")).isbn() is None
+
+    def test_a_second_identifier_in_the_same_subfield_is_not_reached(self):
+        """Both numbers are on one side of the opener, so the cut cannot help.
+        MARC repeats the field rather than writing two numbers in one `$a`."""
+        assert _isbn_fields(_a("9783161484100 9783446249974 (set)")).isbn() is None
+
+    def test_a_parenthesis_in_another_field_carries_content(self):
+        """`300 $a` is where the same shape holds the page count, so a cut
+        applied to every subfield would leave `pages_from_extent` nothing."""
+        fields = Fields(_marc_element(
+            '<datafield tag="300" ind1=" " ind2=" ">'
+            '<subfield code="a">1 Online-Ressource (240 Seiten)</subfield>'
+            "</datafield>"
+        ))
+        assert fields.extent() == "1 Online-Ressource (240 Seiten)"

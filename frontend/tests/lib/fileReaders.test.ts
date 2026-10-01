@@ -9,6 +9,12 @@ import {
   BookFormat,
   BookIdentifierScheme,
 } from "../../src/api/generated/model";
+// Every module, read as text, because the rules below are about the import
+// graph and a module's own exports, neither of which is visible from a value.
+// The one enumeration of `src/` refuses a corpus that is no longer the tree;
+// the pattern used to be written here, where narrowing it was one edit in the
+// file holding the rules it disarmed.
+import { sourceEntries as modules } from "../sourceModules";
 
 /**
  * Every registered extension and the export its module answers with.
@@ -160,25 +166,6 @@ describe("which reader opens a picked file", () => {
   });
 });
 
-/**
- * Every module, read as text, because the rules below are about the import
- * graph and a module's own exports, neither of which is visible from a value.
- *
- * `import.meta.glob` rather than `node:fs`, for the reason
- * `tests/houseRules.test.ts` gives at its own copy: a guard test is a poor
- * reason to add `@types/node` and widen the global types.
- *
- * **Here rather than beside that copy**, which is where a tree wide rule
- * belongs, because this one is about a single seam and this is that seam's test
- * file. `houseRules.test.ts` is also owned by another change this wave, and a
- * rule about `fileReaders.ts` should not need an edit there to be added.
- */
-const SOURCES = import.meta.glob("../../src/**/*.{ts,tsx}", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
 const SEAM = "lib/fileReaders.ts";
 const ENTITY_GUARD = "lib/xmlEntities.ts";
 const YEAR_RULES = "lib/year.ts";
@@ -259,13 +246,6 @@ function bindings(source: string): [string, string, string][] {
 /** Whether a clause names one of the vocabulary a home declares. */
 function names(clause: string, home: readonly string[]): boolean {
   return home.some((name) => new RegExp(`\\b${name}\\b`).test(clause));
-}
-
-function modules(): [string, string][] {
-  return Object.entries(SOURCES).map(([path, source]) => [
-    path.replace("../../src/", ""),
-    source,
-  ]);
 }
 
 /**

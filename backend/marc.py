@@ -836,18 +836,6 @@ def _record(fields: Fields) -> Record | None:
     `marc_fields.Fields`'s rule and not this reader's. Where nothing
     is credited with writing the book, `Fields.credited_names` names everybody
     the record names, which is what an edited volume looks like in MARC.
-
-    **A fourth divergence is known and not fixed here, because the fix is in
-    `marc_fields.py`.** `Fields.isbn` drops the commonest legacy `020 $a` spelling:
-    measured, `9783161484100`, `978-3-16-148410-0` and `9783161484100 :` all
-    parse, and `9783161484100 (pbk.)` returns None. The ISBD colon is stripped
-    and a parenthesised qualifier is not, because that parser was written
-    against the DNB and K10plus, which put the qualifier in `$q`. A file another
-    library hands over is exactly where the inline spelling lives, and the ISBN
-    is this importer's primary match key, so such a record silently falls back
-    to the weaker key. Raised as an issue rather than worked around here:
-    stripping the qualifier in `marc.py` would be a second notion of what an
-    `020` says, which is what this module exists not to build.
     """
     title, subtitle, series_name, series_index = fields.title_statement()
     if not title:

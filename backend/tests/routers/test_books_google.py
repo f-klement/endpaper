@@ -569,7 +569,7 @@ class TestACatalogueCannotWriteWhatTheColumnsRefuse:
 
         Reachable from a title alone: `_series_from_title` matches the shape
         below and calls `float()` on the digits, which is the same door
-        `metadata._marc_title` opens from `245 $n`.
+        `marc_fields.Fields.title_statement` opens from `245 $n`.
         """
         book = make_book(admin["headers"])
 

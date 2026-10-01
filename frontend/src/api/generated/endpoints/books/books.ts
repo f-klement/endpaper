@@ -2390,7 +2390,13 @@ export const getListCustomFieldsUrl = () => {
 };
 
 /**
- * Every field this library keeps, in the order it defined them.
+ * Every field this library may tell you about, in the order it defined them.
+ *
+ * **Not every field it keeps.** A field is listed when a book you can see
+ * holds a value in it, when a book in your trash does, or when no book at all
+ * does. A field whose every value sits on books you cannot see is absent, and
+ * naming it by id is a 404. `fields.Fields` holds the three arms and what
+ * they cost.
  *
  * **No usage count**, unlike `GET /api/books/tags`. A count of the books
  * carrying a field is a disclosure: it is drawn from books the caller may not
@@ -2687,6 +2693,11 @@ export const getDeleteCustomFieldUrl = (fieldId: number) => {
  * It is the sharper case of the two: deleting a tag takes a label off a book,
  * and deleting a field takes the **content** a member wrote.
  *
+ * **The one door taking a field id that is not scoped to the caller**, and
+ * deliberately: gating it would leave a field whose every value sits on books
+ * the admin cannot see undeletable for good. `_any_custom_field` carries the
+ * rest.
+ *
  * 204, like `delete_tag`, and the number of values removed goes to the log
  * rather than to the caller. See `list_custom_fields` for why no count is
  * published.
@@ -2785,6 +2796,14 @@ export const getRenameCustomFieldUrl = (fieldId: number) => {
  * That is the schema rather than this handler: values reference the
  * definition by id, so nothing about them mentions the name. `custom_fields.rename`
  * records why renaming onto an existing name is refused instead of merged.
+ *
+ * **404 for a field you may not be told about**, which is the answer an
+ * absent id already gives: see `fields.Fields.addressable`.
+ *
+ * **Logged, like the delete beside it.** A `CustomField` records no author
+ * and no timestamp, and any member may rename any field they can see, library
+ * wide, so without this line the one verb that relabels content other members
+ * typed is the only one leaving no trace at all.
  * @summary Rename Custom Field
  */
 export const renameCustomField = async (
@@ -6385,6 +6404,11 @@ export const getSetCustomFieldUrl = (bookId: number, fieldId: number) => {
  *
  * Returns the book's whole list rather than the one value, so a client that
  * has just written one is holding the same thing `GET` would give it.
+ *
+ * **404 for a field you may not be told about**, and this is the door that
+ * makes the scoped list worth having: the response carries `name` on every
+ * entry, so an ungated write would be a name oracle over a small integer id
+ * space, reachable on a book of your own. See `fields.Fields.addressable`.
  *
  * 400 when the field holds a link and the value is not one: an address with
  * no scheme, a `javascript:` or `data:` URL, or a host that is missing. See

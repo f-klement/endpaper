@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 33,350 |
+|  | [Backend](decisions.md#backend) | 33,353 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -149,7 +149,7 @@ repeat the argument.
 | Backend | [A seeded tag is identified by a key, not by its name](decisions.md#a-seeded-tag-is-identified-by-a-key-not-by-its-name) | 366 |
 | Backend | [Who may be told a tag exists is a question about books, answered in one module](decisions.md#who-may-be-told-a-tag-exists-is-a-question-about-books-answered-in-one-module) | 285 |
 | Backend | [The tag name index has no viewer, and the viewer sits on the hand off instead](decisions.md#the-tag-name-index-has-no-viewer-and-the-viewer-sits-on-the-hand-off-instead) | 448 |
-| Backend | [The Catalogue record is a type, and the two dialects are gone](decisions.md#the-catalogue-record-is-a-type-and-the-two-dialects-are-gone) | 856 |
+| Backend | [The Catalogue record is a type, and the two dialects are gone](decisions.md#the-catalogue-record-is-a-type-and-the-two-dialects-are-gone) | 859 |
 | Backend | [The Austrian National Library is a third MARCXML source, and the probe is why it works](decisions.md#the-austrian-national-library-is-a-third-marcxml-source-and-the-probe-is-why-it-works) | 645 |
 | Backend | [Where it sits](decisions.md#where-it-sits) | 126 |
 | Backend | [Two defects the mapping would have shipped, neither visible by reading](decisions.md#two-defects-the-mapping-would-have-shipped-neither-visible-by-reading) | 72 |
@@ -231,10 +231,10 @@ repeat the argument.
 | Frontend | [`theme/patterns.ts` exports eleven names only its test imports](decisions.md#themepatternsts-exports-eleven-names-only-its-test-imports) | 411 |
 | Frontend | [A store identifier's value rule lives beside the scheme, and the Takeout reader asks it](decisions.md#a-store-identifiers-value-rule-lives-beside-the-scheme-and-the-takeout-reader-asks-it) | 1,173 |
 |  | [The reading record has one owner, and it is a second privacy rule](decisions.md#the-reading-record-has-one-owner-and-it-is-a-second-privacy-rule) | 448 |
-|  | [A write names what it made stale](decisions.md#a-write-names-what-it-made-stale) | 1,207 |
+|  | [A write names what it made stale](decisions.md#a-write-names-what-it-made-stale) | 1,382 |
 | A write names what it made stale | [A custom field renders as a link because the Library said so, and only if the value still is one](decisions.md#a-custom-field-renders-as-a-link-because-the-library-said-so-and-only-if-the-value-still-is-one) | 291 |
-| A write names what it made stale | [Deleting a custom field is admin only, defining one is not](decisions.md#deleting-a-custom-field-is-admin-only-defining-one-is-not) | 68 |
-| A write names what it made stale | [`MAX_CUSTOM_FIELDS` is the only ceiling the feature needs](decisions.md#max_custom_fields-is-the-only-ceiling-the-feature-needs) | 57 |
+| A write names what it made stale | [Deleting a custom field is admin only, defining one is not](decisions.md#deleting-a-custom-field-is-admin-only-defining-one-is-not) | 166 |
+| A write names what it made stale | [`MAX_CUSTOM_FIELDS` is the only ceiling the feature needs](decisions.md#max_custom_fields-is-the-only-ceiling-the-feature-needs) | 134 |
 | A write names what it made stale | [Settings is an index of six routes, and the descriptions are the page](decisions.md#settings-is-an-index-of-six-routes-and-the-descriptions-are-the-page) | 433 |
 |  | [Tooling](decisions.md#tooling) | 5,164 |
 | Tooling | [Bun, not npm](decisions.md#bun-not-npm) | 27 |
@@ -352,7 +352,7 @@ repeat the argument.
 | Open, and not resolved in this ticket | [A source that cannot answer says which of two things is wrong](decisions.md#a-source-that-cannot-answer-says-which-of-two-things-is-wrong) | 63 |
 | Open, and not resolved in this ticket | [An evasion attempt is bounded by the shapes its author imagines](decisions.md#an-evasion-attempt-is-bounded-by-the-shapes-its-author-imagines) | 180 |
 | Open, and not resolved in this ticket | [A paragraph describing behaviour is not re-read when the behaviour changes](decisions.md#a-paragraph-describing-behaviour-is-not-re-read-when-the-behaviour-changes) | 181 |
-|  | [MARC21 import and export](decisions.md#marc21-import-and-export) | 10,289 |
+|  | [MARC21 import and export](decisions.md#marc21-import-and-export) | 10,303 |
 | MARC21 import and export | [MARC is read through `metadata.py`'s parser, not a second one](decisions.md#marc-is-read-through-metadatapys-parser-not-a-second-one) | 209 |
 | MARC21 import and export | [What `marc.py` refuses is deliberately narrower than what a lookup refuses](decisions.md#what-marcpy-refuses-is-deliberately-narrower-than-what-a-lookup-refuses) | 110 |
 | MARC21 import and export | [An oversized MARC file is refused, where an oversized CSV is truncated](decisions.md#an-oversized-marc-file-is-refused-where-an-oversized-csv-is-truncated) | 62 |
@@ -369,17 +369,17 @@ repeat the argument.
 | MARC21 import and export | [`isbn` is never gap-filled onto a matched Book, and that is what stops a 500](decisions.md#isbn-is-never-gap-filled-onto-a-matched-book-and-that-is-what-stops-a-500) | 408 |
 | MARC21 import and export | [The MARC preview publishes an ISBN existence oracle, and it is accepted](decisions.md#the-marc-preview-publishes-an-isbn-existence-oracle-and-it-is-accepted) | 254 |
 | MARC21 import and export | [The shelf loads what the row needs, not what the serialiser will load anyway](decisions.md#the-shelf-loads-what-the-row-needs-not-what-the-serialiser-will-load-anyway) | 393 |
-| MARC21 import and export | [Three national catalogues speak SRU over HTTP, so they need no Z39.50 client](decisions.md#three-national-catalogues-speak-sru-over-http-so-they-need-no-z3950-client) | 438 |
+| MARC21 import and export | [Three national catalogues speak SRU over HTTP, so they need no Z39.50 client](decisions.md#three-national-catalogues-speak-sru-over-http-so-they-need-no-z3950-client) | 444 |
 | MARC21 import and export | [Greece serves MARC21, not UNIMARC, and it is a different host](decisions.md#greece-serves-marc21-not-unimarc-and-it-is-a-different-host) | 311 |
 | MARC21 import and export | [A miss rate is not a gain: the candidate has to hold the book too](decisions.md#a-miss-rate-is-not-a-gain-the-candidate-has-to-hold-the-book-too) | 256 |
-| MARC21 import and export | [The DNB and the OENB answer almost nothing outside German publishing, and both are in the default first tier](decisions.md#the-dnb-and-the-oenb-answer-almost-nothing-outside-german-publishing-and-both-are-in-the-default-first-tier) | 298 |
+| MARC21 import and export | [The DNB and the OENB answer almost nothing outside German publishing, and both are in the default first tier](decisions.md#the-dnb-and-the-oenb-answer-almost-nothing-outside-german-publishing-and-both-are-in-the-default-first-tier) | 301 |
 | MARC21 import and export | [Most of the coverage the tree credits to the chain is Google Books, and most installations have no key](decisions.md#most-of-the-coverage-the-tree-credits-to-the-chain-is-google-books-and-most-installations-have-no-key) | 155 |
 | MARC21 import and export | [A national library does not hold every ISBN in its own registration group](decisions.md#a-national-library-does-not-hold-every-isbn-in-its-own-registration-group) | 77 |
 | MARC21 import and export | [The Library of Congress is credited with the wrong countries](decisions.md#the-library-of-congress-is-credited-with-the-wrong-countries) | 291 |
 | MARC21 import and export | [Argentina and Uruguay will be covered, using the credentials their libraries publish](decisions.md#argentina-and-uruguay-will-be-covered-using-the-credentials-their-libraries-publish) | 449 |
 | MARC21 import and export | [A number, once written down, stops being re-derived and starts being copied](decisions.md#a-number-once-written-down-stops-being-re-derived-and-starts-being-copied) | 362 |
 | MARC21 import and export | [A finding that rests on a mechanism should say what guards that mechanism](decisions.md#a-finding-that-rests-on-a-mechanism-should-say-what-guards-that-mechanism) | 316 |
-| MARC21 import and export | [An SRU source built on PQF may not build its own query string](decisions.md#an-sru-source-built-on-pqf-may-not-build-its-own-query-string) | 412 |
+| MARC21 import and export | [An SRU source built on PQF may not build its own query string](decisions.md#an-sru-source-built-on-pqf-may-not-build-its-own-query-string) | 417 |
 | MARC21 import and export | [A source that is not UTF-8 corrupts a shelf rather than failing a search](decisions.md#a-source-that-is-not-utf-8-corrupts-a-shelf-rather-than-failing-a-search) | 418 |
 |  | [The cataloguer's column set](decisions.md#the-cataloguers-column-set) | 1,687 |
 | The cataloguer's column set | [The call number is Dewey and Library of Congress, the subjects are GND and LCSH](decisions.md#the-call-number-is-dewey-and-library-of-congress-the-subjects-are-gnd-and-lcsh) | 198 |
@@ -391,7 +391,7 @@ repeat the argument.
 | The cataloguer's column set | [A count is not a fact about a file until it says which tree it describes](decisions.md#a-count-is-not-a-fact-about-a-file-until-it-says-which-tree-it-describes) | 126 |
 | The cataloguer's column set | [A refusal belongs where somebody would go to propose it again](decisions.md#a-refusal-belongs-where-somebody-would-go-to-propose-it-again) | 75 |
 | The cataloguer's column set | [Check the shape of a scripted edit's result, not its exit code](decisions.md#check-the-shape-of-a-scripted-edits-result-not-its-exit-code) | 83 |
-|  | [The default source order, and what an order can and cannot buy](decisions.md#the-default-source-order-and-what-an-order-can-and-cannot-buy) | 2,544 |
+|  | [The default source order, and what an order can and cannot buy](decisions.md#the-default-source-order-and-what-an-order-can-and-cannot-buy) | 2,547 |
 | The default source order, and what an order can and cannot buy | [The first tier is a latency budget, and no order of the roster covers more](decisions.md#the-first-tier-is-a-latency-budget-and-no-order-of-the-roster-covers-more) | 226 |
 | The default source order, and what an order can and cannot buy | [The ticket's own premise did not survive re-derivation, and three of its four claims were wrong](decisions.md#the-tickets-own-premise-did-not-survive-re-derivation-and-three-of-its-four-claims-were-wrong) | 220 |
 | The default source order, and what an order can and cannot buy | [The ÖNB's justifying measurement measured a different population](decisions.md#the-önbs-justifying-measurement-measured-a-different-population) | 320 |
@@ -401,15 +401,16 @@ repeat the argument.
 | The default source order, and what an order can and cannot buy | [A guard proved on one property, then trusted for the property beside it, for the third time in one file](decisions.md#a-guard-proved-on-one-property-then-trusted-for-the-property-beside-it-for-the-third-time-in-one-file) | 209 |
 | The default source order, and what an order can and cannot buy | [A fix a critic hands you is itself a first draft](decisions.md#a-fix-a-critic-hands-you-is-itself-a-first-draft) | 92 |
 | The default source order, and what an order can and cannot buy | [A docstring in a published test may not cite a session path](decisions.md#a-docstring-in-a-published-test-may-not-cite-a-session-path) | 217 |
-| The default source order, and what an order can and cannot buy | [The source order guard's dict arm: a structural rewrite, tried and reverted](decisions.md#the-source-order-guards-dict-arm-a-structural-rewrite-tried-and-reverted) | 299 |
+| The default source order, and what an order can and cannot buy | [The source order guard's dict arm: a structural rewrite, tried and reverted](decisions.md#the-source-order-guards-dict-arm-a-structural-rewrite-tried-and-reverted) | 302 |
 | The default source order, and what an order can and cannot buy | [Two seats made the same mistake in opposite directions](decisions.md#two-seats-made-the-same-mistake-in-opposite-directions) | 128 |
 |  | [A test that loops holds one log record per iteration](decisions.md#a-test-that-loops-holds-one-log-record-per-iteration) | 128 |
-|  | [The National Library of Greece, and the rule that was refusing its records](decisions.md#the-national-library-of-greece-and-the-rule-that-was-refusing-its-records) | 1,322 |
+|  | [The National Library of Greece, and the rule that was refusing its records](decisions.md#the-national-library-of-greece-and-the-rule-that-was-refusing-its-records) | 2,147 |
 | The National Library of Greece, and the rule that was refusing its records | [`020 $q` is a qualifier about this record's item, and refusing it lost the book](decisions.md#020-q-is-a-qualifier-about-this-records-item-and-refusing-it-lost-the-book) | 352 |
 | The National Library of Greece, and the rule that was refusing its records | [Matching an ISBN and choosing one are two questions, and only the first is safe to answer](decisions.md#matching-an-isbn-and-choosing-one-are-two-questions-and-only-the-first-is-safe-to-answer) | 200 |
+| The National Library of Greece, and the rule that was refusing its records | [An inline qualifier is the same qualifier, and reading it needs both halves](decisions.md#an-inline-qualifier-is-the-same-qualifier-and-reading-it-needs-both-halves) | 789 |
 | The National Library of Greece, and the rule that was refusing its records | [A pooled union over a country stratified sample is the wrong instrument for the first tier](decisions.md#a-pooled-union-over-a-country-stratified-sample-is-the-wrong-instrument-for-the-first-tier) | 261 |
 | The National Library of Greece, and the rule that was refusing its records | [The tail's two candidate rules came apart, exactly where the guard said they would](decisions.md#the-tails-two-candidate-rules-came-apart-exactly-where-the-guard-said-they-would) | 137 |
-| The National Library of Greece, and the rule that was refusing its records | [The National Library of Greece is plaintext too, and the identity check is what that costs](decisions.md#the-national-library-of-greece-is-plaintext-too-and-the-identity-check-is-what-that-costs) | 251 |
+| The National Library of Greece, and the rule that was refusing its records | [The National Library of Greece is plaintext too, and the identity check is what that costs](decisions.md#the-national-library-of-greece-is-plaintext-too-and-the-identity-check-is-what-that-costs) | 258 |
 |  | [An address at account creation](decisions.md#an-address-at-account-creation) | 511 |
 | An address at account creation | [An email address belongs to creating an account, and a directory account has no creation moment to attach one to](decisions.md#an-email-address-belongs-to-creating-an-account-and-a-directory-account-has-no-creation-moment-to-attach-one-to) | 490 |
 |  | [What the three seats caught, this wave](decisions.md#what-the-three-seats-caught-this-wave) | 397 |
@@ -430,7 +431,7 @@ repeat the argument.
 |  | [The vocabulary code is lower cased for `marc._extra_headings`, not for the catalogues](decisions.md#the-vocabulary-code-is-lower-cased-for-marc_extra_headings-not-for-the-catalogues) | 107 |
 |  | [An undeclared repeat folds away only when it adds nothing](decisions.md#an-undeclared-repeat-folds-away-only-when-it-adds-nothing) | 158 |
 |  | [A subject label keeps the place of its first occurrence](decisions.md#a-subject-label-keeps-the-place-of-its-first-occurrence) | 105 |
-|  | [The first `$0` is the authority file's number, and `_gnd_identifier` asks a different question](decisions.md#the-first-0-is-the-authority-files-number-and-_gnd_identifier-asks-a-different-question) | 316 |
+|  | [The first `$0` is the authority file's number, and `Subfields.gnd_identifier` asks a different question](decisions.md#the-first-0-is-the-authority-files-number-and-subfieldsgnd_identifier-asks-a-different-question) | 316 |
 |  | [A label under two vocabularies is two subjects; a label restated undeclared is one](decisions.md#a-label-under-two-vocabularies-is-two-subjects-a-label-restated-undeclared-is-one) | 154 |
 |  | [`$2` means a vocabulary on a subject field and a Dewey edition on `082`](decisions.md#2-means-a-vocabulary-on-a-subject-field-and-a-dewey-edition-on-082) | 2,117 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Every Python file is compiled, and the warning is recorded rather than raised](decisions.md#every-python-file-is-compiled-and-the-warning-is-recorded-rather-than-raised) | 448 |
@@ -464,7 +465,7 @@ repeat the argument.
 |  | [The longer fan out is bounded by concurrency, and the bound never waits](decisions.md#the-longer-fan-out-is-bounded-by-concurrency-and-the-bound-never-waits) | 902 |
 | The longer fan out is bounded by concurrency, and the bound never waits | [The backfill waits where the search refuses, and a deadline is what buys the wait](decisions.md#the-backfill-waits-where-the-search-refuses-and-a-deadline-is-what-buys-the-wait) | 701 |
 |  | [Asking nothing has two causes, and the answer has to tell them apart](decisions.md#asking-nothing-has-two-causes-and-the-answer-has-to-tell-them-apart) | 253 |
-|  | [The refused long search names our own limit, not the catalogues'](decisions.md#the-refused-long-search-names-our-own-limit-not-the-catalogues) | 3,884 |
+|  | [The refused long search names our own limit, not the catalogues'](decisions.md#the-refused-long-search-names-our-own-limit-not-the-catalogues) | 3,975 |
 | The refused long search names our own limit, not the catalogues' | [A scheme says how its own call numbers sort, and a scheme with no rule sorts as text](decisions.md#a-scheme-says-how-its-own-call-numbers-sort-and-a-scheme-with-no-rule-sorts-as-text) | 846 |
 | The refused long search names our own limit, not the catalogues' | [A catalogue source is a row, and its parser is not](decisions.md#a-catalogue-source-is-a-row-and-its-parser-is-not) | 201 |
 | The refused long search names our own limit, not the catalogues' | [The runtime asks the constant, and the table waits for the ticket that edits it](decisions.md#the-runtime-asks-the-constant-and-the-table-waits-for-the-ticket-that-edits-it) | 157 |
@@ -473,7 +474,7 @@ repeat the argument.
 | The refused long search names our own limit, not the catalogues' | [What the guard learned from being attacked](decisions.md#what-the-guard-learned-from-being-attacked) | 189 |
 | The refused long search names our own limit, not the catalogues' | [The frontend suite shares one environment, and `tests/doubles/` is what pays for it](decisions.md#the-frontend-suite-shares-one-environment-and-testsdoubles-is-what-pays-for-it) | 448 |
 | The refused long search names our own limit, not the catalogues' | [The backend suite is twice as slow in CI as in an identical pod, and three obvious reasons are not it](decisions.md#the-backend-suite-is-twice-as-slow-in-ci-as-in-an-identical-pod-and-three-obvious-reasons-are-not-it) | 424 |
-| The refused long search names our own limit, not the catalogues' | [The runner checks its image against the pipeline for both toolchains, not one](decisions.md#the-runner-checks-its-image-against-the-pipeline-for-both-toolchains-not-one) | 360 |
+| The refused long search names our own limit, not the catalogues' | [The runner checks its image against the pipeline for both toolchains, not one](decisions.md#the-runner-checks-its-image-against-the-pipeline-for-both-toolchains-not-one) | 451 |
 | The refused long search names our own limit, not the catalogues' | [What the pipeline now reports about its own CPU](decisions.md#what-the-pipeline-now-reports-about-its-own-cpu) | 622 |
 |  | [The library view is remembered per mode, and the household's key kept its name](decisions.md#the-library-view-is-remembered-per-mode-and-the-households-key-kept-its-name) | 395 |
 |  | [The SRU server borrows the public catalogue's gate rather than growing one](decisions.md#the-sru-server-borrows-the-public-catalogues-gate-rather-than-growing-one) | 149 |
@@ -498,7 +499,7 @@ repeat the argument.
 |  | [A new catalogue gets a lookup slot and no search slot until somebody measures the search](decisions.md#a-new-catalogue-gets-a-lookup-slot-and-no-search-slot-until-somebody-measures-the-search) | 292 |
 |  | [OPDS is a discovery route, and the Atom line is not a metadata import route](decisions.md#opds-is-a-discovery-route-and-the-atom-line-is-not-a-metadata-import-route) | 407 |
 |  | [Two source families, one contract](decisions.md#two-source-families-one-contract) | 100 |
-|  | [A decoder is never told how the bytes arrived](decisions.md#a-decoder-is-never-told-how-the-bytes-arrived) | 188 |
+|  | [A decoder is never told how the bytes arrived](decisions.md#a-decoder-is-never-told-how-the-bytes-arrived) | 189 |
 |  | [The capability vocabulary is what a source can be asked for, not which fields it supplies](decisions.md#the-capability-vocabulary-is-what-a-source-can-be-asked-for-not-which-fields-it-supplies) | 127 |
 |  | [Two families, the argument, and where it lives](decisions.md#two-families-the-argument-and-where-it-lives) | 64 |
 |  | [The capability vocabulary is a projection, not the stored field](decisions.md#the-capability-vocabulary-is-a-projection-not-the-stored-field) | 82 |
@@ -730,7 +731,7 @@ repeat the argument.
 |  | [Property based tests run in the ordinary suite, and the budget is a test rather than a number](decisions.md#property-based-tests-run-in-the-ordinary-suite-and-the-budget-is-a-test-rather-than-a-number) | 565 |
 |  | [A generator is derived from the rule, and a witness beside it proves it still reaches the class](decisions.md#a-generator-is-derived-from-the-rule-and-a-witness-beside-it-proves-it-still-reaches-the-class) | 346 |
 |  | [The LIKE escaping has a property at one of its two sites, and the reason is the door in front of each](decisions.md#the-like-escaping-has-a-property-at-one-of-its-two-sites-and-the-reason-is-the-door-in-front-of-each) | 315 |
-|  | [`flip_catalogue_name` is stable on a name and not on a cell that is not one](decisions.md#flip_catalogue_name-is-stable-on-a-name-and-not-on-a-cell-that-is-not-one) | 153 |
+|  | [`flip_catalogue_name` is stable on a name and not on a cell that is not one](decisions.md#flip_catalogue_name-is-stable-on-a-name-and-not-on-a-cell-that-is-not-one) | 186 |
 |  | [The structural house rules stay in the test tree, and both contract tools are refused](decisions.md#the-structural-house-rules-stay-in-the-test-tree-and-both-contract-tools-are-refused) | 1,279 |
 | The structural house rules stay in the test tree, and both contract tools are refused | [It cuts three of the four rules in half](decisions.md#it-cuts-three-of-the-four-rules-in-half) | 125 |
 | The structural house rules stay in the test tree, and both contract tools are refused | [A graph of this backend is very nearly edgeless](decisions.md#a-graph-of-this-backend-is-very-nearly-edgeless) | 286 |
@@ -817,4 +818,8 @@ repeat the argument.
 |  | [A secret scanner that asks a library inherits the library's blind spots](decisions.md#a-secret-scanner-that-asks-a-library-inherits-the-librarys-blind-spots) | 279 |
 |  | [The sentence wider than its measurement is written by the careful seat, not the careless one](decisions.md#the-sentence-wider-than-its-measurement-is-written-by-the-careful-seat-not-the-careless-one) | 1,117 |
 |  | [A guard's verdict can be a property of the tree rather than of the guard](decisions.md#a-guards-verdict-can-be-a-property-of-the-tree-rather-than-of-the-guard) | 567 |
+|  | [A role word can be the surname, and a flip manufactures the stop that hides it](decisions.md#a-role-word-can-be-the-surname-and-a-flip-manufactures-the-stop-that-hides-it) | 850 |
+|  | [An instrument's output is a sample until somebody derives the population](decisions.md#an-instruments-output-is-a-sample-until-somebody-derives-the-population) | 1,033 |
+|  | [A bound widened inside an extraction is recorded, and the arm pinning it has an expiry](decisions.md#a-bound-widened-inside-an-extraction-is-recorded-and-the-arm-pinning-it-has-an-expiry) | 362 |
+|  | [A stale name in prose is checkable only where the sentence spells the module](decisions.md#a-stale-name-in-prose-is-checkable-only-where-the-sentence-spells-the-module) | 383 |
 <!-- index: end -->

@@ -103,6 +103,69 @@ describe("an overdue row is marked twice, and neither mark is colour alone", () 
   });
 });
 
+describe("whether the book is back is read once", () => {
+  // `src/lib/loanState.ts` answers it, and these are the sites that used to
+  // each ask the column for themselves. `tests/lib/loanState.test.ts` holds
+  // the rule that nothing under `src` reads the column but that module; these
+  // arms hold what the card does with the answer, which no rule about a
+  // spelling can see.
+
+  it("prints the date the book came back", () => {
+    row({ returned_at: "2026-02-20T00:00:00" });
+
+    expect(
+      screen.getByText(
+        new RegExp(
+          `Returned ${new Date("2026-02-20T00:00:00").toLocaleDateString("en")}`,
+        ),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("takes the deadline line off a loan that is already back", () => {
+    // The deadline on a book on the shelf is history, and the row reports the
+    // date it came back one line below. This gate read the raw column while
+    // the dimming beside it read a separate derivation of the same rule.
+    row({
+      is_overdue: false,
+      due_at: "2026-03-05T00:00:00",
+      returned_at: "2026-02-20T00:00:00",
+    });
+
+    expect(screen.queryByText(/^Due /)).not.toBeInTheDocument();
+  });
+
+  it("keeps the deadline line on a loan still out", () => {
+    // The arm above is satisfied by a card that never draws the line at all,
+    // which is what a mistaken gate produces.
+    row({
+      is_overdue: false,
+      due_at: "2026-03-05T00:00:00",
+      returned_at: null,
+    });
+
+    expect(screen.getByText(/^Due /)).toBeInTheDocument();
+  });
+
+  it("dims the card and drops the return button once the book is back", () => {
+    const { container } = row({ returned_at: "2026-02-20T00:00:00" });
+
+    expect(card(container).className.split(/\s+/)).toContain("opacity-60");
+    expect(
+      screen.queryByRole("button", { name: "Mark Returned" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers the return button while the book is still out", () => {
+    const { container } = row({ returned_at: null });
+
+    expect(card(container).className.split(/\s+/)).not.toContain("opacity-60");
+    expect(
+      screen.getByRole("button", { name: "Mark Returned" }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("how long the book has been out", () => {
   it("reads the day count off the server rather than the lending date", () => {
     // The whole point of the field. `loaned_at` is right there in the payload

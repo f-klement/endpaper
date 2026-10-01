@@ -140,6 +140,85 @@ _AUTHOR_RELATORS: Final = ("aut", "cre")
 _NON_SORTING: Final = ("\x98", "\x9c", "<<", ">>")
 
 
+#: Where the qualifying information printed inside `020 $a` begins. The legacy
+#: spelling of what subfield `$q` carries today.
+#:
+#: **A position rather than a vocabulary.** `$a` is the number followed by
+#: optional qualifying information, and both the cataloguing that predates `$q`
+#: and the UNIMARC 010 crosswalk parenthesise that information. So everything
+#: from the first opener is the qualifier whatever it says: `(pbk.)`,
+#: `(pbk. : alk. paper)` and the Greek for paperback are one shape and none of
+#: them is a word this module knows. A list of binding words is the enumerating
+#: guard `Fields.isbn` already refuses in as many words, one language at a time
+#: forever.
+#:
+#: **This says where the number ends. It is not the whole of what qualifies**,
+#: because a bracket that is not this one leaves the number where it is and
+#: `_normalise_would_drop_an_alphanumeric` is what notices.
+#:
+#: **Three shapes it deliberately does not reach**, each of which would need a
+#: rule about what may surround a number rather than about where the qualifier
+#: starts: a trailer with no parenthesis, `9783161484100 pbk.`; a label in
+#: front of the number, `ISBN 9783161484100`; and a second identifier in the
+#: same subfield. MARC defines none of the three, and `tests/test_marc_fields.py`
+#: has an arm for each, so widening the rule is a decision somebody takes rather
+#: than one that happens.
+_ISBN_QUALIFIER_OPENER: Final = "("
+
+
+def _normalise_would_drop_an_alphanumeric(text: str) -> bool:
+    """Whether `isbn.normalise` would silently delete a letter or digit here.
+
+    **The other half of what qualifies an `020 $a`, and it is the half that
+    does the damage.** `normalise` keeps ASCII alphanumerics and drops
+    everything else, so a qualifier written in a bracket this module does not
+    open leaves a **residue that parses**, and the entry then reads as one
+    plainly stating that number. Measured 2026-09-30 on
+    `9780441013593 <qualifier>` beside a record's own plain ISBN, where the
+    qualifier is the Greek for "American edition":
+
+    | bracket | without this test | with it |
+    |---|---|---|
+    | `( )` | the record's own number | unchanged |
+    | `[ ]` | **the cross reference, claimed** | the record's own number |
+    | full width `( )` | **the cross reference, claimed** | the record's own number |
+    | lenticular | **the cross reference, claimed** | the record's own number |
+
+    **The two properties are correlated, which is why an opener list would not
+    have done.** Full width parentheses are what CJK cataloguing prints, and a
+    CJK qualifier is exactly the kind whose characters `normalise` deletes. A
+    list of brackets is an enumeration; this is the property that causes the
+    harm.
+
+    **What is left outside it is bounded rather than open.** For a residue to
+    parse, the qualifier must contribute no ASCII alphanumeric at all, so the
+    only shape this misses is a qualifier made entirely of ASCII punctuation,
+    such as `[-]`, which deletes nothing from the number and carries no word.
+
+    **What it newly calls qualified**, stated and not bounded: an `$a` carrying
+    an alphanumeric `normalise` deletes **beside a complete ASCII number**, the
+    shape `conformance/cases/isbn.json` pins as
+    `parse-strips-a-trailing-non-ascii-digit`. Such an entry still states its
+    number and is read when it is alone, and now loses to a sibling stating a
+    plain one. An `$a` whose digits are **themselves** not ASCII states nothing,
+    before this and after, because the deletion shortens the candidate past
+    every length test.
+    """
+    return any(
+        character.isalnum() and not character.isascii() for character in text
+    )
+
+
+def _isbn_parts(text: str) -> tuple[str, bool]:
+    """`020 $a` cut at its qualifying information, and whether it carried any.
+
+    One split read by both `020` readers, so where the number ends and where
+    the qualifier begins cannot become two answers.
+    """
+    head, opener, _ = text.partition(_ISBN_QUALIFIER_OPENER)
+    return head, bool(opener)
+
+
 def _marc_text(raw: str | None) -> str:
     """One subfield's text, as a person would write it.
 
@@ -228,6 +307,79 @@ class Subfields(dict[str, str]):
     def all(self, code: str) -> list[str]:
         """Every value under one code, in the order the record wrote them."""
         return self._repeats.get(code, [])
+
+    def stated_isbn(self) -> str | None:
+        """The ISBN an `020` entry states, or None where `$a` states none.
+
+        **Named for the tag, because the split is `020`'s.** A parenthesis in
+        any other `$a` carries content: `300 $a 1 Online-Ressource (240 Seiten)`
+        is where `bibliographic.pages_from_extent` finds the page count, and a
+        cut at the opener would leave it nothing to read.
+
+        **`isbn.parse` alone answers this by script rather than by rule**, and
+        that is what this method exists to stop. Measured 2026-09-30 against
+        `isbn.parse` with no cut: `9783161484100 (pbk.)` answers None and the
+        same number qualified in Greek answers the ISBN. `isbn.normalise` keeps
+        ASCII alphanumerics and drops the rest, so a Latin script qualifier
+        survives into a candidate too long for any length test and a Greek one
+        vanishes before one is applied. One catalogue convention, answered two
+        ways by the alphabet the qualifier happens to be written in.
+
+        **The cut stays here and not in `isbn.normalise`.** That function is
+        mirrored in the browser and pinned against it case by case in
+        `conformance/cases/isbn.json`, so widening it widens every caller of
+        `isbn.parse`, a barcode scan and a manual entry box and a CSV cell
+        among them, in one implementation of two. A qualifier is a fact about
+        how a catalogue prints a subfield, not about what an ISBN is.
+
+        **Where the cut leaves nothing, the whole subfield is read**, so a
+        number written wholly inside parentheses is still stated. It is not a
+        spelling MARC defines and nothing here has measured one, but reading
+        `$a` whole is what this module did before the cut and losing an
+        identifier is the harm the cut exists to stop.
+
+        **What that costs, and it is a cost rather than a free preservation.**
+        The entry is qualified, so it loses to a sibling stating a number
+        **unqualified**. Where every sibling is qualified it wins on catalogue
+        order, which is what this module did before the cut and is a worse
+        answer than the rest of this rule would otherwise give. Kept because the
+        spelling is undefined and the reversal is one line; the arm pins both
+        halves.
+
+        **No guard on the opener**, because there is nothing to guard: with no
+        opener the head is the whole subfield, so the second call repeats the
+        first. Enumerated over 1,559 texts, zero disagreements with a guarded
+        form, which makes a guard a branch no test can distinguish.
+        """
+        whole = self.get("a", "")
+        head, _ = _isbn_parts(whole)
+        return parse_isbn(head) or parse_isbn(whole)
+
+    def isbn_is_qualified(self) -> bool:
+        """Whether an `020` entry qualifies its ISBN, in any of three ways.
+
+        `$q` is the modern spelling, a parenthesis inside `$a` the legacy one,
+        and a character `isbn.normalise` deletes is the one that has no
+        spelling at all. All three say the same thing: the number is for one
+        binding, one volume or one edition of what is catalogued.
+        `Fields._isbn_entries` prefers entries stating none of them.
+
+        **Reading `$q` alone would leave the legacy spelling counting as
+        unqualified**, which is a hole rather than a gap once the number in
+        front of it parses: `$a 9780441013593 (amerik. Original)` is a cross
+        reference to another edition, exactly what the `$q` rule was bought to
+        keep out of `claims_isbn`.
+
+        **Reading the two spellings alone leaves the same hole one bracket
+        over.** `_normalise_would_drop_an_alphanumeric` carries the measurement
+        and the reason a list of brackets is the wrong shape of fix.
+        """
+        whole = self.get("a", "")
+        return (
+            "q" in self
+            or _isbn_parts(whole)[1]
+            or _normalise_would_drop_an_alphanumeric(whole)
+        )
 
     def gnd_identifier(self) -> str | None:
         """The GND number a field's `$0` carries, or None if it carries none.
@@ -765,32 +917,62 @@ class Fields:
     def _isbn_entries(self) -> list[Subfields]:
         """The 020 entries that identify this record's own book.
 
-        **Unqualified entries where a record has any, and all of them where it has
-        none.** One rule, read by `claims_isbn` and `isbn`, so "which
-        ISBN is this record's" has one answer.
-
-        **A subfield `q` is a qualifier**, such as "amerik. Original" or "Hardback".
-        The first is a cross reference to a different edition, and taking it as
-        identity is how a scan of one printing answers with another. The second is
-        harmless. **Nothing distinguishes them by shape**, so the rule is positional
-        rather than lexical: prefer what is unqualified, and fall back to everything
-        only when there is nothing else, because a record whose every ISBN is
+        **Entries that state a number and qualify it in no way, where a record
+        has any, and all of them where it has none.** One rule, read by
+        `claims_isbn` and `isbn`, so "which ISBN is this record's" has one
+        answer. The fallback exists because a record whose every ISBN is
         qualified is still a record about a book.
+
+        **A qualifier is "amerik. Original" or "Hardback".** The first is a cross
+        reference to a different edition, and taking it as identity is how a scan
+        of one printing answers with another. The second is harmless. **Nothing
+        distinguishes them by shape**, so the rule is positional rather than
+        lexical. Which entries are qualified is `Subfields.isbn_is_qualified`,
+        which carries all three spellings of qualification.
+
+        **`stated_isbn() is not None` is in the predicate, and it is the half
+        that stops a preference becoming a loss.** Ranking an entry above another
+        is only safe while the preferred one has an answer, and an `020` whose
+        number fails its own checksum has none. Measured 2026-09-30 on a record
+        whose plain `$a` is `9783161484199`, a mistyped ISBN, beside a genuine
+        `9789602118962` qualified in Greek: without it the reader prefers the
+        mistyped entry and the record's only usable identifier is lost, which is
+        the harm the whole rule exists to stop. Two arms in
+        `tests/test_marc_fields.py::TestAnInlineQualifierIsAQualifier` hold it,
+        one per spelling, and the `$q` one closes a half that was open before the
+        inline spelling was read at all. **Named by class rather than by method**,
+        because renaming a test is what this round did twice.
+
+        **A middle tier falling back to the stating entries is refused**, and by
+        measurement rather than by taste: enumerated over every record the two
+        readers can tell apart, the two forms disagree nowhere, so such a tier
+        is unobservable rather than merely unobserved.
+
+        **The refusal rests on `claims_isbn`'s annotation.** `isbn` skips an
+        entry that states nothing whatever it is asked; `claims_isbn` does so
+        only for a `str`, since `None` is what such an entry states and would
+        match it. Both call sites honour the annotation and the type check
+        enforces it, so the tier stays refused. Hand it `None` and the same
+        enumeration disagrees, which is the condition written down rather than
+        assumed.
         """
         entries = [entry for entry in self.get("020") if "a" in entry]
-        unqualified = [entry for entry in entries if "q" not in entry]
+        unqualified = [
+            entry
+            for entry in entries
+            if entry.stated_isbn() is not None and not entry.isbn_is_qualified()
+        ]
         return unqualified or entries
 
     def claims_isbn(self, isbn: str) -> bool:
         """Whether 020 names this book, rather than merely mentioning it.
 
-        Which entries count is `_isbn_entries`. The other trap is here: 020 often
-        holds the **ISBN-10** even when the search was by ISBN-13, so both sides are
+        Which entries count is `_isbn_entries` and what each one states is
+        `Subfields.stated_isbn`. The other trap is here: 020 often holds the
+        **ISBN-10** even when the search was by ISBN-13, so both sides are
         canonicalised rather than compared as strings.
         """
-        return any(
-            parse_isbn(entry.get("a", "")) == isbn for entry in self._isbn_entries()
-        )
+        return any(entry.stated_isbn() == isbn for entry in self._isbn_entries())
 
     def _author_entries(self) -> list[tuple[str, Subfields]]:
         """The 100 main entry plus any 700 that actually wrote something, with its field.
@@ -988,7 +1170,7 @@ class Fields:
         it; `docs/decisions.md` carries the decision.
         """
         for entry in self._isbn_entries():
-            parsed = parse_isbn(entry.get("a", ""))
+            parsed = entry.stated_isbn()
             if parsed is not None:
                 return parsed
         return None

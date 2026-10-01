@@ -127,7 +127,7 @@ SECRET_KEYS: Final[frozenset[SettingKey]] = frozenset(
         SettingKey.OVERDUE_WEBHOOK_SECRET,
         SettingKey.MAIL_PASSWORD,
         # In the **URL path** of every Telegram call, so a log line that prints
-        # a request URL prints the token. See `notifications._telegram_url`.
+        # a request URL prints the token. See `notifications.telegram_url`.
         SettingKey.TELEGRAM_BOT_TOKEN,
     }
 )

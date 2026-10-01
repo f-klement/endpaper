@@ -15,9 +15,9 @@
  * prose does: it does not recount itself when a rule is added beside it. There
  * is deliberately no number here now.)
  *
- * The sources are read with `import.meta.glob` rather than `node:fs` so this
- * needs no `@types/node`, which the project does not otherwise want: a guard
- * test is a poor reason to add a dependency and widen the global types.
+ * The sources come from `tests/sourceModules.ts`, which reads them and says
+ * why it reads them the way it does. They used to be globbed here, and the
+ * pattern is what a narrowing edits.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -56,17 +56,25 @@ import ownSource from "./houseRules.test.ts?raw";
 // spelling of that suffix below is checked against it rather than repeated.
 import viteConfig from "../vite.config.ts?raw";
 
-const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+// The one enumeration of `src/`, and the one thing that refuses a corpus that
+// is no longer the tree. The pattern used to be written here, where narrowing
+// it was one edit in the file holding the rules it disarmed.
+import {
+  directoriesIn,
+  sourceEntries as entries,
+  sourceText,
+} from "./sourceModules";
 
-function entries(): [string, string][] {
-  return Object.entries(SOURCES).map(([path, source]) => [
-    path.replace("../src/", ""),
-    source,
-  ]);
+/**
+ * The application tree in the space the test tree's specifiers resolve into.
+ *
+ * **A spelling, not a second population.** `resolvedFrom` resolves both
+ * corpora into paths relative to this directory, so a scope mixing the
+ * application tree with the test tree has to spell the first from here or
+ * every cross tree specifier resolves to a key nothing holds.
+ */
+function sourcesAsImported(): [string, string][] {
+  return entries().map(([path, source]) => [`../src/${path}`, source]);
 }
 
 describe("the generated client stays behind hooks.ts", () => {
@@ -84,8 +92,13 @@ describe("the generated client stays behind hooks.ts", () => {
   });
 
   it("reads the source tree at all", () => {
-    // A glob that matched nothing would make both tests above pass forever.
-    expect(entries().length).toBeGreaterThan(50);
+    // **A floor used to stand here, and a floor is not an arming check.**
+    // Fifty, against a corpus of several hundred, left a narrowing room to
+    // drop every page and clear it anyway. The corpus now comes
+    // from `tests/sourceModules.ts`, which refuses one that is not the tree
+    // and throws rather than answering a short one, so what this arm has
+    // left to say is that the refusal is reached from here.
+    expect(() => entries()).not.toThrow();
   });
 });
 
@@ -306,8 +319,7 @@ function unreadAmong(
 describe("every feature flag has a reader", () => {
   /** The fields the generated model declares, read off its own declaration. */
   function declared(): string[] {
-    const source = SOURCES[`../src/${FLAGS_MODEL}`];
-    if (source === undefined) throw new Error(`${FLAGS_MODEL} is not here`);
+    const source = sourceText(FLAGS_MODEL);
     const model = declaredIn(FLAGS_MODEL, source, "FeatureFlagsOut");
     if (model === null)
       throw new Error(`${FLAGS_MODEL} declares no FeatureFlagsOut`);
@@ -1585,7 +1597,7 @@ describe("no fixture or string carries an address outside reserved space", () =>
   // This file writes the shapes down in order to forbid them, so it is filtered
   // out. **Measured: today that filter removes nothing**, because Vite excludes
   // the importing module from its own `import.meta.glob`. A probe run from a
-  // sibling file saw `./houseRules.test.ts` among 131 keys; run from here it is
+  // sibling file saw `./houseRules.test.ts` among the keys; run from here it is
   // absent. The filter stays because it is one line and it is what keeps the
   // rule working if that ever changes, and the assertion below pins the fact so
   // that nobody reads the filter as evidence of something it is not doing.
@@ -1786,9 +1798,30 @@ describe("a module is replaced by an alias, never by a module mock", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("reads the test tree at all", () => {
-    // A glob that matched nothing would make the rule above pass for ever.
-    expect(Object.keys(TEST_SOURCES).length).toBeGreaterThan(100);
+  it("reads every directory of the test tree", () => {
+    // **A floor of a hundred used to stand here, over 219 keys, and
+    // `tests/pages/` is 118 of them.** Narrow the pattern to exclude that one
+    // directory and 101 survive, the floor clears, and a corpus pattern
+    // written in any of those 118 files is unread by the rule at the foot of
+    // this file. That is the same shape this branch took out of the source
+    // side, left standing over the tree the rules themselves live in.
+    //
+    // Stated as the directories rather than a count, for the reason the
+    // source side states them: a new top level directory under `tests/` is a
+    // decision worth a red line, and a narrowing is not.
+    expect(
+      directoriesIn(Object.keys(TEST_SOURCES).map((path) => path.slice(2))),
+    ).toEqual([
+      "api",
+      "app",
+      "components",
+      "conformance",
+      "doubles",
+      "i18n",
+      "lib",
+      "pages",
+      "theme",
+    ]);
   });
 
   it("parses every file it reads", () => {
@@ -2481,7 +2514,7 @@ describe("the number of table columns is not written down", () => {
 
   function scope(): [string, string][] {
     return [
-      ...Object.entries(SOURCES),
+      ...sourcesAsImported(),
       ...Object.entries(TEST_SOURCES),
       ["./houseRules.test.ts", ownSource] as [string, string],
       ...Object.entries(DOCUMENTS).filter(
@@ -2611,7 +2644,8 @@ describe("the number of table columns is not written down", () => {
  * over every module in the tree would be a different rule, and a stricter one
  * than this tree wants.
  */
-const WALLPAPER = "../src/theme/patterns.ts";
+const WALLPAPER_MODULE = "theme/patterns.ts";
+const WALLPAPER = `../src/${WALLPAPER_MODULE}`;
 
 /**
  * A path with its `.` and `..` segments collapsed and its extension dropped.
@@ -2806,28 +2840,27 @@ function unreferenced(
 describe("every wallpaper export is imported by name somewhere", () => {
   function scope(): [string, string][] {
     return [
-      ...Object.entries(SOURCES),
+      ...sourcesAsImported(),
       ...Object.entries(TEST_SOURCES),
       ["./houseRules.test.ts", ownSource] as [string, string],
     ];
   }
 
   it("leaves none of them unreached", () => {
-    const source = SOURCES[WALLPAPER];
-    expect(source).toBeDefined();
-
-    expect(unreferenced(WALLPAPER, source ?? "", scope())).toEqual([]);
+    expect(
+      unreferenced(WALLPAPER, sourceText(WALLPAPER_MODULE), scope()),
+    ).toEqual([]);
   });
 
   it("is reading a door and a tree, not two empty sets", () => {
     // Both halves of the comparison, asserted: a subject with no exports and a
     // scope with no importers agree, and the arm above cannot tell that from a
     // rule that holds.
-    expect(exportedBy(WALLPAPER, SOURCES[WALLPAPER] ?? "")).toContain(
+    expect(exportedBy(WALLPAPER, sourceText(WALLPAPER_MODULE))).toContain(
       "patternDataUri",
     );
     expect(
-      exportedBy(WALLPAPER, SOURCES[WALLPAPER] ?? "").length,
+      exportedBy(WALLPAPER, sourceText(WALLPAPER_MODULE)).length,
     ).toBeGreaterThan(10);
     const reached = scope()
       .filter(([path]) => path !== WALLPAPER)
@@ -2947,7 +2980,7 @@ describe("every wallpaper export is imported by name somewhere", () => {
     // removed, with every arm green. `producedValue` and `storeIdentifier` are
     // the door. Found by the design seat.
     const OWNER = "../src/lib/stores.ts";
-    const reached = Object.entries(SOURCES)
+    const reached = sourcesAsImported()
       .filter(([path]) => path !== OWNER)
       .flatMap(([path, source]) => importedFrom(path, source, OWNER));
 
@@ -3205,8 +3238,7 @@ function kindOf(arm: Node): string {
  */
 describe("a scan reason is a name, and three arms carry anything else", () => {
   function union(): { names: string[]; named: Node; arms: Node[] } {
-    const source = SOURCES[`../src/${SCAN_REASONS}`];
-    if (source === undefined) throw new Error(`${SCAN_REASONS} is not here`);
+    const source = sourceText(SCAN_REASONS);
     const named = declaredIn(SCAN_REASONS, source, "NamedScanReason");
     const reason = declaredIn(SCAN_REASONS, source, "ScanReason");
     if (named === null || reason === null)
@@ -3330,11 +3362,7 @@ describe("what a catalogue answered is read in one file", () => {
    * to it is covered here by arriving rather than by somebody remembering.
    */
   function comparesAnAnswer(): RegExp {
-    const source = SOURCES[`../src/${QUEUE}`];
-    const declared =
-      source === undefined
-        ? null
-        : declaredIn(QUEUE, source, "CatalogueAnswer");
+    const declared = declaredIn(QUEUE, sourceText(QUEUE), "CatalogueAnswer");
     // **Every quote this language has, not the one the formatter writes.** A
     // backticked answer is the same comparison and passed the version that
     // listed double quotes alone.
@@ -3378,9 +3406,7 @@ describe("what a catalogue answered is read in one file", () => {
     // a tree where no file reads it satisfies that vacuously. This is what goes
     // red instead, and it is checked against the declaration as well as the
     // reading, so a queue that kept the readings and lost the union is caught.
-    const source = SOURCES[`../src/${QUEUE}`];
-    expect(source).toBeDefined();
-    const answers = declaredIn(QUEUE, source!, "CatalogueAnswer");
+    const answers = declaredIn(QUEUE, sourceText(QUEUE), "CatalogueAnswer");
     expect(answers).not.toBeNull();
     expect(literalsOf(answers!).length).toBeGreaterThan(1);
     expect(readers()).toContain(QUEUE);
@@ -4294,9 +4320,9 @@ describe("a general component carries no one page's knowledge", () => {
 /**
  * The module every rendered date goes through, as a path this rule holds once.
  *
- * Spelled as a `SOURCES` key because `unreferenced` resolves importers'
- * specifiers against it, and stripped separately for the arms that walk
- * `entries()`.
+ * Spelled in the space `sourcesAsImported` keys, because `unreferenced`
+ * resolves importers' specifiers into that space, and spelled plainly beside
+ * it for the arms that walk `entries()`.
  */
 const THE_DATE_DOOR = "../src/lib/date.ts";
 const THE_DATE_DOOR_MODULE = "lib/date.ts";
@@ -4669,7 +4695,8 @@ describe("a date reaches a reader through one module", () => {
   // this block: a tree with no modules fails the keep out arm's own scope equality,
   // since `0` is not `entries().length - 1` for an empty glob; its synthetic case
   // was character for character the first assertion of `reports the shapes it
-  // exists for`; and `SOURCES[THE_DATE_DOOR]` is asserted by the door arm below.
+  // exists for`; and the door's own source is asserted by the door arm below,
+  // which asks `sourceText` for it and is handed a throw if the module moves.
   // An arm whose every claim is made by a neighbour reads as coverage and is not.
 
   it("leaves no export of the door unreached", () => {
@@ -4690,11 +4717,12 @@ describe("a date reaches a reader through one module", () => {
     // it caught. Measured per export under `src`: 5, 3, 2, 1, 1 importers, 11
     // modules in all, so scoping this down costs nothing today and makes the
     // sentence true.
-    const source = SOURCES[THE_DATE_DOOR];
-    expect(source).toBeDefined();
-
     expect(
-      unreferenced(THE_DATE_DOOR, source ?? "", Object.entries(SOURCES)),
+      unreferenced(
+        THE_DATE_DOOR,
+        sourceText(THE_DATE_DOOR_MODULE),
+        sourcesAsImported(),
+      ),
     ).toEqual([]);
   });
 
@@ -6671,5 +6699,355 @@ describe("a test cited by name still carries that name", () => {
           `export const x = 1;`,
       }),
     ).toEqual([]);
+  });
+});
+
+/**
+ * Every pattern an `import.meta.glob` call in this file is given.
+ *
+ * **Read off the syntax rather than matched in the text, because a text match
+ * was beaten by two spellings already in this tree.** The first version
+ * anchored on the call followed by a double quote. Driven against four
+ * spellings, it read one: the array form, which two calls here already use
+ * and one of those already points into `src/`, and a backticked pattern both
+ * walked past it, and a blind matcher is silent rather than loud. The backend
+ * paid for the same lesson twice and its own guards record it: read the shape
+ * off the node, never the text.
+ *
+ * **An argument this cannot read comes back as the empty string, and the
+ * silence is the bundler's rather than this rule's.** It takes a literal, or
+ * an array of them, and nothing else: measured by handing it an identifier,
+ * which fails at transform time with `Invalid glob import syntax: Could only
+ * use literals` and takes the file out of the run. So a pattern this cannot
+ * see is a pattern that does not run, which is an enforced limit rather than
+ * a stated one, and is why no arm chases it.
+ *
+ * **The raw text of a template, not the cooked value**, which is what the
+ * bundler itself reads. They differ only on a backslash escape inside a
+ * template, and taking the cooked one errs toward flagging rather than
+ * toward silence, but exact is cheaper than a sentence explaining the
+ * direction.
+ */
+function globPatterns(source: string, lang: "ts" | "tsx"): string[] {
+  const out: string[] = [];
+  const patternsOf = (node: unknown): string[] => {
+    if (!isNode(node)) return [];
+    if (node.type === "Literal") {
+      const value = text(node.value);
+      return value === null ? [] : [value];
+    }
+    if (node.type === "TemplateLiteral") {
+      const parts = (node.quasis as Node[] | undefined) ?? [];
+      if (parts.length !== 1) return [""];
+      const raw = (parts[0]!.value as { raw?: unknown }).raw;
+      return [text(raw) ?? ""];
+    }
+    if (node.type === "ArrayExpression")
+      return ((node.elements as unknown[]) ?? []).flatMap(patternsOf);
+    return [""];
+  };
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value as unknown[]) walk(item);
+      return;
+    }
+    if (!isNode(value)) return;
+    const callee = value.callee;
+    if (
+      value.type === "CallExpression" &&
+      isNode(callee) &&
+      callee.type === "MemberExpression" &&
+      isNode(callee.object) &&
+      callee.object.type === "MetaProperty" &&
+      isNode(callee.property) &&
+      callee.property.name === "glob"
+    )
+      out.push(...patternsOf(((value.arguments as unknown[]) ?? [])[0]));
+    for (const key of Object.keys(value)) walk(value[key]);
+  };
+  walk(parseAst(source, { lang }));
+  return out;
+}
+
+/**
+ * Whether a pattern written in one file can match a module under `src/`.
+ *
+ * **Resolved rather than spelled**, because a pattern need not name the
+ * directory it reaches: `../**` written in `tests/` arrives at the frontend
+ * root and descends into `src/` without the word appearing anywhere.
+ *
+ * **A wildcard is what makes a pattern a corpus.** A glob naming one module
+ * answers for that module or for nothing, and a rule reading it fails loudly
+ * either way. A glob with a `*` in it answers for whatever the pattern
+ * reaches, and narrowing one is how a rule comes to report nothing over a
+ * tree that still holds the violation.
+ *
+ * **What it deliberately does not flag**: a pattern whose own last segment
+ * admits no module or stylesheet suffix. `../../**\/*.md` from this file
+ * reaches the root and descends everywhere, and it cannot match a module. A
+ * suffix list is an enumeration, so it is the same list the corpus itself is
+ * stated with and goes stale with it rather than on its own.
+ *
+ * **What it newly over flags, which is the half worth stating**: a brace in a
+ * directory position is read as able to name the source tree, so one that
+ * cannot, `../{public,assets}/*.ts`, is reported. None exists today, checked
+ * over every pattern the tree writes, and the direction is loud rather than
+ * silent.
+ *
+ * **And one shape no reader of a pattern can ever see**: a `base` option
+ * resolves the pattern against a directory of its own, so `./**\/*.ts` with
+ * `base: "../src"` reaches the tree while this answers false and is right
+ * about the argument it was given. That is refused at the input instead, by
+ * the arm below that holds the option keys to the three this tree uses.
+ */
+function reachesTheSourceTree(from: string, pattern: string): boolean {
+  if (pattern === "" || pattern.startsWith("!")) return false;
+  if (!pattern.includes("*")) return false;
+
+  const segments = pattern.split("/");
+  const last = segments[segments.length - 1]!;
+  // **The last dot, not the first.** `*.d.ts` read from the first dot is the
+  // one token `d.ts`, which no suffix list holds, so every declaration file
+  // pattern answered false. Two such files are in the corpus this guards.
+  const suffixes = last.includes(".")
+    ? last
+        .slice(last.lastIndexOf(".") + 1)
+        .replace(/[{}]/g, "")
+        .split(",")
+    : ["*"];
+  if (!suffixes.some((one) => ["*", "ts", "tsx", "css"].includes(one)))
+    return false;
+
+  // **A leading slash is the project root, not a segment of the importer.**
+  // It is the shortest correct way to spell the source tree and the first
+  // thing somebody reaches for when the dots get long.
+  const out: string[] = pattern.startsWith("/")
+    ? []
+    : ["tests", ...from.replace("./", "").split("/")].slice(0, -1);
+
+  // **A brace in a directory position is a wildcard**, because one of its
+  // branches can be the source tree: `../{src,public}/*.ts` reaches it by
+  // expansion while reading as a literal directory named `{src,public}`.
+  let descends = false;
+  for (const [at, part] of segments.entries()) {
+    if (part.includes("*") || part.includes("{")) {
+      descends = at < segments.length - 1;
+      break;
+    }
+    if (part === "." || part === "") continue;
+    if (part === "..") out.pop();
+    else out.push(part);
+  }
+  const base = out.join("/");
+
+  // `src` sits directly under the project root, so the root is its only
+  // ancestor and a walk that stopped above it reaches it only by descending.
+  return base === "src" || base.startsWith("src/") || (base === "" && descends);
+}
+
+/**
+ * The option keys every `import.meta.glob` call in one file passes.
+ *
+ * Read off the same node as the pattern, because the option that matters
+ * cannot be seen from the pattern at all: `base` resolves it against a
+ * directory of its own.
+ */
+function globOptionKeys(source: string, lang: "ts" | "tsx"): string[] {
+  const out: string[] = [];
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value as unknown[]) walk(item);
+      return;
+    }
+    if (!isNode(value)) return;
+    const callee = value.callee;
+    if (
+      value.type === "CallExpression" &&
+      isNode(callee) &&
+      callee.type === "MemberExpression" &&
+      isNode(callee.object) &&
+      callee.object.type === "MetaProperty" &&
+      isNode(callee.property) &&
+      callee.property.name === "glob"
+    ) {
+      const options = ((value.arguments as unknown[]) ?? [])[1];
+      if (isNode(options) && options.type === "ObjectExpression")
+        for (const property of (options.properties as unknown[]) ?? []) {
+          if (!isNode(property)) continue;
+          const key = property.key;
+          const name = isNode(key) ? (text(key.name) ?? text(key.value)) : null;
+          out.push(name ?? "an option this rule could not read");
+        }
+    }
+    for (const key of Object.keys(value)) walk(value[key]);
+  };
+  walk(parseAst(source, { lang }));
+  return out;
+}
+
+describe("the corpus under src has one pattern", () => {
+  /** Every file in the test tree writing a pattern that reaches `src/`. */
+  const corpusPatterns = (): string[] =>
+    [
+      ...Object.entries(TEST_SOURCES),
+      ["./houseRules.test.ts", ownSource] as [string, string],
+    ]
+      .filter(([path, source]) =>
+        globPatterns(source, langOf(path)).some((pattern) =>
+          reachesTheSourceTree(path, pattern),
+        ),
+      )
+      .map(([path]) => path)
+      .sort();
+
+  it("reads a pattern however the call spells it", () => {
+    // **The instrument, driven, because its first version read one of these
+    // four.** Each is a spelling Vite accepts, two of them are written in
+    // this tree today, and a matcher blind to one reports nothing while the
+    // equality below still holds on the three it can see.
+    const probe = [
+      'const a = import.meta.glob("../src/**/*.ts");',
+      'const b = import.meta.glob(["../src/**/*.tsx", "!../src/x.ts"]);',
+      "const c = import.meta.glob(`../src/**/*.css`);",
+      "const d = import.meta.glob(`../src/${name}/*.ts`);",
+    ].join("\n");
+
+    expect(globPatterns(probe, "ts")).toEqual([
+      "../src/**/*.ts",
+      "../src/**/*.tsx",
+      "!../src/x.ts",
+      "../src/**/*.css",
+      "",
+    ]);
+  });
+
+  it("asks where a pattern lands rather than whether it spells the tree", () => {
+    // **Four families of this were wrong and every error was a silent
+    // miss**, which is the direction that costs: a pattern that reaches the
+    // tree and answers false is a rule nobody is holding. Each row below is
+    // one of them or its control, and the table is the arm rather than the
+    // prose above it.
+    const reaches: [string, string][] = [
+      // The ordinary spelling, from two depths.
+      ["./lib/x.test.ts", "../../src/**/*.ts"],
+      ["./x.test.ts", "../src/**/*.{ts,tsx}"],
+      // Reaching the tree without naming it.
+      ["./x.test.ts", "../**/*.ts"],
+      ["./x.test.ts", "../*/**/*.ts"],
+      // Root relative, which is the shortest correct way to say it.
+      ["./lib/x.test.ts", "/src/**/*.ts"],
+      ["./x.test.ts", "/src/lib/*.ts"],
+      // A brace naming the tree among others, by expansion.
+      ["./x.test.ts", "../{src,public}/**/*.ts"],
+      ["./x.test.ts", "../{src,public}/*.ts"],
+      // Declaration files, which the suffix read from the first dot missed.
+      ["./x.test.ts", "../src/**/*.d.ts"],
+      ["./x.test.ts", "/src/**/*.d.ts"],
+      // The stylesheet half of the corpus.
+      ["./theme/x.test.ts", "../../src/**/*.css"],
+      // The known over flag: a brace that cannot name the tree.
+      ["./x.test.ts", "../{public,assets}/**/*.ts"],
+    ];
+    const misses: [string, string][] = [
+      // No wildcard, so it answers for one module or for nothing.
+      ["./x.test.ts", "../src/lib/zip.ts"],
+      ["./lib/x.test.ts", "../../src/index.css"],
+      // The test tree, which is a different corpus.
+      ["./x.test.ts", "./**/*.{ts,tsx}"],
+      ["./lib/x.test.ts", "./*.test.ts"],
+      // Reaching the root and descending, but admitting no module.
+      ["./x.test.ts", "../../**/*.md"],
+      ["./theme/x.test.ts", "../../../docs/*.md"],
+      // A sibling of the tree rather than the tree.
+      ["./x.test.ts", "../public/**/*"],
+      // An exclusion, which narrows a pattern rather than being one.
+      ["./x.test.ts", "!../src/**/*.ts"],
+      // The frontend root with no descent, which is not the tree.
+      ["./x.test.ts", "../*.ts"],
+      // Unreadable, which the bundler refuses before this ever sees it.
+      ["./x.test.ts", ""],
+    ];
+
+    expect(
+      reaches.filter(([from, pattern]) => !reachesTheSourceTree(from, pattern)),
+      "a pattern that reaches the source tree and is answered false",
+    ).toEqual([]);
+    expect(
+      misses.filter(([from, pattern]) => reachesTheSourceTree(from, pattern)),
+      "a pattern that reaches nothing under src and is answered true",
+    ).toEqual([]);
+  });
+
+  it("is passed only the options this tree has decided on", () => {
+    // **The one shape no reader of a pattern can see.** `base` resolves the
+    // pattern against a directory of its own, so `./**/*.ts` with
+    // `base: "../src"` walks the source tree while every arm above answers
+    // correctly about the argument it was given. Nothing read off the first
+    // argument can ever catch that, so it is refused at the input.
+    //
+    // **An equality over a derived set**, which is the idiom the rule below
+    // uses and for the same reason: an empty offender list is also what a
+    // reader that stopped reading produces.
+    //
+    // **Its own false refusal, stated**: a legitimate new option reds here.
+    // That is one line to clear plus a reading of why the option was added,
+    // which is the trade the equality below already makes.
+    const keys = [
+      ...Object.entries(TEST_SOURCES),
+      ["./houseRules.test.ts", ownSource] as [string, string],
+    ].flatMap(([path, source]) => globOptionKeys(source, langOf(path)));
+
+    expect([...new Set(keys)].sort()).toEqual(["eager", "import", "query"]);
+  });
+
+  it("writes every pattern relative to the file that holds it", () => {
+    // The other input constraint, and the one that keeps the resolution
+    // above honest: two prefixes are in use, and anything else is a spelling
+    // whose resolution nobody here has checked. A root relative pattern reds
+    // by name, and is answered correctly by the reach test as well, so this
+    // is the loud half of a pair rather than the only half.
+    const prefixes = [
+      ...Object.entries(TEST_SOURCES),
+      ["./houseRules.test.ts", ownSource] as [string, string],
+    ]
+      .flatMap(([path, source]) => globPatterns(source, langOf(path)))
+      .filter((pattern) => pattern !== "")
+      .map((pattern) => `${pattern.replace(/^!/, "").split("/")[0]!}/`);
+
+    expect([...new Set(prefixes)].sort()).toEqual(["../", "./"]);
+  });
+
+  it("is globbed in the module that arms it and in two named others", () => {
+    // **An equality and not an empty offender list**, because an instrument
+    // that stopped reading would report nothing, and that looks exactly like
+    // a clean tree. Naming the files that must be found means a matcher
+    // going blind, or the home being deleted, reds here.
+    //
+    // `./sourceModules.ts` is the home. `./sourceModules.test.ts` holds the
+    // patterns the rules used to carry, deliberately outside the module it
+    // checks, because an enumeration checked only by its own neighbours is
+    // checked by nothing when one diff narrows them together.
+    // `./api/invalidate.test.ts` globs the generated endpoint modules as
+    // values rather than as text, which is not what that module serves, and
+    // its own comment says why its pattern stops at one directory level.
+    expect([...new Set(corpusPatterns())]).toEqual([
+      "./api/invalidate.test.ts",
+      "./sourceModules.test.ts",
+      "./sourceModules.ts",
+    ]);
+  });
+
+  it("is asked for by every other rule over that tree", () => {
+    // The half that moves: a rule written tomorrow asks that module for the
+    // corpus, and a pattern written beside the rule instead is named here.
+    const allowed = [
+      "./sourceModules.ts",
+      "./sourceModules.test.ts",
+      "./api/invalidate.test.ts",
+    ];
+
+    expect(corpusPatterns().filter((path) => !allowed.includes(path))).toEqual(
+      [],
+    );
   });
 });

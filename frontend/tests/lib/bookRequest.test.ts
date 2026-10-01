@@ -28,18 +28,10 @@ import { MAX_PACKAGE_BYTES } from "../../src/lib/epub";
 import type { SourceRecord } from "../../src/lib/sourceRecord";
 import type { StoreIdentifierScheme } from "../../src/lib/stores";
 
-const SOURCES = import.meta.glob("../../src/**/*.{ts,tsx}", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
-function modules(): [string, string][] {
-  return Object.entries(SOURCES).map(([path, source]) => [
-    path.replace("../../src/", ""),
-    source,
-  ]);
-}
+// The one enumeration of `src/`, which refuses a corpus that is no longer the
+// tree. The pattern used to be written here, where narrowing it was one edit
+// in the file holding the rule it disarmed.
+import { sourceEntries as modules } from "../sourceModules";
 
 const SCHEMA = JSON.parse(
   readFileSync(

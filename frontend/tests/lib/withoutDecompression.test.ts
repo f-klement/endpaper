@@ -25,8 +25,9 @@ import {
  * `tests/setup.ts`, read as text.
  *
  * `import.meta.glob` rather than `node:fs`, for the reason
- * `tests/houseRules.test.ts` gives at its own copy: a guard test is a poor
- * reason to add `@types/node` and widen the global types.
+ * `tests/sourceModules.ts` gives: a guard test is a poor reason to add
+ * `@types/node` and widen the global types. One file rather than the corpus,
+ * so it is globbed here and not asked of that module.
  */
 const SETUP_SOURCE = (
   import.meta.glob("../setup.ts", {

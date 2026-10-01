@@ -139,11 +139,11 @@ describe("CustomFieldsSection", () => {
 
   it("shows what the server refused", () => {
     renderSection({
-      error: new Error("This library already has a field called Calibre-web."),
+      error: new Error("This library already has a field with that name."),
     });
 
     expect(
-      screen.getByText("This library already has a field called Calibre-web."),
+      screen.getByText("This library already has a field with that name."),
     ).toBeInTheDocument();
   });
 });

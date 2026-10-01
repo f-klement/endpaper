@@ -51,24 +51,19 @@ import { ZipError, zipFailureAs, type ZipFailure } from "../src/lib/zip";
 // blind spot of its own, where the tree had just paid to fix this one's.
 import { langOf, withoutProse } from "./withoutProse";
 
-// `import.meta.glob` and not `node:fs`, for the reason `houseRules.test.ts`
-// gives at its own: a guard test is a poor reason to add `@types/node` and
-// widen the global types.
-const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+// The one enumeration of `src/`, which refuses a corpus that is no longer the
+// tree: the pattern this file used to write is there, where narrowing it is a
+// diff in a shared module rather than a character in the rule being disarmed.
+// It reads with `import.meta.glob` and not `node:fs`, and says there why.
+import {
+  directoriesIn,
+  sourceDirectories,
+  sourceEntries,
+  sourceText,
+} from "./sourceModules";
 
 const ZIP_MODULE = "lib/zip.ts";
 const GENERATED = "api/generated/";
-
-function entries(): [string, string][] {
-  return Object.entries(SOURCES).map(([path, source]) => [
-    path.replace("../src/", ""),
-    source,
-  ]);
-}
 
 /**
  * The union's declaration: the members read out of it, and what was left.
@@ -90,7 +85,7 @@ function entries(): [string, string][] {
  */
 function readZipFailureUnion(): { members: string[]; unread: string } {
   const declaration = /export type ZipFailure =([^;]*);/.exec(
-    withoutProse(SOURCES[`../src/${ZIP_MODULE}`] ?? "", langOf(ZIP_MODULE)),
+    withoutProse(sourceText(ZIP_MODULE), langOf(ZIP_MODULE)),
   );
   const body = declaration?.[1] ?? "";
   return {
@@ -175,7 +170,7 @@ describe("the names this rule is derived from", () => {
 });
 
 describe("a module that reads a zip does not map its failures itself", () => {
-  const readers = entries()
+  const readers = sourceEntries()
     .filter(([path]) => path !== ZIP_MODULE && !path.startsWith(GENERATED))
     .map(([path, source]): [string, string] => [
       path,
@@ -238,8 +233,18 @@ describe("a module that reads a zip does not map its failures itself", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("reads the source tree at all", () => {
-    // A glob that matched nothing would make the scans above pass for ever.
-    expect(readers.length).toBeGreaterThan(50);
+  it("reads every directory of the tree and not a corner of it", () => {
+    // **A floor of fifty used to stand here, over a population of 264.** An
+    // empty glob is no longer what can go wrong: the corpus is armed in
+    // `tests/sourceModules.ts` and throws rather than coming back short.
+    // What that arming cannot see is the two exclusions this block applies,
+    // the owning module and the generated client, and widening either is a
+    // narrowing by another route that a floor on the remainder does not see.
+    //
+    // So this asks the relationship rather than a size: whatever the
+    // exclusions remove, every directory of the tree is still read.
+    expect(directoriesIn(readers.map(([path]) => path))).toEqual(
+      sourceDirectories(),
+    );
   });
 });

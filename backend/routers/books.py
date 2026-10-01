@@ -80,6 +80,7 @@ from enums import (
     ReadStatus,
     TagCategory,
 )
+from fields import Fields
 from identifiers import add_identifiers
 from lending import Loans
 from logvalues import clipped
@@ -338,21 +339,87 @@ def delete_tag(
 # vocabulary that only means anything on a Book.
 
 
-def _custom_field(field_id: int, db: Session) -> CustomField:
-    """The definition at this id, or a 404.
+def _no_such_custom_field() -> HTTPException:
+    """The answer for a field that is absent, and for one this Member may not
+    be told about.
 
-    Not a privacy question: a definition is Library wide, exactly like a Tag,
-    and says nothing about any Book. The 404 is only for an id that is not one.
+    **Identical on purpose**, which is `dependencies._not_found` one level out:
+    a 403 would confirm that a field at this id exists, which is exactly what
+    `fields.Fields` withholds.
+    """
+    return HTTPException(status_code=404, detail="Custom field not found")
+
+
+def _custom_field(field_id: int, db: Session, viewer_id: int) -> CustomField:
+    """The definition at this id, if this Member may be told it exists.
+
+    **This is a privacy question, and this docstring said it was not.** It was
+    right while every Member could list every definition: the list was the
+    disclosure, so an id oracle beside it gave nothing away. Once
+    `list_custom_fields` is scoped, an ungated resolver is the whole leak back,
+    because the two doors it serves both answer with the field's `name`:
+    renaming a guessed id to itself reads the name off the 200, and
+    `PUT /{book_id}/custom-fields/{field_id}` returns the Book's whole list
+    with `name` on every entry. `fields.Fields.addressable` records the rest.
+
+    The absent id and the hidden one get the same 404, so the two cannot be
+    told apart **in the body or on a clock**.
+
+    **The gate is asked before the row is fetched, and that ordering is the
+    whole of the second half.** Written the other way round, `or` short
+    circuits: an absent id never reaches the three arms, so it costs **one**
+    statement where a hidden id costs several, and the two answers separate on
+    a timer by a factor, not a margin. Reordered, both paths issue the same
+    statements and the two medians sit within 1%, interleaved, 400 repetitions
+    each.
+
+    **The hidden path's absolute statement count is deliberately not written
+    here.** Two harnesses measured this question and got 4 and 5, and the claim
+    does not need the number: what it needs is that the two paths were unequal
+    and now are not.
+    `tests/routers/test_books_custom_fields.py::TestNamingAHiddenFieldByItsId::
+    test_an_absent_id_and_a_hidden_one_cost_the_same_statements` asserts the
+    **equality** rather than either count, and pins the cause rather than the
+    clock, because a timing assertion on a shared node is a flake.
+
+    **The condition is unchanged and must stay so.** `field is None` is still
+    what decides there is nothing to return, and the gate is a second refusal
+    beside it. Collapsing the two, so the gate alone answers, would let an id
+    no row carries past arm 3 and change what the door composes to.
+    """
+    may_be_told = Fields.seen_by(db, viewer_id).addressable(field_id)
+    field = db.get(CustomField, field_id)
+    if field is None or not may_be_told:
+        raise _no_such_custom_field()
+    return field
+
+
+def _any_custom_field(field_id: int, db: Session) -> CustomField:
+    """The definition at this id whoever may see it, for the admin delete alone.
+
+    **Deliberately ungated, and named so that the gated spelling is the
+    ordinary one.** `Shelving.assignable` makes the same exemption for the same
+    reason: an admin has no privilege over another member's Private Books, so
+    gating this would leave a field whose every value sits on those Books
+    undeletable for good. Here that is sharper than it is for a collection,
+    because the vocabulary has a ceiling of 25 and the delete is the only verb
+    that frees a slot in it.
     """
     field = db.get(CustomField, field_id)
     if field is None:
-        raise HTTPException(status_code=404, detail="Custom field not found")
+        raise _no_such_custom_field()
     return field
 
 
 @router.get("/custom-fields", response_model=list[CustomFieldOut])
 def list_custom_fields(db: DbSession, current_user: CurrentUser) -> list[CustomField]:
-    """Every field this library keeps, in the order it defined them.
+    """Every field this library may tell you about, in the order it defined them.
+
+    **Not every field it keeps.** A field is listed when a book you can see
+    holds a value in it, when a book in your trash does, or when no book at all
+    does. A field whose every value sits on books you cannot see is absent, and
+    naming it by id is a 404. `fields.Fields` holds the three arms and what
+    they cost.
 
     **No usage count**, unlike `GET /api/books/tags`. A count of the books
     carrying a field is a disclosure: it is drawn from books the caller may not
@@ -361,7 +428,7 @@ def list_custom_fields(db: DbSession, current_user: CurrentUser) -> list[CustomF
     field is about to destroy. Neither number is worth having, so the
     confirmation says "every book" instead. `docs/security.md` records it.
     """
-    return custom_fields.definitions(db)
+    return Fields.seen_by(db, current_user.id).listable()
 
 
 @router.post("/custom-fields", response_model=CustomFieldOut, status_code=status.HTTP_201_CREATED)
@@ -400,14 +467,26 @@ def rename_custom_field(
     That is the schema rather than this handler: values reference the
     definition by id, so nothing about them mentions the name. `custom_fields.rename`
     records why renaming onto an existing name is refused instead of merged.
+
+    **404 for a field you may not be told about**, which is the answer an
+    absent id already gives: see `fields.Fields.addressable`.
+
+    **Logged, like the delete beside it.** A `CustomField` records no author
+    and no timestamp, and any member may rename any field they can see, library
+    wide, so without this line the one verb that relabels content other members
+    typed is the only one leaving no trace at all.
     """
-    field = _custom_field(field_id, db)
+    field = _custom_field(field_id, db, current_user.id)
+    was = field.name
     try:
         custom_fields.rename(db, field, payload.name)
     except custom_fields.Refused as refusal:
         raise HTTPException(status_code=409, detail=str(refusal)) from refusal
     db.commit()
     db.refresh(field)
+    logger.info(
+        "Account %r renamed custom field %r to %r", current_user.username, was, field.name
+    )
     return field
 
 
@@ -429,11 +508,16 @@ def delete_custom_field(
     It is the sharper case of the two: deleting a tag takes a label off a book,
     and deleting a field takes the **content** a member wrote.
 
+    **The one door taking a field id that is not scoped to the caller**, and
+    deliberately: gating it would leave a field whose every value sits on books
+    the admin cannot see undeletable for good. `_any_custom_field` carries the
+    rest.
+
     204, like `delete_tag`, and the number of values removed goes to the log
     rather than to the caller. See `list_custom_fields` for why no count is
     published.
     """
-    field = _custom_field(field_id, db)
+    field = _any_custom_field(field_id, db)
     name = field.name
     removed = custom_fields.remove(db, field)
     db.commit()
@@ -4698,6 +4782,7 @@ def set_custom_field(
     payload: CustomFieldValueUpdate,
     book: BookForWrite,
     db: DbSession,
+    current_user: CurrentUser,
 ) -> list[CustomFieldValueOut]:
     """Fill in a field on this book, or clear it with an empty value.
 
@@ -4707,12 +4792,17 @@ def set_custom_field(
     Returns the book's whole list rather than the one value, so a client that
     has just written one is holding the same thing `GET` would give it.
 
+    **404 for a field you may not be told about**, and this is the door that
+    makes the scoped list worth having: the response carries `name` on every
+    entry, so an ungated write would be a name oracle over a small integer id
+    space, reachable on a book of your own. See `fields.Fields.addressable`.
+
     400 when the field holds a link and the value is not one: an address with
     no scheme, a `javascript:` or `data:` URL, or a host that is missing. See
     `custom_fields.link_target` for the whole list and why it is re-checked on
     every read as well as here.
     """
-    field = _custom_field(field_id, db)
+    field = _custom_field(field_id, db, current_user.id)
     try:
         custom_fields.write(db, book, field, payload.value)
     except custom_fields.Refused as refusal:

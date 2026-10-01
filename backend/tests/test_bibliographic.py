@@ -11,6 +11,7 @@ answers, and `tests/test_marc.py` pins what an uploaded file and an export do.
 
 import ast
 import inspect
+import re
 import string
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,12 @@ from bibliographic import (
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
 from tests.strategies import text_around, witness
 from tests.test_house_rules import BACKEND, _python_sources
+
+#: The letter class `bibliographic._AN_INITIAL` scopes a flag out of, written
+#: here rather than parsed back out of that constant: the arm below is about
+#: what the flag does to this class, so reading the class off the thing under
+#: test would agree with it by construction.
+_AN_INITIAL_CLASS = "[A-Za-z]"
 
 
 class TestTitleStatement:
@@ -381,7 +388,7 @@ class TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor:
     somebody parses a record the way the neighbours do, minus one line.
 
     **The scan is every module of ours and not one file, and that is what
-    publishing this name cost.** While the rule was `metadata._is_physical_book`
+    publishing this name cost.** While the rule was a private name in `metadata.py`
     a second module reaching it had to spell a private name, which
     `tests/test_marc.py::TestNoModuleReadsAnotherModulesPrivateNames` refuses
     everywhere. A public name in another module is refused by neither, so the
@@ -627,8 +634,9 @@ def _text_arguments(function) -> list[Any] | None:
     """A strategy per parameter, or None when this signature is not all text.
 
     Read off the annotations rather than off a list of function names, so a
-    tenth rule added to the module is swept by the property below without
-    anybody remembering to add it.
+    rule added to the module is swept by the property below without anybody
+    remembering to add it. A signature this cannot answer for is what the arm
+    under `TestEveryRuleHereIsSwept` reports, by name.
     """
     strategies: list[Any] = []
     for parameter in inspect.signature(function).parameters.values():
@@ -877,15 +885,86 @@ _YEARS = st.builds(
     st.one_of(st.just(""), st.integers(min_value=1_000, max_value=2_100).map(str)),
 )
 
-#: What a catalogue hangs off a name, as those catalogues write it.
-_NOISE = st.one_of(
+#: A role word, read off the module rather than listed beside it.
+#:
+#: **A derivation refuses nothing, which is what the shape assertion below is
+#: for.** A role removed from `bibliographic._PERSON_ROLES` narrows `_NOISE`
+#: and `_ROLE_SURNAMES` in silence, and a property over a generator that
+#: cannot reach its class is green and empty. One site reddens by name
+#: instead.
+_ROLES = st.sampled_from(bibliographic._PERSON_ROLES)
+
+#: Life dates, in the two spellings a catalogue hangs them off a name with.
+#:
+#: **Named apart from the role word arm because they have to be crossed with
+#: it.** A generator that offers a cell either dates or a role word cannot
+#: reach the cell that carries both, and that is the cell the noise arms
+#: compete over.
+_DATE_NOISE = st.one_of(
     st.just(""),
     _YEARS.map(lambda years: f" ({years})"),
     _YEARS.map(lambda years: f", {years}"),
-    st.sampled_from(["Auteur", "Autrice", "Traducteur", "Illustratrice"]).map(
-        lambda role: f". {role} du texte"
+)
+
+#: What a catalogue hangs off a name, as those catalogues write it.
+_NOISE = st.one_of(_DATE_NOISE, _ROLES.map(lambda role: f". {role} du texte"))
+
+#: A cell whose surname IS a role word, with the role word it was built from.
+#:
+#: Flipping `Autrice, A A.` manufactures `A A. Autrice`, where the initial's
+#: full stop now sits exactly where the BnF puts the separator in front of a
+#: designation, and the noise strip took the surname off as appended noise.
+#:
+#: **Both orders, because they break on different passes.** The catalogue
+#: order cell survives one flip and loses the surname on the second, which is
+#: the export and import round trip; the direct order cell is what that export
+#: writes, and it loses the surname on the first pass, where an idempotence
+#: property cannot see it at all.
+#:
+#: **Crossed with the life dates and with the ISBD stop, which is not a
+#: combination for its own sake.** The refusal that keeps the role word sits
+#: on the same arm that reaches the end of the cell, so a cell carrying dates
+#: *after* the role word is the one where the arms compete: an earlier
+#: refusal that consumed its match hid the date arms behind it and the cell
+#: then flipped around the date's comma. A generator offering one or the other
+#: is green on all of it.
+#:
+#: **Nothing else in `_CATALOGUE_NAMES` reaches a role word in surname
+#: position.** They entered it through `_NOISE` alone, where they are always
+#: appended, so the stability property was green over 20,000 examples against
+#: a live defect. `_WORD` draws from every Unicode letter, so reaching one by
+#: chance is not a bound anybody should rely on.
+#:
+#: The role word rides beside the cell because the arms assert where it ends
+#: up, and a cell alone cannot say which word was the surname.
+_ROLE_SURNAME_CELLS = st.one_of(
+    st.builds(
+        lambda role, forenames, initial, dates, stop: (
+            f"{role}, {forenames} {initial}.{dates}{stop}",
+            role,
+        ),
+        _ROLES,
+        _WORD,
+        st.sampled_from(string.ascii_uppercase),
+        _DATE_NOISE,
+        st.sampled_from(["", "."]),
+    ),
+    st.builds(
+        lambda role, forenames, initial, dates, stop: (
+            f"{forenames} {initial}. {role}{dates}{stop}",
+            role,
+        ),
+        _ROLES,
+        _WORD,
+        st.sampled_from(string.ascii_uppercase),
+        _DATE_NOISE,
+        st.sampled_from(["", "."]),
     ),
 )
+
+#: The same cells without the role word beside them, for the generator that
+#: takes cells.
+_ROLE_SURNAMES = _ROLE_SURNAME_CELLS.map(lambda built: built[0])
 
 #: A person or corporate cell as a catalogue writes it: in catalogue order or
 #: not, with or without the noise, with or without the ISBD full stop, and with
@@ -915,6 +994,7 @@ _CATALOGUE_NAMES = st.one_of(
         # branch's name, and the witness below is what caught that.
         st.sampled_from(string.ascii_uppercase),
     ),
+    _ROLE_SURNAMES,
 )
 
 
@@ -939,14 +1019,90 @@ class TestAFlippedNameIsStillAName:
 
     @given(name=_CATALOGUE_NAMES)
     def test_flipping_a_flipped_name_changes_nothing(self, name):
-        """**Scoped to a name, and the scope is the finding below rather than a
-        convenience.** The CSV import runs this once per cell, and a library
+        """**Scoped to a name, and the scope is the findings below rather than
+        a convenience.** The CSV import runs this once per cell, and a library
         exported and imported again meets it a second time on the already
-        flipped form, so a name has to be stable under it. A cell that is not a
-        name is not, which the case under this class records.
+        flipped form, so a name has to be stable under it.
+
+        Two shapes are outside the scope and each is pinned by a named case
+        under this class rather than left to be rediscovered: a cell whose
+        surname is punctuation, and a cell whose full stop belongs to the name
+        but is not one this module's initial pattern matches.
         """
         once = flip_catalogue_name(name)
         assert flip_catalogue_name(once) == once
+
+    @given(built=_ROLE_SURNAME_CELLS)
+    def test_a_role_word_standing_as_the_surname_ends_up_the_surname(self, built):
+        """The half the stability property above cannot see.
+
+        A direct order cell loses its surname on the **first** pass, so it
+        comes back already settled and flipping it again changes nothing. Only
+        an arm that asks what is left can tell that the name is gone.
+
+        **It asserts where the role word lands, not that one appears.** An
+        earlier version asked only whether some role word was still in the
+        output, which `1948-2020 Marie A. Auteur` satisfies: the surname was
+        there, in the wrong place, behind the life dates the refusal had
+        swallowed. Position is the cheapest assertion that can tell those
+        apart.
+        """
+        cell, role = built
+        assert flip_catalogue_name(cell).rstrip(".").split()[-1] == role
+
+    @given(built=_ROLE_SURNAME_CELLS)
+    def test_the_life_dates_still_come_off_a_cell_whose_surname_is_a_role_word(
+        self, built
+    ):
+        """The arms compete over this cell and only one of them may win.
+
+        The role arm reaches the end of the cell, so a refusal that consumed
+        its match took the life dates out of reach of the arms that own them.
+        Two docstrings in the module promise dates come off whichever branch
+        runs, and this is what holds them to it.
+
+        **No mutation of the pattern reddens this arm, and that is not a sign
+        it is dead.** It is green under every mutant of `_PERSON_NOISE` and
+        reddens only when the refusal is rebuilt as a callback on the
+        substitution, which a sweep cannot write because it edits expressions
+        rather than replacing a mechanism. Measured by hand against a rebuild
+        of that callback: 60 of 180 direct order cells carrying dates after a
+        role word kept them, against 0 here.
+        """
+        cell, _ = built
+        assert not any(character.isdigit() for character in flip_catalogue_name(cell))
+
+    def test_the_generator_covers_every_role_word_the_module_strips(self):
+        """**The derived population, asserted, which is what deriving costs.**
+
+        `_ROLES` reads the module, so a role added there widens `_NOISE` and
+        `_ROLE_SURNAMES` by itself. The same reading makes a role **removed**
+        there shrink them in silence, and this is the one site that reddens by
+        name and prints the member that moved.
+        """
+        assert sorted(bibliographic._PERSON_ROLES) == [
+            "Auteur",
+            "Autrice",
+            "Compilateur",
+            "Editeur",
+            "Illustrateur",
+            "Illustratrice",
+            "Préfacier",
+            "Traducteur",
+            "Traductrice",
+            "Éditeur",
+        ]
+
+    def test_the_generator_still_reaches_a_surname_that_is_a_role_word(self):
+        """Keyed on position rather than on the presence of a role word: the
+        appended noise arm carries one too, and it is neither the head of the
+        cell nor its last word."""
+        witness(
+            _CATALOGUE_NAMES,
+            lambda name: name.split(",")[0] in bibliographic._PERSON_ROLES
+            or name.split()[-1] in bibliographic._PERSON_ROLES,
+            reaches="a cell whose surname is a role word",
+        )
 
     def test_the_generator_still_reaches_a_cell_that_is_reordered(self):
         witness(
@@ -997,3 +1153,196 @@ class TestACellWhoseSurnameIsPunctuationIsNotAName:
     def test_it_flips_and_then_settles_somewhere_else(self):
         assert flip_catalogue_name(";,0") == "0 ;"
         assert flip_catalogue_name("0 ;") == "0"
+
+
+class TestARoleWordCanBeTheSurname:
+    """`Autrice, A A.` flipped to `A A. Autrice` and then to `A A`.
+
+    `_PERSON_NOISE`'s role arm needs a full stop in front of the role word,
+    and the flip manufactures one out of the trailing initial that
+    `_drop_isbd_stop` is careful to keep. A second pass then read the surname
+    as the designation the BnF appends and deleted it, with a 200 and no
+    error.
+
+    **The stop is the key, and it is not the only one the cell carries.** A
+    designation is usually a role word with a space separated qualifier
+    behind it while a surname runs on without one, and a rule reading both
+    keys does better than this one on `Kane, Sean P. Auteur du texte`. It is
+    recorded because the choice was not binary, not because it is the better
+    one.
+
+    **What it costs is measured, and no spelling of it was found that pays
+    nothing.** The conjunction beats this version on the designation cell and
+    fails on other shapes, and **which shapes depends on how the qualifier is
+    spelled**, so no mechanism is named here: three spellings were measured
+    and they do not agree on what breaks. The one fixed point across all of
+    them is that the answer that keeps the initial's stop needs the stop
+    written back, which only a form that consumes its match can do, and that
+    form is the one this version replaced.
+    """
+
+    def test_a_surname_that_is_a_role_word_survives_the_round_trip(self):
+        """**The second call is the arm and the first is the setup.** Flipping
+        a catalogue order cell once was never the damage: that flip is what
+        manufactures the stop, so an arm asserting only its result is green on
+        the defect and green on the fix."""
+        assert flip_catalogue_name("Autrice, A A.") == "A A. Autrice"
+        assert flip_catalogue_name("A A. Autrice") == "A A. Autrice"
+
+    def test_a_leading_initial_is_the_same_stop_and_costs_the_first_pass(self):
+        """`_TRAILING_INITIAL` begins with `^` for this: a cell already in
+        direct order lost its surname without being flipped at all, so no
+        property about flipping twice could reach it."""
+        assert flip_catalogue_name("A. Autrice") == "A. Autrice"
+
+    def test_a_surname_that_merely_begins_with_a_role_word_survives_too(self):
+        """`[^.]*` lets the arm run from the role word to the end of the cell,
+        so the class is every surname starting with one rather than the
+        surnames that are one."""
+        assert flip_catalogue_name("Autrice-Martin, A A.") == "A A. Autrice-Martin"
+        assert flip_catalogue_name("A A. Autrice-Martin") == "A A. Autrice-Martin"
+
+    def test_the_designations_this_repository_has_seen_still_come_off(self):
+        """The refusal is on the stop and not on the role word. Every whole
+        person cell in this tree carrying a designation hangs it off a closing
+        bracket or off a letter, so none of them is an initial's stop and none
+        of them changed."""
+        assert (
+            flip_catalogue_name("Zafón, Carlos (1964-2020). Auteur du texte")
+            == "Carlos Zafón"
+        )
+        assert (
+            flip_catalogue_name("Camus, Albert (1913-1960). Auteur du texte")
+            == "Albert Camus"
+        )
+        assert (
+            flip_catalogue_name("Bibliothèque nationale de France. Éditeur")
+            == "Bibliothèque nationale de France"
+        )
+
+    def test_a_designation_behind_an_initial_is_what_this_now_keeps(self):
+        """**The false refusal the fix buys, and it is not a free trade.**
+
+        The stop after `P.` belongs to the name, so the arm no longer reads it
+        as a separator and a genuine designation survives into the cell.
+
+        **Measured through `authors.author_key`, which is where it costs
+        something.** That key turns punctuation into a space, so the old
+        answer, `Sean P Kane`, keys the same as `Sean P. Kane` and folds onto
+        the right person: what the old answer lost was a displayed full stop
+        and nothing else. This answer keys differently from every other
+        spelling of the name, so it mints an author that no import will ever
+        fold onto and only an alias row undoes.
+
+        So the trade is a display loss against an identity loss, and it goes
+        against this branch on **this** family. It is taken because the
+        defect family costs a deleted surname, which is worse than either, and
+        because no cell of this shape is in this tree while three of the other
+        shape are.
+        """
+        assert (
+            flip_catalogue_name("Kane, Sean P. Auteur du texte")
+            == "Sean P. Auteur du texte Kane"
+        )
+
+    @pytest.mark.parametrize(
+        "cell, settles_at",
+        [
+            # An abbreviation, which is the shape a flip can hand back: see
+            # the arm below.
+            ("Dr. Autrice", "Dr"),
+            # A letter outside `[A-Za-z]`, in a module whose role words are
+            # French and whose catalogue is not English.
+            ("É. Autrice", "É"),
+            # A compound forename abbreviated with a hyphen.
+            ("J.-P. Autrice", "J.-P"),
+            # A space between the initial and its own full stop.
+            ("A A . Autrice", "A A"),
+        ],
+    )
+    def test_a_prefix_the_initial_pattern_does_not_match_still_costs_the_surname(
+        self, cell, settles_at
+    ):
+        """**What is left over, stated as one family rather than as a list.**
+
+        Every one of these is a full stop that belongs to the name in front of
+        a role word, and `_TRAILING_INITIAL` does not match the text before
+        it. The rows are witnesses to the family and are not a bound on it.
+
+        **Widening the letter class is not the fix.** `_drop_isbd_stop` reads
+        the same pattern, so a wider class changes which cells keep their
+        terminal stop, and widening the shape from one letter to a letter run
+        was measured to stop
+        `Bibliothèque nationale de France. Éditeur` losing its designation at
+        all, which the arm above pins.
+        """
+        assert flip_catalogue_name(cell) == settles_at
+
+    def test_the_two_readers_of_an_initials_stop_agree_on_every_codepoint(self):
+        """**One shape, two compilations, and only one of them carries a flag.**
+
+        `_TRAILING_INITIAL` compiles bare; the refusal compiles into
+        `_PERSON_NOISE`, which carries `re.IGNORECASE`, and that flag widens a
+        bare `[A-Za-z]` by the codepoints whose case folding lands inside it.
+        Without the scoped `(?-i:...)` the two disagreed on these four, and a
+        cell built from one of them got two answers: it lost its terminal stop
+        because one reader saw no initial there, and kept its surname because
+        the other one did.
+
+        **The set is derived from the flag rather than listed**, so a Unicode
+        release that adds a fifth reddens by name instead of slipping past
+        four literals.
+
+        The class is typed here rather than parsed back out of the module, so
+        that this arm does not agree with the thing under test by
+        construction. The first assertion is what stops that costing
+        something: without it the module's class could move and this would go
+        on deriving over the old one, narrowing in silence.
+        """
+        # The expected value is on the left because ruff reads the ALL_CAPS
+        # side as the constant and calls the other order a Yoda condition.
+        assert f"(?-i:{_AN_INITIAL_CLASS})" == bibliographic._AN_INITIAL
+
+        strict = re.compile(_AN_INITIAL_CLASS)
+        widened_by_the_flag = [
+            codepoint
+            for codepoint in range(0x110000)
+            if re.fullmatch(_AN_INITIAL_CLASS, chr(codepoint), re.IGNORECASE)
+            and not strict.fullmatch(chr(codepoint))
+        ]
+        assert [hex(codepoint) for codepoint in widened_by_the_flag] == [
+            "0x130",
+            "0x131",
+            "0x17f",
+            "0x212a",
+        ]
+
+        refusal = re.compile(
+            bibliographic._NOT_AN_INITIALS_STOP + r"\.$", re.IGNORECASE
+        )
+        for codepoint in widened_by_the_flag:
+            for before in ("", " ", ".", "x"):
+                cell = f"{before}{chr(codepoint)}."
+                owned = bool(bibliographic._TRAILING_INITIAL.search(cell))
+                refused = refusal.search(cell) is None
+                assert owned == refused, cell
+
+    def test_a_doubled_full_stop_hands_the_next_pass_an_abbreviation(self):
+        """**The route into that family that a flip opens**, which is why the
+        family is not only a hand typed cell.
+
+        A doubled stop is an abbreviation ending a subfield that also carries
+        ISBD terminal punctuation. `_drop_isbd_stop` takes one of the two, the
+        abbreviation keeps its own, and the flip puts it in front of the
+        surname.
+
+        **`_CATALOGUE_NAMES` builds a doubled stop and not this cell**, which
+        is a narrower exclusion than it looks: measured at 494 doubled stops
+        in 30,000 draws, and a targeted search finds one at once. What it
+        cannot build is the **multi letter prefix** in front of one, and that
+        is the half no key available in this module closes, so the stability
+        property over that generator stays green while this arm is what keeps
+        the route visible.
+        """
+        assert flip_catalogue_name("Autrice, Dr..") == "Dr. Autrice"
+        assert flip_catalogue_name("Dr. Autrice") == "Dr"

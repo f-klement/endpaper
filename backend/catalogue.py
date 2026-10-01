@@ -361,7 +361,7 @@ _UNBOUNDED: Final = frozenset({"source"})
 #:
 #: `cover_url` and `google_books_id` are not reachable from a MARC file today:
 #: `_MARC_RECORD_FIELDS` carries neither. The other two are, and neither can
-#: arrive over-wide: `_marc_language` reads a three letter `041 $a`, and
+#: arrive over-wide: `marc_fields.Fields.language` reads a three letter `041 $a`, and
 #: `marc_fields.Fields.isbn` returns `isbn.parse` output. All four are classified
 #: anyway, because a set that is exhaustive by assertion cannot acquire a field
 #: by default, which is the shape this repository keeps finding.
@@ -544,7 +544,7 @@ class Record:
     headings: tuple[Heading, ...] = ()
     #: Which record in an authority file each credited person is, where the
     #: catalogue said so. Empty everywhere but the DNB: see
-    #: `metadata._marc_author_identifiers`.
+    #: `marc_fields.Fields.author_identifiers`.
     author_identifiers: tuple[AuthorityAssertion, ...] = ()
     #: Whether the three collections above have already been folded.
     #:
@@ -1184,7 +1184,7 @@ def _distinct(assertions: Iterable[AuthorityAssertion]) -> tuple[AuthorityAssert
 
     What this does remove is the ordinary repeat, which every DNB record with an
     author produces: `100` names the author and a `700` for the same person
-    names them again, exactly as `_marc_authors` already has to fold.
+    names them again, exactly as `marc_fields.Fields._author_entries` already has to fold.
     """
     seen: dict[AuthorityAssertion, None] = {}
     for assertion in assertions:

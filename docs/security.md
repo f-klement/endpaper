@@ -131,13 +131,21 @@ compile, run and answer with the values on every id passed.
 book's value for it, and the endpoint that lists definitions publishes **no usage count**:
 a count is drawn across books the caller may not see, so it would have to be scoped to the
 viewer, and a viewer-scoped number in a delete confirmation would understate what is about to
-be destroyed. The confirmation says "every book" instead.
+be destroyed. The confirmation says "every book" instead. Which definitions that endpoint
+lists at all is the next section.
 
 `backend/tests/test_custom_fields.py::TestOnlyABookReachesAValue` holds it in three passes. An
-**import** pass, so no module but `custom_fields.py`, `models.py` and `backup.py` may hold
-`CustomFieldValue`. A **touch** pass over the module's own AST, reporting any public function
-whose body names the table and that takes no `Book`. And a **name** pass, so a parameter that
-mentions a book is annotated with `Book`.
+**import** pass, so no module but `custom_fields.py`, `models.py`, `backup.py` and
+`fields.py` may hold `CustomFieldValue`. A **touch** pass over the module's own AST, reporting
+any public function whose body names the table and that takes no `Book`. And a **name** pass,
+so a parameter that mentions a book is annotated with `Book`.
+
+The fourth of those is the one that takes no `Book`, and it is a different question rather
+than an exemption. `backend/fields.py` asks which **definitions** a member may be told exist,
+which is the question in the section below; it reads `custom_field_values` three times and
+every one of them selects `field_id` and nothing else, so no value, no book and no count
+crosses out of it. Two of the three go through the Shelf. The third is unscoped on purpose
+and the module says why.
 
 The touch pass is written that way because the version it replaced was not enforcement: it
 enumerated the two functions that existed by hand, so adding `values_of(db, book_ids)` passed
@@ -152,6 +160,46 @@ are counted, so a third cannot appear inside a module already on the list.
 The blind spots are listed in that file's docstring, the sharpest being that a lazy read of
 `book.custom_field_values` is invisible to all three, which is the safe case because the book
 it hangs off has already been through the Shelf.
+
+### A custom field's name is a member's words, so who may be told it exists is a question
+
+A value is safe because it hangs off a book. A **definition** hangs off nothing: `custom_fields`
+is `id`, `name` and `kind`, with no member column, so nothing in the row says who may be told
+about it. The name is free text somebody typed, and before this it was broadcast to every
+member on every page that drew the field picker.
+
+`backend/fields.py` answers it the way `backend/shelving.py` answers it for collections.
+`Fields.seen_by(db, viewer_id).listable()` admits a definition on three arms: a book the
+viewer can see holds a value in it, a book in the viewer's trash does, or no book at all does.
+`Fields.addressable(field_id)` is the same predicate for an id the caller named, and it answers
+404 from the rename and from the value write, which is the answer an id no row carries already
+gets.
+
+**The value write is the door that makes the list worth scoping**, because its 200 returns the
+book's whole list and every entry carries `name`. Ungated, writing a guessed id on a book of
+your own reads any field's name straight off the response.
+
+**The admin delete is deliberately not gated.** An admin has no privilege over another member's
+private books, so gating it would leave a field whose every value sits on those books
+undeletable for good, and with a library-wide ceiling of 25 definitions the delete is the only
+verb that frees a slot.
+
+What stays open is stated rather than left to be found.
+
+| open | why it is open |
+|---|---|
+| defining a name that exists hands back the stored row | uniqueness is whole-table of necessity, so a scoped check would answer "free" for a name already taken. Whether the collision should still return the row is a ruling nobody has made |
+| refusal at `MAX_CUSTOM_FIELDS` | a member who lists three and is refused at the cap learns twenty-two exist. The oracle is the refusal event, so no wording closes it: a member who never reads this source defines until it fires and subtracts |
+| the ids are consecutive integers | a filtered list reading 1, 2, 5 says rows exist between them |
+
+**The first of those is not a way back, and this section said it was.** Retyping the name gives
+you the definition and nothing else: `define` writes no value, so the three arms answer exactly
+as before and the next write is still a 404. A loop, not a recovery, which is the same pair
+`backend/shelving.py` records for collections. The way back needs an admin, whose only verb
+destroys every value under the row.
+
+The rename's 409 no longer names the field it clashed with, which did leak a hidden name to
+anybody who guessed it.
 
 ### A custom field that holds a link is re-checked on every read
 
@@ -1291,7 +1339,7 @@ request against an arbitrary internal address is not.
 
 **The National Library of Greece answers on two paths and only one of them can check what
 comes back.** On an ISBN lookup a record has to name the ISBN that was scanned, because
-`metadata._marc_claims_isbn` refuses one that does not, so a substituted record chooses the
+`marc_fields.Fields.claims_isbn` refuses one that does not, so a substituted record chooses the
 metadata for the book in hand rather than the book. On a title search there is no
 identifier to check against, so a substituted body can offer any row it likes and a member
 picks one from a list. That second path is exactly the Library of Congress's exposure,

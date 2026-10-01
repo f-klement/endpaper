@@ -20,6 +20,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { sourceText } from "../sourceModules";
 import { en } from "../../src/i18n";
 import {
   PRODUCED_VALUE,
@@ -1089,21 +1090,15 @@ describe("the Takeout reader asks the value rule rather than one of its own", ()
  * total mapping.
  */
 describe("a reader's library says nothing the seam drops", () => {
-  // **`import.meta.glob` and not `node:fs`**, which `houseRules.test.ts`
-  // prefers for a reason that bites here: this file runs under happy-dom, where
-  // `import.meta.url` is not a `file:` URL and `fileURLToPath` throws before an
-  // assertion runs. `licence.test.ts` takes the node environment instead,
-  // because it reads across the trees and the glob is rooted at `frontend/`.
-  const MODULES = import.meta.glob("../../src/lib/*.ts", {
-    query: "?raw",
-    import: "default",
-    eager: true,
-  }) as Record<string, string>;
-
+  // **`import.meta.glob` and not `node:fs`**, which bites here: this file runs
+  // under happy-dom, where `import.meta.url` is not a `file:` URL and
+  // `fileURLToPath` throws before an assertion runs. The pattern is in the one
+  // enumeration of `src/` behind `sourceText`, which refuses a module it does
+  // not hold rather than answering nothing. `licence.test.ts` takes the node
+  // environment instead, because it reads across the trees and the glob is
+  // rooted at `frontend/`.
   function sourceOf(module: string): string {
-    const source = MODULES[`../../src/lib/${module}.ts`];
-    if (source === undefined) throw new Error(`no source for ${module}`);
-    return source;
+    return sourceText(`lib/${module}.ts`);
   }
 
   /**

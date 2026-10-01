@@ -2022,7 +2022,7 @@ delete to undo it, so it has to be a difference nobody would call a decision.
 
 ### The credit line is split on commas, and the importers' flip rule is not reused
 
-`books.author` is comma separated. Every writer of it says so: `metadata._marc_authors`,
+`books.author` is comma separated. Every writer of it says so: `marc_fields.Fields.authors`,
 `_bnf_authors` and `google_books` all join with `", "`, and every import path runs a single
 name through `flip_catalogue_name` first, so a catalogue-order name is flipped **before**
 it reaches the column.
@@ -2116,7 +2116,7 @@ the insert hit the binary `unique=True` on `tags.name` with a name already there
 imported nothing, every time, with a 500. Any member could plant such a tag through
 `POST /api/tags` or one earlier import.
 
-The fix is to fold on one side only: `importing.Import._tags_by_folded_name` reads the Tag
+The fix is to fold on one side only: `tags.Mint._by_folded_name` reads the Tag
 table once and keys it with Python's `.lower()`, so a cache miss means genuinely new. It also
 turns one query per unseen name into one per import.
 
@@ -2790,7 +2790,7 @@ existed only to cross between them, and one of them lived in a route handler.
 previously a rule somebody had to remember:
 
 * Folding a heading a record repeats. One live K10plus record's 082 `$a` values
-  read `100`, `610`, `610`. Three sites deduplicated: `metadata._dnb_subjects`,
+  read `100`, `610`, `610`. Three sites deduplicated: the DNB subject reader,
   `_as_match` and `_merge`. Now one, at construction.
 * Filling a caption from whichever source has one, never overwriting.
 * That an **empty collection is an absence where an empty string is a value**.
@@ -2998,8 +2998,8 @@ created reach ins in the opposite direction, from the Dublin Core and MODS decod
 `marc.py`. There are two concepts here and not one, and the vocabulary comes out first.
 
 The membership test is one sentence: **a rule about what a bibliographic value means,
-independent of the serialisation it arrived in.** It excludes `_Subfields`, `_marc_fields` and
-`_subject_vocabulary`, which are MARC subfield readers wearing generic names, and it excludes
+independent of the serialisation it arrived in.** It excludes `Subfields`, `Fields` and
+`Subfields.subject_vocabulary`, which are MARC subfield readers wearing generic names, and it excludes
 a refusal one catalogue states for itself.
 
 `authors.py` is the precedent for the shape, and `bibliographic.py` rather than `fields.py` is
@@ -4662,12 +4662,25 @@ typed by hand, on Books the caller cannot necessarily see. A `CustomField` recor
 its author, so there is no owner to ask. Deleting a Tag takes a label off a Book; deleting a
 field takes the words.
 
+**Renaming is neither, and that is a gap rather than a third position.** Any Member may
+rename any field, library wide, so the verb that relabels content every other Member typed,
+on Books the caller cannot see, with no undo, was also the only one of the three leaving no
+trace. It logs the account and both names now. Who may rename is unchanged and is a ruling
+nobody has made: a vocabulary only an admin may extend goes unused, which is this entry's
+own argument for leaving defining open, and fixing a typo is the commonest rename.
+
 ### `MAX_CUSTOM_FIELDS` is the only ceiling the feature needs
 
 A Book holds at most one value per definition (`uq_custom_field_values_book_field`), so
 bounding the definitions at 25 bounds every Book's payload, every rename's blast radius and
 every row this feature can add. It is also what makes `define` cheap enough to fold a name by
 scanning the whole table in Python, which is what `create_tag` does and why.
+
+**Scoping the definitions list gave the cap a second consequence.** A Member told about
+fewer fields than it allows and then refused at it learns how many exist that they cannot be
+told about. The oracle is the refusal event rather than its wording, so a Member who reads
+none of this defines until it fires and subtracts, and nothing closes that while the cap is
+library wide. `docs/security.md` carries it among the doors that stay open.
 
 ### Settings is an index of six routes, and the descriptions are the page
 
@@ -7753,7 +7766,7 @@ attempt, a guard that enumerates something open.
 
 It took three attempts and each failure was found by attacking it: the first
 matched a module basename against any local variable and reported `shelf.py`
-three times; the second was blind to `from metadata import _marc_fields`, the
+three times; the second was blind to `from X import _y`, the
 same import shape `tests/test_shelf.py` records its own first version sailing
 past; the third keyed on the local binding, so `import metadata as m` filed the
 read under `m` and the "is it one of ours" filter skipped it.
@@ -7763,7 +7776,7 @@ Until then the backend job ran `ruff check`, the OpenAPI diff and `pytest`, and 
 mention of the type checker was a comment saying the synced virtualenv happens to hold one, so
 a type error reached `main` green and waited for whoever next ran the full gate on their own
 machine. It runs beside the lint step now, at 27.6s over 276 source files against about 240s
-for the suite in the same job, and it pins these reads and `_Subfields`, which is annotation
+for the suite in the same job, and it pins these reads and `Subfields`, which is annotation
 only and which no runtime guard can reach.
 
 **This paragraph said "raised rather than done, because a pipeline change is not one trio's to
@@ -7928,7 +7941,7 @@ measured on one machine says nothing about another.
 
 **The reason is structural and is why this generalises**: YAZ's Generic Frontend Server
 speaks HTTP and Z39.50 on one socket, and answers SRU on it wherever the operator has
-configured a database. `metadata._LOC_URL` is already this fact, `http://lx2.loc.gov:210/lcdb`
+configured a database. The Library of Congress row in `targets.SEEDED` is already this fact, `http://lx2.loc.gov:210/lcdb`
 answering `text/xml`, and it was read as a property of the Library of Congress rather
 than of YAZ. **The survey read six YAZ banners and never sent an HTTP request to any of
 those sockets.**
@@ -7947,7 +7960,7 @@ and a `100$0` carrying `urn:nbn:gr:nlg:01-A112061`.
 So Greece needs neither a Z39.50 client nor a UNIMARC mapping, which were the two things
 that made the session plan call it a mapping ticket rather than a config line.
 
-**It is still not a config line, for a different reason.** `metadata._marc_claims_isbn`
+**It is still not a config line, for a different reason.** `marc_fields.Fields.claims_isbn`
 refuses any `020` carrying a `$q` qualifier, because a qualified entry is a cross
 reference to a different edition and taking one as identity once returned a Ukrainian
 translation of Dune for the American ISBN. **The National Library of Greece uses `$q` for
@@ -7992,7 +8005,7 @@ entry about exactly that.
 ### The DNB and the OENB answer almost nothing outside German publishing, and both are in the default first tier
 
 **Measured 2026-08-30 for #91, n=50 domestic ISBNs per country, one host, asked through
-`metadata._SOURCES` itself so that "answered" means what the application means.** A
+the application's own source roster so that "answered" means what the application means.** A
 source that answered `rate_limited` or `unavailable` after five retries is excluded from
 its own denominator rather than counted as a miss, **which is the mistake the entry above
 records this programme making again while measuring this**: a refusal scored as a miss, or
@@ -8187,7 +8200,7 @@ of it in a published file is a number that will not recount itself. Two of the t
 HTTP query parameter, on the `fetch.py` side of the tree, where the only PQF escaper
 lives behind a seam it would not go through.
 
-`metadata._CQL_UNSAFE` does **not** cover it. It is `[=<>"()/\\]+`, and `@` is not in
+`targets.CQL_STRUCTURE` does **not** cover it. It is the CQL join and mask characters, and `@` is not in
 it. Executed against `_search_terms`, a title term of `@1=1016 harry` becomes
 `@attr 1=4 @1 @attr 1=4 1016 @attr 1=4 harry`, which is exactly the injection the Z39.50
 seam's own escaper was written against: an `@` followed by a digit at the head of a term
@@ -8645,7 +8658,7 @@ from scratch.
 
 `TestNoModuleHardCodesASourceOrder` reads a dict's keys as an ordered literal of
 source names. Every mapping keyed on `CatalogueSource` therefore trips it, which
-is why `metadata._SOURCES` and `metadata._FREE_SEARCHES` were already exempted
+is why metadata's own source roster and `metadata._FREE_SEARCHES` were already exempted
 and why `sources.MEASURED` needed a third exemption the day it was written.
 
 **The rewrite** read a mapping's keys as an order only when its **values are the
@@ -8699,13 +8712,13 @@ iterations. The next loop test will.
 
 ## The National Library of Greece, and the rule that was refusing its records
 
-Five entries from #111. The ticket asked for one SRU adapter and predicted one
-obstacle; the obstacle turned out to belong to three sources rather than to the new
+The SRU adapter for the National Library of Greece, #111, and the inline qualifier rule
+that came after it. The ticket asked for one SRU adapter and predicted one obstacle; the obstacle turned out to belong to three sources rather than to the new
 one, and clearing it moved the whole chain's coverage.
 
 ### `020 $q` is a qualifier about this record's item, and refusing it lost the book
 
-**#111.** `_marc_claims_isbn` skipped every `020` entry carrying a subfield `q`, on the
+**#111.** `Fields.claims_isbn` skipped every `020` entry carrying a subfield `q`, on the
 reasoning that `$q` marks a cross reference to another edition. That reasoning came from
 one German record and does not reach the catalogues beside it. MARC21 defines `$q` as
 qualifying information about **this** record's item: its binding, its volume, its format.
@@ -8741,9 +8754,9 @@ does not produce.
 
 ### Matching an ISBN and choosing one are two questions, and only the first is safe to answer
 
-**#111.** `_isbn_entries` has two readers. `_marc_claims_isbn` **matches**, against an ISBN
-the member already holds, and cannot be wrong about which entry it picks. `_marc_isbn`
-**chooses** the ISBN to store, and where a record carries no unqualified entry there is
+**#111.** `_isbn_entries` has two readers. `Fields.claims_isbn` **matches**, against an ISBN
+the member already holds, and cannot be wrong about which entry it picks.
+`marc_fields.Fields.isbn` **chooses** the ISBN to store, and where a record carries no unqualified entry there is
 nothing to choose on but catalogue order: on a K10plus record whose three `020` entries are
 `ePUB`, `PDF` and `Broschur` it returns the ePUB's. `marc.py` calls it, and that module's
 docstring calls the ISBN the importer's primary match key.
@@ -8755,9 +8768,82 @@ without failing. The record is genuinely ambiguous, one row describing three sal
 forms with no field saying which the row is for, and before this change the same record
 stored **no ISBN at all**. An ambiguous identifier beats none, the lookup path is
 unaffected because the adapters are handed the ISBN that was asked for, and the limitation
-is stated in `_marc_isbn` where somebody reading the code will meet it.
+is stated in `marc_fields.Fields.isbn` where somebody reading the code will meet it.
 
 Raised by the design seat, which executed it rather than reading it.
+
+### An inline qualifier is the same qualifier, and reading it needs both halves
+
+`020 $a` is the number followed by optional qualifying information, and before `$q` was
+defined that information was printed inside `$a` in parentheses. `Fields.isbn` read `$a`
+whole, so `9783161484100 (pbk.)` yielded nothing.
+
+**The cut is a position and not a vocabulary.** Everything from the first opening
+parenthesis is the qualifier, whatever it says, so `(pbk.)`, `(pbk. : alk. paper)` and the
+Greek for paperback are one shape. A list of binding words is the enumerating guard the
+entry above already refuses. **The cut is not the whole of what qualifies**, and the
+paragraph on the residue below is the other half.
+
+**Both halves ship together or the fix is a regression.** Reading the number without
+counting the parenthesis as qualification leaves every inline entry looking plain, and the
+Dune shape then returns: a translation naming the edition it was made from, in `$a` rather
+than in `$q`, is matched by `claims_isbn` and chosen by `isbn`.
+`test_marc_fields.py::TestAnInlineQualifierIsAQualifier::test_an_inline_cross_reference_is_not_this_records_own_isbn`
+is green before the change and red on that half alone.
+
+**`isbn.parse` answered this by what survives normalisation, which is why the cut cannot
+live there.** Measured 2026-09-30: `parse("9783161484100 (pbk.)")` is None and the same
+number qualified in Greek parses, because `normalise` keeps ASCII alphanumerics and drops
+the rest, so a qualifier it keeps survives into an over long candidate and a qualifier it
+deletes vanishes. The script is the instance and the deletion is the mechanism, which is
+the distinction the code and its arms are named for. The hole was therefore already open
+for every qualifier the normaliser deletes.
+
+**The cut stays in the MARC reader.** `isbn.py` is mirrored by `frontend/src/lib/isbn.ts`
+and the two are held to `conformance/cases/isbn.json` case by case, so widening
+`normalise` widens the barcode scanner, the manual entry box, the CSV importer and the
+OPDS identifier reader in one implementation of two.
+`test_isbn.py::TestACatalogueQualifierIsNotThisModulesProblem` pins that boundary.
+
+**Preferring an entry is only safe while it has an answer.** The preference above is a
+ranking, and a rank over an entry that parses to nothing loses the record's identifier.
+Measured 2026-09-30 on a plain `$a 9783161484199`, a mistyped ISBN, beside a genuine
+`9789602118962` qualified in Greek: the reader preferred the mistyped entry and answered
+nothing where the behaviour before the qualifier rule answered the genuine number. The
+preference predicate now requires the entry to state a number as well as to qualify it in
+no way, which also closes the same hole for `$q` that was open before any of this. A
+middle tier falling back to the entries that state a number was tried and refused on
+measurement: both readers skip an entry that states nothing, so it decides nothing and a
+plant of it left every arm green.
+
+**What qualifies is a position and a property, and the property is the one that does the
+harm.** A qualifier in a bracket the rule does not open leaves a **residue that parses**,
+so the entry reads as one plainly stating a number it only cross references. Measured
+2026-09-30 on `9780441013593` followed by the Greek for "American edition", beside a
+record's own plain ISBN: with round parentheses the record's own number wins, and with
+square brackets, full width parentheses or lenticular brackets the cross reference wins
+and `claims_isbn` matches it. `_normalise_would_drop_an_alphanumeric` keys on the property
+rather than on a list of brackets, because the two are correlated: full width parentheses
+are what CJK cataloguing prints, which is exactly where a qualifier the normaliser deletes
+lives. For a residue to parse the qualifier must contribute no ASCII alphanumeric, so what
+stays outside is a qualifier made only of ASCII punctuation, which deletes nothing from the
+number.
+
+**What the rule deliberately does not reach**, pinned by
+`test_marc_fields.py::TestWhatTheInlineQualifierRuleDeliberatelyDoesNotReach`: a qualifier
+made only of ASCII punctuation in a bracket the rule does not open, such as `[-]`. It is
+left open, and **not because the number is safely the record's own**, which is false in
+form: nothing stops a cross reference being written that way. It is left because a
+qualifier carrying no alphanumeric names nothing, and a cross reference has to say what it
+refers to, so the shape the rule misses cannot carry the harm the rule exists to stop. A
+parenthesis **before** the number answers nothing and is unpinned either way, over no
+measured population. An empty `$q` counts as qualification, because the subfield's presence
+is the test; that is pre-existing, unchanged, and pinned by nothing.
+
+**The scoring cost is one fact counted twice, not two facts.** Both MARC readers build
+`cover_url` from the identifier they just read and from nothing else, so a row that states
+no identifier falls from six of six `metadata._PICKABLE_FIELDS` terms to four of six on one
+missing fact. Measured on all five seeded MARC sources.
 
 ### A pooled union over a country stratified sample is the wrong instrument for the first tier
 
@@ -8802,7 +8888,7 @@ the roster arrived four days later.
 
 **#111.** `catalogue.nlg.gr:210` speaks no TLS, and `https://catalogue.nlg.gr` on 443 is a
 different service answering 404 to this path. Both measured 2026-08-30, which is the date
-`metadata._NLG_URL` carries for the same two probes. So this is the
+the National Library of Greece row in `targets.SEEDED` carries for the same two probes. So this is the
 second source in the chain fetched over plaintext HTTP, after the Library of Congress, and
 the reasoning there applies unchanged: `fetch.RedirectedOffHost` is what stops an on path
 attacker turning the request into a request against an arbitrary address, and substituting
@@ -8810,7 +8896,7 @@ a record is still open to them.
 
 **What it buys them differs by path, and the first draft of this entry got that wrong.**
 It said the exposure was narrower here than at the Library of Congress, because this source
-answers ISBN lookups and `_marc_claims_isbn` refuses a record that does not name the ISBN
+answers ISBN lookups and `Fields.claims_isbn` refuses a record that does not name the ISBN
 scanned. That is true of `_nlg` and false of `_nlg_search`, which is registered in
 `_FREE_SEARCHES`, is on by default, and has no identifier to check against. So the search
 path's exposure **equals** the Library of Congress's rather than being narrower, and only
@@ -9259,7 +9345,7 @@ column".
 
 ## `$2` is read on a subject field only, and the signature is what says so
 
-`metadata._subject_vocabulary` takes the MARC tag and raises outside
+`marc_fields.Subfields.subject_vocabulary` takes the MARC tag and raises outside
 `_DNB_SUBJECT_TAGS`. `$2` is a subject vocabulary on `600`, `650`, `651`, `655` and `689`
 and the **Dewey edition** on `082`, where this repository's own fixtures spell it `23sdnb`,
 `22/ger` and `21`, so a caller handing the reader an `082` records a vocabulary named `21`
@@ -9280,7 +9366,7 @@ Two rules now, doing two different jobs, which is the correction rather than a w
   spellings.
 
 The spelling list was the wrong shape and measurably so. It enumerated `get`, `all` and a
-subscript, "three spellings because `_Subfields` offers three"; `_Subfields` subclasses
+subscript, "three spellings because `Subfields` offers three"; `Subfields` subclasses
 `dict`, so it offers every dict reader, and 8 of 10 shapes carrying a literal `"2"` went
 unreported, `e.pop`, `e.setdefault`, `dict.get(e, "2")`, `getattr(e, "get")("2")`,
 `e.get(*("2",))` and an `items()` loop among them. The denominator that makes the
@@ -9289,7 +9375,7 @@ outside docstrings, one reader and one writer.
 
 ## The vocabulary code is lower cased for `marc._extra_headings`, not for the catalogues
 
-`metadata._subject_vocabulary` folds case, and the first version of that comment said two
+`marc_fields.Subfields.subject_vocabulary` folds case, and the first version of that comment said two
 catalogues motivated it. They do not: 0 of the twelve `$2` codes measured appeared in two
 cases, and the two upper case ones are each written by one catalogue only, `VLK` by the
 OENB and `DLC` by K10plus. **The dependency that actually breaks is
@@ -9325,9 +9411,9 @@ first occurrence.
 The comment that let this through said "nothing reads the order", listing `as_match` as a
 consumer in the same sentence. A human reading a joined string is reading the order.
 
-## The first `$0` is the authority file's number, and `_gnd_identifier` asks a different question
+## The first `$0` is the authority file's number, and `Subfields.gnd_identifier` asks a different question
 
-`_subject_identifier` takes a field's **first** `$0`, whole. Measured 2026-08-31 over 718
+`Subfields.subject_identifier` takes a field's **first** `$0`, whole. Measured 2026-08-31 over 718
 live subject fields carrying one: where a field carries a `(DE-588)` at all it is the first
 of that field's values, 691 of 691, with the `d-nb.info` URL and the `(DE-101)`, `(DE-627)`
 and `(DE-576)` house numbers always following; the other 27 carry exactly one `$0` each and
@@ -9338,11 +9424,11 @@ clause.** 691 of 691 counts values as served and says nothing about an element w
 standing in front of them, because an empty `$0` is not something a catalogue writes: it is
 what `_marc_text` makes of `<subfield code="0"/>`. Recounted for this, 0 of the 718 fields
 carry an empty `$0` anywhere, so the sample could not have shown it. Reading
-`values[0] or None` answered None where `_gnd_identifier`, which scans every value, found
+`values[0] or None` answered None where `Subfields.gnd_identifier`, which scans every value, found
 the number and wrote a classification row, so one field produced a heading with an
 identifier and a subject without one.
 
-**`_gnd_identifier` is unchanged and still searches every `$0` for a `(DE-588)`.** The two
+**`Subfields.gnd_identifier` is unchanged and still searches every `$0` for a `(DE-588)`.** The two
 are different questions rather than one rule spelled twice. That one decides whether a
 `classifications` row is written, and that row's `scheme` is a closed set, so a `(DE-101)`
 number filed under `gnd` would be an identifier resolving to nothing. This one asks what
@@ -9376,7 +9462,7 @@ word twice.
 
 ## `$2` means a vocabulary on a subject field and a Dewey edition on `082`
 
-`metadata._subject_vocabulary` is the only place in the backend that reads a `$2`, and
+`marc_fields.Subfields.subject_vocabulary` is the only place in the backend that reads a `$2`, and
 `test_house_rules.py::TestOneReaderPerAmbiguousSubfield` counts rather than trusting the
 comment saying so. A second reader taking `$2` off whatever field it had in hand would
 record a vocabulary called `21`, which is what this repository's own NLG fixture writes on
@@ -9504,7 +9590,7 @@ other half and are the half that was missing.
 **`POST /api/books/{id}/enrich` writes catalogue values with no bound at all.** It hands
 `Record.as_match()` to `merge_into` without building a `BookMatch`, so `series_index = 1e9` is
 stored with a **200** where the same value on `/enrich/apply` is a **422**. Catalogue
-reachable, not upload only: `metadata._marc_title` takes the first digit run of `245 $n` and
+reachable, not upload only: `marc_fields.Fields.title_statement` takes the first digit run of `245 $n` and
 calls `float()`. The fix cannot live here, because `google_books` importing the declarations
 is circular, and the comments now say which of the two routes is closed rather than implying
 both are.
@@ -10515,11 +10601,16 @@ reference whenever the pipeline's side is the one that is present, so a runner t
 its own pin was reported as a path with an image glued to the end. Two explicit branches
 replace it, and the test asserts the message names the pipeline file and not the runner.
 
-And the guard reads its own file with `grep | head -1`, while both patterns are now written
-out as string literals a few lines above the pins they match. A pattern that matched its own
-literal would compare a comment against the pipeline and pass for ever. Neither does, checked
-by running the greps rather than by reading them, and pinned by a test that asserts each
-pattern finds exactly one reference in the runner.
+And each side is read as a distinct set off the lines that **declare** an image, rather than
+off the first match in the file. The runner refuses when it declares more than one image for
+a toolchain, and otherwise asks whether the one it declares is one the pipeline declares:
+membership, because the value of a green run here is that it predicts a green pipeline, and a
+job deliberately on an older toolchain is a decision rather than a drift. A pattern matching
+its own literal a few lines above the pins would once have compared a comment against the
+pipeline; a comment declares nothing, so that route is closed by the narrowing rather than by
+the patterns being careful, and a second declaration is a refusal naming both rather than a
+tie broken by position. **What the narrowing does not close** is a line inside a block scalar
+spelled as a declaration, which is still read as one because the anchor eats the indentation.
 
 Deleting the call does not fail a test, it stops the suite running at all with the refusal on
 stderr, which is the self enforcing rung rather than the tested one.
@@ -10579,7 +10670,7 @@ is fine, listed on a page whose query says it is late, is a screen contradicting
 itself with nothing failing anywhere.
 
 `backend/lending.py` holds the three of them, `days_out` included, and both
-callers read it. The SQL form stays in `notifications._overdue_clauses`, because
+callers read it. The SQL form stays in `notifications.overdue_clauses`, because
 a query cannot call a Python predicate, and `tests/test_lending.py` asserts the
 two select the same loans rather than trusting the comment that says they
 should. The one clause only the query has is `Book.deleted_at`, which is a fact
@@ -10920,7 +11011,7 @@ measurement. `sources.LOOKUP_SOURCES` holds seven rows behind four readers
 (`_LOOKUP_READERS` plus `_BESPOKE_LOOKUPS`), and they reach five record constructions:
 `_dnb_record`, `_k10plus_record`, `_nkp_record`, `_open_library` and `_google_record`. The
 other four are search and cluster path only. Each of the five sets `isbn` from the
-canonicalised argument, from `metadata._marc_isbn`, or from `metadata._google_isbn13`, and
+canonicalised argument, from `marc_fields.Fields.isbn`, or from `metadata._google_isbn13`, and
 all three are `isbn.parse` output.
 
 **Measured, `isbn.parse`'s output width, by three routes:** a sweep of 400,000 random and
@@ -11242,8 +11333,8 @@ Specifications, version 3.0, August 2001, from the Network Development and MARC 
 Office: six documents giving field, indicator and subfield level mappings with processing
 notes, thirteen procedures and five tables. It is field by field rather than approximate:
 UNIMARC 210 `$c` becomes MARC21 260 `$b` and `$d` becomes `$c`, which is exactly what
-`_marc_publisher` and `_marc_year` read; UNIMARC relator `070` becomes `aut`, which is
-exactly what `_marc_author_entries` tests for.
+`Fields.publisher` and `Fields.year` read; UNIMARC relator `070` becomes `aut`, which is
+exactly what `Fields._author_entries` tests for.
 
 It states its own limits, and they are quoted rather than summarised: "Although updated in
 2001 for UNIMARC users, resources were not available for exhaustive review. Some UNIMARC or
@@ -11256,18 +11347,18 @@ not find them here.
 
 **Thirteen of the sixteen datafield tags this tree reads have a source in it.** The three
 without are `264`, which is RDA and postdates the MARC21 edition the crosswalk targets, and
-which costs nothing because `_marc_publisher` and `_marc_year` read `260` as well; `655`,
+which costs nothing because `Fields.publisher` and `Fields.year` read `260` as well; `655`,
 genre, whose UNIMARC counterpart 608 appears nowhere in the document because it postdates
 the 1994 edition; and `689`, the German networks' subject chain, which is not standard
 MARC21 and which no UNIMARC record carries. Both real losses are subject headings, so a
 converted record is thinner and never wrong.
 
-**The shape is element to element, and the tempting shape is wrong.** `metadata._marc_fields`
-produces `dict[str, list[_Subfields]]` and `marc._record` consumes one, so a transformation
-between two such dicts looks like the whole job. It is not: that map is built from
-`datafield` alone and carries **no leader, no control fields and no indicators**. Those are
-load bearing at two different ends, and conflating them is what makes the dict look
-sufficient.
+**The shape is element to element, and the tempting shape is wrong.** `marc_fields.Fields`
+holds one record's datafields as a `dict[str, list[Subfields]]` and `marc._record` consumes a
+`Fields`, so a transformation between two such maps looks like the whole job. It is not: that
+map is built from `datafield` alone and carries **no leader, no control fields and no
+indicators**. Those are load bearing at two different ends, and conflating them is what makes
+the map look sufficient.
 
 **The leader and the control fields are load bearing on the output side.** Procedure 9
 constructs the MARC21 leader and `008` from UNIMARC's coded fields and is the largest single
@@ -11285,7 +11376,7 @@ cannot express a rule keyed on something it discarded.
 
 **The carrier door is the first thing such a path has to answer**, and it fails open rather
 than closed. `_marc_carrier_is_book` reads the leader and the control fields off the record
-node, by its own docstring, precisely because `_marc_fields` does not carry them. Executed on
+node, by its own docstring, precisely because that map does not carry them. Executed on
 a UNIMARC record with a UNIMARC leader and no `007` or `008`, it returns `True`, where the
 same function correctly returns `False` for a MARC21 online resource. So a dict to dict
 transform would admit every UNIMARC record as a physical book, including the electronic ones,
@@ -11304,15 +11395,15 @@ UNIMARC's.**
 
 * **The ISBN, which is the importer's primary match key.** MARC21 `020 $b` is obsolete, so
   the crosswalk's processing note for UNIMARC 010 folds the qualification into `$a` in
-  parentheses. `metadata._marc_isbn` parses `9783161484100`, `978-3-16-148410-0` and
-  `9783161484100 :`, and returns nothing for `9783161484100 (pbk.)`. That divergence is
-  already recorded on `marc._record`; what is new is that a UNIMARC path makes it the normal
-  case rather than the occasional one, because `broché` and `relié` are what `$b` holds in
-  the catalogues this would be built for.
+  parentheses, which is where `broché` and `relié` arrive.
+  `marc_fields.Subfields.stated_isbn` reads that spelling and `Subfields.isbn_is_qualified`
+  counts it as qualification, so a UNIMARC path meets the normal case rather than a gap.
+  What it does not reach is a qualifier with no parenthesis around it at all, which
+  `tests/test_marc_fields.py::TestWhatTheInlineQualifierRuleDeliberatelyDoesNotReach` pins.
 * **Co-authors.** UNIMARC records the role in the tag, 701 for alternate and 702 for
   secondary intellectual responsibility. The crosswalk maps both to `700` and copies `$4`
   only where the source had one, so the role the tag carried is dropped with nothing put in
-  its place. `_marc_author_entries` then keeps only the main entry, and the fallback that
+  its place. `Fields._author_entries` then keeps only the main entry, and the fallback that
   would have caught the rest does not run because the main entry made the credit line
   non-empty. That is a defect in the MARC21 reader today and is on the tracker as its own
   issue, not a UNIMARC one.
@@ -11456,7 +11547,7 @@ anywhere. It goes through `metadata.READERS` now rather than through a private n
 is what made the same test reachable for all four serialisations rather than for MARC only. That is the demand OPF makes, being both a zip entry inside an EPUB and a
 loose file beside a book in a Calibre library.
 
-**What is not separated, stated rather than left to be found.** `metadata._BESPOKE_LOOKUPS`,
+**What is not separated, stated rather than left to be found.** `metadata._FREE_LOOKUPS`, `_KEYED_LOOKUPS`,
 `_FREE_SEARCHES` and `_METERED_SEARCHES` hold adapters that fetch as well as decode. Their
 decoders are already pure inside them (`_open_library_edition`, `_google_record`); what is
 missing is only the registry entry. Splitting them is a rewrite of two JSON adapters rather
@@ -12001,8 +12092,8 @@ either would be a cleanup of live code rather than a guard widening.
 ## A MARC `700` that states no role is not an author
 
 **Asked**: a record with a `100` and `700` fields carrying no `$4` keeps the main entry and
-drops every co-author, because `_marc_author_entries` requires an author relator and
-`_marc_credited_names` runs only where the credit line came back empty. Should a `700` with
+drops every co-author, because `Fields._author_entries` requires an author relator and
+`Fields.credited_names` runs only where the credit line came back empty. Should a `700` with
 no `$4` at all be an unstated author?
 
 **Answered no, on a measurement.** 624 live records from the five MARC sources on
@@ -17176,9 +17267,11 @@ Found by the idempotence property over free text, and pinned in
 a second pass the semicolon is trailing, which is where `_strip_person_noise` rstrips it,
 and the cell changes again to `0`.
 
-**Recorded rather than fixed, and the bound is the reason.** Nothing reaches this but a cell
-whose surname is punctuation, and no catalogue and no importer produces one: a real cell
-ending in a semicolon is trimmed on the first pass before the comma is counted. What it
+**Recorded rather than fixed, and the bound is the reason.** This shape needs a cell whose
+surname is punctuation, and no catalogue and no importer produces one: a real cell ending in
+a semicolon is trimmed on the first pass before the comma is counted. It is not the only
+shape that reaches instability, and the second one is a real cell: see "A role word can be
+the surname, and a flip manufactures the stop that hides it". What it
 costs is that this function is a reader of catalogue person strings and not a general
 normaliser, which is what the idempotence property is now scoped by: it is asserted over
 generated catalogue person cells, and the whitespace collapse and the "nothing is ever
@@ -20045,3 +20138,222 @@ report. From the caller's side an unbounded run and a caught mutant are the same
 a run with no test report counts invalid here rather than caught. Making the source finite at four
 times the budget puts termination in the fixture's own hands, and that is the shape of the repair
 rather than a larger number.
+
+
+## A role word can be the surname, and a flip manufactures the stop that hides it
+
+`_PERSON_NOISE`'s role arm needs a full stop in front of the role word, because that is how
+the BnF separates a designation from the name: `Zafón, Carlos (1964-2020). Auteur du texte`.
+The flip manufactures exactly that stop out of the trailing initial `_drop_isbd_stop` is
+careful to keep, so `Autrice, A A.` became `A A. Autrice` and then `A A`. Silent: the surname
+is gone and nothing says so.
+
+**The shared shape needs a scoped flag, and one token is the whole of it.** The refusal
+compiles into `_PERSON_NOISE`, which carries `re.IGNORECASE`, and that flag widens a bare
+`[A-Za-z]` by the codepoints whose case folding lands inside it, while the other reader
+compiles bare. Measured over every codepoint in Unicode against four preceding contexts: the
+two disagreed on twelve pairs over four codepoints, U+0130, U+0131, U+017F and U+212A, and one
+cell got two answers from them. `(?-i:[A-Za-z])` takes that to zero and is a no op at the
+other reader over the same space. **Two constants are one shape only while nothing between
+them carries a flag**, and nothing says otherwise when one does.
+
+**Keyed on the stop, which `_TRAILING_INITIAL` already answers for `_drop_isbd_stop`.**
+`Bibliothèque nationale de France. Éditeur` is a bare role word at the end of a string and so
+is `A A. Autrice`; the stop's owner is what separates them.
+
+**The key is not the only one the cell carries.** A designation is usually a role word with a
+space separated qualifier behind it while a surname runs on without one, and a rule reading
+both keys beats this one on the designation cell. The choice is recorded because it was not
+binary, not because it is better.
+
+**No spelling of it was found that pays nothing, and the spellings disagree about what
+breaks**, so no mechanism is named: three qualifier spellings were measured against two
+mechanisms, and the losses move between them. What holds across all six is that the answer
+keeping the initial's full stop needs that stop written back, which only a form consuming its
+match can do, and that form is the one this entry replaced.
+
+**Spelled as a zero width assertion and not as a callback on the substitution.** A refusal
+that returns its match consumes it, and this arm runs to the end of the cell, so it hid the
+life date arms behind it. Measured over 180 direct order cells carrying dates after a role
+word: the callback left the dates on 60 of them, against 0 for the assertion, and the worst of
+the 60 then flipped around the date's comma, `A. Auteur, 1901-1990` becoming
+`1901-1990 A. Auteur`. Two docstrings in the module promise dates come off whichever branch
+runs; the callback made both false.
+
+**What it newly refuses, and the trade goes against it on that family.** A genuine designation
+hung off a name ending in an initial, `Kane, Sean P. Auteur du texte`, keeps its role words and
+comes back as `Sean P. Auteur du texte Kane`. Measured through `authors.author_key`, which
+turns punctuation into a space by design: the old answer, `Sean P Kane`, keys identically to
+`Sean P. Kane` and folds onto the right person, so what it lost was a displayed full stop.
+This answer keys differently from every other spelling and mints an author nothing will fold
+onto, undone only by an alias row. **A display loss against an identity loss**, taken because
+the defect family costs a deleted surname, which is worse than either, and because no cell of
+the designation shape is in this tree while three of the other are.
+
+**What is left over is one family: a full stop the name owns in front of a role word, where
+`_TRAILING_INITIAL` does not match the text before it.** Witnesses, not a bound: an
+abbreviation (`Dr. Autrice`), a letter outside `[A-Za-z]` (`É. Autrice`), a hyphenated compound
+(`J.-P. Autrice`), and a space before the stop (`A A . Autrice`). **Widening the letter class
+is not the fix**: `_drop_isbd_stop` reads the same pattern, and widening the shape to a letter
+run was measured to stop `Bibliothèque nationale de France. Éditeur` losing its designation at
+all.
+
+**A flip reaches that family, so it is not only a hand typed cell.** A doubled stop is an
+abbreviation ending a subfield that also carries ISBD terminal punctuation: `_drop_isbd_stop`
+takes one, the abbreviation keeps its own, and `Autrice, Dr..` comes back as `Dr. Autrice`,
+which the next pass reduces to `Dr`. Over one constructed population of 3,140 cells the
+refusal closed 480 of 720 unstable cells and **every one of the 240 left carries a doubled
+stop.**
+
+**The property arm beside it was green over 20,000 examples against the live defect**, because
+its generator could not reach the class: the role words entered `_CATALOGUE_NAMES` through the
+appended noise arm alone. The generator now derives its roles from
+`bibliographic._PERSON_ROLES`, carries the class in both orders, and crosses it with the life
+dates and the ISBD stop, which is what the arms compete over. One arm asserts the derived
+tuple's shape, so a role removed from the module reddens by name.
+
+## An instrument's output is a sample until somebody derives the population
+
+Two instruments certified a population they had only sampled, and they are the same mistake at
+different sizes.
+
+**The mutation sweep could not enter the body of a decorated function**, `staticmethod` and
+`classmethod` excepted, so 232 of 1,425 function bodies under `backend/` outside the tests were
+out of range. 139 of them carry a route decorator and 73 of those are in `routers/books.py`;
+the next largest classes are `@property` at 32 and `@field_validator` at 28. It reported a
+clean result over them rather than a refusal. mutmut skips those bodies for three reasons its
+own source gives and **all three are properties of the trampoline it builds**: copying the
+function re-runs the decorator, the decorator's arguments run at definition time, and
+`@property` breaks the trampoline's signature assignment. This harness never builds a
+trampoline. It takes the mutation list only and renders each mutant over whole source, so the
+decorated function is never copied and never redefined.
+
+**The relaxation re-asks mutmut's own skip decision with the decorators stripped**, rather than
+re-implementing the rules that still apply, so a rule mutmut adds tomorrow still fires. A
+decorator node is still skipped whole, which is what keeps a decorator's arguments out of
+range.
+
+**It changed one thing nobody would have looked for.** A block pragma written on a *decorator*
+line produced no mutants, and that was the decorator rule rather than the pragma: mutmut's
+pragma visitor never reads a decorator's trailing comment. Relaxing the rule would have turned
+a spelling that appeared to suppress into one that plainly does not, so it is honoured
+explicitly, with mutmut's own parser. **And the block token alone is honoured**: the token
+parser answers four, and honouring all four made a bare pragma one line above a `def` silently
+remove the whole body where the same token on the `def` removes one line.
+
+**No recorded verdict was invalidated while the hole was open.** One sweep verdict is recorded
+anywhere in this tree and it ran over undecorated code, so the exposure is forward looking
+rather than historical and there is nothing to re-run. The case for the fix is prospective,
+which is the opposite of what an unbounded sentence about worthless past verdicts would have
+told the next reader.
+
+**The pin guard read the first pin in the file**, so it certified one of the pipeline's four
+toolchain pins and said nothing about the other three. Selection by file position, which is
+the dependency this repository already paid for in the ignore file parser's pin: a job added
+above the first one moves the subject with no diff to the guard at all. It was green on a live
+divergence, one pin a version behind the other three. What replaced it is membership over the
+declared set, recorded in "The runner checks its image against the pipeline for both
+toolchains, not one"; what belongs here is the shape it shares with the sweep.
+
+**Every pipeline pin the runner does not run now carries a declaration marker**, in the idiom
+the publish gate's own exemption already uses, and the divergent set is asserted **by job**, so
+an exemption cannot become a habit. By job and not by digest: a digest reds on every automated
+bump of a pin that is behaving. **The divergent pin itself is untouched and is the owner's
+call**; the marker declares the divergence rather than resolving it. **The guard's own test
+carried the identical defect**, comparing the first element on each side, and was green on the
+same live divergence: the plant matched the instrument. A third instance over the bun pins was
+latent, because those three agree, and is membership too.
+
+**A whole file sweep over a large router is the thing to refuse, and the diff scoped default is
+unharmed.** The relaxation is free at list time and expensive at render time, because a mutant
+is a whole source: `routers/auth.py` goes from 58 mutants to 405 and `routers/books.py` from
+1,044 to 3,092, and one arm is one suite run. Stock, every one of that auth module's ten
+handlers produced zero mutants, so the tool refused rather than swept. `--limit` bounds the
+cost and the report says what it dropped.
+
+**A remainder credited by span over credits it.** Replacing a wrapped call marks every line of
+the call as carrying a mutation, including the line that only opens it, so the credit strips
+the common prefix and suffix of the two renderings, which is exact because the generator holds
+both. **Two readings of the same space, over a denominator they agreed on, returned different
+counts of the lines that can never carry a mutation**, and the difference is a judgement about
+what mutmut can express rather than a count either reading got wrong. So the prose states the
+narrowing and refuses the extent; neither number is written down.
+
+**A citation says what was swept, not what answered.** The file list came off the arms, so a
+target that produced no mutant vanished, and the file that vanishes is the one the sweep found
+nothing in; it carries the plan's targets now. A ref resolving to several commits was cited as
+one, so it cites unresolved unless there is exactly one.
+
+**A guard requiring a citation stamp beside every docstring claiming a harness finding was
+refused, and the reason is the population.** Three careful derivations on one day returned 9, 5
+and 11 over one tree, because the key is a phrase and the three keyed on different phrases: a
+file mentioning a harness at all, a docstring claiming a finding read by hand, and the same
+claim derived. A gate whose population three readings disagree about refuses by accident and
+admits by accident, and the accidents are invisible from inside it. **And the guard's value and
+its population move in opposite directions**: keyed on the harness itself it reaches two files,
+and both are the ones that least need a stamp because they already name their instrument; keyed
+on a phrase it reaches the eleven that do need one and cannot be trusted about its own extent.
+What shipped instead is the citation line, which makes the next claim cheap to cite and closes
+nothing retrospectively.
+
+## A bound widened inside an extraction is recorded, and the arm pinning it has an expiry
+
+`frontend/tests/lib/xmlEntities.test.ts` holds the rule that a module parsing a whole
+document refuses an entity declaration before it parses. That rule was written over the
+`.ts` files directly under `src/lib/`. Moving its corpus into the one enumeration of the
+source tree changed the bound to every module under `src/lib/`, at any depth and in either
+language. **A rule change that ships inside a refactor with no record is how a widening
+becomes folklore**, so this is the record.
+
+**The two spellings name the same files today**, measured on both sides with the bundler's
+own globber under the bundler's own options: `src/lib/` is flat and holds no `.tsx`. So the
+widening costs nothing now, and it has no headroom by construction either, because any file
+that would make the two disagree is a file the old spelling was dropping in silence.
+
+**The wider bound is the right one.** The rule's subject is a property of a module, not of
+its depth or its language: what it looks for is a module that builds a `DOMParser` and does
+not call the refusal, and such a module written one directory down, or in the other
+language, would have sat outside the old pattern. The widening is also loud in the safe
+direction, because it can only add files to a rule that reports its offenders by name.
+
+**The consequence is an asymmetry with an expiry, and that is the part to keep.**
+`frontend/tests/sourceModules.test.ts` pins the new bound against the retired pattern, so
+the extraction can be shown not to have moved the population. That comparison is a one time
+measurement of one extraction. The day somebody legitimately adds a nested module under
+`src/lib/`, the arm reds, and the road back to green is editing a glob inside a test file
+rather than editing a declared list, which is the wrong shape for a decision: every other
+bound in that module is a stated list a person edits on purpose. **So when the first nested
+module arrives the arm is deleted, not widened.** Deleting it loses nothing the rule needs:
+the rule keeps the wider bound, and the thing the arm existed to witness has already
+happened.
+
+## A stale name in prose is checkable only where the sentence spells the module
+
+A reorganisation moves a member and nothing reddens, because prose is not compiled. The
+tempting rule is "a name in prose that looks like a member of this codebase and does not
+exist in it", and it does not hold at that width. Measured over the published tree, a rule
+over bare private names in backticks reports a long tail that nothing here defines and that
+is overwhelmingly correct prose: third party internals named in a sentence that names the
+library, local variables, parametrised fixture names, SQLite's own temporary tables, and
+names this repository deliberately records as gone. A rule over the two segment public form
+is worse, because almost everything it cannot resolve is a file name or a table column whose
+first word happens to be a module stem. **Neither is a gate; both are a census that would
+refuse by accident.** The populations behind that are recorded at the guard itself rather
+than here, where a run can be pointed at them.
+
+**So qualification is the property.** A backticked `module._private`, or
+`module.Class.member`, is unambiguously a member reference and is resolved against the
+module its first segment names. That is the same boundary the test pointer rule drew
+independently a wave earlier, and the escape is the same one: **a name a document keeps on
+purpose is written without backticks.** The two names in the paragraph below are written
+that way for exactly that reason.
+
+**And the class is wider than a stale name.** Two of the names repaired in this sweep never
+existed at all, each wrong on the day it was written, each inside its own commit.
+metadata._check_readable was named in a test docstring and is on neither side of the commit
+that introduced the sentence naming it. notifications._telegram_url was written in a
+comment by **the same commit that added the public spelling beside it**, wrong by one
+underscore against a definition in its own diff. So what a guard here enforces is not only
+"a name that went stale". It is **a name this module never had**, and that second kind is
+the one no amount of care at the moment of a rename would have caught, because there was no
+rename: the only thing that catches it is a check that resolves the name against the module.

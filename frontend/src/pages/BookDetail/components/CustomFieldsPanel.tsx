@@ -64,9 +64,16 @@ export default function CustomFieldsPanel({
   // and goes false between the calls a multi-field save makes.
   const [writing, setWriting] = useState(false);
 
-  // Nothing at all when the library has defined no fields, **unless** a request
-  // failed: with no definitions the whole panel is absent, so returning early
-  // on an error would make a failed fetch invisible rather than quiet.
+  // Nothing at all when the library has told this member of no fields,
+  // **unless** a request failed: with no definitions the whole panel is
+  // absent, so returning early on an error would make a failed fetch
+  // invisible rather than quiet.
+  //
+  // **This cannot hide a value the book holds, and that is a property of the
+  // server rather than of this line.** The definitions are scoped to the
+  // viewer and the first of the three arms is "a book this viewer can see
+  // holds a value in it", so every field on a book that resolved here is in
+  // the list by construction. `backend/fields.py` carries the arms.
   if (definitions.length === 0 && error == null) return null;
 
   const current = new Map(values.map((row) => [row.field_id, row.value]));

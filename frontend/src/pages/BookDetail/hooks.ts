@@ -23,6 +23,7 @@ import {
 
 import {
   getGetCustomFieldsQueryKey,
+  getListCustomFieldsQueryKey,
   getGetNotesQueryKey,
   getGetQuotesQueryKey,
   getListQuotesQueryKey,
@@ -452,6 +453,14 @@ export function useBookCustomFields(bookId: number): UseBookCustomFieldsResult {
       onSuccess: () => {
         void queryClient.invalidateQueries({
           queryKey: getGetCustomFieldsQueryKey(bookId),
+        });
+        // And the definitions, because a write can change which of them this
+        // member is told about. Clearing the last value they can see on a
+        // field whose other carriers are books they cannot see takes the row
+        // off their list; filling one in on a book nobody had used it on
+        // leaves it. `backend/fields.py` holds the arms.
+        void queryClient.invalidateQueries({
+          queryKey: getListCustomFieldsQueryKey(),
         });
       },
     },
