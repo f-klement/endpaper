@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, Field
@@ -6,6 +5,7 @@ from pydantic import AfterValidator, BaseModel, Field
 import mailer
 from enums import AuthMode, ThemeMode, VerificationProvenance
 from models import USERNAME_MAX
+from schemas.common import UtcDateTime
 
 # bcrypt only hashes the first 72 bytes; anything beyond it is not merely
 # useless but actively misleading, since two passwords sharing a 72-byte prefix
@@ -133,7 +133,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     is_admin: bool
-    created_at: datetime
+    created_at: UtcDateTime
     model_config = {"from_attributes": True}
 
 
@@ -333,7 +333,7 @@ class ResetCodeOut(BaseModel):
     """
 
     code: str
-    expires_at: datetime
+    expires_at: UtcDateTime
 
 
 class ResetRequestOut(BaseModel):
@@ -348,11 +348,11 @@ class ResetRequestOut(BaseModel):
 
     user_id: int
     username: str
-    requested_at: datetime
-    expires_at: datetime
-    approved_at: datetime | None = None
+    requested_at: UtcDateTime
+    expires_at: UtcDateTime
+    approved_at: UtcDateTime | None = None
     approved_by: str | None = None
-    code_expires_at: datetime | None = None
+    code_expires_at: UtcDateTime | None = None
 
 
 class MemberVerificationOut(BaseModel):
@@ -366,7 +366,7 @@ class MemberVerificationOut(BaseModel):
 
     id: int
     username: str
-    verified_at: datetime | None = None
+    verified_at: UtcDateTime | None = None
     verification_source: VerificationProvenance | None = None
     verified_by: str | None = None
     has_address: bool
@@ -384,9 +384,9 @@ class MySecurityOut(BaseModel):
     the member list, and who reset whose password is nobody else's business.
     """
 
-    password_reset_at: datetime | None = None
+    password_reset_at: UtcDateTime | None = None
     password_reset_approved_by: str | None = None
-    verified_at: datetime | None = None
+    verified_at: UtcDateTime | None = None
     verification_source: VerificationProvenance | None = None
     verified_by: str | None = None
 

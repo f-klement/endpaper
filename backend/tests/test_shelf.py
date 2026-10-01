@@ -88,22 +88,24 @@ caught would prove nothing about the new one. What is *still* not caught:
 * **A child table that carries a user.** `notes`, `quotes`, `user_books`,
   `reading_progress` and `loans` are outside the fourth pass on purpose: each
   has a viewer of its own. Re-measured 2026-10-01 by running this pass over the
-  tree with that entity set: **42 statements across 10 modules**, or 37 across 9
+  tree with that entity set: **41 statements across 10 modules**, or 36 across 9
   outside `shelf.py`, against **27 across 7** for the book-owned tables, or 22
   across 6 outside it, out of the **98** modules `_source_modules()` returns.
-  **All four pairs were re-derived on this tree together, and the book-owned
-  pair moved while the user-carrying one did not.** `fields.py` arrived with
-  three reads of `custom_field_values` and none of a table carrying a member,
-  so the halves move independently and only a joint re-derivation can say so.
-  The module count moved with it, from 95: that figure was right the day it was
-  written, the tree reached 96 before this work began, `shelving.py` made it 97
-  and `fields.py` 98. Both halves of that
-  comparison are this pass's own output, on the same day; an earlier statement
-  of it compared two different methods and neither number reproduced. All four
-  were re-derived together rather than the two the tag disclosure work moved,
-  because a comparison whose halves carry different dates is the drift this
-  paragraph is already about: on 2026-09-17 they read 45 across 9, 40 across 8,
-  25 across 5 and 20 across 4, over 89 modules.
+  **All four pairs are re-derived together, every time.** On this reading the
+  user-carrying pair moved and the book-owned one did not: `routers/loans.py`
+  fell from 2 to 1 when `_loan_with_relations` stopped building its own
+  `db.query(Loan)` and asked `Loans.seen_by` instead. The reading before it
+  moved the other way, when `fields.py` arrived with three reads of
+  `custom_field_values` and none of a table carrying a member. **The halves
+  move independently, and only a joint re-derivation can say so.**
+  The module count has not moved and reads 98: it was 95 the day that figure
+  was written, the tree reached 96 before that work began, `shelving.py` made
+  it 97 and `fields.py` 98. Every number here is this pass's own output on one
+  day; an earlier statement of it compared two different methods and neither
+  number reproduced. All four are re-derived together rather than the ones a
+  branch happens to move, because a comparison whose halves carry different
+  dates is the drift this paragraph is already about: on 2026-09-17 they read
+  45 across 9, 40 across 8, 25 across 5 and 20 across 4, over 89 modules.
 
   **The figure this replaces did not reproduce either**: the same method
   answers 49 across 8 at `0a8bb0b`, where the line above said 45 across 8. The
@@ -119,8 +121,11 @@ caught would prove nothing about the new one. What is *still* not caught:
   live on a user-carrying table and nothing here would catch it written wrong.
 
   **`lending.py` reads past a viewer**, which makes it the fourth module in the
-  tree to: `shelf.py`'s two named functions, `backup.py`, `notifications.py`'s
-  digest, and now this. One method does it, `Loans.open_on`, which takes Book
+  tree to: `shelf.py`'s named functions, `backup.py`, `notifications.py`'s
+  digest, and now this. **The count of those functions is not repeated here**,
+  and this line said two against a `shelf.py` that names three: the list is
+  what this sentence is for, the number has one home, and a copy of it reds on
+  nothing. One method does it, `Loans.open_on`, which takes Book
   ids and no viewer because every caller resolved its Books through the Shelf
   or through `dependencies.py` first. `Loans.for_a_channel` is **not** the
   second: it goes through `Shelf.seen_by_the_public`, which is a stricter
@@ -133,6 +138,19 @@ caught would prove nothing about the new one. What is *still* not caught:
   justification is that it cannot be reached without naming it, and that it
   takes ids rather than criteria, so it cannot quietly become a way to read the
   table. That is the same pair `shelf.rereading_filtered_rows` rests on.
+
+  **A fifth module held a viewerless Loan read and no list in this file carried
+  it.** `routers/loans._loan_with_relations` was `db.query(Loan)` keyed on an
+  id. It was safe, measured: both callers resolved through a viewer first, one
+  through the Shelf and one through `Loans.seen_by`. It was also invisible to
+  every pass here by construction, because `loans` carries a user so the fourth
+  pass does not walk it and the three above ask only about `Book`, which is
+  what let it sit outside the inventory this bullet is. It asks
+  `Loans.seen_by(...).rendered().with_id(...)` now. **The entry it would have
+  taken was this paragraph, and a paragraph reds on nothing**, which is why the
+  helper was changed rather than written down:
+  `tests/routers/test_loans.py::TestTheSingleLoanHelperIsScoped` fails when the
+  scope comes off.
 * **A Python-side aggregate off a Shelf.** `Shelf.select()` is anchored at the
   filtered `books`, so counting its rows in Python is safe; counting the rows
   of an *allowlisted* book-owned read is not, which is why every entry in
@@ -5202,7 +5220,7 @@ class TestOnlyTheShelfSaysWhatMayLeave:
             "That type means the rows came off a shelf with no viewer, and "
             "building one by hand is asserting that rather than proving it. "
             "Ask `Shelf.seen_by_the_public(db).outbound_page(...)` instead, or "
-            "bring the reason here the way the two named ways past a viewer do."
+            "bring the reason here the way the named ways past a viewer do."
         )
 
     @pytest.mark.parametrize(

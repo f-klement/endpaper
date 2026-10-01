@@ -443,9 +443,11 @@ class TestRenamingAField:
         assert "Calibre-web" not in res.text
 
     def test_it_is_logged_with_both_names(self, client, admin, text_field, caplog):
-        """A `CustomField` records no author and no timestamp and any member
-        may rename one, so without this line the one verb that relabels
-        content other members typed leaves no trace at all."""
+        """The log line says who did it, where the column says who may.
+
+        The two are not the same person: an admin may rename any field they
+        can address, so the only record of an admin relabelling somebody
+        else's name is this line."""
         with caplog.at_level(logging.INFO, logger="endpaper.books"):
             client.patch(
                 f"/api/books/custom-fields/{text_field['id']}",
@@ -459,14 +461,135 @@ class TestRenamingAField:
         assert "'Bought from'" in renames[0]
         assert "'Provenance'" in renames[0]
 
-    def test_any_member_may_rename(self, client, admin, member, text_field):
+    def test_the_member_who_defined_it_may_rename_it(self, client, admin, member):
+        """Any member may define a field, so any member may rename the ones
+        they defined. The admin fixture is requested so the member is not the
+        first account, which would make them an admin."""
+        assert admin["user"]["is_admin"] is True
+        field = client.post(
+            "/api/books/custom-fields",
+            json={"name": "Shelf photo", "kind": "text"},
+            headers=member["headers"],
+        ).json()
+
+        res = client.patch(
+            f"/api/books/custom-fields/{field['id']}",
+            json={"name": "Where it lives"},
+            headers=member["headers"],
+        )
+
+        assert res.status_code == 200, res.text
+
+    def test_a_member_who_did_not_define_it_may_not(self, client, admin, member, text_field):
+        """**403 and not 404**, and the two refusals answer different
+        questions. The 404 withholds that a row exists; `text_field` is on this
+        member's own settings page, so by the time this fires its existence is
+        already disclosed and saying whose it is adds nothing.
+
+        One member relabelling the whole library's vocabulary was the thing
+        this closes: the rename took any member where the delete takes an
+        admin, over books the renamer cannot necessarily see.
+        """
         res = client.patch(
             f"/api/books/custom-fields/{text_field['id']}",
             json={"name": "Provenance"},
             headers=member["headers"],
         )
 
-        assert res.status_code == 200
+        assert res.status_code == 403
+        assert client.get(
+            "/api/books/custom-fields", headers=member["headers"]
+        ).json() == [{"id": text_field["id"], "name": "Bought from", "kind": "text"}]
+
+    def test_an_admin_may_rename_a_field_somebody_else_defined(
+        self, client, admin, member
+    ):
+        """The same asymmetry the delete carries and a weaker version of it: a
+        library wide vocabulary with a ceiling of 25 needs somebody who can
+        repair a name whose author is unreachable, and this moves a label
+        where the delete destroys content."""
+        field = client.post(
+            "/api/books/custom-fields",
+            json={"name": "Shelf photo", "kind": "text"},
+            headers=member["headers"],
+        ).json()
+
+        res = client.patch(
+            f"/api/books/custom-fields/{field['id']}",
+            json={"name": "Where it lives"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200, res.text
+
+    def test_a_field_with_no_author_is_renamable_by_anybody(
+        self, client, admin, member, db
+    ):
+        """Every field defined before the author column has a null, and so does
+        every field in an archive taken before it. A refusal on a null would
+        take the rename away from an entire existing vocabulary on the morning
+        of the upgrade, which is why null means "no author to ask" rather than
+        "ask an admin".
+
+        The null is written here rather than reached through a door, because
+        there is no door left in the application that makes one.
+        """
+        from models import CustomField
+
+        field = client.post(
+            "/api/books/custom-fields",
+            json={"name": "Shelf photo", "kind": "text"},
+            headers=admin["headers"],
+        ).json()
+        row = db.get(CustomField, field["id"])
+        row.created_by_user_id = None
+        db.commit()
+
+        res = client.patch(
+            f"/api/books/custom-fields/{field['id']}",
+            json={"name": "Where it lives"},
+            headers=member["headers"],
+        )
+
+        assert res.status_code == 200, res.text
+
+    def test_a_field_the_member_may_not_be_told_about_is_still_a_404(
+        self, client, admin, member, make_book
+    ):
+        """The 403 never reaches a field whose existence is withheld, which is
+        what keeps the new refusal from becoming an existence oracle. The
+        resolver answers first and it answers 404.
+
+        Defined by the admin and carried only on the admin's private book, so
+        the member fails every arm including the new one.
+        """
+        field = client.post(
+            "/api/books/custom-fields",
+            json={"name": "Shelf photo", "kind": "text"},
+            headers=admin["headers"],
+        ).json()
+        book = make_book(admin["headers"], title="A diary")
+        assert (
+            client.patch(
+                f"/api/books/{book['id']}/privacy",
+                json={"is_private": True},
+                headers=admin["headers"],
+            ).status_code
+            == 200
+        )
+        assert (
+            _set(client, admin["headers"], book["id"], field["id"], "x").status_code
+            == 200
+        )
+
+        res = client.patch(
+            f"/api/books/custom-fields/{field['id']}",
+            json={"name": "Provenance"},
+            headers=member["headers"],
+        )
+
+        assert res.status_code == 404
+        assert "Shelf photo" not in res.text
 
 
 class TestDeletingAField:
@@ -851,3 +974,74 @@ class TestNamingAHiddenFieldByItsId:
         )
 
         assert res.status_code == 200
+
+
+class TestTheDefinerIsNotLockedOutOfTheirOwnField:
+    """The lockout the author column was added for, at the route.
+
+    A member defines a field, somebody else fills it in on a private book, and
+    the three Shelf arms then answer no for the definer: not on a book they can
+    see, not in their trash, and carried. Before arm 4 the field left their own
+    settings page and could not be named by id, and retyping the name is a loop
+    rather than a recovery because `define` hands back the existing row and
+    writes nothing.
+
+    `tests/test_fields.py` holds the arm itself. What this adds is that the
+    route serves it, which is the half a member meets.
+    """
+
+    @pytest.fixture
+    def defined_by_the_member(self, client, admin, member, make_book):
+        """A field the member defined, carried only on the admin's private
+        book."""
+        field = client.post(
+            "/api/books/custom-fields",
+            json={"name": "Shelf photo", "kind": "text"},
+            headers=member["headers"],
+        ).json()
+        book = make_book(admin["headers"], title="A diary")
+        assert (
+            client.patch(
+                f"/api/books/{book['id']}/privacy",
+                json={"is_private": True},
+                headers=admin["headers"],
+            ).status_code
+            == 200
+        )
+        assert (
+            _set(client, admin["headers"], book["id"], field["id"], "On the landing").status_code
+            == 200
+        )
+        return field
+
+    def test_it_is_still_on_their_settings_page(
+        self, client, member, defined_by_the_member
+    ):
+        listed = client.get("/api/books/custom-fields", headers=member["headers"]).json()
+
+        assert [field["id"] for field in listed] == [defined_by_the_member["id"]]
+
+    def test_they_may_still_fill_it_in_on_a_book_of_their_own(
+        self, client, member, make_book, defined_by_the_member
+    ):
+        """`addressable` and not just `listable`: the write door is the one
+        that makes the field usable again, and a field a member can see and
+        not write is still a lockout."""
+        mine = make_book(member["headers"], title="Mine")
+
+        res = _set(
+            client, member["headers"], mine["id"], defined_by_the_member["id"], "Oxfam"
+        )
+
+        assert res.status_code == 200, res.text
+
+    def test_a_third_member_is_still_told_nothing(
+        self, client, other_user, defined_by_the_member
+    ):
+        """The arm admits one member, so the disclosure the scoped list exists
+        to close is unchanged for everybody else."""
+        listed = client.get(
+            "/api/books/custom-fields", headers=other_user["headers"]
+        ).json()
+
+        assert listed == []

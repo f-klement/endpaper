@@ -1179,11 +1179,18 @@
   answered, and the refusal when a name is taken no longer says which name it clashed with.
   Deleting a field is unchanged and stays an admin's. What a scoped list newly tells a member,
   and the two doors no wording closes, are written down in `docs/security.md`.
-- **Renaming a custom field is recorded.** Any member may rename any field, library wide, and
-  the row carries no author and no timestamp, so the one verb that relabels content other
-  members typed, on books the renamer cannot see, was also the only one leaving no trace,
+- **Renaming a custom field is recorded.** Renaming relabels content other members typed, on
+  books the renamer cannot see, and it was the only one of the three verbs leaving no trace,
   where deleting a field logs and is an admin's. The rename now logs the account and both
-  names. Who may rename is unchanged.
+  names, whoever renames: the entry below narrows who may, and the log line says who did.
+- **The rules that walk the frontend test tree now read one corpus too, and its allowlist is
+  itself held.** The source half of this landed first and left the test half with a pattern
+  per rule, which is the same disarming cost one tree over. Both halves now name which files
+  may hold such a pattern, and each permitted file's patterns are pinned whole, exclusions
+  included: an exclusion reaches no tree, so a rule that only asks where a pattern lands
+  never sees a narrowing arrive. A narrowing applied after the sweep rather than inside it
+  is still possible where no document cites a file in the directory hidden, which is written
+  down at the rule rather than left to be found. Internal: no behaviour changes.
 - **Every rule that walks the frontend source reads one corpus, and narrowing it is refused
   rather than obeyed.** Each tree wide rule carried its own file pattern, so disarming one
   cost a single line in the file of whoever wanted that rule green, and the rule went on
@@ -1203,6 +1210,42 @@
   here defines, and reading them finds most are correct prose, third party internals, local
   variables and names deliberately recorded as gone, so an unqualified rule would refuse by
   accident. The escape for a name a document keeps on purpose is to drop the backticks.
+- **Every date and time this library shows is now the time where you are.** The server keeps
+  its clock in UTC and used to hand a browser a timestamp with no zone on it, so a book added
+  at noon UTC read as noon wherever the reader was sitting: an hour or two out across most of
+  Europe, and most of a working day out across the Pacific. Near midnight it showed the wrong
+  day. Timestamps now say which zone they are in, and the browser renders them in yours.
+- **A loan is due at the end of the day you picked, where you are.** A deadline was sent as a
+  bare clock time and read as UTC, so a book due on the fifth was due just after midnight on
+  the sixth in Berlin and in the late afternoon of the fifth in California, which is where it
+  went overdue while the day it was due still had hours left in it. The deadline now carries
+  the zone, so it is the end of your own day and the date shown back is the date you chose.
+  **Deadlines set before this are left as they were**: nothing recorded which zone each was
+  set in, so there is nothing to convert them from, and one near midnight may read as the
+  neighbouring day.
+- **A custom field now records the member who defined it.** Two things follow from the one
+  column. The definer is told their field exists even when the only book carrying a value in
+  it is one they cannot see, where before a member could be shut out of a field they had
+  named themselves. And renaming is now theirs: any member could relabel the whole library's
+  vocabulary, on books they cannot see and with no undo, where deleting a field has always
+  been an admin's. An admin may still rename any field they can see, so a name whose author
+  is unreachable can be repaired. **A field that existed before this release records no
+  author and stays renamable by anybody**, which is every field in your library today: there
+  is nobody to prefer, and refusing the rename would have taken the verb away from a whole
+  existing vocabulary on the morning of the upgrade.
+- **A Postgres connection can now verify the server, and a connection that quietly gave up on
+  TLS says so.** The driver was asked for no TLS context at all, which meant it offered an
+  upgrade, verified neither the certificate nor the hostname when one was accepted, and
+  carried on in the clear with nothing raised when the server declined. Nothing in
+  `DATABASE_URL` could turn any of it on: an `sslmode` written into the query string reaches
+  the driver, which has no such parameter and fails on the first connection, so a deployment
+  spelling it there finds out rather than believing it took. `DATABASE_SSL_MODE` now takes
+  libpq's own names, `disable`, `prefer`, `require`, `verify-ca` and `verify-full`, and
+  `DATABASE_SSL_ROOT_CERT` points at the CA the verifying two check against. The default is
+  `prefer`, which is exactly what this connection already did, so no deployment's behaviour
+  moves; what changes is that a declined upgrade is a warning in the log naming the modes
+  that would refuse it. SQLite deployments are untouched, and either variable set beside a
+  URL that is not Postgres is a startup failure rather than a line nothing reads.
 
 ## v0.17.2
 

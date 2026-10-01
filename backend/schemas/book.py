@@ -1,6 +1,6 @@
 import collections.abc as abc
 from collections.abc import Iterable, Mapping
-from datetime import date, datetime
+from datetime import date
 from types import UnionType
 from typing import TYPE_CHECKING, Annotated, Final, Union, get_args, get_origin
 
@@ -46,6 +46,7 @@ from schemas.classification import (
 from schemas.common import (
     MAX_PAGE_SIZE,
     RowIdField,
+    UtcDateTime,
     one_line_without_invisible_characters,
 )
 from schemas.identifier import (
@@ -764,10 +765,10 @@ class BookColumns(BaseModel):
     year: int | None
     description: str | None
     cover_url: str | None
-    added_at: datetime
+    added_at: UtcDateTime
     #: When this book was trashed, or null while it is on the shelf. Always
     #: null outside the trash listing, since `visible_to()` excludes the rest.
-    deleted_at: datetime | None = None
+    deleted_at: UtcDateTime | None = None
     is_private: bool = False
     ownership: OwnershipStatus = OwnershipStatus.OWNED
     added_by: UserOut | None = None
@@ -917,8 +918,8 @@ class ViewerFields(BaseModel):
     #: The caller's own reading record. A member never sees another member's.
     my_status: ReadStatus
     my_rating: int | None
-    my_started_at: datetime | None
-    my_finished_at: datetime | None
+    my_started_at: UtcDateTime | None
+    my_finished_at: UtcDateTime | None
     #: Whether the caller has offered to talk about this book.
     my_wants_to_discuss: bool
 
@@ -928,7 +929,7 @@ class ViewerFields(BaseModel):
     #: known, else whatever percent was recorded, else null. Rounded to a whole
     #: number, which is the precision a progress bar can show.
     my_progress_percent: int | None
-    my_progress_recorded_at: datetime | None
+    my_progress_recorded_at: UtcDateTime | None
 
 
 class BookOut(ViewerFields, BookColumns):

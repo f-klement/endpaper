@@ -12,11 +12,10 @@ inserts through Core and sees no model in this file at all.
 row can be re-checked only by a client and never by this server.
 """
 
-from datetime import datetime
-
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from models import DIGITAL_REFERENCE_MAX_SIZE, DIGITAL_REFERENCE_PATH_MAX
+from schemas.common import UtcDateTime, UtcDateTimeIn
 
 #: The most file references one book may carry.
 #:
@@ -103,7 +102,7 @@ class DigitalReferenceIn(BaseModel):
     size_bytes: int | None = Field(default=None, ge=0, le=DIGITAL_REFERENCE_MAX_SIZE)
 
     #: `File.lastModified`, if the client read it.
-    file_modified_at: datetime | None = None
+    file_modified_at: UtcDateTimeIn | None = None
 
     @field_validator("root_label", "relative_path")
     @classmethod
@@ -164,18 +163,18 @@ class DigitalReferenceOut(BaseModel):
     relative_path: str
     root_confirmed: bool
     size_bytes: int | None
-    file_modified_at: datetime | None
+    file_modified_at: UtcDateTime | None
 
     # This server's own clock.
-    created_at: datetime
+    created_at: UtcDateTime
 
     #: When this server last received a report that the file was there.
     #: **Not when anybody looked**: see `models.DigitalReference.confirmed_at`.
-    confirmed_at: datetime
+    confirmed_at: UtcDateTime
 
     #: When this server first received a report that it did not resolve, or null
     #: while nothing has said so.
-    missing_since: datetime | None
+    missing_since: UtcDateTime | None
 
 
 class MissingDigitalReferenceOut(DigitalReferenceOut):
@@ -189,7 +188,7 @@ class MissingDigitalReferenceOut(DigitalReferenceOut):
 
     **`missing_since` is narrowed to non-null**, which is the only field this
     type narrows rather than adds. Every row is here *because* the column is
-    set, so the base's `datetime | None` would make every client branch on a
+    set, so the base's `UtcDateTime | None` would make every client branch on a
     null the route's WHERE clause has already excluded. The guarantee lives in
     that clause; if it ever loosens, this narrowing turns a row into a 500
     rather than into a client rendering "missing since never", and loud is the
@@ -198,7 +197,7 @@ class MissingDigitalReferenceOut(DigitalReferenceOut):
 
     #: When this server was first told the file did not resolve. Never null
     #: here, which is what this listing selects on.
-    missing_since: datetime
+    missing_since: UtcDateTime
 
     book_title: str
     book_author: str | None = None

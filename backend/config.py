@@ -56,6 +56,40 @@ def database_url() -> str:
     return os.getenv("DATABASE_URL", f"sqlite:///{DATA_DIR / 'library.db'}")
 
 
+def database_ssl_mode() -> str:
+    """How hard this deployment insists on TLS to a Postgres server, or empty.
+
+    **Empty means the environment said nothing**, which is `env_override`'s
+    convention and is here for the same reason: what the names mean, and which
+    one applies when nobody chose, is one fact and it lives beside the table in
+    `database.py`. A default spelled here as well would be that fact in two
+    files, free to drift.
+
+    Nothing reads this on a SQLite URL, which opens no socket at all.
+    `database.py` **refuses** a value set beside one rather than ignoring it: a
+    TLS setting that the connection cannot honour is the shape of a deployment
+    that believes it is encrypted.
+    """
+    return os.getenv("DATABASE_SSL_MODE", "").strip().lower()
+
+
+def database_ssl_root_cert() -> str:
+    """Path to the CA bundle `verify-ca` and `verify-full` check against.
+
+    Empty means the image's own trust store, which is Alpine's
+    `ca-certificates`: right for a managed server holding a publicly issued
+    certificate, and useless for the self hosted case, where the CA is the
+    operator's own and has to be mounted into the container before anything in
+    it can read the file.
+
+    **Supplying it replaces the default store rather than adding to it**, which
+    is what libpq's `sslrootcert` does too. A private CA here means a public one
+    no longer verifies, and that is the correct trade for a server whose
+    certificate you issued yourself.
+    """
+    return os.getenv("DATABASE_SSL_ROOT_CERT", "").strip()
+
+
 def secret_key() -> str:
     """HMAC key for signing JWTs."""
     return os.getenv("SECRET_KEY", "dev-secret-change-in-production")

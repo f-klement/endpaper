@@ -312,7 +312,9 @@ def definitions(db: Session) -> list[CustomField]:
     return db.query(CustomField).order_by(CustomField.id).all()
 
 
-def define(db: Session, name: str, kind: CustomFieldKind) -> CustomField:
+def define(
+    db: Session, name: str, kind: CustomFieldKind, defined_by_user_id: int
+) -> CustomField:
     """Define a field, or hand back the one that already has the name.
 
     **A collision returns the existing row rather than a 409**, which is what
@@ -340,6 +342,13 @@ def define(db: Session, name: str, kind: CustomFieldKind) -> CustomField:
     conflict, which changes behaviour under a load nobody has reported.
     `create_tag` has carried the identical second exposure since it was
     written.
+
+    **A collision does not re-author the row it hands back**, and that is the
+    half of `defined_by_user_id` worth stating. Authorship is who defined the
+    name, not who last asked for it, so a second Member typing an existing
+    name takes no stake in it; if it did, the rename rule built on the column
+    would be transferable by typing, which is the loop this feature already
+    has one of.
     """
     rows = definitions(db)
     folded = name.lower()
@@ -351,7 +360,7 @@ def define(db: Session, name: str, kind: CustomFieldKind) -> CustomField:
             f"This library already has {MAX_CUSTOM_FIELDS} custom fields, "
             "which is the most it can have. Delete one to add another."
         )
-    field = CustomField(name=name, kind=kind)
+    field = CustomField(name=name, kind=kind, created_by_user_id=defined_by_user_id)
     db.add(field)
     return field
 

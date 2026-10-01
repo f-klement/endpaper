@@ -55,18 +55,17 @@ dependencies = [
     # be: it needs libpq and a compiler. The published tables say the full scheme
     # for that reason.
     #
-    # **The connection is not certificate checked, and drops to cleartext
-    # silently if the server declines TLS.** It is authenticated, by the
-    # password in the URL; what nothing authenticates is the server.
-    # With no `ssl_context`, `pg8000.core._make_socket` builds a default context
-    # and then sets `check_hostname = False` and `verify_mode = CERT_NONE`; if
-    # the server does not answer the SSLRequest with `S`, the `elif
-    # orig_ssl_context is not None` arm is false and the session **continues in
-    # cleartext** with nothing raised. `database.py` passes `connect_args={}` for
-    # every non SQLite URL and SQLAlchemy's pg8000 dialect copies `url.query` in
-    # as strings, so no `DATABASE_URL` can supply an `SSLContext`. Verified
-    # against pg8000 1.31.5's own source, 2026-09-17. Honouring an `sslmode` is a
-    # change to `database.py` and is in the tracker.
+    # **How much of the connection is verified is `DATABASE_SSL_MODE`, and
+    # `database.py` is its one home.** `ssl_context` in `connect_args` is the
+    # only channel a context reaches this driver through, which is why that
+    # decision sits where the engine is built rather than in a URL: SQLAlchemy's
+    # pg8000 dialect copies `url.query` straight into the driver's keyword
+    # arguments, so an `?sslmode=` there reaches `pg8000.dbapi.connect`, which has
+    # no such parameter and raises `TypeError` on the first connection. Driven
+    # 2026-10-01, and it is worth stating accurately rather than as "ignored":
+    # a deployment that spells it there finds out immediately. The reading of
+    # `pg8000.core._make_socket` that each mode name rests on is in that module,
+    # beside the table it justifies.
     #
     # Its paramstyle is `format`, the same `%` hazard psycopg2 has, so
     # `database.MonthBucket`'s note about choosing a `to_char` pattern with no `%`

@@ -2565,6 +2565,12 @@ export const getDefineCustomFieldUrl = () => {
  * A name that already exists, in any capitalisation, returns that field
  * rather than a 409: somebody typing a name that is already there wants that
  * field. Past `MAX_CUSTOM_FIELDS` it refuses with 409.
+ *
+ * **The caller is recorded as the definer**, and that is what makes two
+ * other things work: the field stays on their own settings page whatever
+ * carries it, and they may rename it. `fields.Fields` holds both. The
+ * collision above takes no authorship: a second member typing an existing
+ * name gets the row and not a stake in it.
  * @summary Define Custom Field
  */
 export const defineCustomField = async (
@@ -2687,8 +2693,9 @@ export const getDeleteCustomFieldUrl = (fieldId: number) => {
  * same split `delete_tag` makes. Defining a field is additive and reversible
  * by deleting it. Deleting one destroys, in one request and with no undo,
  * something every member of the house typed by hand, on books the caller
- * cannot necessarily see. A `CustomField` records nobody as its author, so
- * there is no owner to ask.
+ * cannot necessarily see. The row records who **defined** it, which is who
+ * may rename it, and that is not an owner of the content under it: the
+ * values were typed by everybody, so there is still nobody to ask.
  *
  * It is the sharper case of the two: deleting a tag takes a label off a book,
  * and deleting a field takes the **content** a member wrote.
@@ -2800,10 +2807,30 @@ export const getRenameCustomFieldUrl = (fieldId: number) => {
  * **404 for a field you may not be told about**, which is the answer an
  * absent id already gives: see `fields.Fields.addressable`.
  *
- * **Logged, like the delete beside it.** A `CustomField` records no author
- * and no timestamp, and any member may rename any field they can see, library
- * wide, so without this line the one verb that relabels content other members
- * typed is the only one leaving no trace at all.
+ * **403 for a field somebody else defined**, and the two refusals are
+ * different on purpose. The 404 withholds that a row exists; by the time
+ * this one can fire, `addressable` has already said it does, so saying
+ * whose it is adds nothing the caller did not have. `fields.Fields.renamable`
+ * holds the rule, including why a field with no author is renamable by
+ * anybody: that is every field defined before the column existed, and a
+ * refusal there would have taken the verb away from an entire existing
+ * vocabulary on the morning of the upgrade.
+ *
+ * **An admin may rename any field they can address**, for the reason the
+ * delete below is admin only: a Library wide vocabulary with a ceiling of 25
+ * needs somebody who can repair a name whose author is unreachable.
+ *
+ * **It is not the same exemption, and calling it that overstates it.** The
+ * delete is deliberately ungated, so it reaches a field whose every value
+ * sits on Books the admin cannot see; this is gated on `addressable` like
+ * every other id door here. So for a field hidden from every admin, the only
+ * verb left is the delete, which destroys every value under the row. The
+ * valve for a Member who has defined the whole vocabulary is therefore
+ * repair where the field is visible and destruction where it is not.
+ *
+ * **Logged, like the delete beside it.** The log line predates the author
+ * column and is not replaced by it: the column says who may rename, and the
+ * line says who did, which for an admin rename is a different person.
  * @summary Rename Custom Field
  */
 export const renameCustomField = async (

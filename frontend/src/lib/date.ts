@@ -177,6 +177,74 @@ export function clockTime(
 }
 
 /**
+ * The instant a day somebody picked ends, where that person is.
+ *
+ * **The one function here that reads a date rather than writing one**, and the
+ * only place this app turns a chosen day into a timestamp. A `<input
+ * type="date">` gives a bare `YYYY-MM-DD` and the API wants an instant. End of
+ * day rather than midnight, or a book due "today" is overdue from the moment it
+ * is lent.
+ *
+ * **The offset is what makes the day the member's own, and it rests on the same
+ * rule that used to make a rendered timestamp wrong.** `new Date` reads a
+ * date-time form carrying no offset as **local** time. Above, that rule is the
+ * hazard: a server instant written without an offset rendered as the UTC clock
+ * face wearing a local label. Here it is the mechanism: it builds the instant at
+ * which 23:59:59 happens where the viewer is, and `toISOString` writes that
+ * instant as UTC. Sent without an offset instead, the server reads the member's
+ * wall clock as a UTC clock and the deadline lands late by the viewer's offset,
+ * which is what `backend/lending.py` then compares against.
+ *
+ * **The zone is the browser's, because this app has no other.** No timezone is
+ * stored against an account, here or on the server, so the platform's answer at
+ * the moment of the lend is the only statement of where the member is. The day
+ * **counts** stay the server's for the opposite reason, which
+ * `pages/components/LoanRow.tsx` records: two definitions of a whole day in two
+ * zones is how a row and a reminder come to disagree about one loan. This
+ * decides an instant, not a count.
+ *
+ * **Deadlines written before this are left alone, deliberately.** They were sent
+ * as a wall clock and stored as though it were UTC, so for a library away from
+ * UTC an old deadline is off by the offset and one near midnight reads as the
+ * neighbouring day. Reinterpreting them would mean guessing which zone each was
+ * written in, which nothing records. Accepted as a one off rather than migrated.
+ *
+ * **An evening when the clocks change is bounded rather than left open.**
+ * Enumerated over all 418 IANA zones for every day of 2026 and 2027: 23:59:59
+ * is **absent** on 4 zone and day pairs, in `America/Godthab` and
+ * `America/Scoresbysund`, and **happens twice** on 10, in those two plus
+ * `Africa/Cairo`, `America/Santiago` and `Asia/Beirut`. Five zones, fourteen
+ * evenings in two years, and the engine resolves every one: the absent case
+ * lands on 00:59:59 the next morning, each ambiguous one takes the earlier
+ * instant and reads back as 23:59:59 on the right day. **So the worst case is
+ * one hour**, on one or two evenings a year, in five zones, which is not worth
+ * the zone arithmetic closing it would need.
+ *
+ * **Absent in, null out, and an unusable date too.** `toISOString` raises
+ * `RangeError` on an invalid date, and past year 9999 it emits the expanded form
+ * `+010000-01-01T00:00:00.000Z`, which the server answers 422 for.
+ * `lib/digitalReference.ts` carries both guards for both reasons over a
+ * `File.lastModified`; this is the same pair over a picked day, and the year is
+ * read in **UTC** at both sites because the expanded form is a property of the
+ * spelling `toISOString` produces rather than of the local date. Thrown from a
+ * click handler, either one replaces the whole app shell: `app/providers.tsx`
+ * holds the only error boundary.
+ *
+ * **One residual is left open and named.** `2026-02-30` is an impossible day
+ * that `Date` rolls into March, so it returns an instant rather than null. A
+ * date input cannot produce one, and the string this replaced rolled it
+ * identically.
+ */
+export function endOfDayInstant(day: string | null | undefined): string | null {
+  if (!day) return null;
+  const when = new Date(`${day}T23:59:59`);
+  if (Number.isNaN(when.getTime())) return null;
+  const year = when.getUTCFullYear();
+  if (year < 1 || year > 9999) return null;
+  return when.toISOString();
+}
+
+/**
  * A `YYYY-MM` bucket as a month a reader recognises: `Aug 2026`.
  *
  * **The bucket key is parsed here rather than at its caller, and that is the one

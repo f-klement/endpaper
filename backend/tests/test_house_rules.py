@@ -18,6 +18,7 @@ import sys
 import tomllib
 import unicodedata
 import warnings
+from collections import Counter
 from collections.abc import Container, Iterable, Sequence
 from enum import StrEnum
 from fnmatch import fnmatch
@@ -114,6 +115,89 @@ def _python_sources(root: Path = BACKEND) -> list[Path]:
         if not {"tests", "migrations"} & set(path.relative_to(root).parts)
         and not _is_vendored(path, root)
     ]
+
+
+class TestTheApplicationCorpusIsStillTheApplication:
+    """`_python_sources()` returns every top level directory the backend has.
+
+    **Beside the reader rather than inside any one rule**, because this corpus
+    is walked from test classes across many files and a narrowing takes every
+    one of them at once. **No count of them is written here**: the figure that
+    stood in this sentence was never derived before it was written, and two
+    derivations of it afterwards disagreed on both halves. The argument does
+    not need a number, only that the readers are more than one and are not all
+    in this file.
+
+    **It is here because the walk had no arming of its own and the nearest
+    thing to one is blind to half the class.**
+    `test_the_walk_reaches_every_group_and_leaves_no_remainder` compares
+    `_python_sources()` against `_every_python_file()`, so it reds on a filter
+    added inside `_python_sources` and **not** on the identical filter added
+    inside `_is_vendored`, which both instruments call: the two degrade
+    together, so there is no disagreement left to see.
+
+    Driven, 2026-10-01, with a real provenance violation planted and 156 arms
+    run per column. A narrowing written in `_is_vendored` to drop `routers/`
+    leaves the violation unreported and reds 11 unrelated guards that happen to
+    pin exact populations over this corpus; dropping `schemas/` reds 6; **and
+    dropping `scripts/` reds nothing at all**, corpus 96 of 98, every arm green,
+    the violation invisible. Which directory the token names decided whether
+    anything went red. This arm reds by name on all three.
+
+    **It reds on a legitimate new directory too, and that is wanted**: a new
+    package under `backend/` is a decision about what every one of those rules
+    reads, and one line here is where it is taken.
+    """
+
+    def test_the_walk_returns_every_package_the_backend_has(self) -> None:
+        directories = sorted(
+            {
+                path.relative_to(BACKEND).parts[0]
+                for path in _python_sources()
+                if len(path.relative_to(BACKEND).parts) > 1
+            }
+        )
+
+        assert directories == ["routers", "schemas", "scripts"], (
+            "the application corpus lost or gained a top level directory. Every "
+            "rule reading `_python_sources()` now reads a different tree: either "
+            "the walk was narrowed, or `backend/` grew a package and this line "
+            "is where somebody decides the rules should see it."
+        )
+
+    def test_the_modules_at_the_root_are_still_there(self) -> None:
+        """The other half, since the arm above is satisfied by a walk that
+        returns the three directories and nothing else.
+
+        **An equality against a second derivation**, and the arm this replaced
+        was a membership test on three names with a justification that
+        inverted its own comparison: it said a floor leaves room to decay,
+        where three names out of the root's modules leave far more room than a
+        floor would. What actually made it adequate is that the quiet route
+        cannot express the attack, since `_is_vendored` tests **part names**
+        and no part name drops the root of a tree. That is a property of the
+        helper rather than of the arm, so the arm is strengthened instead of
+        the sentence being rewritten.
+
+        **The glob does not route through `_is_vendored`**, which is what
+        makes it a second instrument rather than the same reading twice: the
+        walk under test prunes a dotted part and this does not, so the guard
+        below is what keeps the two comparable. Measured: the root holds no
+        dotted module today, so that guard is not what makes the equality
+        hold, and it is what stops the day one arrives being a failure of this
+        arm rather than a decision.
+        """
+        roots = {
+            path.name
+            for path in _python_sources()
+            if len(path.relative_to(BACKEND).parts) == 1
+        }
+        globbed = {
+            path.name for path in BACKEND.glob("*.py") if not path.name.startswith(".")
+        }
+
+        assert roots == globbed
+        assert {"models.py", "shelf.py", "main.py"} <= roots
 
 
 def _test_sources(root: Path = BACKEND) -> list[Path]:
@@ -222,10 +306,22 @@ def _every_file_a_tool_does_not_own(root: Path = BACKEND) -> list[Path]:
     restating the filter it is testing.
 
     `os.walk` and a pruned `dirnames`, where the walk above is an `rglob` and a
-    per path predicate. Same exclusion, different traversal, so a filter added
-    to that function shows up here as a difference. Pruning is also what keeps
-    this affordable: a `.venv` holds tens of thousands of files and neither walk
+    per path predicate. Different traversals, so a filter added to that
+    function shows up here as a difference. Pruning is also what keeps this
+    affordable: a `.venv` holds tens of thousands of files and neither walk
     should descend one.
+
+    **It is NOT the same exclusion, and the difference is load bearing.** The
+    pruning asks `_is_vendored` about **directory names** and every filename
+    is then taken unfiltered. So the two instruments degrade **identically**
+    when a directory token is added to that helper, which is why the corpus
+    the application rules walk needed an arm of its own, and they degrade
+    **differently** when a **filename** token is added: the file leaves the
+    walk above and stays in this one, so it lands in the complement and reds
+    by name. **Making this walk ask `_is_vendored` about filenames too is six
+    words, reads as a consistency fix, and takes a live filename narrowing to
+    every arm green.** That is what the sentence this paragraph replaced
+    invited, by calling the two exclusions the same.
     """
     found: list[Path] = []
     for directory, dirnames, filenames in os.walk(root):
@@ -2308,11 +2404,306 @@ class TestEveryRequestBodyRowIdIsBounded:
         assert "Page" not in in_scope
 
 
+def _declared_provenance() -> tuple[dict[str, dict[str, str]], dict[str, set[str]]]:
+    """Which columns a model declares as provenance, and which share the name.
+
+    Returns `{column: {model: where the promise is written}}` and
+    `{column: {models declaring the same name without the marker}}`. The rule
+    needs both halves: what may not be read, and which receivers are a
+    different column that happens to be spelled the same way.
+
+    **Membership is derived from the declaration, never from a list of
+    names.** The previous version was a literal keyed on `created_by_user_id`,
+    which was evadable by renaming a column and short at the same time: its one
+    entry named `models.Collection` while two other models carry the identical
+    promise and were covered only by sharing a spelling.
+
+    **The matching half is still a name**, and that is a property of the
+    question rather than a shortcut: an instance read has no statically
+    resolvable owner, so `_provenance_reads` compares the attribute against
+    these keys and uses the second half only to clear a receiver it can
+    resolve. What the derivation buys is that the keys are whatever the models
+    say and are asserted, not that a read is attributed to a model.
+    """
+    marked: dict[str, dict[str, str]] = {}
+    unmarked: dict[str, set[str]] = {}
+    for mapper in Base.registry.mappers:
+        model = mapper.class_.__name__
+        for prop in mapper.column_attrs:
+            reason = prop.columns[0].info.get("provenance")
+            if reason:
+                marked.setdefault(prop.key, {})[model] = reason
+            else:
+                unmarked.setdefault(prop.key, set()).add(model)
+    return marked, unmarked
+
+
+#: What `_model_names_safe_to_resolve` maps the name of the `models` module to,
+#: where every other entry maps to a class in it.
+#:
+#: **A sentinel rather than a list of spellings.** The first version matched
+#: the dotted receiver against `{"models", "orm"}`, which is an inclusion list
+#: and goes stale the day somebody writes a third alias. The import already
+#: says which local name is the module, so the resolver asks the map.
+_THE_MODELS_MODULE: Final = object()
+
+
+def _names_bound_by(node: ast.AST) -> list[str]:
+    """Every name this node binds, imports excepted.
+
+    **One list rather than a chain of branches**, because the chain is what
+    went short: the first version read `ast.Name` in a `Store` context plus
+    arguments, functions and classes, and **every binder below that carries
+    its name as a plain string was invisible to it**. Each of those puts an
+    arbitrary object under a name a resolver then treats as a model.
+    """
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+        return [node.id]
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        arguments = node.args
+        return [
+            node.name,
+            *(
+                arg.arg
+                for arg in [
+                    *arguments.posonlyargs,
+                    *arguments.args,
+                    *arguments.kwonlyargs,
+                    *([arguments.vararg] if arguments.vararg else []),
+                    *([arguments.kwarg] if arguments.kwarg else []),
+                ]
+            ),
+        ]
+    if isinstance(node, ast.Lambda):
+        # **The member this list was short by**, and it is the one that makes
+        # the family a family: a lambda's parameters are plain strings, it is
+        # not a `FunctionDef`, and nothing else here reaches it. Bound once as
+        # far as a counter can see, so a marked read through a lambda
+        # parameter named after an unmarked model was cleared.
+        arguments = node.args
+        return [
+            arg.arg
+            for arg in [
+                *arguments.posonlyargs,
+                *arguments.args,
+                *arguments.kwonlyargs,
+                *([arguments.vararg] if arguments.vararg else []),
+                *([arguments.kwarg] if arguments.kwarg else []),
+            ]
+        ]
+    if isinstance(node, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple):
+        # The same shape one more time, and the only one in this list that is
+        # not a plausible receiver. Here because the family is what was short,
+        # not the instance: a reader completing it later would have to find it
+        # again.
+        return [node.name]
+    if isinstance(node, ast.ClassDef):
+        return [node.name]
+    if isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar):
+        return [node.name] if node.name is not None else []
+    if isinstance(node, ast.MatchMapping):
+        return [node.rest] if node.rest is not None else []
+    if isinstance(node, ast.Global | ast.Nonlocal):
+        return list(node.names)
+    return []
+
+
+def _model_names_safe_to_resolve(tree: ast.Module) -> dict[str, object]:
+    """Local name to the thing in `models` it certainly means, in this module.
+
+    A class name maps to the **class's own name**, which is what the receiver
+    has to be looked up by: `from models import Collection as CustomField`
+    binds a local name that is a member of the unmarked set and a class that
+    is a member of the marked one, so a resolver returning the local name
+    reads the marked column off an unmarked model and clears it. **One line of
+    import laundered the rule** before this returned the real name. The module
+    itself maps to `_THE_MODELS_MODULE`.
+
+    **Bound exactly once in this file, by that import, and never again.**
+    Counted rather than subtracted, which is the second half: a second
+    `import ... as X` rebinds the name without being a `Store` of it, so a
+    subtraction cannot see it. `_names_bound_by` holds the rest.
+
+    **A name bound twice is dropped whichever binding came second**, because
+    this walk tracks no scopes and no order. That refuses some correct code
+    loudly and no incorrect code quietly, which is the direction this whole
+    rule is written in.
+    """
+    from_models: dict[str, object] = {}
+    bindings: Counter[str] = Counter()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                local = alias.asname or alias.name
+                bindings[local] += 1
+                if node.module == "models" and node.level == 0:
+                    from_models[local] = alias.name
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                # `import a.b` binds `a`, and `import a.b as c` binds `c`.
+                local = alias.asname or alias.name.split(".")[0]
+                bindings[local] += 1
+                if alias.name == "models":
+                    from_models[local] = _THE_MODELS_MODULE
+        else:
+            bindings.update(_names_bound_by(node))
+
+    return {local: real for local, real in from_models.items() if bindings[local] == 1}
+
+
+def _receiver_model(node: ast.expr, names: dict[str, object]) -> str | None:
+    """Which model class a receiver names, or `None` when it cannot be known.
+
+    Two shapes and no more: a name bound by `from models import ...`, and an
+    attribute of the `models` module under whatever local name the import gave
+    it. Both resolve to the **class's own name**, never the local one.
+    Everything else, and that includes **every instance read**, is `None`.
+    """
+    if isinstance(node, ast.Name):
+        real = names.get(node.id)
+        return real if isinstance(real, str) else None
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and names.get(node.value.id) is _THE_MODELS_MODULE
+    ):
+        return node.attr
+    return None
+
+
+@dataclasses.dataclass(frozen=True)
+class ColumnMention:
+    """One place a module's source names a column, and what it names it on.
+
+    `receiver` is the expression the column hangs off, for a caller that wants
+    to resolve which model it is. `builds_a_row` separates the write from
+    every other spelling.
+    """
+
+    line: int
+    column: str
+    receiver: ast.expr
+    builds_a_row: bool
+
+
+def column_mentions(tree: ast.Module, columns: Container[str]) -> list[ColumnMention]:
+    """Every place this source names one of these columns, in three spellings.
+
+    **Shared rather than copied, and that is the point of it.** Two rules ask
+    this question, `TestProvenanceColumnsAreNeverRead` here and
+    `tests/test_fields.py::TestFieldsIsTheOnlyReaderOfTheAuthorColumn`, and
+    the second was written as an attribute walk and was blind to the
+    authorization clause the first had just learned to see, one file away.
+    A second walk is a second thing to keep in step.
+
+    The three spellings, and the first version of the rule above had only the
+    first:
+
+    * an attribute, `row.column` or `Model.column`;
+    * `getattr(x, "column")` and `setattr(x, "column", v)` with a **constant**
+      name, which an attribute walk cannot see and which are live spellings in
+      this backend rather than hypothetical ones. **No figure for how live.**
+      The one that stood here was a line count relayed as a site count, and
+      two derivations of the real thing then disagreed on how many files hold
+      it. A number two careful readings disagree about is not a number yet,
+      and the claim this sentence has to carry is that the spelling occurs at
+      all. **`setattr` arrived a round after `getattr` and the gap is the
+      lesson**: the walk had the read side twin and not the write side one, so
+      the rule that only asks about reads could never have surfaced it and the
+      rule next door that asks about writes inherited the hole;
+    * a keyword argument, `f(column=...)`, which names no attribute at all and
+      is how an authorization clause is written as `filter_by`.
+
+    **`builds_a_row` is true when the callee is a bare name**, and that is the
+    whole of what the callee shape separates. It is **not** "a constructor":
+    a module qualified constructor, `models.Collection(column=...)`, has an
+    attribute callee and arrives here as an ordinary keyword mention. The case
+    is latent rather than absent: `test_no_module_reads_a_provenance_column`
+    returning nothing is what says no call of that shape in this corpus
+    carries a marked column, and no separate count is taken for it. It is
+    latent in the **loud** direction, since a caller refusing what it cannot
+    resolve refuses that one too. Named as a refusal rather than left as an
+    impossibility, because the first version of this comment called the bare
+    name callee "the constructor", which is the sentence somebody reasons
+    from.
+
+    A `getattr` whose name is a variable is outside this walk, deliberately
+    and with nothing claimed about it: there is no constant to match.
+    """
+    found: list[ColumnMention] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in columns:
+            found.append(ColumnMention(node.lineno, node.attr, node.value, False))
+        elif isinstance(node, ast.Call):
+            if (
+                isinstance(node.func, ast.Name)
+                # `setattr` beside `getattr`, taking the same constant name
+                # and the same string test. One of the two is a write, and
+                # this walk reports mentions rather than classifying them:
+                # which of them a caller cares about is the caller's question.
+                and node.func.id in {"getattr", "setattr"}
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                # The name has to be a string before it can be a column, and
+                # `ast.Constant` holds anything a literal can be.
+                and isinstance(node.args[1].value, str)
+                and node.args[1].value in columns
+            ):
+                found.append(
+                    ColumnMention(node.lineno, node.args[1].value, node.args[0], False)
+                )
+            receiver = node.func.value if isinstance(node.func, ast.Attribute) else node.func
+            for keyword in node.keywords:
+                if keyword.arg is not None and keyword.arg in columns:
+                    found.append(
+                        ColumnMention(
+                            node.lineno,
+                            keyword.arg,
+                            receiver,
+                            isinstance(node.func, ast.Name),
+                        )
+                    )
+    return found
+
+
+def _provenance_reads(source: str, label: str = "probe.py") -> list[str]:
+    """Every read of a declared provenance column in one module's source.
+
+    **The three spellings are `column_mentions`', and what this adds is the
+    clearing.** A mention is a read unless it builds a row, and it is reported
+    unless its receiver resolves to a model that declares the column
+    **without** the marker: that is a different column sharing a conventional
+    name, decided rather than reported. Everything else, a receiver that
+    resolves to a marked model and a receiver that resolves to nothing alike,
+    is reported.
+
+    **So a method call whose receiver is a query is reported**, because a call
+    expression resolves to no model. That is this rule's stated loudness
+    arriving at a new spelling rather than a new defect: the one legitimate
+    reader writes the column into a `query()` argument list, not into a
+    `filter_by`.
+    """
+    marked, unmarked = _declared_provenance()
+    tree = ast.parse(source)
+    names = _model_names_safe_to_resolve(tree)
+
+    found: list[str] = []
+    for mention in column_mentions(tree, marked):
+        if mention.builds_a_row:
+            continue
+        owner = _receiver_model(mention.receiver, names)
+        if owner is not None and owner in unmarked.get(mention.column, set()):
+            continue
+        found.append(f"{label}:{mention.line} ({mention.column})")
+    return sorted(set(found), key=found.index)
+
+
 class TestProvenanceColumnsAreNeverRead:
     """A column recorded only so somebody can be asked later is never consulted
     by code.
 
-    One entry, and it is here because three places in the tree say of
+    It is here because three places in the tree say of
     `collections.created_by_user_id` that "no query consults it, which is what
     keeps that true rather than merely intended" while nothing kept it true. A
     claim of mechanism with no mechanism is worse than no claim: the next reader
@@ -2324,53 +2715,440 @@ class TestProvenanceColumnsAreNeverRead:
     rule itself is pinned by `tests/test_models.py`; this pins the weaker
     promise beside it.
 
-    **Attribute access is the test**, not the name. Writing the column is a
-    keyword argument (`Collection(created_by_user_id=...)`) and declaring it is
-    an assignment target, so neither is an `ast.Attribute`; every read of it,
-    whether `row.created_by_user_id` or `Collection.created_by_user_id` in a
-    filter, is one. If a genuine reason to read one ever arrives, delete the
-    entry here and the three sentences it stands for, in the same commit.
+    ## It keys on the declaration, and it used to key on one column name
+
+    **The old version was evadable and short at the same time.** `PROVENANCE_COLUMNS`
+    was a literal mapping `created_by_user_id` to a sentence naming
+    `models.Collection`. Renaming the column slipped past it entirely, which
+    makes it a rule about a spelling rather than about a property; and
+    `AuthorAlias` and `AuthorIdentifier` carry the identical promise and were
+    covered only because they happen to use the same name, which the one
+    entry's own text did not say.
+
+    **It had no exemption slot**, and its own comment prescribed the two things
+    to do about a fourth model with a conventional column name: rename the
+    column, or add an entry here. The first is the evasion the rule exists to
+    refuse and the second declares the new column unread, which is the opposite
+    of the truth when the new column is read on purpose.
+    `custom_fields.created_by_user_id` is exactly that case: a member axis
+    added so a definer can be told their own field exists and can rename it.
+
+    **So membership is now the declaration.** `info={"provenance": ...}` at the
+    column's own site puts it in, `_declared_provenance` reads it off the
+    mapper, and `test_the_declarations_are_the_ones_the_models_make` asserts
+    the result, so a marker added or dropped reddens by name.
+
+    ## What it refuses
+
+    **Three spellings**, and `_provenance_reads` says why each is there and
+    what separates the query clause from the constructor write. An attribute
+    walk alone was the first version and two live shapes went past it.
+
+    ## What it accepts, which is one spelling and not a remedy
+
+    **A read is cleared only where the receiver resolves to a model that does
+    not mark the column**: a class imported with `from models import ...`, or
+    an attribute of the `models` module, in a file that binds that local name
+    exactly once. Nothing else.
+
+    **Everything else is reported, and "everything else" is wider than it
+    reads.** `REFUSED` below is the list, each one driven, and it is a list
+    rather than a count on purpose: the figure that stood here was measured
+    against the rule **before** the resolver fix and was written into prose
+    describing the rule after it, which is this wave's own recurring defect
+    arriving in the sentence written to correct one.
+
+    **This docstring used to call that cost "ask the class instead", and that
+    is not a remedy that exists.** It exists for `ACCEPTED` below and for
+    nothing else: there is no class to ask when the receiver is not a models
+    class, and **inside `models.py` itself there is no accepted spelling at
+    all**, because that file imports nothing from `models`. What is being
+    claimed is only that the refusals are **loud** and the misses would be
+    silent, so the rule fails in the direction somebody notices. A reader who
+    meets one is meeting the limit of the rule, and the answer is a decision
+    here rather than a workaround there.
+
+    An exemption keyed on the file or the function was the alternative and it
+    would have accepted every read inside it.
+
+    If a genuine reason to read a marked one ever arrives, delete the marker and
+    the sentences it stands for, in the same commit.
     """
 
-    #: Column, and where the promise about it is written down.
-    #: The match is by **name, across the whole tree**, and deliberately so: an
-    #: instance read (`row.created_by_user_id`) has no statically resolvable
-    #: owner, so keying on the model would miss the dominant shape. The cost is
-    #: that a second model given this conventional column name inherits the rule
-    #: and fails with a message pointing at `Collection`. That is a rename or an
-    #: entry here, not a bug, and knowing it is the difference between a
-    #: two-minute fix and an afternoon.
-    PROVENANCE_COLUMNS = {
-        "created_by_user_id": "models.Collection, docs/decisions.md, docs/data-model.md",
-    }
+    def test_the_declarations_are_the_ones_the_models_make(self) -> None:
+        """Derive it and assert it, so a widening is noticed rather than
+        automatic.
+
+        **Both directions.** A marker added to a fourth column widens what the
+        rule refuses across the whole tree, and a marker deleted narrows it to
+        nothing with no other failure. Either is a decision and reds here.
+        """
+        marked, unmarked = _declared_provenance()
+        declared = sorted(
+            (column, owner) for column, owners in marked.items() for owner in owners
+        )
+
+        assert declared == [
+            ("created_by_user_id", "AuthorAlias"),
+            ("created_by_user_id", "AuthorIdentifier"),
+            ("created_by_user_id", "Collection"),
+        ]
+
+        # **The half that decides every ALLOW, and nothing named a member of
+        # it.** `marked` is what the rule refuses; `unmarked` is the only
+        # reason any read is cleared, and it has exactly one member. A second
+        # model given this conventional column name would silently gain the
+        # exemption, which is the direction an exemption must never move in on
+        # its own. Narrowed to the marked names, since the whole set is every
+        # column of every model.
+        sharing = sorted(
+            (column, owner)
+            for column in marked
+            for owner in unmarked.get(column, set())
+        )
+
+        assert sharing == [("created_by_user_id", "CustomField")]
+
+    def test_the_marked_columns_are_still_there_to_be_unread(self) -> None:
+        """The rule passes just as well if somebody deletes a column, so this
+        says which absence would be the wrong one.
+
+        Over every declaration rather than over `Collection` alone, which is
+        what the literal version could not do.
+
+        **Keyed by the column's own name and not by the ORM attribute.**
+        `marked` is keyed on the attribute, so a column whose attribute and
+        database name differ would have reddened this while nothing was wrong.
+        None do today, which is why it was latent rather than red.
+
+        **It is one clause and it used to be two.** The second re read the
+        marker back off `__table__.columns` and was called a second source;
+        it is not one. The mapper's column, the attribute's first column and
+        the table's column are **the same object**, verified by identity on
+        all three marked columns, and the `info` dict is the same dict, so
+        that conjunct could never be False while the pair was in `marked`. A
+        vacuous conjunct beside a real one reads as strengthening and is the
+        thing a later reader trusts. What this arm is worth is entirely the
+        question the first clause asks: does the table still have the column.
+        """
+        marked, _unmarked = _declared_provenance()
+        mappers = {mapper.class_.__name__: mapper for mapper in Base.registry.mappers}
+
+        missing = [
+            f"{owner}.{column}"
+            for column, owners in marked.items()
+            for owner in owners
+            if mappers[owner].columns[column].name
+            not in mappers[owner].class_.__table__.columns
+        ]
+        assert not missing, missing
 
     def test_no_module_reads_a_provenance_column(self) -> None:
+        marked, _unmarked = _declared_provenance()
         offenders: list[str] = []
-
         for path in _python_sources():
-            tree = ast.parse(path.read_text())
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Attribute):
-                    continue
-                if node.attr not in self.PROVENANCE_COLUMNS:
-                    continue
-                offenders.append(f"{path.relative_to(BACKEND)}:{node.lineno} ({node.attr})")
+            offenders += _provenance_reads(
+                path.read_text(), str(path.relative_to(BACKEND))
+            )
 
         assert not offenders, (
-            "These read a column recorded as provenance only, and something in the tree "
-            "promises nothing does:\n  "
+            "These read a column a model declares as provenance only, and something "
+            "in the tree promises nothing does:\n  "
             + "\n  ".join(sorted(offenders))
             + "\nEither stop reading it, or delete the promise where "
-            + "; ".join(f"{column}: {where}" for column, where in self.PROVENANCE_COLUMNS.items())
+            + "; ".join(
+                f"{column}: {', '.join(sorted(owners.values()))}"
+                for column, owners in sorted(marked.items())
+            )
             + "."
         )
 
-    def test_the_column_is_still_there_to_be_unread(self) -> None:
-        """The rule above passes just as well if somebody deletes the column, so
-        this says which absence would be the wrong one."""
-        from models import Collection
+    def test_a_read_on_the_model_that_marks_it_is_reported(self) -> None:
+        assert _provenance_reads(
+            "from models import Collection\n"
+            "rows = db.query(Collection).filter(Collection.created_by_user_id == 1)\n"
+        ) == ["probe.py:2 (created_by_user_id)"]
 
-        assert "created_by_user_id" in Collection.__table__.columns
+    def test_a_read_on_a_model_that_does_not_mark_it_is_allowed(self) -> None:
+        """The case the rule had no way to express. `CustomField` carries this
+        column because it is read: see `fields.Fields._author_of`."""
+        assert (
+            _provenance_reads(
+                "from models import CustomField\n"
+                "rows = db.query(CustomField.id, CustomField.created_by_user_id).all()\n"
+            )
+            == []
+        )
+
+    def test_a_dotted_read_through_the_models_module_resolves_too(self) -> None:
+        assert _provenance_reads(
+            "import models\n"
+            "a = models.CustomField.created_by_user_id\n"
+            "b = models.Collection.created_by_user_id\n"
+        ) == ["probe.py:3 (created_by_user_id)"]
+
+    def test_an_instance_read_is_reported_whatever_the_row_is(self) -> None:
+        """The stated false refusal, pinned so nobody relaxes it by accident.
+
+        A row has no statically resolvable owner, so an unmarked model's row is
+        indistinguishable from a marked one's and both are reported. The one
+        legitimate reader pays for this by asking the class instead."""
+        assert _provenance_reads(
+            "from models import CustomField\n"
+            "def f(row: CustomField) -> int | None:\n"
+            "    return row.created_by_user_id\n"
+        ) == ["probe.py:3 (created_by_user_id)"]
+
+    def test_a_rebound_model_name_does_not_launder_a_read(self) -> None:
+        """The evasion the resolution half creates, and the reason
+        `_model_names_safe_to_resolve` subtracts every assigned name."""
+        assert _provenance_reads(
+            "from models import Collection, CustomField\n"
+            "CustomField = Collection\n"
+            "x = CustomField.created_by_user_id\n"
+        ) == ["probe.py:3 (created_by_user_id)"]
+
+    def test_a_local_shadowing_a_model_name_does_not_launder_a_read(self) -> None:
+        """A rebinding inside a function body is still a rebinding: this walk
+        tracks no scopes, so any `Store` of the name anywhere drops it."""
+        assert _provenance_reads(
+            "from models import CustomField\n"
+            "def f(rows):\n"
+            "    CustomField = rows[0]\n"
+            "    return CustomField.created_by_user_id\n"
+        ) == ["probe.py:4 (created_by_user_id)"]
+
+    def test_a_write_and_a_declaration_are_not_reads(self) -> None:
+        """Both are how the column gets its value, and neither is an
+        `ast.Attribute`."""
+        assert (
+            _provenance_reads(
+                "from models import Collection\n"
+                "row = Collection(name='x', created_by_user_id=7)\n"
+                "created_by_user_id = 7\n"
+            )
+            == []
+        )
+
+    def test_a_name_no_model_declares_at_all_is_not_resolvable(self) -> None:
+        """A receiver that is not a model name resolves to nothing, so the read
+        is reported. `Loan` carries no such column, and a reader cannot know
+        that from the attribute alone."""
+        assert _provenance_reads(
+            "from models import Loan\n" "x = Loan.created_by_user_id\n"
+        ) == ["probe.py:2 (created_by_user_id)"]
+
+    #: Receivers this rule refuses, each one driven rather than reasoned.
+    #:
+    #: **A list and not a count.** The figure that used to stand in the class
+    #: docstring was measured before the resolver fix and written into prose
+    #: describing the code after it. A list cannot go stale that way: a member
+    #: that stops being refused reds here by name.
+    REFUSED = (
+        (
+            "an aliased entity",
+            "from models import CustomField\n"
+            "from sqlalchemy.orm import aliased\n"
+            "V = aliased(CustomField)\n"
+            "x = V.created_by_user_id\n"
+        ),
+        (
+            "the table columns accessor",
+            "from models import CustomField\n"
+            "x = CustomField.__table__.c.created_by_user_id\n"
+        ),
+        ("a relative models import", "from .models import CustomField\nx = CustomField.created_by_user_id\n"),
+        ("a row", "def f(row):\n    return row.created_by_user_id\n"),
+        ("a schema object", "def f(payload):\n    return payload.created_by_user_id\n"),
+        ("a schema class", "from schemas import CustomFieldOut\nx = CustomFieldOut.created_by_user_id\n"),
+        (
+            "a dataclass",
+            "import dataclasses\n"
+            "@dataclasses.dataclass\n"
+            "class Row:\n"
+            "    created_by_user_id: int\n"
+            "x = Row.created_by_user_id\n"
+        ),
+        (
+            "models.py itself, which imports nothing from models",
+            "class CustomField:\n"
+            "    pass\n"
+            "x = CustomField.created_by_user_id\n"
+        ),
+        (
+            "the module shadowed by a parameter",
+            "import models\n"
+            "def f(models):\n"
+            "    return models.CustomField.created_by_user_id\n"
+        ),
+        (
+            "a class name rebound as a local",
+            "from models import CustomField\n"
+            "CustomField = fetch()\n"
+            "x = CustomField.created_by_user_id\n"
+        ),
+        (
+            "a lambda parameter",
+            "from models import CustomField\n"
+            "f = lambda CustomField: CustomField.created_by_user_id\n"
+        ),
+        (
+            "a star import, which binds no name this walk can see",
+            "from models import *\n"
+            "x = CustomField.created_by_user_id\n"
+        ),
+        # **The two spellings where binding twice is deliberate**, and the
+        # ones a reader is least likely to expect from a rule that drops a
+        # name bound more than once. Both are ordinary Python and both are
+        # refused, which is the loud direction and is still a cost somebody
+        # meeting it should find written down rather than discover.
+        (
+            "a type checking import beside the runtime one",
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from models import CustomField\n"
+            "from models import CustomField\n"
+            "x = CustomField.created_by_user_id\n"
+        ),
+        (
+            "a try and except import pair",
+            "try:\n"
+            "    from models import CustomField\n"
+            "except ImportError:\n"
+            "    from models import CustomField\n"
+            "x = CustomField.created_by_user_id\n"
+        ),
+    )
+
+    #: Every receiver that has an accepted spelling. There are no others.
+    ACCEPTED = (
+        ("a plain models import", "from models import CustomField\nx = CustomField.created_by_user_id\n"),
+        ("an aliased models import", "from models import CustomField as CF\nx = CF.created_by_user_id\n"),
+        ("the module route", "import models\nx = models.CustomField.created_by_user_id\n"),
+        ("the module route, aliased", "import models as m\nx = m.CustomField.created_by_user_id\n"),
+    )
+
+    @pytest.mark.parametrize(("shape", "source"), REFUSED, ids=[name for name, _ in REFUSED])
+    def test_a_receiver_this_rule_cannot_resolve_is_refused(
+        self, shape: str, source: str
+    ) -> None:
+        """What the class docstring says the cost is, written down as the
+        members rather than as a number. Every one reads a column no model in
+        the source marks, and every one is reported, because the rule refuses
+        what it cannot attribute."""
+        assert _provenance_reads(source), shape
+
+    @pytest.mark.parametrize(("shape", "source"), ACCEPTED, ids=[name for name, _ in ACCEPTED])
+    def test_the_accepted_spellings_are_these_and_no_others(
+        self, shape: str, source: str
+    ) -> None:
+        """The other side of the list above, so "there is one accepted
+        spelling" is checkable rather than asserted in prose."""
+        assert _provenance_reads(source) == [], shape
+
+    def test_an_import_alias_does_not_launder_the_marked_column(self) -> None:
+        """One line of import, and the whole rule was cleared.
+
+        `Collection` bound under an unmarked model's name is bound **once**, by
+        the import, so no binding count can see it. What sees it is the
+        resolver returning the class's own name rather than the local one.
+        """
+        assert _provenance_reads(
+            "from models import Collection as CustomField\n"
+            "x = CustomField.created_by_user_id\n"
+        ) == ["probe.py:2 (created_by_user_id)"]
+
+    def test_the_one_reader_may_alias_its_own_import(self) -> None:
+        """The other direction of the same line, and it was a false refusal:
+        the legitimate reader was reported for aliasing an import."""
+        assert (
+            _provenance_reads(
+                "from models import CustomField as CF\n"
+                "x = CF.created_by_user_id\n"
+            )
+            == []
+        )
+
+    def test_the_models_module_is_resolved_under_any_alias(self) -> None:
+        """No inclusion list of spellings: the import says which local name is
+        the module, so a third alias is resolved the day it is written."""
+        assert _provenance_reads(
+            "import models as schema\n"
+            "a = schema.CustomField.created_by_user_id\n"
+            "b = schema.Collection.created_by_user_id\n"
+        ) == ["probe.py:3 (created_by_user_id)"]
+
+    def test_a_name_bound_twice_is_not_resolved_however_it_was_bound(self) -> None:
+        """Three binders that carry their name as a string rather than as a
+        `Name` node, so the first version's subtraction could not see any of
+        them and each put an arbitrary object under a model's name."""
+        shapes = (
+            "from models import CustomField\n"
+            "try:\n    pass\nexcept ValueError as CustomField:\n"
+            "    x = CustomField.created_by_user_id\n",
+            "from models import CustomField\n"
+            "def f(value):\n    match value:\n        case [CustomField]:\n"
+            "            return CustomField.created_by_user_id\n",
+            "from models import CustomField\n"
+            "import json as CustomField\n"
+            "x = CustomField.created_by_user_id\n",
+        )
+
+        assert [len(_provenance_reads(shape)) for shape in shapes] == [1, 1, 1]
+
+    def test_a_filter_by_keyword_is_a_read(self) -> None:
+        """The authorization clause this rule exists to refuse, which named no
+        attribute at all. `tests/test_folding.py` records the same blind spot
+        in its own narrowing set and the lesson did not travel one file."""
+        assert _provenance_reads(
+            "from models import Collection\n"
+            "rows = db.query(Collection).filter_by(created_by_user_id=1).all()\n"
+        ) == ["probe.py:2 (created_by_user_id)"]
+
+    def test_the_constructor_write_is_still_not_a_read(self) -> None:
+        """What separates the clause from the write is the callee: a
+        constructor's `func` is a bare name, a query method's is an attribute.
+        Both live write sites are constructors."""
+        assert (
+            _provenance_reads(
+                "from models import Collection\n"
+                "row = Collection(name='x', created_by_user_id=7)\n"
+            )
+            == []
+        )
+
+    def test_a_getattr_with_a_constant_name_is_a_read(self) -> None:
+        """A live spelling in this backend under other column names, and
+        invisible to an attribute walk. `column_mentions` says why no count
+        of how live is written anywhere."""
+        assert _provenance_reads(
+            "from models import Collection\n"
+            "a = getattr(Collection, 'created_by_user_id')\n"
+            "b = getattr(row, 'created_by_user_id')\n"
+        ) == [
+            "probe.py:2 (created_by_user_id)",
+            "probe.py:3 (created_by_user_id)",
+        ]
+
+    def test_the_one_reader_may_getattr_its_own_model(self) -> None:
+        assert (
+            _provenance_reads(
+                "from models import CustomField\n"
+                "x = getattr(CustomField, 'created_by_user_id')\n"
+            )
+            == []
+        )
+
+    def test_a_keyword_on_a_call_the_rule_cannot_resolve_is_reported(self) -> None:
+        """The loudness arriving at the new spelling, pinned so nobody reads it
+        as a defect. A call expression resolves to no model, so a `filter_by`
+        chained onto a query over an **unmarked** model is reported too. The
+        one legitimate reader writes the column into a `query()` argument list
+        and never into a `filter_by`, so nothing live meets it."""
+        assert _provenance_reads(
+            "from models import CustomField\n"
+            "rows = db.query(CustomField).filter_by(created_by_user_id=1).all()\n"
+        ) == ["probe.py:2 (created_by_user_id)"]
 
 
 class TestTheBoundsActuallyRefuse:

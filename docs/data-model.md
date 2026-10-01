@@ -628,6 +628,16 @@ Whether a value renders as a **link** is decided on every read, not stored:
 no credentials and a parseable port. A `url` field whose value does not survive that is
 served as text. See [security.md](security.md).
 
+`custom_fields.created_by_user_id` is the member who defined the row, and it is **read**,
+which separates it from the three `created_by_user_id` columns described as provenance
+elsewhere on this page. It answers two questions nothing else could: a definer is told
+their own field exists even when its only value sits on a book they cannot see, and a
+definer may rename it where another member may not. It is nullable and null is not an
+error: every row defined before the column has one, so does every row from an archive
+taken before it, and null means "no author to ask", which keeps the rule those rows
+already had. The rename is still open to an admin for any field, which is the same
+asymmetry the delete carries and a weaker version of it.
+
 **`catalogue_targets`.** One catalogue source as a row: its address, transport, which
 indexes it answers on, and the bounds a search is held to. The primary key holds a
 `CatalogueSource` value, and it is a `String(32)` with no CHECK: what closes the set is

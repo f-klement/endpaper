@@ -1,6 +1,7 @@
+from datetime import UTC, datetime
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field, PlainSerializer
 
 # Bounds for every paginated endpoint. The ceiling is what stops a caller
 # asking for the whole library in one request and undoing the point of paging.
@@ -27,6 +28,91 @@ MAX_ROW_ID = 2**63 - 1
 #: see it; `tests/test_house_rules.py::TestEveryRequestBodyRowIdIsBounded` is
 #: the one that does.
 RowIdField = Annotated[int, Field(ge=1, le=MAX_ROW_ID)]
+
+
+def _as_utc(when: datetime) -> datetime:
+    """A stored value, labelled UTC on the way out.
+
+    Every `DateTime` column here is naive, and **the frame is whatever wrote the
+    row rather than one rule**. Measured off the metadata: 31 such columns, of
+    which **16 carry a database side default** and are written by the engine,
+    `CURRENT_TIMESTAMP` on SQLite and `now()` on a server. The rest are written
+    from Python, where `accounts.now()` is the spelling and `lending.py` states
+    it for the loan columns. Serialised as they stand these reach a client as
+    `2026-08-19T10:00:00`, and RFC 3339, which is what `format: date-time`
+    names, requires an offset.
+
+    **So this asserts the frame rather than discovering it**, and two writers are
+    known not to be in it. A deadline arrived from a browser as a wall clock
+    until `frontend/src/lib/date.ts::endOfDayInstant`, so rows written before
+    that are in the submitter's zone; and the sixteen defaults are cast to a
+    naive column using the session zone, which nothing in this tree sets, so on
+    a server away from UTC they hold local wall clock. **This change does not
+    cause either and it does make both louder**, because the wire now says UTC
+    over a value that may not be.
+
+    **An aware value is converted rather than refused**, which is what makes
+    this safe to apply to a field a client writes: see `UtcDateTimeIn`, which
+    runs the same rule inbound so that nothing aware reaches a column.
+    """
+    return when.replace(tzinfo=UTC) if when.tzinfo is None else when.astimezone(UTC)
+
+
+def _as_stored(when: datetime) -> datetime:
+    """The inbound half: whatever a client sent, as the naive UTC a column holds.
+
+    **The live case is not hypothetical and it is not the loan door.** The
+    browser sends `file_modified_at` as `toISOString()`, so that field arrives
+    **aware** on every digital reference the app writes, and the route assigns it
+    onto the column. Nothing is lost today only because the offset is zero and
+    the SQLite formatter drops it: the formatter reads the field values and
+    ignores `tzinfo`, so an offset that is not zero would store the wrong instant
+    and a server dialect would store it differently again. That accident is what
+    `lending.close` was written about, one door over.
+    """
+    return _as_utc(when).replace(tzinfo=None)
+
+
+#: A `datetime` on this API's wire, carrying the offset `format: date-time` promises.
+#:
+#: **`return_type=datetime` is what keeps the promise it is here to honour.**
+#: Returning a string instead would type the field `{"type": "string"}` with no
+#: format at all, so the schema would stop declaring `date-time` and the
+#: operations would go green by dropping the claim rather than by meeting it.
+#: Handing pydantic a datetime back leaves the declaration where it was and
+#: renders UTC as `Z`.
+#:
+#: **`when_used="json"` keeps the column's frame out of the python mode dump,
+#: and the reason is a write rather than a rendering.** Three routes in
+#: `routers/books.py` turn a request body into column values through
+#: `model_dump()`, and an aware datetime written into a `DateTime` column is
+#: the frame error `lending.close` records: it reaches the disk only because
+#: the SQLite formatter drops the offset, and anything reading the attribute
+#: before the refetch subtracts a naive datetime from an aware one and raises.
+#: **None of those three bodies carries a datetime today**, so this is what
+#: stops the first one that does rather than a repair of a live failure. JSON
+#: is the only mode a client sees, so it is the only mode that needs an offset.
+#:
+#: **Applied to every `datetime` field under `schemas/`, request bodies
+#: included, rather than to the response ones.** A field crosses that line the
+#: day one route names its model as a `response_model`, and a policy applied by
+#: direction has to be re-decided at that moment while a policy applied by
+#: position does not. On a body it is inert: FastAPI never serialises a request
+#: model, and python mode is excluded above.
+UtcDateTime = Annotated[
+    datetime, PlainSerializer(_as_utc, return_type=datetime, when_used="json")
+]
+
+#: A `datetime` a **client** writes, normalised to the frame its column holds.
+#:
+#: `UtcDateTime` plus the inbound half, so the two directions are one object and
+#: a field cannot have the first without the second. Validation only: the schema
+#: is unchanged, because an `AfterValidator` describes no shape.
+#:
+#: **Narrower than `UtcDateTime` on purpose.** Every other dated field is written
+#: by this server in the column's own frame, so running a conversion over them
+#: would be a no op dressed as a rule. This is for the two a browser fills.
+UtcDateTimeIn = Annotated[UtcDateTime, AfterValidator(_as_stored)]
 
 #: Every control character: C0 (0x00 to 0x1F), DEL, and C1 (0x80 to 0x9F).
 #:

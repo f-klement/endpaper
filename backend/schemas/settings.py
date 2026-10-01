@@ -1,4 +1,3 @@
-from datetime import datetime
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
@@ -10,6 +9,7 @@ from enums import (
     OverdueNotifyReason,
     OverdueSender,
 )
+from schemas.common import UtcDateTime
 
 #: How far apart two reminders for the same loan may be, in days. The floor is
 #: 1 rather than 0: a zero would mean "resend on every tick", which is an hourly
@@ -728,7 +728,7 @@ class SenderHealth(BaseModel):
     #: Null until this channel has run at all, which is what a household sees
     #: on the day they configure one. "Not yet" and "fine" are the two answers
     #: they most need to tell apart, so they are not the same value here.
-    last_run_at: datetime | None = None
+    last_run_at: UtcDateTime | None = None
     #: Null for the same reason as `last_run_at`.
     sent: bool | None = None
     #: The failure, if the last run was one. Null on a success.
@@ -737,7 +737,7 @@ class SenderHealth(BaseModel):
     #: The first failure of the current unbroken run of them, so a channel that
     #: failed once at 3am reads differently from one failing every hour since
     #: Tuesday. Null whenever the last run succeeded.
-    failing_since: datetime | None = None
+    failing_since: UtcDateTime | None = None
     #: How many consecutive failures. Zero on a success and on a channel that
     #: has never run.
     failures: int = Field(default=0, ge=0)

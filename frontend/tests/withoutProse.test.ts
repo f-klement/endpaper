@@ -28,13 +28,14 @@ import { langOf, withoutProse } from "./withoutProse";
 // The one enumeration of `src/`, which refuses a corpus that is no longer the
 // tree. The pattern used to be written here, where narrowing it was one edit
 // in the file holding the rule it disarmed.
-import { directoriesIn, sourceEntries } from "./sourceModules";
-
-const TESTS = import.meta.glob("./**/*.{ts,tsx}", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+import { sourceEntries } from "./sourceModules";
+// The one enumeration of `tests/`, for the same reason: the pattern used to
+// be written here, and a third copy of it stood in `houseRules.test.ts`.
+import {
+  testDirectoriesIn,
+  testEntries,
+  testEntriesBesides,
+} from "./testModules";
 
 /**
  * What the stripper keeps and what it removes.
@@ -164,10 +165,11 @@ describe("prose is stripped by the parser, not by a line shape", () => {
 /**
  * This file, which writes the instruments down in order to forbid them.
  *
- * Vite excludes the importing module from its own `import.meta.glob`, measured
- * at the address rule in `houseRules.test.ts`, so this filter removes nothing
- * today. It is one line and it is what keeps the rule working if that ever
- * changes.
+ * **It used to remove nothing.** Vite excludes the importing module from its
+ * own `import.meta.glob` and the pattern was written here, so the filter was
+ * decoration over a key that was never present. The corpus comes from
+ * `tests/testModules.ts` now, which holds every test module, so this
+ * exclusion is the only thing keeping this file out of its own rule.
  */
 const SELF = "./withoutProse.test.ts";
 
@@ -281,13 +283,8 @@ function carriesAnInstrument(source: string, lang: "ts" | "tsx"): boolean {
 }
 
 function carriers(): string[] {
-  return Object.entries(TESTS)
-    .filter(
-      ([path, source]) =>
-        path !== SELF &&
-        path !== HOME &&
-        carriesAnInstrument(source, langOf(path)),
-    )
+  return testEntriesBesides(SELF, HOME)
+    .filter(([path, source]) => carriesAnInstrument(source, langOf(path)))
     .map(([path]) => path)
     .sort();
 }
@@ -417,28 +414,34 @@ describe("the stripping has one home", () => {
     expect(reactsToAMarker(String.raw`https?:\/\/[\w.]+`, "")).toBe(false);
   });
 
-  it("reads every directory of the test tree", () => {
-    // **The second half of a floor taken out of `houseRules.test.ts`, and
-    // found by recounting rather than by reading.** Fifty, against a tree of
-    // 219 keys of which `tests/pages/` is 118: a pattern narrowed to exclude
-    // that directory clears it with every page test unread, and the ratchet
-    // above then re-derives itself over a tree it can no longer see all of.
+  it("reads the test tree at all", () => {
+    // **A floor of fifty stood here, then the directory equality that
+    // replaced it, and now neither.** The floor was against 219 keys of
+    // which `tests/pages/` is 118, so a pattern excluding that directory
+    // cleared it while the ratchet above re-derived itself over a tree it
+    // could no longer see all of. The equality was the right arm in the
+    // wrong place: written beside one of the three rules reading that
+    // pattern, where the next rule carries its own copy.
+    // `tests/testModules.ts` holds it, and refuses a corpus that is not the
+    // tree rather than handing back a short one.
+    expect(() => testEntries()).not.toThrow();
+
+    // **And the two exclusions above are outside everything that module
+    // arms.** Widening one to swallow a directory is a narrowing by another
+    // route, so what this rule walks after its own filter is compared
+    // against what the tree holds. `tests/pages/` is the half a narrowing
+    // takes first, and it is more than this tree's other eight together.
     //
-    // The directories rather than a count, which is how the source side of
-    // this file states the same thing: a new top level directory under
-    // `tests/` is a decision, and a narrowing is not.
+    // **Its mutant is a future caller rather than a present one.** The
+    // exclusion accessor takes exact paths and throws on one the tree does
+    // not hold, so no caller as written can swallow a directory without
+    // listing every file in it. This is here for the caller that filters by
+    // prefix instead.
+    // **Module against module.** `testDirectories()` answers for every file,
+    // modules included or not, so comparing a module corpus against it would
+    // red the day a directory of fixtures arrives.
     expect(
-      directoriesIn(Object.keys(TESTS).map((path) => path.slice(2))),
-    ).toEqual([
-      "api",
-      "app",
-      "components",
-      "conformance",
-      "doubles",
-      "i18n",
-      "lib",
-      "pages",
-      "theme",
-    ]);
+      testDirectoriesIn(testEntriesBesides(SELF, HOME).map(([path]) => path)),
+    ).toEqual(testDirectoriesIn(testEntries().map(([path]) => path)));
   });
 });

@@ -17,7 +17,7 @@
  *
  * **`missing_since` is narrowed to non-null**, which is the only field this
  * type narrows rather than adds. Every row is here *because* the column is
- * set, so the base's `datetime | None` would make every client branch on a
+ * set, so the base's `UtcDateTime | None` would make every client branch on a
  * null the route's WHERE clause has already excluded. The guarantee lives in
  * that clause; if it ever loosens, this narrowing turns a row into a 500
  * rather than into a client rendering "missing since never", and loud is the

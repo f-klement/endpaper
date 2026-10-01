@@ -1,10 +1,9 @@
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, model_validator
 
 from models import BORROWER_NAME_MAX, names_exactly_one_borrower
-from schemas.common import RowIdField
+from schemas.common import RowIdField, UtcDateTime, UtcDateTimeIn
 from schemas.user import UserOut
 
 if TYPE_CHECKING:
@@ -24,7 +23,7 @@ class LoanCreate(BaseModel):
     loaned_to_name: str | None = Field(default=None, max_length=BORROWER_NAME_MAX)
     # Optional. Most library lending has no deadline, and demanding one would
     # make the common case worse to serve the rare one.
-    due_at: datetime | None = None
+    due_at: UtcDateTimeIn | None = None
 
     #: "Yes, I know, lend it anyway."
     #:
@@ -81,14 +80,14 @@ class LoanOut(BaseModel):
     loaned_to_user_id: int | None
     loaned_to_name: str | None = None
     loaned_by_user_id: int
-    loaned_at: datetime
+    loaned_at: UtcDateTime
     # None while the book is still out. This is what marks a loan "active";
     # there is at most one such row per book.
-    returned_at: datetime | None
+    returned_at: UtcDateTime | None
     # Optional, and only meaningful while the loan is open. `is_overdue` is
     # computed rather than stored: a stored flag would be wrong from the moment
     # the deadline passed until something wrote to the row.
-    due_at: datetime | None = None
+    due_at: UtcDateTime | None = None
     is_overdue: bool = False
     #: How many whole days past the deadline, and 0 when there is none.
     #:

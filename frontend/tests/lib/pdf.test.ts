@@ -31,6 +31,10 @@ import {
   xmpPacket,
 } from "../pdfFixtures";
 import { withoutDecompressionStream } from "./withoutDecompression";
+// One module's text from the armed corpus, which refuses a name the tree does
+// not hold. The glob this replaced took the first value of its own result and
+// cast it, so a rename handed the assertion below `undefined`.
+import { sourceText } from "../sourceModules";
 
 /**
  * How long a sweep of malformed files may take.
@@ -891,16 +895,6 @@ async function chainOfInflatedStreams(links: number) {
   });
 }
 
-/** `src/lib/pdf.ts` as text, read the way `sqlite.test.ts` reads its own. */
-function source(): string {
-  const files = import.meta.glob("../../src/lib/pdf.ts", {
-    query: "?raw",
-    import: "default",
-    eager: true,
-  });
-  return Object.values(files)[0] as string;
-}
-
 describe("what one file may spend altogether", () => {
   it("reads a file whose one stream inflates to the per stream ceiling", async () => {
     const bytes = await chainOfInflatedStreams(1);
@@ -992,7 +986,9 @@ describe("what one file may spend altogether", () => {
     // at all. Nothing structural sees either, because the ways of spending are
     // not a closed set; the three that exist are covered by the arms above and
     // by the bomb test further up.
-    expect(source().match(/this\.spent\s*[-+*/]?=/g)).toHaveLength(1);
+    expect(
+      sourceText("lib/pdf.ts").match(/this\.spent\s*[-+*/]?=/g),
+    ).toHaveLength(1);
   });
 });
 

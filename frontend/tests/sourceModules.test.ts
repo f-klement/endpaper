@@ -258,11 +258,26 @@ describe("a corpus whose enumerations disagree", () => {
   });
 });
 
+/**
+ * A file of a kind this tree does not hold, for the arm below.
+ *
+ * **Named, because the fixture is `[...INTACT, UNCLASSIFIED]` and that is
+ * satisfied by a duplicate.** Follow the remedy this module states for a new
+ * kind of file under `src/`, name it in `NOT_MODULES` and add it to
+ * `INTACT`, and the arm below goes on passing: one failure, mentioning
+ * `NOT_MODULES`, raised for the repeated entry rather than for the
+ * unclassified kind. Found on the test tree's half of this rule and carried
+ * here, which is the direction a lesson usually fails to travel.
+ */
+const UNCLASSIFIED = "theme/logo.svg";
+
 describe("a kind of file nobody has classified", () => {
   it("is refused rather than swept into the module corpus", () => {
     // Placed inside an existing directory on purpose, so the top level check
     // is silent and this is the only thing that speaks.
-    const corpus = corpusOf([...INTACT, "theme/logo.svg"]);
+    expect(NOT_MODULES).not.toContain(UNCLASSIFIED);
+    expect(INTACT).not.toContain(UNCLASSIFIED);
+    const corpus = corpusOf([...INTACT, UNCLASSIFIED]);
 
     expect(soleFailure(corpus)).toContain("NOT_MODULES");
   });

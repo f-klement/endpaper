@@ -84,8 +84,9 @@ those ten are correct indexes reported anyway, which is the cost of not guessing
 
 Which tables are children of `books` is derived from the foreign keys. Which of those
 children have a viewer of their own is pinned by hand, because a foreign key to `users` is
-not the answer: three tables here carry a `created_by_user_id` no query consults. A new child
-fails a test until somebody classifies it, so it cannot default to unguarded. Every read is
+not the answer: three tables in this schema carry a `created_by_user_id` no query consults,
+and a fourth, `custom_fields`, carries one that is read on purpose. A new child fails a test
+until somebody classifies it, so it cannot default to unguarded. Every read is
 counted, including the two written through the Shelf, so one more statement is a decision
 rather than an edit.
 
@@ -163,17 +164,28 @@ it hangs off has already been through the Shelf.
 
 ### A custom field's name is a member's words, so who may be told it exists is a question
 
-A value is safe because it hangs off a book. A **definition** hangs off nothing: `custom_fields`
-is `id`, `name` and `kind`, with no member column, so nothing in the row says who may be told
-about it. The name is free text somebody typed, and before this it was broadcast to every
-member on every page that drew the field picker.
+A value is safe because it hangs off a book. A **definition** hangs off nothing: the row
+names at most one member, the one recorded as defining it, and it named none before that
+column existed. So for anybody else nothing in the row says who may be told about it. The
+name is free text somebody typed, and before this it was broadcast to every member on every
+page that drew the field picker.
 
 `backend/fields.py` answers it the way `backend/shelving.py` answers it for collections.
-`Fields.seen_by(db, viewer_id).listable()` admits a definition on three arms: a book the
-viewer can see holds a value in it, a book in the viewer's trash does, or no book at all does.
-`Fields.addressable(field_id)` is the same predicate for an id the caller named, and it answers
-404 from the rename and from the value write, which is the answer an id no row carries already
-gets.
+`Fields.seen_by(db, viewer_id).listable()` admits a definition on four arms: a book the
+viewer can see holds a value in it, a book in the viewer's trash does, no book at all does, or
+**this member defined it**. That arm is one of the two things
+`custom_fields.created_by_user_id` was added for: a definer whose only value lands on somebody
+else's private book fails the other three and loses the field from their own settings page.
+The other is the refusal below. `Fields.addressable(field_id)` is the same predicate
+for an id the caller named, and it answers 404 from the rename and from the value write, which
+is the answer an id no row carries already gets.
+
+**The rename can also answer 403**, which is the one refusal here that is not about existence.
+`Fields.renamable` is asked only after `addressable` has admitted the id, so the row's
+existence is already disclosed and saying whose it is adds nothing: a definer may rename their
+own field, an admin may rename any field they can address, and a field with **no** recorded
+author is renamable by anybody, which is every field defined before the column existed and
+every field in an archive taken before it.
 
 **The value write is the door that makes the list worth scoping**, because its 200 returns the
 book's whole list and every entry carries `name`. Ungated, writing a guessed id on a book of
@@ -193,10 +205,16 @@ What stays open is stated rather than left to be found.
 | the ids are consecutive integers | a filtered list reading 1, 2, 5 says rows exist between them |
 
 **The first of those is not a way back, and this section said it was.** Retyping the name gives
-you the definition and nothing else: `define` writes no value, so the three arms answer exactly
-as before and the next write is still a 404. A loop, not a recovery, which is the same pair
-`backend/shelving.py` records for collections. The way back needs an admin, whose only verb
-destroys every value under the row.
+you the definition and nothing else: `define` writes no value and takes no authorship, so the
+arms answer exactly as before and the next write is still a 404. A loop, not a recovery, which
+is the same pair `backend/shelving.py` records for collections. The way back needs an admin,
+whose only verb destroys every value under the row.
+
+**Who is in that loop narrowed when the fourth arm arrived, and the loop did not.** A member
+recorded as the field's author is admitted by that arm whatever carries it, so they never
+enter it. Everybody else does, and **on the morning of the upgrade that is everybody**: the
+migration backfills no author, and the arm matches a recorded id rather than a definer in the
+abstract.
 
 The rename's 409 no longer names the field it clashed with, which did leak a hidden name to
 anybody who guessed it.
@@ -328,7 +346,9 @@ CSP.
 The same split `delete_tag` makes, and the sharper case of it. Defining a field is additive,
 changes no book and is open to any member, exactly as inventing a tag is. Deleting one
 destroys, in one request with no undo, content every member typed by hand, on books the caller
-cannot necessarily see, and a `CustomField` records nobody as its author.
+cannot necessarily see. The row records who **defined** it, which is who may rename it, and
+that is not an owner of the content under it: the values were typed by everybody, so there is
+still nobody to ask.
 
 ## Authentication
 
@@ -842,11 +862,12 @@ every field, so one `logger.exception` would put the mail password in a log.
 so supporting it would be a supported way to print the mail password into the container
 log.
 
-### The database connection is not certificate checked and can be cleartext
+### The database connection verifies nothing by default, and says so when it downgrades
 
 **SQLite is the default and opens no socket at all**, so this is a property of choosing
 Postgres rather than of running Endpaper. It is written here because the section above
-offers the SMTP path as this project's standard, and the database URL does not hold to it.
+offers the SMTP path as this project's standard, and the database URL's default does not
+hold to it.
 
 **It is not the only outbound door that can be cleartext, and this is a pointer rather
 than a closed list.** The webhook's `http://` destination is beside the notification
@@ -856,20 +877,46 @@ under `## Catalogue requests`, which is the only one of the three whose host an 
 cannot move: the other two are addresses somebody chose, and a seeded catalogue's is a
 module constant.
 
-Pointed at a server, `DATABASE_URL` carries a password. `database.py` passes no
-`connect_args` on that path, so the connection takes `pg8000`'s defaults: a default TLS
-context with `check_hostname` set to `False` and `verify_mode` set to `CERT_NONE`, and, if
-the server does not answer the SSL request, **a session that continues in cleartext with
-nothing raised**. Neither is reachable from a `DATABASE_URL`: `connect_args` is the only
+Pointed at a server, `DATABASE_URL` carries a password. **`DATABASE_SSL_MODE` decides how
+much is checked**, in libpq's own vocabulary, and `database.py` is the one place a name
+becomes a TLS context. Nothing in `DATABASE_URL` can reach it: `connect_args` is the only
 channel an `SSLContext` arrives through, and SQLAlchemy's pg8000 dialect copies the URL's
-query string in as strings. The reading of the driver's source that establishes this sits
-beside the dependency in `backend/pyproject.toml` and is not repeated here.
+query string straight into the driver's keyword arguments. So an `?sslmode=` there is not
+ignored and is not honoured either: `pg8000.dbapi.connect` has no such parameter and raises
+`TypeError: connect() got an unexpected keyword argument 'sslmode'` on the first connection.
+Driven 2026-10-01. **That is the better outcome and it is why the wording matters**: a
+deployment that spells the mode in the URL finds out at the first connection rather than
+believing it took.
 
-So the password is exposed to anyone who can answer for the address, and the traffic to
-anyone on the path. **Keep the server on a network you trust.** Making the connection
-verify is a change to `database.py` and is on the tracker; it needs a decision about what
-the default mode is, since matching this project's SMTP standard would refuse the self
-signed certificate most self hosted deployments have.
+| mode | TLS attempted | server declines | certificate | hostname |
+|---|---|---|---|---|
+| `disable` | no | n/a | n/a | n/a |
+| `prefer`, the default | yes | **cleartext, and a warning in the log** | not checked | not checked |
+| `require` | yes | connection refused | not checked | not checked |
+| `verify-ca` | yes | connection refused | checked | not checked |
+| `verify-full` | yes | connection refused | checked | checked |
+
+`allow` is libpq's sixth name and is deliberately absent rather than approximated: it means
+cleartext first and TLS only on insistence, and the driver sends the SSL request before
+anything else or not at all. An unrecognised name is a startup failure, as is either
+setting beside a URL that is not Postgres: a TLS setting that cannot be honoured is how a
+deployment comes to believe it is encrypted.
+
+**The default is weaker than this project's SMTP standard, and the gap is the owner's
+call rather than an implementation gap.** `prefer` is exactly what this connection did
+before the setting existed, so no deployment's posture moved on the upgrade that added it.
+A self hosted Postgres is overwhelmingly a container on the same network with no
+certificate at all, so the mail module's posture as a default would refuse the ordinary
+deployment. What the ruling closed is the silence: under `prefer` the server declining the
+upgrade is logged, once per connection the pool opens, naming the modes that would refuse
+it instead.
+
+So under the default the password is still exposed to anyone who can answer for the
+address, and the traffic to anyone on the path. **Set `DATABASE_SSL_MODE=verify-full`, or
+keep the server on a network you trust.** `verify-ca` and `verify-full` need the CA inside
+the container, at `DATABASE_SSL_ROOT_CERT`, and that file **replaces** the image's trust
+store rather than adding to it, which is libpq's behaviour for `sslrootcert` and the right
+one for a certificate you issued yourself.
 
 ### The webhook URL is an admin-to-admin capability, and a blocklist would not fix it
 
@@ -1892,8 +1939,13 @@ Worth knowing before exposing this beyond a private network:
 - **Any member can exhaust the custom field allowance, and only an admin can undo it.**
   Defining a field is additive and open to everyone, deleting one is admin only, and there
   are 25 of them: 25 requests deny the whole feature library wide, the 26th answers 409, and
-  the member who made them gets 403 on the delete. Renaming has the same shape without the
-  ceiling, since any member may rename any field. That is **denial, not disclosure**, and it
+  the member who made them gets 403 on the delete. Renaming no longer has that shape, and
+  **the admin is not the valve for it**: a member may rename their own fields, and the admin's
+  rename is gated on `Fields.addressable` where the delete is deliberately ungated. So a
+  grabber who defines 25 and keeps every value on their own private books holds every label
+  against everybody, an admin included, since the resolver answers 404 before the admin arm is
+  reached. The only verb that reaches such a field is the delete, which destroys every value
+  under it. That is **denial, not disclosure**, and it
   is a different question from the define/delete asymmetry argued above, which is about who
   may destroy content. Anybody who would do it can also delete every book on the shelf, which
   is the bullet above; it is here because a reader auditing the asymmetry will ask.

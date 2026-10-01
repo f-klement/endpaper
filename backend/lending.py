@@ -311,6 +311,24 @@ class Loans:
 
     # ── Reading ───────────────────────────────────────────────────────────────
 
+    def rendered(self) -> Loans:
+        """This scope with the one load plan on it. See `RENDERED`.
+
+        **For a single loan, which `page` cannot serve.** That method applies
+        the plan itself and has to: it counts from the query **without** the
+        options, so a `selectinload` does not issue its statement for a count
+        that discards the rows. A single loan has nothing to count, so the two
+        cannot share a call site and the plan is named in two places instead
+        of being written out in two places.
+
+        **One caller**, `routers/loans._loan_with_relations`, which is both
+        single loan routes. A second caller is a decision about where the plan
+        is applied rather than an edit: the drift this closed was two routes
+        carrying a hand written trio of joins while the list routes used
+        `RENDERED`, and that is exactly what a third spelling restarts.
+        """
+        return Loans(self._query.options(*RENDERED))
+
     def with_id(self, loan_id: int) -> Loan | None:
         """One loan from this scope, or None.
 

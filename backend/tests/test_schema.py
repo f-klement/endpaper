@@ -5635,3 +5635,131 @@ class TestTheApiBoundIsTheCeilingAMigratedDatabaseInstalls:
             connection.execute(text(statement), values)
 
         assert f"ck_opds_servers_{field}" in str(refusal.value)
+
+
+class TestACustomFieldRecordsWhoDefinedIt:
+    """Revision c7b41e92f80a, and the half worth testing is the downgrade.
+
+    The upgrade is one `ALTER TABLE ... ADD COLUMN ... REFERENCES`, in place,
+    for the reason `a7c41d9e6b28` gives: SQLite does that without a rewrite
+    whenever the new column's default is NULL, and alembic will not emit it
+    because `add_column` carrying a `ForeignKey` routes through
+    `add_constraint`, which the SQLite dialect refuses.
+
+    **Dropping a column is the operation SQLite cannot do in place**, so the
+    downgrade goes through the batch context and rebuilds `custom_fields`.
+    That table is the parent of `custom_field_values`, so a rebuild is the
+    shape that orphans child rows or leaves a foreign key pointing at the
+    temporary table batch mode renames. Neither happens on alembic 1.19.1 with
+    SQLAlchemy 2.0.52, which is what these hold, and the dependency bot
+    automerges minor and patch releases of both.
+
+    **No other test puts this table through either step carrying rows.** The
+    suite builds its schema from the migrations once per worker, against an
+    empty database.
+    """
+
+    PREVIOUS = "b8f4c1a7e309"
+
+    def build_database_with_a_filled_field(self) -> None:
+        """A library with one definition and one value under it, before the
+        column."""
+        drop_everything()
+        schema.upgrade_to(self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO books (title, added_by_user_id) VALUES ('Dune', 1)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO custom_fields (name, kind) VALUES ('Bought from', 'text')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO custom_field_values (book_id, field_id, value) "
+                    "VALUES (1, 1, 'Oxfam')"
+                )
+            )
+            connection.commit()
+
+    def test_the_column_arrives(self):
+        self.build_database_with_a_filled_field()
+
+        schema.upgrade_to_head()
+
+        columns = {column["name"] for column in inspect(engine).get_columns("custom_fields")}
+        assert "created_by_user_id" in columns
+
+    def test_every_existing_field_has_no_author(self):
+        """The case that bites on day one. A backfill would invent an owner for
+        a name somebody else typed, and a refusal on a null would take the
+        rename away from the whole existing vocabulary: `fields.Fields.renamable`
+        reads null as "no author to ask" instead."""
+        self.build_database_with_a_filled_field()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT COUNT(*) FROM custom_fields "
+                        "WHERE created_by_user_id IS NOT NULL"
+                    )
+                ).scalar()
+                == 0
+            )
+
+    def test_the_values_survive_the_upgrade(self):
+        self.build_database_with_a_filled_field()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            assert (
+                connection.execute(text("SELECT value FROM custom_field_values")).scalar()
+                == "Oxfam"
+            )
+
+    def test_the_downgrade_drops_the_column_and_keeps_both_tables(self):
+        """The rebuild. A batch `drop_column` recreates `custom_fields`, which
+        is the parent of `custom_field_values`."""
+        from alembic import command
+
+        self.build_database_with_a_filled_field()
+        schema.upgrade_to_head()
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        columns = {column["name"] for column in inspect(engine).get_columns("custom_fields")}
+        assert "created_by_user_id" not in columns
+        with engine.connect() as connection:
+            assert (
+                connection.execute(text("SELECT name FROM custom_fields")).scalar()
+                == "Bought from"
+            )
+            assert (
+                connection.execute(text("SELECT value FROM custom_field_values")).scalar()
+                == "Oxfam"
+            )
+
+    def test_the_child_still_points_at_the_rebuilt_parent(self):
+        """The failure a row count cannot see: a rebuild that leaves
+        `custom_field_values.field_id` referencing the temporary table batch
+        mode renamed, so the foreign key names something that is gone and
+        refuses nothing afterwards."""
+        from alembic import command
+
+        self.build_database_with_a_filled_field()
+        schema.upgrade_to_head()
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        keys = inspect(engine).get_foreign_keys("custom_field_values")
+        assert {key["referred_table"] for key in keys} == {"books", "custom_fields"}

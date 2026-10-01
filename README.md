@@ -252,6 +252,8 @@ Environment variables:
 |---|---|---|
 | `SECRET_KEY` | dev placeholder | Signs the JWTs. **Change this.** |
 | `DATABASE_URL` | `sqlite:///$DATA_DIR/library.db` | SQLAlchemy URL, and in practice where the SQLite file goes. Postgres is the one other engine: spell it `postgresql+pg8000://user:password@host/endpaper`, and see below |
+| `DATABASE_SSL_MODE` | unset | How hard to insist on TLS to a Postgres server: `disable`, `prefer`, `require`, `verify-ca` or `verify-full`, which are libpq's names. **Leave it unset**, which means `prefer` on a Postgres URL and reads as nothing at all on a SQLite one. Setting it beside a URL that is not Postgres is a startup failure, including setting it to `prefer` or `disable`. See below |
+| `DATABASE_SSL_ROOT_CERT` | none | The CA `verify-ca` and `verify-full` check against, as a path inside the container. It replaces the image's trust store rather than adding to it |
 | `DATA_DIR` | `/app/data` | SQLite file + uploaded covers |
 | `ALLOW_REGISTRATION` | `true` | `false` closes new signups |
 | `APP_ENV` | `prod` | `dev` relaxes the startup secret-key check |
@@ -280,13 +282,24 @@ beside the dependency in `backend/pyproject.toml`. **Spell the URL
 `postgresql+pg8000://`**; a bare `postgresql://` asks SQLAlchemy for psycopg2, which is
 not here.
 
-**That connection is not certificate checked and can be cleartext, so keep the server on
-a network you trust.** The driver offers TLS and, on a server that accepts it, verifies
-neither the certificate nor the hostname; on a server that does not, it carries on in the
-clear without saying so. Nothing in `DATABASE_URL` turns verification on. This is unlike
-the mail and Telegram paths, where verification is a property rather than a default and
-cannot be relaxed at all, so a `DATABASE_URL` carrying a password does not have the
-protection those do. `docs/security.md` states the posture in full.
+**The default connection is not certificate checked and can be cleartext, so either set
+`DATABASE_SSL_MODE` or keep the server on a network you trust.** The default, `prefer`,
+offers TLS and, on a server that accepts it, verifies neither the certificate nor the
+hostname; on a server that declines, it carries on in the clear and **logs a warning
+saying so**. This is weaker than the mail path, where verification is a property rather
+than a default, cannot be relaxed at all, and a server that will not upgrade is a failure.
+The gap is deliberate: a self hosted Postgres is usually a container with no certificate,
+so the mail module's posture as a default would refuse the ordinary deployment.
+
+| `DATABASE_SSL_MODE` | Refuses | Breaks |
+|---|---|---|
+| `disable` | nothing; it offers no TLS at all | a managed server that only accepts TLS |
+| `prefer` | nothing. The downgrade is logged, not refused | nothing. It is what this connection already did |
+| `require` | a server that declines the upgrade | the usual compose Postgres, which ships with TLS off |
+| `verify-ca` | and a certificate that chains to nothing trusted | a self signed certificate with no `DATABASE_SSL_ROOT_CERT`, and a private CA that is not mounted into the container |
+| `verify-full` | and a certificate whose name is not the host in `DATABASE_URL` | reaching the server by container name or by IP, which is most of compose |
+
+`docs/security.md` states the posture in full.
 
 **Where a credential lives.** By default an admin pastes it into Settings and it is stored
 in the database. Setting the matching environment variable instead hands that job to the

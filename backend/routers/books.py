@@ -350,7 +350,7 @@ def _no_such_custom_field() -> HTTPException:
     return HTTPException(status_code=404, detail="Custom field not found")
 
 
-def _custom_field(field_id: int, db: Session, viewer_id: int) -> CustomField:
+def _custom_field(field_id: int, db: Session, fields: Fields) -> CustomField:
     """The definition at this id, if this Member may be told it exists.
 
     **This is a privacy question, and this docstring said it was not.** It was
@@ -387,7 +387,7 @@ def _custom_field(field_id: int, db: Session, viewer_id: int) -> CustomField:
     beside it. Collapsing the two, so the gate alone answers, would let an id
     no row carries past arm 3 and change what the door composes to.
     """
-    may_be_told = Fields.seen_by(db, viewer_id).addressable(field_id)
+    may_be_told = fields.addressable(field_id)
     field = db.get(CustomField, field_id)
     if field is None or not may_be_told:
         raise _no_such_custom_field()
@@ -445,9 +445,15 @@ def define_custom_field(
     A name that already exists, in any capitalisation, returns that field
     rather than a 409: somebody typing a name that is already there wants that
     field. Past `MAX_CUSTOM_FIELDS` it refuses with 409.
+
+    **The caller is recorded as the definer**, and that is what makes two
+    other things work: the field stays on their own settings page whatever
+    carries it, and they may rename it. `fields.Fields` holds both. The
+    collision above takes no authorship: a second member typing an existing
+    name gets the row and not a stake in it.
     """
     try:
-        field = custom_fields.define(db, payload.name, payload.kind)
+        field = custom_fields.define(db, payload.name, payload.kind, current_user.id)
     except custom_fields.Refused as refusal:
         raise HTTPException(status_code=409, detail=str(refusal)) from refusal
     db.commit()
@@ -471,12 +477,41 @@ def rename_custom_field(
     **404 for a field you may not be told about**, which is the answer an
     absent id already gives: see `fields.Fields.addressable`.
 
-    **Logged, like the delete beside it.** A `CustomField` records no author
-    and no timestamp, and any member may rename any field they can see, library
-    wide, so without this line the one verb that relabels content other members
-    typed is the only one leaving no trace at all.
+    **403 for a field somebody else defined**, and the two refusals are
+    different on purpose. The 404 withholds that a row exists; by the time
+    this one can fire, `addressable` has already said it does, so saying
+    whose it is adds nothing the caller did not have. `fields.Fields.renamable`
+    holds the rule, including why a field with no author is renamable by
+    anybody: that is every field defined before the column existed, and a
+    refusal there would have taken the verb away from an entire existing
+    vocabulary on the morning of the upgrade.
+
+    **An admin may rename any field they can address**, for the reason the
+    delete below is admin only: a Library wide vocabulary with a ceiling of 25
+    needs somebody who can repair a name whose author is unreachable.
+
+    **It is not the same exemption, and calling it that overstates it.** The
+    delete is deliberately ungated, so it reaches a field whose every value
+    sits on Books the admin cannot see; this is gated on `addressable` like
+    every other id door here. So for a field hidden from every admin, the only
+    verb left is the delete, which destroys every value under the row. The
+    valve for a Member who has defined the whole vocabulary is therefore
+    repair where the field is visible and destruction where it is not.
+
+    **Logged, like the delete beside it.** The log line predates the author
+    column and is not replaced by it: the column says who may rename, and the
+    line says who did, which for an admin rename is a different person.
     """
-    field = _custom_field(field_id, db, current_user.id)
+    # One `Fields` for both questions, which is that class's own rule: a
+    # second instance here would re-issue every arm the resolver had just
+    # paid for, and `renamable` asks `addressable` again by construction.
+    fields = Fields.seen_by(db, current_user.id)
+    field = _custom_field(field_id, db, fields)
+    if not current_user.is_admin and not fields.renamable(field_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the member who defined this field can rename it.",
+        )
     was = field.name
     try:
         custom_fields.rename(db, field, payload.name)
@@ -502,8 +537,9 @@ def delete_custom_field(
     same split `delete_tag` makes. Defining a field is additive and reversible
     by deleting it. Deleting one destroys, in one request and with no undo,
     something every member of the house typed by hand, on books the caller
-    cannot necessarily see. A `CustomField` records nobody as its author, so
-    there is no owner to ask.
+    cannot necessarily see. The row records who **defined** it, which is who
+    may rename it, and that is not an owner of the content under it: the
+    values were typed by everybody, so there is still nobody to ask.
 
     It is the sharper case of the two: deleting a tag takes a label off a book,
     and deleting a field takes the **content** a member wrote.
@@ -4802,7 +4838,7 @@ def set_custom_field(
     `custom_fields.link_target` for the whole list and why it is re-checked on
     every read as well as here.
     """
-    field = _custom_field(field_id, db, current_user.id)
+    field = _custom_field(field_id, db, Fields.seen_by(db, current_user.id))
     try:
         custom_fields.write(db, book, field, payload.value)
     except custom_fields.Refused as refusal:

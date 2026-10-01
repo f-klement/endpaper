@@ -231,12 +231,12 @@ repeat the argument.
 | Frontend | [`theme/patterns.ts` exports eleven names only its test imports](decisions.md#themepatternsts-exports-eleven-names-only-its-test-imports) | 411 |
 | Frontend | [A store identifier's value rule lives beside the scheme, and the Takeout reader asks it](decisions.md#a-store-identifiers-value-rule-lives-beside-the-scheme-and-the-takeout-reader-asks-it) | 1,173 |
 |  | [The reading record has one owner, and it is a second privacy rule](decisions.md#the-reading-record-has-one-owner-and-it-is-a-second-privacy-rule) | 448 |
-|  | [A write names what it made stale](decisions.md#a-write-names-what-it-made-stale) | 1,382 |
+|  | [A write names what it made stale](decisions.md#a-write-names-what-it-made-stale) | 1,557 |
 | A write names what it made stale | [A custom field renders as a link because the Library said so, and only if the value still is one](decisions.md#a-custom-field-renders-as-a-link-because-the-library-said-so-and-only-if-the-value-still-is-one) | 291 |
-| A write names what it made stale | [Deleting a custom field is admin only, defining one is not](decisions.md#deleting-a-custom-field-is-admin-only-defining-one-is-not) | 166 |
+| A write names what it made stale | [Deleting a custom field is admin only, defining one is not](decisions.md#deleting-a-custom-field-is-admin-only-defining-one-is-not) | 341 |
 | A write names what it made stale | [`MAX_CUSTOM_FIELDS` is the only ceiling the feature needs](decisions.md#max_custom_fields-is-the-only-ceiling-the-feature-needs) | 134 |
 | A write names what it made stale | [Settings is an index of six routes, and the descriptions are the page](decisions.md#settings-is-an-index-of-six-routes-and-the-descriptions-are-the-page) | 433 |
-|  | [Tooling](decisions.md#tooling) | 5,164 |
+|  | [Tooling](decisions.md#tooling) | 5,225 |
 | Tooling | [Bun, not npm](decisions.md#bun-not-npm) | 27 |
 | Tooling | [`bunfig.toml` configures a security scanner](decisions.md#bunfigtoml-configures-a-security-scanner) | 66 |
 | Tooling | [`--import-mode=importlib` for pytest](decisions.md#--import-modeimportlib-for-pytest) | 10 |
@@ -251,7 +251,7 @@ repeat the argument.
 | Tooling | [A backticked test name is an assertion about a location, and a name that is gone loses its backticks](decisions.md#a-backticked-test-name-is-an-assertion-about-a-location-and-a-name-that-is-gone-loses-its-backticks) | 315 |
 | Tooling | [The frontend has no sweep, and the route to one is recorded rather than built](decisions.md#the-frontend-has-no-sweep-and-the-route-to-one-is-recorded-rather-than-built) | 223 |
 | Tooling | [A schema driven run over every operation, and what it is allowed to claim](decisions.md#a-schema-driven-run-over-every-operation-and-what-it-is-allowed-to-claim) | 639 |
-| Tooling | [Three ways a response contradicted the schema that declares it, and one 500](decisions.md#three-ways-a-response-contradicted-the-schema-that-declares-it-and-one-500) | 588 |
+| Tooling | [Three ways a response contradicted the schema that declares it, and one 500](decisions.md#three-ways-a-response-contradicted-the-schema-that-declares-it-and-one-500) | 649 |
 | Tooling | [Every hand raised refusal is a sentence, so none of them may use 422](decisions.md#every-hand-raised-refusal-is-a-sentence-so-none-of-them-may-use-422) | 429 |
 | Tooling | [A route that answers with no body documents none](decisions.md#a-route-that-answers-with-no-body-documents-none) | 311 |
 | Tooling | [A route declares every answer it files, and no rule chooses between them](decisions.md#a-route-declares-every-answer-it-files-and-no-rule-chooses-between-them) | 277 |
@@ -822,4 +822,11 @@ repeat the argument.
 |  | [An instrument's output is a sample until somebody derives the population](decisions.md#an-instruments-output-is-a-sample-until-somebody-derives-the-population) | 1,033 |
 |  | [A bound widened inside an extraction is recorded, and the arm pinning it has an expiry](decisions.md#a-bound-widened-inside-an-extraction-is-recorded-and-the-arm-pinning-it-has-an-expiry) | 362 |
 |  | [A stale name in prose is checkable only where the sentence spells the module](decisions.md#a-stale-name-in-prose-is-checkable-only-where-the-sentence-spells-the-module) | 383 |
+|  | [The API promises RFC 3339, so the serialiser adds the offset the column does not hold](decisions.md#the-api-promises-rfc-3339-so-the-serialiser-adds-the-offset-the-column-does-not-hold) | 709 |
+|  | [A deadline is an instant, so the browser sends the offset](decisions.md#a-deadline-is-an-instant-so-the-browser-sends-the-offset) | 269 |
+|  | [A database side default on a naive column is the one ambiguous stored value, and the wire did not make it one](decisions.md#a-database-side-default-on-a-naive-column-is-the-one-ambiguous-stored-value-and-the-wire-did-not-make-it-one) | 150 |
+|  | [The database connection's default is weaker than the mail path's, deliberately](decisions.md#the-database-connections-default-is-weaker-than-the-mail-paths-deliberately) | 348 |
+|  | [A shared corpus owes a single file caller a refusal, and the module that holds it cannot see itself](decisions.md#a-shared-corpus-owes-a-single-file-caller-a-refusal-and-the-module-that-holds-it-cannot-see-itself) | 1,233 |
+|  | [An author column on the custom field row, rather than the cheaper alternative](decisions.md#an-author-column-on-the-custom-field-row-rather-than-the-cheaper-alternative) | 240 |
+|  | [The provenance arm was widened to the declaration rather than given an exemption](decisions.md#the-provenance-arm-was-widened-to-the-declaration-rather-than-given-an-exemption) | 142 |
 <!-- index: end -->

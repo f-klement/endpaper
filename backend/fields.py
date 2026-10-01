@@ -2,10 +2,16 @@
 they may name by id.
 
 **The reading counterpart for `custom_fields`, and the seam that table was
-missing.** A `CustomField` carries no member anybody may read, so nothing in a
-row says who may be told about it: the answer is whoever may read a Book
-holding a value in it. That is a question about the Shelf, asked here once,
-rather than a clause in each of the routes that read the table whole.
+missing.** Who may be told a `CustomField` exists is mostly not a property of
+the row: it is whoever may read a Book holding a value in it. That is a
+question about the Shelf, asked here once, rather than a clause in each of the
+routes that read the table whole.
+
+**`created_by_user_id` is the one thing the row does say**, and it answers the
+two questions the Shelf cannot: a definer is told their own field exists even
+when nothing they can see carries it, and a definer may rename it. This module
+is the only reader of that column, which is what keeps the member axis in the
+same place as the Shelf axis instead of in a route.
 
 **Not `custom_fields.py`, and that is its own decision rather than a
 preference.** That module's docstring declares *no `Shelf` here*, on the ground
@@ -37,9 +43,9 @@ from shelf import Shelf
 class Fields:
     """The custom fields one Member may be told about, and may name by id.
 
-    One `Fields` per request. Each of the three reads below is issued **lazily
+    One `Fields` per request. Each of the four reads below is issued **lazily
     and once**, so a caller that asks about a single id pays only for the arms
-    that id reaches, and `listable()` over the whole table pays at most three
+    that id reaches, and `listable()` over the whole table pays at most four
     statements however many definitions there are.
 
     ## Sets of ids, never a count, and that is the difference from its two siblings
@@ -53,7 +59,7 @@ class Fields:
     published number by somebody reaching for the attribute that was already
     there.
 
-    ## Three arms, in cost order
+    ## Four arms, in cost order but for one stated exception
 
     1. **A Book this Member can see holds a value in it.** `Shelf.seen_by`, so
        the Member can already read the name off that Book: `CustomFieldValueOut`
@@ -73,14 +79,26 @@ class Fields:
        and the first value there is no carrier, so without it a Member would
        define a field and watch it fail to appear.
 
-    There is no fourth. `tags.Vocabulary` has a seeded arm because
+    4. **This Member defined it.** `CustomField.created_by_user_id`, read off
+       the class in one statement. Without it a Member who defines a field and
+       then has its only value land on somebody else's Private Book loses the
+       field from their own settings page, and retyping the name is a loop
+       rather than a recovery.
+
+       **Numbered 4 and evaluated third**, which is not a slip: arm 3 short
+       circuits on an id no row carries, so an arm behind it runs for a hidden
+       id and not for an absent one and the two 404s separate on a clock. The
+       comment in `_may_be_told` carries it and names the test.
+
+    There is no fifth. `tags.Vocabulary` has a seeded arm because
     `PREDEFINED_TAGS` is published by the mirror; nothing ships a custom field,
     so nothing here is public by construction.
 
-    **And no ownership arm**, because there is no column to read:
-    `CustomField` is `id`, `name` and `kind`. That absence is also why arm 3
-    carries more weight here than it does for a Collection, and why the
-    residual below is the one it is.
+    **The ownership arm arrived with its column**, and this class is the only
+    reader of it. Everything a `CustomField` row says about a member is read
+    here, on the class rather than on the row, which is the shape
+    `_author_of` explains and
+    `tests/test_house_rules.py::TestProvenanceColumnsAreNeverRead` requires.
 
     ## What this closes
 
@@ -112,10 +130,12 @@ class Fields:
     the constant. **State the mechanism and bound nothing**: what the oracle
     gives is a cardinality, not a name, a kind or an id, and only at the cap.
 
-    **And discovery leaves the product.** A field whose every value is on other
-    members' Private Books is gone from the picker of a Member who ought to be
-    filling it in. What replaces it is a house agreeing a field name out loud,
-    which is not a mechanism this code can offer.
+    **And discovery leaves the product, for everybody but the definer.** A
+    field whose every value is on other members' Private Books is gone from
+    the picker of a Member who ought to be filling it in. Arm 4 exempts the
+    one Member who can be named from the row and nobody else, so what replaces
+    it for the rest is a house agreeing a field name out loud, which is not a
+    mechanism this code can offer.
 
     ## The non monotonicity is the thing a reader will call a bug
 
@@ -142,11 +162,21 @@ class Fields:
       write that was going to restore arm 1 answers 404. Retyping the name is
       **a loop rather than a recoverable state**, which is the phrase
       `shelving.Shelving` already uses for the identical pair, measured a day
-      earlier. The way back needs an admin, and the admin's only verb destroys
-      every value under the row.
+      earlier.
       `tests/routers/test_books_custom_fields.py::TestNamingAHiddenFieldByItsId::
       test_retyping_the_name_is_a_loop_rather_than_a_recovery` drives both
       steps, because an arm on the write alone pins half of it.
+
+      **Who is in that loop narrowed when arm 4 arrived, and the loop itself
+      did not.** A Member recorded as a field's author does not enter it:
+      arm 4 admits their field whatever carries it, so there is nothing to
+      retype. **Every other Member does, and on the morning of the upgrade
+      that is everybody**, because the migration backfills no author and arm 4
+      admits a matching id rather than a definer in the abstract. For them the
+      way back is still an admin, whose only verb destroys every value under
+      the row. Retyping remains a loop rather than a recovery, for a set that
+      shrinks by one field each time somebody defines one, which is why this
+      bullet is narrowed rather than deleted.
     * `rename` no longer names the field it clashed with. That refusal said
       `This library already has a field called {name}` over the whole table, so
       it published a hidden name to any Member who guessed it.
@@ -157,7 +187,7 @@ class Fields:
     tell, and not closed here.
     """
 
-    __slots__ = ("_carried", "_db", "_on_the_shelf", "_trashed", "_viewer_id")
+    __slots__ = ("_authors", "_carried", "_db", "_on_the_shelf", "_trashed", "_viewer_id")
 
     def __init__(self, db: Session, viewer_id: int) -> None:
         self._db = db
@@ -165,6 +195,7 @@ class Fields:
         self._on_the_shelf: frozenset[int] | None = None
         self._trashed: frozenset[int] | None = None
         self._carried: frozenset[int] | None = None
+        self._authors: dict[int, int | None] | None = None
 
     @classmethod
     def seen_by(cls, db: Session, viewer_id: int) -> Self:
@@ -222,13 +253,43 @@ class Fields:
         """
         return self._may_be_told(field_id)
 
+    def renamable(self, field_id: int) -> bool:
+        """Whether this Member may relabel a field they may be told about.
+
+        **False is a 403 and never a 404**, which is the one place in this
+        class the two come apart. Everything else here withholds the existence
+        of a row, so the answer has to be the answer an absent id gives. This
+        predicate is asked only of a field `addressable` has already admitted,
+        so existence is disclosed before it runs and refusing in a way that
+        says "yours, not mine" gives the caller nothing they did not have.
+
+        **Three states, and the null is the one that matters on day one.**
+        A field this Member defined is theirs. A field another Member defined
+        is not. A field with **no** author belongs to nobody and keeps the rule
+        the whole table had before the column existed: any Member may rename
+        it. Every row defined before the migration is in that third state, and
+        so is every row restored from an archive taken before it, so a rule
+        that refused on a null would take the rename away from the entire
+        existing vocabulary of every deployment at once.
+
+        **An admin is not an arm here**, and that is deliberate rather than an
+        omission: this class is built from a viewer id and knows nothing about
+        roles. `rename_custom_field` holds the admin arm, beside the
+        `require_admin` the delete already carries, which keeps one question
+        about privilege in one place.
+        """
+        if not self.addressable(field_id):
+            return False
+        author = self._author_of.get(field_id)
+        return author is None or author == self._viewer_id
+
     def _may_be_told(self, field_id: int) -> bool:
-        """The one predicate both questions ask, three arms, in cost order.
+        """The one predicate both questions ask, four arms, in cost order.
 
         **In cost order and short circuiting, which is the whole statement
         budget.** Arm 1 is one statement and answers for every field this
-        Member has a value in, so the ordinary path pays one query. Arms 2 and
-        3 fire only for a field that arm did not admit.
+        Member has a value in, so the ordinary path pays one query. Arms 2, 3
+        and 4 fire only for a field the arms before them did not admit.
 
         Keeping this one function rather than two is deliberate, and
         `shelving.Shelving` gives the reason: two cooperating predicates over
@@ -238,6 +299,19 @@ class Fields:
         if field_id in self._on_a_book_this_member_sees:
             return True
         if field_id in self._in_the_trash_this_member_sees:
+            return True
+        # **Arm 4 is evaluated before arm 3, and the reason is an equality
+        # rather than a cost.** Arm 3 answers `True` for an id no row carries,
+        # so it short circuits on an **absent** field id. Arm 4 behind it
+        # would therefore run for a hidden id and not for an absent one, and
+        # the two 404s would separate by one statement on a clock, which is
+        # exactly the oracle `routers/books._custom_field` reordered its own
+        # two lines to close. Pinned by
+        # `tests/routers/test_books_custom_fields.py::
+        # TestNamingAHiddenFieldByItsId::
+        # test_an_absent_id_and_a_hidden_one_cost_the_same_statements`, which
+        # counts the whole request and fails on this order being reversed.
+        if field_id in self._defined_by_this_member:
             return True
         return field_id not in self._carried_by_any_book
 
@@ -355,3 +429,68 @@ class Fields:
             rows = self._db.query(CustomFieldValue.field_id).distinct().all()
             self._carried = frozenset(row[0] for row in rows)
         return self._carried
+
+    @property
+    def _author_of(self) -> dict[int, int | None]:
+        """Who defined each definition, for the two questions that need it.
+
+        **Read off the class and never off a row**, which is a guard's
+        requirement rather than a style: three other models carry a
+        `created_by_user_id` that nothing may consult, and
+        `tests/test_house_rules.py::TestProvenanceColumnsAreNeverRead` refuses
+        every instance read of such a name anywhere in the tree, because an
+        instance read has no statically resolvable owner. Naming the model
+        here is what tells that rule which column this is. Reading it off a
+        `CustomField` row, which is the obvious spelling, is reported and
+        should be.
+
+        **One statement for both questions**, and it is the whole table, which
+        `custom_fields.definitions` already does for the same reason:
+        `MAX_CUSTOM_FIELDS` is 25, so a per id lookup would be more statements
+        for less. Lazy like the other three reads, so a caller that never asks
+        about authorship never issues it.
+
+        **Unscoped, and it discloses nothing.** What crosses is a member id per
+        definition id, for definitions this class decides separately whether to
+        admit: `listable` filters by `_may_be_told` and `renamable` is asked
+        only after `addressable` has. A viewer scoped version of this question
+        is not available, because the question is who the author **is** rather
+        than which Books carry the field.
+
+        **`None` is a value here and not a missing key**, which is what keeps
+        `renamable` readable: a field with no author answers `None` from the
+        row, and a field id no row carries answers `None` from `dict.get`. The
+        two mean different things and neither reaches `renamable` without
+        `addressable` having answered first.
+        """
+        if self._authors is None:
+            rows = self._db.query(
+                CustomField.id, CustomField.created_by_user_id
+            ).all()
+            self._authors = {row[0]: row[1] for row in rows}
+        return self._authors
+
+    @property
+    def _defined_by_this_member(self) -> frozenset[int]:
+        """The fields this Member defined. Arm 4.
+
+        **The arm `CustomField` had no column for**, and the three above are
+        what made its absence a lockout rather than an inconvenience: a field
+        whose every value sits on another Member's Private Book fails arm 1,
+        fails arm 2, and is carried, so it fails arm 3. The Member who defined
+        it watched it leave their own settings page, and retyping the name is
+        a loop rather than a recovery, because `custom_fields.define` hands
+        back the existing row and writes nothing.
+
+        **Behind arms 1 and 2 and in front of arm 3.** Arm 1 answers for
+        every field this Member has a value in, which is the ordinary page
+        load, so a second statement in front of it would be paid on every
+        request to serve a case that is rare by construction. What puts it in
+        front of arm 3 is the statement count equality `_may_be_told`
+        explains, not the cost.
+        """
+        return frozenset(
+            field_id
+            for field_id, author in self._author_of.items()
+            if author == self._viewer_id
+        )

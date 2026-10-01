@@ -1,8 +1,7 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field, model_validator
 
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
+from schemas.common import UtcDateTime
 
 #: A book with more pages than this is a typo. Re-exported from `models` rather
 #: than restated: `ck_quotes_page_bounds` interpolates the same number into
@@ -48,7 +47,7 @@ class ProgressOut(BaseModel):
 
     id: int
     book_id: int
-    recorded_at: datetime
+    recorded_at: UtcDateTime
     page: int | None = None
     percent: int | None = None
     minutes: int | None = None

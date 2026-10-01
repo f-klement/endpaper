@@ -40,6 +40,9 @@ import {
   type MockApi,
   type StubResponse,
 } from "../../utils";
+// One module's text from the armed corpus, which refuses a name the tree does
+// not hold. The glob this replaced answered the empty string on a miss.
+import { sourceText } from "../../sourceModules";
 
 function renderLibrary(route = "/") {
   return renderHookWithProviders(() => useLibrary(), { route });
@@ -56,13 +59,6 @@ beforeEach(() => {
     body: makeBookPage([makeBook({ title: "Dune" })]),
   });
 });
-
-const HOOKS_PATH = "../../../src/pages/Home/hooks.ts";
-const HOOKS_SOURCE = import.meta.glob("../../../src/pages/Home/hooks.ts", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
 
 /** The query string of the most recent books listing request. */
 function lastQuery(): URLSearchParams {
@@ -182,12 +178,11 @@ describe("useLibrary", () => {
    * count in silence, where this fails loudly and says which arm.
    */
   describe("the filter set has one writer", () => {
-    function source(): string {
-      const raw = HOOKS_SOURCE[HOOKS_PATH] ?? "";
-      // A glob that matched nothing would make both assertions pass forever.
-      expect(raw.length).toBeGreaterThan(1000);
-      return raw;
-    }
+    // **The read refuses a module the tree does not hold**, so the length
+    // floor that used to stand here is gone: it was there because the glob
+    // this replaced answered the empty string on a miss, which makes every
+    // count below zero and every assertion pass.
+    const source = (): string => sourceText("pages/Home/hooks.ts");
 
     it("holds the filters in one piece of state", () => {
       expect(source().split("useState<BookFilters>").length - 1).toBe(1);

@@ -42,6 +42,7 @@ import {
 } from "../../../../src/pages/SettingsPage/LibrarySettingsPage/hooks";
 import { CALIBRE_SCHEMA, databaseOf } from "../../../lib/sqliteFixtures";
 import { mockApi, renderHookWithProviders, type MockApi } from "../../../utils";
+import { sourceText } from "../../../sourceModules";
 
 const require = createRequire(import.meta.url);
 
@@ -128,13 +129,16 @@ function importHook() {
   return renderHookWithProviders(() => useCalibreImport());
 }
 
-/** The hook's own source, for the one property no assertion on it can see. */
-const HOOKS_SOURCE = Object.values(
-  import.meta.glob(
-    "../../../../src/pages/SettingsPage/LibrarySettingsPage/hooks.ts",
-    { query: "?raw", import: "default", eager: true },
-  ),
-)[0] as string;
+/**
+ * The hook's own source, for the one property no assertion on it can see.
+ *
+ * **Named rather than taken as the first value of a one file glob and cast.**
+ * That cast answered `undefined` on a rename, and every `not.toMatch` below
+ * is satisfied by it.
+ */
+const HOOKS_SOURCE = sourceText(
+  "pages/SettingsPage/LibrarySettingsPage/hooks.ts",
+);
 
 describe("what a session that never opens this card pays", () => {
   it("reaches the engine through await import and never at the top", () => {

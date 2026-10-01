@@ -16,22 +16,27 @@ import {
   openSqliteFile,
 } from "../../src/lib/sqlite";
 import { databaseOf, engine } from "./sqliteFixtures";
+// One module's text from the armed corpus, which refuses a name the tree does
+// not hold. The lookup this replaced cast the first value of its own glob, so
+// a rename handed the comparison below `undefined`.
+import { sourceText } from "../sourceModules";
 
-/** One file of this repository, as text. */
-function raw(path: "../../package.json" | "../../src/lib/sqlite.ts"): string {
-  const files = {
-    "../../package.json": import.meta.glob("../../package.json", {
-      query: "?raw",
-      import: "default",
-      eager: true,
-    }),
-    "../../src/lib/sqlite.ts": import.meta.glob("../../src/lib/sqlite.ts", {
-      query: "?raw",
-      import: "default",
-      eager: true,
-    }),
-  };
-  return Object.values(files[path])[0] as string;
+/**
+ * The package manifest, as text.
+ *
+ * **Not a module of either tree**, so it has no armed corpus to come from and
+ * keeps its own glob. It is one file by name and the cast is the shape this
+ * branch removed everywhere a corpus could answer instead: what stops it
+ * being silent here is the parse below, which throws on anything that is not
+ * the manifest.
+ */
+function manifestText(): string {
+  const files = import.meta.glob("../../package.json", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  });
+  return Object.values(files)[0] as string;
 }
 
 async function open(bytes: Uint8Array) {
@@ -264,10 +269,10 @@ describe("the engine the policy was measured against", () => {
     // this the sentence justifying the relaxation goes stale with nothing red.
     // Read through `import.meta.glob`, which needs no `node:fs` and no file
     // URL: this file runs under happy-dom, where `import.meta.url` is not one.
-    const manifest = JSON.parse(raw("../../package.json")) as {
+    const manifest = JSON.parse(manifestText()) as {
       dependencies: Record<string, string>;
     };
-    const source = raw("../../src/lib/sqlite.ts");
+    const source = sourceText("lib/sqlite.ts");
 
     const pinned = manifest.dependencies["sql.js"];
     expect(pinned).toMatch(/^\d+\.\d+\.\d+$/);

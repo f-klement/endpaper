@@ -33,12 +33,10 @@ import {
   supportedExtension,
 } from "../../src/lib/fileName";
 import { BookFormat } from "../../src/api/generated/model";
-
-const SOURCE = import.meta.glob("../../src/lib/fileName.ts", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+// One module's text from the armed corpus, which refuses a name the tree does
+// not hold. The glob this replaced answered the empty string on a miss, so a
+// rename of the module turned the rule below into a rule about nothing.
+import { sourceText } from "../sourceModules";
 
 function clues(name: string, folders: string[] = []) {
   return readName({ name, folders });
@@ -374,11 +372,13 @@ describe("a name as it is printed", () => {
 });
 
 describe("the module cannot see a file", () => {
-  const source = SOURCE["../../src/lib/fileName.ts"] ?? "";
+  const source = sourceText("lib/fileName.ts");
 
   it("is reading the module it claims to", () => {
-    // A glob that matched nothing would make the two assertions below pass on
-    // an empty string forever.
+    // **The read refuses a missing module now, so this is not the anti empty
+    // string arm it used to be.** What is left for it to say is the half a
+    // throw cannot: that the subject the two assertions below are about is
+    // still in the file they are reading.
     expect(source).toContain("export function readName");
   });
 

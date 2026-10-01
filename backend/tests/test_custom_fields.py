@@ -397,16 +397,16 @@ def other_book(db, member) -> Book:
 
 
 @pytest.fixture
-def link_field(db) -> CustomField:
-    field = define(db, "Calibre-web", CustomFieldKind.URL)
+def link_field(db, member) -> CustomField:
+    field = define(db, "Calibre-web", CustomFieldKind.URL, member.id)
     db.commit()
     db.refresh(field)
     return field
 
 
 @pytest.fixture
-def text_field(db) -> CustomField:
-    field = define(db, "Bought from", CustomFieldKind.TEXT)
+def text_field(db, member) -> CustomField:
+    field = define(db, "Bought from", CustomFieldKind.TEXT, member.id)
     db.commit()
     db.refresh(field)
     return field
@@ -828,32 +828,53 @@ class TestDefiningAField:
     def test_a_field_is_defined_once_for_the_library(self, db, text_field):
         assert [field.name for field in definitions(db)] == ["Bought from"]
 
-    def test_a_name_that_already_exists_returns_that_field(self, db, text_field):
-        again = define(db, "bought FROM", CustomFieldKind.URL)
+    def test_a_name_that_already_exists_returns_that_field(self, db, member, text_field):
+        again = define(db, "bought FROM", CustomFieldKind.URL, member.id)
 
         assert again.id == text_field.id
         assert again.kind == CustomFieldKind.TEXT
 
-    def test_the_fold_is_pythons_and_not_sqlites(self, db):
+    def test_the_definer_is_recorded(self, db, member, text_field):
+        """The column `fields.Fields` reads, and the only writer of it."""
+        assert text_field.created_by_user_id == member.id
+
+    def test_a_collision_does_not_re_author_the_row(self, db, member, text_field):
+        """Authorship is who defined the name, not who last asked for it.
+
+        If a collision transferred it, the rename rule built on the column
+        would be takeable by typing an existing name, which is a way round the
+        refusal rather than a recovery from it.
+        """
+        other = User(username="second", password_hash="x")
+        db.add(other)
+        db.commit()
+        db.refresh(other)
+
+        again = define(db, "bought FROM", CustomFieldKind.URL, other.id)
+
+        assert again.id == text_field.id
+        assert again.created_by_user_id == member.id
+
+    def test_the_fold_is_pythons_and_not_sqlites(self, db, member):
         """SQLite's `lower()` is ASCII only, so a name with a non-ASCII capital
         would never match and the insert would hit the binary unique index as a
         500. Measured on `create_tag` before it was fixed."""
-        first = define(db, "Ähnliches", CustomFieldKind.TEXT)
+        first = define(db, "Ähnliches", CustomFieldKind.TEXT, member.id)
         db.commit()
 
-        assert define(db, "ähnliches", CustomFieldKind.TEXT).id == first.id
+        assert define(db, "ähnliches", CustomFieldKind.TEXT, member.id).id == first.id
 
-    def test_the_library_is_capped(self, db):
+    def test_the_library_is_capped(self, db, member):
         for index in range(25):
-            define(db, f"Field {index}", CustomFieldKind.TEXT)
+            define(db, f"Field {index}", CustomFieldKind.TEXT, member.id)
         db.commit()
 
         with pytest.raises(Refused):
-            define(db, "One too many", CustomFieldKind.TEXT)
+            define(db, "One too many", CustomFieldKind.TEXT, member.id)
 
-    def test_they_are_listed_in_the_order_they_were_defined(self, db):
+    def test_they_are_listed_in_the_order_they_were_defined(self, db, member):
         for name in ("Zebra", "Aardvark", "Moose"):
-            define(db, name, CustomFieldKind.TEXT)
+            define(db, name, CustomFieldKind.TEXT, member.id)
         db.commit()
 
         assert [field.name for field in definitions(db)] == ["Zebra", "Aardvark", "Moose"]

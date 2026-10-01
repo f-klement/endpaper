@@ -274,7 +274,16 @@ class Collection(Base):
     # would speed up. An index is a write cost, and this one would have no read
     # behind it.
     created_by_user_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=True
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True,
+        # **The marker is what the guard reads, and the prose is not.**
+        # `tests/test_house_rules.py::TestProvenanceColumnsAreNeverRead`
+        # derives its set from this key, so a column is covered because it
+        # says so here rather than because it is spelled like its neighbours.
+        # Removing the marker removes the protection, loudly: the guard
+        # asserts which columns carry it.
+        info={"provenance": "models.Collection, docs/decisions.md, docs/data-model.md"},
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -382,7 +391,10 @@ class AuthorAlias(Base):
     # Deliberately not indexed: no query consults it and there is no
     # delete-account path whose child check it would speed up.
     created_by_user_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=True
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True,
+        info={"provenance": "models.AuthorAlias"},
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -642,9 +654,14 @@ class AuthorIdentifier(Base):
 
     # Set only on a `MEMBER` row, and null on a `CATALOGUE` one by check
     # constraint. Deliberately not indexed, like `author_aliases`: no query
-    # consults it.
+    # consults it. The CHECK above is SQL and reads the column in the
+    # database; the marker is about Python, which is where a filter or an
+    # authorisation clause would be written.
     created_by_user_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=True
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True,
+        info={"provenance": "models.AuthorIdentifier, ck_author_identifiers_asserter"},
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -2585,7 +2602,9 @@ class CustomField(Base):
     **Never a privacy boundary**, the same promise `Collection` makes. A field
     is a shape, not an access rule: what may be read is decided by
     `visible_to()` on the Book the value hangs off, and nothing here is
-    consulted by that decision.
+    consulted by that decision. `created_by_user_id` does not change that and
+    is the one place the distinction has to be read carefully: it decides who
+    may **relabel** a name, and never which Books a value on it reaches.
 
     Ordered by `id` wherever it is listed, which is the order the Library
     defined them in. No `position` column: reordering is a feature nobody asked
@@ -2653,6 +2672,32 @@ class CustomField(Base):
         String(CUSTOM_FIELD_NAME_MAX), unique=True, nullable=False
     )
     kind: Mapped[CustomFieldKind] = mapped_column(String(20), nullable=False)
+
+    # **The Member who defined it, and this one is read.** It carries no
+    # `info={"provenance": ...}` for that reason: the three columns that do
+    # are promises that nothing consults them, and this is the opposite, a
+    # column added because two questions had no answer without a member axis
+    # on the row.
+    #
+    # **`fields.Fields` is the only reader**, and it reads it off the class in
+    # one query rather than off a row, which is what keeps the guard on the
+    # other three able to refuse every instance read in the tree. The two
+    # questions it answers are that class's fourth arm, a definition its
+    # author may always be told about, and `renamable`, which is who may
+    # relabel a Library wide name.
+    #
+    # **Nullable, and null is not an error.** Every row defined before this
+    # column existed has it, and so does every row from an archive taken
+    # before it. Null means the field has no author to ask, which is the
+    # state the whole table was in, so it keeps the rule it had: any Member
+    # may rename it. A new refusal that applied to those rows would take a
+    # working verb away from the library on the morning of the migration.
+    #
+    # Deliberately not indexed, like the three provenance columns: the table
+    # has a ceiling of `MAX_CUSTOM_FIELDS` rows and is read whole.
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
 
     # **No `values` relationship, deliberately.** It would be a way to read
     # every Book's value for a field from a definition nobody had to be allowed

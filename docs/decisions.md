@@ -4658,16 +4658,29 @@ in.
 
 The same split `delete_tag` makes, and the sharper case of it. Defining is additive and
 reversible by deleting; deleting destroys, in one request with no undo, content every Member
-typed by hand, on Books the caller cannot necessarily see. A `CustomField` records nobody as
-its author, so there is no owner to ask. Deleting a Tag takes a label off a Book; deleting a
-field takes the words.
+typed by hand, on Books the caller cannot necessarily see. A `CustomField` records who
+**defined** it and nobody as the owner of the content under it, so there is still no owner to
+ask about the words. Deleting a Tag takes a label off a Book; deleting a field takes the
+words.
 
-**Renaming is neither, and that is a gap rather than a third position.** Any Member may
+**Renaming is neither, and that was a gap rather than a third position.** Any Member could
 rename any field, library wide, so the verb that relabels content every other Member typed,
 on Books the caller cannot see, with no undo, was also the only one of the three leaving no
-trace. It logs the account and both names now. Who may rename is unchanged and is a ruling
-nobody has made: a vocabulary only an admin may extend goes unused, which is this entry's
-own argument for leaving defining open, and fixing a typo is the commonest rename.
+trace. It logs the account and both names now. Who may rename was recorded here as open, on
+the argument that a vocabulary only an admin may extend goes unused, which is this entry's
+own argument for leaving defining open, and that fixing a typo is the commonest rename.
+
+**Who may rename a custom field was ruled, and the column is what made the ruling possible.**
+The ground for leaving it open was that the row carried no author and no timestamp, so there
+was nobody to prefer. The delete's own paragraph above rested on the same ground and needed
+the same correction: the row names who **defined** the field, which is not an owner of the
+content under it, so the argument for the admin only delete survives and its stated reason
+did not. `CustomField.created_by_user_id` removes that ground for the rename: the definer may
+rename their own, an admin may rename any field they can address, and a field with no
+recorded author stays renamable by anybody, which is every field that existed before the
+column. The rename stays gated on `Fields.addressable`, so it is a narrower exemption than
+the admin delete, which is deliberately ungated and is the only verb that reaches a field
+hidden from every admin.
 
 ### `MAX_CUSTOM_FIELDS` is the only ceiling the feature needs
 
@@ -4998,8 +5011,9 @@ refused would otherwise be green and empty.
 Found by the schema driven run above, 2026-09-20 on builder, at 20 examples per operation:
 31 red operations of 139. **Nothing here was a schema fuzzer's opinion about style**: each
 was the committed `frontend/openapi.json`, which the TypeScript client is generated from,
-disagreeing with what the app sends. Three of the four classes are closed; the fourth is
-the only one with two readings and is the owner's.
+disagreeing with what the app sends. Three of the four classes closed here; the fourth was
+the only one with two readings and was the owner's, and it was ruled afterwards in "The API
+promises RFC 3339, so the serialiser adds the offset the column does not hold".
 
 **One server error, `PATCH /api/books/{book_id}`.** A body of `{"title": null}` reached
 `UPDATE books SET title=NULL`, SQLite refused on the NOT NULL constraint, and
@@ -5022,7 +5036,7 @@ are untouched, and clearing a nullable column still clears.
 
 | class | operations | disposition |
 |---|---|---|
-| A naive datetime against `format: date-time` | 24 | **Open, with the owner.** RFC 3339 requires an offset and these carry none |
+| A naive datetime against `format: date-time` | 24 | **Was open, with the owner, and is closed by the ruling named above.** RFC 3339 requires an offset and these carried none |
 | A 422 whose `detail` is a string | 4 | Closed: every hand raised refusal moved off 422 |
 | A 202 with no body and no content type | 2 | Closed: the schema now documents no content |
 
@@ -5046,7 +5060,9 @@ generated TypeScript client types these as `string`, so nothing in this reposito
 today. A consumer that validates, which is what publishing a schema invites, rejects them.
 So this is a decision about what the API promises rather than a bug report, and it has a
 one line home either way: `validate-formats` on the `response_schema_conformance` check
-config turns the assertion off, in the module, with the reason beside it.
+config turns the assertion off, in the module, with the reason beside it. **The ruling went
+the other way**, and the entry that records it says why going green by dropping the claim is
+not the same as going green by meeting it.
 
 ### Every hand raised refusal is a sentence, so none of them may use 422
 
@@ -20357,3 +20373,266 @@ underscore against a definition in its own diff. So what a guard here enforces i
 "a name that went stale". It is **a name this module never had**, and that second kind is
 the one no amount of care at the moment of a rename would have caught, because there was no
 rename: the only thing that catches it is a check that resolves the name against the module.
+
+## The API promises RFC 3339, so the serialiser adds the offset the column does not hold
+
+The fourth class of the schema driven run, the one with two readings, was the owner's.
+**The ruling is that the API promises RFC 3339**: the serialisers gain an offset, the
+operations go green, and the published schema means what it says. The alternative, turning
+`validate-formats` off on the conformance check, would have gone green by dropping the claim
+rather than by meeting it.
+
+**One alias, carried by every `datetime` field under `schemas/`.** `schemas.common.UtcDateTime`
+is a `datetime` carrying a `PlainSerializer`. Three choices in it are load bearing and each is
+written at its own site:
+
+* **`return_type=datetime` rather than a string.** A string return types the field as a
+  string with no format, so the schema would stop declaring `date-time` altogether. Handing
+  pydantic a datetime back leaves the declaration where it was.
+* **`when_used="json"`**, so the python mode dump stays in the column's frame. Three routes in
+  `routers/books.py` turn a request body into column values through `model_dump()`, and an
+  aware datetime in a `DateTime` column is the frame error `lending.close` records. None of
+  those bodies carries a datetime today, so this stops the first one that does rather than
+  repairing a live failure.
+* **Applied by position and not by direction.** Every `datetime` field under `schemas/` carries
+  it, the two request bodies included, because a field crosses that line the day one route
+  names its model as a `response_model`.
+
+**The column is untouched and no stored value became ambiguous.** Every `DateTime` column
+still holds naive UTC, written by `accounts.now` and read by the clocks `lending.py` names.
+What changed is one step later, at the serialiser. The backup archive is unaffected for the
+same reason: `backup.py` reads column values straight off the row and writes `isoformat()`,
+which no pydantic model sees.
+
+**What reads a dated field, and what each does now.**
+
+| Reader | Before | After |
+|---|---|---|
+| `frontend/src/lib/date.ts`, every rendered date and time | a timestamp with no offset parses as **local** time by specification, so a UTC instant rendered as the UTC clock face wearing a local label | the instant, rendered in the viewer's zone. A value near midnight moves a day |
+| The generated TypeScript client | a string | a string. No type moved, because the declaration never did |
+| The CSV, text and MARCXML exports | the date read off the row | unchanged. No export goes through a schema model |
+| `backup.py`, archive and restore | naive, round trips | unchanged |
+| `notifications.build_digest`, the overdue webhook | naive `isoformat()` | unchanged, and it is now the only dated field this server sends without an offset |
+| OPDS, SRU, Z39.50 | carry no dated field | unchanged |
+
+**What the old behaviour refused that the new one accepts: nothing.** Both forms parse in
+every reader measured. What the new one refuses is a consumer validating the published
+schema, which is the whole point, and the generated client's types are byte identical.
+
+**What a member sees change.** Every rendered timestamp moves by the viewer's offset from UTC,
+and it moves toward the truth: driven in `Europe/Berlin`, a row added at noon UTC read back as
+noon and now reads as the local afternoon.
+
+**The inbound half is a second alias, on the two fields a client writes.**
+`schemas.common.UtcDateTimeIn` is `UtcDateTime` plus an `AfterValidator` to naive UTC, on
+`LoanCreate.due_at` and `DigitalReferenceIn.file_modified_at`. **The live case is the second
+one**: the browser has always sent `file_modified_at` as an aware instant and it was assigned
+straight onto a naive column. Nothing was lost only because the offset is zero and the SQLite
+formatter ignores `tzinfo`, which is the accident `lending.close` was written about. The schema
+does not move, because a validator describes no shape.
+
+**The guard is behavioural, which is what keeps it from being a test of one object.**
+`backend/tests/schemas/test_wire_datetimes.py` pushes a naive datetime through each field's own
+annotation and asks what the JSON form carries, so a correct policy spelled another way passes
+and a field that lost one is named. Three arms stop it passing vacuously: a population floor, a
+planted bare field that must be reported, and the published components reconciled against the
+package walk. Nothing published is outside that walk and no path declares the format inline.
+
+## A deadline is an instant, so the browser sends the offset
+
+**The one dated field a client writes, and the one the serialiser ruling left wrong.**
+`LoanPanel` sent the picked day plus a bare end of day clock time with no offset, so the server
+read a member's wall clock as a UTC clock. `endOfDayInstant` in `frontend/src/lib/date.ts` now
+sends the instant at which that day ends where the viewer is.
+
+**The rendering was the smaller half.** `lending.is_overdue` compares that column against a UTC
+clock, so a library west of UTC saw a book go overdue while the day it was due still had hours
+left in it, and one east of UTC saw it stay current into the next day. Driven in four zones: a
+deadline picked as one day now renders as that day in all four, where two of them rendered the
+day after.
+
+**The zone is the browser's because this app stores no other**, in the frontend or the backend.
+The day **counts** stay the server's for the matching reason, which
+`frontend/src/pages/components/LoanRow.tsx` records.
+
+**Deadlines written before this are left alone, and that is an accepted cost rather than an
+oversight.** Nothing recorded which zone each was set in, so there is nothing to convert them
+from; one near midnight reads as the neighbouring day for a library away from UTC. The reason
+is at the site.
+
+**What this newly refuses: almost nothing.** A deadline posted with no offset is still read as
+UTC verbatim, because the string says nothing about which zone it meant. What changed is a
+deadline posted **with** one: `schemas.common.UtcDateTimeIn` converts it, where before the
+SQLite formatter dropped it and stored the wrong instant.
+
+## A database side default on a naive column is the one ambiguous stored value, and the wire did not make it one
+
+Read off the metadata and compiled against both dialects: a minority of this schema's
+`DateTime` columns carry a database side default, which is `CURRENT_TIMESTAMP` on SQLite and
+`now()` cast into a naive column on Postgres **using the session zone, which nothing in this
+tree sets**. On a server away from UTC those columns hold local wall clock while `accounts.now`
+writes UTC into the same columns.
+
+**The serialiser ruling does not cause that and does make it louder**, because the wire now
+asserts an offset over a value that may not be UTC. The fix is one site, setting the session
+zone where the SQLite pragmas are set, and it is **filed as work of its own** rather than taken
+with the ruling: the evidence is a dialect compilation and not a server, so measuring it
+against a real Postgres away from UTC is the first step rather than the last.
+
+## The database connection's default is weaker than the mail path's, deliberately
+
+`mailer.send` builds `ssl.create_default_context()` itself, takes no context from a caller, has
+no setting that relaxes it, and treats a server that will not upgrade as a failure.
+`database.py` does not hold to that by default: `DATABASE_SSL_MODE` defaults to `prefer`, which
+offers TLS, verifies nothing when the server accepts and continues in the clear when it
+declines.
+
+**That is the owner's call, not an implementation gap.** A self hosted Postgres is
+overwhelmingly a container on the same network with no certificate at all. The mail module's
+posture as a default would refuse the ordinary deployment on an upgrade nobody asked for, and
+an upgrade that breaks the ordinary deployment is one people pin away from.
+
+What the ruling does close is the **silence**. Under `prefer` a declined upgrade is logged once
+per connection the pool opens, naming the modes that would refuse it. The four other modes are
+there for an operator who wants the mail module's posture, and `verify-full` is it.
+
+**The mode cannot be spelled in the URL, and that fails loudly rather than quietly.**
+SQLAlchemy's pg8000 dialect copies the query string into the driver's keyword arguments, so an
+`sslmode` in the query reaches `pg8000.dbapi.connect`, which has no such parameter and raises
+`TypeError` on the first connection. Driven 2026-10-01. The first draft of this work called it
+inert, in two published files; it is not, and the true behaviour is the better one.
+
+**`allow` is libpq's sixth name and is absent rather than approximated.** It means cleartext
+first and TLS only if the server insists, and pg8000 sends the SSL request before anything else
+or not at all. A name accepted here that did something else would be worse than one that is
+refused.
+
+**A TLS setting the connection cannot honour is refused, never ignored**: an unknown mode name,
+a CA file under a mode that checks no certificate, a CA path the process cannot read, and
+either variable beside a URL that is not Postgres. The failure mode being refused is a
+deployment that reads its own compose file afterwards and believes the connection is protected.
+
+## A shared corpus owes a single file caller a refusal, and the module that holds it cannot see itself
+
+`frontend/tests/sourceModules.ts` ended one wave as the single enumeration of `src/`, and the
+rules walking `tests/` kept a pattern each. The reason they were left is the interesting half:
+the bundler excludes a module from its own `import.meta.glob`, so moving those patterns into one
+module changes every one of their corpora by exactly one file. **That is a population change
+wearing an extraction's clothes**, and the file it turns on is the one holding the patterns.
+
+**The answer taken here is that the shared module hands over the whole tree and supplies its own
+text by a `?raw` specifier**, which is a different module id and so a string rather than a
+cycle. Both halves of the exclusion are then pinned rather than relied on: that the text
+arrived, and that it is not also in the sweep, because if the bundler ever stops excluding the
+importer the supply becomes a duplicate and a duplicate is the failure nobody reads.
+
+**What falls out of that is the answer to the other half, which is what a reader wanting one
+file is owed.** It is a lookup against the armed corpus that throws on a name the tree does not
+hold.
+
+**The first draft of this entry justified that with a measurement that did not hold, and the
+correction took two more rounds.** It said a set of such reads were silent on a miss. Driven at
+the base by feeding each read the value its miss produces, every one of them reddened, the two
+mechanisms it named were not the ones in the tree, and the member left out of its categories was
+`tests/setup.ts`, which is the one the rule exempts: the member left out of the enumeration was
+the member left out of the experiment.
+
+**What holds is one level down, measured at arm granularity rather than at file granularity.**
+Two arms go green, both negated matches over an empty string in `frontend/tests/lib/fileName.test.ts`,
+whose anchor is an arm of its own that neither calls. Everywhere else the anchor sits in the call
+path of the arms it guards, so the file reds at the first one. **And the anchors are mostly
+redundant**: delete them all and most arms still red by themselves, because the module read is
+usually one the same file imports by static specifier, which the bundler refuses before any arm
+runs. The two that are not are `frontend/src/app/routes.tsx` and `frontend/src/index.css`.
+
+**So this is a consolidation and the entry should say so.** What the shared refusal buys is those
+two arms, a third that a tidied floor would expose, and the hand written anchors deleted. The
+sentence the corpus rule already carried, that a glob naming one module fails loudly either way,
+was right about the file and silent about the arm.
+
+**And the exclusions a rule states become live rather than decorative.** Filters in two files
+were written as an inequality against a key the bundler had already removed, so pointing one at a
+file that does not exist changed nothing. `testEntriesBesides` refuses a name the tree does not
+hold, which makes a renamed rule file a red line.
+
+**One exemption, and what survives of its argument is blast radius alone.** `tests/setup.ts` runs
+for every file in the suite, so an arming failure reached from there is every file red rather
+than the files that read the corpus. **The memory half of the first draft was refuted**:
+`frontend/vite.config.ts` sets `isolate: false`, so a worker evaluates the source corpus once and
+its text is resident already for every file that worker runs. The exemption is taken from
+`setupFiles` in that config, so pointing the suite at another file moves it, and what that buys is
+the rename case rather than the whole literal: the name is still written out one arm down.
+
+**One population widened, recorded here because a widening inside a refactor becomes folklore
+otherwise**, which is the precedent this register already sets for the `src/lib/` extraction.
+Three distinct populations were read before, by file rather than by site: the address rule's, the
+scopes that added this file back by specifier, and the stripper ratchet's. Two of the three see
+exactly the set of pre-existing files they saw before. The third, the rule refusing a module mock
+and the arm beside it that parses every file it reads, gains `frontend/tests/houseRules.test.ts`:
+that file wrote the pattern, so the bundler had been keeping it out of its own rule. It passes by
+construction rather than by luck, because the rule is parse based and every spelling of a module
+mock in that file is inside a literal or a comment rather than a call. **Literal alone was
+wrong**: of those spellings one is in a comment and one is a template literal carrying an
+interpolation, which is not a string literal.
+
+**What the rule does not reach, stated rather than claimed closed**: a `?raw` static specifier
+naming one file. It is not a glob, so nothing reads it, and it does not need to be: the bundler
+refuses a specifier naming a file that is not there, which is a failed transform rather than an
+empty result. The silent class is the one file glob, and that is what is refused.
+
+**What the test tree's corpus rule still allows.** The rule pins which files may write a pattern
+over `tests/` and what every pattern in each permitted home is, exclusions included, with the
+permitted set itself asserted against the stated homes so that shortening the allowlist is not the
+way past it. **It does not see a narrowing applied after the glob**, as a filter over the result,
+written into both corpus modules consistently: no pattern changes and no equality moves. Planted
+both ways, one change per mutant. A filter excluding the settings page directory reds; the
+identical filter excluding the authors page directory does not. **No corpus arm fires in either.**
+What caught the first is the rule about documents citing tests by name, which reaches the tree
+through the same entries accessor and fired only because two documents happen to cite files inside
+that directory. So the condition, which is the finding, is that **a subdirectory survives if no
+file in it is cited by name by a document**, and the bound moves the day a document is reworded. A
+size written here would be a property of the documentation rather than of the guard.
+
+**Closing it needs a derivation of the tree that is not a glob, and `frontend/tests/COVERAGE.md` is
+the wrong one rather than the only one**: its reporter already checks a row per collected file, and
+a corpus guard standing on it would be red on every branch that adds a test, for reasons that have
+nothing to do with the corpus, which is how a rule teaches people to edit it. A filesystem walk is
+the other candidate and is not refused here. `node:fs` is already imported across this test tree
+and the type check is green on it, so the dependency is paid, and the home's own stated reason for
+avoiding it, the global types and the browser environment's missing file URL, holds for the home
+and not for the module that checks it, which already declares a node environment. What is missing
+is a measurement of its cost and of how it behaves under the container layout, and an unmeasured
+closure is a proposal.
+
+## An author column on the custom field row, rather than the cheaper alternative
+
+Two problems came out of one absence. A member could be shut out of a field they defined, once
+somebody else's value on a private book was the only one carrying it, and retyping the name is a
+loop rather than a recovery because `custom_fields.define` hands back the existing row and writes
+nothing. And any member could relabel the whole library's vocabulary, where the delete takes an
+admin. There was no member axis on the row, so nothing else could answer either.
+
+**One column answers both.** `fields.Fields` gained a fourth arm and a `renamable` predicate, and
+it is the only reader. Null is not an error and means "no author to ask": every row defined before
+the migration has one, so does every row from an archive taken before it, and a refusal on a null
+would have taken the rename away from an entire existing vocabulary on the morning of the upgrade.
+
+**Arm 4 is evaluated before arm 3, and the order is an equality rather than a cost.** Arm 3 answers
+True for an id no row carries, so it short circuits on an absent field id. An ownership arm behind
+it would run for a hidden id and not for an absent one, and the two 404s the routes answer would
+then separate by one statement on a clock, which is the oracle the router's own custom field
+resolver had already reordered its two lines to close.
+
+## The provenance arm was widened to the declaration rather than given an exemption
+
+The rule that no module reads a column recorded as provenance keyed on the literal name
+`created_by_user_id`. It was evadable, since renaming a column slipped past it entirely, and short,
+since its one entry named `models.Collection` while `AuthorAlias` and `AuthorIdentifier` carry the
+identical promise and were covered only by sharing a spelling.
+
+**Membership is now declared at the column's own site**, as `info={"provenance": ...}`, derived off
+the mapper and asserted, and a read is permitted only where the receiver resolves to a model that
+does **not** mark the column. An instance read stays reported whatever the row is, which is a false
+refusal in the loud direction: it costs the one legitimate reader a query shaped read off the
+class. **An exemption keyed on a file or a function would have accepted every read inside it**,
+which is the trade this refuses.

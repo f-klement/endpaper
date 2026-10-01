@@ -163,6 +163,23 @@ os.environ["DATABASE_URL"] = _database_url()
 # fsync it buys was most of this suite's runtime. See database._synchronous.
 os.environ["SQLITE_SYNCHRONOUS"] = "OFF"
 
+# **Unset rather than set, and by hand, which here is the exception and not the
+# pattern.** `database.py` refuses either of these beside a URL that is not
+# Postgres, and this suite's URL is SQLite unless one job asks otherwise. So a
+# developer with one exported in their shell gets a collection error in every
+# module that imports the database, carrying a message that is correct for a
+# deployment and misleading here: it names a variable this file owns and they
+# cannot change.
+#
+# **The two loops below derive their names and each says why a hand list goes
+# stale. This is a hand list.** It stays one because the derivation that would
+# replace it is wrong rather than merely unwritten: the population is the names
+# `config.py` reads with a direct `os.getenv`, and popping all of them would pop
+# `DATA_DIR`, `DATABASE_URL` and `SECRET_KEY`, which the lines above set on
+# purpose. Add a name here when a direct read gains one the suite must not see.
+for _unset_for_the_suite in ("DATABASE_SSL_MODE", "DATABASE_SSL_ROOT_CERT"):
+    os.environ.pop(_unset_for_the_suite, None)
+
 os.environ["SECRET_KEY"] = "test-secret-key-at-least-32-characters-long"
 os.environ.setdefault("ALLOW_REGISTRATION", "true")
 # The suite exercises the startup secret guard explicitly in test_config.py;

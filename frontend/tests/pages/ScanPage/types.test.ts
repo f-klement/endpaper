@@ -40,6 +40,11 @@ import { producedValue } from "../../../src/lib/stores";
 import { TEXT_CEILINGS } from "../../../src/lib/bookBounds";
 import type { FileMetadata } from "../../../src/lib/fileReaders";
 import { CARRIES_A_BOOK } from "../../carriesABook";
+// One module's text per tree, each from the armed corpus that refuses a name
+// its tree does not hold. The array glob this replaced read both with a
+// lookup defaulting to the empty string.
+import { sourceText } from "../../sourceModules";
+import { testText } from "../../testModules";
 
 /**
  * One value per draft field, all of them set.
@@ -1032,22 +1037,18 @@ describe("draftFromAudiobook", () => {
 });
 
 describe("this module names a File exactly once", () => {
-  const SOURCE = import.meta.glob(
-    ["../../../src/pages/ScanPage/types.ts", "../../lib/fileName.test.ts"],
-    { query: "?raw", import: "default", eager: true },
-  ) as Record<string, string>;
-
   /** The source with comments removed, so a rule cannot be satisfied by prose. */
   function withoutProse(source: string): string {
     return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
   }
 
+  // **Two armed corpora rather than one glob over both trees.** The pattern
+  // this replaced was an array naming a module and a sibling test, and both
+  // halves were read with a lookup defaulting to the empty string, which is
+  // what a rename turns the rules below into: a rule about nothing. Each tree
+  // has one enumeration that refuses a name it does not hold.
   function code(): string {
-    const source = SOURCE["../../../src/pages/ScanPage/types.ts"] ?? "";
-    // A glob that matched nothing would make the assertion below pass on an
-    // empty string, which names no File at all.
-    expect(source.length).toBeGreaterThan(1000);
-    return withoutProse(source);
+    return withoutProse(sourceText("pages/ScanPage/types.ts"));
   }
 
   it("is reading the module it claims to", () => {
@@ -1064,8 +1065,7 @@ describe("this module names a File exactly once", () => {
     // no cast. Two spellings of one rule is the defect `backend/targets.py`
     // records shipping once already, so this asserts that file carries this
     // exact source text rather than trusting that somebody kept them level.
-    const sibling = SOURCE["../../lib/fileName.test.ts"] ?? "";
-    expect(sibling.length).toBeGreaterThan(1000);
+    const sibling = testText("./lib/fileName.test.ts");
     // **Stripped, like every other reading here.** Against the raw source the
     // sibling satisfies this with a comment: narrow its pattern and leave the
     // full literal in a trailing comment on the same line, and the check passes

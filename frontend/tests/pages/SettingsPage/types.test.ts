@@ -12,15 +12,10 @@ import { describe, expect, it } from "vitest";
 
 import { SETTINGS_ROUTES } from "../../../src/pages/SettingsPage/types";
 import { en } from "../../../src/i18n/en";
-
-const TYPES = import.meta.glob("../../../src/pages/SettingsPage/types.ts", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+import { sourceText } from "../../sourceModules";
 
 /** The route table's own source, for the counts its comment states. */
-const TYPES_SOURCE = Object.values(TYPES)[0] ?? "";
+const TYPES_SOURCE = sourceText("pages/SettingsPage/types.ts");
 
 /** The number words the comment is allowed to use, up to a size nobody wants. */
 /** Sentence case, for a count that opens a sentence in that comment. */
@@ -44,14 +39,14 @@ const WORDS = [
   "twelve",
 ];
 
-const ROUTES = import.meta.glob("../../../src/app/routes.tsx", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
-/** The route table, as source. One file, so the lookup is not by name. */
-const ROUTES_SOURCE = Object.values(ROUTES)[0] ?? "";
+/**
+ * The routing table, as source.
+ *
+ * **Named rather than taken as the first value of a one file glob**, which
+ * is what both reads here used to be: that answers the empty string when the
+ * module is renamed, and an empty string satisfies every rule below.
+ */
+const ROUTES_SOURCE = sourceText("app/routes.tsx");
 
 describe("SETTINGS_ROUTES", () => {
   it("is the eight the owner settled on", () => {

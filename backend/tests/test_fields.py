@@ -38,12 +38,18 @@ from datetime import UTC, datetime
 from typing import Final
 
 import pytest
+from sqlalchemy import event
 
 import custom_fields
 from enums import CustomFieldKind
 from fields import Fields
 from models import Book, CustomField, CustomFieldValue, User
-from tests.test_house_rules import _source_modules
+from tests.test_house_rules import (
+    _model_names_safe_to_resolve,
+    _receiver_model,
+    _source_modules,
+    column_mentions,
+)
 from tests.test_shelf import _book_owned_offences, _statement_at
 from tests.test_tags import _reaches_private
 
@@ -113,6 +119,28 @@ FIELD_READERS: Final = {
             "is one this Book carries a value in, which is `Fields`' first arm "
             "by construction, so the names on that payload are exactly the "
             "names the list would have shown the same caller.",
+        ),
+    ],
+    "fields.py": [
+        (
+            "_author_of: rows = self._db.query( CustomField.id, "
+            "CustomField.created_by_user_id ).all()",
+            "**two columns and never a row**, which is both the privacy bound "
+            "and the reason the statement is shaped this way. What crosses is "
+            "a member id per definition id, for definitions this class decides "
+            "separately whether to admit: `listable` filters every row through "
+            "`_may_be_told`, and `renamable` is asked only after `addressable` "
+            "has answered. No `name` and no `kind` leave here, so the read "
+            "cannot become the broadcast this module exists to close. "
+            "**Unscoped on purpose**: the question is who the author is, which "
+            "no viewer can be applied to without making it a different "
+            "question. **Read off the class rather than off a row** because "
+            "three other models carry this column name under a promise that "
+            "nothing reads it, and "
+            "`test_house_rules.py::TestProvenanceColumnsAreNeverRead` reports "
+            "every instance read of the name anywhere in the tree. The whole "
+            "table rather than one id for the reason `definitions` gives: "
+            "`MAX_CUSTOM_FIELDS` is 25.",
         ),
     ],
     "routers/books.py": [
@@ -772,8 +800,40 @@ def stranger(db) -> User:
 
 
 @pytest.fixture
-def field(db) -> CustomField:
-    row = custom_fields.define(db, "Bought from", CustomFieldKind.TEXT)
+def field(db, stranger) -> CustomField:
+    """A field **the stranger** defined.
+
+    Authored away from `viewer` deliberately: arm 4 admits a definition to its
+    own author whatever carries it, so a fixture authored by the member most
+    of these tests ask about would satisfy every arm at once and the three
+    Shelf arms would assert nothing. `defined_by_the_viewer` is the fixture for
+    the arm itself.
+    """
+    row = custom_fields.define(db, "Bought from", CustomFieldKind.TEXT, stranger.id)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@pytest.fixture
+def defined_by_the_viewer(db, viewer) -> CustomField:
+    row = custom_fields.define(db, "Shelf photo", CustomFieldKind.TEXT, viewer.id)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@pytest.fixture
+def unattributed(db) -> CustomField:
+    """A field with no author, which is every row defined before the column.
+
+    Built through the model rather than through `define`, because `define`
+    requires an author: there is no door left in the application that makes
+    one of these. The migration and an archive taken before it are the two
+    ways they exist, and both are outside this module.
+    """
+    row = CustomField(name="Shelf", kind=CustomFieldKind.TEXT)
+    db.add(row)
     db.commit()
     db.refresh(row)
     return row
@@ -802,8 +862,8 @@ class TestAFieldNoBookCarries:
         assert Fields.seen_by(db, viewer.id).listable() == [field]
         assert Fields.seen_by(db, stranger.id).listable() == [field]
 
-    def test_its_author_can_still_name_it_by_id(self, db, viewer, field) -> None:
-        """The arm the whole define flow rests on.
+    def test_anybody_can_still_name_it_by_id(self, db, viewer, field) -> None:
+        """Arm 3, and the arm the whole define flow rests on.
 
         Between defining a field and the first value there is no carrier, so
         without this arm a member defines a field and watches it fail to
@@ -884,7 +944,7 @@ class TestTheListIsNotMonotonic:
 
 class TestTheOrderIsTheOrderItWasDefinedIn:
     def test_the_filter_keeps_definition_order(self, db, viewer, field) -> None:
-        second = custom_fields.define(db, "Shelf photo", CustomFieldKind.TEXT)
+        second = custom_fields.define(db, "Shelf photo", CustomFieldKind.TEXT, viewer.id)
         db.commit()
         db.refresh(second)
 
@@ -892,3 +952,368 @@ class TestTheOrderIsTheOrderItWasDefinedIn:
             field.id,
             second.id,
         ]
+
+
+class TestTheArmForTheMemberWhoDefinedIt:
+    """Arm 4: a definer is told their own field exists, whatever carries it.
+
+    **Without it the definer is locked out and cannot get back in.** The three
+    Shelf arms ask what a Member can see, and a field whose only value sits on
+    somebody else's Private Book fails all three: not on a Book they can see,
+    not in their trash, and carried. The field leaves their own settings page,
+    and retyping the name is a loop rather than a recovery, because `define`
+    hands back the existing row and writes nothing, so nothing moves and the
+    answer does not change.
+    """
+
+    def test_the_definer_is_told_it_exists_when_only_a_hidden_book_carries_it(
+        self, db, viewer, stranger, defined_by_the_viewer
+    ) -> None:
+        _fill(db, _book(db, stranger, private=True), defined_by_the_viewer)
+
+        assert Fields.seen_by(db, viewer.id).listable() == [defined_by_the_viewer]
+
+    def test_the_definer_may_still_name_it_by_id(
+        self, db, viewer, stranger, defined_by_the_viewer
+    ) -> None:
+        """The half that matters more than the listing: `addressable` is what
+        the rename and the value write resolve through, so a definer who could
+        see the row and not act on it would be no better off."""
+        _fill(db, _book(db, stranger, private=True), defined_by_the_viewer)
+
+        assert Fields.seen_by(db, viewer.id).addressable(defined_by_the_viewer.id) is True
+
+    def test_nobody_else_is(self, db, viewer, stranger, defined_by_the_viewer) -> None:
+        """The arm admits exactly one Member, so it widens nothing: the
+        stranger carrying the value on their own Private Book still reaches it
+        through arm 1, and a third Member reaches it through none."""
+        _fill(db, _book(db, stranger, private=True), defined_by_the_viewer)
+        third = User(username="third", password_hash="x")
+        db.add(third)
+        db.commit()
+        db.refresh(third)
+
+        assert Fields.seen_by(db, third.id).listable() == []
+        assert Fields.seen_by(db, third.id).addressable(defined_by_the_viewer.id) is False
+
+    def test_an_unattributed_field_admits_nobody_through_this_arm(
+        self, db, viewer, stranger, unattributed
+    ) -> None:
+        """Null is not a member, so a row defined before the column is hidden
+        from everybody exactly as it was. The compatibility this column buys is
+        in `renamable` and never here: arm 4 cannot give a field back to
+        somebody who was never recorded as its author."""
+        _fill(db, _book(db, stranger, private=True), unattributed)
+
+        assert Fields.seen_by(db, viewer.id).listable() == []
+
+    def test_it_is_asked_before_the_unscoped_arm(
+        self, db, viewer, stranger, field
+    ) -> None:
+        """The order, pinned where the reason lives.
+
+        Arm 3 answers True for an id no row carries, so it short circuits on an
+        **absent** id. An ownership arm behind it would therefore run for a
+        hidden id and not for an absent one, and the two 404s the routes answer
+        would separate by one statement on a clock.
+
+        **An equality rather than a count**, which is the same instrument
+        `test_books_custom_fields.py` puts over the whole request: a literal
+        here would move with any arm and say nothing about the ordering.
+        Measured both ways while writing it: with arm 4 behind arm 3 the two
+        differ, which is the mutation this refuses.
+        """
+        _fill(db, _book(db, stranger, private=True), field)
+        engine = db.get_bind()
+        # Read **outside** the counter. `_fill` commits, which expires every
+        # instance in this session, so the first measured call would otherwise
+        # pay a refresh of `viewer` and the second would not: the first version
+        # of this read 5 against 4 and the difference was the fixture.
+        viewer_id = viewer.id
+        hidden_id = field.id
+
+        def statements(field_id: int) -> int:
+            seen: list[str] = []
+
+            def record(conn, cursor, statement, *rest):
+                seen.append(statement)
+
+            event.listen(engine, "before_cursor_execute", record)
+            try:
+                Fields.seen_by(db, viewer_id).addressable(field_id)
+            finally:
+                event.remove(engine, "before_cursor_execute", record)
+            return len(seen)
+
+        hidden = statements(hidden_id)
+        absent = statements(999999)
+
+        assert hidden > 0, "nothing was counted, so this arm measured nothing"
+        assert absent == hidden, (
+            f"an absent field id costs {absent} statements and a hidden one "
+            f"{hidden}, so the two 404s are separable on a clock"
+        )
+
+
+class TestWhoMayRenameAField:
+    """`renamable`, which is the only question here that is not about privacy.
+
+    Existence is already disclosed by the time it is asked: the route resolves
+    through `addressable` first, so this decides a 403 and never a 404.
+    """
+
+    def test_the_definer_may(self, db, viewer, defined_by_the_viewer) -> None:
+        assert Fields.seen_by(db, viewer.id).renamable(defined_by_the_viewer.id) is True
+
+    def test_another_member_may_not(self, db, stranger, defined_by_the_viewer) -> None:
+        assert (
+            Fields.seen_by(db, stranger.id).renamable(defined_by_the_viewer.id) is False
+        )
+
+    def test_a_field_with_no_author_is_renamable_by_anybody(
+        self, db, viewer, stranger, unattributed
+    ) -> None:
+        """The compatibility rule, and the one that bites on day one.
+
+        Every row defined before the column has a null here, and so does every
+        row from an archive taken before it. Refusing on a null would take the
+        rename away from an entire existing vocabulary on the morning of the
+        upgrade.
+        """
+        assert Fields.seen_by(db, viewer.id).renamable(unattributed.id) is True
+        assert Fields.seen_by(db, stranger.id).renamable(unattributed.id) is True
+
+    def test_a_field_the_member_may_not_be_told_about_is_not_renamable(
+        self, db, viewer, stranger, field
+    ) -> None:
+        """`addressable` first, so the 403 can never be reached for a field
+        whose existence is withheld. The route answers 404 for this one."""
+        _fill(db, _book(db, stranger, private=True), field)
+
+        assert Fields.seen_by(db, viewer.id).renamable(field.id) is False
+
+    def test_an_id_no_row_carries_answers_like_an_unattributed_field(
+        self, db, viewer
+    ) -> None:
+        """True, and it is the route that refuses it.
+
+        Arm 3 admits an id no row carries and the authorship lookup finds no
+        row, so this answers exactly as it does for a field with no author.
+        `rename_custom_field` resolves the row through `_custom_field` first
+        and answers 404, which is the answer an absent id already gets, so the
+        permissiveness here is unreachable. Pinned because the obvious
+        "hardening" is to make this False, and that would make an absent id and
+        an unattributed one answer differently one layer down.
+        """
+        assert Fields.seen_by(db, viewer.id).renamable(999999) is True
+
+
+class TestFieldsIsTheOnlyReaderOfTheAuthorColumn:
+    """The containment three published sentences argue the design from.
+
+    `fields.py`, `models.py` and `docs/data-model.md` each say this module is
+    the only reader of `custom_fields.created_by_user_id`. That is the privacy
+    containment the whole member axis rests on: the column decides who may
+    relabel a library wide name, and a second reader is a second place an
+    authorization clause can be written.
+
+    **Nothing enforced it, and the obvious guard does not.**
+    `tests/test_house_rules.py::TestProvenanceColumnsAreNeverRead` refuses
+    reads of the three columns that promise nothing consults them, and
+    `CustomField` is deliberately not one of those: it marks no column, so a
+    router reading this one **off the class** is cleared by that rule by
+    construction. Only reading it off a row is reported there, and a route
+    writing a filter would read it off the class. Measured 2026-10-01 by
+    planting exactly that in a router: zero offenders.
+
+    ## It is the shared walk and the shared resolver, not an attribute match
+
+    **The first version of this class was keyed on the literal receiver name**
+    and both its plant arms planted that one spelling, which is a guard's
+    author choosing the case the guard covers. Driven, it saw the live reader
+    and was blind to an aliased import, a module qualified read, a constant
+    `getattr`, a row read, and **the same authorization clause written as a
+    `filter_by` keyword** that the rule one file away had just learned to
+    catch for the other three columns.
+
+    So it asks `column_mentions` for the spellings and `_receiver_model` for
+    the model, which are the two functions that rule already uses, rather than
+    widening a matcher of its own.
+
+    **What one instrument buys is narrower than "the lesson cannot fail to
+    travel", which is what this paragraph claimed.** It buys that a spelling
+    **added** there reaches both rules. It equally makes one place to be short
+    for both at once, and that is how `setattr` was missed: the shared walk
+    carried the read side twin and not the write side one, so this class
+    inherited the gap **from** the shared walk, and the rule next door, which
+    asks only about reads, could never have surfaced it. The design is still
+    the right one; the guarantee is not the one the sentence claimed.
+
+    **Why an unresolvable receiver counts as a read here.** Three other models
+    carry this column name under a promise that nothing consults them, so a
+    read naming one of those is already refused tree wide and a row read
+    cannot be told from it. A mention this walk cannot attribute is therefore
+    either that refusal, which is zero, or a read of this column, which has to
+    be in `fields.py`. Counting it loudly is the only answer that does not
+    rest on guessing which row it was.
+    """
+
+    #: The attribute, on the model the reads name it through.
+    AUTHOR: Final = "created_by_user_id"
+
+    #: The module the author column may be read in, and the one it may be
+    #: written in. Two names rather than a count, so the failure says which.
+    READER: Final = "fields.py"
+    WRITER: Final = "custom_fields.py"
+
+    def _census(self) -> tuple[set[str], set[str]]:
+        """Modules reading the author column, and modules writing it.
+
+        A write is a keyword on a bare name callee, which is the constructor.
+        A module qualified constructor is **not** one, and arrives in the
+        reading half: `column_mentions` says why, and the direction is loud.
+        """
+        readers: set[str] = set()
+        writers: set[str] = set()
+        for name, source in _source_modules().items():
+            tree = ast.parse(source)
+            resolvable = _model_names_safe_to_resolve(tree)
+            for mention in column_mentions(tree, {self.AUTHOR}):
+                owner = _receiver_model(mention.receiver, resolvable)
+                if mention.builds_a_row:
+                    if owner == "CustomField":
+                        writers.add(name)
+                else:
+                    # **Every non write mention, whoever it resolves to.** A
+                    # read naming one of the three marked models is already
+                    # refused tree wide, so it is zero, and a row read cannot
+                    # be told from one. Either way the module is reading this
+                    # column and has to be the one module that may.
+                    readers.add(name)
+        return readers, writers
+
+    def test_one_module_reads_it(self) -> None:
+        readers, _writers = self._census()
+
+        assert readers == {self.READER}, (
+            "something outside `fields.Fields` reads which member defined a "
+            "custom field. Three published sentences say that module is the "
+            "only reader, and a second one is a second place the question of "
+            "who may relabel a library wide name gets answered."
+        )
+
+    def test_one_module_writes_it(self) -> None:
+        _readers, writers = self._census()
+
+        assert writers == {self.WRITER}, (
+            "something outside `custom_fields.define` records who defined a "
+            "field. Authorship is set once, at the definition, and a second "
+            "writer is how it becomes transferable."
+        )
+
+    #: Every spelling the first version of this class was blind to, and the
+    #: live one it did see.
+    #:
+    #: **Planted by a reader who is not the author of the matcher they beat**,
+    #: which is the rule this repository states about who chooses an evasion.
+    #: The first version's own two plants were both the spelling it was keyed
+    #: on, and came back clean.
+    BLIND = (
+        ("the live spelling", "from models import CustomField\nx = CustomField.created_by_user_id\n"),
+        ("an aliased import", "from models import CustomField as CF\nx = CF.created_by_user_id\n"),
+        ("the module route", "import models\nx = models.CustomField.created_by_user_id\n"),
+        (
+            "a constant getattr",
+            "from models import CustomField\n"
+            "x = getattr(CustomField, 'created_by_user_id')\n"
+        ),
+        ("a row read", "def f(row):\n    return row.created_by_user_id\n"),
+        (
+            "the filter clause",
+            "from models import CustomField\n"
+            "rows = db.query(CustomField).filter_by(created_by_user_id=1).all()\n",
+        ),
+        # **The write side spellings, which land here rather than in the
+        # writer census**, for the reason `test_a_write_is_told_from_a_read`
+        # gives. They are in this list because the equality they red is this
+        # one, so this is where a reopening would be caught.
+        (
+            "a setattr",
+            "def f(row):\n    setattr(row, 'created_by_user_id', 1)\n",
+        ),
+        (
+            "an attribute assignment",
+            "def f(row):\n    row.created_by_user_id = 1\n",
+        ),
+    )
+
+    @pytest.mark.parametrize(("shape", "source"), BLIND, ids=[name for name, _ in BLIND])
+    def test_the_walk_sees_every_spelling_of_a_read(self, shape: str, source: str) -> None:
+        """A guard is not evidence until somebody has tried to evade it, and an
+        equality over a walk is only as good as what the walk sees."""
+        tree = ast.parse(source)
+        resolvable = _model_names_safe_to_resolve(tree)
+        reads = [
+            mention
+            for mention in column_mentions(tree, {self.AUTHOR})
+            if not mention.builds_a_row
+        ]
+
+        assert reads, shape
+        assert all(
+            _receiver_model(mention.receiver, resolvable) != "Collection"
+            for mention in reads
+        )
+
+    #: The write spellings, plus the two that are not writes and must not be
+    #: counted as one.
+    WRITES = (
+        (
+            "a bare constructor",
+            "from models import CustomField\nrow = CustomField(created_by_user_id=1)\n",
+            True,
+        ),
+        (
+            "an aliased constructor",
+            "from models import CustomField as CF\nrow = CF(created_by_user_id=1)\n",
+            True,
+        ),
+        (
+            "a module qualified constructor",
+            "import models\nrow = models.CustomField(created_by_user_id=1)\n",
+            False,
+        ),
+        (
+            "a filter clause, which is a read",
+            "from models import CustomField\nq = db.query(CustomField).filter_by(created_by_user_id=1)\n",
+            False,
+        ),
+    )
+
+    @pytest.mark.parametrize(
+        ("shape", "source", "is_a_write"), WRITES, ids=[name for name, _, _ in WRITES]
+    )
+    def test_a_write_is_told_from_a_read(
+        self, shape: str, source: str, is_a_write: bool
+    ) -> None:
+        """**Every write whose callee is not a bare name is counted as a read**,
+        which is a false refusal and the loud direction: it reds the reader
+        equality, whose message names the right concern, rather than slipping
+        past the writer one.
+
+        Four shapes land there and this sentence used to name one: the module
+        qualified constructor; an attribute assignment,
+        `row.created_by_user_id = 1`, which is an `ast.Attribute` like any
+        other; `setattr` with a constant name; and a Core `values()` clause on
+        either an insert or an update, which is a keyword on a method call.
+        Pinned so nobody reads the asymmetry as an accident."""
+        tree = ast.parse(source)
+        resolvable = _model_names_safe_to_resolve(tree)
+        writes = [
+            mention
+            for mention in column_mentions(tree, {self.AUTHOR})
+            if mention.builds_a_row
+            and _receiver_model(mention.receiver, resolvable) == "CustomField"
+        ]
+
+        assert bool(writes) is is_a_write, shape

@@ -29,6 +29,7 @@ import { describe, expect, it } from "vitest";
 import { Locale } from "../../src/api/generated/model";
 import {
   clockTime,
+  endOfDayInstant,
   longMonthDate,
   monthLabel,
   numericDate,
@@ -82,6 +83,73 @@ describe("clockTime", () => {
       "2:05:07 PM",
     );
     expect(clockTime("2026-08-19T14:05:07", Locale.de)).toBe("14:05:07");
+  });
+});
+
+describe("endOfDayInstant", () => {
+  it("sends the end of the picked day as an instant", () => {
+    // **Derived rather than written out, and that is forced.** The answer
+    // depends on where the run is: measured, `2026-08-19T21:59:59.000Z` in
+    // `Europe/Berlin` against `2026-08-19T23:59:59.000Z` under the suite's own
+    // UTC. A literal pins whichever zone the run happened to be in.
+    //
+    // The numeric constructor rather than the parser the module uses, so this
+    // states the intent in a second expression instead of calling the first.
+    // Month 7 is August.
+    expect(endOfDayInstant("2026-08-19")).toBe(
+      new Date(2026, 7, 19, 23, 59, 59).toISOString(),
+    );
+  });
+
+  it("carries an offset, which is the whole reason it exists", () => {
+    // The old spelling sent the bare wall clock and the server read it as a
+    // UTC clock, so a deadline landed late by the viewer's offset.
+    //
+    // **This restates the intent; it does not discriminate a case the equality
+    // admits.** It cannot fail while that one passes, because the comparison's
+    // right hand side is a `toISOString()` and every one of those ends in `Z`.
+    // It is kept because it names the behaviour as a sentence, and because it
+    // is the floor if somebody later weakens the equality to a looser match.
+    //
+    // **And no further assertion can say more here**, which is written down so
+    // the next reader stops trying. Under `TZ=UTC`, which is what the suite
+    // container runs, this function and the one regression it exists to
+    // prevent, parsing the picked day as UTC rather than as local, are the
+    // same function: no expression over their output tells them apart, and a
+    // round trip through `Date` does not either. Pinning the suite's zone is
+    // the only thing that can catch it and is filed as work of its own.
+    expect(endOfDayInstant("2026-08-19")).toMatch(/Z$/);
+  });
+
+  it("answers nothing for a day that is not there", () => {
+    expect(endOfDayInstant(null)).toBeNull();
+    expect(endOfDayInstant(undefined)).toBeNull();
+    expect(endOfDayInstant("")).toBeNull();
+  });
+
+  it("answers nothing for a day it cannot read", () => {
+    // `toISOString` raises `RangeError` on an invalid date, and this is called
+    // from a click handler: thrown from there it replaces the app shell, since
+    // `app/providers.tsx` holds the only error boundary.
+    expect(endOfDayInstant("not a date")).toBeNull();
+    expect(endOfDayInstant("2026-13-01")).toBeNull();
+    expect(endOfDayInstant("2026-")).toBeNull();
+  });
+
+  it("answers nothing for a year the server cannot parse", () => {
+    // Past 9999 `toISOString` emits the expanded form,
+    // `+010000-01-01T00:00:00.000Z`, and the server answers 422 for that
+    // spelling. `lib/digitalReference.ts` carries the same bound over a
+    // `File.lastModified`, and the year is read in UTC at both sites because
+    // the expanded form is a property of the spelling rather than of the local
+    // date.
+    //
+    // **One residual is left open rather than closed**: `2026-02-30` is an
+    // impossible day that `Date` rolls over into March, so it returns an
+    // instant rather than null. A date input cannot produce one, and the
+    // string this function replaced rolled it identically.
+    expect(endOfDayInstant("10000-01-01")).toBeNull();
+    expect(endOfDayInstant("275760-09-13")).toBeNull();
   });
 });
 

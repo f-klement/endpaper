@@ -917,17 +917,6 @@ describe("what a scheme's own producers write", () => {
 });
 
 describe("the store seam reaches its readers and they do not reach back", () => {
-  // **`import.meta.glob` and not `node:fs`**, and its own copy rather than the
-  // one further down this file, for the reason that one states: a rule keeps
-  // the helper it reads with, and this file runs under happy-dom, where
-  // `import.meta.url` is not a `file:` URL and `fileURLToPath` throws before an
-  // assertion runs.
-  const SOURCE = import.meta.glob("../../src/lib/stores.ts", {
-    query: "?raw",
-    import: "default",
-    eager: true,
-  }) as Record<string, string>;
-
   /** An import or export with a `from` clause, and whether it is type only. */
   const FROM_CLAUSE =
     /\b(?:import|export)\b\s*(type\b\s*)?[^;]*?from\s*"([^"]+)"/g;
@@ -951,9 +940,8 @@ describe("the store seam reaches its readers and they do not reach back", () => 
     // same cycle is in its temporal dead zone. So an inline `import { type X }`
     // counts as eager here, which is the safe direction and is what the file
     // seam's version of this rule states too.
-    const source = SOURCE["../../src/lib/stores.ts"];
-    expect(source).toBeDefined();
-    const statements = [...source!.matchAll(FROM_CLAUSE)];
+    const source = sourceText("lib/stores.ts");
+    const statements = [...source.matchAll(FROM_CLAUSE)];
     // A pattern that stopped matching would make the assertion below pass for
     // ever, so what it found is anchored first.
     expect(statements.length).toBeGreaterThan(0);
@@ -977,10 +965,10 @@ describe("the store seam reaches its readers and they do not reach back", () => 
     // statement whose `await import` lands on an indented continuation line,
     // and one inside a top level block or after a label; neither is written
     // here and prettier produces neither at this width.
-    expect([...source!.matchAll(/^\s*import\s*"[^"]+"/gm)]).toEqual([]);
-    const dynamic = [...source!.matchAll(/await\s+import\s*\(/g)];
+    expect([...source.matchAll(/^\s*import\s*"[^"]+"/gm)]).toEqual([]);
+    const dynamic = [...source.matchAll(/await\s+import\s*\(/g)];
     expect(dynamic.length).toBeGreaterThan(0);
-    expect([...source!.matchAll(/^\S.*await\s+import\s*\(/gm)]).toEqual([]);
+    expect([...source.matchAll(/^\S.*await\s+import\s*\(/gm)]).toEqual([]);
   });
 });
 

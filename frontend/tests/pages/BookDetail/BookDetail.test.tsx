@@ -1193,9 +1193,12 @@ describe("BookDetail enrichment fields", () => {
 });
 
 describe("BookDetail lending with a due date", () => {
-  it("sends the chosen date as the end of that day", async () => {
+  it("sends the chosen date as the end of that day where the member is", async () => {
     // Midnight would make a book due "today" overdue from the moment it was
-    // lent, which is not what anyone means by a return date.
+    // lent, which is not what anyone means by a return date. The offset is the
+    // other half, and the larger one: without it the server reads this wall
+    // clock as a UTC clock, so the overdue predicate fired seven hours early
+    // in Los Angeles. `lib/date.ts::endOfDayInstant` carries the rest.
     stubLoad();
     api.on(/\/api\/loans$/, { body: makeLoan() });
     renderDetail(OWNER);
@@ -1211,9 +1214,22 @@ describe("BookDetail lending with a due date", () => {
     });
     await user.click(screen.getByRole("button", { name: "Loan" }));
 
+    // **A literal is not available here and that is the point.** The correct
+    // body differs between the suite container, which runs UTC, and a
+    // developer machine: measured, `2026-09-01T23:59:59.000Z` against
+    // `2026-09-01T21:59:59.000Z` in `Europe/Berlin`. A literal pins whichever
+    // zone the run happened to be in and reddens everywhere else.
+    //
+    // **Built from parts rather than from the string the component parses**,
+    // so this states the intent in a second expression instead of calling the
+    // component's own. Month 8 is September. It is still an equality, so a
+    // dropped offset fails on the string rather than passing on an instant
+    // that happens to match.
+    const endOfThePickedDay = new Date(2026, 8, 1, 23, 59, 59);
+
     await waitFor(() =>
       expect(api.lastCall(/\/api\/loans$/, "POST")?.body).toMatchObject({
-        due_at: "2026-09-01T23:59:59",
+        due_at: endOfThePickedDay.toISOString(),
       }),
     );
   });
