@@ -18,6 +18,25 @@ Like Endpaper or find it useful? Offer me a coffee. It helps pay for the public
 server that lets two copies of Endpaper reach each other. All features are free
 either way.
 
+## Motivation
+
+**A book that has been read once goes back on a shelf and stops being a book anybody reads.**
+Most of a household's library is like that: finished, kept because it was good, and invisible
+to everybody who might want it next. The people who would most enjoy a particular book are
+usually the ones already in the same building, the same street or the same group of friends,
+and none of them knows it is there.
+
+Endpaper exists to make a shelf legible to the people around it. Catalogue what you own once,
+and then the question "does anybody have a copy of this" has an answer, as does the more
+interesting question of what is sitting on somebody else's shelf that you would never have
+gone looking for. Lending is tracked because the practical obstacle to lending a book is not
+generosity, it is forgetting who has it.
+
+It is self hosted for the same reason. A record of what you read is not something to hand to
+a company, a shelf is a private thing until its owner decides otherwise, and nothing here
+needs an account with anybody. Books that are private stay private, and what you share is a
+decision you make per book rather than a setting you forget.
+
 ## Quick Start
 
 Run the published image. No build step, nothing to clone:
@@ -135,6 +154,33 @@ A **public catalogue** is there if you want one, off by default and behind two
 switches: library mode changes what a cataloguer sees and publishes nothing, and
 publishing is a second, separate decision. Private books stay private in every
 mode.
+
+## Usage
+
+**Getting books in.** Open the app on a phone and point the camera at a barcode, or type an
+ISBN, and the catalogues above fill in the record. For books already on disk, point Endpaper
+at a folder of ebooks and it drafts a row out of each file, reading what the file itself
+says rather than guessing from its name. A spreadsheet or an export from another cataloguing
+tool can be imported instead. Anything the lookup gets wrong is editable afterwards, and a
+book with no ISBN at all can be typed in by hand.
+
+**Organising them.** Shelves, collections and tags are yours to invent. Custom fields cover
+whatever the standard record leaves out, such as which box a book is in or where a copy was
+bought. Several copies of one title are held as copies of one book rather than as duplicates
+that have to be kept in step by hand.
+
+**Sharing them.** Every book is private or shared, decided per book. A shared book is visible
+to the other members of your library, who can see that it exists, who has it, and whether it
+is currently lent out. Lending records who took a book and when, so the answer to "where did
+that go" is in the catalogue rather than in somebody's memory.
+
+**Reading them.** Mark a book as reading or finished, rate it, and keep notes and quotes
+against it. Reading status belongs to the member rather than to the book, so two people
+reading the same copy do not overwrite each other.
+
+**Finding them.** Search covers titles, authors, series, subjects and identifiers, and the
+same catalogue is reachable from an ebook reader through OPDS, so the shelf shows up in the
+reading app rather than only in a browser.
 
 ## Local Development
 
@@ -370,3 +416,29 @@ signed in as a real member this way.
 and open Settings. The API key is stored in the database and never shown again after saving.
 
 Design notes (data model, the privacy rule, auth, testing) are in [`docs/`](docs/).
+
+## Contributing
+
+Bug reports, questions and patches are all welcome. **For anything larger than a small fix,
+open an issue first**, because the reasoning behind a surprising decision is usually written
+down somewhere and it is cheaper to read it than to rediscover it.
+
+Set up a local checkout with *Local Development* above, and run the suites and the linters in
+*Testing* before proposing a change. Both suites run offline, so neither needs credentials or
+a network.
+
+A few conventions are load bearing, and a change that ignores them will be sent back:
+
+- **Tests mirror the source tree and are never beside the file they test.** `backend/tests/`
+  mirrors `backend/`, and `frontend/tests/` mirrors `frontend/src/`.
+- **Every query that returns or counts books goes through `backend/shelf.py`.** Visibility is
+  applied by construction there. Omitting it is how private books leak with a 200 and no
+  error, which is the one defect class this codebase guards hardest.
+- **Write tersely, and explain why rather than what.** A comment that guards a trap says what
+  breaks if it is removed. Prose that merely restates the code is deleted.
+- **No dashes as punctuation.** Use a colon, a comma or a full stop. This is enforced by a
+  test, so a dash will fail the suite rather than a review.
+
+**Read [`docs/decisions.md`](docs/decisions.md) before changing something that looks wrong.**
+It records what was already tried and why the current shape was chosen, and a good proportion
+of the odd looking things in this repository are odd on purpose.
