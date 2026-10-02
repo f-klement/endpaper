@@ -9,13 +9,20 @@ gets believed:
 
 * `TestTheTwoSpellings` is the construct alone: two arms, a refusal for every
   other named dialect, and the stringifier. It says nothing about any constraint.
+* `TestTheTwoWalksOverTheRevisionsAgree` is what arms the two rule walks
+  below, and it is here rather than inside either of them because they share
+  their readers. It says nothing about any rule: it says the two ways this
+  file has of enumerating `migrations/versions/` still agree about what is in
+  it, and both of its instruments are the functions the rules themselves call.
 * `TestTheRevisionsPostgresArmIsTheModelsPostgresArm` is the second engine's
   copy of a comparison that already existed for the first: a revision writes its
   SQL out rather than importing it, so the two copies are a fact stored twice.
-  **The revisions it covers are found by type rather than listed**, so one that
-  carries a rule table is covered the moment it exists, and the comparison is a
-  **chain**: each revision's arm is the next one's starting point and the last is
-  the model.
+  **The revisions it covers are found by type rather than listed**, for both
+  rule shapes, so one that carries a rule table is covered the moment it exists.
+  For a swapped rule the comparison is a **chain**: each revision's arm is the
+  next one's starting point and the last is the model. For an added rule there
+  is no chain, and the arm saying so is
+  `::test_every_addition_is_still_the_last_text_of_its_chain`.
 * `TestEveryCheckRendersWithoutASqliteOnlyIdiom` is parametrised over
   `Base.metadata`, so a constraint added to a model is covered the moment it
   exists. **It is a token scan, and a token scan is an enumeration of an open
@@ -37,9 +44,10 @@ gets believed:
   it does not.
 """
 
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator, Mapping
 from contextlib import contextmanager
 from itertools import pairwise
+from types import ModuleType
 from typing import Final
 
 import pytest
@@ -59,9 +67,6 @@ from sqlalchemy.schema import CreateTable
 
 from database import Base, engine
 from dialect import AddedRule, DialectSQL, SwappedRule, for_bind
-from migrations.versions import (
-    b8f4c1a7e309_bound_the_bytes_three_columns_never_had as bound_the_bytes,
-)
 from models import Book  # noqa: F401  registers every table on Base.metadata
 
 SQLITE = sqlite.dialect()
@@ -198,8 +203,86 @@ class TestTheStringifierIsNotAnEngine:
         assert name != "default"
 
 
-def _revisions_carrying_swapped_rules() -> dict[str, tuple[SwappedRule, ...]]:
-    """Every revision declaring a table of `SwappedRule`, by revision id.
+def _revision_modules() -> dict[str, ModuleType]:
+    """Every module under `migrations/versions/`, by the revision it declares.
+
+    **The corpus both rule walks stand on, and therefore the one thing neither
+    of them can arm.** A narrowing written here shrinks both populations at
+    once and every rule over them goes on passing, over a corpus nobody chose.
+    `TestTheTwoWalksOverTheRevisionsAgree` is what holds it, placed beside
+    this reader rather than inside either walk, because a walk that reads this
+    one inherits the hole rather than noticing it.
+
+    **Keyed on `revision` rather than on the module name**, because that is what
+    `down_revision` points at and what `_in_chain_order` reads.
+    """
+    import importlib
+    import pkgutil
+
+    import migrations.versions as versions
+
+    found: dict[str, ModuleType] = {}
+    for module_info in pkgutil.iter_modules(versions.__path__):
+        module = importlib.import_module(f"migrations.versions.{module_info.name}")
+        found[module.revision] = module
+    return found
+
+
+def _rules_in[RuleT: tuple](
+    namespace: Mapping[str, object], shape: type[RuleT]
+) -> list[RuleT]:
+    """Every rule of `shape` one module's namespace declares.
+
+    **A namespace rather than a module, so this can be driven.** What it does
+    is a pure function of a mapping, and taking the mapping is the whole of
+    what lets `TestTheScanOverAModulesNamespace` hand it one case instead of
+    the branch resting at the rung where a comment is the only thing holding
+    it.
+
+    **Two shapes are admitted: a bare rule, and a rule carrying
+    collection that is not text.** The first version took a tuple alone; a
+    list, a bare rule and a `frozenset` each went green carrying deliberately
+    wrong SQL on both engines, while the identical payload as a tuple reddened
+    the comparisons by name, so each green was about the container rather than
+    about the rule. Both a list and a mapping are live module level idioms in
+    `migrations/versions/` rather than hypotheses.
+
+    **The bare rule is the one a reader misses**, and it is checked first for
+    a reason that reads as a redundancy: a `NamedTuple` instance is itself a
+    tuple, so it reaches the collection branch and is measured by its own
+    string fields, which match no shape.
+
+    **A mapping is read by its values**, because a rule table keyed by name is
+    the shape a dictionary takes here, and iterating a mapping yields keys.
+
+    **What is left open is a mechanism and the extent is not claimed.**
+    Membership is `all`, and it has to be, or a collection holding one rule
+    beside nine unrelated values would answer for the shape. So a collection
+    mixing the two rule shapes, or holding a rule beside anything else, is in
+    neither population, and so is a rule reached through anything that is not
+    a collection of its own.
+    """
+    rules: list[RuleT] = []
+    for value in namespace.values():
+        if isinstance(value, shape):
+            rules.append(value)
+            continue
+        if isinstance(value, str | bytes) or not isinstance(value, Collection):
+            continue
+        members = [
+            one
+            for one in (value.values() if isinstance(value, Mapping) else value)
+            if isinstance(one, shape)
+        ]
+        if len(members) == len(value):
+            rules.extend(members)
+    return rules
+
+
+def _revisions_carrying[RuleT: tuple](
+    shape: type[RuleT],
+) -> dict[str, tuple[RuleT, ...]]:
+    """Every revision declaring a table of `shape`, by revision id.
 
     **Found by type rather than by name, and the type is the fact.** A first
     version of this was a list of three revisions and their tables, because they
@@ -207,31 +290,62 @@ def _revisions_carrying_swapped_rules() -> dict[str, tuple[SwappedRule, ...]]:
     cannot be renamed. The spelling is not what makes one of these a rule table;
     the element type is. So a revision carrying one is covered the moment it
     exists, where a list was a line somebody had to remember, and the standing
-    rule says to derive rather than to add a case per spelling. Measured over
-    `migrations/versions/`: exactly the three, and nothing spurious.
+    rule says to derive rather than to add a case per spelling.
 
-    **Keyed on `revision` rather than on the module name**, because that is what
-    `down_revision` points at and what the ordering below reads.
+    **One walk for both shapes, rather than one per shape.** `AddedRule` had no
+    walk at all and was reached through the single revision that declares one,
+    so for any other revision **nothing compared an added rule's own text with
+    the model's**. On SQLite a disagreement would still surface once that
+    revision ran, as a disagreement between the migrated schema and the model
+    in `test_schema.py::TestTheMigrationsAndTheModelsAgree`; on Postgres
+    nothing in this suite can, because there is no Postgres in it. The two
+    shapes differ in what a revision does with them, not in how a reader finds
+    them, and a second copy of this function is the second place a narrowing
+    has to be noticed.
+
+    The scan itself is `_rules_in`, which takes a namespace rather than a
+    module so it can be driven directly.
     """
-    import importlib
-    import pkgutil
-
-    import migrations.versions as versions
-
-    carrying: dict[str, tuple[SwappedRule, ...]] = {}
-    for found in pkgutil.iter_modules(versions.__path__):
-        module = importlib.import_module(f"migrations.versions.{found.name}")
-        rules = tuple(
-            rule
-            for value in vars(module).values()
-            if isinstance(value, tuple)
-            and value
-            and all(isinstance(one, SwappedRule) for one in value)
-            for rule in value
-        )
+    carrying: dict[str, tuple[RuleT, ...]] = {}
+    for revision, module in _revision_modules().items():
+        rules = _rules_in(vars(module), shape)
         if rules:
-            carrying[module.revision] = rules
+            carrying[revision] = tuple(rules)
     return carrying
+
+
+def _alembics_chain() -> list[str]:
+    """Every revision Alembic chains, oldest first.
+
+    **One reader, because this file had two copies of this walk and an arm over
+    one of them.** `_revisions_carrying`'s docstring states the rule and the
+    first version of this arming broke it one function away: the agreement arm
+    read a copy of its own and `_in_chain_order` kept another, so narrowing the
+    chain reader's copy to the revisions that carry a rule left the run byte
+    for byte identical to the baseline. **No count beside that**, deliberately:
+    it would be a total over a corpus holding the file it is written in, so
+    the next test added here falsifies it in silence, and the zero difference
+    is the whole of what the sentence argues from anyway. Both callers read
+    this now, so a narrowing has one place to be written and the arm is over
+    the walk that is used rather than beside it.
+
+    It is the second instrument in `TestTheTwoWalksOverTheRevisionsAgree`, and
+    it degrades differently from the first on purpose: this globs the directory
+    and chains what it finds on `down_revision`, where `_revision_modules`
+    imports a package and reads `revision`.
+    """
+    from alembic.script import ScriptDirectory
+
+    import schema
+
+    return [
+        revision.revision
+        for revision in reversed(
+            list(
+                ScriptDirectory.from_config(schema._alembic_config()).walk_revisions()
+            )
+        )
+    ]
 
 
 def _in_chain_order(revisions: list[str]) -> list[str]:
@@ -244,28 +358,232 @@ def _in_chain_order(revisions: list[str]) -> list[str]:
     silently; `down_revision` is the fact the migration runner itself uses, and
     `pkgutil` hands the modules over in filename order, which is no order at all.
     """
-    from alembic.script import ScriptDirectory
-
-    import schema
-
-    walked = [
-        revision.revision
-        for revision in ScriptDirectory.from_config(
-            schema._alembic_config()
-        ).walk_revisions()
-    ]
-    oldest_first = list(reversed(walked))
+    oldest_first = _alembics_chain()
     return sorted(revisions, key=oldest_first.index)
 
 
-def _pg_chain() -> dict[str, list[tuple[str, SwappedRule]]]:
+def _swap_chain() -> dict[str, list[tuple[str, SwappedRule]]]:
     """Each constraint's swaps, oldest first, with the revision that made each."""
-    tables = _revisions_carrying_swapped_rules()
+    tables = _revisions_carrying(SwappedRule)
     chain: dict[str, list[tuple[str, SwappedRule]]] = {}
     for name in _in_chain_order(list(tables)):
         for rule in tables[name]:
             chain.setdefault(rule.constraint, []).append((name, rule))
     return chain
+
+
+def _added_rules() -> list[tuple[str, AddedRule]]:
+    """Every `AddedRule` any revision declares, with the revision that made it,
+    oldest revision first.
+
+    **Sorted, and not for determinism.** `pkgutil.iter_modules` sorts the
+    filenames itself, so the order is already the same on every worker and the
+    xdist collection check this file's other sort was written for does not
+    arise here. The reason is the reader: `vars()` hands a module's tables over
+    in definition order, which is an order but not one somebody reading a
+    failure would recognise, and chain order is the order the rest of this
+    file argues in.
+
+    **Read by `test_schema.py` as well**, which holds the SQLite half of the
+    comparison this file holds the Postgres half of. One walk, so a narrowing
+    is one place rather than two that drift.
+    """
+    carrying = _revisions_carrying(AddedRule)
+    return [
+        (revision, rule)
+        for revision in _in_chain_order(list(carrying))
+        for rule in sorted(
+            carrying[revision], key=lambda one: (one.table, one.constraint)
+        )
+    ]
+
+
+#: Bound once rather than called per parametrisation, and **the cost is
+#: Alembic's chain rather than the imports**. The package walk goes through
+#: `sys.modules`, so a second call re-executes nothing; `ScriptDirectory` does
+#: not, so every chain build re-executes every revision file. Driven, with a
+#: module level side effect in three revisions and each walk called twice in
+#: one process: the package walk re-executed 0 of 3, the chain walk 3 of 3. A
+#: decorator calling this for its arguments and again for its ids would pay
+#: that per parametrisation. `test_schema.py` imports both of these rather
+#: than calling either again, which is a second reason beside the one stated
+#: there.
+ADDED_RULES: Final = _added_rules()
+
+#: The same, for the chain, which both files read at import.
+SWAP_CHAIN: Final = _swap_chain()
+
+
+def _swap_rows() -> list[tuple[str, str, str]]:
+    """Every swap any revision makes, as `(revision, table, constraint)`, in
+    chain order. Held against `THE_SWAPS` from both files that read the
+    chain."""
+    return [
+        (revision, rule.table, rule.constraint)
+        for constraint in sorted(SWAP_CHAIN)
+        for revision, rule in SWAP_CHAIN[constraint]
+    ]
+
+
+#: Every swap the revisions make today, written down.
+#:
+#: **One literal, asserted from two files.** `test_schema.py` reads the chain
+#: too, and a targeted run of one file is what this repository recommends
+#: while implementing, so an exact list in one of them is green on exactly the
+#: narrowing it exists to catch whenever the other is the file being run. The
+#: fact has one home and two arms rather than two copies.
+THE_SWAPS: Final = [
+    ("f4a1c62d0b97", "author_identifiers", "ck_author_identifiers_bounds"),
+    ("b8f4c1a7e309", "book_identifiers", "ck_book_identifiers_bounds"),
+    ("b8f4c1a7e309", "catalogue_credentials", "ck_catalogue_credentials_envelope"),
+    ("a6d3f92c7b14", "catalogue_targets", "ck_catalogue_targets_indexes"),
+    ("b8f4c1a7e309", "catalogue_targets", "ck_catalogue_targets_indexes"),
+    ("f4a1c62d0b97", "custom_field_values", "ck_custom_field_values_bounds"),
+    ("f4a1c62d0b97", "custom_fields", "ck_custom_fields_name_bounds"),
+    ("a6d3f92c7b14", "opds_servers", "ck_opds_servers_base_url"),
+    ("f4a1c62d0b97", "opds_servers", "ck_opds_servers_name"),
+    ("f4a1c62d0b97", "quotes", "ck_quotes_text_bounds"),
+]
+
+
+class TestTheScanOverAModulesNamespace:
+    """`_rules_in`, driven directly rather than through a revision.
+
+    **Here because a comment was the only thing holding the branch order.**
+    The bare rule case has to run before the collection case, since a
+    `NamedTuple` is a tuple; moving it after, the way a tidy up would, loses
+    every bare rule, and was green on the whole file.
+    A reader can correctly observe that a named tuple is a tuple and conclude
+    the branch is dead, which is a strong invitation to delete it.
+
+    What the scan does is a pure function of a mapping, so arming it costs one
+    case per spelling rather than a revision per spelling.
+    """
+
+    SWAPPED = SwappedRule("t", "ck_t", "a", "a_pg", "b", "b_pg")
+    ADDED = AddedRule("t", "ck_t", "sqlite", "postgresql")
+
+    def test_a_bare_rule_is_found(self):
+        """The case the branch order decides. It reds when the two branches
+        are swapped, which no revision in the tree would show today."""
+        assert _rules_in({"_RULE": self.ADDED}, AddedRule) == [self.ADDED]
+
+    @pytest.mark.parametrize(
+        "container",
+        [
+            (ADDED,),
+            [ADDED],
+            frozenset({ADDED}),
+            {ADDED},
+            {"by name": ADDED},
+        ],
+        ids=["tuple", "list", "frozenset", "set", "mapping"],
+    )
+    def test_a_rule_carrying_collection_is_found(self, container: object):
+        """Every container spelling, including the two that are not sequences
+        and the mapping, which is read by its values because iterating one
+        yields keys."""
+        assert _rules_in({"_RULES": container}, AddedRule) == [self.ADDED]
+
+    def test_every_rule_a_container_carries_is_found(self):
+        """The membership test is arithmetic and a one element container
+        cannot see it: narrowing it to the first rule leaves every case above
+        green, because every one of them carries exactly one."""
+        second = AddedRule("u", "ck_u", "sqlite u", "postgresql u")
+
+        assert _rules_in({"_RULES": (self.ADDED, second)}, AddedRule) == [
+            self.ADDED,
+            second,
+        ]
+
+    def test_the_scan_finds_the_swapped_shape_when_that_is_the_shape_asked_for(
+        self,
+    ):
+        """Both shapes are read through this one scan, and `SwappedRule` is
+        the one no other case here passes as `shape`. A narrowing written
+        against the added shape alone would be invisible to all of them."""
+        assert _rules_in({"_RULES": (self.SWAPPED,)}, SwappedRule) == [self.SWAPPED]
+
+    def test_the_other_shape_is_not_this_population(self):
+        """The two shapes share this scan and must not share a population."""
+        assert _rules_in({"_RULES": (self.SWAPPED,)}, AddedRule) == []
+        assert _rules_in({"_RULE": self.SWAPPED}, AddedRule) == []
+
+    def test_a_rule_beside_anything_else_is_in_neither_population(self):
+        """The mechanism the docstring names, as a case rather than a
+        sentence: membership is `all`, so this is the open edge."""
+        assert _rules_in({"_RULES": (self.ADDED, "a string")}, AddedRule) == []
+
+    def test_text_is_not_a_collection_of_rules(self):
+        """`str` and `bytes` are collections, so without the exclusion a
+        module constant would be scanned character by character."""
+        assert _rules_in({"_NAME": "ck_t", "_RAW": b"ck_t"}, AddedRule) == []
+
+
+class TestTheTwoWalksOverTheRevisionsAgree:
+    """What arms both rule walks, at the readers they share.
+
+    **Named for the agreement, not for the extent.** A first version of this
+    was called "reaches every revision", which is wider than anything here
+    holds: what is asserted is that this file's two ways of enumerating
+    `migrations/versions/` describe the same set, and the name is the sentence
+    a reader of a failure sees first.
+
+    `_revisions_carrying` derives its population by importing every module
+    under `migrations/versions/`, and two rules read that population: the
+    Postgres chain below and the added rule comparison beside it. **A narrowing
+    written in `_revision_modules` moves both together**, so no comparison
+    between them can see it.
+
+    **And neither can a non emptiness assertion over either population**, which
+    is what the chain already had and the obvious thing to give the added walk
+    beside it. Most revisions carry no rule table at all, so a walk narrowed to
+    the handful that carry one today leaves both populations exactly as they
+    are. Driven with that narrowing in place: every other arm in this file is
+    green, and the first one below is the only thing that reds. A floor is
+    worse again: the added population is one rule, and there is no room under
+    one.
+
+    So `_revision_modules` is held against `_alembics_chain`, which degrades
+    differently: it globs the directory and chains what it finds on
+    `down_revision`, where the package walk imports a module and reads
+    `revision`. A filter written into either one is a disagreement here rather
+    than a smaller corpus nobody sees. **Both of this class's instruments are
+    the functions the rules themselves call**, which is the repair of a first
+    version whose second instrument was a third copy of the Alembic walk:
+    narrowing the copy `_in_chain_order` was using left this class green and
+    the whole file byte for byte at the baseline. Said of the instruments
+    rather than of the arms, because the second arm reads one of the two.
+
+    **What an agreement cannot report is the two sides narrowing together**, by
+    a filter written into both. A revision file simply going missing is not
+    that case and is loud already: Alembic raises on the dangling
+    `down_revision` the gap leaves, naming it, and a file lost from the head
+    end takes its schema work with it. **That raise comes out of
+    `_alembics_chain`, so it surfaces in the arm below** and at collection,
+    rather than somewhere a reader of this has to go and find. The second arm
+    covers the far end, an empty corpus. Between the two there is a band this
+    says nothing about.
+    """
+
+    def test_the_package_walk_and_alembics_chain_find_the_same_revisions(self):
+        found = set(_revision_modules())
+        walked = set(_alembics_chain())
+
+        assert found == walked, (
+            "the package walk and Alembic's own chain disagree about which "
+            "revisions exist, so every rule derived from one of them is over a "
+            f"corpus nobody chose: {sorted(found ^ walked)}"
+        )
+
+    def test_there_is_a_revision_to_walk_over(self):
+        """The arm above is an agreement, and two walks agree perfectly over no
+        revisions at all. That is the one shape it cannot report, so it is the
+        one asserted separately."""
+        assert _revision_modules(), (
+            "no revision module was found at all, so every walk over them is "
+            "empty and every rule derived from one passes over nothing"
+        )
 
 
 class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
@@ -294,7 +612,7 @@ class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
         """
         broken = [
             (constraint, earlier_name, later_name)
-            for constraint, swaps in _pg_chain().items()
+            for constraint, swaps in SWAP_CHAIN.items()
             for (earlier_name, earlier), (later_name, later) in pairwise(swaps)
             if " ".join(earlier.after_pg.split())
             != " ".join(later.before_pg.split())
@@ -315,32 +633,160 @@ class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
         and every rule here would pass over it. So the revisions are asserted
         before the links are.
         """
-        assert _revisions_carrying_swapped_rules(), (
+        assert _revisions_carrying(SwappedRule), (
             "no revision was found to carry a table of swapped rules, so every "
             "comparison in this class is over an empty chain"
         )
         assert [
-            constraint for constraint, swaps in _pg_chain().items() if len(swaps) > 1
+            constraint for constraint, swaps in SWAP_CHAIN.items() if len(swaps) > 1
         ]
 
+    def test_these_are_the_swaps_the_revisions_make(self):
+        """The exact list for the swapped side, which is where the room to
+        decay actually is.
+
+        **Non emptiness was the arming here and it was the wrong instrument on
+        this population.** It was refused for the added side because one rule
+        makes it vacuous, and then left standing over ten rules across three
+        revisions, which is the side with somewhere to shrink to. Driven: one
+        line inside `_revisions_carrying` dropping a single rule carrying
+        revision takes five Postgres comparisons out of the run with nothing
+        red, because the parametrisation below is derived and a missing case
+        is a case that does not exist rather than a case that fails.
+
+        **Derived through `_swap_chain` rather than through
+        `_revisions_carrying`**, so the same arm covers a narrowing written in
+        the shared reader and one written in the chain reader. Reaching for
+        the walk directly would arm the walk and leave the function between it
+        and the parametrisation unguarded, which is the shape this branch has
+        now been caught by twice.
+        """
+        assert _swap_rows() == THE_SWAPS
+
     @pytest.mark.parametrize(
-        "constraint", sorted(_pg_chain()), ids=lambda constraint: constraint
+        "constraint", sorted(SWAP_CHAIN), ids=lambda constraint: constraint
     )
     def test_the_last_revision_to_touch_a_rule_is_the_model(self, constraint: str):
-        _, rule = _pg_chain()[constraint][-1]
+        _, rule = SWAP_CHAIN[constraint][-1]
 
         assert " ".join(rule.after_pg.split()) == _declared(
             rule.table, rule.constraint, POSTGRESQL
         )
 
     @pytest.mark.parametrize(
-        "added", bound_the_bytes._ADDED, ids=lambda added: added.constraint
+        "added",
+        [rule for _, rule in ADDED_RULES],
+        ids=[f"{revision}-{rule.constraint}" for revision, rule in ADDED_RULES],
     )
     def test_every_rule_a_revision_added_agrees(self, added: AddedRule):
         """A constraint added rather than swapped has no `after_pg`, because it
-        has no `before` either. It is the same fact stored twice all the same."""
+        has no `before` either. It is the same fact stored twice all the same.
+
+        **Found by walking every revision for the shape**, as the chain above
+        is, and not by reaching into the revision that declares one today.
+        Reaching by name is how a second revision's addition would have been
+        compared against nothing: the rule nobody adds a line for is always the
+        new one.
+        """
         assert " ".join(added.postgresql.split()) == _declared(
             added.table, added.constraint, POSTGRESQL
+        )
+
+    def test_these_are_the_rules_the_revisions_add(self):
+        """Anti vacuity for that walk, and **non emptiness would not be it.**
+
+        A parametrisation over a derived population takes its cases with it
+        when the population empties. Measured, by emptying it: pytest puts a
+        **skip** where the cases were, nothing fails, and the rule above has
+        stopped existing rather than started failing. So something has to
+        assert the population from outside the parametrisation.
+
+        **A bare `assert _revisions_carrying(AddedRule)` is the wrong
+        something, because the population is one.** It witnesses that the one
+        module declaring a rule is reachable and nothing else, so it is green
+        on a walk narrowed to that module alone, which is the narrowing
+        `TestTheTwoWalksOverTheRevisionsAgree` exists for. What it cannot be
+        made to do is notice the corpus; that arm is there and this is not it.
+
+        **What this adds is the other direction**: a rule going invisible to
+        the walk, and a rule arriving unexamined. Naming the set means a second
+        revision's addition has to be written down here by somebody who checked
+        it against the model, which is the shape
+        `TestTheseAreTheConstraintsWithTwoSpellings` already has in this file.
+        """
+        assert [
+            (revision, rule.table, rule.constraint) for revision, rule in ADDED_RULES
+        ] == [("b8f4c1a7e309", "catalogue_targets", "ck_catalogue_targets_base_url")]
+
+    def test_every_addition_is_still_the_last_text_of_its_chain(self):
+        """The condition under which comparing an addition with the model is
+        the right comparison, asserted rather than assumed.
+
+        An addition is the **first** text of a constraint's chain and
+        `test_every_rule_a_revision_added_agrees` compares it against the
+        **last**, which is what the model declares. **Two things would have to
+        stay true for those to be one text**, and this asserts one of them:
+        that nothing swaps a constraint some revision added. The other is that
+        no constraint is added twice, which needs no arm of its own, because a
+        second addition of one constraint reds the exact list beside this and
+        reds whichever of the two texts is not the model's.
+
+        **This is where the widened walk refuses something legitimate.** It
+        reds **as well as** the comparisons, not instead of them: a legitimate
+        swap moves the model, so driven, the two text comparisons red naming
+        the addition and this reds naming the constraint. That is one extra
+        named failure, and it is the one that says which of the two is the
+        fault. When it fires, the fix is to fold the additions into the chain
+        `_swap_chain` builds, so an addition is a link rather than an endpoint,
+        and not to delete any of the three.
+
+        **Why that fold is not already here.** It would make the comparison
+        right in general, and it is a design change rather than a widening: an
+        addition has no `before`, so a chain that holds one needs a convention
+        for where an addition starts, and **nothing in this tree could
+        exercise that convention**, because no addition has ever been swapped.
+        A rule invented over an empty population is a rule nobody has run.
+
+        **The choice between the two is failure direction, not effort.** This
+        arm is wrong **loudly**: it refuses a correct revision at the line
+        somebody is writing it on, and they find out the same day. A
+        convention nothing exercises is wrong **quietly**, because being wrong
+        about it means a chain that agrees with itself. That is the reason
+        that survives the day somebody decides the fold is cheap after all,
+        where an argument about effort is overturned by exactly that reader.
+        """
+        added = {(rule.table, rule.constraint): rule for _, rule in ADDED_RULES}
+        last_swap = {
+            (swaps[-1][1].table, constraint): swaps[-1][1]
+            for constraint, swaps in SWAP_CHAIN.items()
+        }
+        # **Both engines, and the engine is in the message.** A first version
+        # compared the Postgres sides alone, so an addition overtaken on the
+        # SQLite arm only left this green while the addition's own comparison
+        # reddened: the refusal still happened and the arm that exists to
+        # explain it said nothing. SQLite is the engine every deployment runs,
+        # so that is the half this cannot be blind to.
+        overtaken = sorted(
+            (table, constraint, engine)
+            for (table, constraint), addition in added.items()
+            if (table, constraint) in last_swap
+            for engine, ended_on, added_as in (
+                ("sqlite", last_swap[table, constraint].after, addition.sqlite),
+                (
+                    "postgresql",
+                    last_swap[table, constraint].after_pg,
+                    addition.postgresql,
+                ),
+            )
+            if " ".join(ended_on.split()) != " ".join(added_as.split())
+        )
+
+        assert added, "no revision adds a constraint, so this asserted nothing"
+        assert not overtaken, (
+            f"{overtaken} was added with one text and its chain now ends on "
+            "another, on the engine named beside it, so the addition is no "
+            "longer the last text of its constraint and comparing it against "
+            "the model refuses a correct revision"
         )
 
 

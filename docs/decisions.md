@@ -20564,6 +20564,48 @@ that do red look like fixtures wanting new expected values. `frontend/tests/setu
 refuses a pin that is not west, with the reason in the message.
 
 
+## A branded date type was refused, and the reason is that the branding is free and the slot is impossible
+
+**Somebody will reach for this again**, because two guards over unformatted dates both say in
+their own docstrings that they close no part of the class, and a type looks like the thing
+that would. This records what three seats measured so the next reader does not re-derive it.
+
+**A branded return type refuses nothing.** A string intersected with a tag is a **subtype** of
+string, so it is accepted in a JSX child, in an attribute, in an interpolation parameter, in a
+concatenation, in a query string and in a request body. Six for six, measured against this
+tree's own compiler and React types. It costs one line, reads as progress, and closes the
+empty set.
+
+**And a display slot cannot be made to require anything.** React's node type is a type alias,
+so declaration merging on it is a duplicate identifier error, and narrowing children on the
+DOM attributes interface is a conflicting redeclaration. The only augmentation hook the
+library publishes widens the union. So a slot that requires the type can only ever be a
+bespoke component, **and nothing in the type system requires anybody to use one.**
+
+**Written against the slots this tree actually has, the discipline refuses twenty one ordinary
+sites.** One table has a single renderer type covering every column it shows, of which two are
+dates; one statistics row has six callers, three of them passing a username, a collection name
+and a tag name. Of twenty four call sites into the date module, **only three sit in a position
+a slot could be written for**, and thirteen go into a translation parameter whose function
+returns a plain string that cannot carry a brand, because a union of a brand with a string
+reduces to the string.
+
+**The working alternative was found and is also refused, on cost rather than on mechanism.**
+Branding the value coming off the wire, so a dated field fits no slot, does work: seven hand
+written files and forty lines, closing both named blind spots by construction. **It was
+refused because both of those blind spots have zero live instances**, so it buys a property
+rather than fixing a defect; because it **adds to** the two existing guards rather than
+replacing them, which the seat that modelled its erosion called its most important finding;
+and because one cast at the boundary erases the whole discipline, with three of its four
+escape routes invisible in review.
+
+**One measurement worth keeping if it is ever reconsidered.** The base type decides what is
+left open. An object wrapper permits concatenation, template interpolation and an explicit
+conversion, all of which render object notation to a reader. **A symbol base refuses the first
+two outright**, leaving only the explicit conversion. So the shape to start from is a symbol,
+not an object, and that is the opposite of the first thing anybody writes.
+
+
 ## A database side default on a naive column is the one ambiguous stored value, and the wire did not make it one
 
 Read off the metadata and compiled against both dialects: a minority of this schema's

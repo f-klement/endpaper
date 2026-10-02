@@ -96,7 +96,7 @@ def _dialect_sql_postgresql(element: DialectSQL, compiler: Any, **kw: Any) -> st
 
 @compiles(DialectSQL)
 def _dialect_sql_unsupported(element: DialectSQL, compiler: Any, **kw: Any) -> str:
-    """Every other dialect refused, and `str()` answered with the live engine.
+    """Every other dialect refused, and `str()` answered with the SQLite arm.
 
     Without the raise, SQLAlchemy renders a `ColumnElement` through whatever
     generic path it has and a third engine silently receives one of these two

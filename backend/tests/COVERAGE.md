@@ -2,8 +2,8 @@
 
 <!-- measured: begin -->
 
-**10040 tests, in 143 files**, counted by the run that reads this line.
-**The 125 rows below sum to 9031.**
+**10066 tests, in 143 files**, counted by the run that reads this line.
+**The 125 rows below sum to 9057.**
 The other 1009 tests are in 19 files this register may not name.
 The table also carries 1 file this engine does not run, stated as 0.
 <!-- measured: end -->
@@ -144,7 +144,7 @@ why the helper uses regexes.
 | `schemas/test_book.py` | 104 | **Two request bodies writing one column must agree about it.** `BookMatch` bounded four of its seventeen fields while `merge_into` wrote them all. Also the doors over `books.categories`, by the input that drives each: a separator bearing candidate among clean ones for the refusal, the count and the entry width read off their own named factors, a payload of exactly the stated width carrying bare separators for the rejoin, one subject as wide as the whole bound for the diagonal, and a field partition driven by synthetic sides including this tree's own annotated spelling and an abstract sequence; and the field partition is read against both write bodies, since the update route assigns onto a row rather than calling a constructor and needs its own refusal, its own derived pop list and its own reader over the route's source |
 | `schemas/test_settings.py` | 2 | **A row the router builds must carry every field the source describes.** The settings row is built by splatting the description into the response model |
 | `test_serialisation.py` | 47 | Assembling `BookOut`: the per-request fields, the tag suggestion by caption and by DDC number, that a tag name inside a longer word is not a caption match |
-| `test_schema.py`                           |   272 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial, and the bounds three text columns and one address column gained |
+| `test_schema.py`                           |   282 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial, and the bounds three text columns and one address column gained |
 | `schemas/test_wire_datetimes.py` | 7 | **Every dated field this API publishes carries an offset**, asked of what each field emits rather than of which policy object it names, so a second correct spelling passes and a field that lost one is reported by name. With the arms that keep it from passing vacuously: a population floor, a planted bare field, a planted container, and the published components reconciled against the walk |
 | `schemas/test_digital.py` | 31 | What a client may say about a file it holds, bounded at the schema: the root, the path beneath it and the fingerprint, each refused at its ceiling rather than trusted for its width |
 | `test_env_example.py` | 4 | **Operator documentation that goes stale silently.** That every environment name `config.py` reads appears in `.env.example` and nothing appears there that the code ignores |
@@ -152,7 +152,7 @@ why the helper uses regexes.
 | `test_database_tls_on_a_real_server.py` | 0 | That the modes refusing a downgrade refuse a server with no TLS, that the tolerant two reach it, and that the cleartext probe can still see the driver's socket. Skipped off Postgres, so this run collects none of it |
 | `test_fetch.py` | 123 | **The only door outwards.** That the body cap counts raw wire bytes and compression is never requested |
 | `test_deadline.py` | 38 | How much of a deadline is left, and which clock answers: that the two names are the whole door, that neither grows a parameter, and that the module imports nothing but the standard library |
-| `test_dialect.py` | 88 | One rule, two engines: that each dialect's arm renders where the rule is rendered and a third is refused there, that the SQLite arm of every ported constraint is the text it always was, and that no SQLite arm lost a clause the Postgres arm is allowed to omit, and that each revision's Postgres arm is the next one's starting point |
+| `test_dialect.py` | 104 | One rule, two engines: that each dialect's arm renders where the rule is rendered and a third is refused there, that the SQLite arm of every ported constraint is the text it always was, and that no SQLite arm lost a clause the Postgres arm is allowed to omit, and that each revision's Postgres arm is the next one's starting point |
 | `test_catalogue.py` | 241 | Folding what one source repeats, filling one row from another, merging two catalogues of one printing, how complete a record is, the two draft shapes, and what a source may not assert about this deployment's own files, and that rewriting a scalar after the fold refuses every collection, leaves each one the same object, and re-enters every dropper, so the locality rule needs no second belt on the import path |
 | `test_classifications.py` | 38 | **What a heading asserts, beside which file its number is in.** The kind a field carries, that a legacy row keeps its pair, and the derivation that counts the readers |
 | `test_filing.py` | 238 | **How each classification scheme's call numbers sort.** One rule per scheme answering three things: whether it recognises a number, the key that files it |

@@ -14,6 +14,7 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Final
 
 import pytest
@@ -54,6 +55,7 @@ from migrations.versions import (
     f4a1c62d0b97_bind_every_text_ceiling_on_bytes_too as bind_every_text_ceiling,
 )
 from schemas.opds import OpdsServerIn
+from tests.test_dialect import ADDED_RULES, SWAP_CHAIN, THE_SWAPS, _swap_rows
 from tests.test_filing import CORPUS
 from tests.test_house_rules import BACKEND, _python_sources
 
@@ -4473,6 +4475,151 @@ def _widest_envelope_this_application_writes() -> int:
     )
 
 
+#: Both walks are **imported rather than called again here**, so this file and
+#: `test_dialect.py` parametrise over one object. A second call built a second
+#: chain, and `test_a_revision_declares_one_to_compare` below holds `THE_SWAPS`
+#: against the walk in the *other* file: measured by narrowing this file's own
+#: binding, a case vanished from both selections with nothing red, and the same
+#: payload one level up in `_swap_chain` reds in both. It also drops **two**
+#: Alembic chain builds at collection, each re-executing every revision file,
+#: since both walks build one. The Python imports were never the cost: they are
+#: `sys.modules` hits. See the note beside `ADDED_RULES` for the measurement.
+
+
+def _the_one_predecessor_of(revision: ModuleType) -> str:
+    """A revision's `down_revision`, refused unless it is a single one.
+
+    **Read off the revision rather than written down beside it.** A literal
+    predecessor is a second copy of a fact the module already states, and a
+    rebase moves the module's copy in silence: the cases would then stand the
+    database up at a revision that is not this one's predecessor and compare
+    `before` against a schema it never described.
+
+    **Refused at import rather than at the first case that trips over it**,
+    because `down_revision` is typed to allow a merge revision's tuple and a
+    class that stands one database up at one revision has nothing to do with
+    that. The narrowing is a return type rather than an assertion at the use
+    site so the refusal happens once.
+    """
+    previous = revision.down_revision
+    assert isinstance(previous, str), (
+        f"{revision.revision} has no single predecessor, so a case cannot "
+        f"stand the database up at one: {previous!r}"
+    )
+    return previous
+
+
+_BOUND_THE_BYTES_PREVIOUS: Final = _the_one_predecessor_of(bound_the_bytes)
+
+
+class TestEveryRuleARevisionAddsIsTheModelsRule:
+    """Every `AddedRule` any revision declares, against what `models.py` says.
+
+    **The SQLite half.** `test_dialect.py` holds the Postgres one, which is the
+    division those two files have had since the second engine arrived: a
+    revision writes its SQL out rather than importing a constant, so each rule
+    is a fact stored twice, and these are what stand between the copies.
+
+    **Outside `TestTheBoundsThisRevisionPutOnBytes`, and that placement is the
+    whole of this class.** That class owns one revision's downgrade, so
+    reaching that revision's rule table by name belongs there and stays. Not
+    because every case in it is about that revision, which is true of three of
+    the twenty six and is corrected at its own site. This comparison is about
+    no revision in particular, and reaching by name meant that for any other
+    revision **no test read an added rule's text at all**.
+
+    **No database.** Both sides are text: the revision's `sqlite` literal, and
+    what `_declared_constraint` gets out of `models.py` through `str()`, which
+    `dialect.py` answers with the SQLite arm. What the migrated
+    schema actually carries is `TestTheMigrationsAndTheModelsAgree`, per named
+    CHECK and derived over the whole schema, and that is what stood behind the
+    gap on this engine: a second revision's wrong text would have shown there
+    as a wrong schema, once the revision ran, rather than here as a wrong
+    literal at the line that holds it.
+
+    **What it does with an addition a later revision swaps**, which is a chain
+    this treats as a single text: **it reds, naming the addition.** A
+    legitimate swap moves the model, because the model is always the last
+    text, and this compares the addition's literal against whatever the model
+    says now. Driven, by moving the model under the addition: this class reds
+    on that case, and so does its Postgres sibling.
+
+    So the refusal is loud here and says the wrong thing: it names the
+    addition where the fault is the swap. The arm that names the swap is
+    `test_dialect.py::TestTheRevisionsPostgresArmIsTheModelsPostgresArm::test_every_addition_is_still_the_last_text_of_its_chain`,
+    and it is in that file rather than this one, so a run of this file alone
+    gets the red without the explanation.
+    """
+
+    @pytest.mark.parametrize(
+        "added",
+        [rule for _, rule in ADDED_RULES],
+        ids=[f"{revision}-{rule.constraint}" for revision, rule in ADDED_RULES],
+    )
+    def test_the_added_rules_text_is_the_models_text(self, added: AddedRule) -> None:
+        """A constraint added rather than swapped has no `before` at all, which
+        is why it is a second shape and why its only text is the one being
+        installed."""
+        assert " ".join(added.sqlite.split()) == _declared_constraint(
+            added.table, added.constraint
+        )
+
+    @pytest.mark.parametrize(
+        "constraint", sorted(SWAP_CHAIN), ids=lambda constraint: constraint
+    )
+    def test_the_last_revision_to_swap_a_rule_wrote_the_models_text(
+        self, constraint: str
+    ) -> None:
+        """The swapped side of the same comparison, over every revision rather
+        than one.
+
+        **The last text in the chain and not every text**, which is the whole
+        difference between this and an addition: an earlier `after` describes
+        a schema the model has since moved past, and comparing it would refuse
+        a correct revision. `test_dialect.py` holds the links that cover the
+        earlier texts on the other engine.
+
+        **Here because a fourth revision carrying swapped rules would
+        otherwise get no SQLite comparison at all**, silently, which is the
+        gap this branch closed for the added shape and left open beside it.
+        The reason that was written for leaving it, that widening is a second
+        ticket, is an argument about effort, and the paragraph two classes
+        down now says why that is the kind of reason that does not survive.
+        """
+        _, rule = SWAP_CHAIN[constraint][-1]
+
+        assert " ".join(rule.after.split()) == _declared_constraint(
+            rule.table, rule.constraint
+        )
+
+    def test_a_revision_declares_one_to_compare(self) -> None:
+        """Anti vacuity. The parametrisation above is over a derived
+        population, and an empty one takes its cases with it: measured, by
+        emptying it, pytest puts a **skip** where the case was and nothing
+        fails, so the comparison stops existing rather than starts failing.
+
+        **Which revisions the walk reaches is not armed here.** That is
+        `test_dialect.py::TestTheTwoWalksOverTheRevisionsAgree`, beside the
+        walk, and which added rules it finds is
+        `::test_these_are_the_rules_the_revisions_add` beside the same walk.
+
+        **The swaps are held against the same written list that file holds
+        them against**, because a targeted run of one file is what this
+        repository recommends while implementing, and an exact list in that
+        file alone is green on exactly the narrowing it exists to catch
+        whenever this is the file being run. One literal, `THE_SWAPS`, with
+        an arm on each side of the import rather than a copy on each side.
+        """
+        assert ADDED_RULES, (
+            "no revision was found to add a constraint, so the comparison "
+            "above collected no cases and asserted nothing"
+        )
+        assert _swap_rows() == THE_SWAPS, (
+            "the swaps this file is parametrised over are not the ones "
+            "written down, so a case above is missing rather than failing"
+        )
+
+
 @pytest.mark.usefixtures("restore_schema")
 class TestTheBoundsThisRevisionPutOnBytes:
     """`b8f4c1a7e309`, and the four holes it closes, which are four holes.
@@ -4496,9 +4643,49 @@ class TestTheBoundsThisRevisionPutOnBytes:
     `main.py` calls `init_db()` at import and `conftest` imports it first, so
     `create_all` builds nothing and a `CheckConstraint` in `models.py` is
     installed by no run at all.
+
+    **This revision's rule tables are reached by name here, and the reason is
+    per case rather than per class.** A first version of this paragraph said
+    every case in the class is about this revision, which is true of three of
+    the twenty six: most stand the database up at head and probe a column, and
+    eight touch no database at all. What the by name reach has to be justified
+    for is the five places that read `_SWAPPED` or `_ADDED`, and they do not
+    share one reason:
+
+    * `test_the_downgrade_puts_each_rule_back` and
+      `test_the_downgrade_takes_the_added_rule_away` stand the database up at
+      `PREVIOUS`, this revision's own predecessor, and run this `downgrade()`.
+      A downgrade has no meaning away from the revision that owns it, and a
+      walk would hand these rules no run in scope installs.
+    * `test_the_model_is_the_rule_a_migrated_database_carries` runs at head,
+      where `TestTheMigrationsAndTheModelsAgree` already compares every named
+      CHECK over the whole schema, so its reason is not the revision at all:
+      it is **the instrument**. It reads the DDL SQLite stored, where the
+      derived comparison reads SQLAlchemy's parse of it, and two readings of
+      one artefact are what say a parser that stopped recognising a clause is
+      a parser and not a schema change.
+    * `_drop_the_scratch_tables` cleans up after this class's own failed
+      rebuild, so the tables it must drop are this revision's.
+    * `test_the_revisions_text_is_the_models_text` is this revision's own
+      witness that its `after` is what the model declares. The general form of
+      it, over every revision's chain, is
+      `TestEveryRuleARevisionAddsIsTheModelsRule::test_the_last_revision_to_swap_a_rule_wrote_the_models_text`
+      above, which is where a fourth revision carrying swapped rules is picked
+      up. This one stays because it is keyed on the revision rather than on the
+      chain, and it reds if this revision stops being the last to touch its own
+      three.
+
+    The comparisons that are about no revision in particular walk instead:
+    `TestEveryRuleARevisionAddsIsTheModelsRule` above for the added text on
+    this engine, and `test_dialect.py` for the Postgres texts.
     """
 
-    PREVIOUS: Final = "a6d3f92c7b14"
+    #: Read off the revision rather than written down. `down_revision` is the
+    #: fact every case here depends on, and a literal beside it is a second
+    #: copy that a rebase moves in silence: the cases would then stand the
+    #: database up at a revision that is not this one's predecessor and compare
+    #: `before` against a schema it never described.
+    PREVIOUS: Final = _BOUND_THE_BYTES_PREVIOUS
 
     @staticmethod
     def _migrated() -> None:
@@ -4583,16 +4770,6 @@ class TestTheBoundsThisRevisionPutOnBytes:
         """
         assert " ".join(rule.after.split()) == self._declared(
             rule.table, rule.constraint
-        )
-
-    @pytest.mark.parametrize(
-        "added", bound_the_bytes._ADDED, ids=lambda added: added.constraint
-    )
-    def test_the_added_rules_text_is_the_models_text(self, added: AddedRule) -> None:
-        """The same comparison for the rule this revision adds rather than
-        swaps. It has no `before` at all, which is why it is a second list."""
-        assert " ".join(added.sqlite.split()) == self._declared(
-            added.table, added.constraint
         )
 
     _declared = staticmethod(_declared_constraint)
