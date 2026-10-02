@@ -17862,18 +17862,34 @@ constraints declared, 12 ceilings found, so the floor holds with room. The sente
 claim about a neighbour rather than about the rule it sits on, and correcting it is a one
 line edit in a file this wave gave no seat.
 
-## `AddedRule` stays in the revision, and the objection is recorded rather than answered
+## `AddedRule` moved to `dialect.py`, and the move was measured rather than asserted
 
-The design seat asked for it in `dialect.py` beside `SwappedRule`, on `dialect.py`'s own
-argument that a third engine should be an arm there and a branch at every site rather than
-an edit to a frozen revision. **The argument is right and the file is not this branch's**,
-which is the wave's rule rather than a judgement about the code: `dialect.py` is listed to no
-seat in this batch. The cost the seat measured, five untyped or ignored parameters, is gone
-either way, the type being importable from the revision module. Moving it is a one file
-change for whoever owns `dialect.py` next, and the revision's own docstring states the
-argument for the placement it has so the next reader meets both sides.
-**The realised cost is that two test modules now import a type from a frozen revision**,
-which is the line to read when deciding.
+The design seat asked for it there beside `SwappedRule` and was declined on file ownership
+rather than on the merits, the module having been listed to no seat in that batch. It is
+there now, and the two test modules that imported a type out of a frozen revision import it
+from the module that owns the shape.
+
+**What the module keeps is that no SQL lives in it, and a field list is not SQL.** The
+objection recorded against the move was that a revision is frozen and a structure only one
+revision needs is one more thing a later edit could change under it. That objection applied
+equally to `SwappedRule`, which three revisions already import from there, so what it argues
+for is a rule nobody was following. Widening either shape without a default is a `TypeError`
+at import on every revision that builds a rule positionally, and every construction across
+those three revisions is positional with no keyword, so the failure is loud at the revision
+rather than silent inside it.
+
+**A cosmetic edit to a revision that has run on live databases is a data change until it is
+shown not to be.** Four things were compared across the move and are identical: the chain
+pointers, every string inside `_SWAPPED` and `_ADDED`, the normalised bodies of `upgrade`,
+`downgrade` and the three helpers under them, and **the shape's own field list, order and
+defaults**. The last is the load bearing one, because a rule is constructed positionally, so
+reordering two fields silently swaps the engines' arms with no syntax error anywhere. A
+planted defect per category was reported by name in each. The standing in-tree evidence is
+`tests/test_schema.py::TestTheBoundsThisRevisionPutOnBytes`, where
+`test_the_added_rules_text_is_the_models_text` compares the text and
+`test_the_model_is_the_rule_a_migrated_database_carries` and
+`test_the_downgrade_takes_the_added_rule_away` run the real upgrade and downgrade over
+`_ADDED`, with `tests/test_dialect.py::test_every_rule_a_revision_added_agrees` beside them.
 
 ## What the envelope ceiling's derivation still cannot see
 
@@ -17887,10 +17903,34 @@ than as another pattern, a router being allowed to reach that module as `import 
 and no other way, and `test_nothing_outside_the_routers_seals_a_pair` closes the other
 premise, that `routers/` is where to look at all.
 
-**The bound the derivation really wants is inside `credentials.put`**, where every caller
-would pass through one number instead of two Pydantic models nobody is obliged to consult.
-That is `credentials.py`, which this wave gave no seat, and it is the change that would
-retire all three guards above.
+**The bound cannot move into `credentials.put`, and the derivation's home is not a
+compromise.** `models.py` builds `ck_catalogue_credentials_envelope` out of the ceiling while
+its own class body is still being evaluated, so the value has to exist before anything that
+could compute it has been imported. **The obstacle is on `models.py` alone, which can read
+none of the three inputs**: a module downstream of it can read all three, and two routers
+already import all three. Driven by evaluating `models.py`'s real source under its own module
+name with one import prepended: unchanged it evaluates clean, and reading the ceiling from
+`credentials`, from `schemas.opds`, from `schemas.settings` or from `schemas.author` each
+raises `ImportError`. **All four raise at the same edge**, `credentials.py`'s own import of a
+model class, reached through the `schemas` package initialiser rather than through any one
+schema module: no schema module can be imported at all without running that initialiser, and
+it reaches `credentials`. So the test tree is where such a check belongs rather than the only
+place one could sit.
+
+**And the number is pinned to a migrated schema rather than free to track a route.** The
+database holds `2825` because `b8f4c1a7e309` installed it, and
+`test_the_revisions_text_is_the_models_text` holds the model's text byte equal to the
+revision's. A computed ceiling would therefore move the model's declared CHECK away from the
+schema that ran, which is what widening a route really costs: a revision, not a constant.
+Converting that into a red test naming both routes is what the derivation is for, so it
+belongs where it is.
+
+**None of the guards retires, and there are five rather than the three this section used to
+claim.** The three premises that find the routes stay whatever owns the number, because
+nothing inside the sealing function can know which request bodies its callers declared; the
+derivation against the constant stays because the constant cannot be derived; and the
+arithmetic against a real seal call stays because the helper rebuilds the envelope's layout
+by hand, and moving it closer to `seal` does not make it agree with `seal`.
 
 ## A guard over another tree's source names no file in it
 

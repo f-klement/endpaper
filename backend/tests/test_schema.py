@@ -28,7 +28,7 @@ import models  # registers the tables on Base.metadata
 import schema
 import targets
 from database import Base, engine
-from dialect import SwappedRule
+from dialect import AddedRule, SwappedRule
 from enums import (
     AuthorityScheme,
     BookFormat,
@@ -52,9 +52,6 @@ from migrations.versions import (
 )
 from migrations.versions import (
     f4a1c62d0b97_bind_every_text_ceiling_on_bytes_too as bind_every_text_ceiling,
-)
-from migrations.versions.b8f4c1a7e309_bound_the_bytes_three_columns_never_had import (
-    AddedRule,
 )
 from schemas.opds import OpdsServerIn
 from tests.test_filing import CORPUS

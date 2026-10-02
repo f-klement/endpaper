@@ -749,8 +749,8 @@ repeat the argument.
 |  | [The envelope still carries no NUL clause, and the reason changed under it](decisions.md#the-envelope-still-carries-no-nul-clause-and-the-reason-changed-under-it) | 115 |
 |  | [Every constraint naming a NUL is probed, and which rule probes it depends on the arm](decisions.md#every-constraint-naming-a-nul-is-probed-and-which-rule-probes-it-depends-on-the-arm) | 483 |
 |  | [`STILL_OPEN` is empty, and the file keeps two anti vacuity guards without it](decisions.md#still_open-is-empty-and-the-file-keeps-two-anti-vacuity-guards-without-it) | 132 |
-|  | [`AddedRule` stays in the revision, and the objection is recorded rather than answered](decisions.md#addedrule-stays-in-the-revision-and-the-objection-is-recorded-rather-than-answered) | 147 |
-|  | [What the envelope ceiling's derivation still cannot see](decisions.md#what-the-envelope-ceilings-derivation-still-cannot-see) | 158 |
+|  | [`AddedRule` moved to `dialect.py`, and the move was measured rather than asserted](decisions.md#addedrule-moved-to-dialectpy-and-the-move-was-measured-rather-than-asserted) | 302 |
+|  | [What the envelope ceiling's derivation still cannot see](decisions.md#what-the-envelope-ceilings-derivation-still-cannot-see) | 453 |
 |  | [A guard over another tree's source names no file in it](decisions.md#a-guard-over-another-trees-source-names-no-file-in-it) | 254 |
 |  | [An allowlist entry is keyed on the statement, because a fragment names a token](decisions.md#an-allowlist-entry-is-keyed-on-the-statement-because-a-fragment-names-a-token) | 290 |
 |  | [Every CHECK is compared as text, and a fourth premise arm asks a boot what it built](decisions.md#every-check-is-compared-as-text-and-a-fourth-premise-arm-asks-a-boot-what-it-built) | 810 |

@@ -42,11 +42,17 @@ is what stops that sentence going stale.
 
 ## No SQL lives here
 
-This module holds the dispatch and the shape a revision states a swapped rule
-in, and no SQL at all. Every spelling stays at its own site, which is what lets a
+This module holds the dispatch and the two shapes a revision states a rule in,
+and no SQL at all. Every spelling stays at its own site, which is what lets a
 revision stay frozen while the dispatch under it moves: a third engine is an arm
-here, a field on `SwappedRule`, and a branch at every site, never a constant here
+here, a field on each shape, and a branch at every site, never a constant here
 that changes what a revision installed.
+
+**A field list is not a spelling**, which is why the two shapes are here and the
+SQL they carry is not. Widening one without a default is a `TypeError` at import
+on every revision that builds a rule positionally, and all of them do: that is
+the loud failure a frozen revision wants, where a constant here would have
+changed what a revision installed and said nothing.
 """
 
 from typing import Any, Final, NamedTuple
@@ -124,6 +130,24 @@ class SwappedRule(NamedTuple):
     before_pg: str
     after: str
     after_pg: str
+
+
+class AddedRule(NamedTuple):
+    """One CHECK a revision adds where the table carried none of that name.
+
+    **Not a `SwappedRule` with an empty `before`**, which would read as a
+    constraint whose earlier text was the empty string and would hand
+    `drop_constraint` a name that is not there. The two shapes are separate
+    because the two directions of the migration are: a swap goes back to its
+    `before`, and an addition goes back to nothing at all. So there is no
+    `before` pair here and no `after` prefix either, the only text there is
+    being the text being installed.
+    """
+
+    table: str
+    constraint: str
+    sqlite: str
+    postgresql: str
 
 
 def for_bind(bind: Connection | Dialect, *, sqlite: str, postgresql: str) -> str:

@@ -97,36 +97,15 @@ widens, so no row can fail it.
 """
 
 from collections.abc import Sequence
-from typing import NamedTuple
 
 from alembic import op
 
-from dialect import DialectSQL, SwappedRule
+from dialect import AddedRule, DialectSQL, SwappedRule
 
 revision: str = "b8f4c1a7e309"
 down_revision: str | Sequence[str] | None = "a6d3f92c7b14"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
-
-
-class AddedRule(NamedTuple):
-    """One CHECK a revision adds where the table carried none of that name.
-
-    **Not a `SwappedRule` with an empty `before`**, which would read as a
-    constraint whose earlier text was the empty string and would hand
-    `drop_constraint` a name that is not there. The two lists are separate
-    because the two directions of the migration are: a swap goes back to its
-    `before`, and an addition goes back to nothing at all.
-
-    This shape lives here rather than in `dialect.py` for the reason that module
-    gives for holding no SQL: a revision is frozen, and a structure only one
-    revision needs is one more thing a later edit could change under it.
-    """
-
-    table: str
-    constraint: str
-    sqlite: str
-    postgresql: str
 
 
 #: Every constraint this revision rewrites. `dialect.SwappedRule` names the six
@@ -201,8 +180,10 @@ _SWAPPED: tuple[SwappedRule, ...] = (
 #: The constraint this revision adds where the table carried none.
 #:
 #: A tuple of one, because the shape is what the next addition wants and a bare
-#: pair of strings would have to be unpacked into one. Written out rather than
-#: imported for the reason `_SWAPPED` states.
+#: pair of strings would have to be unpacked into one. `dialect.AddedRule` names
+#: the four fields and says why an addition is not a swap with an empty
+#: `before`. The SQL is written out rather than imported for the reason
+#: `_SWAPPED` states.
 _ADDED: tuple[AddedRule, ...] = (
     AddedRule(
         "catalogue_targets",

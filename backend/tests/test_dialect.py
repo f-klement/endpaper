@@ -58,12 +58,9 @@ from sqlalchemy.engine import Inspector
 from sqlalchemy.schema import CreateTable
 
 from database import Base, engine
-from dialect import DialectSQL, SwappedRule, for_bind
+from dialect import AddedRule, DialectSQL, SwappedRule, for_bind
 from migrations.versions import (
     b8f4c1a7e309_bound_the_bytes_three_columns_never_had as bound_the_bytes,
-)
-from migrations.versions.b8f4c1a7e309_bound_the_bytes_three_columns_never_had import (
-    AddedRule,
 )
 from models import Book  # noqa: F401  registers every table on Base.metadata
 
