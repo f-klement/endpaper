@@ -127,6 +127,18 @@ export function declaresItselfInternal(source: string): boolean {
 }
 
 export interface Census {
+  /**
+   * Every test file vitest discovered, whether or not this run executed it.
+   *
+   * **The second instrument, and the rules about which files the document
+   * names are asked of this one.** `counts` is what ran; a narrowed run has
+   * fewer of them and can say nothing about any count, but the question of
+   * whether every file in the tree has a row does not depend on running any
+   * of them. Before this field existed a narrowed run checked **nothing**: not
+   * the counts, not the rows, not the contradiction between a stripped file
+   * and a row naming it.
+   */
+  discovered: ReadonlySet<string>;
   /** Tests the run collected, per file, relative to the test root. */
   counts: ReadonlyMap<string, number>;
   /** What `countWrittenOut` found, per file. */
@@ -141,6 +153,23 @@ export interface Census {
    * name. Both critic seats reached that independently.
    */
   internal: ReadonlySet<string>;
+}
+
+/**
+ * Whether this census can answer about counts as well as about rows.
+ *
+ * **A property of the census rather than a flag a caller passes**, so that no
+ * caller can get the gate wrong and the one place it is decided is here. The
+ * reporter reads it to say so in the log; `problems` reads it to decide which
+ * rules may speak.
+ *
+ * Size and not the set, because the two failures are different: a run of the
+ * right size over different names means the two instruments have stopped
+ * spelling the same tree, which the reporter refuses outright rather than
+ * treating as an ordinary narrowing.
+ */
+export function isWhole(census: Census): boolean {
+  return census.counts.size === census.discovered.size;
 }
 
 export interface Row {
@@ -204,13 +233,18 @@ function sum(values: Iterable<number>): number {
  * A file it may not name is outside this map altogether, so no row's sum counts
  * it and it is never reported as undescribed. That a row covers one anyway is a
  * separate problem, reported on its own.
+ *
+ * **Over what vitest discovered, not over what this run executed.** Keyed on
+ * `counts` it was empty of every file a narrowed run skipped, so the row rules
+ * read a tree of whatever size the command line asked for and found nothing
+ * wrong with it.
  */
 export function matched(
   census: Census,
   patterns: string[],
 ): Map<string, string[]> {
   const found = new Map<string, string[]>();
-  for (const file of census.counts.keys())
+  for (const file of census.discovered)
     if (!census.internal.has(file))
       found.set(
         file,
@@ -267,6 +301,13 @@ export function problems(register: string, census: Census): string[] {
   const patterns = declared.map((row) => row.pattern);
   const hits = matched(census, patterns);
   const found: string[] = [];
+  // **Which rules a narrowed run may still ask**, which is the half the
+  // backend half of this register already had and this one did not. Every rule
+  // here used to sit downstream of the reporter's early return, so a narrowed
+  // run checked nothing at all. The three guarded below are the only ones that
+  // read a count; the rest read the document against the tree and hold on any
+  // run.
+  const whole = isWhole(census);
 
   // **Reported first, and refused rather than clamped, because the block below
   // states a property this is the only thing making true.** `render` calls a file
@@ -281,7 +322,12 @@ export function problems(register: string, census: Census): string[] {
   // invokes is written out and collected nowhere. Clamping would make the
   // sentence true and the figures quietly wrong, so this refuses instead, and the
   // block's claim then holds by construction rather than by luck.
-  for (const [file, count] of census.counts) {
+  // Empty rather than wrapped in an `if`, so the block below keeps one
+  // indentation and the guard is the same expression the other two use.
+  const comparable: ReadonlyMap<string, number> = whole
+    ? census.counts
+    : new Map();
+  for (const [file, count] of comparable) {
     // `?? 0` is an unarmed belt and stays one: the reporter fills both maps in a
     // single loop over the same modules, so a file present in one and absent from
     // the other has no reachable case, and an arm for it would pin nothing.
@@ -300,9 +346,10 @@ export function problems(register: string, census: Census): string[] {
       patternsHit.includes(pattern),
     );
     if (covered.length === 0) {
-      found.push(`\`${pattern}\` matches no file this run collected`);
+      found.push(`\`${pattern}\` matches no file in this test tree`);
       continue;
     }
+    if (!whole) continue;
     const counted = sum(covered.map(([file]) => census.counts.get(file) ?? 0));
     if (counted !== stated)
       found.push(
@@ -334,6 +381,8 @@ export function problems(register: string, census: Census): string[] {
       `these files have no row: ${unnamed.join(", ")}. A row says what the file ` +
         `covers, which is the half of this register a run cannot write.`,
     );
+
+  if (!whole) return found;
 
   const fresh = render(census, patterns);
   if (blockOf(register) !== fresh)

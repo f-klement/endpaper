@@ -205,6 +205,90 @@ def _test_sources(root: Path = BACKEND) -> list[Path]:
     return [path for path in (root / "tests").rglob("*.py") if not _is_vendored(path, root)]
 
 
+class TestTheTestTreeIsStillTheTestTree:
+    """`_test_sources()` returns every Python file under `backend/tests`.
+
+    **Beside the shared reader rather than inside any one rule**, for the
+    reason the class above `_test_sources` gives: this walk is read at many
+    sites across many files, and a narrowing takes every one of them at once.
+
+    **It is here because the one instrument that reads this walk's population
+    goes quiet rather than red when the walk narrows.** The coverage register
+    compares pytest's own collection against this walk and hands the
+    disagreement to `pytest.skip`, so a narrowing is not a wrong answer there,
+    it is no answer.
+
+    Driven, 2026-10-01 by a review seat, with the register's three count arms
+    as the subject: a narrowing in `_test_sources` dropping `*_guard.py`, none
+    of which carries a register row, left **no arm in that file red** and all
+    three count arms skipping; the identical narrowing written one function up
+    in `_is_vendored` did the same. The only reds either way were collateral,
+    in files the narrowing was not written in, and which arm fired moved with
+    where it was written.
+
+    **A top level directory arm does not close it**, which is the difference
+    from the class above: that narrowing left every directory in place. So
+    this is an equality against the glob, less an exclusion set stated by
+    equality rather than by a count.
+
+    **It reds on a new directory or a new file under `tests/` only if the walk
+    stops returning one**, since both sides see a legitimate addition.
+    """
+
+    def test_the_walk_returns_every_python_file_the_test_tree_has(self) -> None:
+        walked = {path.relative_to(BACKEND) for path in _test_sources()}
+        # The second derivation. It shares this walk's `rglob` and not its
+        # filter, so a narrowing written in `_test_sources` or in
+        # `_is_vendored` is a disagreement here rather than a smaller corpus
+        # nobody sees. What it cannot see is an edit to both at once.
+        globbed = {
+            path.relative_to(BACKEND) for path in (BACKEND / "tests").rglob("*.py")
+        }
+        excluded = sorted(str(path) for path in globbed - walked)
+
+        # **The exclusion stated by equality, and it is empty.** `_is_vendored`
+        # prunes a dotted part and the tool directory names beside it, and
+        # under `backend/tests` none of them holds a `.py` file: the bytecode
+        # cache
+        # holds `.pyc` only, and the virtualenv and the pipeline's cache sit
+        # beside `tests/` rather than inside it. A member arriving here is a
+        # decision about what every rule reading this walk sees, and this line
+        # is where somebody takes it.
+        assert excluded == [], (
+            "the test tree corpus lost files to an exclusion. Every rule "
+            f"reading `_test_sources()` now reads a different tree: {excluded}"
+        )
+        assert walked == globbed
+
+        # Vacuity. Every assertion above holds over an empty tree, and this
+        # file is in the walk it is asserting about.
+        assert Path(__file__).resolve() in {
+            path.resolve() for path in _test_sources()
+        }
+
+    def test_a_vendored_file_under_the_test_tree_is_the_difference(
+        self, tmp_path: Path
+    ) -> None:
+        """What the exclusion asserted above is an exclusion of, and anti
+        vacuity for it.
+
+        The two readings share an `rglob` on the real tree and the equality
+        alone cannot say the filter is doing anything, because the exclusion
+        there is empty. Planted rather than asserted of this checkout, since
+        an exclusion nobody has seen produce a member is a rule stated and not
+        measured.
+        """
+        (tmp_path / "tests" / ".tool").mkdir(parents=True)
+        (tmp_path / "tests" / "test_real.py").write_text("")
+        (tmp_path / "tests" / ".tool" / "vendored.py").write_text("")
+
+        walked = {path.name for path in _test_sources(tmp_path)}
+        globbed = {path.name for path in (tmp_path / "tests").rglob("*.py")}
+
+        assert walked == {"test_real.py"}
+        assert globbed - walked == {"vendored.py"}
+
+
 def _every_module_but_the_tests(root: Path = BACKEND) -> list[Path]:
     """The application and its migrations, excluding the tests and anything vendored.
 

@@ -11,8 +11,18 @@ import type {
 import CustomFieldsPanel from "../../../../src/pages/BookDetail/components/CustomFieldsPanel";
 import { renderLocalised } from "../../../utils";
 
-const LINK: CustomFieldOut = { id: 1, name: "Calibre-web", kind: "url" };
-const TEXT: CustomFieldOut = { id: 2, name: "Bought from", kind: "text" };
+const LINK: CustomFieldOut = {
+  id: 1,
+  name: "Calibre-web",
+  kind: "url",
+  renamable: true,
+};
+const TEXT: CustomFieldOut = {
+  id: 2,
+  name: "Bought from",
+  kind: "text",
+  renamable: true,
+};
 
 interface Callbacks {
   onSuccess: () => void;

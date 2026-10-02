@@ -394,6 +394,51 @@ def _custom_field(field_id: int, db: Session, fields: Fields) -> CustomField:
     return field
 
 
+def _custom_field_out(field: CustomField, fields: Fields, is_admin: bool) -> CustomFieldOut:
+    """One definition as it looks to the Member asking.
+
+    **The two gates `rename_custom_field` applies, in the same order and from
+    the same `Fields`.** `addressable` first, because an admin is not exempt
+    from it: the delete is the ungated door and this one is not, so a field
+    whose every value sits on Books the admin cannot see is a 404 to them and
+    drawing a rename control for it would be an offer the server refuses.
+    Then the admin arm, which is the route's and not the class's, for the
+    reason `Fields.renamable` gives: that class is built from a viewer id and
+    knows nothing about roles.
+
+    **Written as the whole conjunction rather than leaning on `renamable`
+    already asking `addressable`.** It does, so the left hand side is
+    redundant for a non admin and load bearing for an admin, and spelling out
+    only the half that is needed is how the admin arm would quietly widen past
+    the gate it has to stay behind.
+
+    One `Fields` across the whole list, so the cost is **constant in the number
+    of definitions**: every read on that class is lazy and cached for the
+    instance, so twenty five definitions issue what one does.
+
+    **No statement count and no bound is written here, deliberately, and the
+    figure in this spot has been wrong twice.** The arms differ by what carries
+    a field, so there is no single figure to quote; and the only statement
+    counting arm in this area pins a **parity** between two paths rather than
+    this route's total, so nothing in the tree would catch a third wrong
+    number. A bound stated and unarmed is the shape that stops guarding without
+    ever failing.
+
+    What is true without a number: `renamable` reaches the author read where
+    `_may_be_told` short circuits on a field the viewer already has a value in,
+    which is the ordinary page, so this list costs **more** than it did, and
+    the increase does not grow with the vocabulary. Count it against the pre
+    branch shape with an arm before quoting a bound again.
+    """
+    return CustomFieldOut(
+        id=field.id,
+        name=field.name,
+        kind=field.kind,
+        renamable=fields.addressable(field.id)
+        and (is_admin or fields.renamable(field.id)),
+    )
+
+
 def _any_custom_field(field_id: int, db: Session) -> CustomField:
     """The definition at this id whoever may see it, for the admin delete alone.
 
@@ -412,7 +457,7 @@ def _any_custom_field(field_id: int, db: Session) -> CustomField:
 
 
 @router.get("/custom-fields", response_model=list[CustomFieldOut])
-def list_custom_fields(db: DbSession, current_user: CurrentUser) -> list[CustomField]:
+def list_custom_fields(db: DbSession, current_user: CurrentUser) -> list[CustomFieldOut]:
     """Every field this library may tell you about, in the order it defined them.
 
     **Not every field it keeps.** A field is listed when a book you can see
@@ -427,14 +472,40 @@ def list_custom_fields(db: DbSession, current_user: CurrentUser) -> list[CustomF
     number in a confirmation dialog would then understate what deleting the
     field is about to destroy. Neither number is worth having, so the
     confirmation says "every book" instead. `docs/security.md` records it.
+
+    **Each row says whether you may rename it.** Every field reaching this list
+    is addressable to you by construction, since `listable` and `addressable`
+    ask the same predicate, so what `renamable` adds is the author arm and the
+    admin one. `schemas/custom_field.CustomFieldOut` records why that is a
+    boolean rather than the author's member id.
+
+    **On this list a false `renamable` is a fact about another Member**, and it
+    is a disclosure rather than a convenience. The other two causes cannot
+    reach here, since every listed row is addressable and an admin is never
+    refused the author arm, so for a Member who is not an admin the flag reads
+    exactly "somebody else defined this". Learning that used to take a rename
+    request and its 403; it is now on every page load.
+
+    **No application log records any of it, and the access log this project's
+    own serving command produces records every request, so what the change
+    removes is the one line that was distinctive.** A refusal on a path normal
+    use never produces, carrying the field id, becomes the request every
+    settings page load makes. Observability is therefore **not** unchanged, and
+    a sentence saying nothing is logged reads as though it were. Nothing here
+    claims anything about what a deployment's ingress keeps, which a published
+    file cannot know. `docs/security.md` carries the row.
     """
-    return Fields.seen_by(db, current_user.id).listable()
+    fields = Fields.seen_by(db, current_user.id)
+    return [
+        _custom_field_out(row, fields, current_user.is_admin)
+        for row in fields.listable()
+    ]
 
 
 @router.post("/custom-fields", response_model=CustomFieldOut, status_code=status.HTTP_201_CREATED)
 def define_custom_field(
     payload: CustomFieldCreate, db: DbSession, current_user: CurrentUser
-) -> CustomField:
+) -> CustomFieldOut:
     """Define a field for the whole library.
 
     Any member, like `create_tag` and for the same reason: public books are a
@@ -451,6 +522,40 @@ def define_custom_field(
     carries it, and they may rename it. `fields.Fields` holds both. The
     collision above takes no authorship: a second member typing an existing
     name gets the row and not a stake in it.
+
+    **So `renamable` on the answer is not always true**, and the collision is
+    the case that makes it worth computing rather than asserting: a member who
+    retypes somebody else's name is handed that row and may not rename it, and
+    a member who retypes the name of a field hidden from them is handed a row
+    they cannot address at all. Both are the open door
+    `fields.Fields` records under "uniqueness is whole table of necessity";
+    this reports them rather than closing them.
+
+    **For an admin those two causes do not collide, and that is a disclosure
+    rather than a symmetry.** The sentence above reads as though the collision
+    kept both quiet, and it does keep them quiet for everybody else. The admin
+    arm means the author half never refuses, so a false `renamable` tells an
+    admin exactly one thing: a field by that name exists and every value in it
+    sits on Books they cannot see. One request and no write, where the same
+    conclusion used to take a define and then a rename.
+
+    **And nothing bounds the guessing**: no rate limiter on this route, no
+    counter anywhere, so a dictionary of candidate names can be walked at one
+    request each. That is what makes it enumeration rather than one bit about
+    a name the caller already had.
+
+    **No application log records any of it, and the access log this project's
+    own serving command produces records every request, so what the change
+    removes is the one line that was distinctive.** A distinctive refusal
+    becomes a request indistinguishable from a legitimate define. Nothing here
+    claims anything about what a deployment's ingress keeps.
+    `docs/security.md` carries the row.
+
+    **Where the `Fields` is constructed is not load bearing**, which is worth
+    saying because it reads as though it were. Autoflush puts the pending row
+    in the table before any arm reads it, and the arm for a definition no Book
+    carries admits it either way, so warming every cache before the commit
+    answers the same. Driven both ways; nothing reds.
     """
     try:
         field = custom_fields.define(db, payload.name, payload.kind, current_user.id)
@@ -458,7 +563,8 @@ def define_custom_field(
         raise HTTPException(status_code=409, detail=str(refusal)) from refusal
     db.commit()
     db.refresh(field)
-    return field
+    fields = Fields.seen_by(db, current_user.id)
+    return _custom_field_out(field, fields, current_user.is_admin)
 
 
 @router.patch("/custom-fields/{field_id}", response_model=CustomFieldOut)
@@ -467,7 +573,7 @@ def rename_custom_field(
     payload: CustomFieldRename,
     db: DbSession,
     current_user: CurrentUser,
-) -> CustomField:
+) -> CustomFieldOut:
     """Rename a field. Every value under it is kept.
 
     That is the schema rather than this handler: values reference the
@@ -501,6 +607,12 @@ def rename_custom_field(
     **Logged, like the delete beside it.** The log line predates the author
     column and is not replaced by it: the column says who may rename, and the
     line says who did, which for an admin rename is a different person.
+
+    **The two refusals here are the whole of what `CustomFieldOut.renamable`
+    publishes**, and the client draws its control from that rather than
+    deriving one. A client that has gone stale still reaches them, which is
+    why the refusal is worded for a reader: hiding a control is advice and
+    this is the guarantee.
     """
     # One `Fields` for both questions, which is that class's own rule: a
     # second instance here would re-issue every arm the resolver had just
@@ -522,7 +634,10 @@ def rename_custom_field(
     logger.info(
         "Account %r renamed custom field %r to %r", current_user.username, was, field.name
     )
-    return field
+    # The same `Fields` the two gates above were asked of. A rename moves
+    # neither authorship nor what carries the field, so nothing it cached has
+    # gone stale, and a second instance would re-issue every arm.
+    return _custom_field_out(field, fields, current_user.is_admin)
 
 
 @router.delete("/custom-fields/{field_id}", status_code=status.HTTP_204_NO_CONTENT)

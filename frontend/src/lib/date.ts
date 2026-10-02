@@ -91,16 +91,49 @@ const FORMATS = {
 type Format = keyof typeof FORMATS;
 
 /**
- * One formatter per locale per format, built on first use.
+ * One formatter per locale per format **per zone**, built on first use.
  *
- * Keyed on both, for the reason `lib/nameOrder.ts` states about its collators:
- * the app switches language without a reload, so a single instance would carry
- * the locale it happened to be built under into every later render.
+ * Keyed on locale and format for the reason `lib/nameOrder.ts` states about its
+ * collators: the app switches language without a reload, so a single instance
+ * would carry the locale it happened to be built under into every later render.
+ *
+ * **The zone is in the key for exactly the same reason, and it was missing.** A
+ * formatter with no `timeZone` option resolves the ambient zone **once, when it
+ * is built**, and then renders every later date in that zone whatever the
+ * platform now says. So a key of locale and format alone means the first render
+ * of a given pair decides the zone for the rest of the session. A member can
+ * move the device's zone while the app is open, which is the live case; the
+ * latent one is any caller that builds a formatter before something else sets
+ * the zone, and a test suite pinning its own zone is that caller.
+ *
+ * **The cost is one ambient zone read per format call, which is a fraction of
+ * the formatter build it prevents and is of the same order as the `format()`
+ * it sits in front of.** That second half is the part worth saying: the key is
+ * affordable because of the ratio against the build, not because the read is
+ * free against a render.
+ *
+ * **No figure is published here, deliberately, and the spread is why.**
+ * Measured on bun 1.4.2 over 200,000 iterations by three seats: the zone read
+ * came out anywhere between 0.82 and 2.12 `format()` calls, the build cost
+ * disagreed across seats by a factor of 1.6, and the ratio against
+ * `getTimezoneOffset()` by a factor of 8. Only the order of each survived
+ * re-derivation, so a point or an interval written here would be one seat's run
+ * presented as a property of the code. Re-derive on the machine in hand if the
+ * cost ever matters.
+ *
+ * **Not keyed on `getTimezoneOffset()`, which is cheaper and wrong.** None of
+ * the formats above renders a zone name, so two zones at the same offset agree
+ * today and disagree for a date in the other half of the year: measured,
+ * `Europe/London` and `Africa/Abidjan` are both 0 in January, and in July
+ * London is an hour off where Abidjan has not moved. An offset key serves one
+ * zone's formatter for the other's summer dates. The zone name is the thing
+ * that decides the rendering, so it is the thing in the key.
  */
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
 function formatterFor(format: Format, locale: Locale): Intl.DateTimeFormat {
-  const key = `${locale}|${format}`;
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const key = `${locale}|${format}|${zone}`;
   const existing = formatters.get(key);
   if (existing) return existing;
   const built = new Intl.DateTimeFormat(locale, FORMATS[format]);

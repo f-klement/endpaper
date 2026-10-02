@@ -2404,6 +2404,28 @@ export const getListCustomFieldsUrl = () => {
  * number in a confirmation dialog would then understate what deleting the
  * field is about to destroy. Neither number is worth having, so the
  * confirmation says "every book" instead. `docs/security.md` records it.
+ *
+ * **Each row says whether you may rename it.** Every field reaching this list
+ * is addressable to you by construction, since `listable` and `addressable`
+ * ask the same predicate, so what `renamable` adds is the author arm and the
+ * admin one. `schemas/custom_field.CustomFieldOut` records why that is a
+ * boolean rather than the author's member id.
+ *
+ * **On this list a false `renamable` is a fact about another Member**, and it
+ * is a disclosure rather than a convenience. The other two causes cannot
+ * reach here, since every listed row is addressable and an admin is never
+ * refused the author arm, so for a Member who is not an admin the flag reads
+ * exactly "somebody else defined this". Learning that used to take a rename
+ * request and its 403; it is now on every page load.
+ *
+ * **No application log records any of it, and the access log this project's
+ * own serving command produces records every request, so what the change
+ * removes is the one line that was distinctive.** A refusal on a path normal
+ * use never produces, carrying the field id, becomes the request every
+ * settings page load makes. Observability is therefore **not** unchanged, and
+ * a sentence saying nothing is logged reads as though it were. Nothing here
+ * claims anything about what a deployment's ingress keeps, which a published
+ * file cannot know. `docs/security.md` carries the row.
  * @summary List Custom Fields
  */
 export const listCustomFields = async (
@@ -2571,6 +2593,40 @@ export const getDefineCustomFieldUrl = () => {
  * carries it, and they may rename it. `fields.Fields` holds both. The
  * collision above takes no authorship: a second member typing an existing
  * name gets the row and not a stake in it.
+ *
+ * **So `renamable` on the answer is not always true**, and the collision is
+ * the case that makes it worth computing rather than asserting: a member who
+ * retypes somebody else's name is handed that row and may not rename it, and
+ * a member who retypes the name of a field hidden from them is handed a row
+ * they cannot address at all. Both are the open door
+ * `fields.Fields` records under "uniqueness is whole table of necessity";
+ * this reports them rather than closing them.
+ *
+ * **For an admin those two causes do not collide, and that is a disclosure
+ * rather than a symmetry.** The sentence above reads as though the collision
+ * kept both quiet, and it does keep them quiet for everybody else. The admin
+ * arm means the author half never refuses, so a false `renamable` tells an
+ * admin exactly one thing: a field by that name exists and every value in it
+ * sits on Books they cannot see. One request and no write, where the same
+ * conclusion used to take a define and then a rename.
+ *
+ * **And nothing bounds the guessing**: no rate limiter on this route, no
+ * counter anywhere, so a dictionary of candidate names can be walked at one
+ * request each. That is what makes it enumeration rather than one bit about
+ * a name the caller already had.
+ *
+ * **No application log records any of it, and the access log this project's
+ * own serving command produces records every request, so what the change
+ * removes is the one line that was distinctive.** A distinctive refusal
+ * becomes a request indistinguishable from a legitimate define. Nothing here
+ * claims anything about what a deployment's ingress keeps.
+ * `docs/security.md` carries the row.
+ *
+ * **Where the `Fields` is constructed is not load bearing**, which is worth
+ * saying because it reads as though it were. Autoflush puts the pending row
+ * in the table before any arm reads it, and the arm for a definition no Book
+ * carries admits it either way, so warming every cache before the commit
+ * answers the same. Driven both ways; nothing reds.
  * @summary Define Custom Field
  */
 export const defineCustomField = async (
@@ -2831,6 +2887,12 @@ export const getRenameCustomFieldUrl = (fieldId: number) => {
  * **Logged, like the delete beside it.** The log line predates the author
  * column and is not replaced by it: the column says who may rename, and the
  * line says who did, which for an admin rename is a different person.
+ *
+ * **The two refusals here are the whole of what `CustomFieldOut.renamable`
+ * publishes**, and the client draws its control from that rather than
+ * deriving one. A client that has gone stale still reaches them, which is
+ * why the refusal is worded for a reader: hiding a control is advice and
+ * this is the guarantee.
  * @summary Rename Custom Field
  */
 export const renameCustomField = async (

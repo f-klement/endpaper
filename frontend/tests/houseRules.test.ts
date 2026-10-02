@@ -7378,3 +7378,949 @@ describe("one file of either tree is read by name from that tree's corpus", () =
     expect(viteConfig).toContain('setupFiles: ["./tests/setup.ts"]');
   });
 });
+
+/**
+ * A member citation: a code span holding a module's path, `::`, and a name.
+ *
+ * **The sibling of the rule above, one tree over.** That one asks whether a
+ * backticked `path::name` names a test; this one asks whether it names
+ * something the module has. The shape is the same and the populations do not
+ * overlap: membership there is that the path ends in the suffix the config
+ * collects tests by, so every other two colon citation falls here, and that
+ * rule's own docstring says it leaves them alone by name.
+ *
+ * **The backend half of this is older and is where the shape comes from.** It
+ * resolves a dotted token's head segment to a module and asks whether the
+ * module declares the final segment. What is copied is the mechanism and not
+ * the spelling: a module here has no import root, two suffixes and generated
+ * code, and what this tree writes is a path rather than a stem.
+ *
+ * **Anchored on the token, with its two delimiters checked where they stand,
+ * and that is load bearing rather than a style.** The first version paired a
+ * span over the unwrapped text, `(``?)([^`]+?)\1`. The unwrapper turns every
+ * line break into a space, so a fenced code block arrives as three backticks
+ * inline, the pair reads two of them as a fence and swallows the region to the
+ * next pair, and **every citation after the first fence in that file is
+ * unread**. Measured by appending one citation at the end of each published
+ * document: the paired reading loses it in **15 of 23**, the anchored reading
+ * in **0 of 23**. What the anchored reading gains on this tree is stated as
+ * the difference rather than as two totals, because a total over this corpus
+ * counts the citations in this comment and moves when the comment is edited:
+ * the paired reading misses the two correctly fenced citations in
+ * `docs/decisions.md`, and it misses the two written here. **The figures that
+ * stood here were taken one commit before the one that published them**, by
+ * this comment's own doing: writing the old pattern as a span of backticks
+ * mispairs under the reading it describes.
+ *
+ * **What makes that form safe is that each half names its site, not that the
+ * difference cannot move.** It can: it was two at one tip and four at two
+ * others, because this file is in the corpus it measures. A reader who wants
+ * the number counts the sites named. The backend
+ * half records the same lesson from the other direction, a stray backtick
+ * inverting a whole file, and anchoring is what makes a mispaired delimiter
+ * cost one citation rather than a region.
+ *
+ * **Squeezed after matching, because the formatter breaks a long token.** The
+ * token admits at most two runs of whitespace and they are removed before the
+ * shape is read, which is the backend half's arrangement. **What it costs** is
+ * that a two word span whose words squeeze into this shape is read as a
+ * citation.
+ *
+ * **The cap is load bearing in both directions and each has an arm.** Below
+ * it, a citation the formatter broke is unread, which `reads a citation the
+ * formatter wrapped across a line` holds. Above it, ordinary prose becomes a
+ * citation: an unbounded cap squeezes a backticked sentence into a path and a
+ * member and reports the ones that resolve, which the prose row in `leaves
+ * everything the sibling rule owns, and prose, alone` is blind to because its
+ * subject is prose under either cap. **The refusal the cap buys** is a
+ * citation broken four ways, which the formatter cannot produce: the longest
+ * live citation is 47 characters against an 80 column width, so a fourth
+ * break needs a token three times longer than anything written.
+ *
+ * **Qualification is the property, and refusing the two unqualified forms is a
+ * measurement.** Taken over this corpus at `167f4e5a`, by the same index this
+ * rule uses:
+ *
+ * | the form | population | naming nothing a module declares |
+ * |---|---|---|
+ * | a two segment dotted token whose head is a module stem | 700 | 589 |
+ * | a bare backticked identifier | 7,874 | 4,416 |
+ *
+ * Reading the first finds file names (`importing.py`, `en.ts`, `index.html`)
+ * and backend table columns (`books.isbn`, `users.username`) whose first word
+ * happens to be a module stem; the second is most of the prose in the
+ * repository, including every name belonging to the backend, to a library or
+ * to a member's own data. Neither is a gate. Both are a census that would
+ * refuse by accident, which is this repository's recorded reason for not
+ * shipping a phrase pattern over prose.
+ *
+ * **The escape is dropping the backticks**, which is the backend half's one
+ * mechanism and is taken here for its reason: a sentence recording a name that
+ * was deliberately removed writes it without a span. That is a real difference
+ * from the rule above, which refuses an unfenced citation outright, and the
+ * difference is the subject: a dead test is always a defect, a member written
+ * down as gone is a register doing its job.
+ *
+ * **Nothing in the tree uses that escape today, and its absence is not a
+ * reason to drop the span requirement.** The requirement is what the escape
+ * is, so removing it removes the only way to write a name down as gone.
+ * Counted over this corpus: zero unfenced citations, so the shape is available
+ * and unused rather than depended on. **A review seat briefly found two live
+ * users and both were correctly fenced citations its instrument had misread
+ * through the paired span defect above**, which is the measurement to repeat
+ * rather than the claim to carry.
+ *
+ * ## What goes past it
+ *
+ * **A path resolving to no module of either tree, unless the citation spells
+ * the tree.** `vite.config.ts`, `orval.config.ts` and `scripts/check-build.ts`
+ * are real files outside both corpora, so an absence there is this rule's
+ * ignorance rather than a defect. Where the path is written from `src/` or
+ * `tests/` the tree is enumerated and an absence is a fact, so that half is
+ * reported. **No citation in the tree is tree prefixed**, measured, so that
+ * condition catches none of them and the index arming below is what stands in
+ * its place rather than a residue somebody will notice.
+ *
+ * **A module whose every candidate re-exports from somewhere else.** Its
+ * surface is not in its own parse. **One barrel among several candidates no
+ * longer silences the rest**, which it did: `index.ts` is the name of 29
+ * modules and two of them are generated barrels, so a citation to any
+ * `index.ts` member was silent while the path qualified spelling of the same
+ * citation was reported.
+ *
+ * **That repair buys a false refusal and this is where it is said.** A
+ * citation to a name a generated barrel genuinely re-exports, written as a
+ * basename **several modules share**, was accepted before and is reported
+ * now, because the readable candidates beside the barrel keep the union non
+ * empty. Ambiguity is the property, not bareness: an unambiguous basename
+ * resolves to the barrel alone and is still skipped. Driven on real tree data with three such types; none is
+ * live. Closing it means following `export *`, which is a resolver rather
+ * than a line, so the cost is stated instead of paid.
+ *
+ * **The middle segments of a dotted name.** The name resolves if the module
+ * declares the whole of it or any of its dotted tails, so
+ * `kobo.ts::KoboBook.contentId` resolves on `contentId` and
+ * `en.ts::nav.library` resolves on the whole, because a message key is itself
+ * a dotted name. A member filed under the wrong type is green, which is the
+ * backend half's line and is taken for its reason: checking the type means
+ * reading the inheritance a sentence is allowed to skip.
+ *
+ * **Those two examples are members of the population rather than
+ * illustrations**, which is this docstring's one piece of luck: the second is
+ * the live citation that reds the rule when the resolution is narrowed back to
+ * the final segment, so the sentence explaining the widening is also the
+ * witness for it.
+ *
+ * **That witness is readable only under the anchored reading**, because it
+ * sits after this comment's own span of backticks, so two fixes shipped in
+ * one commit hold it up together. It is not the only thing holding the
+ * widening: the `nav.library` row in `reports the shapes it exists for`
+ * carries the same mutation on text written there, so a revert of either
+ * half alone still reds.
+ *
+ * **A document declaring itself internal**, because `citingFiles` excludes one
+ * and the subject is what reaches the mirror.
+ *
+ * **Aboutness.** A name that resolves and is the wrong name for what the
+ * sentence says is green here.
+ */
+const MODULE_FILE = String.raw`[\w./-]+\.tsx?`;
+
+/** The one spelling of the test suffix, which is the sibling rule's subject. */
+const CITES_A_TEST = new RegExp(`^${TEST_FILE}$`);
+
+/** One dotted run of identifiers, which is what a member name is written as. */
+const MEMBER_NAME = String.raw`[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*`;
+
+/**
+ * The characters a citation is made of, and the whitespace a wrap leaves.
+ *
+ * **`:` is in the set because `::` is part of the token.** The token is
+ * matched first and validated second, which is what keeps a stray backtick
+ * from swallowing a region: see the docstring above for the measurement.
+ */
+const CITATION_CHAR = String.raw`[\w./$:-]`;
+const CITATION_TOKEN =
+  CITATION_CHAR + "+(?:[ \\t]+" + CITATION_CHAR + "+){0,2}";
+const MEMBER_SPAN = new RegExp("(``?)(" + CITATION_TOKEN + ")\\1", "g");
+const MEMBER_CITATION = new RegExp(
+  "^(" + MODULE_FILE + ")::(" + MEMBER_NAME + ")$",
+);
+
+/**
+ * Each corpus reader's half, keyed the two ways this file keys them.
+ *
+ * **One home, because two arms compare against them**: the index builder's
+ * output and the citing corpus's code halves. Written out at each arm is how
+ * one of the two comes to be checked and the other not, which is the defect
+ * those arms exist for, one level up.
+ */
+/**
+ * The same documents, globbed a second way, with one exclusion left off.
+ *
+ * **A second derivation rather than a third arm, because the count equality
+ * beside it cannot see its own narrowing**: both sides of that one come from
+ * `DOCUMENTS`, so a pattern added there moves both together and reddens
+ * nothing. This pattern carries the three machinery exclusions and **not**
+ * the content one, so any further narrowing written into `DOCUMENTS` alone
+ * shows up here as a disagreement rather than as a smaller corpus nobody
+ * sees. Narrowing the corpus now has to be written in two places.
+ *
+ * **Names only and never read**, so this costs a directory walk and no file
+ * contents. It reaches no module and no stylesheet, so it is outside
+ * everything the two corpus modules arm.
+ */
+const EVERY_DOCUMENT = import.meta.glob([
+  "../../**/*.md",
+  "!../../**/node_modules/**",
+  "!../../**/.venv/**",
+  "!../../**/.git/**",
+]);
+
+const theSourceHalf = (): string[] => entries().map(([path]) => `src/${path}`);
+const theTestHalf = (): string[] =>
+  testEntries().map(([path]) => path.replace("./", "tests/"));
+
+const sortedPaths = (paths: readonly string[]): string[] => [...paths].sort();
+
+/** Every module of either tree, keyed the way a citation spells a path. */
+function citableModules(): Record<string, string> {
+  return {
+    ...Object.fromEntries(
+      entries().map(([path, source]) => [`src/${path}`, source]),
+    ),
+    ...Object.fromEntries(
+      testEntries().map(([path, source]) => [
+        path.replace("./", "tests/"),
+        source,
+      ]),
+    ),
+  };
+}
+
+/**
+ * The nodes that declare a member rather than a module level name.
+ *
+ * **`Property` is in it and seven legitimate spellings turned on it.**
+ * Measured over twenty spellings this tree writes or can write: without it an
+ * object literal property, a nested one, an object literal getter, a quoted
+ * key and an `as const` were all refused, 7 of 20 against 0 of 20 with it and
+ * the namespace descent below. **The live cost was the message catalogue**,
+ * where the keys are quoted object properties: `src/i18n/en.ts` indexed **3**
+ * names against the **1,160** it declares, so every citation of a message key
+ * was a false refusal.
+ */
+const DECLARES_A_MEMBER = new Set([
+  "TSPropertySignature",
+  "TSMethodSignature",
+  "PropertyDefinition",
+  "AccessorProperty",
+  "MethodDefinition",
+  "TSEnumMember",
+  "Property",
+]);
+
+/** The declaration kinds that carry the declared name in `id`. */
+const DECLARES_A_NAME = new Set([
+  "FunctionDeclaration",
+  "ClassDeclaration",
+  "TSInterfaceDeclaration",
+  "TSTypeAliasDeclaration",
+  "TSEnumDeclaration",
+  "TSModuleDeclaration",
+]);
+
+/**
+ * Every name one declaration binds, however the target is shaped.
+ *
+ * **Every identifier under the target, not the targets that are an
+ * identifier.** A destructured binding is a member like any other, and this
+ * tree writes them at module scope. The type annotation is skipped, because
+ * the identifiers in one are types this module names rather than names it
+ * binds, and admitting them resolves a citation to a type declared somewhere
+ * else.
+ */
+function namesBound(node: unknown, into: Set<string>): void {
+  if (Array.isArray(node)) {
+    for (const item of node as unknown[]) namesBound(item, into);
+    return;
+  }
+  if (!isNode(node)) return;
+  if (node.type === "Identifier") {
+    const name = text(node.name);
+    if (name !== null) into.add(name);
+    return;
+  }
+  for (const key of Object.keys(node))
+    if (key !== "typeAnnotation") namesBound(node[key], into);
+}
+
+/**
+ * Every member name a declaration's class, interface, enum, type or object
+ * body holds.
+ *
+ * **It stops at a function body**, which is the backend half's line and the
+ * same one: a local is not a member a sentence can cite, and admitting one
+ * makes this rule green on exactly the citation it exists to report. The arm
+ * named `does not resolve a member of a type declared inside a function` is
+ * the only thing that holds it.
+ */
+function membersDeclaredIn(node: unknown, into: Set<string>): void {
+  if (Array.isArray(node)) {
+    for (const item of node as unknown[]) membersDeclaredIn(item, into);
+    return;
+  }
+  if (!isNode(node)) return;
+  if (DECLARES_A_MEMBER.has(node.type)) {
+    // **`key` or `id`, because the two are not one convention.** A property
+    // signature, a method signature, an object property and a class member
+    // name themselves in `key`; an enum member names itself in `id`, measured
+    // off this parser. Reading `key` alone left every enum member out of the
+    // index, which is a false refusal of every citation to one.
+    const named = isNode(node.key) ? node.key : node.id;
+    const name = isNode(named) ? (text(named.name) ?? text(named.value)) : null;
+    if (name !== null) into.add(name);
+  }
+  // **It stops at a call as well, and that bound is what keeps the object
+  // key admission to objects a module declares.** Admitting keys is what
+  // indexes a message catalogue; without this line it also indexes the keys
+  // of a call's arguments, of a default parameter value and of a type
+  // annotation object, none of which is a member a sentence can cite.
+  // **Measured as differences, because the totals count this file.** The
+  // index reads every module of both trees including this one, so a total
+  // moves whenever an arm is added here, and the three that stood in this
+  // comment were each exactly three low by the time the commit carrying them
+  // landed. The differences do not have that problem: the key admission adds
+  // **3,335** names and this stop costs **101**, and both hold on the tree
+  // this comment ships in as well as on the two before it, where the totals
+  // moved under them each time. The catalogue's **1,160** is unaffected either way,
+  // because the catalogue is not the file doing the counting.
+  // Admitting one of those keys is a false acceptance, which is the direction
+  // no sweep finds, and the reason this is a bound rather than a preference.
+  //
+  // **What it refuses, and the tidy up that reopens the hole it closed.** An
+  // export whose object passes through a call is not indexed at all, so
+  // `export const en = Object.freeze({ ... })` would make every citation of a
+  // message key a false refusal again, which is exactly the defect the key
+  // admission was added to close. Nothing is live because `src/i18n/en.ts`
+  // declares its object directly, and that is an unstated property of one
+  // file rather than anything held here: freeze the catalogue, or wrap it in
+  // any helper, and the citations to it start reporting.
+  if (node.type === "BlockStatement" || node.type === "CallExpression") return;
+  for (const key of Object.keys(node)) membersDeclaredIn(node[key], into);
+}
+
+/**
+ * Every name a statement list declares, and the one place it descends.
+ *
+ * **A namespace body, and nothing else.** A descent into the branches of an
+ * `if`, a `try` and a bare block stood here for one round and is gone: two
+ * seats drove it independently, it reddened no arm and left the index byte
+ * identical, and what it admitted was a block scoped declaration as a module
+ * member, which is what the function body stop in `membersDeclaredIn`
+ * deliberately refuses. A line no mutant reds on is a line the next reader
+ * deletes, and it contradicted its neighbour besides.
+ *
+ * **It answers `false` for a module that re-exports everything**, because the
+ * names such a module provides are declared elsewhere and refusing a citation
+ * to one would be a false refusal over a file nobody wrote by hand.
+ */
+function declaresInto(body: unknown, into: Set<string>): boolean {
+  if (!Array.isArray(body)) return true;
+  for (const statement of body as unknown[]) {
+    if (!isNode(statement)) continue;
+    if (statement.type === "ExportAllDeclaration") return false;
+    let node = statement;
+    if (
+      node.type === "ExportNamedDeclaration" ||
+      node.type === "ExportDefaultDeclaration"
+    ) {
+      for (const specifier of (node.specifiers as unknown[]) ?? []) {
+        if (!isNode(specifier)) continue;
+        const exported = specifier.exported;
+        const name = isNode(exported)
+          ? (text(exported.name) ?? text(exported.value))
+          : null;
+        if (name !== null) into.add(name);
+      }
+      const inner = node.declaration;
+      if (!isNode(inner)) continue;
+      node = inner;
+    }
+    if (DECLARES_A_NAME.has(node.type)) {
+      const id = node.id;
+      const name = isNode(id) ? text(id.name) : null;
+      if (name !== null) into.add(name);
+      membersDeclaredIn(node, into);
+      if (node.type === "TSModuleDeclaration" && isNode(node.body))
+        declaresInto(node.body.body, into);
+      continue;
+    }
+    if (node.type === "VariableDeclaration") {
+      for (const declarator of (node.declarations as unknown[]) ?? []) {
+        if (!isNode(declarator)) continue;
+        namesBound(declarator.id, into);
+        membersDeclaredIn(declarator.id, into);
+        membersDeclaredIn(declarator.init, into);
+      }
+      continue;
+    }
+  }
+  return true;
+}
+
+/** What a module has, or nothing when its surface is not in its own parse. */
+function namesDeclaredIn(
+  source: string,
+  lang: "ts" | "tsx",
+): Set<string> | null {
+  const found = new Set<string>();
+  const body = (parseAst(source, { lang }) as unknown as Node).body;
+  return declaresInto(body, found) ? found : null;
+}
+
+/** The whole dotted name, then each of its tails. */
+function theNameAndItsTails(name: string): string[] {
+  const segments = name.split(".");
+  return segments.map((_, at) => segments.slice(at).join("."));
+}
+
+/** Every member citation these files hold, read but not yet resolved. */
+function memberCitationsIn(
+  files: Record<string, string>,
+): { from: string; cited: string; name: string }[] {
+  const out: { from: string; cited: string; name: string }[] = [];
+  for (const [from, source] of Object.entries(files)) {
+    MEMBER_SPAN.lastIndex = 0;
+    for (const span of unwrapped(source).matchAll(MEMBER_SPAN)) {
+      const written = MEMBER_CITATION.exec(span[2]!.replace(/[ \t]+/g, ""));
+      if (written === null) continue;
+      const cited = normalised(from, written[1]!);
+      if (CITES_A_TEST.test(cited)) continue;
+      out.push({ from, cited, name: written[2]! });
+    }
+  }
+  return out;
+}
+
+/**
+ * The member citations in `files` that resolve to nothing, as sentences.
+ *
+ * Pure and handed its whole world, so the probes below drive the same code the
+ * rule does rather than a second implementation of it.
+ *
+ * **An unqualified basename matching several modules is checked against their
+ * union**, which is the sibling rule's leniency and is taken for its reason:
+ * nothing here can tell which of them somebody meant.
+ */
+function unheld(
+  files: Record<string, string>,
+  modules: Record<string, string>,
+): string[] {
+  const paths = Object.keys(modules);
+  const index = new Map<string, Set<string> | null>();
+  const declaredBy = (path: string): Set<string> | null => {
+    if (!index.has(path))
+      index.set(path, namesDeclaredIn(modules[path] ?? "", langOf(path)));
+    return index.get(path) ?? null;
+  };
+
+  const found: string[] = [];
+  for (const { from, cited, name } of memberCitationsIn(files)) {
+    const targets = paths.filter(
+      (path) => path === cited || path.endsWith(`/${cited}`),
+    );
+    if (targets.length === 0) {
+      // **Reported only where the citation spells a tree this rule
+      // enumerates.** A bare basename naming nothing may be a file outside
+      // both corpora, and refusing one is this rule's ignorance read as a
+      // defect.
+      if (cited.startsWith("src/") || cited.startsWith("tests/"))
+        found.push(
+          `${from} names ${cited} for the member ${name}, ` +
+            `and there is no such module here`,
+        );
+      continue;
+    }
+    // **A barrel among the candidates no longer answers for the others.** The
+    // first version skipped the citation when **any** candidate re-exported
+    // everything, and `index.ts` is the name of 29 modules two of which are
+    // generated barrels, so one union covered every page folder's own
+    // `index.ts` and the rule was silent over all of them. Measured: the bare
+    // spelling was silent while the path qualified spelling of the same
+    // citation was reported.
+    const readable = targets
+      .map(declaredBy)
+      .filter((names): names is Set<string> => names !== null);
+    if (readable.length === 0) continue;
+    const declared = new Set(readable.flatMap((names) => [...names]));
+    if (theNameAndItsTails(name).some((one) => declared.has(one))) continue;
+    found.push(`${from} names ${cited} and the member ${name}, undeclared`);
+  }
+  return found;
+}
+
+describe("a module member cited in prose is still declared there", () => {
+  /**
+   * **The shape the rule above cannot see, by its own account.** That rule
+   * reads a two colon citation only when the path is a test file, and its own
+   * arms assert that it leaves a source module's export alone. So the tree has
+   * one instrument for a renamed test and none for a renamed member, while the
+   * backend has had the second since the MARC reader split.
+   *
+   * **A guard next door that looks like it covers you** is how the sibling
+   * describes the gap it was built into, and this is the same sentence one
+   * tree over: a green run of either neighbour says nothing about this class.
+   */
+  it("leaves no cited member undeclared", () => {
+    expect(unheld(citingFiles(), citableModules())).toEqual([]);
+  });
+
+  it("reads citations in all three families, not an empty set", () => {
+    // **The arming, and it is a property of the population rather than its
+    // size.** A corpus narrowed by directory keeps a count up while losing
+    // the family that carries the defect, which is what a floor cannot see.
+    // The documents are the family the sibling rule shipped without and the
+    // only one that was carrying a live defect.
+    const citing = new Set(
+      memberCitationsIn(citingFiles()).map(({ from }) =>
+        from.startsWith("src/")
+          ? "src"
+          : from.startsWith("tests/")
+            ? "tests"
+            : "a document",
+      ),
+    );
+
+    expect([...citing].sort()).toEqual(["a document", "src", "tests"]);
+  });
+
+  it("indexes every module both corpus readers hand over", () => {
+    // **Set equality against the readers, and the set assertions that stood
+    // here could not do this job.** They held the first path segments and the
+    // suffixes, so **687 of 689 modules could be dropped inside the index
+    // builder with every arm green.**
+    //
+    // **And the loss is silent, not loud.** No citation in the tree is tree
+    // prefixed, so a citation whose target leaves the index resolves to
+    // nothing and is dropped by the ignorance condition in `unheld` rather
+    // than reported. No sibling guard reddens on it either, so there is no
+    // collateral catch.
+    //
+    // **Set rather than count, because a count holds neither identity nor
+    // membership**: dropping one module and adding a renamed copy keeps every
+    // count where it was. The sets are free, since both sides are derived
+    // from the readers already.
+    expect(sortedPaths(Object.keys(citableModules()))).toEqual(
+      sortedPaths([...theSourceHalf(), ...theTestHalf()]),
+    );
+  });
+
+  it("reads every module both corpus readers hand over", () => {
+    // **The same arm one tree over, because the citing corpus had the hole
+    // the index one had just closed.** The index is where a citation is
+    // resolved; `citingFiles` is where one is found, and nothing held its two
+    // code halves. Driven on the real arms: with a real stale citation live,
+    // a single directory filter written inside that reader takes the run back
+    // to green, where the same filter in the index builder reds by name. The
+    // document half is held by the arm below and the two code halves by this
+    // one.
+    //
+    // **Its independence stops at the reader, and a run of this file alone
+    // cannot see that.** Both sides of both equalities call `sourceEntries`
+    // and `testEntries`, so a narrowing written **inside** one of those
+    // readers moves both sides together and reddens nothing here: what
+    // catches it is `tests/sourceModules.test.ts` and `tests/testModules.ts`'s
+    // own arm file, which enumerate those trees a second way. A top level
+    // narrowing reds here loudly; a subdirectory one is theirs. Said because
+    // this guard has been graded by targeted runs of this file, and a
+    // targeted run is the one thing that cannot observe the division.
+    const citing = Object.keys(citingFiles());
+
+    expect(
+      sortedPaths(citing.filter((path) => path.startsWith("src/"))),
+    ).toEqual(sortedPaths(theSourceHalf()));
+    expect(
+      sortedPaths(citing.filter((path) => path.startsWith("tests/"))),
+    ).toEqual(sortedPaths(theTestHalf()));
+  });
+
+  it("reads every published document the glob hands over", () => {
+    // **Two instruments, because one of them cannot see its own narrowing.**
+    // The count equality catches a filter added between the glob and the
+    // corpus, which is where a narrowing would be written; it cannot catch a
+    // narrowing written **into** the glob, because that moves both sides
+    // together. The directory set catches that one, and reds by name on a new
+    // directory of documents too, which is the loud direction.
+    //
+    // **The document family's own arming was a population of one**: of the
+    // 23 published documents exactly one carried a citation, so dropping the
+    // other 22 left the families arm, the rule and the self arm all green.
+    // The two counts that stood here naming the other two families are gone
+    // rather than registered, which is this repository's own remedy for a
+    // count in prose: one of them read as a roster count and the census that
+    // walks every published file reported it.
+    const published = Object.entries(DOCUMENTS).filter(
+      ([, source]) => !declaresItselfInternal(source),
+    );
+    const read = Object.keys(citingFiles()).filter((path) =>
+      path.endsWith(".md"),
+    );
+    //
+    // **Two documents arrive keyed relative to the globbing directory rather
+    // than to the repository**, `./COVERAGE.md` and `./doubles/README.md`,
+    // because the shared reader strips a `../../` prefix those two keys do not
+    // carry. That is the reader's property rather than this rule's, it is
+    // recorded here rather than repaired because the reader is the sibling
+    // rule's, and it matters to a reader of the failure message: a relative
+    // citation written in either of those two files would resolve against the
+    // wrong directory. None is written today.
+    const where = new Set(
+      read.map((path) =>
+        path.startsWith("./")
+          ? "the globbing directory"
+          : path.includes("/")
+            ? path.split("/")[0]!
+            : "the repository root",
+      ),
+    );
+
+    //
+    // **A subset rather than an equality, and the equality was wrong in the
+    // one place it fired.** The glob reads the filesystem rather than what
+    // the repository versions, so a checkout holding working notes reads them
+    // too: measured at 23 documents in a worktree against 216 in the owner's
+    // own checkout, 193 of them notes under a directory nobody versions. An
+    // equality reds there permanently, on the presence of a scratch directory
+    // and on no citation at all, and a permanent red for normal working state
+    // is what teaches the next reader to delete the arm. The subset still
+    // reds on the narrowing this exists for and gives up reddening on a new
+    // documents directory, which is the cost.
+    const missing = ["backend", "conformance", "docs", "the repository root"]
+      .concat("the globbing directory")
+      .filter((one) => !where.has(one));
+
+    expect(read.length).toBe(published.length);
+    expect(missing).toEqual([]);
+  });
+
+  it("reads the same documents a second pattern reaches", () => {
+    // **The arm the two above cannot be**, and the shape the backend's own
+    // register gate uses: a direct glob less an exclusion set, compared
+    // against the corpus. A partial narrowing written inside `DOCUMENTS`
+    // reddened neither of them, the count because both its sides derive from
+    // that one glob, the directory subset because the directory survives a
+    // narrowing that drops only part of it.
+    //
+    // **The exclusion is a literal, and the sentence here said otherwise.**
+    // It names one directory: the one the publish script writes to **by
+    // default**, which is gitignored and exists only where somebody has run
+    // that script. A run given an explicit directory writes outside what this
+    // excludes, and nothing cleverer is available, because that directory is
+    // a runtime argument to a shell script. **The predicted consequence does
+    // not occur here**: a tree materialised under another name lands in both
+    // patterns, so the two agree and this arm stays green. Verified by two
+    // runs of the script with explicit refs.
+    //
+    // **Where it does land is the shared document glob, and that is a ticket
+    // rather than this arm's business**: with the script pointed elsewhere
+    // that glob stops excluding the materialised tree and the rule reads a
+    // stale copy of every document, which is the failure that glob's own
+    // comment already records from 2026-09-10. The property that closes it is
+    // the one the document arm above already names and already declines,
+    // keying on what the repository versions rather than on the filesystem,
+    // and the decline is now one demonstrated instance more expensive than
+    // when it was written.
+    const theirs = Object.keys(DOCUMENTS);
+    const mine = Object.keys(EVERY_DOCUMENT);
+    const onlyInTheSecond = mine
+      .filter((path) => !theirs.includes(path))
+      .filter((path) => !path.startsWith("../../public/"));
+    const onlyInTheFirst = theirs.filter((path) => !mine.includes(path));
+
+    expect([onlyInTheSecond, onlyInTheFirst]).toEqual([[], []]);
+  });
+
+  it("reads a citation written after a fenced code block", () => {
+    // **The defect this rule shipped with, and the reason the span is
+    // anchored on the token.** The unwrapper turns a break into a space, so a
+    // fence arrives as three backticks inline; a paired span reads two of them
+    // as a delimiter and swallows everything to the next pair. Measured over
+    // the published documents, a citation appended at the end was unread in 15
+    // of 23 before and 0 of 23 after.
+    const document = [
+      "# A document",
+      "",
+      "```ts",
+      "const example = 1;",
+      "```",
+      "",
+      "And `thing.ts" + "::theOldName` is gone.",
+    ].join("\n");
+
+    expect(
+      unheld(
+        { "docs/a.md": document },
+        { "src/thing.ts": `export const theNewName = 1;` },
+      ),
+    ).toEqual([
+      "docs/a.md names thing.ts and the member theOldName, undeclared",
+    ]);
+  });
+
+  it("reports the shapes it exists for", () => {
+    // **Assembled rather than written out**, so none of these is a citation
+    // in this file's own source and the rule above reads this file for real.
+    const cite = (path: string, name: string) => "`" + path + "::" + name + "`";
+    const probe = (module: string, comment: string) =>
+      unheld(
+        { "src/x.ts": `// ${comment}\nexport const x = 1;` },
+        { "src/thing.ts": module },
+      );
+
+    // The two it is for. A renamed member, and a module that is not there.
+    expect(
+      probe(`export const theNewName = 1;`, cite("thing.ts", "theOldName")),
+    ).toEqual([
+      "src/x.ts names thing.ts and the member theOldName, undeclared",
+    ]);
+    expect(
+      probe(`export const kept = 1;`, cite("src/gone.ts", "kept")),
+    ).toEqual([
+      "src/x.ts names src/gone.ts for the member kept, " +
+        "and there is no such module here",
+    ]);
+
+    // And the legitimate spellings, every one of which a stricter reading
+    // refuses. A rule that refuses these is worse than none, because the next
+    // author deletes it rather than obeying it. **Seven of these were refused
+    // by the first version**: the five object literal rows, and both
+    // namespace rows.
+    const accepted: [string, string][] = [
+      [`export const kept = 1;`, cite("thing.ts", "kept")],
+      [`function kept() {}`, cite("thing.ts", "kept")],
+      [`const [kept, other] = [1, 2];\nvoid other;`, cite("thing.ts", "kept")],
+      [`export type Kept = { field: string };`, cite("thing.ts", "Kept")],
+      [`export interface Kept { field: string }`, cite("thing.ts", "field")],
+      [`interface Kept { run(): void }`, cite("thing.ts", "run")],
+      [`enum Kept { Member = 1 }`, cite("thing.ts", "Member")],
+      [`class Kept { run() {} }`, cite("thing.ts", "run")],
+      [`class Kept { get only() { return 1; } }`, cite("thing.ts", "only")],
+      [
+        `const kept = 1;\nexport { kept as renamed };`,
+        cite("thing.ts", "renamed"),
+      ],
+      [`export default function named() {}`, cite("thing.ts", "named")],
+      // The object literal family, which is how the message catalogue is
+      // written and was the whole of the live false refusal.
+      [`export const o = { prop: 1 };`, cite("thing.ts", "prop")],
+      [`export const o = { a: { b: 1 } };`, cite("thing.ts", "b")],
+      [
+        `export const o = { get only() { return 1; } };`,
+        cite("thing.ts", "only"),
+      ],
+      [`export const o = { a: 1 } as const;`, cite("thing.ts", "a")],
+      // A quoted key that is itself dotted, resolved on the whole name.
+      [
+        `export const en = { "nav.library": "Library" };`,
+        cite("thing.ts", "nav.library"),
+      ],
+      // A namespace, both halves.
+      [
+        `export namespace N { export const inner = 1; }`,
+        cite("thing.ts", "inner"),
+      ],
+      [
+        `declare namespace N { interface Inner { f: string } }`,
+        cite("thing.ts", "Inner"),
+      ],
+      // The dotted tail, whose middle segments are prose.
+      [
+        `export interface Kept { field: string }`,
+        cite("thing.ts", "Kept.field"),
+      ],
+      [
+        `export interface Kept { field: string }`,
+        cite("thing.ts", "Other.field"),
+      ],
+      // The path spelled from the repository root, and from the tree.
+      [`export const kept = 1;`, cite("frontend/src/thing.ts", "kept")],
+      [`export const kept = 1;`, cite("src/thing.ts", "kept")],
+    ];
+    for (const [module, comment] of accepted)
+      expect(probe(module, comment), comment).toEqual([]);
+  });
+
+  it("lets one barrel among several candidates answer for none of them", () => {
+    // **The hole two leniencies composed into.** The union over an ambiguous
+    // basename is deliberate; skipping a module that re-exports everything is
+    // deliberate; skipping the citation when **any** candidate was a barrel
+    // made the rule silent over every `index.ts` in the tree, 29 modules of
+    // which two are generated barrels. All three spellings are driven here
+    // because the bare one was silent while the qualified one reported, which
+    // is the shape that makes a rule look like it works.
+    const modules = {
+      "src/api/generated/model/index.ts": `export * from "./x.ts";`,
+      "src/pages/Home/index.ts": `export { Home } from "./Home.tsx";`,
+      "src/thing.ts": `export const kept = 1;`,
+    };
+    const citing = (cited: string) => ({
+      "src/x.ts": "// `" + cited + "::gone`\nexport const x = 1;",
+    });
+
+    // The bare name, whose candidates include a barrel and a real module.
+    expect(unheld(citing("index.ts"), modules)).toEqual([
+      "src/x.ts names index.ts and the member gone, undeclared",
+    ]);
+    // The qualified spelling of the same citation, which always reported.
+    expect(unheld(citing("src/pages/Home/index.ts"), modules)).toEqual([
+      "src/x.ts names src/pages/Home/index.ts and the member gone, undeclared",
+    ]);
+    // And a citation whose only candidate is a barrel is still skipped,
+    // because that module's surface is genuinely not in its own parse.
+    expect(unheld(citing("src/api/generated/model/index.ts"), modules)).toEqual(
+      [],
+    );
+  });
+
+  it("leaves everything the sibling rule owns, and prose, alone", () => {
+    const span = (inner: string) => "`" + inner + "`";
+    const probe = (comment: string) =>
+      unheld(
+        { "src/x.ts": `// ${comment}\nexport const x = 1;` },
+        { "src/thing.ts": `export const kept = 1;` },
+      );
+
+    // A test file is the sibling's population by the one spelling of the
+    // suffix, so this rule says nothing about one even where it resolves to
+    // nothing. **Assembled, like the sibling's own probes**, because the
+    // whole shape written out here is an unfenced citation in this file's
+    // source and that rule reports one.
+    const aTest = (name: string) => span("src/a.test.ts" + "::" + name);
+    expect(probe(aTest("a label nobody wrote"))).toEqual([]);
+    expect(probe(aTest("gone"))).toEqual([]);
+    // The escape, driven rather than described.
+    expect(probe("thing.ts" + "::gone is the one that went")).toEqual([]);
+    // A path outside both corpora, which this rule cannot answer for.
+    expect(probe(span("vite.config.ts" + "::gone"))).toEqual([]);
+    // The two refused forms the docstring measures.
+    expect(probe(span("thing.gone"))).toEqual([]);
+    expect(probe(span("gone"))).toEqual([]);
+    // A prose span of more words than a wrapped token can carry.
+    expect(probe(span("a sentence. with a dot"))).toEqual([]);
+    // **The row that discriminates, which the one above does not.** That one
+    // is prose under either cap. This one is prose at the cap the token
+    // carries and a reported false refusal without it: squeezed it reads as
+    // this probe's own module and a member it does not declare, so an
+    // unbounded cap turns a sentence about a renamed reader into a citation
+    // nobody wrote.
+    //
+    // **The module has to be one this probe's world holds.** The row was
+    // handed over naming a real module of the tree and measured green at
+    // both caps here, because a path the probe's two module world does not
+    // hold leaves the population through the ignorance condition before any
+    // cap applies. A row whose subject is dropped for an unrelated reason
+    // discriminates nothing.
+    expect(probe(span("thing.ts" + "::kept but renamed twice"))).toEqual([]);
+  });
+
+  it("does not resolve a name that is only a local", () => {
+    // **The widening this rule has to stay closed against**, which is the one
+    // mutation that takes it green over a live defect: index every identifier
+    // a declaration holds rather than the names it declares. Measured with
+    // `namesBound(node, found)` added to the declaration branch, which is the
+    // one line that does it: this arm and the one below it both red, which is
+    // the honest size of that mutant rather than evidence about this arm
+    // alone.
+    //
+    // **The two obvious weakenings are not that one**, measured rather than
+    // assumed: removing the stop at a function body leaves this green, and so
+    // does reading the member key alone. Each has an arm of its own, the
+    // first below and the second in the enum row above, because a line no
+    // mutant reds on is a line the next reader deletes.
+    const module = `export function run() {\n  const local = 1;\n  return local;\n}`;
+
+    expect(
+      unheld(
+        { "src/x.ts": "// `thing.ts" + "::local`\nexport const x = 1;" },
+        { "src/thing.ts": module },
+      ),
+    ).toEqual(["src/x.ts names thing.ts and the member local, undeclared"]);
+  });
+
+  it("does not resolve a key handed to a call", () => {
+    // **What the stop at a call is for, and the only thing holding it.**
+    // Admitting object keys is what indexes a message catalogue, and the same
+    // descent reaches the keys of a call's arguments, which are an argument's
+    // shape rather than anything the module provides. Nothing in the tree
+    // cites one, because the direction is false acceptance and a citation to
+    // such a key would quietly pass, so the subject is planted.
+    const module = `export const x = configure({ notAMember: 1 });`;
+
+    expect(
+      unheld(
+        { "src/x.ts": "// `thing.ts" + "::notAMember`\nexport const x = 1;" },
+        { "src/thing.ts": module },
+      ),
+    ).toEqual([
+      "src/x.ts names thing.ts and the member notAMember, undeclared",
+    ]);
+  });
+
+  it("does not resolve a member of a type declared inside a function", () => {
+    // **What the stop at a function body is for**, and it is the only thing
+    // that holds it: measured, removing that line reddens nothing else, here
+    // or over the tree. A type declared inside a function is not a member a
+    // sentence can reach, and admitting one resolves a citation against a
+    // name no caller of the module can name.
+    const module = `export function run() {\n  interface Inner { hidden: string }\n  return null as unknown as Inner;\n}`;
+
+    expect(
+      unheld(
+        { "src/x.ts": "// `thing.ts" + "::hidden`\nexport const x = 1;" },
+        { "src/thing.ts": module },
+      ),
+    ).toEqual(["src/x.ts names thing.ts and the member hidden, undeclared"]);
+  });
+
+  it("reads a citation the formatter wrapped across a line", () => {
+    // The wrap the formatter mandates over eighty columns, which a line
+    // oriented reading misses. Nothing in this corpus wraps today, counted by
+    // comparing the reading with and without the unwrapper, so the arm is
+    // planted rather than live.
+    expect(
+      unheld(
+        {
+          "src/x.ts":
+            "// see `thing.ts" +
+            "::\n// theOldName` for it\nexport const x = 1;",
+        },
+        { "src/thing.ts": `export const theNewName = 1;` },
+      ),
+    ).toEqual([
+      "src/x.ts names thing.ts and the member theOldName, undeclared",
+    ]);
+  });
+
+  it("is reading this file, which carries its own subject", () => {
+    // **Membership is not the subject, and the name was for the subject.**
+    // Stripping every citation out of this file while leaving the file in
+    // the corpus reddened nothing: the arm held that the file is read, which
+    // is a weaker claim than the one it is named for. What makes this file a
+    // member worth reading is the citations it writes, so those are what is
+    // asserted.
+    //
+    // **They are a subject rather than a fixture**, which is the line between
+    // a guard sitting in its own population legitimately and one planting its
+    // own evidence: both name a real module and both must resolve like any
+    // other prose in the corpus. The fixtures that used to sit here named a
+    // module the tree does not have and could only ever be dropped in
+    // silence, which is why they are assembled now.
+    const mine = memberCitationsIn(citingFiles()).filter(
+      ({ from }) => from === "tests/houseRules.test.ts",
+    );
+
+    expect(Object.keys(citingFiles())).toContain("tests/houseRules.test.ts");
+    expect(mine.length).toBeGreaterThan(0);
+  });
+});

@@ -43,7 +43,7 @@ from sqlalchemy import event
 import custom_fields
 from enums import CustomFieldKind
 from fields import Fields
-from models import Book, CustomField, CustomFieldValue, User
+from models import MAX_CUSTOM_FIELDS, Book, CustomField, CustomFieldValue, User
 from tests.test_house_rules import (
     _model_names_safe_to_resolve,
     _receiver_model,
@@ -436,9 +436,14 @@ class TestNothingElseDecidesWhoMayBeToldAFieldExists:
             "\n\ndef every_field_there_is(db):\n"
             "    return db.query(CustomField).order_by(CustomField.id).all()\n"
         )
+        # The comprehension's source, which is the spelling the two sibling
+        # rules plant into as well: `test_tags.py` and `test_shelving.py` both
+        # anchor on `for <row> in <reader>.listable()`. The route used to
+        # return the reader's list directly and the anchor used to be that
+        # return; it now renders each row, so the anchor is the loop.
         rewritten = sources["routers/books.py"].replace(
-            "return Fields.seen_by(db, current_user.id).listable()",
-            "return every_field_there_is(db)",
+            "for row in fields.listable()",
+            "for row in every_field_there_is(db)",
             1,
         )
         assert rewritten != sources["routers/books.py"], (
@@ -1052,6 +1057,89 @@ class TestTheArmForTheMemberWhoDefinedIt:
         assert absent == hidden, (
             f"an absent field id costs {absent} statements and a hidden one "
             f"{hidden}, so the two 404s are separable on a clock"
+        )
+
+
+class TestListingCostsTheSameWhateverTheNumberOfDefinitions:
+    """The N+1 the four lazy reads exist to avoid, and the arm they never had.
+
+    **A relative instrument and never a literal**, which is the whole lesson
+    of the sentence this guards. That docstring stated a count, the count was
+    short by the whole table read `listable` issues from another module, and
+    nothing here could see it. A literal moves with every arm added or removed
+    and says nothing about an N+1; an equality between two populations moves
+    with neither and reds the moment a read goes per definition. The same
+    shape `test_serialisation.py` puts over a page.
+
+    **Every definition is carried only by a book the viewer cannot see**, so
+    all four arms are consulted for every one of them and a read that lost its
+    memoisation in any of them is one statement per definition. A population
+    that any arm admitted early would short circuit the rest and measure less.
+
+    **The wide end is `MAX_CUSTOM_FIELDS` and never a literal**, so it is the
+    widest library the feature permits rather than a number somebody picked,
+    and the ceiling has one home here as it does everywhere else.
+    """
+
+    def test_one_definition_costs_what_a_full_library_does(
+        self, db, viewer, stranger
+    ) -> None:
+        hidden = _book(db, stranger, private=True)
+        # Read **outside** every measured window, for the reason
+        # `test_it_is_asked_before_the_unscoped_arm` records: the commits below
+        # expire this instance, so a first touch inside a window is counted and
+        # the second is not, which is a difference of one between the two
+        # readings and nothing to do with the subject.
+        viewer_id = viewer.id
+
+        def define_another(index: int) -> None:
+            field = custom_fields.define(
+                db, f"Field {index}", CustomFieldKind.TEXT, stranger.id
+            )
+            db.commit()
+            _fill(db, hidden, field)
+
+        def listing() -> tuple[int, list[CustomField]]:
+            seen: list[str] = []
+
+            def record(conn, cursor, statement, *rest):
+                seen.append(statement)
+
+            engine = db.get_bind()
+            event.listen(engine, "before_cursor_execute", record)
+            try:
+                rows = Fields.seen_by(db, viewer_id).listable()
+            finally:
+                event.remove(engine, "before_cursor_execute", record)
+            return len(seen), rows
+
+        define_another(0)
+        one, listed_for_one = listing()
+        for index in range(1, MAX_CUSTOM_FIELDS):
+            define_another(index)
+        twenty_five, listed_for_twenty_five = listing()
+
+        # The populations really were 1 and 25, and the arm configuration
+        # really was the one the docstring describes. Without these three the
+        # equality below holds over an empty table and measures nothing.
+        assert len(custom_fields.definitions(db)) == MAX_CUSTOM_FIELDS
+        assert listed_for_one == []
+        assert listed_for_twenty_five == []
+        # **The floor has its own mutant and is not decoration.** A
+        # `_may_be_told` answering False without consulting an arm leaves every
+        # other assertion here true: the list is empty, which is what the three
+        # above require, and one statement at both populations satisfies the
+        # equality below. This is the only line that reds on it.
+        #
+        # **The mutant that does NOT isolate it is the obvious one.** A
+        # `listable` returning the table without consulting the predicate was
+        # the first candidate and it reds `listed_for_one` two lines up, three
+        # statements earlier, so it never reaches here. Planted both ways
+        # rather than argued: the first version of this comment named that one.
+        assert one > 1, "no arm was consulted, so this measured the table read alone"
+        assert twenty_five == one, (
+            f"one definition costs {one} statements and {MAX_CUSTOM_FIELDS} cost "
+            f"{twenty_five}, so `listable` issues a read per definition"
         )
 
 

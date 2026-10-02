@@ -1,5 +1,6 @@
 """Tests for backend/database.py: engine setup and the session dependency."""
 
+import ast
 import datetime as dt
 import logging
 import os
@@ -19,6 +20,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 from sqlalchemy import event, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import QueuePool
 
@@ -658,6 +660,44 @@ print(why)
 """
 
 
+#: What the gate child prints in front of its one line of verdict.
+_GATE_MARKER = "GATE:"
+
+#: A child that imports the application's own module and reports the constant
+#: the listener reads.
+#:
+#: **Separate from the posture child above rather than folded into it**, which
+#: would make one child answer two questions and neither arm able to say which
+#: moved. It dials nothing, so it needs no server and no certificate.
+_GATE_CHILD = f"""
+import sys
+sys.path.insert(0, {str(Path(__file__).parent.parent)!r})
+import database
+print("{_GATE_MARKER}" + repr(database._SPEAKS_POSTGRES))
+"""
+
+
+def _what_the_child_said_the_gate_is(url: str, tmp_path: Path) -> str:
+    """The constant, as a fresh interpreter built from `url` computes it."""
+    finished = subprocess.run(
+        [sys.executable, "-c", _GATE_CHILD],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(tmp_path),
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_URL": url,
+            "SECRET_KEY": "a" * 40,
+        },
+    )
+    for line in finished.stdout.splitlines():
+        if line.startswith(_GATE_MARKER):
+            return line[len(_GATE_MARKER) :]
+    return f"no verdict: stdout={finished.stdout!r} stderr={finished.stderr!r}"
+
+
 def _a_server_that_declines_tls() -> tuple[socket.socket, int]:
     """A loopback socket that answers the SSL request with `N`, once.
 
@@ -769,3 +809,509 @@ class TestTheApplicationsOwnEngineIsBuiltFromTheSetting:
         said, streams = _the_engine_said("other-failure", "disable", tmp_path)
 
         assert said, streams
+
+
+class _ARecordedCursor:
+    """One cursor, recording the statement and the state it ran under."""
+
+    def __init__(self, connection: _ARecordedConnection) -> None:
+        self._connection = connection
+
+    def execute(self, statement: str) -> None:
+        self._connection.statements.append(statement)
+        if self._connection.refuse_the_statement:
+            raise RuntimeError("the server refused SET TIME ZONE")
+        # **The state is read while the statement runs, not afterwards.** The
+        # listener restores it, so a check taken after the call reports the
+        # state it was handed and says nothing about the statement.
+        self._connection.autocommitting_while_executing.append(
+            self._connection.autocommit
+        )
+
+    def close(self) -> None:
+        self._connection.cursors_closed += 1
+
+
+class _ARecordedConnection:
+    """A DBAPI connection that remembers what a connect listener did to it.
+
+    The shape pg8000 presents, and the shape psycopg presents too: a cursor
+    factory and a mutable `autocommit`. Both are what the listener touches.
+    """
+
+    def __init__(
+        self, *, autocommit: bool = False, refuse_the_statement: bool = False
+    ) -> None:
+        self.autocommit = autocommit
+        self.refuse_the_statement = refuse_the_statement
+        self.statements: list[str] = []
+        self.autocommitting_while_executing: list[bool] = []
+        self.cursors_closed = 0
+
+    def cursor(self) -> _ARecordedCursor:
+        return _ARecordedCursor(self)
+
+
+class TestThePostgresSessionZoneIsSetUnderAutocommit:
+    """Sixteen columns take a database side default cast through this setting.
+
+    **The measurement behind every arm here is in the listener's own
+    docstring** and was taken against a real Postgres 18.6 whose zone was not
+    UTC. These arms cannot take it again: the suite is SQLite, where the
+    listener is inert by design, so what they hold is the shape the measurement
+    said is required.
+    """
+
+    @pytest.fixture
+    def speaking_postgres(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(database, "_SPEAKS_POSTGRES", True)
+
+    def test_a_postgres_connection_is_put_on_utc(self, speaking_postgres: None) -> None:
+        """UTC because the application's other writer is naive UTC already."""
+        connection = _ARecordedConnection()
+
+        database._pin_the_postgres_session_zone(connection, None)
+
+        assert connection.statements == ["SET TIME ZONE 'UTC'"]
+
+    def test_the_statement_runs_with_autocommit_on(
+        self, speaking_postgres: None
+    ) -> None:
+        """**The arm the whole listener turns on, and it is not decoration.**
+
+        Measured with pg8000 against a real server: issued inside the implicit
+        transaction, the zone reads UTC until the first `rollback` on that
+        connection and the server's own zone for the rest of its life in the
+        pool. Delete the two `autocommit` assignments and every other arm here
+        stays green over a listener that stops working on the first rollback.
+        """
+        connection = _ARecordedConnection()
+
+        database._pin_the_postgres_session_zone(connection, None)
+
+        assert connection.autocommitting_while_executing == [True]
+
+    def test_autocommit_is_put_back_the_way_it_was_found(
+        self, speaking_postgres: None
+    ) -> None:
+        """Both ways round, because restoring to a constant is the same code
+        as restoring to what was there and only one of them is right.
+
+        **The statements are asserted beside the flag, and the flag alone was
+        not enough.** This arm built a connection with autocommit already on
+        and read only the flag afterwards, so the whole already autocommitting
+        path was unexercised: an `if connection.autocommit: return` added to
+        the listener reddened **none** of the twelve arms, because every other
+        arm hands over a connection with it off. The zone must be set whatever
+        state the driver hands the connection in.
+        """
+        was_off = _ARecordedConnection(autocommit=False)
+        was_on = _ARecordedConnection(autocommit=True)
+
+        database._pin_the_postgres_session_zone(was_off, None)
+        database._pin_the_postgres_session_zone(was_on, None)
+
+        assert (was_off.autocommit, was_on.autocommit) == (False, True)
+        assert (was_off.statements, was_on.statements) == (
+            ["SET TIME ZONE 'UTC'"],
+            ["SET TIME ZONE 'UTC'"],
+        )
+
+    def test_the_cursor_is_closed_on_the_way_out(
+        self, speaking_postgres: None
+    ) -> None:
+        """A cursor per physical connection, leaked once per connection.
+
+        **Named for what it holds.** It was named for the statement not being
+        able to fail, which the arm three lines below exists to falsify: that
+        one hands over a cursor that refuses and requires the failure to
+        propagate. Two arms in one class cannot disagree about whether the
+        statement can fail.
+        """
+        connection = _ARecordedConnection()
+
+        database._pin_the_postgres_session_zone(connection, None)
+
+        assert connection.cursors_closed == 1
+
+    def test_a_refused_statement_is_not_swallowed(
+        self, speaking_postgres: None
+    ) -> None:
+        """A connection whose zone was not set is worse than one that failed.
+
+        Wrapping the statement in a bare `except` reddened none of the arms
+        this class shipped with: every one of them asserts what the listener
+        did on a cursor that accepts, and a pool handing out a connection whose
+        timestamps disagree with the application's is the defect the whole
+        listener exists to stop.
+        """
+        connection = _ARecordedConnection(refuse_the_statement=True)
+
+        with pytest.raises(RuntimeError, match="SET TIME ZONE"):
+            database._pin_the_postgres_session_zone(connection, None)
+
+        # And the connection is left as it was found rather than autocommitting.
+        assert (connection.autocommit, connection.cursors_closed) == (False, 1)
+
+    def test_a_connection_is_not_touched_when_the_gate_says_this_is_not_postgres(
+        self,
+    ) -> None:
+        """SQLite compiles the same default to `CURRENT_TIMESTAMP`, which is
+        UTC by definition, so there is nothing to set and no cursor to open.
+
+        **Named for the gate, because the gate is what it reads.** The
+        connection handed over here is the same shape as every other in this
+        class; what makes the listener leave it alone is the module flag, not
+        anything about the connection, and the old name said otherwise.
+        """
+        connection = _ARecordedConnection()
+
+        database._pin_the_postgres_session_zone(connection, None)
+
+        assert (connection.statements, connection.cursors_closed) == ([], 0)
+
+    def test_the_listener_is_registered_on_the_engine(self) -> None:
+        """Every arm above calls the function, so none of them needs it wired.
+
+        Delete the `@event.listens_for` and leave the body, and the whole class
+        stays green over a zone that is never set. This is the one arm that
+        reads the registration rather than the behaviour, and it is the
+        neighbouring TLS class's arrangement for the same reason.
+        """
+        assert event.contains(engine, "connect", database._pin_the_postgres_session_zone)
+
+    def test_the_suite_s_own_engine_reaches_none_of_it(self) -> None:
+        """The suite is SQLite, so no arm in it can observe this listener run.
+
+        Stated as an assertion rather than as a sentence, because it is the
+        reason every arm above fakes a connection and a reader is entitled to
+        check it rather than believe it.
+        """
+        assert database._SPEAKS_POSTGRES is False
+
+
+class TestTheZoneGateReadsTheDialectAndNotTheDriver:
+    """The neighbouring cleartext check gates on pg8000 and this one does not.
+
+    That one reads a private pg8000 attribute, so the driver is the honest
+    thing to name. This one emits standard SQL, and gating it on the driver
+    would leave a deployment that swapped drivers carrying the defect with
+    nothing saying so. **The caveat on that argument is that the dependency
+    file pins one driver**, so the other spellings below are shapes the gate
+    answers for rather than deployments that exist.
+
+    **Every arm drives `database._speaks_postgres`, and the first version of
+    this class drove `make_url` instead.** That asserted a fact about
+    SQLAlchemy and nothing about the gate: rewriting the gate as the substring
+    test anybody reaches for, `"postgresql" in url`, reddened **none** of the
+    twelve arms in this file.
+    """
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "postgresql+pg8000://u:p@db.invalid:5432/endpaper",
+            "postgresql+psycopg://u:p@db.invalid:5432/endpaper",
+            "postgresql://u:p@db.invalid:5432/endpaper",
+        ],
+    )
+    def test_every_spelling_of_a_postgres_url_is_postgres(self, url: str) -> None:
+        assert database._speaks_postgres(url) is True
+
+    def test_a_sqlite_url_is_not_postgres(self) -> None:
+        assert database._speaks_postgres("sqlite:///./x.db") is False
+
+    def test_a_sqlite_file_named_after_the_dialect_is_not_postgres(self) -> None:
+        """**The substring gate's wrong answer, which is why the gate parses.**
+        `"postgresql" in url` is true here and the dialect is SQLite, so this
+        is the one arm that separates the two spellings."""
+        assert database._speaks_postgres("sqlite:///./postgresql.db") is False
+
+    def test_the_two_gates_differ_on_a_driver_this_tree_does_not_ship(
+        self,
+    ) -> None:
+        """The dialect over driver claim, asserted rather than described."""
+        other = "postgresql+psycopg://u:p@db.invalid:5432/endpaper"
+
+        assert database._speaks_postgres(other) is True
+        assert make_url(other).drivername != database._PG8000
+
+    def test_the_constant_is_true_under_a_postgres_url(
+        self, tmp_path: Path
+    ) -> None:
+        """The listener reads the constant, so the constant is what to ask.
+
+        **An equality between the function and the constant held nothing.**
+        Both answer `False` on the suite's own SQLite URL, so the arm that
+        stood here admitted any falsy expression whatever: three seats severed
+        the constant from the function four ways and only a hardcoded `True`
+        reddened. `False` passed, the driver gate passed, and so did the
+        function applied to a URL the application never opens.
+
+        **A child interpreter, because the constant is computed at import**
+        and no monkeypatch after that moves it. The child dials nothing:
+        `create_engine` opens no socket, so a port with no listener is enough
+        to carry a Postgres URL into the module.
+        """
+        said = _what_the_child_said_the_gate_is(
+            "postgresql+pg8000://u:p@127.0.0.1:1/db", tmp_path
+        )
+
+        assert said == "True", said
+
+    def test_the_constant_is_false_under_the_url_the_suite_runs(
+        self, tmp_path: Path
+    ) -> None:
+        """The other half, so a constant hardcoded true reds here.
+
+        The in process arm above it asserts the same thing about the live
+        module; this one asserts it through the same instrument as the
+        Postgres half, so the two answers come from one reading.
+        """
+        said = _what_the_child_said_the_gate_is("sqlite:///./probe.db", tmp_path)
+
+        assert said == "False", said
+
+    def test_the_constant_is_the_function_applied_to_this_module_s_url(
+        self,
+    ) -> None:
+        """The severing a child cannot reach, read off the syntax.
+
+        **The driver gate is the severing that matters and no behavioural arm
+        here can see it.** Writing `_SPEAKS_POSTGRES = _SPEAKS_PG8000` agrees
+        with the function on every URL a child can carry, because the only
+        Postgres driver installed is the one the other gate names, so the two
+        differ exactly where this suite cannot go. What distinguishes them is
+        the expression, so the expression is what is asserted.
+        """
+        sites = _every_binding_of("_SPEAKS_POSTGRES")
+        written = _what_the_name_is_bound_to("_SPEAKS_POSTGRES")
+
+        assert len(sites) == 1, f"{len(sites)} bindings in the module, expected one"
+        assert len(written) == 1, f"{len(written)} of them assign an expression"
+        assert ast.unparse(written[0]) == "_speaks_postgres(DATABASE_URL)"
+
+
+def _database_module() -> ast.Module:
+    """`database.py`, parsed once per call and cheap enough to leave so."""
+    return ast.parse(Path(database.__file__).read_text(encoding="utf-8"))
+
+
+def _binds(node: ast.AST, name: str) -> bool:
+    """Whether one node binds `name`, by what binds rather than by its kind.
+
+    **Two versions of this read statement kinds and both were defeated by
+    adding a line.** The first collected annotated assignments and took the
+    first match, so a plain assignment appended below it passed. The second
+    collected both assignment kinds at **module top level**, so the same
+    assignment appended one indent in, inside an `if`, a `try`, a `for`, a
+    `with` or a walrus, passed again: the walk reported one binding, unparsed
+    it to the expected call, and was green over a module whose constant was
+    something else after import.
+
+    **So this asks what binds.** A name in store context covers assignment in
+    every nesting and every one of those five spellings; the rest are the
+    binding forms that carry their name somewhere other than a `Name` node.
+
+    **What no syntactic walk reaches, stated rather than enumerated around**:
+    the module's namespace written as data. `globals()["..."] = ...` and
+    `vars(sys.modules[__name__])["..."] = ...` are subscript stores on a
+    call's result; `setattr(sys.modules[__name__], ...)` is a call; `exec` of
+    a string names nothing at all. Naming only the first of those was this
+    docstring's own version of the defect it describes. A pattern per spelling
+    would enumerate the ways to write one evasion rather than hold a property.
+
+    **The live residue is one value, not four spellings**, which is the half
+    that says why not to enumerate: measured, only a rebinding to the driver
+    gate survives any of them, because any other value is caught by
+    `test_the_constant_is_true_under_a_postgres_url`.
+
+    **This holds the name and not what the expression depends on**, which
+    "what binds" invites a reader to assume. Redefining the function the
+    constant calls leaves this walk and both child arms green and reds three
+    arms over that function; rebinding the module's URL leaves this walk green
+    and reds the child arm. Nothing is open: the neighbours hold both.
+    """
+    if isinstance(node, ast.Name):
+        return isinstance(node.ctx, ast.Store) and node.id == name
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        return node.name == name
+    if isinstance(node, ast.alias):
+        return (node.asname or node.name.split(".")[0]) == name
+    if isinstance(node, ast.ExceptHandler):
+        return node.name == name
+    if isinstance(node, ast.MatchAs | ast.MatchStar):
+        return node.name == name
+    if isinstance(node, ast.MatchMapping):
+        return node.rest == name
+    return False
+
+
+def _every_binding_of(name: str) -> list[ast.AST]:
+    """Every site in `database.py` that binds `name`, at any nesting.
+
+    **Its false refusals are both loud and immediate**: a local of the same
+    name anywhere in the module, of which there are none today, and a correct
+    rewrite that binds the name twice on purpose.
+    """
+    return [node for node in ast.walk(_database_module()) if _binds(node, name)]
+
+
+def _what_the_name_is_bound_to(name: str) -> list[ast.expr]:
+    """The expressions assigned to `name`, for the one binding above.
+
+    Separate from the count, because most binding forms have no value to read:
+    a `for` target and a `with ... as` bind without an expression anybody can
+    unparse, and the count is what refuses those.
+    """
+    found: list[ast.expr] = []
+    for node in ast.walk(_database_module()):
+        if isinstance(node, ast.AnnAssign | ast.AugAssign | ast.NamedExpr):
+            target = node.target
+            if (
+                isinstance(target, ast.Name)
+                and target.id == name
+                and node.value is not None
+            ):
+                found.append(node.value)
+        elif isinstance(node, ast.Assign):
+            for assigned in node.targets:
+                if any(
+                    isinstance(inner, ast.Name) and inner.id == name
+                    for inner in ast.walk(assigned)
+                ):
+                    found.append(node.value)
+    return found
+
+
+def _the_zone_listener() -> ast.FunctionDef:
+    """The listener, as a node, for the two readings below."""
+    listener = [
+        node
+        for node in _database_module().body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_pin_the_postgres_session_zone"
+    ]
+    assert len(listener) == 1, "the listener is not defined once"
+    return listener[0]
+
+
+def _what_the_zone_statement_interpolates() -> tuple[ast.expr, list[str]]:
+    """The listener's one statement, and the names it interpolates.
+
+    Read off the listener's own body rather than off the constant, because the
+    constant's spelling and the statement's are two facts and the arms held
+    only the first: moving an environment read **into** the interpolation while
+    leaving the constant a literal reddened nothing.
+    """
+    executes = [
+        node
+        for node in ast.walk(_the_zone_listener())
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "execute"
+    ]
+    assert len(executes) == 1, f"{len(executes)} execute calls, expected one"
+    argument = executes[0].args[0]
+    interpolated = [
+        ast.unparse(part.value)
+        for part in ast.walk(argument)
+        if isinstance(part, ast.FormattedValue)
+    ]
+    return argument, interpolated
+
+
+class TestTheSessionZoneIsALiteralAndNotAnEnvironmentRead:
+    """The constant's own docstring says it is not an environment knob.
+
+    **Nothing held that, and this file already contains the shape somebody
+    would copy**: `_synchronous` reads `SQLITE_SYNCHRONOUS` and reaches a
+    statement that cannot be parameterised, which is why it whitelists what it
+    passes through. The zone reaches the same kind of statement and is written
+    as a literal instead, so what keeps it safe is that it is a literal.
+
+    **Two facts, not one, and the first version of this class held only the
+    first.** The constant's spelling and the statement's are independent: an
+    environment read moved into the interpolation leaves the constant a
+    literal and reddened nothing, because this suite runs with the variable
+    unset. One arm each.
+
+    Read off the syntax, because both properties are syntactic: rewriting the
+    constant as a `getenv` reddened nothing before this, and so did moving one
+    into the statement.
+    """
+
+    def test_the_zone_is_written_as_a_literal(self) -> None:
+        sites = _every_binding_of("_SESSION_TIME_ZONE")
+        written = _what_the_name_is_bound_to("_SESSION_TIME_ZONE")
+
+        assert len(sites) == 1, f"{len(sites)} bindings in the module, expected one"
+        assert len(written) == 1, f"{len(written)} of them assign an expression"
+        assert isinstance(written[0], ast.Constant), ast.dump(written[0])
+        assert written[0].value == "UTC"
+
+    def test_the_statement_carries_that_literal_and_nothing_else(self) -> None:
+        """The literal is only safe if it is what reaches the cursor.
+
+        **Behavioural, and it owns only the case where the environment is
+        unset**, which is every run of this suite. That is why the arm below
+        reads the statement's own syntax: a read moved into the interpolation
+        answers `UTC` here and this arm cannot tell.
+        """
+        connection = _ARecordedConnection()
+        import unittest.mock
+
+        with unittest.mock.patch.object(database, "_SPEAKS_POSTGRES", True):
+            database._pin_the_postgres_session_zone(connection, None)
+
+        assert connection.statements == ["SET TIME ZONE 'UTC'"]
+
+    def test_the_statement_interpolates_the_constant_and_nothing_else(
+        self,
+    ) -> None:
+        """The other half, and the arms here held only the constant's half.
+
+        **A literal constant does not make a literal statement.** Moving the
+        environment read out of the constant and **into** the interpolation
+        leaves the constant a literal, answers `UTC` on a run with the
+        variable unset, and reddened nothing: the class was named for the
+        statement and held the spelling of the name beside it.
+
+        **An f-string whose one interpolation is that name**, which refuses a
+        read placed there, a second value spliced in beside it, and a percent
+        or `format` spelling that is not an f-string at all.
+
+        **And the listener binds no local of that name, which is the half the
+        other three arms leave open.** This arm checks the **name**, and a
+        local shadow satisfies it: rebinding `_SESSION_TIME_ZONE` inside the
+        listener from the environment passes all four, because the module
+        constant is still a literal, the interpolation still unparses to that
+        name, and the behavioural arm sees the right string on a run with the
+        variable unset. "Interpolates the constant and nothing else" is true
+        of the shadow, which is the same defect this arm's predecessor was
+        replaced for: a name that describes a property it does not hold.
+
+        **Two correct rewrites it refuses, both loud.** Binding the statement
+        to a local first, and extracting the statement into a helper the
+        listener calls: the helper keeps exactly one execute so the count
+        still passes, and the f-string assertion then reds on a call instead.
+
+        **The binding count in the class above also reds on the shadow
+        today**, because a local store is a binding of that name in the
+        module and that walk counts every one. This is not redundant with it:
+        that arm counts bindings anywhere and would stop seeing a shadow the
+        moment anybody narrowed its walk back to module scope, which is the
+        narrowing it has already been rewritten for twice.
+        """
+        argument, interpolated = _what_the_zone_statement_interpolates()
+        shadows = [
+            node
+            for node in ast.walk(_the_zone_listener())
+            if isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Store)
+            and node.id == "_SESSION_TIME_ZONE"
+        ]
+
+        assert isinstance(argument, ast.JoinedStr), ast.unparse(argument)
+        assert interpolated == ["_SESSION_TIME_ZONE"]
+        assert shadows == [], "the listener rebinds the name it interpolates"

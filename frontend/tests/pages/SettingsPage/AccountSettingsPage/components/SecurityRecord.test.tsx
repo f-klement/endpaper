@@ -33,7 +33,7 @@ function draw(
 describe("SecurityRecord", () => {
   it("names the admin who approved a reset", () => {
     draw({
-      password_reset_at: "2026-09-06T10:00:00",
+      password_reset_at: "2026-09-06T10:00:00Z",
       password_reset_approved_by: "sam",
       verified_at: null,
       verification_source: null,
@@ -49,7 +49,7 @@ describe("SecurityRecord", () => {
     // the sentence around them took the app's. The two locales spell this date
     // differently, which is what makes the pair an observation.
     const record = {
-      password_reset_at: "2026-08-19T10:00:00",
+      password_reset_at: "2026-08-19T10:00:00Z",
       password_reset_approved_by: "sam",
       verified_at: null,
       verification_source: null,
@@ -85,7 +85,7 @@ describe("SecurityRecord", () => {
 
   it("still gives the date when the approver's account is gone", () => {
     draw({
-      password_reset_at: "2026-09-06T10:00:00",
+      password_reset_at: "2026-09-06T10:00:00Z",
       password_reset_approved_by: null,
       verified_at: null,
       verification_source: null,
@@ -102,7 +102,7 @@ describe("SecurityRecord", () => {
     draw({
       password_reset_at: null,
       password_reset_approved_by: null,
-      verified_at: "2026-09-01T10:00:00",
+      verified_at: "2026-09-01T10:00:00Z",
       verification_source: VerificationProvenance.admin,
       verified_by: "sam",
     });
@@ -123,7 +123,7 @@ describe("SecurityRecord", () => {
     draw({
       password_reset_at: null,
       password_reset_approved_by: null,
-      verified_at: "2026-09-01T10:00:00",
+      verified_at: "2026-09-01T10:00:00Z",
       verification_source: VerificationProvenance.directory,
       verified_by: null,
     });

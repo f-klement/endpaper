@@ -298,10 +298,29 @@ export function useStoreIdentifierBackfill(): UseStoreIdentifierBackfillResult {
     error: backfill.error,
   };
 }
+/**
+ * What one rename reports back, so the edit row can stay open on a refusal.
+ *
+ * `mutate` with per-call callbacks rather than `mutateAsync`, which is the
+ * choice `BookDetail`'s `SaveCallbacks` already makes and for the same reason:
+ * the house rule against the latter is that it rejects and leaves an unhandled
+ * rejection on every failure, and these are handled by react-query rather than
+ * by a caller remembering to catch.
+ *
+ * **It carries the error where that one does not**, and the difference is
+ * where the sentence is rendered. The book panel prints a refusal from the
+ * hook's section level `error`; a rename is refused for one row out of up to
+ * twenty five, so the sentence has to reach that row.
+ */
+export interface RenameCallbacks {
+  onSuccess: () => void;
+  onError: (error: unknown) => void;
+}
+
 export interface UseCustomFieldsResult {
   fields: CustomFieldOut[];
   define: (name: string, kind: CustomFieldKind) => void;
-  rename: (fieldId: number, name: string) => void;
+  rename: (fieldId: number, name: string, callbacks: RenameCallbacks) => void;
   remove: (fieldId: number) => void;
   isBusy: boolean;
   error: unknown;
@@ -354,10 +373,21 @@ export function useCustomFields(): UseCustomFieldsResult {
   return {
     fields: fields.data ?? [],
     define: (name, kind) => define.mutate({ data: { name, kind } }),
-    rename: (fieldId, name) => rename.mutate({ fieldId, data: { name } }),
+    // Per-call callbacks beside the hook level ones, which react-query runs
+    // as well rather than instead, so the invalidation above still happens on
+    // a rename.
+    rename: (fieldId, name, callbacks) =>
+      rename.mutate(
+        { fieldId, data: { name } },
+        { onSuccess: () => callbacks.onSuccess(), onError: callbacks.onError },
+      ),
     remove: (fieldId) => remove.mutate({ fieldId }),
     isBusy: define.isPending || rename.isPending || remove.isPending,
-    error: fields.error ?? define.error ?? rename.error ?? remove.error,
+    // **`rename.error` is deliberately not folded in.** A refused rename is
+    // rendered beside the row it was typed in, from the error this hook hands
+    // that row; folding it here as well would print the server's sentence
+    // twice, once of them at the top of a section holding every other field.
+    error: fields.error ?? define.error ?? remove.error,
   };
 }
 

@@ -499,7 +499,14 @@ class TestRenamingAField:
         assert res.status_code == 403
         assert client.get(
             "/api/books/custom-fields", headers=member["headers"]
-        ).json() == [{"id": text_field["id"], "name": "Bought from", "kind": "text"}]
+        ).json() == [
+            {
+                "id": text_field["id"],
+                "name": "Bought from",
+                "kind": "text",
+                "renamable": False,
+            }
+        ]
 
     def test_an_admin_may_rename_a_field_somebody_else_defined(
         self, client, admin, member
@@ -590,6 +597,204 @@ class TestRenamingAField:
 
         assert res.status_code == 404
         assert "Shelf photo" not in res.text
+
+
+class TestWhatTheListSaysAboutRenaming:
+    """`CustomFieldOut.renamable` is the answer `PATCH` would give.
+
+    **The client used to derive it and could not.** Renaming is refused on two
+    grounds, one about the author and one about what the viewer may be told,
+    and the second is a question about every Book in the Library. No payload
+    the client holds can answer it, so the control was drawn for everybody and
+    the refusal arrived after the typing.
+
+    **The last arm walks addressable rows only, and that is a real bound on
+    it.** It iterates the list, and `listable` and `addressable` are the same
+    predicate, so a row the caller cannot address can never enter the loop:
+    an instrumented census of it reports ten pairs and **no 404 among them**,
+    so two of the three outcomes are reachable there and not three. What it
+    stops drifting is the author arm and the admin arm against the route.
+
+    **The addressability half is covered by
+    `test_an_admin_is_not_told_they_may_rename_what_they_cannot_address`
+    instead**, which reaches a non addressable row by the one door that hands
+    one back, the retyped define, and drives the 404 beside the flag. Said
+    here because the previous version of this sentence claimed the loop
+    covered all three, and a reader checking the claim would have found the
+    loop and not that arm.
+
+    **The last arm asserts agreement, which is a different property from
+    correctness, and only the arms above it hold the second.** Nothing can
+    satisfy the two sided control and defeat the agreement, because agreement
+    is what the arm asserts; asking for such a mutant is a category error. The
+    reachable attack is to break **both** sides the same way, after which the
+    payload and the route agree, the disagreement set is empty, the control is
+    still two sided and this arm passes **while the policy is wrong**. What
+    reds then is `test_an_admin_is_told_they_may_rename_somebody_elses` here,
+    and in the class above
+    `TestRenamingAField::test_an_admin_may_rename_a_field_somebody_else_defined`.
+    Both assert an expected value rather than a relation. **So this arm is not
+    what keeps the admin rule right**, and a reader looking here for that
+    should look up.
+
+    **No arm on a Member who is not an admin can observe that break**, which
+    is why the second name is in the other class rather than beside the first.
+    For such a Member the published value already reduces to the plain
+    predicate, so dropping the admin arm is a no op on their path: driven, and
+    `test_a_member_who_did_not_define_it_is_told_they_may_not` stays green
+    under it.
+    """
+
+    def _listed(self, client, headers):
+        """What one member is told, by field name."""
+        return {
+            row["name"]: row
+            for row in client.get("/api/books/custom-fields", headers=headers).json()
+        }
+
+    def _define(self, client, headers, name):
+        return client.post(
+            "/api/books/custom-fields",
+            json={"name": name, "kind": "text"},
+            headers=headers,
+        )
+
+    def _rename(self, client, headers, field_id, name="Something else"):
+        return client.patch(
+            f"/api/books/custom-fields/{field_id}",
+            json={"name": name},
+            headers=headers,
+        )
+
+    def _hide_behind_a_private_book(self, client, owner, make_book, field_id):
+        """Put this field's only value on a Book nobody else may see.
+
+        Arms 1, 2 and 3 then all fail for everybody but the definer, which is
+        the state that separates `addressable` from `renamable`.
+        """
+        book = make_book(owner["headers"], title="A diary")
+        assert (
+            client.patch(
+                f"/api/books/{book['id']}/privacy",
+                json={"is_private": True},
+                headers=owner["headers"],
+            ).status_code
+            == 200
+        )
+        assert (
+            _set(client, owner["headers"], book["id"], field_id, "x").status_code == 200
+        )
+
+    def test_the_definer_is_told_they_may_rename_it(self, client, admin, member):
+        field = self._define(client, member["headers"], "Shelf photo").json()
+
+        assert field["renamable"] is True
+        assert self._listed(client, member["headers"])["Shelf photo"]["renamable"]
+
+    def test_a_member_who_did_not_define_it_is_told_they_may_not(
+        self, client, member, text_field
+    ):
+        assert (
+            self._listed(client, member["headers"])["Bought from"]["renamable"] is False
+        )
+
+    def test_an_admin_is_told_they_may_rename_somebody_elses(
+        self, client, admin, member
+    ):
+        """The admin arm is the route's and not `Fields`', so a payload built
+        from the class alone would say False here and hide a control from
+        somebody the server would have obeyed."""
+        self._define(client, member["headers"], "Shelf photo")
+
+        assert self._listed(client, admin["headers"])["Shelf photo"]["renamable"]
+
+    def test_a_field_with_no_author_is_published_as_renamable_to_anybody(
+        self, client, admin, member, db
+    ):
+        """The state every row is in on the morning of the upgrade. A client
+        reading an author id would see a null and have to carry this rule
+        itself."""
+        from models import CustomField
+
+        field = self._define(client, admin["headers"], "Shelf photo").json()
+        row = db.get(CustomField, field["id"])
+        row.created_by_user_id = None
+        db.commit()
+
+        assert self._listed(client, member["headers"])["Shelf photo"]["renamable"]
+
+    def test_an_admin_is_not_told_they_may_rename_what_they_cannot_address(
+        self, client, admin, member, make_book
+    ):
+        """The case the admin arm would get wrong on its own.
+
+        The delete is ungated and this is not, so a field whose every value
+        sits on another member's private Book is deletable by an admin and a
+        404 to rename. The definer retyping the name hands the row back
+        (`fields.Fields` records why that door is open), which is the one way
+        an admin can be holding this row at all, and what comes back has to
+        say False.
+        """
+        field = self._define(client, member["headers"], "Shelf photo").json()
+        self._hide_behind_a_private_book(client, member, make_book, field["id"])
+        assert "Shelf photo" not in self._listed(client, admin["headers"])
+
+        retyped = self._define(client, admin["headers"], "Shelf photo")
+
+        assert retyped.json()["renamable"] is False
+        assert self._rename(client, admin["headers"], field["id"]).status_code == 404
+
+    def test_what_the_list_publishes_is_what_the_rename_answers(
+        self, client, admin, member, other_user, make_book
+    ):
+        """Drive both doors over every listed field, for three accounts.
+
+        **A rename that succeeds is undone, and the undo is asserted.** Its
+        exclusion from the loop is only partly construction: the 404 branch
+        cannot arise, since the loop walks addressable rows, but the 409 for a
+        name already taken is excluded **only** because each rename is undone
+        before the next one asks. An undo that silently failed would red the
+        next pair for the wrong reason and the last pair not at all.
+
+        **The hidden field is in the setup for one thing, and it is asserted
+        rather than left to the pair count.** Its pair is identical in kind to
+        another, so dropping it leaves the two sided control satisfied; what
+        only it gives is a row **absent** from the other two accounts' lists,
+        which is what separates "this walks what each account may be told" from
+        "this walks the whole table".
+        """
+        self._define(client, admin["headers"], "Bought from")
+        self._define(client, member["headers"], "Shelf photo")
+        self._define(client, other_user["headers"], "Read aloud to")
+        hidden = self._define(client, member["headers"], "Secret shelf").json()
+        self._hide_behind_a_private_book(client, member, make_book, hidden["id"])
+
+        disagreed = []
+        asked = {True: 0, False: 0}
+        for account in (admin, member, other_user):
+            listed = self._listed(client, account["headers"])
+            # The hidden field's own contribution. Its definer still sees it by
+            # the author arm; nobody else may be told it is there.
+            assert ("Secret shelf" in listed) == (account is member), listed
+            for name, row in listed.items():
+                answer = self._rename(client, account["headers"], row["id"])
+                allowed = answer.status_code == 200
+                if allowed:
+                    undone = self._rename(client, account["headers"], row["id"], name)
+                    assert undone.status_code == 200, undone.text
+                asked[row["renamable"]] += 1
+                if allowed != row["renamable"]:
+                    disagreed.append(
+                        f"{account['user']['username']} was told renamable="
+                        f"{row['renamable']} for {name!r} and the rename "
+                        f"answered {answer.status_code}"
+                    )
+
+        assert not disagreed, disagreed
+        # The control. An agreement loop is satisfied by a payload that is
+        # constant and a route that refuses everything, or by both saying yes
+        # to everything, so say that both answers were reached.
+        assert asked[True] and asked[False], asked
 
 
 class TestDeletingAField:

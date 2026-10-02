@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import LoansPage from "../../../src/pages/LoansPage";
 import {
+  endOfDay,
   makeBook,
   makeLoan,
   makeLoanPage,
@@ -131,7 +132,7 @@ describe("LoansPage", () => {
 
     it("records a return", async () => {
       api.on("/api/loans/5/return", {
-        body: makeLoan({ returned_at: "2026-03-01T00:00:00" }),
+        body: makeLoan({ returned_at: "2026-03-01T12:00:00Z" }),
       });
       renderWithProviders(<LoansPage />);
 
@@ -193,7 +194,7 @@ describe("LoansPage", () => {
         body: makeLoanPage([
           makeLoan({
             book: makeBook({ title: "Dune" }),
-            returned_at: "2026-03-01T00:00:00",
+            returned_at: "2026-03-01T12:00:00Z",
           }),
         ]),
       });
@@ -335,7 +336,7 @@ describe("LoansPage overdue handling", () => {
 
   it("marks an overdue row", async () => {
     stubLoans(
-      [makeLoan({ is_overdue: true, due_at: "2026-01-05T23:59:59" })],
+      [makeLoan({ is_overdue: true, due_at: endOfDay("2026-01-05") })],
       1,
     );
     renderWithProviders(<LoansPage />);
@@ -345,7 +346,7 @@ describe("LoansPage overdue handling", () => {
 
   it("shows a future date without calling it overdue", async () => {
     stubLoans(
-      [makeLoan({ is_overdue: false, due_at: "2099-01-05T23:59:59" })],
+      [makeLoan({ is_overdue: false, due_at: endOfDay("2099-01-05") })],
       0,
     );
     renderWithProviders(<LoansPage />);

@@ -19,8 +19,8 @@ import { renderLocalised } from "../../../../utils";
 const request = {
   user_id: 7,
   username: "kim",
-  requested_at: "2026-09-06T10:00:00",
-  expires_at: "2026-09-13T10:00:00",
+  requested_at: "2026-09-06T10:00:00Z",
+  expires_at: "2026-09-13T10:00:00Z",
   approved_at: null,
   approved_by: null,
   code_expires_at: null,
@@ -59,25 +59,29 @@ describe("ResetRequests", () => {
       requests: [
         {
           ...request,
-          requested_at: "2026-08-19T14:05:00",
+          requested_at: "2026-08-19T14:05:00Z",
           approved_by: "sam",
-          code_expires_at: "2026-08-19T15:05:00",
+          code_expires_at: "2026-08-19T15:05:00Z",
         },
       ],
     };
 
     // Unmounted between the two, because cleanup runs per test rather than per
     // render and two mounted trees would put both spellings in one document.
+    // The clock times are the stamps rendered where the suite is, which is
+    // west of UTC: 14:05 and 15:05 UTC read as 04:35 and 05:35. The zone is
+    // pinned in `tests/setup.ts`. Both dates stay on the 19th, so the locale
+    // spellings this arm is about are untouched.
     const german = draw(overrides, Locale.de);
     expect(screen.getByText(/19\.8\.2026/)).toBeInTheDocument();
-    expect(screen.getByText(/15:05:00/)).toBeInTheDocument();
+    expect(screen.getByText(/05:35:00/)).toBeInTheDocument();
     german.unmount();
 
     draw(overrides, Locale.en);
     expect(screen.getByText(/8\/19\/2026/)).toBeInTheDocument();
     // `\s` rather than a literal space: ICU 72 spells the separator before
-    // `PM` as U+202F, and which one a run gets is the runtime's business.
-    expect(screen.getByText(/3:05:00\sPM/)).toBeInTheDocument();
+    // `AM` as U+202F, and which one a run gets is the runtime's business.
+    expect(screen.getByText(/5:35:00\sAM/)).toBeInTheDocument();
   });
 
   it("offers no way to start a reset", () => {
@@ -98,7 +102,7 @@ describe("ResetRequests", () => {
   it("shows the code once, where the admin can read it out", () => {
     draw({
       codes: {
-        7: { code: "ABCD-EFGH-JKLM", expiresAt: "2026-09-06T11:00:00" },
+        7: { code: "ABCD-EFGH-JKLM", expiresAt: "2026-09-06T11:00:00Z" },
       },
     });
 
@@ -114,7 +118,7 @@ describe("ResetRequests", () => {
     // true when the constant moves, so the served expiry is what is drawn.
     draw({
       codes: {
-        7: { code: "ABCD-EFGH-JKLM", expiresAt: "2026-09-06T11:00:00" },
+        7: { code: "ABCD-EFGH-JKLM", expiresAt: "2026-09-06T11:00:00Z" },
       },
     });
 
@@ -126,7 +130,7 @@ describe("ResetRequests", () => {
       // the host picked, agreed in every locale, and could observe neither the
       // defect nor its fix. `renderLocalised` defaults to English, so `"en"`
       // here is the app's locale asserted rather than assumed.
-      new Date("2026-09-06T11:00:00").toLocaleTimeString("en"),
+      new Date("2026-09-06T11:00:00Z").toLocaleTimeString("en"),
     );
   });
 
@@ -143,9 +147,9 @@ describe("ResetRequests", () => {
       requests: [
         {
           ...request,
-          approved_at: "2026-09-06T10:30:00",
+          approved_at: "2026-09-06T10:30:00Z",
           approved_by: "sam",
-          code_expires_at: "2026-09-06T11:30:00",
+          code_expires_at: "2026-09-06T11:30:00Z",
         },
       ],
       codes: {},
@@ -153,7 +157,7 @@ describe("ResetRequests", () => {
 
     expect(
       screen.getByText(
-        `The code stops working at ${new Date("2026-09-06T11:30:00").toLocaleTimeString("en")}.`,
+        `The code stops working at ${new Date("2026-09-06T11:30:00Z").toLocaleTimeString("en")}.`,
       ),
     ).toBeInTheDocument();
   });
@@ -163,7 +167,7 @@ describe("ResetRequests", () => {
     // say about a request an admin has already dealt with.
     draw({
       requests: [
-        { ...request, approved_at: "2026-09-06T11:00:00", approved_by: "sam" },
+        { ...request, approved_at: "2026-09-06T11:00:00Z", approved_by: "sam" },
       ],
     });
 

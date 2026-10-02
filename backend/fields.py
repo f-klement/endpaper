@@ -45,8 +45,19 @@ class Fields:
 
     One `Fields` per request. Each of the four reads below is issued **lazily
     and once**, so a caller that asks about a single id pays only for the arms
-    that id reaches, and `listable()` over the whole table pays at most four
-    statements however many definitions there are.
+    that id reaches, and `listable()` over the whole table costs the same
+    whatever the number of definitions: one read of the table, plus the arms
+    that ran, never one per definition.
+
+    **No figure is written here.** This sentence stated four and measured five:
+    the read it left out is `custom_fields.definitions`, which `listable`
+    issues from another module and which the word "below" excludes. The
+    invariance is what carries the claim, and an arm added or removed moves a
+    digit while leaving the invariance true, so the digit was the part that
+    rotted.
+    `tests/test_fields.py::TestListingCostsTheSameWhateverTheNumberOfDefinitions`
+    measures one definition against a library at the ceiling and asserts
+    equality.
 
     ## Sets of ids, never a count, and that is the difference from its two siblings
 

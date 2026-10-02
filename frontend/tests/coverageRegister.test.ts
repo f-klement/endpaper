@@ -23,6 +23,7 @@ import {
   blockOf,
   countWrittenOut,
   covers,
+  isWhole,
   problems,
   render,
   rowsOf,
@@ -30,11 +31,20 @@ import {
 import { MARKER } from "./coverageRegister.globalSetup";
 import CoverageRegisterReporter from "./coverageRegister.reporter";
 
+/**
+ * A census this file made up.
+ *
+ * `discovered` defaults to the files that ran, which is what a whole run has.
+ * Pass it to make a narrowed one, where the counts cannot be compared and the
+ * rules about which files the document names still can.
+ */
 const census = (
   counts: Record<string, number>,
   writtenOut: Record<string, number> = counts,
   internal: string[] = [],
+  discovered: string[] = Object.keys(counts),
 ): Census => ({
+  discovered: new Set(discovered),
   counts: new Map(Object.entries(counts)),
   writtenOut: new Map(Object.entries(writtenOut)),
   internal: new Set(internal),
@@ -212,7 +222,7 @@ describe("what the run says the register has wrong", () => {
     const gone = registerFor(body, [...rows, ["gone/*", 0]]);
 
     expect(problems(gone, body)).toContainEqual(
-      "`gone/*` matches no file this run collected",
+      "`gone/*` matches no file in this test tree",
     );
   });
 
@@ -336,6 +346,63 @@ describe("what the run says the register has wrong", () => {
     expect(problems(register, body).join("\n")).toContain(
       "these files have no row: orphan.test.ts",
     );
+  });
+});
+
+describe("what a narrowed run may still say", () => {
+  /**
+   * The fold the backend half of this register already had.
+   *
+   * Every rule used to sit downstream of the reporter's early return, so a run
+   * over fewer files than vitest discovered checked **nothing**: not the
+   * counts, not whether every file has a row, not whether a row names a file
+   * the publish gate strips. The counts genuinely cannot answer on such a run.
+   * The rest never needed to.
+   */
+  const counts = { "a.test.ts": 10 };
+  const everything = ["a.test.ts", "dir/b.test.tsx"];
+
+  it("knows a census built from fewer files than were discovered", () => {
+    expect(isWhole(census(counts))).toBe(true);
+    expect(isWhole(census(counts, counts, [], everything))).toBe(false);
+  });
+
+  it("names a discovered file no row covers, though it did not run", () => {
+    const body = census(counts, counts, [], everything);
+
+    expect(
+      problems(registerFor(body, [["a.test.ts", 10]]), body).join("\n"),
+    ).toContain("these files have no row: dir/b.test.tsx");
+  });
+
+  it("names a row covering a file the register may not name, though it did not run", () => {
+    const body = census(counts, counts, ["dir/b.test.tsx"], everything);
+
+    expect(
+      problems(
+        registerFor(body, [
+          ["a.test.ts", 10],
+          ["dir/*", 0],
+        ]),
+        body,
+      ).join("\n"),
+    ).toContain("dir/b.test.tsx declares itself internal");
+  });
+
+  it("compares no count and renders no block, because neither can answer", () => {
+    const body = census(counts, counts, [], everything);
+    const wrong = registerFor(body, [
+      ["a.test.ts", 99],
+      ["dir/b.test.tsx", 99],
+    ]);
+
+    // Both rows are wrong and the block is a whole run's. On a whole census
+    // the same register gives three problems; here it gives none, which is
+    // the line this fold draws.
+    expect(problems(wrong, body)).toEqual([]);
+    expect(
+      problems(wrong, census({ ...counts, "dir/b.test.tsx": 10 })).length,
+    ).toBe(3);
   });
 });
 
@@ -484,6 +551,7 @@ describe("the guard fails a run", () => {
   type Run = {
     pid: number;
     status: number | null;
+    stdout: string;
     stderr: string;
     refusals: Refusal[];
     ranTestsIn: Where[];
@@ -672,6 +740,12 @@ describe("the guard fails a run", () => {
     return {
       pid: run.pid,
       status: run.status,
+      // **Kept because one branch of the reporter reports through it and not
+      // through the refusal channel.** A narrowed run says what it did not
+      // check on stdout and exits 0, so without this field the arm for it
+      // could only assert that nothing went wrong, which a reporter that
+      // returned at the top would also satisfy.
+      stdout: run.stdout,
       stderr: run.stderr,
       refusals: readFileSync(channel, "utf8")
         .split("\n")
@@ -1133,6 +1207,60 @@ export function teardown(): void {
         "`a.test.ts`: the register says 3, the run counted 2",
       );
       expect(run.status).toBe(1);
+    },
+    SPAWNED + 30_000,
+  );
+
+  /**
+   * A narrowed run, which used to check nothing and now checks the document.
+   *
+   * **Until this pair, no end to end arm in this file narrowed a run**, so
+   * both branches of the reporter's size test were on the "stated" rung: the
+   * arms above drive a correct register, a one test out register, a missing
+   * row and a replaced reporter, and not one of them takes fewer files than
+   * vitest discovered.
+   *
+   * The counts cannot answer here and are not asked. What the run still says
+   * is that `b.test.ts` has no row, which is a fact about the tree rather
+   * than about what ran, and which the same spawn reported nowhere before.
+   */
+  it(
+    "fails a narrowed run whose register has no row for a file it did not run",
+    () => {
+      write(registerFor(body, [["a.test.ts", 2]]));
+
+      const run = runThere("tests/a.test.ts");
+
+      expect(refused(run, "reporter")).toContain(
+        "these files have no row: b.test.ts",
+      );
+      expect(run.status).toBe(1);
+    },
+    SPAWNED + 30_000,
+  );
+
+  /**
+   * The other direction, so the arm above is not satisfied by a guard that
+   * reds on every narrowed run.
+   *
+   * **The log line is the assertion, because exiting 0 is also what a
+   * reporter that returned at the top of the hook does.** A positive
+   * containment on a stream this run owns, which is the direction extra bytes
+   * from a third party cannot displace, where a negative one on the same
+   * stream is the shape they can.
+   */
+  it(
+    "passes a narrowed run whose register describes the tree, and says what it skipped",
+    () => {
+      write(registerFor(body, rows));
+
+      const run = runThere("tests/a.test.ts");
+
+      expect(run.refusals).toEqual([]);
+      expect(run.status).toBe(0);
+      expect(run.stdout).toContain(
+        "coverage register: counts not checked, this run took 1 of 2 test files",
+      );
     },
     SPAWNED + 30_000,
   );

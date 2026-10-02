@@ -70,7 +70,7 @@ describe("DataSettingsPage", () => {
       id: 7,
       username: "tester",
       is_admin: false,
-      created_at: "2026-01-01T00:00:00",
+      created_at: "2026-01-01T12:00:00Z",
     };
 
     it("lists them for an admin", async () => {

@@ -22,8 +22,8 @@ describe("ReadingPanel", () => {
 
   it("shows both dates when they exist", () => {
     renderPanel({
-      my_started_at: "2026-01-02T10:00:00",
-      my_finished_at: "2026-01-20T10:00:00",
+      my_started_at: "2026-01-02T10:00:00Z",
+      my_finished_at: "2026-01-20T10:00:00Z",
     });
 
     expect(screen.getByText(/Started/)).toBeInTheDocument();
@@ -31,7 +31,10 @@ describe("ReadingPanel", () => {
   });
 
   it("shows only the start when that is all there is", () => {
-    renderPanel({ my_started_at: "2026-01-02T10:00:00", my_finished_at: null });
+    renderPanel({
+      my_started_at: "2026-01-02T10:00:00Z",
+      my_finished_at: null,
+    });
 
     expect(screen.getByText(/Started/)).toBeInTheDocument();
     expect(screen.queryByText(/Finished/)).not.toBeInTheDocument();

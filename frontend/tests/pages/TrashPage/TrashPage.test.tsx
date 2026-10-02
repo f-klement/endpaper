@@ -41,7 +41,7 @@ describe("TrashPage", () => {
       makeBook({
         id: 7,
         title: "Deleted Book",
-        deleted_at: "2026-08-19T10:00:00",
+        deleted_at: "2026-08-19T10:00:00Z",
       }),
     ]);
     renderWithProviders(<TrashPage />);
@@ -54,7 +54,7 @@ describe("TrashPage", () => {
     // books wait here", so a looser pattern matches two elements and
     // findByText refuses to choose between them.
     stubTrash([
-      makeBook({ id: 7, title: "Dune", deleted_at: "2026-08-19T10:00:00" }),
+      makeBook({ id: 7, title: "Dune", deleted_at: "2026-08-19T10:00:00Z" }),
     ]);
     renderWithProviders(<TrashPage />);
 
@@ -69,7 +69,7 @@ describe("TrashPage", () => {
     // differently, so asserting both is what observes it: `19.8.2026` against
     // `8/19/2026`.
     stubTrash([
-      makeBook({ id: 7, title: "Dune", deleted_at: "2026-08-19T10:00:00" }),
+      makeBook({ id: 7, title: "Dune", deleted_at: "2026-08-19T10:00:00Z" }),
     ]);
     renderWithProviders(<TrashPage />, { locale: Locale.de });
 
@@ -78,7 +78,7 @@ describe("TrashPage", () => {
   });
 
   it("says the trash does not empty itself", async () => {
-    stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00" })]);
+    stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00Z" })]);
     renderWithProviders(<TrashPage />);
 
     expect(await screen.findByText(/until you empty it/)).toBeInTheDocument();
@@ -107,7 +107,7 @@ describe("TrashPage", () => {
         makeBook({
           id: 7,
           title: "Deleted Book",
-          deleted_at: "2026-08-19T10:00:00",
+          deleted_at: "2026-08-19T10:00:00Z",
         }),
       ]);
       api.on("/api/books/7/restore", { body: makeBook({ id: 7 }) });
@@ -131,7 +131,7 @@ describe("TrashPage", () => {
         makeBook({
           id: 7,
           title: "Deleted Book",
-          deleted_at: "2026-08-19T10:00:00",
+          deleted_at: "2026-08-19T10:00:00Z",
         }),
       ]);
       const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
@@ -150,7 +150,7 @@ describe("TrashPage", () => {
         makeBook({
           id: 7,
           title: "Deleted Book",
-          deleted_at: "2026-08-19T10:00:00",
+          deleted_at: "2026-08-19T10:00:00Z",
         }),
       ]);
       api.on("/api/books/7/permanent", { status: 204 }, "DELETE");
@@ -167,7 +167,7 @@ describe("TrashPage", () => {
     });
 
     it("asks before emptying the whole trash", async () => {
-      stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00" })]);
+      stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00Z" })]);
       const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
       renderWithProviders(<TrashPage />);
 
@@ -180,7 +180,7 @@ describe("TrashPage", () => {
     });
 
     it("empties it once confirmed", async () => {
-      stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00" })]);
+      stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00Z" })]);
       api.on("/api/books/trash", { body: { purged: 1 } }, "DELETE");
       vi.spyOn(window, "confirm").mockReturnValue(true);
       renderWithProviders(<TrashPage />);

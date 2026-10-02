@@ -1,6 +1,8 @@
 /**
  * Tests for the four import hooks in
- * src/pages/SettingsPage/LibrarySettingsPage/hooks.ts.
+ * src/pages/SettingsPage/LibrarySettingsPage/hooks.ts, and for the one thing
+ * `useCustomFields` decides that no component test can see: which of its four
+ * failures reaches the section level `error` and which does not.
  *
  * What is pinned throughout is the orchestration; the readers have their own
  * files. Two families, and they are stubbed differently because they import
@@ -28,13 +30,17 @@ import { createRequire } from "node:module";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  CustomFieldOut,
+  CustomFieldValueOut,
   ImportPreviewOut,
   ImportResultOut,
   MarcPreviewOut,
 } from "../../../../src/api/generated/model";
 import { ApiError } from "../../../../src/api/mutator";
+import { useBookCustomFields } from "../../../../src/pages/BookDetail/hooks";
 import {
   useCalibreImport,
+  useCustomFields,
   useLibraryImport,
   useMarcImport,
   useStoreImport,
@@ -1053,5 +1059,202 @@ describe("the flags a confirm carries", () => {
     expect(queryOf(api, "/api/imports/marc")).toEqual({
       create_missing: "false",
     });
+  });
+});
+
+/**
+ * Where a refused write is reported from.
+ *
+ * `useCustomFields` folds three of its four failures into one `error` and
+ * leaves the rename out, because a rename is refused for one row out of up to
+ * twenty five and its sentence is rendered beside that row. Folding it in as
+ * well prints the server's words twice, once of them at the top of a section
+ * listing every other field, and nothing about the section copy says which
+ * name was refused.
+ */
+describe("which custom field failure the section is told about", () => {
+  // **Annotated, and that annotation is the point.** A mock body typed loosely
+  // is a stub that cannot be wrong: `renamable` is required in the model, so
+  // without this the compiler cannot see a payload missing it.
+  const FIELDS: CustomFieldOut[] = [
+    { id: 1, name: "Calibre-web", kind: "url", renamable: true },
+  ];
+
+  /** One book's value in the field above, as the server would serve it. */
+  const ON_THE_BOOK: CustomFieldValueOut[] = [
+    { field_id: 1, name: "Calibre-web", kind: "url", value: "x", href: null },
+  ];
+
+  it("still drops the cached list when a rename succeeds", async () => {
+    // **The load bearing half of the per call callbacks.** They are passed
+    // beside the hook level `onSuccess` rather than instead of it, so the
+    // invalidation survives; that is read off the library rather than from
+    // anything in this tree, and dropping the hook level handler from the
+    // rename alone left every other arm green.
+    //
+    // **Asserted as the name the hook serves, never as a count of requests.**
+    // The property is that the stale name is gone, and a direct cache write
+    // achieves that with no second read, so a request count would refuse a
+    // correct alternative and pin the mechanism this hook happens to use.
+    // The stub's body is therefore a variable the write moves, which is also
+    // why the obvious version fails: a constant body serves the old name back
+    // on the refetch and the arm reds on a clean tree.
+    const api = mockApi();
+    let listed: CustomFieldOut[] = FIELDS;
+    api.on("/api/books/custom-fields", () => ({ body: listed }));
+    api.on(
+      "/api/books/custom-fields/1",
+      () => {
+        listed = [{ ...FIELDS[0]!, name: "Ebook" }];
+        return { body: listed[0] };
+      },
+      "PATCH",
+    );
+    const { result } = renderHookWithProviders(() => useCustomFields());
+    await waitFor(() => expect(result.current.fields).toHaveLength(1));
+
+    await act(async () =>
+      result.current.rename(1, "Ebook", {
+        onSuccess: vi.fn(),
+        onError: vi.fn(),
+      }),
+    );
+
+    await waitFor(() =>
+      expect(result.current.fields.map((row) => row.name)).toEqual(["Ebook"]),
+    );
+  });
+
+  it("still drops a book's values when a rename succeeds", async () => {
+    // **The other half of the same invalidation, and nothing held it.** The
+    // hook drops every book's values as well as the list, because the label a
+    // book draws comes from the definition; removing that predicate entirely
+    // left the whole directory green.
+    //
+    // It reaches into `useBookCustomFields` as an observer rather than as a
+    // subject: the behaviour under test is this hook's invalidation, and that
+    // is the only query in the app that would show the stale label.
+    const api = mockApi();
+    let onTheBook = ON_THE_BOOK;
+    api.on("/api/books/custom-fields", { body: FIELDS });
+    api.on("/api/books/1/custom-fields", () => ({ body: onTheBook }));
+    api.on(
+      "/api/books/custom-fields/1",
+      () => {
+        onTheBook = [{ ...ON_THE_BOOK[0]!, name: "Ebook" }];
+        return { body: { ...FIELDS[0]!, name: "Ebook" } };
+      },
+      "PATCH",
+    );
+    const { result } = renderHookWithProviders(() => ({
+      library: useCustomFields(),
+      book: useBookCustomFields(1),
+    }));
+    await waitFor(() => expect(result.current.book.values).toHaveLength(1));
+
+    await act(async () =>
+      result.current.library.rename(1, "Ebook", {
+        onSuccess: vi.fn(),
+        onError: vi.fn(),
+      }),
+    );
+
+    await waitFor(() =>
+      expect(result.current.book.values.map((row) => row.name)).toEqual([
+        "Ebook",
+      ]),
+    );
+  });
+
+  it("hands a refused rename to the caller and not to the section", async () => {
+    const api = mockApi();
+    api.on("/api/books/custom-fields", { body: FIELDS });
+    api.on(
+      "/api/books/custom-fields/1",
+      {
+        status: 403,
+        body: {
+          detail: "Only the member who defined this field can rename it.",
+        },
+      },
+      "PATCH",
+    );
+    const { result } = renderHookWithProviders(() => useCustomFields());
+    await waitFor(() => expect(result.current.fields).toHaveLength(1));
+
+    const told: unknown[] = [];
+    await act(async () =>
+      result.current.rename(1, "Ebook", {
+        onSuccess: () => told.push("ok"),
+        onError: (error) => told.push(error),
+      }),
+    );
+    await waitFor(() => expect(told).toHaveLength(1));
+
+    expect(told[0]).toBeInstanceOf(ApiError);
+    expect(result.current.error).toBeFalsy();
+  });
+
+  it("still tells the section about a refused define", async () => {
+    // The counterpart, so the arm above reads as a choice about the rename
+    // rather than as this hook reporting nothing.
+    const api = mockApi();
+    api.on("/api/books/custom-fields", { body: FIELDS });
+    api.on(
+      "/api/books/custom-fields",
+      {
+        status: 409,
+        body: { detail: "This library has run out of field slots." },
+      },
+      "POST",
+    );
+    const { result } = renderHookWithProviders(() => useCustomFields());
+    await waitFor(() => expect(result.current.fields).toHaveLength(1));
+
+    await act(async () => result.current.define("Bought from", "text"));
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+
+    expect((result.current.error as ApiError).message).toBe(
+      "This library has run out of field slots.",
+    );
+  });
+
+  it("still tells the section about a list that would not load", async () => {
+    // The third of the four, and the one with no caller to hand an error to:
+    // there is no row to put it beside, because there are no rows.
+    const api = mockApi();
+    api.on("/api/books/custom-fields", {
+      status: 500,
+      body: { detail: "The library could not be read." },
+    });
+    const { result } = renderHookWithProviders(() => useCustomFields());
+
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+
+    expect((result.current.error as ApiError).message).toBe(
+      "The library could not be read.",
+    );
+    expect(result.current.fields).toEqual([]);
+  });
+
+  it("still tells the section about a refused delete", async () => {
+    // The fourth. A delete is confirmed in a dialog rather than typed into a
+    // row, so there is no draft to keep and nothing to put the sentence beside.
+    const api = mockApi();
+    api.on("/api/books/custom-fields", { body: FIELDS });
+    api.on(
+      "/api/books/custom-fields/1",
+      { status: 403, body: { detail: "Only an admin can delete a field." } },
+      "DELETE",
+    );
+    const { result } = renderHookWithProviders(() => useCustomFields());
+    await waitFor(() => expect(result.current.fields).toHaveLength(1));
+
+    await act(async () => result.current.remove(1));
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+
+    expect((result.current.error as ApiError).message).toBe(
+      "Only an admin can delete a field.",
+    );
   });
 });

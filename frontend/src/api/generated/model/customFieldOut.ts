@@ -8,10 +8,40 @@
 import type { CustomFieldKind } from "./customFieldKind.ts";
 
 /**
- * A field this Library has defined.
+ * A field this Library has defined, as it looks to the Member asking.
+ *
+ * **Not a row**, which is why there is no `from_attributes` here and the
+ * three routes build this explicitly. `renamable` is an answer about the
+ * caller, so a model that could be validated straight off a `CustomField`
+ * would be one somebody can build without supplying it.
+ *
+ * **`renamable` rather than the author's member id, and the choice is a
+ * containment rather than a disclosure.** `fields.Fields` is the only reader
+ * of `custom_fields.created_by_user_id`, said in three published places and
+ * enforced by
+ * `tests/test_fields.py::TestFieldsIsTheOnlyReaderOfTheAuthorColumn`. A
+ * `created_by_user_id` field here would be read by Pydantic with no
+ * attribute access anywhere in the source, so it would pass that guard while
+ * falsifying what it guards, and every client would then hold its own copy
+ * of the rule. `rename_custom_field` says what the server does with the
+ * column; this says what the server would answer.
+ *
+ * **It is viewer scoped and therefore not cacheable across members.** The
+ * same field answers differently to two Members and to the same Member
+ * before and after an admin flag changes. A client that has gone stale is
+ * refused at the route, which is why the refusal has to survive being shown:
+ * the control is advice and the 403 is the guarantee.
+ *
+ * **Stale the other way is refused by nothing, and nothing here can refuse
+ * it.** A client holding `false` where the server would now answer `true`
+ * offers no control, so no request is made and the route never sees one.
+ * That direction costs an affordance rather than a guarantee, and the
+ * client names it at its own site because only the client knows its cache
+ * went stale.
  */
 export interface CustomFieldOut {
   id: number;
   kind: CustomFieldKind;
   name: string;
+  renamable: boolean;
 }

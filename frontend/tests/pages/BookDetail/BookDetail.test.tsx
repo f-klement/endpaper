@@ -9,6 +9,7 @@ import {
   BookIdentifierScheme,
   OwnershipStatus,
   ReadStatus,
+  type CustomFieldOut,
   type UserOut,
 } from "../../../src/api/generated/model";
 import BookDetail from "../../../src/pages/BookDetail";
@@ -28,19 +29,19 @@ const OWNER: UserOut = {
   id: 1,
   username: "owner",
   is_admin: false,
-  created_at: "2026-01-01T00:00:00",
+  created_at: "2026-01-01T12:00:00Z",
 };
 const OTHER: UserOut = {
   id: 2,
   username: "other",
   is_admin: false,
-  created_at: "2026-01-01T00:00:00",
+  created_at: "2026-01-01T12:00:00Z",
 };
 const ADMIN: UserOut = {
   id: 3,
   username: "admin",
   is_admin: true,
-  created_at: "2026-01-01T00:00:00",
+  created_at: "2026-01-01T12:00:00Z",
 };
 
 let api: MockApi;
@@ -60,7 +61,10 @@ function stubLoad({
   users = [OWNER, OTHER],
   googleBooks = false,
   goodreads = false,
-  customFields = [] as { id: number; name: string; kind: string }[],
+  // **The generated model, not a shape written here.** A mock body typed
+  // loosely is a stub that cannot be wrong: a field the model requires can go
+  // missing from it with nothing to report that.
+  customFields = [] as CustomFieldOut[],
   customFieldValues = [] as {
     field_id: number;
     name: string;
@@ -370,7 +374,9 @@ describe("BookDetail", () => {
       // field is this library's own filing of a fact about the book, beside
       // its tags, its shelf and its collection.
       stubLoad({
-        customFields: [{ id: 1, name: "Calibre-web", kind: "url" }],
+        customFields: [
+          { id: 1, name: "Calibre-web", kind: "url", renamable: true },
+        ],
         customFieldValues: [
           {
             field_id: 1,

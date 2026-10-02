@@ -16,11 +16,36 @@
  * to hold that, because a reporter wired up wrong is silent in exactly the
  * direction that matters.
  *
- * **It answers only for a run that collected the whole tree.** A narrowed run
- * would report every other row as missing and every filtered file's own count
- * as a fraction of its row, which is a guard that cries wolf until somebody
- * deletes it. The file set comes from vitest's own discovery rather than from a
- * second glob, so it cannot disagree with what a full run would have collected.
+ * **Only its counts answer for a run that collected the whole tree.** A
+ * narrowed run would report every filtered file's own count as a fraction of
+ * its row, which is a guard that cries wolf until somebody deletes it. The
+ * rules about which files the document names do not depend on running any of
+ * them, so they are asked of vitest's discovery and hold on any green run.
+ * `isWhole` is where that line is drawn and `problems` is what honours it.
+ *
+ * **The two sides can disagree, and both branches below are for a way they
+ * do.** A run can take fewer files than were discovered, which is an ordinary
+ * narrowing; and it can take as many under different names, which is the two
+ * instruments having stopped spelling the same tree and is refused outright.
+ * A sentence here saying they cannot is read as covering both, and what it
+ * costs is a size test nobody keeps.
+ *
+ * **The backend half's own fail open has no twin here, and that is measured
+ * rather than assumed.** Two things of vitest's make it so. A name pattern
+ * marks a matching task `skip` rather than removing it, and `allTests()`
+ * yields a skipped task, so no count moves; the backend's equivalent
+ * deselects the item outright and leaves its gate open on a figure that is
+ * one low. And the per file slot is created for every file discovered, so a
+ * file collecting nothing is present with a count of 0 rather than absent,
+ * which is the whole reason the backend half needs a row of 0 and this one
+ * does not. **A caveat missing beside a twin that carries one reads as
+ * forgotten**, so both are written here rather than left out as inapplicable.
+ *
+ * **The always on rules fire at different moments in the two halves.** There
+ * they are arms inside a file a narrowed run may not collect at all; here
+ * they are a reporter, so they run on every invocation, a single file debug
+ * run included. The asymmetry is wanted: a register this run can already
+ * contradict reaches a person sooner on this side.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -30,6 +55,7 @@ import {
   type Census,
   countWrittenOut,
   declaresItselfInternal,
+  isWhole,
   problems,
 } from "./coverageRegister";
 import { MARKER, OWNER } from "./coverageRegister.globalSetup";
@@ -82,49 +108,70 @@ export default class CoverageRegisterReporter {
     const testRoot = join(project.config.root, "tests");
     const here = (file: string) =>
       relative(testRoot, file).replaceAll("\\", "/");
-    const discovered = (await project.globTestFiles()).testFiles.map(here);
+    const found = (await project.globTestFiles()).testFiles;
+    const discovered = found.map(here);
     const ran = modules.map((module) => here(module.moduleId));
 
-    if (ran.length !== discovered.length) {
-      console.log(
-        `coverage register: not checked, this run took ${ran.length} of ` +
-          `${discovered.length} test files`,
-      );
-      return;
+    // **Whether a file is one the register may not name is a property of the
+    // file**, so it is read for everything vitest discovered rather than for
+    // what this run executed. Read once and keyed by the relative path,
+    // because the loop below wants the same bytes for the files that ran.
+    const sources = new Map<string, string>();
+    for (const file of found)
+      sources.set(here(file), readFileSync(file, "utf8"));
+    const internal = new Set(
+      [...sources]
+        .filter(([, source]) => declaresItselfInternal(source))
+        .map(([file]) => file),
+    );
+
+    const counts = new Map<string, number>();
+    const writtenOut = new Map<string, number>();
+    for (const module of modules) {
+      const file = here(module.moduleId);
+      // A module outside what the glob discovered has no entry above. It is
+      // read here rather than defaulted, because a figure counted off an empty
+      // string is a wrong number where a second read is the right one.
+      const source = sources.get(file) ?? readFileSync(module.moduleId, "utf8");
+      counts.set(file, [...module.children.allTests()].length);
+      writtenOut.set(file, countWrittenOut(source, file));
     }
+
+    const census: Census = {
+      discovered: new Set(discovered),
+      counts,
+      writtenOut,
+      internal,
+    };
 
     // **Counted first, then compared, and the order is what decides which
     // failure is silent.** A narrowed run is ordinary and says so; a run of the
     // right size over a different set of names means the two sides have stopped
     // spelling the same tree, and comparing sets first would turn that into a
     // guard that skips every run from then on with nothing said.
-    const missing = discovered.filter((file) => !ran.includes(file));
-    if (missing.length > 0)
-      throw new Error(
-        "the coverage register reporter ran over as many files as vitest " +
-          `discovered and not the same ones: ${missing.join(", ")} was ` +
-          "discovered and did not run.",
+    if (!isWhole(census))
+      console.log(
+        `coverage register: counts not checked, this run took ${ran.length} ` +
+          `of ${discovered.length} test files. The rules about which files ` +
+          "the document names still ran.",
       );
-
-    const counts = new Map<string, number>();
-    const writtenOut = new Map<string, number>();
-    const internal = new Set<string>();
-    for (const module of modules) {
-      const file = here(module.moduleId);
-      const source = readFileSync(module.moduleId, "utf8");
-      counts.set(file, [...module.children.allTests()].length);
-      writtenOut.set(file, countWrittenOut(source, file));
-      if (declaresItselfInternal(source)) internal.add(file);
+    else {
+      const missing = discovered.filter((file) => !ran.includes(file));
+      if (missing.length > 0)
+        throw new Error(
+          "the coverage register reporter ran over as many files as vitest " +
+            `discovered and not the same ones: ${missing.join(", ")} was ` +
+            "discovered and did not run.",
+        );
     }
 
-    const census: Census = { counts, writtenOut, internal };
-    const found = problems(
+    const wrong = problems(
       readFileSync(join(testRoot, "COVERAGE.md"), "utf8"),
       census,
     );
-    if (found.length > 0)
+    if (wrong.length > 0)
       throw new Error(
-        `tests/COVERAGE.md does not describe this run:\n\n${found.join("\n\n")}`,
+        `tests/COVERAGE.md does not describe this run:\n\n${wrong.join("\n\n")}`,
       );
   }
 }

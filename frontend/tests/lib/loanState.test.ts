@@ -42,12 +42,12 @@ describe("a loan's return state", () => {
     // The date is answered beside the verdict rather than left to the caller
     // to fetch, because a caller that went back to the column for it would be
     // the second derivation this module exists to remove.
-    expect(loanState(makeLoan({ returned_at: "2026-02-20T00:00:00" }))).toEqual(
-      {
-        isOpen: false,
-        returnedOn: "2026-02-20T00:00:00",
-      },
-    );
+    expect(
+      loanState(makeLoan({ returned_at: "2026-02-20T12:00:00Z" })),
+    ).toEqual({
+      isOpen: false,
+      returnedOn: "2026-02-20T12:00:00Z",
+    });
   });
 
   it("calls a loan whose stamp is empty still out", () => {
@@ -78,7 +78,7 @@ describe("a loan's return state", () => {
     // **Four values, named, and not a claim about the domain.** They are the
     // three the declared `string | null` admits once an absent key is counted,
     // plus a stamp. What a hand built object could carry is the arm below.
-    for (const stamp of [null, undefined, "", "2026-02-20T00:00:00"]) {
+    for (const stamp of [null, undefined, "", "2026-02-20T12:00:00Z"]) {
       const state = loanState(makeLoan({ returned_at: stamp }));
 
       expect(state.isOpen).toBe(state.returnedOn === null);

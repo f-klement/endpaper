@@ -67,7 +67,7 @@ describe("MemberVerification", () => {
     draw([
       {
         ...waiting,
-        verified_at: "2026-09-06T10:00:00",
+        verified_at: "2026-09-06T10:00:00Z",
         verification_source: VerificationProvenance.admin,
         verified_by: "sam",
       },
@@ -80,7 +80,7 @@ describe("MemberVerification", () => {
     draw([
       {
         ...waiting,
-        verified_at: "2026-09-06T10:00:00",
+        verified_at: "2026-09-06T10:00:00Z",
         verification_source: VerificationProvenance.email,
       },
     ]);

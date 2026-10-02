@@ -35,15 +35,68 @@ import {
   numericDate,
   shortMonthDate,
 } from "../../src/lib/date";
+import { endOfDay } from "../factories";
 
-// Midday, so no timezone offset can move the day and make a date assertion
-// depend on where the suite runs.
-const WHEN = "2026-08-19T12:00:00";
+// **Carries its offset, because the API does.** `schemas.common.UtcDateTime`
+// puts one on every `date-time` field this server sends, so a bare wall clock
+// here is a payload the server cannot produce. The arms below therefore read an
+// instant rendered in the suite's zone rather than a string that parsed back to
+// itself.
+//
+// **`date-time` and not every dated field**, which is the narrower claim and the
+// true one. Four properties are `format: date`, and all four are the purchase
+// date: a bare `YYYY-MM-DD` with no clock to carry an offset in the first place.
+// Nothing in this file renders one.
+//
+// Midday, so the rendered day is the stamp's own day rather than its
+// neighbour's: the suite's zone is pinned in `tests/setup.ts`, and midday UTC
+// sits a few hours clear of a date boundary there. That is a property of the
+// pin and not of midday, which is why the pin is named rather than restated.
+const WHEN = "2026-08-19T12:00:00Z";
 
 describe("numericDate", () => {
   it("renders the plainest date the app shows, per locale", () => {
     expect(numericDate(WHEN, Locale.en)).toBe("8/19/2026");
     expect(numericDate(WHEN, Locale.de)).toBe("19.8.2026");
+  });
+
+  it("renders in the zone the device is in now, not the one it was built in", () => {
+    // **The formatter cache's zone key, which nothing else observes.** A
+    // formatter with no `timeZone` option resolves the ambient zone once, when
+    // it is built, so a cache keyed on locale and format alone lets the first
+    // render of a pair decide the zone for the whole session. Reverting that key
+    // leaves the full suite green, so without this arm the line rests on a
+    // measurement and the figures beside it read as an invitation to undo it.
+    //
+    // The first call builds and caches under the pinned zone; the second asks
+    // for the same locale and format from a different one. Kiritimati is +14
+    // against the pin's -09:30, so midday UTC falls on the following day there
+    // and a stale formatter answers with the wrong date rather than a wrong
+    // clock time, which is the louder failure.
+    expect(numericDate(WHEN, Locale.en)).toBe("8/19/2026");
+
+    const pinned = process.env.TZ;
+    try {
+      process.env.TZ = "Pacific/Kiritimati";
+      // **The second zone is proved to have taken, for the reason
+      // `tests/setup.ts` proves the pin.** An unresolvable zone is ignored
+      // silently, with no throw and no warning, so on a runtime shipping the
+      // pinned zone but not this one the assertion below would fail with
+      // `expected '8/19/2026' to be '8/20/2026'`, which is character for
+      // character what a genuinely broken cache key produces. Without this
+      // line the arm refuses a correct implementation and names the wrong
+      // cause.
+      expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(
+        "Pacific/Kiritimati",
+      );
+      expect(numericDate(WHEN, Locale.en)).toBe("8/20/2026");
+    } finally {
+      // Restored here rather than left to the teardown, because every later
+      // arm in this file reads the pinned zone. The teardown in
+      // `tests/setup.ts` is the backstop that names a forgotten restore
+      // instead of letting it poison the rest of the run.
+      process.env.TZ = pinned;
+    }
   });
 });
 
@@ -79,25 +132,52 @@ describe("clockTime", () => {
   it("renders a clock time, per locale", () => {
     // The twelve hour clock is the observable difference here, and it is the
     // one that made a bare call visibly wrong rather than merely inconsistent.
-    expect(normalisedSpaces(clockTime("2026-08-19T14:05:07", Locale.en))).toBe(
-      "2:05:07 PM",
+    //
+    // **04:35 and not 14:05, because the stamp carries an offset and the suite
+    // has a zone.** Both are properties of the tree rather than of this arm:
+    // the server sends UTC with an offset, and `tests/setup.ts` pins where the
+    // run is. The pair still differs by the twelve hour clock, which is what
+    // this arm is for.
+    expect(normalisedSpaces(clockTime("2026-08-19T14:05:07Z", Locale.en))).toBe(
+      "4:35:07 AM",
     );
-    expect(clockTime("2026-08-19T14:05:07", Locale.de)).toBe("14:05:07");
+    expect(clockTime("2026-08-19T14:05:07Z", Locale.de)).toBe("04:35:07");
   });
 });
 
 describe("endOfDayInstant", () => {
+  /**
+   * The picked day, named once because three arms below have to agree with it.
+   *
+   * **Every expectation here is interpolated from this rather than written
+   * beside it.** Two literals that have to agree are an arm one edit can
+   * disarm: change the input day, leave the expected string, and the arm
+   * passes while asserting nothing about the day it names. Driven on the first
+   * version of the UTC arm below, which had exactly that shape.
+   */
+  const PICKED = "2026-08-19";
+  const [YEAR, MONTH, DAY] = PICKED.split("-").map(Number);
+
   it("sends the end of the picked day as an instant", () => {
-    // **Derived rather than written out, and that is forced.** The answer
-    // depends on where the run is: measured, `2026-08-19T21:59:59.000Z` in
-    // `Europe/Berlin` against `2026-08-19T23:59:59.000Z` under the suite's own
-    // UTC. A literal pins whichever zone the run happened to be in.
+    // **Derived rather than written out, and it stays derived now that a
+    // literal would work.** `tests/setup.ts` pins the suite's zone, so the
+    // answer no longer depends on where the run is and could be spelled out.
+    // It is not, because the derivation is also what states the rule: the end
+    // of the picked day is 23:59:59 **where the viewer is**, and a literal
+    // instant says that to nobody. It would also have to be re-derived by hand
+    // the day the pin moves, which is the same work with a wrong answer
+    // available.
     //
     // The numeric constructor rather than the parser the module uses, so this
     // states the intent in a second expression instead of calling the first.
-    // Month 7 is August.
-    expect(endOfDayInstant("2026-08-19")).toBe(
-      new Date(2026, 7, 19, 23, 59, 59).toISOString(),
+    // Its parts come off `PICKED`, so there is no second day to disagree with
+    // the first; the month is one based in the string and zero based here.
+    //
+    // **This is the arm that discriminates the regression**, and it does so
+    // only because the pinned zone is not UTC: the two readings of the picked
+    // day are the same function under UTC, so this equality was vacuous there.
+    expect(endOfDayInstant(PICKED)).toBe(
+      new Date(YEAR!, MONTH! - 1, DAY!, 23, 59, 59).toISOString(),
     );
   });
 
@@ -111,14 +191,43 @@ describe("endOfDayInstant", () => {
     // It is kept because it names the behaviour as a sentence, and because it
     // is the floor if somebody later weakens the equality to a looser match.
     //
-    // **And no further assertion can say more here**, which is written down so
-    // the next reader stops trying. Under `TZ=UTC`, which is what the suite
-    // container runs, this function and the one regression it exists to
-    // prevent, parsing the picked day as UTC rather than as local, are the
-    // same function: no expression over their output tells them apart, and a
-    // round trip through `Date` does not either. Pinning the suite's zone is
-    // the only thing that can catch it and is filed as work of its own.
-    expect(endOfDayInstant("2026-08-19")).toMatch(/Z$/);
+    // The arm below is what discriminates the UTC misreading, and it can
+    // because the pinned zone is not UTC.
+    expect(endOfDayInstant(PICKED)).toMatch(/Z$/);
+  });
+
+  it("reads the picked day where the viewer is, not as a UTC clock", () => {
+    // **The regression named, rather than caught as a side effect.** The old
+    // spelling sent `${day}T23:59:59` with no offset and the server read a
+    // member's wall clock as a UTC clock, so the deadline landed late by the
+    // viewer's offset. That mutant returns exactly the string below, in every
+    // zone, because it is the UTC parse written out.
+    //
+    // The equality above already fails on it. This arm exists because that one
+    // fails for a reason a reader has to derive, where this one fails by
+    // naming the wrong answer.
+    //
+    // **What goes past it**: it says nothing about the offset being the right
+    // one, only that the picked day was not read as UTC. The equality above is
+    // what holds the value, and under a UTC pin this arm would be red rather
+    // than vacuous, which is the failure mode worth having.
+    expect(endOfDayInstant(PICKED)).not.toBe(`${PICKED}T23:59:59.000Z`);
+  });
+
+  it("is what the deadline fixtures are built to be", () => {
+    // **The fixtures' own helper, pinned against the door it stands in for.**
+    // `tests/factories.ts` builds `due_at` with its own numeric constructor
+    // rather than by calling this module, so that an assertion over a fixture
+    // cannot agree with the code by construction. That independence is right
+    // and it leaves the two free to drift, and nothing observed the drift:
+    // driven, with the helper rewritten to parse the day as UTC, which is this
+    // branch's own regression, all three consumer files stayed green at 55 of
+    // 55. The badge arm in `LoanRow` provably cannot see it, because its
+    // expectation is derived from the helper and both sides move together.
+    //
+    // So the fixture keeps its own constructor and this is the one place the
+    // two derivations are required to agree. It is what reds when they part.
+    expect(endOfDay(PICKED)).toBe(endOfDayInstant(PICKED));
   });
 
   it("answers nothing for a day that is not there", () => {

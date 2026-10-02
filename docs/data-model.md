@@ -635,8 +635,10 @@ their own field exists even when its only value sits on a book they cannot see, 
 definer may rename it where another member may not. It is nullable and null is not an
 error: every row defined before the column has one, so does every row from an archive
 taken before it, and null means "no author to ask", which keeps the rule those rows
-already had. The rename is still open to an admin for any field, which is the same
-asymmetry the delete carries and a weaker version of it.
+already had. The rename is open to an admin for any field **they can address**, which is a
+weaker version of the asymmetry the delete carries rather than the same one: the delete is
+ungated, so a field whose every value sits on somebody's private book is deletable by an
+admin and a 404 to rename. `routers/books.rename_custom_field` carries the pair.
 
 **`catalogue_targets`.** One catalogue source as a row: its address, transport, which
 indexes it answers on, and the bounds a search is held to. The primary key holds a

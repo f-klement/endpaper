@@ -205,6 +205,34 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 #: parse per connection to answer a question the URL settles at import.
 _SPEAKS_PG8000: Final = make_url(DATABASE_URL).drivername == _PG8000
 
+def _speaks_postgres(url: str) -> bool:
+    """Whether a URL names the Postgres dialect, whatever drives it.
+
+    **The dialect, where the check above takes the driver, and the difference
+    is deliberate.** That one reads a private pg8000 attribute, so naming the
+    driver is what makes it honest. This one emits standard SQL every Postgres
+    driver carries, and gating it on pg8000 would leave a deployment that
+    swapped the driver carrying the defect with nothing saying so. The caveat
+    on that argument is that the dependency file pins one driver, so the other
+    spellings are a shape this answers for rather than a deployment that
+    exists.
+
+    **A function rather than an inline expression, because a gate written as a
+    substring test is a mutation nothing could see.** `"postgresql" in url` is
+    the spelling somebody reaches for and it answers `True` for
+    `sqlite:///./postgresql.db`. Parsing the URL is what refuses that, and
+    `TestTheZoneGateReadsTheDialectAndNotTheDriver` drives this rather than
+    re-deriving the same expression beside the rule, which is what the first
+    version of those arms did: they asserted a fact about SQLAlchemy and
+    nothing about this gate.
+    """
+    return make_url(url).get_backend_name() == "postgresql"
+
+
+#: Whether the session zone listener below has anything to set. Derived once,
+#: for the reason the check above is.
+_SPEAKS_POSTGRES: Final = _speaks_postgres(DATABASE_URL)
+
 
 def _is_encrypted(dbapi_connection: Any) -> bool | None:
     """Whether this connection's socket is wrapped, or `None` for "no answer".
@@ -325,6 +353,103 @@ def _synchronous() -> str:
     mode = os.getenv("SQLITE_SYNCHRONOUS", "FULL").strip().upper()
     return mode if mode in _SYNCHRONOUS_MODES else "FULL"
 
+
+
+#: The session setting every naive timestamp column on Postgres is cast
+#: through, and the one value that makes the two writers of those columns
+#: agree.
+#:
+#: Not an environment knob. A deployment that wants local wall clock in the
+#: database has to change the columns, not this: the application's own writes
+#: are naive UTC and would not move with it.
+#:
+#: **That sentence is held by two arms rather than stated**, because the
+#: neighbour three screens up does read the environment and reaches a
+#: statement that cannot be parameterised, so this file already contains the
+#: shape somebody would copy. `TestTheSessionZoneIsALiteralAndNotAnEnvironmentRead`
+#: holds both halves: that this value is a literal, and that the statement
+#: below interpolates this name and nothing else. **One arm held only the
+#: first**, and a read moved into the interpolation passed it.
+_SESSION_TIME_ZONE: Final = "UTC"
+
+
+@event.listens_for(engine, "connect")
+def _pin_the_postgres_session_zone(connection: Any, _record: Any) -> None:
+    """Pin the session zone, because every naive timestamp is cast through it.
+
+    **Measured against a real Postgres 18.6 whose own zone is
+    America/New_York**, rather than inferred from compiling the metadata. The
+    thirty one `DateTime` columns in `models.py` are declared without
+    `timezone=True`, and sixteen of them carry `server_default=func.now()`,
+    which compiles to `now()`: a `timestamptz` implicitly cast into `TIMESTAMP
+    WITHOUT TIME ZONE`, and **that cast reads the session `TimeZone`**. On that
+    server one row took the database side default and the application's own
+    value in the same statement, and they landed four hours apart. With this
+    set they land equal.
+
+    **UTC and not the server's zone, because the other writer is already
+    fixed.** The application writes `datetime.now(UTC).replace(tzinfo=None)`.
+    So this is what makes two writers of one column agree, not a preference
+    about how to store time.
+
+    **Per physical connection, like the pragmas above, because the setting is
+    session scoped.** Measured on the same server: `RESET TIME ZONE` puts a
+    session back on the server's own, so nothing inherits this from elsewhere.
+
+    **Autocommit around the statement, and it is the whole of why this works.**
+    Measured with pg8000 over three connections: issued plainly, the zone reads
+    `UTC` until the first `rollback` on that connection and `America/New_York`
+    for the rest of its life in the pool, which is **every** session the pool
+    hands out after the first transaction that rolls back. With autocommit on
+    for the statement it survives a rollback, a commit and the connection being
+    handed out again. Remove the two assignments and the listener still sets
+    the zone, still passes an arm that reads it on a fresh connection, and
+    stops working in production, which is what
+    `backend/tests/test_database.py::test_the_statement_runs_with_autocommit_on`
+    holds.
+
+    **Rows written before this landed keep the zone they were written in.**
+    A Postgres deployment away from UTC has database side timestamps in local
+    wall clock and application side ones in UTC, in the same columns, and
+    nothing here moves them: this stops the divergence growing and does not
+    repair it.
+
+    **A repair needs the writer per row as well as the offset, and the writer
+    is not recorded either.** A column carrying a database side default also
+    takes application writes, and those rows are already in the target zone,
+    so a blanket shift corrupts exactly the rows that were right. Both facts
+    are absent from the rows, which is why this is a migration somebody has to
+    decide about rather than something this listener can do.
+
+    **SQLite reaches none of this and that is not an oversight.** There,
+    `func.now()` compiles to `CURRENT_TIMESTAMP`, which is UTC by definition,
+    so the column already agrees with the application. It also means **no arm
+    in the suite can observe this listener running**, since the suite is
+    SQLite: the arms below call it directly and the pipeline's Postgres job is
+    where it meets a server.
+    """
+    if not _SPEAKS_POSTGRES:
+        return
+    # **No early return on a connection that is already autocommitting.** The
+    # statement has to run on every physical connection whatever state the
+    # driver hands it in, and an `if connection.autocommit: return` added here
+    # reddened none of the twelve arms until one of them asserted the
+    # statements as well as the flag.
+    was_autocommitting = connection.autocommit
+    connection.autocommit = True
+    cursor = connection.cursor()
+    try:
+        # **Nothing catches this.** A `SET TIME ZONE` that fails is a
+        # connection whose timestamps will disagree with the application's, so
+        # the pool handing it out is worse than the connection failing.
+        cursor.execute(f"SET TIME ZONE '{_SESSION_TIME_ZONE}'")
+    finally:
+        # **The order of these two is not load bearing and no arm holds it.**
+        # Said here because every other line in this block is: closing a
+        # cursor runs no statement, so swapping them changes nothing, and a
+        # reader looking for the reason would otherwise invent one.
+        cursor.close()
+        connection.autocommit = was_autocommitting
 
 # ── Where a query's two dialects differ ──────────────────────────────────────
 #

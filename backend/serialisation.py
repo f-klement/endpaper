@@ -339,8 +339,12 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     collection**, for the same reason. **Plus one per distinct `added_by` the
     session has not already loaded.**
 
-    **Only the 7 is pinned by a test**, which is worth knowing before quoting the
-    others: the conditional statements need a page shaped to trigger them.
+    **Only the constant is pinned by a test**, which is worth knowing before
+    quoting the others: the conditional statements need a page shaped to
+    trigger them. **This sentence deliberately does not repeat the figure.**
+    The test reads it out of the line above rather than carrying its own copy,
+    so that one cannot drift; the copy that used to stand here still said 7
+    after the constant became 8.
     """
     if not books:
         return []
