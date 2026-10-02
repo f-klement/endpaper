@@ -704,19 +704,21 @@ function escaped(text: string, marks: RegExp): string {
  * one trace of a case leaving is erased by the ordinary process that follows
  * it.
  *
- * **Nothing holds the lists themselves, and that is the shipped half's
- * boundary.** Six edits are silent here, each measured green: a table added
- * with no list beside it, a list deleted, a list marked skipped, which is
- * worse than a deletion because the list is still there for the next reader
- * to believe, a generator handed a narrowed table, a list pinning fewer rows
- * than the generator drives, and the whole group of arms over this renderer
- * deleted. Closing the first five is a rule over this file's own source,
- * filed separately, because four rounds of it each closed the container that
- * had just been demonstrated and the enumeration does not terminate: what it
- * wants is the generator's argument and the pin's subject resolved to one
- * declaration. The sixth is the regress every guard in this tree sits on and
- * nothing closes it. So this renderer closes the defect for the tables that
- * have a list, and for no others.
+ * **What holds the lists themselves is `a table driven rule group is held by
+ * a pin on one declaration`, and two things it does not hold are written
+ * here rather than there.** Of the six edits that were silent beside this
+ * renderer, five are now refused: a table added with no list beside it, a
+ * list deleted, a list marked skipped, which is worse than a deletion
+ * because the list is still there for the next reader to believe, a
+ * generator handed a narrowed table, and a list pinning fewer rows than the
+ * generator drives. Each is driven as a row of that rule's own refusals.
+ *
+ * **The sixth stands: the whole group of arms over this renderer deleted.**
+ * That is the regress every guard in this tree sits on and nothing closes
+ * it. **And one word still disarms the file**, because `only` on any arm
+ * anywhere leaves the rule below among the arms that do not run, which no
+ * rule written in this file can observe: it wants a focused test check in
+ * the linter, which this project's configuration does not enable today.
  *
  * **Membership rather than a size.** A count cannot tell a row swapped for
  * another from the row it replaced, nor a row whose input is rewritten in
@@ -913,6 +915,1517 @@ describe("a row of a rule table is rendered as one line", () => {
       .map(([shape]) => shape);
 
     expect(collided).toEqual([]);
+  });
+});
+
+/**
+ * The renderer a pin reads a table through, named once. See `asRows`.
+ *
+ * **The rule matches ten names out of the code it reads**: this one,
+ * `expect`, the two exact matchers, the two generator properties, the
+ * three runner names and the module they come from. Each is loud when it
+ * stops matching. Renaming the renderer without changing this line reds
+ * every group at once; an aliased `expect` or matcher stops a pin being
+ * read as a pin, which reports the group it was holding; a runner
+ * spelling or a runner module outside those refuses a pin that runs.
+ * Accepting any one argument call in the renderer's place would instead
+ * take a pin that drops cells, with nothing said, which is the direction
+ * this refuses.
+ */
+const PIN_RENDERER = "asRows";
+
+/**
+ * The matchers that hold a whole value, so that a row leaving is seen.
+ *
+ * A length, a containment or a predicate is green on a table that has lost a
+ * row, which is the defect `asRow` exists for. Anything not here is not read
+ * as a pin, so the group it was meant to hold is reported.
+ */
+const WHOLE_VALUE_MATCHERS = new Set(["toEqual", "toStrictEqual"]);
+
+/**
+ * Every node that opens a scope a name can be bound in.
+ *
+ * **The grammar's list rather than anybody's memory, and a kind missing
+ * from it is a silent miss.** Its bindings land in the map of the scope
+ * outside it, where the outer declaration was added first and wins, so the
+ * pin and the generator reach one node and the group reads as held. That
+ * is a false acceptance, which is the defect this whole rule is about, and
+ * it is the opposite of what the first version of this sentence claimed.
+ *
+ * **So nothing here is self correcting and a row per construct is what
+ * makes it loud.** Most members turn a refusal into an acceptance when
+ * they go, the block statement and the arrow the most of any; the enum
+ * body refuses something legitimate instead and the program does both,
+ * because without it a foreign import binds nowhere and the nothing it
+ * resolves to reads as the runner; and a handful move no row. **The breakdown is deliberately not written down**, because
+ * it is a property of the rows and it went stale in the commit that added
+ * one: remove a member at a time and read it off, which is how every
+ * figure here was taken.
+ *
+ * **The members that move no row are measured rather than assumed.** A
+ * shadow written in a function declaration, a static block, a class
+ * declaration or a class expression is caught by the scope inside or
+ * around it, driven each way; the two bodiless function kinds cannot hold
+ * a generator at all.
+ */
+const SCOPES = new Set([
+  "Program",
+  "FunctionDeclaration",
+  "FunctionExpression",
+  "ArrowFunctionExpression",
+  "TSDeclareFunction",
+  "TSEmptyBodyFunctionExpression",
+  "BlockStatement",
+  "StaticBlock",
+  "TSModuleBlock",
+  "ForStatement",
+  "ForInStatement",
+  "ForOfStatement",
+  "CatchClause",
+  "SwitchStatement",
+  "ClassDeclaration",
+  "ClassExpression",
+  // An enum body is a namespace of its own, so its members bind inside it
+  // and nowhere else. It is here rather than exempted at the reader below
+  // because that is what it is: without it, every member of every enum is a
+  // declaration the reader does not know, and one enum anywhere in the file
+  // would refuse every name in it.
+  "TSEnumBody",
+]);
+
+/** The three specifiers an import binds a local name through. */
+const IMPORT_BINDINGS = new Set([
+  "ImportSpecifier",
+  "ImportDefaultSpecifier",
+  "ImportNamespaceSpecifier",
+]);
+
+/**
+ * The declaration kinds carrying a name that binds in the type space alone.
+ *
+ * **They are named because they are the exception to the refusal below**,
+ * which records any other kind declaring a name the reader does not read,
+ * rather than walking past it. Keyed on carrying an `id` that is an
+ * identifier, which is what declaring a name looks like whatever the kind is
+ * called. Censused that way over every module of `src` and `tests`, 689
+ * files: these two are the only kinds that reach it, at 618 and 464
+ * occurrences, so the exemption is what keeps the refusal off ordinary
+ * TypeScript and nothing else is being waved through.
+ */
+const BINDS_IN_THE_TYPE_SPACE = new Set([
+  "TSTypeAliasDeclaration",
+  "TSInterfaceDeclaration",
+]);
+
+/**
+ * The properties that make a call a table driven generator.
+ *
+ * **Two members, and an enumeration of two is still an enumeration.** A
+ * third table driving property added by the runner is **reported** rather
+ * than missed, because a curried call on a runner member is read by its
+ * shape wherever the property list is short: see the refusal beside the
+ * walk. What the two members decide is whether such a call is read as a
+ * group or named as one this rule cannot read. The second member is
+ * written against the next group rather than against anything live:
+ * measured over this file, no row spells `for` today.
+ */
+const GENERATOR_PROPERTIES = new Set(["each", "for"]);
+
+/**
+ * The names a call must carry for what it is handed to be read as running.
+ *
+ * **Three members, and the shape of the call was not enough.** Asking only
+ * that the callee be a plain name accepted `const quietly = it.skip` and
+ * every helper besides. A runner spelling outside this set, `suite` or
+ * whatever is added next, refuses a pin that does run, loudly at the line,
+ * which is the direction to be wrong in here.
+ */
+const RUNNER_NAMES = new Set(["it", "test", "describe"]);
+
+/** The module a runner name has to come from to be the runner. */
+const RUNNER_MODULE = "vitest";
+
+/** The nodes `value` holds, whether it is one node or a list of them. */
+function nodesIn(value: unknown): Node[] {
+  if (Array.isArray(value))
+    return (value as unknown[]).filter((one): one is Node => isNode(one));
+  return isNode(value) ? [value] : [];
+}
+
+/** Every node `node` holds directly, by its own keys rather than by a list. */
+function heldBy(node: Node): Node[] {
+  return Object.keys(node).flatMap((key) => nodesIn(node[key]));
+}
+
+/** Every node under `root`, each with the node holding it. */
+function parentsOf(root: Node): Map<Node, Node | null> {
+  const parents = new Map<Node, Node | null>([[root, null]]);
+  const pending: Node[] = [root];
+  while (pending.length > 0) {
+    const node = pending.pop() as Node;
+    for (const child of heldBy(node)) {
+      parents.set(child, node);
+      pending.push(child);
+    }
+  }
+  return parents;
+}
+
+/**
+ * Every name a binding position binds, by the pattern grammar.
+ *
+ * **Closed, and a shape outside it is recorded rather than skipped.**
+ * Skipping one is how a shadowing binding goes unseen, and an unseen shadow
+ * is what lets a pin and a generator spelling one name read as holding one
+ * table while they name two.
+ */
+function boundBy(pattern: unknown, out: Node[], unreadable: string[]): void {
+  if (!isNode(pattern)) return;
+  if (pattern.type === "Identifier") out.push(pattern);
+  else if (pattern.type === "ObjectPattern")
+    for (const one of nodesIn(pattern.properties))
+      boundBy(one, out, unreadable);
+  else if (pattern.type === "ArrayPattern")
+    for (const one of nodesIn(pattern.elements)) boundBy(one, out, unreadable);
+  else if (pattern.type === "Property") boundBy(pattern.value, out, unreadable);
+  else if (pattern.type === "AssignmentPattern")
+    boundBy(pattern.left, out, unreadable);
+  else if (pattern.type === "RestElement")
+    boundBy(pattern.argument, out, unreadable);
+  else if (pattern.type === "TSParameterProperty")
+    boundBy(pattern.parameter, out, unreadable);
+  else unreadable.push(pattern.type);
+}
+
+/** What one scope binds, and the binding shapes it could not read. */
+interface ScopeBindings {
+  readonly names: Map<string, Node>;
+  readonly unreadable: string[];
+}
+
+/**
+ * What `scope` binds, read off the constructs that bind rather than off the
+ * statements a scope is allowed to hold.
+ *
+ * **Three sources, and the third is the one a block walk misses.** What the
+ * scope node itself binds, which is its parameters, a catch's parameter and
+ * an expression's own name; what is declared in its own region, found by
+ * walking until the next scope so that a nested block keeps its own; and,
+ * for a function body and the module body, what a `var` hoists out of a
+ * nested block into.
+ */
+function scopeBindings(scope: Node): ScopeBindings {
+  const names = new Map<string, Node>();
+  const unreadable: string[] = [];
+  const add = (value: unknown): void => {
+    if (!isNode(value) || value.type !== "Identifier") return;
+    const name = text(value.name);
+    if (name !== null && !names.has(name)) names.set(name, value);
+  };
+  const take = (pattern: unknown): void => {
+    const out: Node[] = [];
+    boundBy(pattern, out, unreadable);
+    for (const one of out) add(one);
+  };
+
+  for (const one of nodesIn(scope.params)) take(one);
+  if (scope.type === "CatchClause") take(scope.param);
+  if (scope.type === "FunctionExpression" || scope.type === "ClassExpression")
+    add(scope.id);
+
+  const lexical = (node: Node): void => {
+    for (const child of heldBy(node)) {
+      if (SCOPES.has(child.type)) {
+        // A nested declaration binds its own name out here even though its
+        // body is somebody else's scope. **Written as the two exceptions
+        // rather than as a list of declarations**, which is what it was: a
+        // function expression and a class expression bind their own name
+        // inward only, and every other scope node either carries a
+        // declaration's name or carries no `id` at all, where this is a no
+        // op. Naming the declarations instead left `declare function` out,
+        // measured, and that is a shadow nobody sees.
+        if (
+          child.type !== "FunctionExpression" &&
+          child.type !== "ClassExpression"
+        )
+          add(child.id);
+        continue;
+      }
+      if (child.type === "VariableDeclarator") take(child.id);
+      else if (IMPORT_BINDINGS.has(child.type)) add(child.local);
+      else if (
+        child.type === "TSEnumDeclaration" ||
+        child.type === "TSModuleDeclaration" ||
+        child.type === "TSImportEqualsDeclaration"
+      )
+        add(child.id);
+      // **A declaration kind this reader does not know is recorded, not
+      // walked past.** `boundBy` already does that for a pattern shape, and
+      // for one round this one did not do it for a declaration kind, so
+      // `import T = A.rows` was a shadow that went unseen and the group read
+      // as held while driving another table. The key is carrying an `id`
+      // that is an identifier, which is what declaring a name looks like
+      // whatever the kind is called.
+      else if (
+        !BINDS_IN_THE_TYPE_SPACE.has(child.type) &&
+        isNode(child.id) &&
+        child.id.type === "Identifier"
+      )
+        unreadable.push(child.type);
+      lexical(child);
+    }
+  };
+  lexical(scope);
+
+  if (scope.type === "Program" || Array.isArray(scope.params)) {
+    const hoisted = (node: Node): void => {
+      for (const child of heldBy(node)) {
+        if (
+          Array.isArray(child.params) ||
+          child.type === "ClassDeclaration" ||
+          child.type === "ClassExpression"
+        ) {
+          if (child.type === "FunctionDeclaration") add(child.id);
+          continue;
+        }
+        if (child.type === "VariableDeclaration" && text(child.kind) === "var")
+          for (const one of nodesIn(child.declarations)) take(one.id);
+        hoisted(child);
+      }
+    };
+    hoisted(scope);
+  }
+  return { names, unreadable };
+}
+
+/** The declaration a name reaches, or why it reaches none. */
+interface Resolution {
+  readonly declaration: Node | null;
+  readonly why: string;
+}
+
+/**
+ * A reader answering which declaration a name refers to.
+ *
+ * **This is the whole of the idea the rule below rests on.** A name resolves
+ * to exactly one binding by the language's own scoping rules, so asking
+ * whether a pin holds the table a generator drives is asking whether two
+ * names reach one declaration. That question does not care which container
+ * the shadowing happened in, which is why it terminates where four rounds of
+ * naming containers did not.
+ */
+function resolverOver(
+  parents: Map<Node, Node | null>,
+): (use: Node) => Resolution {
+  const cache = new Map<Node, ScopeBindings>();
+  const bindings = (scope: Node): ScopeBindings => {
+    const held = cache.get(scope);
+    if (held !== undefined) return held;
+    const fresh = scopeBindings(scope);
+    cache.set(scope, fresh);
+    return fresh;
+  };
+  return (use) => {
+    const name = text(use.name) ?? "";
+    let at = parents.get(use) ?? null;
+    while (at !== null) {
+      if (SCOPES.has(at.type)) {
+        const { names, unreadable } = bindings(at);
+        if (unreadable.length > 0)
+          return {
+            declaration: null,
+            why: `a binding shape this rule cannot read, ${unreadable[0]}`,
+          };
+        const declaration = names.get(name);
+        if (declaration !== undefined) return { declaration, why: "" };
+      }
+      at = parents.get(at) ?? null;
+    }
+    return { declaration: null, why: "no declaration in this file" };
+  };
+}
+
+/** The name a member expression reads, or null where it reads none. */
+function propertyName(member: Node): string | null {
+  const property = member.property;
+  if (!isNode(property)) return null;
+  if (member.computed !== true && property.type === "Identifier")
+    return text(property.name);
+  if (property.type === "Literal" && typeof property.value === "string")
+    return property.value;
+  return null;
+}
+
+/** A call's callee read as a base name and the properties taken off it. */
+interface Chain {
+  readonly base: string;
+  readonly props: string[];
+}
+
+function chainOf(callee: unknown): Chain | null {
+  const props: string[] = [];
+  let at: unknown = callee;
+  while (isNode(at) && at.type === "MemberExpression") {
+    const named = propertyName(at);
+    if (named === null) return null;
+    props.unshift(named);
+    at = at.object;
+  }
+  if (!isNode(at) || at.type !== "Identifier") return null;
+  const base = text(at.name);
+  return base === null ? null : { base, props };
+}
+
+/**
+ * Does everything between `node` and the module body run as written?
+ *
+ * **Every function on the way out has to be a call's own argument, and
+ * that call has to name a runner.** A modifier is a property taken off the
+ * runner, so `skip`, `only`, `todo` and whatever is added next fail the
+ * test without being named; a pin lifted into a helper the arm merely
+ * names is a function nobody passed to a call; and a pin handed to any
+ * other call is one nothing here can say runs, whether that call defers
+ * it, discards it or runs it at once.
+ *
+ * **Two versions of this test were beaten in opposite directions, and the
+ * third asks the question the rest of the rule already asks.** Reading the
+ * callee's **shape**, that it is a plain name, was beaten by aliasing the
+ * runner into a local, `const quietly = it.skip`. Reading its **name** was
+ * beaten by shadowing a local into the runner's, `const test = it.skip`.
+ * Each fix closed the spelling just shown and left the other direction
+ * open, which is the regress this whole rule exists to stop, reappearing
+ * inside one function.
+ *
+ * **So `isTheRunner` reads the binding, as the generator side does.** A
+ * name resolves to exactly one binding, and the only binding accepted is
+ * an import of that name from the runner's module, or none at all.
+ *
+ * **That is closed against anything written in this file, and the argument
+ * is the same one the group rule rests on.** It is two clauses rather than
+ * three: a callee outside the three names is refused, **which covers a
+ * callee that is not a name at all, because it carries no name to match**,
+ * and a name resolving to anything but that import is refused. Nothing
+ * else is left to spell. A third clause comparing the callee's node kind
+ * stood here for a round and was discharged by the first: removing it
+ * reddened nothing, which is the same masking the sweep found one layer
+ * down.
+ *
+ * **Each half has a row, and the name test nearly did not.** The binding
+ * test is held by the two locals carrying a runner's name and by the
+ * foreign import. The name test looked held by the helper rows and was
+ * not: a helper declared here is a local, so the binding test refuses it
+ * whatever it is called, and dropping the name test left the suite green.
+ * What the name test alone holds is a call **declared nowhere**, which
+ * resolves to nothing and is accepted on the binding, and that is the row
+ * `a pin under a call this file declares nowhere and no runner names`.
+ * Found by this branch's own sweep, not by reading.
+ *
+ * **Two routes remain and neither is syntax**, which is why they are named
+ * here rather than closed. The module could export something that is not
+ * the runner under the right name, which no reading of this file can see.
+ * And the runner could be replaced at run time, which `a module is
+ * replaced by an alias, never by a module mock` is the rule for.
+ *
+ * **A name declared nowhere is read as the runner, and the reason is the
+ * config rather than the fixtures.** This file imports four names and
+ * `test` is not among them, so an arm written with `test` takes that
+ * branch here today; saying it is what the fixtures are and the file is
+ * not was wrong. What makes it right is that the suite runs with globals
+ * on, so an undeclared runner name **is** the runner, and with globals off
+ * it throws rather than passing quietly. The failure direction is loud
+ * either way. `the runner a pin runs under is global when nothing declares
+ * it` pins that setting, so the dependency reds rather than being stated.
+ */
+function isTheRunner(
+  callee: unknown,
+  parents: Map<Node, Node | null>,
+  resolve: (use: Node) => Resolution,
+): boolean {
+  if (!isNode(callee)) return false;
+  const named = text(callee.name);
+  if (named === null || !RUNNER_NAMES.has(named)) return false;
+  const declared = resolve(callee).declaration;
+  // **Nothing declares it here, so it came from outside the file**, which
+  // is what a fixture looks like and what an ambient runner looks like.
+  // The resolver also answers nothing where a scope it met is unreadable,
+  // and this reads that as the runner too: that costs nothing, because the
+  // generator's own resolution hits the same scope and refuses the group.
+  if (declared === null) return true;
+  const holder = parents.get(declared) ?? null;
+  if (holder === null) return false;
+  // **A named import of that very name**, which is narrower than "some
+  // import" by three live spellings: a namespace import, a default import
+  // and a renamed import of another export all come from the runner's
+  // module under a runner's name and are not the runner. One line does all
+  // three: only a named import carries `imported` at all, so a namespace
+  // or default specifier fails this test without being named.
+  //
+  // **A test for the specifier's kind stood beside this for a round and
+  // was dominated by it**, reddening no row because this line already
+  // refused everything it refused. That is the third time a clause in this
+  // function has been masked by its neighbour, and the pattern is the part
+  // worth keeping: drop each term of a predicate in turn and require one
+  // row to move, or the term is dead. **Deleting it cost no arm**, because
+  // the behaviour's witness is this line's own row, the renamed import.
+  if (!isNode(holder.imported) || text(holder.imported.name) !== named)
+    return false;
+  const from = parents.get(holder) ?? null;
+  return (
+    from !== null && isNode(from.source) && from.source.value === RUNNER_MODULE
+  );
+}
+
+function runsAsWritten(
+  node: Node,
+  parents: Map<Node, Node | null>,
+  resolve: (use: Node) => Resolution,
+): boolean {
+  let at = parents.get(node) ?? null;
+  while (at !== null) {
+    if (Array.isArray(at.params)) {
+      const holder = parents.get(at) ?? null;
+      const passed =
+        holder !== null &&
+        holder.type === "CallExpression" &&
+        nodesIn(holder.arguments).includes(at) &&
+        isTheRunner(holder.callee, parents, resolve);
+      if (!passed) return false;
+    }
+    at = parents.get(at) ?? null;
+  }
+  return true;
+}
+
+/**
+ * Does the written list reach the declaration the pin is supposed to hold?
+ *
+ * A list built from the table is the table compared with itself, which is
+ * green whatever the table says. Every node of the expected value is read,
+ * so a spread and a call carrying the name are both refused rather than only
+ * the spelling in hand.
+ *
+ * **And a name in between is not a laundry.** Stopping at the binding left
+ * `const rendered = asRows(T)` and an expected value spelling `[...rendered]`
+ * green, one variable away from the direct form this already refused, so a
+ * name is followed. `seen` stops a cycle.
+ *
+ * **What it follows is narrow, and this is the mechanism rather than two
+ * examples of it.** A name is followed only where the identifier it
+ * resolves to is a declarator's own `id`, never one inside a pattern, and
+ * only into that declarator's own initialiser. Every other route from the
+ * rendering to the expected value is therefore accepted, measured: a
+ * function declaration returning it, a static class field holding it,
+ * either destructuring, and an assignment to a name declared without an
+ * initialiser. The arm named for that blindness drives all five, so
+ * closing the gap without moving this paragraph reds.
+ */
+function namesAgain(
+  written: Node,
+  declaration: Node,
+  resolve: (use: Node) => Resolution,
+  parents: Map<Node, Node | null>,
+  seen: Set<Node>,
+): boolean {
+  if (written.type === "Identifier") {
+    const reached = resolve(written).declaration;
+    if (reached === null || seen.has(reached)) return false;
+    if (reached === declaration) return true;
+    seen.add(reached);
+    const holder = parents.get(reached) ?? null;
+    const init =
+      holder !== null &&
+      holder.type === "VariableDeclarator" &&
+      holder.id === reached
+        ? holder.init
+        : null;
+    return (
+      isNode(init) && namesAgain(init, declaration, resolve, parents, seen)
+    );
+  }
+  return heldBy(written).some((one) =>
+    namesAgain(one, declaration, resolve, parents, seen),
+  );
+}
+
+/** The nearest block or arm name above `node`, for the report. */
+function labelAround(node: Node, parents: Map<Node, Node | null>): string {
+  let at = parents.get(node) ?? null;
+  while (at !== null) {
+    if (
+      at.type === "CallExpression" &&
+      isNode(at.callee) &&
+      at.callee.type === "Identifier"
+    ) {
+      const [first] = nodesIn(at.arguments);
+      if (
+        first !== undefined &&
+        first.type === "Literal" &&
+        typeof first.value === "string"
+      )
+        return first.value;
+    }
+    at = parents.get(at) ?? null;
+  }
+  return "no block";
+}
+
+/** One table driven rule group, and what holds the table it drives. */
+interface Group {
+  label: string;
+  spelling: string;
+  table: string;
+  pin: string;
+  fault: string;
+}
+
+/** One live equality over a whole value, and the declaration it holds. */
+interface HeldPin {
+  readonly through: string;
+  readonly live: boolean;
+  readonly declaration: Node | null;
+}
+
+/**
+ * Every table driven rule group in `source`, and every generator it could
+ * not read as one.
+ *
+ * **Keyed on the property rather than on the runner's name**, so a runner
+ * this file has not seen is read rather than skipped. A generator the
+ * chain reader cannot follow is reported instead of dropped, which is what
+ * keeps the population from narrowing under the rule in silence, and it is
+ * seeded from the same two properties, so widening one without the other
+ * leaves the report blind to exactly the spelling it was widened for.
+ *
+ * **The seeding keys on the property alone and never on the chain**, so a
+ * chain this reader cannot follow is reported whatever its base is: a
+ * call, a conditional, `this`, a computed key on a call, a nested member.
+ * Driven, all five.
+ *
+ * **`GENERATOR_PROPERTIES` is two members, and a third would be a miss
+ * where a fourth runner name is a loud refusal.** That asymmetry is closed
+ * by shape rather than by guessing the name: a curried call on a runner
+ * member is reported whatever the property is called, because driving rows
+ * is what currying on a runner is for.
+ *
+ * **What that still does not reach**, said rather than left to be found: a
+ * table driving function that is not a runner member at all, and a runner
+ * property that takes the callback directly instead of currying. Both are
+ * misses, not refusals, and nothing here would say so.
+ */
+function tableGroupsIn(
+  source: string,
+  lang: "ts" | "tsx",
+): {
+  groups: Group[];
+  unread: string[];
+  nodes: { walked: number; serialised: number };
+} {
+  const root = parseAst(source, { lang }) as unknown as Node;
+  const parents = parentsOf(root);
+  const resolve = resolverOver(parents);
+  const every = [...parents.keys()];
+
+  const pins: HeldPin[] = [];
+  for (const node of every) {
+    if (node.type !== "CallExpression") continue;
+    const matcher = node.callee;
+    if (!isNode(matcher) || matcher.type !== "MemberExpression") continue;
+    const held = propertyName(matcher);
+    if (held === null || !WHOLE_VALUE_MATCHERS.has(held)) continue;
+    const subject = matcher.object;
+    if (!isNode(subject) || subject.type !== "CallExpression") continue;
+    if (!isNode(subject.callee) || subject.callee.type !== "Identifier")
+      continue;
+    if (text(subject.callee.name) !== "expect") continue;
+    const [written] = nodesIn(node.arguments);
+    if (written === undefined || written.type !== "ArrayExpression") continue;
+    const [value] = nodesIn(subject.arguments);
+    if (value === undefined) continue;
+
+    let name = value.type === "Identifier" ? value : null;
+    let through = "the value itself";
+    if (
+      name === null &&
+      value.type === "CallExpression" &&
+      isNode(value.callee) &&
+      value.callee.type === "Identifier" &&
+      text(value.callee.name) === PIN_RENDERER
+    ) {
+      const wrapped = nodesIn(value.arguments);
+      const [only] = wrapped;
+      if (
+        wrapped.length === 1 &&
+        only !== undefined &&
+        only.type === "Identifier"
+      ) {
+        name = only;
+        through = PIN_RENDERER;
+      }
+    }
+    if (name === null) continue;
+
+    const to = resolve(name);
+    const circular =
+      to.declaration !== null &&
+      namesAgain(written, to.declaration, resolve, parents, new Set());
+    pins.push({
+      through,
+      live: runsAsWritten(node, parents, resolve),
+      declaration: circular ? null : to.declaration,
+    });
+  }
+
+  const unread = new Set(
+    every.filter(
+      (one) =>
+        one.type === "MemberExpression" &&
+        GENERATOR_PROPERTIES.has(propertyName(one) ?? ""),
+    ),
+  );
+  const groups: Group[] = [];
+  for (const node of every) {
+    const applied =
+      node.type === "CallExpression"
+        ? node.callee
+        : node.type === "TaggedTemplateExpression"
+          ? node.tag
+          : null;
+    const chain = isNode(applied) ? chainOf(applied) : null;
+    if (chain === null) {
+      // **An applied member whose property cannot be read is recorded
+      // here, not dropped.** `propertyName` answers null for a computed
+      // key that is not a literal, and both this walk and the seeding
+      // above read the property through it, so `it[k](table)` used to be
+      // invisible to the rule, to the population arm and to this report at
+      // once. Only an applied one is recorded: an ordinary subscript such
+      // as `row[column]` is not a generator and would be noise.
+      // **Keyed on the property being unreadable, not on the chain
+      // failing.** `chainOf` also answers null where the base is not a
+      // plain name, which every `expect(...).toEqual` is, so recording on
+      // the chain turned every acceptance row red at once. Measured.
+      if (
+        isNode(applied) &&
+        applied.type === "MemberExpression" &&
+        propertyName(applied) === null
+      )
+        unread.add(applied);
+      continue;
+    }
+    if (!chain.props.some((one) => GENERATOR_PROPERTIES.has(one))) {
+      // **A curried call on a runner member drives rows, whatever the
+      // property is called.** `GENERATOR_PROPERTIES` is two members and a
+      // third would be a miss here where a fourth runner name is a loud
+      // refusal, so the asymmetry is closed by reporting the shape rather
+      // than by guessing the name. Currying is the shape: a runner member
+      // called, and that call called again.
+      const outer = parents.get(node) ?? null;
+      if (
+        RUNNER_NAMES.has(chain.base) &&
+        node.type === "CallExpression" &&
+        outer !== null &&
+        outer.type === "CallExpression" &&
+        outer.callee === node &&
+        isNode(applied)
+      )
+        unread.add(applied);
+      continue;
+    }
+    let spelled: unknown = applied;
+    while (isNode(spelled) && spelled.type === "MemberExpression") {
+      unread.delete(spelled);
+      spelled = spelled.object;
+    }
+
+    const group: Group = {
+      label: labelAround(node, parents),
+      spelling: `${chain.base}.${chain.props.join(".")}`,
+      table: "",
+      pin: "",
+      fault: "",
+    };
+    groups.push(group);
+
+    if (chain.props.length !== 1) {
+      group.fault = "is spelled with a modifier, so what it drives is not read";
+      continue;
+    }
+    if (node.type !== "CallExpression") {
+      group.fault = "is handed a template rather than a name";
+      continue;
+    }
+    const handed = nodesIn(node.arguments);
+    const [first] = handed;
+    if (
+      handed.length !== 1 ||
+      first === undefined ||
+      first.type !== "Identifier"
+    ) {
+      group.fault = "is handed an expression rather than a name";
+      continue;
+    }
+    group.table = text(first.name) ?? "";
+    const to = resolve(first);
+    if (to.declaration === null) {
+      group.fault = `names ${group.table}, which resolves to ${to.why}`;
+      continue;
+    }
+    const theirs = pins.filter((one) => one.declaration === to.declaration);
+    const living = theirs.filter((one) => one.live);
+    if (living.length === 0) {
+      group.fault =
+        theirs.length > 0
+          ? `names ${group.table}, whose only pin does not run as written`
+          : `names ${group.table}, and no live pin holds that declaration`;
+      continue;
+    }
+    group.pin = [...new Set(living.map((one) => one.through))]
+      .sort()
+      .join(", ");
+  }
+
+  return {
+    groups,
+    unread: [...unread].map((one) => labelAround(one, parents)),
+    // **The walk's reach, against a second derivation of the same tree.**
+    // The population arm reds on a truncation keyed where a group sits and
+    // is blind to one keyed on a kind no group sits under: returning early
+    // for a conditional statement hides thousands of nodes with every arm
+    // green. A count taken off the serialised tree degrades differently
+    // and cannot be forged from the source, because the serialiser escapes
+    // a quote inside a string literal and this counts the unescaped form.
+    nodes: {
+      walked: every.length,
+      serialised: JSON.stringify(root).split('"type":').length - 1,
+    },
+  };
+}
+
+/** Every group in `source` that nothing live holds, one line each. */
+function groupsWithNoLivePin(
+  source: string,
+  lang: "ts" | "tsx" = "ts",
+): string[] {
+  const { groups, unread } = tableGroupsIn(source, lang);
+  return [
+    ...groups
+      .filter((one) => one.fault !== "")
+      .map((one) => `the group in "${one.label}" ${one.fault}`),
+    ...unread.map(
+      (label) =>
+        `a generator named in "${label}" is applied where this rule cannot read what it drives`,
+    ),
+  ].sort();
+}
+
+/**
+ * This file, as the shared corpus keys it.
+ *
+ * One spelling for two rules: the address rule below excludes itself with
+ * it, and the rule here reads itself by it.
+ */
+const SELF = "./houseRules.test.ts";
+
+/** This file's own text, taken from the shared corpus so a narrowing reds. */
+function ownSource(): string {
+  const mine = testEntries().find(([path]) => path === SELF);
+  expect(
+    mine,
+    "this file is no longer in the shared test corpus, so the rule below would read nothing",
+  ).toBeDefined();
+  return mine?.[1] ?? "";
+}
+
+/**
+ * The sources this rule must report, one row each.
+ *
+ * **Every row is a witness and none is discharged in prose.** The shadowing
+ * rows are one per construct the grammar binds a name through, pattern
+ * shapes and declaration kinds alike, because the argument that the regress
+ * terminates is exactly that this list is the grammar's rather than a list
+ * of containers somebody thought of, and an argument with a row nobody
+ * drove is not an argument. One row holds the other half of that argument:
+ * a declaration kind the reader does not know is reported rather than
+ * walked past, so the list being short is a red line and not a miss.
+ *
+ * **A row here says a source is refused, not why**, and for the pattern
+ * shapes those are two different things: deleting a branch of `boundBy`
+ * makes the record refuse the same source, so the row stayed green while
+ * the branch it is named for was gone. `is refused for an unreadable
+ * binding shape on one row only` is what tells the two apart, and it is
+ * what makes these rows witnesses rather than names.
+ */
+const REFUSED: [string, string][] = [
+  [
+    "a group with nothing pinning its table",
+    `describe("g", () => { const T = [["a"]]; it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin marked skipped",
+    `describe("g", () => { const T = [["a"]]; it.skip("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin marked todo",
+    `describe("g", () => { const T = [["a"]]; it.todo("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin focused, which skips every arm beside it",
+    `describe("g", () => { const T = [["a"]]; it.only("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin inside a skipped block",
+    `describe("g", () => { const T = [["a"]]; describe.skip("inner", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin inside a helper the arm never calls",
+    `describe("g", () => { const T = [["a"]]; const check = () => { expect(asRows(T)).toEqual([]); }; it("pin", check); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin inside a callback of its own",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { [1].forEach(() => { expect(asRows(T)).toEqual([]); }); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a generator handed a narrowed table",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T.filter(Boolean))("%s", () => {}); });`,
+  ],
+  [
+    "a pin holding a narrowed table",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T.slice(1))).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin holding another table",
+    `describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(U)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin holding a count rather than the rows",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toHaveLength(1); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin reading the table through anything but the renderer",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(labels(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin whose expected value is the table spread",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(T).toEqual([...T]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin whose expected value is rendered from the table",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([asRows(T)[0]]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a generator spelled with a skip in the chain",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.skip.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a generator spelled with a focus in the chain",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.only.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a generator reached under a computed name and narrowed",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it["each"](T.slice(0))("%s", () => {}); });`,
+  ],
+  [
+    "a generator driven by a tagged template",
+    `describe("g", () => { it.each\`ab\`("%s", () => {}); });`,
+  ],
+  [
+    "a for named without being applied to anything",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); const g = it.for; g(T)("%s", () => {}); });`,
+  ],
+  [
+    "an each named without being applied to anything",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); const g = it.each; g(T)("%s", () => {}); });`,
+  ],
+  [
+    "a table this file declares nowhere",
+    `describe("g", () => { it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a group outside every block",
+    `const T = [["a"]]; it.each(T)("%s", () => {});`,
+  ],
+  [
+    "a name shadowed by a block scoped const",
+    `describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { const T = U; it.each(T)("%s", () => {}); } });`,
+  ],
+  [
+    "a name shadowed by a callback parameter",
+    `describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); [U].forEach((T) => { it.each(T)("%s", () => {}); }); });`,
+  ],
+  [
+    "a name shadowed by a function parameter",
+    `describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); (function (T) { it.each(T)("%s", () => {}); })(U); });`,
+  ],
+  [
+    "a name shadowed by a destructured parameter",
+    `describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); (({ T }) => { it.each(T)("%s", () => {}); })({ T: U }); });`,
+  ],
+  [
+    "a name shadowed by a rest parameter",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); ((...T) => { it.each(T)("%s", () => {}); })(); });`,
+  ],
+  [
+    "a name shadowed by a parameter carrying a default",
+    `describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); ((T = U) => { it.each(T)("%s", () => {}); })(); });`,
+  ],
+  [
+    "a name shadowed by a for of binding",
+    `describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); for (const T of [U]) { it.each(T)("%s", () => {}); } });`,
+  ],
+  [
+    "a name shadowed by a for in binding",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); for (const T in { a: 1 }) { it.each(T)("%s", () => {}); } });`,
+  ],
+  [
+    "a name shadowed by a catch parameter",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); try { x(); } catch (T) { it.each(T)("%s", () => {}); } });`,
+  ],
+  [
+    "a name shadowed by a function declaration",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { function T() {} it.each(T)("%s", () => {}); } });`,
+  ],
+  [
+    "a name shadowed by a class declaration",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { class T {} it.each(T)("%s", () => {}); } });`,
+  ],
+  [
+    "a name shadowed by a var hoisted out of a nested block",
+    `describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); (() => { it.each(T)("%s", () => {}); if (x) { var T = U; } })(); });`,
+  ],
+  [
+    "a name shadowed by a constructor parameter property",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); class C { constructor(private T: number) { it.each(T)("%s", () => {}); } } });`,
+  ],
+  [
+    "a group outside the block whose pin shadows the import it names",
+    `import { T } from "x"; describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); }); it.each(T)("%s", () => {});`,
+  ],
+  [
+    "a name shadowed by an import equals declaration",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { import T = A.rows; it.each(T)("%s", () => {}); } });`,
+  ],
+  [
+    "a name shadowed by an ambient function declaration",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { declare function T(): void; it.each(T)("%s", () => {}); } });`,
+  ],
+  [
+    "a name shadowed by an enum declaration",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { enum T { A } it.each(T)("%s", () => {}); } });`,
+  ],
+  [
+    "a name shadowed by a namespace declaration",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { namespace T { } it.each(T)("%s", () => {}); } });`,
+  ],
+  [
+    "a declaration kind the reader cannot read, in a scope the name reaches",
+    `export as namespace W; const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a generator spelled for with nothing pinning its table",
+    `describe("g", () => { const T = [["a"]]; it.for(T)("%s", () => {}); });`,
+  ],
+  [
+    "a block generator spelled for with nothing pinning its table",
+    `describe("g", () => { const T = [["a"]]; describe.for(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin whose expected value is laundered through a name",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { const rendered = asRows(T); expect(asRows(T)).toEqual([...rendered]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin whose expected value is laundered through a call",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { const rendered = () => asRows(T); expect(asRows(T)).toEqual([...rendered()]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a name shadowed by a for statement binding",
+    `describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); for (let T = U; false; ) { it.each(T)("%s", () => {}); } });`,
+  ],
+  [
+    "a name shadowed inside a namespace body",
+    `const T = [["a"]]; const U = [["b"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); }); namespace N { const T = U; it.each(T)("%s", () => {}); }`,
+  ],
+  [
+    "a name shadowed by a case clause binding",
+    `describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); switch (x) { case 1: const T = U; it.each(T)("%s", () => {}); } });`,
+  ],
+  [
+    "a pin under a runner reached through a local name",
+    `describe("g", () => { const T = [["a"]]; const quietly = it.skip; quietly("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin handed to a helper that discards it",
+    `describe("g", () => { const T = [["a"]]; const ignore = (fn) => {}; ignore(() => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin inside a callback on a plain name",
+    `describe("g", () => { const T = [["a"]]; const run = (fn) => { fn(); }; it("pin", () => { run(() => { expect(asRows(T)).toEqual([]); }); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a generator under a computed key that is not a literal, table pinned",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); const k = "each"; it[k](T)("%s", () => {}); });`,
+  ],
+  [
+    "a name shadowed by an array destructured parameter",
+    `describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); (([T]) => { it.each(T)("%s", () => {}); })([U]); });`,
+  ],
+  [
+    "a pin under a local bound to a runner's name",
+    `describe("g", () => { const T = [["a"]]; const test = it.skip; test("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin under a local arrow carrying a runner's name",
+    `describe("g", () => { const T = [["a"]]; const test = (n, fn) => {}; test("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin under a runner imported from somewhere other than the runner",
+    `import { it } from "./not-the-runner"; describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a generator curried on a runner member that is no generator property",
+    `describe("g", () => { const T = [["a"]]; it.over(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin under a call this file declares nowhere and no runner names",
+    `describe("g", () => { const T = [["a"]]; elsewhere("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin under a callee that carries no name to match",
+    `describe("g", () => { const T = [["a"]]; (it as any)("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin under a namespace import of the runner's module",
+    `import * as it from "vitest"; describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin under a default import from the runner's module",
+    `import it from "vitest"; describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin under another export of the runner's module renamed to a runner",
+    `import { describe as it } from "vitest"; describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+];
+
+/**
+ * The sources this rule must not report.
+ *
+ * **Two of these are paired with a refusal above, and the derivation is
+ * named rather than implied**, so that neither row of a pair reads as
+ * decoration. The callback of another name is `a name shadowed by a
+ * callback parameter` with the parameter renamed. The generator spelled
+ * `for` over a pinned table is `a generator spelled for with nothing
+ * pinning its table` with the pin put back. The two sibling blocks are what
+ * a rule keyed on the name rather than on the declaration would refuse, and
+ * every shadowing row above is what such a rule would let through.
+ *
+ * The nested group is **not** the block scoped const refusal with the
+ * binding removed, which yields a bare block rather than a block the runner
+ * names; it is the shape the round before this one refused outright, kept
+ * because that refusal was wrong.
+ *
+ * The rest carry their own reason rather than a pair: the rows beside a
+ * table reached through the module body hold the exemptions the binding
+ * reader needs, one per kind, and each reds when its own exemption is
+ * taken away. The count is deliberately not written: it went stale in the
+ * round that added two of them.
+ */
+const ACCEPTED: [string, string][] = [
+  [
+    "a pin written above the generator it holds",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin written below the generator it holds",
+    `describe("g", () => { const T = [["a"]]; it.each(T)("%s", () => {}); it("pin", () => { expect(asRows(T)).toEqual([]); }); });`,
+  ],
+  [
+    "a pin written in the block body rather than in an arm",
+    `describe("g", () => { const T = [["a"]]; expect(asRows(T)).toEqual([]); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin written in a function expression arm",
+    `describe("g", () => { const T = [["a"]]; it("pin", function () { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a nested group driving the table its parent pins",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); describe("inner", () => { it.each(T)("%s", () => {}); }); });`,
+  ],
+  [
+    "a callback parameter of another name between the binding and the group",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); [1].forEach((row) => { it.each(T)("%s", () => {}); }); });`,
+  ],
+  [
+    "a population pinned as itself rather than through the renderer",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(T).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a generator spelled as a block",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); describe.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a generator reached under a computed name",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it["each"](T)("%s", () => {}); });`,
+  ],
+  [
+    "an arm holding a name of its own that no generator drives",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it("other", () => { const U = [1]; expect(U).toEqual([1]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a table declared outside the block that drives and pins it",
+    `const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "two sibling blocks whose tables carry one name",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); }); describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a generator spelled for over a pinned table",
+    `describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.for(T)("%s", () => {}); });`,
+  ],
+  [
+    "a type alias beside a table the group reaches through the module body",
+    `type Rows = string; const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "an interface beside a table the group reaches through the module body",
+    `interface Rows { a: number } const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "an enum beside a table the group reaches through the module body",
+    `enum Rows { T } const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "an import equals beside a table the group reaches through the module body",
+    `import Rows = A.b; const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a namespace beside a table the group reaches through the module body",
+    `namespace Rows { } const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+  [
+    "a pin under the runner this file imports",
+    `import { describe, expect, it } from "vitest"; describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+  ],
+];
+
+/**
+ * **What this refuses that is legitimate, because a sweep only ever plants
+ * defects and will never tell you.** Every one of these is loud, at the
+ * line somebody is writing, which is the direction to be wrong in: a
+ * generator handed a table written inline rather than declared, or handed
+ * any expression at all; a table driven from a tagged template, which has
+ * no name to resolve; a pin written with any matcher but an exact equality,
+ * or reading the table through any call but the renderer, or lifted into a
+ * helper two arms share; a pin reached through any property taken off the
+ * runner, `concurrent` and `skipIf` with `skip` and `only`; **a pin
+ * reached through any call that does not name one of the three runners**,
+ * which takes in a helper that runs it at once, a wrapper that defers it,
+ * an immediately invoked function, and a runner spelled `suite`; a pin
+ * written inside the body of a block generator, which is the shape the
+ * acceptances below invite by taking such a generator and is refused all
+ * the same, because that body is handed to a call whose own callee is a
+ * call, `describe.each(table)`, rather than a name at all; and a
+ * generator called on anything whose receiver is not a plain name. None
+ * of those is live in this file, derived rather than read, so the rule
+ * refuses nothing as it stands and reds at the first one, which is where
+ * somebody decides.
+ *
+ * **The pin inside a block generator's body is the one worth arguing
+ * about**, and it stays refused: accepting it means accepting a pin under
+ * every call made on a property, which is where a disarmed pin hides, and
+ * nothing has measured what that would let through. Write the pin beside
+ * the generator rather than inside it.
+ *
+ * **And one refusal reaches further than the group it names**: moving a
+ * group into a nested block changes its row in the population arm below,
+ * because that row carries the block it sits in. That is the membership
+ * contract this file already keeps, not an extra rule.
+ *
+ * **What the argument rests on, said rather than assumed, so that the next
+ * round attacks the right two things.** The node walk reaches every node,
+ * and the lists it reads the grammar off are complete: the scopes a name
+ * can be bound in, the shapes a binding position can hold, and the kinds
+ * that declare a name.
+ *
+ * **The walk takes two arms, because one of them cannot see half the
+ * narrowings.** The population arm reds on a truncation keyed where a
+ * live group sits and is green on one keyed on a kind no group sits
+ * under, measured. `reaches every node of its own source` holds the walk
+ * against a count taken off the serialised tree, which degrades
+ * differently, and reds on both.
+ *
+ * **How each of the three lists fails is different, and `SCOPES` is the
+ * one to read for its own.** A pattern shape outside `boundBy` and a
+ * declaration kind outside the reader in `scopeBindings` are each
+ * recorded, so those two lists are backed by a refusal rather than by
+ * being right. What a dropped `SCOPES` member costs is not one answer:
+ * its own docstring measures it member by member, and the three it holds
+ * that declare a name are backed by that same record while most of the
+ * rest are not.
+ *
+ * **What the declaration record cannot see is a kind binding a name
+ * through neither a pattern nor an identifier `id`**, and the live
+ * grammar has several: the three import specifiers bind through `local`,
+ * a type parameter through `name`, and a labeled statement through
+ * `label`. The specifiers are read by name in the reader rather than
+ * reached by the record; a type parameter binds in the type space and a
+ * label in its own, where no table lives. So the record's key is an
+ * identifier `id` and the sentence stops there. **No census settles
+ * this**: a count says what a tree holds, never what the grammar permits.
+ */
+describe("a table driven rule group is held by a pin on one declaration", () => {
+  it("holds every group this file drives", () => {
+    expect(groupsWithNoLivePin(ownSource(), langOf(SELF))).toEqual([]);
+  });
+
+  /**
+   * The groups this file drives, rendered.
+   *
+   * **The anti vacuity arm, and the one that refuses a narrowing.** A walk
+   * that finds nothing reports nothing, so the arm above is green on a rule
+   * that has stopped reading anything at all. This one holds the population
+   * itself, so a filter written anywhere in the walk, by block, by runner
+   * name or by position, moves a cell or loses a row.
+   */
+  it("holds exactly the groups this file drives, cell by cell", () => {
+    const { groups, unread } = tableGroupsIn(ownSource(), langOf(SELF));
+    expect(unread).toEqual([]);
+    const rows = groups
+      .map((one): Cell[] => [one.label, one.spelling, one.table, one.pin])
+      .sort((first, second) => asRow(first).localeCompare(asRow(second)));
+    expect(asRows(rows)).toEqual([
+      `a decoder a runtime may not carry is never built at module scope | it.each | SHAPES | asRows`,
+      `a directory reproducing the tree is read as a copy of it | it.each | SHAPES | asRows`,
+      `a directory reproducing the tree is read as a copy of it | it.each | UNVERSIONED_AT_THE_ROOT | the value itself`,
+      `a member's book file cannot leave the browser | it.each | SHAPES | asRows`,
+      `a table driven rule group is held by a pin on one declaration | it.each | ACCEPTED | asRows`,
+      `a table driven rule group is held by a pin on one declaration | it.each | REFUSED | asRows`,
+    ]);
+  });
+
+  /**
+   * The walk's reach, held against a second reading of the same tree.
+   *
+   * **The population arm cannot see every narrowing, which is why this
+   * exists.** It reds on a truncation keyed where a live group sits and
+   * stays green on one keyed on a kind no group sits under: returning
+   * early for a conditional statement hides thousands of nodes with every
+   * other arm green. The second reading counts the serialised tree, which
+   * degrades differently and which the source cannot forge, because a
+   * quote inside a string literal is escaped and this counts the
+   * unescaped spelling.
+   */
+  it("reaches every node of its own source", () => {
+    const { nodes } = tableGroupsIn(ownSource(), langOf(SELF));
+    expect(nodes.walked).toBe(nodes.serialised);
+    // Not a floor: the population arm below cannot hold six rows out of a
+    // tree of nothing, so this says only that the two readings agree about
+    // something rather than about an empty pair.
+    expect(nodes.serialised).not.toBe(0);
+  });
+
+  /**
+   * Which refusals are refused for a binding shape the reader cannot read.
+   *
+   * **Five pattern rows were passing for a reason other than the one they
+   * name.** Deleting a branch of `boundBy` makes the record fire instead,
+   * which still refuses, and a row asserting a non empty result cannot
+   * tell a shadow found from a shape refused. Naming the rows that are
+   * refused that way moves a name into this list when a branch goes, where
+   * nothing moved before.
+   */
+  it("is refused for an unreadable binding shape on one row only", () => {
+    const unreadable = REFUSED.filter(([, source]) =>
+      groupsWithNoLivePin(source).some((one) =>
+        one.includes("a binding shape this rule cannot read"),
+      ),
+    ).map(([name]) => name);
+    expect(unreadable).toEqual([
+      "a declaration kind the reader cannot read, in a scope the name reaches",
+    ]);
+  });
+
+  /**
+   * Why a runner name nothing declares is read as the runner.
+   *
+   * **The reason is the config, not the fixtures.** This file imports four
+   * names and `test` is not among them, so an arm written with `test`
+   * takes that branch here and not only in a fixture. What makes the
+   * branch right is that the suite runs with globals on, so an undeclared
+   * runner name is the runner at run time. With globals off it throws
+   * rather than passing quietly, so the failure direction is loud either
+   * way; this pins the setting so the dependency reds instead of being
+   * stated, which is what the round before this one got wrong.
+   */
+  it("runs a pin under a runner that is global when nothing declares it", () => {
+    expect(viteConfig).toMatch(/^\s*globals: true,$/m);
+  });
+
+  it.each(REFUSED)("refuses %s", (_name, source) => {
+    expect(groupsWithNoLivePin(source)).not.toEqual([]);
+  });
+
+  /**
+   * The rows above, rendered. `asRow` holds why they are written out, and
+   * `asRows` refuses a column this rendering cannot tell apart.
+   */
+  it("holds exactly the refusals listed here, cell by cell", () => {
+    expect(asRows(REFUSED)).toEqual([
+      `a group with nothing pinning its table | describe("g", () => { const T = [["a"]]; it.each(T)("%s", () => {}); });`,
+      `a pin marked skipped | describe("g", () => { const T = [["a"]]; it.skip("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin marked todo | describe("g", () => { const T = [["a"]]; it.todo("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin focused, which skips every arm beside it | describe("g", () => { const T = [["a"]]; it.only("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin inside a skipped block | describe("g", () => { const T = [["a"]]; describe.skip("inner", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); }); it.each(T)("%s", () => {}); });`,
+      `a pin inside a helper the arm never calls | describe("g", () => { const T = [["a"]]; const check = () => { expect(asRows(T)).toEqual([]); }; it("pin", check); it.each(T)("%s", () => {}); });`,
+      `a pin inside a callback of its own | describe("g", () => { const T = [["a"]]; it("pin", () => { [1].forEach(() => { expect(asRows(T)).toEqual([]); }); }); it.each(T)("%s", () => {}); });`,
+      `a generator handed a narrowed table | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T.filter(Boolean))("%s", () => {}); });`,
+      `a pin holding a narrowed table | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T.slice(1))).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin holding another table | describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(U)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin holding a count rather than the rows | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toHaveLength(1); }); it.each(T)("%s", () => {}); });`,
+      `a pin reading the table through anything but the renderer | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(labels(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin whose expected value is the table spread | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(T).toEqual([...T]); }); it.each(T)("%s", () => {}); });`,
+      `a pin whose expected value is rendered from the table | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([asRows(T)[0]]); }); it.each(T)("%s", () => {}); });`,
+      `a generator spelled with a skip in the chain | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.skip.each(T)("%s", () => {}); });`,
+      `a generator spelled with a focus in the chain | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.only.each(T)("%s", () => {}); });`,
+      `a generator reached under a computed name and narrowed | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it["each"](T.slice(0))("%s", () => {}); });`,
+      `a generator driven by a tagged template | describe("g", () => { it.each\`ab\`("%s", () => {}); });`,
+      `a for named without being applied to anything | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); const g = it.for; g(T)("%s", () => {}); });`,
+      `an each named without being applied to anything | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); const g = it.each; g(T)("%s", () => {}); });`,
+      `a table this file declares nowhere | describe("g", () => { it.each(T)("%s", () => {}); });`,
+      `a group outside every block | const T = [["a"]]; it.each(T)("%s", () => {});`,
+      `a name shadowed by a block scoped const | describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { const T = U; it.each(T)("%s", () => {}); } });`,
+      `a name shadowed by a callback parameter | describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); [U].forEach((T) => { it.each(T)("%s", () => {}); }); });`,
+      `a name shadowed by a function parameter | describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); (function (T) { it.each(T)("%s", () => {}); })(U); });`,
+      `a name shadowed by a destructured parameter | describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); (({ T }) => { it.each(T)("%s", () => {}); })({ T: U }); });`,
+      `a name shadowed by a rest parameter | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); ((...T) => { it.each(T)("%s", () => {}); })(); });`,
+      `a name shadowed by a parameter carrying a default | describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); ((T = U) => { it.each(T)("%s", () => {}); })(); });`,
+      `a name shadowed by a for of binding | describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); for (const T of [U]) { it.each(T)("%s", () => {}); } });`,
+      `a name shadowed by a for in binding | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); for (const T in { a: 1 }) { it.each(T)("%s", () => {}); } });`,
+      `a name shadowed by a catch parameter | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); try { x(); } catch (T) { it.each(T)("%s", () => {}); } });`,
+      `a name shadowed by a function declaration | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { function T() {} it.each(T)("%s", () => {}); } });`,
+      `a name shadowed by a class declaration | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { class T {} it.each(T)("%s", () => {}); } });`,
+      `a name shadowed by a var hoisted out of a nested block | describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); (() => { it.each(T)("%s", () => {}); if (x) { var T = U; } })(); });`,
+      `a name shadowed by a constructor parameter property | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); class C { constructor(private T: number) { it.each(T)("%s", () => {}); } } });`,
+      `a group outside the block whose pin shadows the import it names | import { T } from "x"; describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); }); it.each(T)("%s", () => {});`,
+      `a name shadowed by an import equals declaration | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { import T = A.rows; it.each(T)("%s", () => {}); } });`,
+      `a name shadowed by an ambient function declaration | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { declare function T(): void; it.each(T)("%s", () => {}); } });`,
+      `a name shadowed by an enum declaration | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { enum T { A } it.each(T)("%s", () => {}); } });`,
+      `a name shadowed by a namespace declaration | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); { namespace T { } it.each(T)("%s", () => {}); } });`,
+      `a declaration kind the reader cannot read, in a scope the name reaches | export as namespace W; const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a generator spelled for with nothing pinning its table | describe("g", () => { const T = [["a"]]; it.for(T)("%s", () => {}); });`,
+      `a block generator spelled for with nothing pinning its table | describe("g", () => { const T = [["a"]]; describe.for(T)("%s", () => {}); });`,
+      `a pin whose expected value is laundered through a name | describe("g", () => { const T = [["a"]]; it("pin", () => { const rendered = asRows(T); expect(asRows(T)).toEqual([...rendered]); }); it.each(T)("%s", () => {}); });`,
+      `a pin whose expected value is laundered through a call | describe("g", () => { const T = [["a"]]; it("pin", () => { const rendered = () => asRows(T); expect(asRows(T)).toEqual([...rendered()]); }); it.each(T)("%s", () => {}); });`,
+      `a name shadowed by a for statement binding | describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); for (let T = U; false; ) { it.each(T)("%s", () => {}); } });`,
+      `a name shadowed inside a namespace body | const T = [["a"]]; const U = [["b"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); }); namespace N { const T = U; it.each(T)("%s", () => {}); }`,
+      `a name shadowed by a case clause binding | describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); switch (x) { case 1: const T = U; it.each(T)("%s", () => {}); } });`,
+      `a pin under a runner reached through a local name | describe("g", () => { const T = [["a"]]; const quietly = it.skip; quietly("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin handed to a helper that discards it | describe("g", () => { const T = [["a"]]; const ignore = (fn) => {}; ignore(() => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin inside a callback on a plain name | describe("g", () => { const T = [["a"]]; const run = (fn) => { fn(); }; it("pin", () => { run(() => { expect(asRows(T)).toEqual([]); }); }); it.each(T)("%s", () => {}); });`,
+      `a generator under a computed key that is not a literal, table pinned | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); const k = "each"; it[k](T)("%s", () => {}); });`,
+      `a name shadowed by an array destructured parameter | describe("g", () => { const T = [["a"]]; const U = [["b"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); (([T]) => { it.each(T)("%s", () => {}); })([U]); });`,
+      `a pin under a local bound to a runner's name | describe("g", () => { const T = [["a"]]; const test = it.skip; test("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin under a local arrow carrying a runner's name | describe("g", () => { const T = [["a"]]; const test = (n, fn) => {}; test("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin under a runner imported from somewhere other than the runner | import { it } from "./not-the-runner"; describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a generator curried on a runner member that is no generator property | describe("g", () => { const T = [["a"]]; it.over(T)("%s", () => {}); });`,
+      `a pin under a call this file declares nowhere and no runner names | describe("g", () => { const T = [["a"]]; elsewhere("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin under a callee that carries no name to match | describe("g", () => { const T = [["a"]]; (it as any)("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin under a namespace import of the runner's module | import * as it from "vitest"; describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin under a default import from the runner's module | import it from "vitest"; describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin under another export of the runner's module renamed to a runner | import { describe as it } from "vitest"; describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+    ]);
+  });
+
+  it.each(ACCEPTED)("accepts %s", (_name, source) => {
+    expect(groupsWithNoLivePin(source)).toEqual([]);
+  });
+
+  /**
+   * The rows above, rendered. `asRow` holds why they are written out, and
+   * `asRows` refuses a column this rendering cannot tell apart.
+   */
+  it("holds exactly the acceptances listed here, cell by cell", () => {
+    expect(asRows(ACCEPTED)).toEqual([
+      `a pin written above the generator it holds | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin written below the generator it holds | describe("g", () => { const T = [["a"]]; it.each(T)("%s", () => {}); it("pin", () => { expect(asRows(T)).toEqual([]); }); });`,
+      `a pin written in the block body rather than in an arm | describe("g", () => { const T = [["a"]]; expect(asRows(T)).toEqual([]); it.each(T)("%s", () => {}); });`,
+      `a pin written in a function expression arm | describe("g", () => { const T = [["a"]]; it("pin", function () { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a nested group driving the table its parent pins | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); describe("inner", () => { it.each(T)("%s", () => {}); }); });`,
+      `a callback parameter of another name between the binding and the group | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); [1].forEach((row) => { it.each(T)("%s", () => {}); }); });`,
+      `a population pinned as itself rather than through the renderer | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(T).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a generator spelled as a block | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); describe.each(T)("%s", () => {}); });`,
+      `a generator reached under a computed name | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it["each"](T)("%s", () => {}); });`,
+      `an arm holding a name of its own that no generator drives | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it("other", () => { const U = [1]; expect(U).toEqual([1]); }); it.each(T)("%s", () => {}); });`,
+      `a table declared outside the block that drives and pins it | const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `two sibling blocks whose tables carry one name | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); }); describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a generator spelled for over a pinned table | describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.for(T)("%s", () => {}); });`,
+      `a type alias beside a table the group reaches through the module body | type Rows = string; const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `an interface beside a table the group reaches through the module body | interface Rows { a: number } const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `an enum beside a table the group reaches through the module body | enum Rows { T } const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `an import equals beside a table the group reaches through the module body | import Rows = A.b; const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a namespace beside a table the group reaches through the module body | namespace Rows { } const T = [["a"]]; describe("g", () => { it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+      `a pin under the runner this file imports | import { describe, expect, it } from "vitest"; describe("g", () => { const T = [["a"]]; it("pin", () => { expect(asRows(T)).toEqual([]); }); it.each(T)("%s", () => {}); });`,
+    ]);
+  });
+
+  it("is blind to a pin an arm holds but never reaches", () => {
+    // **The residue with a witness, because a blind spot stated in prose is
+    // the row nobody rechecks.** This asks where a pin is written, not
+    // whether the statement runs, so a pin behind a condition that is never
+    // true reads as live. Closing it is reachability over a body, which is
+    // the silent kind of wrong this rule is built to avoid: it would answer
+    // "unreachable" by failing to see a path, and failing to see something
+    // is what finding nothing looks like.
+    const table = `const T = [["a"]];`;
+    const generator = `it.each(T)("%s", () => {});`;
+    const behind = `it("pin", () => { if (never) { expect(asRows(T)).toEqual([]); } });`;
+    expect(
+      groupsWithNoLivePin(
+        `describe("g", () => { ${table} ${behind} ${generator} });`,
+      ),
+    ).toEqual([]);
+
+    // It reds the moment the pin is written where the arm cannot reach it at
+    // all, which is what makes this a witness rather than a restatement.
+    const lifted = `const check = () => { expect(asRows(T)).toEqual([]); }; it("pin", check);`;
+    expect(
+      groupsWithNoLivePin(
+        `describe("g", () => { ${table} ${lifted} ${generator} });`,
+      ),
+    ).not.toEqual([]);
+  });
+
+  it("is blind to a rendering reaching the expected value by any other route", () => {
+    // **The second blind spot, with its five witnesses**, because the walk
+    // into an initialiser is narrower than it reads: it follows a name only
+    // where the identifier is a declarator's own `id` and only into that
+    // declarator's initialiser. Each of these is the refused row one token
+    // out, and each is accepted. Closing any of them reds here, which is
+    // what stops the paragraph at `namesAgain` going stale against the code.
+    const table = `const T = [["a"]];`;
+    const generator = `it.each(T)("%s", () => {});`;
+    const past = [
+      `function rendered() { return asRows(T); } expect(asRows(T)).toEqual([...rendered()]);`,
+      `class C { static rows = asRows(T); } expect(asRows(T)).toEqual([...C.rows]);`,
+      `const [rendered] = [asRows(T)]; expect(asRows(T)).toEqual([...rendered]);`,
+      `const { rendered } = { rendered: asRows(T) }; expect(asRows(T)).toEqual([...rendered]);`,
+      `let rendered; rendered = asRows(T); expect(asRows(T)).toEqual([...rendered]);`,
+    ];
+    for (const body of past)
+      expect(
+        groupsWithNoLivePin(
+          `describe("g", () => { ${table} it("pin", () => { ${body} }); ${generator} });`,
+        ),
+      ).toEqual([]);
+
+    // The one route it does follow, so this reads as a boundary rather than
+    // as the walk doing nothing.
+    const caught = `const rendered = asRows(T); expect(asRows(T)).toEqual([...rendered]);`;
+    expect(
+      groupsWithNoLivePin(
+        `describe("g", () => { ${table} it("pin", () => { ${caught} }); ${generator} });`,
+      ),
+    ).not.toEqual([]);
   });
 });
 
@@ -1880,8 +3393,10 @@ describe("no fixture or string carries an address outside reserved space", () =>
   // a sibling file saw `./houseRules.test.ts` among the keys and run from here
   // it was absent. The corpus comes from `tests/testModules.ts` now, which
   // holds this file, so the exclusion is live and `testEntriesBesides` reds if
-  // it ever names a file the tree does not hold.
-  const SELF = "./houseRules.test.ts";
+  // it ever names a file the tree does not hold. **The key itself is
+  // `SELF`, written once at module scope**, because the group rule above
+  // reads this file by the same key and two spellings of one path are two
+  // chances to drift.
 
   function everything(): [string, string][] {
     return [
