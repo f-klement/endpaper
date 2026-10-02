@@ -5025,6 +5025,17 @@ describe("a date reaches a reader through one module", () => {
    * by `TranslateParams` being `Record<string, string | number>` rather than by
    * anything here. Widening that type reopens it silently.
    *
+   * **A dated field rendered with no formatting call at all writes no name**, so
+   * it is out on a different axis from the four above: each of those is a place
+   * this rule cannot look, and this one is a defect with nothing to look for.
+   * Widening the watched list can never reach it. The rule below this block is
+   * keyed on the field rather than on the call and reports one shape of it, a
+   * field named in a JSX child with no door call handed that field. **It closes
+   * no part of the class, including inside that position**: a field bound to a
+   * local name before the child reads it sits in a JSX child and is reported by
+   * neither rule, which that rule's own arm asserts. Whoever reads this row
+   * reads the table there rather than taking the position as a boundary.
+   *
    * ## The false refusals this arm accepts, so neither is read as a bug
    *
    * **`Intl.DateTimeFormat` used to read rather than to render** is reported:
@@ -5389,6 +5400,1184 @@ describe("a date reaches a reader through one module", () => {
         else expect(found).toContain(name);
       }
     }
+  });
+});
+
+/**
+ * The committed schema, which is where the dated field names come from.
+ *
+ * Read the way `lib/bookBounds.test.ts` and `lib/bookRequest.test.ts` read it,
+ * so there is one idiom for "ask the API what it declares" rather than three.
+ */
+const SCHEMA = import.meta.glob("../openapi.json", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
+/** As much of a JSON Schema node as the walk below has to understand. */
+interface SchemaNode {
+  type?: unknown;
+  format?: unknown;
+  properties?: Record<string, SchemaNode>;
+  anyOf?: SchemaNode[];
+  items?: SchemaNode;
+  [key: string]: unknown;
+}
+
+let schema: SchemaNode | undefined;
+
+/**
+ * Parsed once, because the rule below asks for it per module.
+ *
+ * Half a megabyte of JSON parsed three hundred times is minutes, and this file
+ * already states what a test environment costs a run.
+ */
+function schemaDocument(): SchemaNode {
+  const raw = SCHEMA["../openapi.json"] ?? "";
+  // A glob that matched nothing would make every field name below disappear
+  // and the rule pass over an empty subject.
+  expect(raw.length).toBeGreaterThan(1000);
+  schema ??= JSON.parse(raw) as SchemaNode;
+  return schema;
+}
+
+/**
+ * The members of one property's schema that are not the null branch.
+ *
+ * A nullable field is `anyOf: [{the real thing}, {"type": "null"}]`, which is
+ * the same flattening `lib/bookBounds.test.ts` does for a bound. Written here
+ * rather than imported because that one keeps only the four keys a bound uses
+ * and drops `format`, which is the whole subject of this rule.
+ */
+function branchesOf(property: SchemaNode): SchemaNode[] {
+  const parts = [property, ...(property.anyOf ?? [])];
+  const items = parts
+    .map((part) => part.items)
+    .filter((part) => part !== undefined);
+  return [...parts, ...items].filter((part) => part.type !== "null");
+}
+
+/**
+ * Every property name the API declares as a date or a timestamp.
+ *
+ * **Derived from the committed schema, never listed.** A written list of dated
+ * fields is the defect this repository has paid for repeatedly: it is right on
+ * the day it is written and silently short on the day a migration adds a
+ * column. `format` is the thing to key on rather than a name suffix, because
+ * `failing_since` and `missing_since` carry no `_at` and `root_confirmed`
+ * carries no date.
+ *
+ * **The schema is the backend's own output and the suite holds it byte
+ * identical**, so this cannot drift from what the API sends without a red in
+ * the other suite first.
+ */
+let dated: string[] | undefined;
+
+function datedFields(): string[] {
+  if (dated !== undefined) return dated;
+  const names = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node as unknown[]) walk(item);
+      return;
+    }
+    if (typeof node !== "object" || node === null) return;
+    const record = node as SchemaNode;
+    for (const [name, property] of Object.entries(record.properties ?? {}))
+      if (
+        branchesOf(property).some(
+          (part) => part.format === "date" || part.format === "date-time",
+        )
+      )
+        names.add(name);
+    for (const value of Object.values(record)) walk(value);
+  };
+  walk(schemaDocument());
+  dated = [...names].sort();
+  return dated;
+}
+
+/** The non null types those fields are declared with, as a set. */
+function datedFieldTypes(): string[] {
+  const types = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node as unknown[]) walk(item);
+      return;
+    }
+    if (typeof node !== "object" || node === null) return;
+    const record = node as SchemaNode;
+    for (const property of Object.values(record.properties ?? {}))
+      for (const part of branchesOf(property))
+        if (part.format === "date" || part.format === "date-time")
+          types.add(
+            typeof part.type === "string"
+              ? part.type
+              : `${JSON.stringify(part.type)}`,
+          );
+    for (const value of Object.values(record)) walk(value);
+  };
+  walk(schemaDocument());
+  return [...types].sort();
+}
+
+/**
+ * The expression kinds that hand their own value to an expression inside them.
+ *
+ * **Read by `resultsOf` rather than stated beside it.** Written as a list and
+ * dispatched on a `switch`, the list is prose: a kind added to the switch and
+ * not to the list, or the reverse, changes the rule while every arm here stays
+ * green. The dispatch is this record, so there is one home and no second
+ * spelling to drift against.
+ *
+ * **The closed set this is drawn from is the grammar**, which is the only
+ * reason the rule below can claim to close anything: these are the ESTree
+ * expression kinds whose result is the result of a sub expression. The question
+ * is not "what else could somebody write", which does not terminate.
+ *
+ * **A kind missing from here is silent, not loud, and the first version of this
+ * comment had that backwards.** Reading a node whole pools the names of every
+ * branch into one set, so a missing kind turns a split into a pooling; where
+ * the same field is also handed to the door elsewhere in that node, the pooling
+ * clears it. The fix for the direction is not in this list, it is that nothing
+ * is cleared by sharing a node with a door call: a field is cleared only where
+ * it is itself an argument of one. What this list still owes is the arm below
+ * that refuses a kind classified in neither half.
+ *
+ * **`&&` forwards only its right side, and that rests on the schema rather
+ * than on taste.** It yields its left side when that side is falsy, and every
+ * dated field is declared `string` or null, so a falsy one is `""`, `null` or
+ * `undefined` and React renders none of the three. The arm below asserts that
+ * type, and it asserts one spelling of it: the type on the branch that carries
+ * the date format. A field that kept a dated string branch and gained a second
+ * branch typed something else would pass that arm and break this row, because
+ * the second branch carries no format for the walk to find it by.
+ *
+ * **Not censused against the tree, where its other half is.** A forwarding row
+ * earns its place by being right when the kind arrives, not by occurring today:
+ * the comma operator occurs nowhere under `src` and is here because it parses
+ * inside a conditional branch and would otherwise pool. That is the same ground
+ * `RENDERS_A_DATE_WITHOUT_A_LOCALE` sits on above, two lists with different
+ * grounds rather than one list with an exception.
+ */
+const FORWARDS_ITS_VALUE: Record<
+  string,
+  ((node: Node) => unknown[]) | undefined
+> = {
+  ChainExpression: (node) => [node.expression],
+  ParenthesizedExpression: (node) => [node.expression],
+  TSAsExpression: (node) => [node.expression],
+  TSNonNullExpression: (node) => [node.expression],
+  TSSatisfiesExpression: (node) => [node.expression],
+  ConditionalExpression: (node) => [node.consequent, node.alternate],
+  LogicalExpression: (node) =>
+    text(node.operator) === "&&" ? [node.right] : [node.left, node.right],
+  SequenceExpression: (node) =>
+    (Array.isArray(node.expressions)
+      ? (node.expressions as unknown[])
+      : []
+    ).slice(-1),
+};
+
+/**
+ * The kinds a result position hands this rule that are read whole.
+ *
+ * **Censused against the tree in both directions**, which is the half the
+ * forwarding record above cannot have: a kind the corpus produces and nobody
+ * classified is a kind whose branches are being pooled with nothing said, and a
+ * kind here the corpus no longer produces is a row that has outlived its
+ * reason. That is the discipline `oxlintRatchet.test.ts` applies to its own
+ * suppressions and `backend/book_columns.py` to its columns.
+ *
+ * **It is brittle on purpose, and the brittle rows are not the ones a reader
+ * guesses.** The row nearest to emptying is the render prop, and the template
+ * is next. A comment written as a child reads like the fragile one and is not:
+ * it sits behind the element and the call, third from the safe end. Emptying a
+ * row reds the arm by name, which is a line of diff for whoever did it and the
+ * price of the other direction being watched. No counts are written beside the
+ * rows: the census arm recomputes them every run, and a figure here would be
+ * the one thing in this block nothing recounts.
+ *
+ * **This is the top of a child, which is narrower than where the reader
+ * applies the record.** Those were the same set until the reader began
+ * forwarding at depth; it now stands on kinds this census never sees, arrays,
+ * binaries, objects and spreads among them, and classifies none of them. The
+ * arm below says so rather than claiming a partition over the reader's whole
+ * population.
+ */
+const READ_WHOLE: string[] = [
+  // The three ways a value arrives already computed.
+  "CallExpression",
+  "Identifier",
+  "MemberExpression",
+  // A literal, and a template, which is read whole because its substitutions
+  // are all rendered: there is no discarded position in one.
+  "Literal",
+  "TemplateLiteral",
+  // An element renders itself, and its own children are visited separately, so
+  // the reader stops at it and this row contributes no name.
+  "JSXElement",
+  "JSXFragment",
+  // `{/* a comment */}`, which holds no expression at all.
+  "JSXEmptyExpression",
+  // A render prop handed down as a child. Its body is read whole like any
+  // other: every live one happens to be an element, which is a fact about this
+  // tree today and not the reason the row is safe.
+  "ArrowFunctionExpression",
+];
+
+/** Every expression a result position can evaluate to, with nothing between. */
+function resultsOf(node: Node): Node[] {
+  const forward = FORWARDS_ITS_VALUE[node.type];
+  if (forward === undefined) return [node];
+  return forward(node).flatMap((value) =>
+    isNode(value) ? resultsOf(value) : [],
+  );
+}
+
+/**
+ * The kinds the corpus actually puts in a result position.
+ *
+ * **Taken over `src` alone and never over a fixture**, because a probe written
+ * into the population it measures is counted by it: the synthetic sources in
+ * the arms below would otherwise add kinds to this census and classify
+ * themselves.
+ */
+function terminalKindsUnderSrc(): string[] {
+  const kinds = new Set<string>();
+  for (const [path, source] of entries())
+    for (const value of renderedExpressionsIn(path, source))
+      for (const result of resultsOf(value)) kinds.add(result.type);
+  return [...kinds].sort();
+}
+
+/**
+ * Does this kind carry a type rather than a value?
+ *
+ * **One rule derived from the forwarding record, where a list of key names
+ * stood before.** That list had four entries and one mutant between them, and
+ * three of the four were masked rather than inert: a parameter's annotation is
+ * already walked with collection off, and two of the others lead to nodes whose
+ * next key is one of those. Three rows read as arms and one was doing the work.
+ *
+ * **A `TS` prefix is the whole test, less the kinds that forward.** Those are
+ * expressions carrying a value through a type, so they are read; everything
+ * else `TS` prefixed is a type, and a type that happens to spell a door export
+ * or a field name is not a call and not a read. Descending into `expression`
+ * rather than stopping keeps `foo(x.due_at as string)` visible, which is what
+ * sank the first version of this: dropping every `TS` node unsaw it entirely.
+ *
+ * **The descent is insurance rather than a live path.** No `TS` prefixed kind
+ * that forwards nothing and carries a value somewhere other than `expression`
+ * is reachable from inside a child today, so the line costs a traversal and
+ * buys the direction being loud when one arrives.
+ */
+function carriesATypeOnly(node: Node): boolean {
+  return (
+    node.type.startsWith("TS") && FORWARDS_ITS_VALUE[node.type] === undefined
+  );
+}
+
+/**
+ * The identifiers written under one node, as names.
+ *
+ * **Identifiers and not literals, which is narrower than the reader beside
+ * it.** This one answers "does this function call the door", and a string
+ * equal to a door export's name is not a call to it. The reader below collects
+ * literals on purpose, because `book["due_at"]` is a read.
+ */
+function identifiersUnder(value: unknown): Set<string> {
+  const names = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node as unknown[]) walk(item);
+      return;
+    }
+    if (!isNode(node)) return;
+    if (node.type === "JSXElement" || node.type === "JSXFragment") return;
+    if (carriesATypeOnly(node)) {
+      walk(node.expression);
+      return;
+    }
+    if (node.type === "Identifier") {
+      const name = text(node.name);
+      if (name !== null) names.add(name);
+    }
+    for (const key of Object.keys(node)) walk(node[key]);
+  };
+  walk(value);
+  return names;
+}
+
+/**
+ * Every value a module writes into a JSX child position.
+ *
+ * **The position is read off the grammar and not off a list of places.** A
+ * `JSXElement` and a `JSXFragment` each hold a `children` array, and that array
+ * holds five kinds: text, a nested element, a nested fragment, an expression
+ * container and a spread child. The first three carry no expression to check,
+ * and the two nested kinds are reached by the walk on their own account. The
+ * last two each carry one `expression`, which is what this reads.
+ *
+ * **Whole containers, not split into results.** The reader below applies the
+ * forwarding record at every node it meets rather than only here, so splitting
+ * twice would be two applications of one rule. `resultsOf` is still what the
+ * census arm reads, which is the one thing that wants the terminals by
+ * themselves.
+ */
+function renderedExpressionsIn(path: string, source: string): Node[] {
+  const results: Node[] = [];
+  visitNodes(parseAst(source, { lang: langOf(path) }), (node) => {
+    if (node.type !== "JSXElement" && node.type !== "JSXFragment") return;
+    for (const child of Array.isArray(node.children)
+      ? (node.children as unknown[])
+      : []) {
+      if (!isNode(child) || !isNode(child.expression)) continue;
+      results.push(child.expression);
+    }
+  });
+  return results;
+}
+
+let doorNames: Set<string> | undefined;
+
+/**
+ * The door's exported names.
+ *
+ * **One export reads a date rather than writing one.** `endOfDayInstant` turns
+ * a picked day into an ISO instant, so a field handed to it is cleared here
+ * although rendering the answer would be the same defect. No child position
+ * under `src` hands it one, and it is accepted rather than excluded by name
+ * because the door is the unit this rule is written against: a list of door
+ * exports kept here would be the stale list the whole design avoids.
+ *
+ * **Taken through `exportedBy`, which the arm above this block already uses**,
+ * so a rename moves both at once and neither can be the stale one.
+ */
+function doorExports(): Set<string> {
+  doorNames ??= new Set(
+    exportedBy(THE_DATE_DOOR_MODULE, sourceText(THE_DATE_DOOR_MODULE)),
+  );
+  return doorNames;
+}
+
+/**
+ * Every name a module binds at its top level, under any form.
+ *
+ * **A declarator id goes through `identifiersIn` and not through `.name`.**
+ * A pattern has no `name`, so reading the property direct answers `undefined`
+ * for `const { numericDate } = helpers` and for the array form, and both were
+ * cleared. That reader is the file's one home for the names a binding target
+ * writes, and this is the fourth time the same shape has been paid for here.
+ *
+ * **An import binds too, and only one from somewhere other than the door.**
+ * `import { numericDate } from "./elsewhere"` has no `id` at all, so a door
+ * name imported from a module that is not the door was cleared. Both halves of
+ * that are silent, which is what makes them worth a reader rather than a
+ * sentence. The door's own import is deliberately not counted: subtracting it
+ * would take the trust away from every correct caller in the tree, which is
+ * the one way this fix could be worse than the miss it closes.
+ */
+function declaredAtTopLevel(path: string, source: string): Set<string> {
+  const names = new Set<string>();
+  const ast = parseAst(source, { lang: langOf(path) }) as unknown as {
+    body: unknown[];
+  };
+  const take = (node: unknown): void => {
+    if (!isNode(node)) return;
+    if (node.type === "ExportNamedDeclaration") {
+      take(node.declaration);
+      return;
+    }
+    if (node.type === "ImportDeclaration") {
+      const from = isNode(node.source) ? text(node.source.value) : null;
+      if (
+        from !== null &&
+        resolvedFrom(path, from) === flatten(THE_DATE_DOOR_MODULE.split("/"))
+      )
+        return;
+      for (const one of Array.isArray(node.specifiers) ? node.specifiers : [])
+        if (isNode(one) && isNode(one.local))
+          for (const name of identifiersIn(one.local)) names.add(name);
+      return;
+    }
+    if (node.type === "VariableDeclaration") {
+      for (const one of Array.isArray(node.declarations)
+        ? node.declarations
+        : [])
+        if (isNode(one) && isNode(one.id))
+          for (const name of identifiersIn(one.id)) names.add(name);
+      return;
+    }
+    const id = node.id;
+    const name = isNode(id) ? text(id.name) : null;
+    if (name !== null) names.add(name);
+  };
+  for (const node of ast.body) take(node);
+  return names;
+}
+
+/**
+ * The names a call to which means "the door formatted this", in one module.
+ *
+ * **The door's own exports, less what the module declares for itself, plus one
+ * hop.** A module that writes its own `const numericDate = (x) => x` and never
+ * imports the door used to clear every field it handed that function. The
+ * subtraction closes it, and it costs nothing live: the door is the only module
+ * under `src` declaring any of these names.
+ *
+ * **The subtraction and not an import seeded set, which is a trade and not an
+ * oversight.** Reading the trust set off the module's own import of the door
+ * would additionally clear an alias, `import { numericDate as nd }`. Here `nd`
+ * is reported instead, which is a false refusal, loud, at the line somebody
+ * writes it, and there are none. What that buys is that this needs no import
+ * resolution and has no shape of import it can throw on.
+ *
+ * **The alias runs both ways and only one way is loud, so both are written.**
+ * An alias **of** the door loses the trust and is reported. An alias **onto** a
+ * door name from elsewhere, `import { formatIt as numericDate }`, would have
+ * taken the trust and cleared silently, which is the dangerous half; the
+ * subtraction below reads an import's local name and closes it. **Neither reading
+ * closes a nested shadow**: a binding inside one function, in a module that
+ * does import the door, keeps the trust either way, and only a scope walk
+ * closes that. A scope walk is wrong by answering yes, which is silent.
+ *
+ * **The hop is one deep.** `SenderHealthLine` binds
+ * `const when = (iso) => longMonthDate(iso, locale)` and renders `when(...)`,
+ * which is a correct call site the door's exports alone do not explain: without
+ * it, both of the lines that component draws are refused, and it is the only
+ * module under `src` that has one. A wrapper of a wrapper is refused, loudly,
+ * at the line where somebody writes the second one.
+ *
+ * **The hop is earned by naming a door export as an identifier**, never by a
+ * string or a template chunk equal to one: a name in quotes is not a call.
+ *
+ * **It takes `const` bound functions and not declarations**, and the stated
+ * reason used to be only half of what the exclusion does. Trusting a
+ * component's own name would explain any mention of it, and `LoanPanel`,
+ * `TrashRow` and `SenderHealthLine` are the components this would trust. But
+ * `lend` in `LoanPanel` is a declared helper and not a component, so the
+ * exclusion is about the declaration form rather than about components.
+ *
+ * **Those four are named rather than counted**, which is not a refusal to
+ * measure: this function's own reader is what found them. Three instruments
+ * answered the question with three figures, differing on whether the door's own
+ * declarations count and on whether the walk reads a string equal to a door
+ * name, and two of them agree on exactly these four once both are fixed. A
+ * reader can check four names; nobody re-runs a census to check a total.
+ */
+function formattingNamesIn(path: string, source: string): Set<string> {
+  const declared = declaredAtTopLevel(path, source);
+  const door = new Set(
+    [...doorExports()].filter((name) => !declared.has(name)),
+  );
+  const names = new Set(door);
+  visitNodes(parseAst(source, { lang: langOf(path) }), (node) => {
+    if (node.type !== "VariableDeclarator" || !isNode(node.init)) return;
+    if (
+      node.init.type !== "ArrowFunctionExpression" &&
+      node.init.type !== "FunctionExpression"
+    )
+      return;
+    const bound = isNode(node.id) ? text(node.id.name) : null;
+    if (bound === null) return;
+    if ([...identifiersUnder(node.init)].some((name) => door.has(name)))
+      names.add(bound);
+  });
+  return names;
+}
+
+/**
+ * The name a call writes for its callee, where that is a plain name.
+ *
+ * **A member call is not a door call, and the branch that read one is gone.**
+ * The door is reached by a named import, which `importedFrom` in this file
+ * already refuses to resolve through a namespace, so `date.numericDate(x)`
+ * cannot be a door call here. Reading the property name off a member call only
+ * ever widened what gets cleared: any `x.clockTime(book.due_at)` on an
+ * unrelated object cleared the field. No live door call is a member call.
+ */
+function calleeNameOf(node: Node): string | null {
+  const callee = node.callee;
+  if (!isNode(callee) || callee.type !== "Identifier") return null;
+  return text(callee.name);
+}
+
+/**
+ * Every dated field a value reads, less the ones it hands to a door call.
+ *
+ * **The discard rule applies at every node and not only at the top of the
+ * child, which is the whole correction over the version before it.** Splitting
+ * a conditional into its branches at the result position and then reading the
+ * rest of the expression whole means that inside a terminal the branches are
+ * pooled again. A door call in a branch that never runs then cleared the branch
+ * that does: `{t(k, { x: ok ? numericDate(b.due_at, l) : b.due_at })}` was
+ * green. One walk, applying `resultsOf` wherever it stands, closes it.
+ *
+ * **So the clearing is per occurrence, and the reading that made per field
+ * necessary is gone.** Each read is judged where it sits: `ReadingPanel` writes
+ * `book.my_started_at && longMonthDate(book.my_started_at, locale)`, and the
+ * first mention is the discarded left of a logical rather than a mention
+ * cleared by its neighbour. A second raw mention of the same field elsewhere in
+ * that value is now reported, which per field could not do.
+ *
+ * **A door call hands over everything inside it**, so the walk stops there
+ * rather than subtracting a set afterwards. That is also why a string literal
+ * inside a door call no longer clears a field beside it: there is no set to
+ * pollute.
+ *
+ * **Both halves come from this one function**, with the door set emptied to ask
+ * what the value reads at all. Two readers for the two halves would be two
+ * chances to disagree about what a read is.
+ *
+ * **A parameter list is a binding and not a read**, so it is walked with
+ * collection off: `{rows.map(({ due_at }) => <Cell />)}` names the field and
+ * reads nothing, where its undestructured twin was already clean, and reporting
+ * one and not the other is a false refusal keyed on spelling. Parameters are
+ * the whole of that rule: a set of pattern kinds stood beside it and reddened
+ * nothing when deleted, because inside a child expression the only route to a
+ * pattern is a parameter list. The residual is that a default value in a
+ * parameter, `({ a = book.due_at }) => ...`, is a read and is not collected.
+ * The tree has none.
+ *
+ * **A property key is not a read either**, in either spelling. `{ due_at: v }`
+ * and `{ "due_at": v }` both name the field and read `v`, and a computed key is
+ * left alone because `{ [due_at]: v }` does read it.
+ */
+function fieldsReadIn(
+  value: unknown,
+  door: Set<string>,
+  fields: string[],
+): Set<string> {
+  const found = new Set<string>();
+  const walk = (node: unknown, binds: boolean): void => {
+    if (Array.isArray(node)) {
+      for (const item of node as unknown[]) walk(item, binds);
+      return;
+    }
+    if (!isNode(node)) return;
+    // A nested element renders itself, and the walk reaches it on its own
+    // account. Without this, a field handed to a child component as an
+    // attribute is reported as a rendering.
+    if (node.type === "JSXElement" || node.type === "JSXFragment") return;
+    if (carriesATypeOnly(node)) {
+      walk(node.expression, binds);
+      return;
+    }
+    if (node.type === "CallExpression") {
+      const callee = calleeNameOf(node);
+      if (callee !== null && door.has(callee)) return;
+    }
+    // The forwarding record, applied through the same function the census
+    // reads, so there is one application of it rather than two.
+    const results = resultsOf(node);
+    if (results.length !== 1 || results[0] !== node) {
+      for (const result of results) walk(result, binds);
+      return;
+    }
+    if (!binds) {
+      const written: (string | null)[] = [
+        node.type === "Identifier" ? text(node.name) : null,
+        node.type === "TemplateElement"
+          ? text((node.value as { cooked?: unknown })?.cooked)
+          : null,
+        text(node.value),
+      ];
+      for (const name of written)
+        if (name !== null && fields.includes(name)) found.add(name);
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "key" && node.type === "Property" && !node.computed) continue;
+      walk(node[key], key === "params" ? true : binds);
+    }
+  };
+  walk(value, false);
+  return found;
+}
+
+/** One row per dated field a module names in a value a reader is shown. */
+interface RenderedDate {
+  readonly field: string;
+  /** Whether every mention of it in that value went into a door call. */
+  readonly handed: boolean;
+}
+
+function datesRenderedIn(path: string, source: string): RenderedDate[] {
+  const fields = datedFields();
+  const door = formattingNamesIn(path, source);
+  const rows: RenderedDate[] = [];
+  for (const value of renderedExpressionsIn(path, source)) {
+    const unhanded = fieldsReadIn(value, door, fields);
+    for (const field of fieldsReadIn(value, new Set(), fields))
+      rows.push({ field, handed: !unhanded.has(field) });
+  }
+  return rows;
+}
+
+/** The ones handed to nothing, as sentences, which is the refusal. */
+function datesRenderedRawIn(path: string, source: string): string[] {
+  return [
+    ...new Set(
+      datesRenderedIn(path, source)
+        .filter((row) => !row.handed)
+        .map((row) => `${path} renders ${row.field} unformatted`),
+    ),
+  ].sort();
+}
+
+/**
+ * A dated field named in a JSX child is handed to a door call in that child.
+ *
+ * **Keyed on the field, where the block above is keyed on the call.** That
+ * block collects the names the platform publishes, so a field rendered with no
+ * formatting call writes no name and is invisible to it however wide the name
+ * list grows. This asks the schema which fields carry a date instead.
+ *
+ * **The name of this rule is the whole of what it holds, deliberately.** It
+ * does not say the field was rendered through the door, because it cannot see
+ * whether the value the door returned is the value that reached the page; it
+ * says every mention of the field in that child sits inside a door call. An
+ * earlier version said "goes through the door" while clearing on co-residence,
+ * which is a weaker property under a stronger name, and that is the defect this
+ * file charges for most often.
+ *
+ * ## What it does not reach, which is most of the class
+ *
+ * **It closes no part of the class outright, including inside its own
+ * position.** Both rows below that are about a value sit in a JSX child, so a
+ * reader must not take the position as the boundary of what is covered.
+ *
+ * **A field bound to a local name first is invisible, in a JSX child.**
+ * `SecurityRecord` writes `const resetOn = security.password_reset_at` and
+ * renders `numericDate(resetOn, locale)`: correct, and the child names no dated
+ * field, so this rule never looks at it. The same mechanism hides the wrong
+ * version. Witnessed by an arm below rather than left here as a sentence.
+ *
+ * **A read whose value is rendered as something other than a date is still
+ * reported, which is what clearing per occurrence costs.** Only a door call
+ * clears, so a field compared, handed to a helper that is not the door, or
+ * written into a dependency array inside a child is refused although no date
+ * reaches the page. The same read in a discarded position is clean, so this is
+ * narrower than "any read that is not a date". It is the mirror of the
+ * residual the per field reading had: that one cleared too much silently, this
+ * one refuses too much loudly, at the line somebody writes it. **None is live
+ * and one is an inline away**: `LoanRow` already draws a day count beside a
+ * formatted date, and the count is computed above the child rather than in it.
+ * Witnessed below, both halves.
+ *
+ * **A field carried out of the component in a structure is invisible**, and
+ * this is the shape the defect that prompted the rule actually took:
+ * `["copy.purchasedAt", book.purchased_at]` is an array element whose siblings
+ * are already rendered strings, mapped through `String(value)` later and drawn
+ * by another part of the file. The parent kind of that read is an
+ * `ArrayExpression`, which is also the parent kind of a React dependency array,
+ * so no rule over the parent kind separates the two. What would close the class
+ * is a type the door returns and a display slot requires, which is a change to
+ * the application rather than a guard over it.
+ *
+ * **An attribute is out of scope deliberately.** `title=`, `aria-label`, `alt`
+ * and `placeholder` each put a string in front of a reader, and the set of
+ * attributes that do is not fixed by anything: it is an enumeration of places,
+ * which is the shape that does not terminate. No mention of a dated field under
+ * `src` sits in one today, so the choice costs nothing on arrival.
+ *
+ * ## The false refusals, measured before the rule shipped and not after
+ *
+ * **Every live mention of a dated field under `src` was derived from the schema
+ * and driven through this pass before it was written into the file.** No figure
+ * is written here, because the arms below are the measurement and they move
+ * with the tree: one says nothing is refused, one says the set that is allowed
+ * is not empty, and a green on the first alone is also what a pass over no
+ * render positions produces. The live shapes are driven as fixtures further
+ * down, so a sharpening that starts refusing one reds by name.
+ */
+describe("a dated field named in a JSX child is handed to a door call", () => {
+  it("hands every dated field a child names to the door", () => {
+    // **What the walk consumed is recorded, not asserted about afterwards.**
+    // An earlier version said in a comment that there was no filter here, which
+    // is a property of the text rather than an arm: a three line filter at this
+    // site hid two live modules and left the run green. This collects the paths
+    // the walk actually reached, so a filter shortens the record and reds.
+    const walked: string[] = [];
+    const reported = entries().flatMap(([path, source]) => {
+      walked.push(path);
+      return datesRenderedRawIn(path, source);
+    });
+
+    expect(walked).toEqual(entries().map(([path]) => path));
+    expect(reported).toEqual([]);
+  });
+
+  it("finds dated fields in child positions that the door is handed", () => {
+    // **The anti vacuity line, and it is a difference rather than a floor.**
+    // The arm above is an empty list, which is also what a pass that finds no
+    // render position produces, what a schema walk returning no field produces,
+    // and what a corpus with no `.tsx` in it produces. This says the set the
+    // rule allows is not empty today.
+    //
+    // **A row is one field in one child, which is a smaller unit than it used
+    // to be.** The reader took each split terminal separately before and takes
+    // the whole container now, so two mentions of one field in one child that
+    // were two rows are one. Any count of these rows taken before that change
+    // is larger for that reason and not because a site was lost.
+    const handed = entries()
+      .flatMap(([path, source]) => datesRenderedIn(path, source))
+      .filter((row) => row.handed);
+
+    expect(handed.length).toBeGreaterThan(0);
+  });
+
+  it("classifies every kind at the top of a child, exactly once", () => {
+    // **The partition, which is what makes the closure argument an arm.**
+    // Defaulting an unclassified kind to "read whole" is silent: reading whole
+    // pools the branches, and a pooled field handed to the door once used to
+    // clear its neighbours. Now it is refused by name instead, which is the
+    // discipline `backend/book_columns.py` applies to its columns.
+    //
+    // **Its population is the top of a child, and the reader's is larger.**
+    // The two were the same set until the reader began applying the forwarding
+    // record at every node rather than only here; it now stands on kinds this
+    // never sees, among them arrays, binaries, objects and spreads, and this
+    // arm says nothing about any of them. What it still holds is that nothing
+    // arrives at the top of a child unclassified, which is where a kind with
+    // discarded positions would otherwise be read whole and pool them.
+    //
+    // **The forwarding half is deliberately outside this census**, for the
+    // reason its own comment gives: a row there earns its place by being right
+    // when the kind arrives rather than by occurring today.
+    const seen = terminalKindsUnderSrc();
+    const forwarding = Object.keys(FORWARDS_ITS_VALUE);
+
+    expect(seen.filter((kind) => !READ_WHOLE.includes(kind))).toEqual([]);
+    expect(READ_WHOLE.filter((kind) => !seen.includes(kind))).toEqual([]);
+    expect(READ_WHOLE.filter((kind) => forwarding.includes(kind))).toEqual([]);
+  });
+
+  it("takes its field names from the schema and nothing else", () => {
+    // Three claims the rest of this block rests on, each failing on its own.
+    // The schema is reachable and names fields; the fields are the ones the
+    // API declares rather than ones chosen by a suffix; and every one of them
+    // is a string, which is what the `&&` row of `FORWARDS_ITS_VALUE` rests on.
+    const fields = datedFields();
+
+    expect(fields).toContain("purchased_at");
+    // No `_at` and no `_on`, so a rule keyed on a name shape would miss it.
+    expect(fields).toContain("failing_since");
+    // Dated by neither name nor meaning, so the derivation is not a suffix.
+    expect(fields).not.toContain("purchase_source");
+    expect(datedFieldTypes()).toEqual(["string"]);
+  });
+
+  it("takes its door names from the door and from one local hop", () => {
+    const door = exportedBy(
+      THE_DATE_DOOR_MODULE,
+      sourceText(THE_DATE_DOOR_MODULE),
+    );
+    expect(door).toContain("numericDate");
+    for (const name of door)
+      expect(formattingNamesIn("x.tsx", "const a = 1;")).toContain(name);
+
+    // The hop, which is the live shape `SenderHealthLine` writes.
+    const wrapper =
+      "const when = (iso: string) => longMonthDate(iso, locale);\n" +
+      "const no = (iso: string) => iso;\n";
+    expect(formattingNamesIn("x.tsx", wrapper)).toContain("when");
+    expect(formattingNamesIn("x.tsx", wrapper)).not.toContain("no");
+
+    // A door name in a type position is not a call, so it earns no hop.
+    expect(
+      formattingNamesIn(
+        "x.tsx",
+        "const f = (x: string) => x as unknown as numericDate;",
+      ),
+    ).not.toContain("f");
+
+    // Nor is a door name in quotes, or in a template, which is what a reader
+    // collecting literals alongside identifiers would take for a call.
+    expect(
+      formattingNamesIn(
+        "x.tsx",
+        'const g = (x: string) => pick("numericDate");',
+      ),
+    ).not.toContain("g");
+    expect(
+      formattingNamesIn("x.tsx", "const h = (x: string) => pick(`clockTime`);"),
+    ).not.toContain("h");
+
+    // A nested element ends the hop reader, and it is the only thing keeping
+    // every arrow component out of the trust set: without it, an ordinary
+    // component rendering a formatted date earns the hop, and then calling
+    // that component clears whatever it is handed.
+    expect(
+      formattingNamesIn(
+        "x.tsx",
+        "const Row = ({ d }: P) => <p>{numericDate(d, l)}</p>;",
+      ),
+    ).not.toContain("Row");
+
+    // And a name the module binds for itself is not the door's, in every form
+    // a top level binding takes. Each of these clears nothing: the plain
+    // `const`, the exported one, the two patterns, and a door name imported
+    // from somewhere that is not the door, which is the silent half of the
+    // alias trade.
+    const SHADOWS = [
+      "const numericDate = (x: string) => x;",
+      "export const numericDate = (x: string) => x;",
+      "const { numericDate } = helpers;",
+      "const [numericDate] = makers;",
+      'import { numericDate } from "./elsewhere";',
+      'import { formatIt as numericDate } from "./elsewhere";',
+    ];
+    for (const shadow of SHADOWS) {
+      expect(formattingNamesIn("x.tsx", shadow)).not.toContain("numericDate");
+      expect(
+        datesRenderedRawIn(
+          "x.tsx",
+          `${shadow}\nconst C = () => <p>{numericDate(b.due_at)}</p>;`,
+        ),
+      ).toEqual(["x.tsx renders due_at unformatted"]);
+    }
+
+    // The door's own import is not a shadow, which is the line between this
+    // and taking the trust away from every correct caller in the tree.
+    expect(
+      formattingNamesIn(
+        "pages/components/Row.tsx",
+        'import { numericDate } from "../../lib/date";',
+      ),
+    ).toContain("numericDate");
+
+    // And a declaration is not a hop, which is what keeps a component that
+    // names a door export from explaining every mention of itself.
+    expect(
+      formattingNamesIn(
+        "x.tsx",
+        "function Panel() { return numericDate(a, l); }",
+      ),
+    ).not.toContain("Panel");
+  });
+
+  it("reports a dated field written straight into a child", () => {
+    // The plain spelling, which is what the defect that prompted this rule
+    // would have looked like had it been written one layer in.
+    expect(
+      datesRenderedRawIn(
+        "x.tsx",
+        "const C = () => <p>{book.purchased_at}</p>;",
+      ),
+    ).toEqual(["x.tsx renders purchased_at unformatted"]);
+
+    // Through a fragment, which is the other node carrying children.
+    expect(
+      datesRenderedRawIn("x.tsx", "const C = () => <>{book.due_at}</>;"),
+    ).toEqual(["x.tsx renders due_at unformatted"]);
+
+    // A computed read, which a matcher over `.due_at` would not see.
+    expect(
+      datesRenderedRawIn("x.tsx", 'const C = () => <p>{book["due_at"]}</p>;'),
+    ).toEqual(["x.tsx renders due_at unformatted"]);
+
+    // A template, which is a kind with no forwarding row, so it is read whole.
+    expect(
+      datesRenderedRawIn("x.tsx", "const C = () => <p>{`${book.due_at}`}</p>;"),
+    ).toEqual(["x.tsx renders due_at unformatted"]);
+
+    // And the door clears it, which is the same source with one call added.
+    expect(
+      datesRenderedRawIn(
+        "x.tsx",
+        "const C = () => <p>{numericDate(book.due_at, locale)}</p>;",
+      ),
+    ).toEqual([]);
+  });
+
+  it("reports a field beside a handed one rather than clearing it", () => {
+    // **The finding the co-residence rule could not see.** The first version
+    // cleared any field sharing a value with a door name, so the first source
+    // here was green and the second, the same source with the call removed, was
+    // red: the arm moved on the presence of the call and not on what the call
+    // was handed. This is the pair that separates the two.
+    expect(
+      datesRenderedRawIn(
+        "x.tsx",
+        "const C = () => <p>{t(k, { a: numericDate(b.due_at, l), b: b.loaned_at })}</p>;",
+      ),
+    ).toEqual(["x.tsx renders loaned_at unformatted"]);
+    expect(
+      datesRenderedRawIn(
+        "x.tsx",
+        "const C = () => <p>{t(k, { a: b.due_at, b: b.loaned_at })}</p>;",
+      ),
+    ).toEqual([
+      "x.tsx renders due_at unformatted",
+      "x.tsx renders loaned_at unformatted",
+    ]);
+
+    // **The same field, once handed and once raw, and the raw one is
+    // reported.** Clearing per field name let this through and was taken
+    // because the stronger reading refused `ReadingPanel`. It no longer does:
+    // that component's first mention is the discarded left of a logical, which
+    // the walk now skips wherever it stands rather than only at the top of the
+    // child, so the stronger reading costs nothing and is what runs.
+    expect(
+      datesRenderedRawIn(
+        "x.tsx",
+        "const C = () => <p>{t(k, { a: numericDate(b.due_at, l), b: b.due_at })}</p>;",
+      ),
+    ).toEqual(["x.tsx renders due_at unformatted"]);
+  });
+
+  it("reports a branch that runs beside a door call in one that does not", () => {
+    // **The pooling the split at the top of a child could not reach.** The
+    // forwarding record used to be applied once, at the result position, and
+    // the rest of the value read whole, so a door call anywhere inside a
+    // terminal cleared the field for every other branch of it. All three of
+    // these were green.
+    for (const body of [
+      // A door call in the branch that does not run.
+      "<p>{t(k, { x: ok ? numericDate(b.due_at, l) : b.due_at })}</p>",
+      // The same, inside an interpolation.
+      "<p>{`${ok ? numericDate(b.due_at, l) : b.due_at}`}</p>",
+      // The reading panel's own shape with one extra raw mention.
+      "<p>{[b.due_at && numericDate(b.due_at, l), b.due_at].join(' ')}</p>",
+    ])
+      expect(datesRenderedRawIn("x.tsx", `const C = () => ${body};`)).toEqual([
+        "x.tsx renders due_at unformatted",
+      ]);
+  });
+
+  it("stops at a nested element when it looks for a door call", () => {
+    // **The stop is load bearing on both halves of the reader and was armed on
+    // only one.** A door call inside a nested element belongs to that element,
+    // which the walk reaches on its own account, so it cannot clear a field
+    // written beside it out here.
+    expect(
+      datesRenderedRawIn(
+        "x.tsx",
+        "const C = () => <p>{[<X key={1}>{numericDate(b.due_at, l)}</X>, b.due_at]}</p>;",
+      ),
+    ).toEqual(["x.tsx renders due_at unformatted"]);
+  });
+
+  it("splits a branch that reading the node whole would pool", () => {
+    // **The three rows of `FORWARDS_ITS_VALUE` that are observable, each with
+    // both of its sides.** The discarded position answers clean where reading
+    // whole would report, and the yielded position answers reported. A row
+    // needs both: with only the clean side, emptying the row's accessor is
+    // green, because a row that yields nothing makes the whole child vanish
+    // and every field in it with it. That is the shape this file warns about,
+    // a replacement stronger in the dimension it was written for and silently
+    // weaker in one nobody re-checked.
+    //
+    // The other five rows are inert by construction, not by luck: their kind
+    // has one expression child, so forwarding it and reading it whole visit the
+    // same nodes. The arm below says which, so the distinction is a measurement
+    // rather than this sentence.
+    const SPLITS: [string, string, string][] = [
+      // The test of a conditional is not its value; its branches are.
+      [
+        "ConditionalExpression",
+        '<p>{book.due_at ? "a" : "b"}</p>',
+        '<p>{ok ? book.due_at : "b"}</p>',
+      ],
+      // The left of `&&` is yielded only when falsy, and a falsy date is "".
+      [
+        "LogicalExpression",
+        '<p>{book.due_at && "a"}</p>',
+        "<p>{ok && book.due_at}</p>",
+      ],
+      // Every element of a comma but the last is discarded.
+      [
+        "SequenceExpression",
+        '<p>{ok ? (book.due_at, "a") : "b"}</p>',
+        '<p>{ok ? (a, book.due_at) : "b"}</p>',
+      ],
+    ];
+
+    for (const [, discarded, yielded] of SPLITS) {
+      expect(
+        datesRenderedRawIn("x.tsx", `const C = () => ${discarded};`),
+      ).toEqual([]);
+      expect(
+        datesRenderedRawIn("x.tsx", `const C = () => ${yielded};`),
+      ).toEqual(["x.tsx renders due_at unformatted"]);
+    }
+
+    // Every kind not named above forwards one child, so it cannot be observed
+    // this way. Stated as the relationship, so a kind added to the record with
+    // more than one child fails here until it has a case.
+    const observable = new Set(SPLITS.map(([kind]) => kind));
+    const single = Object.keys(FORWARDS_ITS_VALUE).filter(
+      (kind) => !observable.has(kind),
+    );
+    expect(single).toEqual([
+      "ChainExpression",
+      "ParenthesizedExpression",
+      "TSAsExpression",
+      "TSNonNullExpression",
+      "TSSatisfiesExpression",
+    ]);
+  });
+
+  it("reads a kind it forwards and a kind it does not the same way", () => {
+    // The five inert rows, driven so that "inert" is a measurement. Each
+    // carries the field in the one position its kind forwards, so dropping its
+    // row changes nothing: both readings reach the same node.
+    for (const body of [
+      "<p>{book?.due_at}</p>",
+      "<p>{book.due_at as string}</p>",
+      "<p>{book.due_at!}</p>",
+      "<p>{book.due_at satisfies string}</p>",
+    ])
+      expect(datesRenderedRawIn("x.tsx", `const C = () => ${body};`)).toEqual([
+        "x.tsx renders due_at unformatted",
+      ]);
+
+    // `ParenthesizedExpression` has no case because this parser keeps no node
+    // for a bracket, which is asserted rather than assumed.
+    const kinds = new Set<string>();
+    visitNodes(parseAst("const a = (b);", { lang: "ts" }), (node) =>
+      kinds.add(node.type),
+    );
+    expect([...kinds]).not.toContain("ParenthesizedExpression");
+  });
+
+  it("refuses a comma at the top of a child and not below it", () => {
+    // **Where the parser's refusal holds, which is narrower than it looked.**
+    // JSX refuses the comma operator as the whole of a container, and that is
+    // all it refuses: inside a conditional branch it parses, which is why
+    // `SequenceExpression` has a forwarding row at all. The earlier version
+    // read the top level refusal as covering the kind.
+    expect(() =>
+      datesRenderedRawIn(
+        "x.tsx",
+        "const C = () => <p>{(ok, book.due_at)}</p>;",
+      ),
+    ).toThrow();
+    expect(
+      datesRenderedRawIn(
+        "x.tsx",
+        'const C = () => <p>{ok ? (a, book.due_at) : "b"}</p>;',
+      ),
+    ).toEqual(["x.tsx renders due_at unformatted"]);
+
+    // An angle bracket assertion is an element in a `.tsx` file and unwritable
+    // in a `.ts` one, which has no JSX child, so it has no row either.
+    expect(() =>
+      datesRenderedRawIn(
+        "x.tsx",
+        "const C = () => <p>{<string>book.due_at}</p>;",
+      ),
+    ).toThrow();
+  });
+
+  it("leaves the shapes this tree already writes alone", () => {
+    // **The false refusal surface, driven rather than argued.** A rule that
+    // reddens any of these is not shippable, so they are asserted here rather
+    // than measured once and written into the prose above.
+    //
+    // **Most are live shapes under `src`, reduced to the part this rule reads,
+    // and the two attribute rows are not.** Two instruments measure no dated
+    // field in a JSX attribute today, and the destructured one was written for
+    // this arm. They are kept because the attribute carry is the shape the
+    // element stop exists for, and a rule whose only evidence is the tree stops
+    // being evidence the day the tree changes.
+    const CLEAN = [
+      // A predicate gating an element, which is `ReadingPanel` and `LoanRow`.
+      "const C = () => <div>{(book.my_started_at || book.my_finished_at) && <p>x</p>}</div>;",
+      // The deadline branch of `LoanRow`, whose test names the field twice.
+      "const C = () => <span>{n > 0 && loan.due_at ? t(k, { date: numericDate(loan.due_at, locale) }) : t(j)}</span>;",
+      // Not live: a field carried into a child component as an attribute.
+      "const C = () => <ul>{rows.map((row) => <Cell when={row.due_at} />)}</ul>;",
+      // Not live either: the same, destructured, which used to be refused for
+      // its spelling.
+      "const C = () => <ul>{rows.map(({ due_at }) => <Cell when={due_at} />)}</ul>;",
+      // The one hop wrapper, which is `SenderHealthLine`.
+      "const C = () => { const when = (iso: string) => longMonthDate(iso, locale); return <p>{t(k, { when: when(health.last_run_at) })}</p>; };",
+      // A list joined before it is rendered, which is `ReadingPanel`: the field
+      // is a predicate in one element and the door's argument in the next.
+      "const C = () => <p>{[book.my_started_at && longMonthDate(book.my_started_at, l)].filter(Boolean).join(' ')}</p>;",
+      // A key is not a read, in either spelling.
+      "const C = () => <p>{t(k, { due_at: 1 })}</p>;",
+      'const C = () => <p>{t(k, { "due_at": 1 })}</p>;',
+    ];
+
+    for (const source of CLEAN)
+      expect(datesRenderedRawIn("x.tsx", source)).toEqual([]);
+  });
+
+  it("refuses a read in a child that renders no date", () => {
+    // **What clearing per occurrence costs, as an arm rather than a
+    // sentence.** Only a door call clears and only a discarded position is
+    // skipped, so a read that reaches the page as something other than a date
+    // is still reported. The direction is the opposite of the residual this
+    // replaced: that one cleared too much and said nothing, this one refuses
+    // too much at the line somebody writes it.
+    //
+    // **The `LoanRow` shape is the one an inline away from live.** That
+    // component draws a day count beside a formatted date and computes the
+    // count above the child; written inside it, this is what it becomes.
+    //
+    // **The same comparison as a conditional's test is not refused**, which is
+    // narrower than this residual first read: `{b.due_at < now ? "a" : "b"}`
+    // is clean, because a test is a discarded position. So the residual is a
+    // read whose value is rendered as something other than a date, not every
+    // read that is not a date.
+    for (const body of [
+      // A comparison operand, in a position whose value is rendered.
+      "<p>{b.due_at < now}</p>",
+      // An argument to a helper that is not the door.
+      "<p>{daysBetween(b.due_at, now)}</p>",
+      // A dependency array written in the child.
+      "<p>{useMemo(() => n, [b.due_at])}</p>",
+      // A comparator.
+      "<p>{rows.sort((x, y) => cmp(x.due_at, y.due_at)).length}</p>",
+      // A class name derived from the field.
+      "<p>{b.due_at ? cx(b.due_at) : null}</p>",
+    ])
+      expect(datesRenderedRawIn("x.tsx", `const C = () => ${body};`)).toEqual([
+        "x.tsx renders due_at unformatted",
+      ]);
+
+    expect(
+      datesRenderedRawIn(
+        "x.tsx",
+        'const C = () => <p>{b.due_at < now ? "a" : "b"}</p>;',
+      ),
+    ).toEqual([]);
+  });
+
+  it("is blind to a dated field bound to a local name first", () => {
+    // **The blind spot with a witness, because a blind spot stated in prose is
+    // the row nobody rechecks.** Both of these render the field, one correctly
+    // and one not, and this rule reports neither: the child names the binding
+    // rather than the field. The second is the shape the defect this rule was
+    // written after actually took, one indirection further out. Both sit in a
+    // JSX child, which is why the row above this block says the position is not
+    // the boundary of what is covered.
+    expect(
+      datesRenderedRawIn(
+        "x.tsx",
+        "const C = () => { const on = book.purchased_at; return <p>{on}</p>; };",
+      ),
+    ).toEqual([]);
+    expect(
+      datesRenderedRawIn(
+        "x.tsx",
+        "const C = () => { const f = [['k', book.purchased_at]]; return <p>{f.map(([k, v]) => String(v))}</p>; };",
+      ),
+    ).toEqual([]);
+
+    // It reds the day the binding is skipped, which is what makes this a
+    // witness rather than a restatement: the same field written in the child
+    // directly is reported.
+    expect(
+      datesRenderedRawIn(
+        "x.tsx",
+        "const C = () => <p>{book.purchased_at}</p>;",
+      ),
+    ).toEqual(["x.tsx renders purchased_at unformatted"]);
   });
 });
 

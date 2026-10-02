@@ -20497,9 +20497,13 @@ string, so the card printed an ISO date where the table beside it printed a form
 in every language. It now goes through the same renderer. **The date door in
 `frontend/tests/houseRules.test.ts` cannot see that class**: it collects the names the
 platform publishes, and a field rendered with no formatting call names nothing, so widening
-its name list can never reach it. Closing the class needs a rule keyed on the field rather
-than on the call, which is a render position pass rather than a name match, and that is
-tracked separately.
+its name list can never reach it. **A second rule keyed on the field now sits beside it**,
+reporting a dated field named in a JSX child that is not handed to a door call in that
+child, with the field names derived from the committed schema. **It reports one shape of the
+class and closes no part of it, including inside its own position**, which its own docstring
+states with a witness arm for each blind spot. What would close the class is a type the door
+returns and a display slot requires, which is a change to the application rather than a
+guard over it, and that is tracked separately.
 
 **What a member sees change.** The table's Bought on column moves forward by one day for
 readers west of Greenwich, onto the date the copy was actually bought. The card's Bought on
