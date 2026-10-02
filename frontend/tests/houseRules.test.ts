@@ -659,6 +659,263 @@ const ENGINE_URL_IMPORT =
 const REACHES_THE_NETWORK =
   /\b(fetch|XMLHttpRequest|WebSocket|sendBeacon|FormData|navigator\.send)\b|from "[^"]*\/api\/(?!generated\/model")/;
 
+/** What a cell of such a table may be. See `asRow`, which is why it is named. */
+type Cell = string | number | boolean | readonly string[];
+
+/** What separates one cell from the next on a rendered line. */
+const CELL = " | ";
+
+/** What separates one item from the next inside a cell holding a list. */
+const ITEM = ", ";
+
+/**
+ * `text` with every character `marks` names prefixed by the escape character.
+ *
+ * **Both classes hold the escape character and only one of them needs it.**
+ * In a list item it is load bearing: the item separator's escape is a
+ * backslash and a comma, so an item ending in a backslash, followed by the
+ * raw separator, is the same bytes as an item spelling that separator, and
+ * `renders two rows of one shape as two lines that differ` carries the pair
+ * that drives it.
+ *
+ * **In a string cell it is inert today, measured, and it stays because what
+ * makes it inert is not this function.** The cell separator carries spaces
+ * and the escape of a pipe does not, so the two cannot be confused. **Spell
+ * that separator without its spaces and a collision becomes reachable across
+ * shapes, and only across shapes**: the property asserted here is per shape,
+ * by its own grouping and by the argument that rows of one table share a
+ * column's kind and a width, so the per shape result stays empty under
+ * exactly that condition and no arm here would red. That is the extent of
+ * what is known about it, and it is the reason this stays rather than being
+ * measured inert and taken out.
+ */
+function escaped(text: string, marks: RegExp): string {
+  return text.replace(marks, (one) => `\\${one}`);
+}
+
+/**
+ * One row of a table driven rule group, rendered as a line.
+ *
+ * **A rule group here is a local table feeding one `it.each`, and each caller
+ * holds its own table against a written list of these.** Without that list a
+ * row can be deleted in silence: the generator makes one arm fewer, nothing
+ * else reads the table, and the only thing that moves is the frontend
+ * coverage register, which a merge re-renders as a matter of course, so the
+ * one trace of a case leaving is erased by the ordinary process that follows
+ * it.
+ *
+ * **Nothing holds the lists themselves, and that is the shipped half's
+ * boundary.** Six edits are silent here, each measured green: a table added
+ * with no list beside it, a list deleted, a list marked skipped, which is
+ * worse than a deletion because the list is still there for the next reader
+ * to believe, a generator handed a narrowed table, a list pinning fewer rows
+ * than the generator drives, and the whole group of arms over this renderer
+ * deleted. Closing the first five is a rule over this file's own source,
+ * filed separately, because four rounds of it each closed the container that
+ * had just been demonstrated and the enumeration does not terminate: what it
+ * wants is the generator's argument and the pin's subject resolved to one
+ * declaration. The sixth is the regress every guard in this tree sits on and
+ * nothing closes it. So this renderer closes the defect for the tables that
+ * have a list, and for no others.
+ *
+ * **Membership rather than a size.** A count cannot tell a row swapped for
+ * another from the row it replaced, nor a row whose input is rewritten in
+ * place onto a case the table already drives: both leave it where it was and
+ * the case is gone either way.
+ *
+ * **Every cell, rather than the row's name.** A name alone is green on a row
+ * whose input was rewritten under it, measured, and the case is as gone as if
+ * the row had been deleted. The cost is that a cosmetic edit to a fixture
+ * reds as loudly as a deletion, and loud is the direction to be wrong in.
+ * **When one of these arms reds, rewrite the line only after confirming the
+ * row still drives a case no other row drives**: rewriting it on sight is how
+ * a case losing edit is waved through, and it is the same keystroke as the
+ * legitimate answer.
+ *
+ * **The separators are escaped inside the values, because joining a list is
+ * otherwise not injective.** A list of three documents and a single document
+ * spelling all three render the same line: measured live on the copy table,
+ * where the collision takes a named decision witness with it and leaves only
+ * a collateral catch behind. Escaping was taken over refusing such a value at
+ * the door because it refuses nothing: a door refusal on the cell separator
+ * would have turned away a source fixture spelling a union type, which is
+ * ordinary in exactly this subject matter. Measured on the tree as it stands,
+ * no value holds either separator, so no line here is escaped today.
+ *
+ * **Both separators are escaped inside a list item, and the cell separator
+ * is the one that was missing.** Two list columns are the copy table's own
+ * shape, and with an item free to carry the cell separator two rows of one
+ * kind per column and the same width render the same line. **Two kinds in
+ * one column collide for a different reason**, and `asRows` refuses a mixed
+ * column rather than this saying one does not arise.
+ *
+ * **One renderer rather than a key per table**, because the tables differ in
+ * what their cells mean and not in what a cell is. Nothing here reads a
+ * column's meaning, so no table is made to look like another.
+ *
+ * **`Cell` names what this can print**, so a cell of any other kind is a type
+ * error at the call site. That is the whole of what it excludes: it says
+ * nothing about two rows rendering alike.
+ */
+function asRow(cells: readonly Cell[]): string {
+  return cells
+    .map((one) => {
+      if (typeof one === "object")
+        return `[${one.map((item) => escaped(item, /[\\,|]/g)).join(ITEM)}]`;
+      return typeof one === "string" ? escaped(one, /[\\|]/g) : String(one);
+    })
+    .join(CELL);
+}
+
+/**
+ * Every row of a table, rendered, with what the rendering rests on refused.
+ *
+ * **One kind per column, asserted here rather than stated anywhere.** `asRow`
+ * reads a cell as a list or as a value by its own kind, so a column holding
+ * two kinds breaks the escaping argument outright, and three pairs collide
+ * today: a string spelling a bracketed list against that list, a number
+ * against its own spelling, and a boolean against its own. Nothing in the
+ * tree has a mixed column and the tuple types are what keep it so, so this
+ * refuses nothing as it stands and reds at the first one, which is the
+ * moment the argument stops holding. **A refusal that refuses nothing today
+ * is deleted by the next reader who measures it**, so both refusals here
+ * carry an arm of their own in `a row of a rule table is rendered as one
+ * line`: without them this whole file is green with both lines gone.
+ *
+ * **One width too**, because the column walk takes its width from the first
+ * row: a row carrying cells past that width is never read, and a shorter one
+ * is caught only as a column of two kinds, which is a message about the
+ * wrong thing.
+ */
+function asRows(table: readonly (readonly Cell[])[]): string[] {
+  expect(table, "a table with no rows, which drives nothing").not.toHaveLength(
+    0,
+  );
+
+  const widths = [...new Set(table.map((row) => row.length))];
+  expect(
+    widths,
+    "rows of one table that are not all the same width: a row with no value for a column is a different table rather than a short row",
+  ).toHaveLength(1);
+
+  const kindOf = (cell: Cell) =>
+    typeof cell === "object" ? "list" : typeof cell;
+  const mixed = [...Array.from({ length: widths[0] ?? 0 }).keys()].filter(
+    (column) => new Set(table.map((row) => kindOf(row[column]!))).size > 1,
+  );
+  expect(
+    mixed,
+    "columns holding more than one kind of cell: the rendering reads a cell by its kind, so give the column one kind rather than widening this helper",
+  ).toEqual([]);
+
+  return table.map((row) => asRow(row));
+}
+
+describe("a row of a rule table is rendered as one line", () => {
+  it("renders a cell of every kind the tables carry", () => {
+    // **Arms on the renderer rather than through whichever table carries a
+    // kind.** The list branch was held by the copy table's arm alone, so
+    // dropping it reddened one arm of three and the claim that a change here
+    // reds all three was an extent claim about the narrowings chosen.
+    expect(asRow(["a text", 7, true, ["x", "y"]])).toBe(
+      "a text | 7 | true | [x, y]",
+    );
+  });
+
+  it("refuses a column holding more than one kind of cell", () => {
+    // **The refusals inside `asRows` have no other arm.** Deleting both
+    // leaves this file green, measured, because nothing on the tree has
+    // either shape: a line that refuses nothing today and is held by nothing
+    // is a line the next reader removes, and the escaping every membership
+    // arm rests on goes with it.
+    expect(() =>
+      asRows([
+        ["a", "b"],
+        ["a", ["b"]],
+      ]),
+    ).toThrow(/more than one kind/);
+  });
+
+  it("refuses a table whose rows are not all one width, and an empty one", () => {
+    expect(() => asRows([["a"], ["a", "b"]])).toThrow(/not all the same width/);
+    expect(() => asRows([])).toThrow(/no rows/);
+  });
+
+  it("tells a list of items from one item spelling the whole list", () => {
+    // The live collision, and the shape it was found in: a corpus of three
+    // documents rewritten as one document naming all three rendered the same
+    // line, kept the same generated name and the same verdict, and took the
+    // row's decision witness with it.
+    expect(asRow([["a", "b"]])).not.toBe(asRow([["a, b"]]));
+  });
+
+  it("renders two rows of one shape as two lines that differ", () => {
+    // **The measurement, rather than the argument**, and it is grouped by the
+    // kinds a row's columns hold, because that is the claim: rows of one
+    // table share a column's kind, and two kinds in one column collide for a
+    // different reason and are refused by `asRows`. Comparing across shapes
+    // would red this arm over a collision nothing can reach.
+    //
+    // **The pair that matters is a value spelling a separator against the
+    // values it would be read as**, so both are built rather than only the
+    // concatenation. An alphabet that never constructs the colliding
+    // spelling is green under the escapes dropped, measured.
+    const alphabet = ["a", ",", "|", "\\", "a, b", "a | b"];
+    const rows: Cell[][] = [];
+    for (const first of alphabet)
+      for (const second of alphabet) {
+        rows.push([first, second]);
+        rows.push([first + CELL + second]);
+        rows.push([[first, second]]);
+        rows.push([[first + ITEM + second]]);
+        rows.push([[first], [second]]);
+      }
+
+    // **An item ending in the escape character, against an item spelling the
+    // item separator.** This pair is what the escape character's own escape
+    // inside a list item is for: the separator's escape is a backslash and a
+    // comma, so without it these two render the same bytes. The alphabet
+    // holds the character and never pairs it into that position, so the rows
+    // are written out.
+    rows.push([["a\\", "b"]]);
+    rows.push([["a, b"]]);
+
+    // **Two string columns, and this pair is what the cell separator escape
+    // inside a string cell is for.** Grouping by shape is what made it
+    // necessary: the pair that used to catch that escape was a two cell row
+    // against a one cell row, which are different shapes and are no longer
+    // compared, and dropping the escape went green until these two rows
+    // existed. Measured both ways.
+    rows.push(["a | b", "c"]);
+    rows.push(["a", "b | c"]);
+
+    // **Two list columns is the copy table's shape, and this pair is what
+    // the cell separator escape inside an item is for.** One kind per column
+    // and the same width in both, and with that escape dropped they render
+    // the same line, which an alphabet of single values cannot construct.
+    rows.push([["a] | [b"], ["c"]]);
+    rows.push([["a"], ["b] | [c"]]);
+
+    const shapeOf = (row: Cell[]) =>
+      row
+        .map((cell) => (typeof cell === "object" ? "list" : typeof cell))
+        .join("/");
+    const byShape = new Map<string, Cell[][]>();
+    for (const row of rows)
+      byShape.set(shapeOf(row), [...(byShape.get(shapeOf(row)) ?? []), row]);
+
+    const collided = [...byShape]
+      .filter(
+        ([, group]) =>
+          new Set(group.map((row) => asRow(row))).size !==
+          new Set(group.map((row) => JSON.stringify(row))).size,
+      )
+      .map(([shape]) => shape);
+
+    expect(collided).toEqual([]);
+  });
+});
+
 describe("a member's book file cannot leave the browser", () => {
   it("keeps every reader out of reach of the network", () => {
     // The decision on the digital copies ticket is that no bytes reach the
@@ -921,6 +1178,32 @@ describe("a member's book file cannot leave the browser", () => {
 
   it.each(SHAPES)("%s", (_label, source, refused) => {
     expect(buildersIn(source, "ts").some(takesABook)).toBe(refused);
+  });
+
+  /**
+   * The rows above, rendered. `asRow` holds why they are written out, and
+   * `asRows` refuses a column this rendering cannot tell apart.
+   */
+  it("holds exactly the shapes listed here, cell by cell", () => {
+    expect(asRows(SHAPES)).toEqual([
+      "a declaration taking a File is refused | export function draftFromX(file: File): BookDraft {} | true",
+      "an arrow assigned to a const is refused | export const draftFromX = (file: File): BookDraft => 0; | true",
+      "an overload is refused for what it declares, not what it implements | export function draftFromX(file: File): BookDraft;\nexport function draftFromX(input: unknown): BookDraft {} | true",
+      "an anonymous default export is refused | export default function (file: File): BookDraft {} | true",
+      "a callable held as an object property is refused | export const built = { draftFromX: (file: File) => 0 }; | true",
+      "a File behind two other parameters is refused | export function draftFromX(c: NameClues, done: () => void, f: File) {} | true",
+      "a builder renamed out of the family is refused for its return | function make(cover: File): BookDraft {} | true",
+      "an array view is refused, and not only a File | export function draftFromX(bytes: Uint8Array): BookDraft {} | true",
+      "a buffer view sharing no name with an array is refused | export function draftFromX(bytes: DataView): BookDraft {} | true",
+      "a Blob is refused, which is the pair this rule was written for | export function draftFromX(bytes: Blob): BookDraft {} | true",
+      "so is what a Blob is built out of, which a bare name admitted | export function draftFromX(bytes: BlobPart): BookDraft {} | true",
+      "a buffer named without the word array is refused | export function draftFromX(bytes: BufferSource): BookDraft {} | true",
+      "bytes that arrive a chunk at a time are refused | export function draftFromX(bytes: ReadableStream): BookDraft {} | true",
+      "a handle onto a file the member picked is refused | export function draftFromX(picked: FileList): BookDraft {} | true",
+      "a builder taking the parsed record is admitted | export function draftFromX(record: FileMetadata): BookDraft {} | false",
+      "a parameter merely named for an array is admitted: a name is not a type | export function draftFromX(bookArray: NameClues): BookDraft {} | false",
+      "a function that builds no draft is admitted | export function elsewhere(file: File): Request {} | false",
+    ]);
   });
 
   /**
@@ -2257,6 +2540,37 @@ describe("a decoder a runtime may not carry is never built at module scope", () 
   it.each(SHAPES)("reads %s", (source, lang, refuses) => {
     expect(decoderConstructions(source, lang).some(refused)).toBe(refuses);
   });
+
+  /**
+   * The rows above, rendered. `asRow` holds why they are written out, and
+   * `asRows` refuses a column this rendering cannot tell apart.
+   */
+  it("holds exactly the constructions listed here, cell by cell", () => {
+    expect(asRows(SHAPES)).toEqual([
+      `const d = new TextDecoder("utf-16be"); | ts | true`,
+      `export const d = new TextDecoder("utf-16be"); | ts | true`,
+      `let d: TextDecoder = new TextDecoder("utf-16be"); | ts | true`,
+      `const all = { be: new TextDecoder("utf-16be") }; | ts | true`,
+      `const d = new globalThis.TextDecoder("utf-16be"); | ts | true`,
+      `const d = (() => new TextDecoder("utf-16be"))(); | ts | true`,
+      `const d = (function () { return new TextDecoder("x"); })(); | ts | true`,
+      `const d = (() => new TextDecoder("utf-16be")).call(null); | ts | true`,
+      `const ds = ["utf-16be"].map((l) => new TextDecoder(l)); | ts | true`,
+      `Array.from([1], () => new TextDecoder("utf-16be")); | ts | true`,
+      `const d = new TextDecoder(LABEL); | ts | true`,
+      `class C { d = new TextDecoder("utf-16be"); } | ts | true`,
+      `const view = <p x={new TextDecoder("utf-16be")} />; | tsx | true`,
+      `function f() { return new TextDecoder("utf-16be"); } | ts | false`,
+      `const f = () => new TextDecoder("utf-16be"); | ts | false`,
+      `const o = { f() { return new TextDecoder("utf-16be"); } }; | ts | false`,
+      `const o = { get f() { return new TextDecoder("utf-16be"); } }; | ts | false`,
+      `class C { f() { return new TextDecoder("utf-16be"); } } | ts | false`,
+      `function f() { return [1].map(() => new TextDecoder("x")); } | ts | false`,
+      `const d = new TextDecoder("utf-8"); | ts | false`,
+      `const d = new TextDecoder("UTF-8"); | ts | false`,
+      `const d = new TextDecoder(); | ts | false`,
+    ]);
+  });
 });
 
 /**
@@ -2834,6 +3148,28 @@ describe("a directory reproducing the tree is read as a copy of it", () => {
 
   it.each(SHAPES)("reads %s", (_name, corpus, copies) => {
     expect(materialisedCopies(corpus)).toEqual(copies);
+  });
+
+  /**
+   * The rows above, rendered. `asRow` holds why they are written out, and
+   * `asRows` refuses a column this rendering cannot tell apart.
+   *
+   * The row built from `COPY` is spelled through `COPY` here too, so renaming
+   * that fixture moves the table and this list together: measured, a rename
+   * reds nothing in this file, and reds this arm once the same line is
+   * written with the fixture's value instead.
+   */
+  it("holds exactly the corpora listed here, cell by cell", () => {
+    expect(asRows(SHAPES)).toEqual([
+      "a copy of the tree under a name that is not the default | [README.md, docs/api.md, mirror/README.md, mirror/docs/api.md] | [mirror/README.md, mirror/docs/api.md]",
+      "a copy nested below the root | [README.md, docs/api.md, build/out/README.md, build/out/docs/api.md] | [build/out/README.md, build/out/docs/api.md]",
+      "a directory whose one document shares a root document's name | [README.md, docs/api.md, doubles/README.md] | []",
+      "a directory of its own documents, one of them sharing a name | [README.md, docs/api.md, docs/README.md] | []",
+      "a directory of its own documents holding one copy of a nested one | [README.md, docs/api.md, notes/docs/api.md, notes/own.md] | []",
+      "a directory holding nothing but a copy of a nested document | [docs/api.md, keep/docs/api.md] | [keep/docs/api.md]",
+      `a copy beside a directory whose name begins the same way | [README.md, docs/api.md, ${COPY}/README.md, ${COPY}/docs/api.md, ${COPY}ed/own.md] | [${COPY}/README.md, ${COPY}/docs/api.md]`,
+      "nothing at all | [] | []",
+    ]);
   });
 
   it("pins the directory the repository refuses to version at its own root", () => {
