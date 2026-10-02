@@ -10,8 +10,21 @@ routes that read the table whole.
 **`created_by_user_id` is the one thing the row does say**, and it answers the
 two questions the Shelf cannot: a definer is told their own field exists even
 when nothing they can see carries it, and a definer may rename it. This module
-is the only reader of that column, which is what keeps the member axis in the
-same place as the Shelf axis instead of in a route.
+is the only one that reads that column, except the archive, which is what
+keeps the member axis in the same place as the Shelf axis instead of in a
+route.
+
+**The archive is the exception and it is past every rule that matches a column
+name.** `backup.py` selects every column of every table it archives without
+naming any of them, so it reads this one and no walk over source can see that.
+It is admin only for that reason, which `docs/security.md` records.
+
+**A schema field named for it is a read, and it is the read no source walk can
+see.** Pydantic populates such a field by reading the attribute off the row, so
+the column reaches every client with no attribute access written anywhere.
+`CustomFieldOut` answers a derived `renamable` for that reason, and
+`tests/test_fields.py::TestFieldsIsTheOnlyReaderOfTheAuthorColumn` refuses the
+declaration as well as the statement.
 
 **Not `custom_fields.py`, and that is its own decision rather than a
 preference.** That module's docstring declares *no `Shelf` here*, on the ground
@@ -454,6 +467,12 @@ class Fields:
         here is what tells that rule which column this is. Reading it off a
         `CustomField` row, which is the obvious spelling, is reported and
         should be.
+
+        **Naming the model buys nothing in a schema, and that is deliberate.**
+        A Pydantic field named for one of these columns is refused whichever
+        row it would be validated from, because a declaration has no receiver
+        to resolve: the same rule says why, and the exit is to publish a
+        derived answer rather than the id.
 
         **One statement for both questions**, and it is the whole table, which
         `custom_fields.definitions` already does for the same reason:

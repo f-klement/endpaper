@@ -822,11 +822,15 @@ repeat the argument.
 |  | [An instrument's output is a sample until somebody derives the population](decisions.md#an-instruments-output-is-a-sample-until-somebody-derives-the-population) | 1,033 |
 |  | [A bound widened inside an extraction is recorded, and the arm pinning it has an expiry](decisions.md#a-bound-widened-inside-an-extraction-is-recorded-and-the-arm-pinning-it-has-an-expiry) | 362 |
 |  | [A stale name in prose is checkable only where the sentence spells the module](decisions.md#a-stale-name-in-prose-is-checkable-only-where-the-sentence-spells-the-module) | 383 |
-|  | [The API promises RFC 3339, so the serialiser adds the offset the column does not hold](decisions.md#the-api-promises-rfc-3339-so-the-serialiser-adds-the-offset-the-column-does-not-hold) | 709 |
+|  | [The API promises RFC 3339, so the serialiser adds the offset the column does not hold](decisions.md#the-api-promises-rfc-3339-so-the-serialiser-adds-the-offset-the-column-does-not-hold) | 719 |
 |  | [A deadline is an instant, so the browser sends the offset](decisions.md#a-deadline-is-an-instant-so-the-browser-sends-the-offset) | 269 |
+|  | [A calendar date is not an instant, so the renderer reads the shape rather than the caller](decisions.md#a-calendar-date-is-not-an-instant-so-the-renderer-reads-the-shape-rather-than-the-caller) | 601 |
 |  | [A database side default on a naive column is the one ambiguous stored value, and the wire did not make it one](decisions.md#a-database-side-default-on-a-naive-column-is-the-one-ambiguous-stored-value-and-the-wire-did-not-make-it-one) | 150 |
 |  | [The database connection's default is weaker than the mail path's, deliberately](decisions.md#the-database-connections-default-is-weaker-than-the-mail-paths-deliberately) | 348 |
 |  | [A shared corpus owes a single file caller a refusal, and the module that holds it cannot see itself](decisions.md#a-shared-corpus-owes-a-single-file-caller-a-refusal-and-the-module-that-holds-it-cannot-see-itself) | 1,233 |
 |  | [An author column on the custom field row, rather than the cheaper alternative](decisions.md#an-author-column-on-the-custom-field-row-rather-than-the-cheaper-alternative) | 240 |
 |  | [The provenance arm was widened to the declaration rather than given an exemption](decisions.md#the-provenance-arm-was-widened-to-the-declaration-rather-than-given-an-exemption) | 142 |
+|  | [A schema declaration counts as a read of a guarded column](decisions.md#a-schema-declaration-counts-as-a-read-of-a-guarded-column) | 234 |
+|  | [The declaration reader is keyed on Pydantic's compiled schema, not on `FieldInfo`](decisions.md#the-declaration-reader-is-keyed-on-pydantics-compiled-schema-not-on-fieldinfo) | 128 |
+|  | [What the two instruments hold is reading, with the archive as a stated exception](decisions.md#what-the-two-instruments-hold-is-reading-with-the-archive-as-a-stated-exception) | 169 |
 <!-- index: end -->

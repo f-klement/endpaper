@@ -23,12 +23,13 @@ from collections.abc import Container, Iterable, Sequence
 from enum import StrEnum
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Final, get_args
+from typing import Any, Final, get_args
 
 import httpx
+import pydantic
 import pytest
 import respx
-from pydantic import BaseModel
+from pydantic import AliasChoices, AliasPath, BaseModel
 from sqlalchemy import CheckConstraint
 
 import marc_fields
@@ -2751,6 +2752,1019 @@ def column_mentions(tree: ast.Module, columns: Container[str]) -> list[ColumnMen
     return found
 
 
+def _application_module_names() -> list[str]:
+    """`_source_modules()` keys as dotted module names.
+
+    The same corpus every rule here walks, said the way `importlib` takes it,
+    so a narrowing of **that** walk narrows this and reds in
+    `TestTheApplicationCorpusIsStillTheApplication` by name.
+
+    **This function is a third corpus layer and needs arming of its own**,
+    which the sentence here used to deny. A skip written inside this loop
+    drops a module from the population, nothing imports it, and no model it
+    declares is in the registry: every reading downstream starts here, so
+    they all shrink together and no equality between them can see it. Driven
+    2026-10-02 with a live declaration planted: **one skip line here took the
+    two rules and 504 arms to green.** `test_the_renaming_is_rebuilt_from_the_corpus`
+    is what reds on it, by rebuilding this answer from `_source_modules()`
+    rather than asserting anything about it.
+
+    **It takes no tree, deliberately**, which is what keeps it out of
+    `_walk_names`. A walk is driven against a constructed directory and this
+    one **imports** what it names: driven against a tmp tree it would reach
+    for modules that do not exist. It is a renaming of the corpus rather than
+    a reading of the disk.
+    """
+    names: list[str] = []
+    for relative in _source_modules():
+        parts = Path(relative).parts
+        stem = parts[-1].removesuffix(".py")
+        dotted = ".".join(parts[:-1] + ((stem,) if stem != "__init__" else ()))
+        if dotted:
+            names.append(dotted)
+    return sorted(set(names))
+
+
+def _every_subclass(root: type) -> set[type]:
+    """Transitive, because a model whose base is another model is still one.
+
+    Models with a model for a base are live in this corpus, so stopping at
+    `__subclasses__()` would drop every one of them.
+    `test_an_indirect_subclass_is_in_the_population` is the witness, and it
+    asserts the property rather than how many there are.
+    """
+    seen: set[type] = set()
+    stack = [root]
+    while stack:
+        for sub in stack.pop().__subclasses__():
+            if sub not in seen:
+                seen.add(sub)
+                stack.append(sub)
+    return seen
+
+
+@functools.cache
+def application_models() -> tuple[type[BaseModel], ...]:
+    """Every Pydantic model this backend defines, off Python's own registry.
+
+    **The population is the class registry and not a glob of `schemas/`**,
+    which is the directory narrowing this repository meets first in every
+    guard it writes: a response model declared in a router would be outside a
+    directory walk and is inside this one. Nothing declares one outside
+    `schemas/` today, so that is latent in the loud direction.
+
+    **Imported rather than parsed, and the first reason written here did not
+    hold.** It said a walk over class bodies would miss the inheriting models
+    and the generic parametrisations. Measured 2026-10-02: a walk over
+    annotated assignments under `schemas/` misses **none** of the names this
+    reader produces, and by construction rather than by luck, since a
+    parametrisation introduces no field its origin's body lacks and every
+    inheriting model has its base's class statement in the same corpus, with
+    no model taking a base from outside it.
+
+    **What the registry buys that no class body can have is two other
+    things.** A **config level alias generator** renames every field of a
+    model with no literal appearing in any class body anywhere, and it drives
+    the attribute lookup: measured, a model whose generator returns the
+    guarded name reads that attribute off the row while no class body
+    contains the string. And a model built by `pydantic.create_model` has no
+    class statement at all, while recording the calling module, so it is
+    inside this population and outside any parse.
+
+    **What is past it, stated as conditions rather than bounded.** The
+    largest is not a narrowing of this population at all: **this population
+    is models, and a response body need not be one.** A route that builds its
+    body outside the model layer declares nothing for any reader to walk, and
+    two operations in the committed document do exactly that. The archive is
+    one: `backup.build_archive` selects every column of every table it lists
+    and serialises the rows, so it carries the guarded columns and is past
+    **both** instruments, naming no column and declaring no field. It is
+    admin only for that reason, which `docs/security.md` records. No arming
+    of this population reaches that, because there is no model to walk, and
+    that is a different condition from the directory narrowing the paragraph
+    above is written against.
+
+    Three smaller ones, all harmless today and none of them a count.
+    Membership is `cls.__module__`, so a model built by a bare
+    `type(name, (BaseModel,), ...)` is outside, because the three argument
+    form takes `__module__` from the metaclass's frame and records `abc`:
+    measured, and it is why the plants below set `__module__` themselves.
+    `pydantic.create_model` records the caller's module and is inside. And
+    the corpus excludes the test tree and the migrations, so a model declared
+    in either is outside this population.
+
+    **A model whose validator is not built yet is rebuilt here**, because
+    `declared_schema_fields` reads the compiled schema and an unbuilt model
+    carries a mock in its place. Rebuilding is what Pydantic does itself on
+    first use, so this only brings that forward, and it happens after every
+    corpus module is imported, which is the widest namespace the rebuild can
+    be attempted in. `test_every_model_carries_a_schema_this_rule_can_read`
+    is what stops a model that cannot be rebuilt being skipped in silence.
+    """
+    for module in _application_module_names():
+        importlib.import_module(module)
+    corpus = set(_application_module_names())
+    found: list[type[BaseModel]] = sorted(
+        (
+            cls
+            for cls in _every_subclass(BaseModel)
+            if cls.__module__ in corpus and issubclass(cls, BaseModel)
+        ),
+        key=lambda cls: (cls.__module__, cls.__name__),
+    )
+    for cls in found:
+        if not isinstance(cls.__pydantic_core_schema__, dict):
+            cls.model_rebuild()
+    return tuple(found)
+
+
+def _lookup_names(cls: type[BaseModel]) -> dict[str, set[str]]:
+    """Each field of this model, against the attribute names it can read.
+
+    **Read off Pydantic's own compiled schema, which is why no alias shape is
+    named here.** `cls.__pydantic_core_schema__` is what the validator was
+    built from, and it carries each field's resolved `validation_alias`
+    already flattened into strings and lists of them. A shape the library
+    grows next compiles into the same node, so this closes the question
+    rather than bounding it.
+
+    **The version this replaced enumerated `str`, `AliasPath` and
+    `AliasChoices` off `FieldInfo` and raised on a fourth.** That was the
+    loud direction and it was still an enumeration, and it could not see an
+    alias injected by a custom `__get_pydantic_core_schema__`, which leaves
+    no trace on `FieldInfo` at all. Measured 2026-10-02 over every model this
+    backend defines: the two agree on all 126 that carry a built schema, and
+    the compiled key additionally catches a config level alias generator and
+    every shape probed.
+
+    **The field's own name is kept even where an alias replaces it**, which
+    is a superset of what one validation reads: with an alias set, Pydantic
+    looks up the alias alone, measured both with and without
+    `populate_by_name`. The superset refuses loudly where the exact set would
+    rest on one version's precedence rule, and it is what the reader this
+    replaced already did, so the key changed and the extent did not.
+    """
+    found: dict[str, set[str]] = {}
+    for name, field in _compiled_node(cls, "model-fields")["fields"].items():
+        reads = {name}
+        pending = [field.get("validation_alias")]
+        while pending:
+            alias = pending.pop()
+            if isinstance(alias, str):
+                reads.add(alias)
+            elif isinstance(alias, list):
+                pending.extend(alias)
+        found[name] = reads
+    return found
+
+
+def _compiled_node(cls: type[BaseModel], kind: str) -> dict[str, Any]:
+    """This model's own compiled node of that kind, or a refusal.
+
+    **Shared by both readers of the compiled schema, and it was not.** The
+    extras reader had a private walk of the same shape that **returned false
+    silently** where this one raises, so a narrowing written in it answered
+    "no model admits extras" rather than failing. That is exactly the
+    behaviour the refusal below exists to prevent, one function over.
+    `test_every_model_carries_a_schema_this_rule_can_read` drives both kinds
+    for that reason: a narrowing here has to red by name rather than by
+    whichever rule happens to ask first.
+
+    **The two kinds sit at different depths and both are live.** Measured
+    over this population: the `model` node at 0, 1 or 2, and `model-fields`
+    at 1, 2 or 3, through four distinct chains, because a validator
+    decorator and a recursive reference each add a wrapper. So a bound that
+    looks generous still answers for the plain majority and misses the rest,
+    which is why the refusal matters more than the bound.
+
+    **The descent step is `schema` alone.** It was `schema` or `cls_schema`,
+    and that second member is not a key of any core schema type the installed
+    library defines: no file of `pydantic` or of `pydantic_core` mentions the
+    string at all.
+
+    ```bash
+    grep -rl cls_schema "$(python -c 'import pydantic,pathlib;print(pathlib.Path(pydantic.__file__).parent)')"
+    ```
+
+    **That is why it is dropped rather than noted.** A count of how often this
+    population needed it would be a measurement over a population and would
+    go stale as the population moved; the library's own definition does not,
+    and a shape that somehow needs it meets the refusal below.
+
+    **The node is checked to belong to the class it was asked about.** The
+    descent returns the first node of its kind on the chain, and without this
+    that is correct by accident: a root model whose root is a model would
+    hand back the inner one. There are none, so it reds nothing today, and
+    one condition turns a property that happens to hold into one that is
+    asserted.
+    """
+    node: object = cls.__pydantic_core_schema__
+    its_own = False
+    for _ in range(_SCHEMA_DEPTH):
+        if not isinstance(node, dict):
+            break
+        if node.get("type") == "model":
+            if node.get("cls") is not cls:
+                raise LookupError(
+                    f"the first model node under {cls.__module__}.{cls.__name__} "
+                    f"belongs to {node.get('cls')!r}, so reading it would "
+                    "describe another class."
+                )
+            its_own = True
+        if node.get("type") == kind:
+            if not its_own:
+                raise LookupError(
+                    f"a {kind} node was reached under "
+                    f"{cls.__module__}.{cls.__name__} before its own model "
+                    "node, so it cannot be attributed to this class."
+                )
+            return node
+        node = node.get("schema")
+    raise LookupError(
+        f"{cls.__module__}.{cls.__name__} carries no compiled {kind} node this "
+        "rule can read, so what it declares is unknown rather than empty. A "
+        "model whose validator is unbuilt is rebuilt in `application_models`; "
+        "this is a model that could not be."
+    )
+
+
+#: How far down the compiled schema a model's own nodes may sit.
+#:
+#: A model schema wraps its fields in `definitions` and in a `function-*`
+#: validator per decorator, so the depth is a property of the model rather
+#: than a constant. The bound is here only to stop a cycle spinning: reaching
+#: it raises, which is the loud direction, and the deepest node this corpus
+#: takes sits well inside it.
+_SCHEMA_DEPTH: Final = 50
+
+
+def declared_schema_fields(
+    columns: Container[str], models: Iterable[type[BaseModel]] | None = None
+) -> list[str]:
+    """Every Pydantic field in this backend that a column name reaches.
+
+    **A declaration is a read, and it is the read no source walk can see.**
+    A field named for a column, on a model validated off an ORM row, is
+    populated by Pydantic reading that attribute: there is no `ast.Attribute`,
+    no `getattr` and no keyword anywhere in the source, so `column_mentions`
+    is satisfied and the column's value reaches a client. That is the whole
+    reason this reader exists beside that walk rather than inside it.
+
+    **It does not ask whether the model carries `from_attributes`, and that is
+    not laziness.** `model_validate(row, from_attributes=True)` turns it on
+    **at the call site**, measured 2026-10-02 against a model whose own
+    `model_config` sets nothing, so no property of the class can decide
+    whether the attribute will be read. Keying on the config would have been a
+    guard that a caller one file away disarms.
+
+    **And it has no clearing, where `_provenance_reads` has one.** That half
+    clears a read whose receiver resolves to a model not marking the column.
+    A declaration has no receiver: which rows this model will be validated
+    from is a property of its call sites. So an unmarked owner's column is
+    reported here and allowed there, which is a false refusal in the loud
+    direction and the only answer that does not rest on guessing.
+
+    **Two more false refusals it takes, and they are accepted rather than
+    unnoticed.** A model that is never validated from a row at all, such as
+    one built only from a request body, is reported the same way, because
+    nothing on the class says which it is. And a request model naming the
+    column, a filter say, is reported, which is wanted: that is a second
+    place the question of who may relabel a name would be answered. The exit
+    from all three is to publish a derived answer, which is what
+    `CustomFieldOut.renamable` is.
+    """
+    return sorted(
+        {
+            f"{cls.__module__}.{cls.__name__}.{name} ({column})"
+            for cls, name, column in _declared_rows(columns, models)
+        }
+    )
+
+
+def _declared_rows(
+    columns: Container[str], models: Iterable[type[BaseModel]] | None = None
+) -> list[tuple[type[BaseModel], str, str]]:
+    """The reader's own loop, as rows rather than as rendered strings.
+
+    **Lifted so something can be held against it.** Every plant hands the
+    reader a population, so a narrowing written in this loop is invisible to
+    all of them, and an arm comparing the reader to `_lookup_names` is
+    invisible to one written in **that**, because both its sides go through
+    it. `test_the_reader_reaches_every_field_the_models_declare` compares
+    these rows against `model_fields`, which reaches neither.
+    """
+    rows: list[tuple[type[BaseModel], str, str]] = []
+    for cls in application_models() if models is None else models:
+        for name, reads in _lookup_names(cls).items():
+            for column in sorted(read for read in reads if read in columns):
+                rows.append((cls, name, column))
+    return rows
+
+
+def _admits_extras(cls: type[BaseModel]) -> tuple[bool, bool]:
+    """Whether this model passes an undeclared key through, read two ways.
+
+    `(by the config, by the compiled schema)`. The first is what Pydantic
+    resolves through inheritance and exposes; the second is the setting the
+    validator was actually built with, which is the one a custom
+    `__get_pydantic_core_schema__` could move without touching the config.
+
+    **Both, because the first version of this read one key and read the wrong
+    one.** It asked `model-fields` for `extra_behavior`, where the setting
+    sits on the enclosing `model` node's `config` as
+    `extra_fields_behavior`. That spelling is accepted by nobody and raised
+    nothing: the function returned False for every model including a planted
+    one, so the rule was **permanently inert** and green. It was caught by
+    the plant below and by nothing else, which is why that plant asserts each
+    reading separately rather than their union.
+
+    **The descent is `_compiled_node` and it used to be a private copy.**
+    That copy answered False where the shared one raises, so narrowing its
+    depth left this rule answering for the plain majority of models and
+    missing every one whose node sits deeper, with no arm red: a planted
+    model's node is at depth zero, so no plant could see it.
+    """
+    config = _compiled_node(cls, "model").get("config") or {}
+    return (
+        cls.model_config.get("extra") == "allow",
+        config.get("extra_fields_behavior") == "allow",
+    )
+
+
+def models_admitting_extras(
+    models: Iterable[type[BaseModel]] | None = None,
+) -> list[str]:
+    """Every model that would carry an undeclared key into its response.
+
+    **This is the precondition that makes `declared_schema_fields` an
+    answer.** That reader enumerates what a model declares, and a model
+    opting into extras carries keys it declares nowhere: `Model(**vars(row))`
+    then puts every attribute of the row into the body. Driven 2026-10-02
+    against the splat spelling already live in this backend: with extras
+    allowed the guarded column reaches `model_dump` **with no declaration and
+    no attribute access**, so both halves of the rule are satisfied and the
+    value reaches the client.
+
+    **Only `allow` leaks.** `ignore` drops the key and `forbid` raises, so
+    both are safe and neither is refused here; what is refused is the one
+    setting that passes an undeclared key through.
+
+    **It refuses a model that opts in for a reason having nothing to do with
+    a row**, a passthrough payload say, and that is the loud direction rather
+    than an oversight: nothing on the class says where its keys come from, so
+    the alternative is deciding by guess. The exit is to declare the fields.
+
+    **The union of two readings**, for the reason `_admits_extras` gives: one
+    of them was wrong on its own and silently reported nothing.
+    """
+    return sorted(name for name, admits in _extras_rows(models) if admits)
+
+
+def _extras_rows(
+    models: Iterable[type[BaseModel]] | None = None,
+) -> list[tuple[str, bool]]:
+    """The extras reader's own loop, as rows rather than as a filtered list.
+
+    **The same door `_declared_rows` has, and it is here because the lesson
+    did not travel.** This rule was written in the same commit as the
+    declaration reader and inherited the identical hole: both its plants hand
+    it a population, so one line in its comprehension hid a live opt in with
+    nothing red. `test_the_extras_reader_reaches_every_model` is its arm.
+
+    **It yields the rendered name rather than the class, and that is
+    structural rather than tidy.** The public function above has no class to
+    key a predicate on, so the one line form of that narrowing cannot be
+    written there at all. **It does not close the class, and that is driven
+    rather than conceded**: a predicate on the rendered string is still
+    available, and with a live opt in behind one every arm passes at exit
+    zero. Nothing here refuses it and nothing can. The
+    declaration reader does not need this, because an arm entering at its
+    door covers the same layer; this rule has no such arm available, since
+    its output over a clean tree is empty and any equality between its layers
+    would be a must green over nothing.
+    """
+    return [
+        (f"{cls.__module__}.{cls.__name__}", any(_admits_extras(cls)))
+        for cls in (application_models() if models is None else models)
+    ]
+
+
+class _EveryName:
+    """A `Container` holding every name, so the reader reports every field.
+
+    **This is how the reader's own loop is armed.** Every plant hands
+    `declared_schema_fields` a population of its own, so a filter written
+    inside its loop is invisible to all of them: the narrowing is in the
+    consumer rather than in the population, and no arming of the population
+    can see it. Asking it for everything makes its output a statement about
+    which models it reached.
+    """
+
+    def __contains__(self, _name: object) -> bool:
+        return True
+
+
+class TestTheDeclarationReaderAndThePopulationItWalks:
+    """`declared_schema_fields` and the population it is asked over.
+
+    **Named for both, because it arms both and they fail differently.** The
+    population half says `application_models()` is every Pydantic model the
+    backend defines; the reader half says each one's declared lookup names
+    are the ones its compiled validator carries. A plant through the reader
+    with a population handed to it certifies the reader and says nothing
+    about the population, which is why the first arms exist at all.
+
+    **Beside the reader rather than inside the two rules that use it**, for
+    the reason `TestTheApplicationCorpusIsStillTheApplication` gives one rung
+    down: a narrowing here takes both rules at once, and an arm living in
+    either of them leaves the other inheriting the hole.
+
+    ## Every link under these two rules, and what reads each one
+
+    **Named rather than counted, because the count was wrong twice and the
+    list that replaced it was short once, all three times by the same
+    mechanism.** The count said three layers over a chain of nine. The list
+    that replaced it was then taken over the functions **that round** had
+    touched and omitted three it had not, two of them unarmed at the time.
+    That is a census over a corpus holding the work it describes, which is
+    the defect this branch has paid for in a figure, in a list of published
+    sites and now in a list of links.
+
+    **So the question to ask of this list is not whether it is right, it is
+    what was touched last.** A round that lifts a helper adds a link above
+    it; a round that reads only what it edited will not see it. The two
+    unarmed omissions were found by a reader asking what sits between two
+    named links, which is the pass this list cannot perform on itself.
+
+    Each link, and what reads it **without passing through it**:
+
+    * `_is_vendored`, by `TestTheSourceWalkSeesOnlyThisProject`, one rung
+      down, which this class does not restate.
+    * `_python_sources`, by `TestTheApplicationCorpusIsStillTheApplication`
+      and the complement walk beside it.
+    * `_source_modules`, by `test_the_renaming_is_rebuilt_from_the_corpus`,
+      whose other side reads `_python_sources` and so does not pass through
+      it. **It was omitted, and while it was the arm went through it on both
+      sides**, which is the condition that arm exists to avoid one function
+      up: one line in it took a live declaration to a whole file green.
+    * `_application_module_names`, by
+      `test_the_renaming_is_rebuilt_from_the_corpus`, which rebuilds the
+      renaming by string surgery where the helper uses path parts.
+    * `_every_subclass`, by `test_an_indirect_subclass_is_in_the_population`,
+      which was already written and already named below. A naming gap in
+      this list rather than a gap in the arming.
+    * `application_models`, by the three arms below it: the import loop, the
+      registry against the namespaces, and the indirect subclass.
+    * `declared_schema_fields`, by
+      `test_the_reader_reaches_every_field_the_models_declare`, which enters
+      at this door rather than below it.
+    * `_declared_rows` and `_lookup_names`, by that same arm, which passes
+      through both and whose other side is `model_fields`, reaching no
+      compiled schema at all.
+    * `_compiled_node`, by `test_every_model_carries_a_schema_this_rule_can_read`
+      and by the refusal arm, both driven over both kinds.
+    * the compiled schema itself, by nothing here, and nothing should: it is
+      the library's rather than this repository's.
+
+    **The sibling rule has the same chain with `models_admitting_extras`,
+    `_extras_rows` and `_admits_extras` in place of the middle three.**
+    `test_the_extras_reader_reaches_every_model` enters at its door, and its
+    public function takes no class, deliberately: see `_extras_rows`.
+    `_admits_extras` was the second unarmed omission and is read by
+    `test_the_extras_rows_are_what_the_configs_say`, which that arm's own
+    docstring is honest about the worth of.
+
+    **The chain terminates because its last link is the library's.** That is
+    what makes this a closure rather than a longer list, and it closes the
+    chain under the population of Pydantic models and nothing wider: a
+    response body built without a model is outside it, which
+    `application_models` states as a condition with the live instance named.
+    """
+
+    def test_every_application_module_is_imported(self) -> None:
+        """The reader's import loop against the corpus it claims to cover.
+
+        A module the loop skips contributes no model and nothing else notices,
+        because the population would simply be smaller.
+
+        **`application_models()` is called first and that is the arm**, not
+        setup: it is what performs the import, and asking `sys.modules`
+        without it reports on whatever the rest of the run happened to
+        import. The first version of this arm omitted the call and was red
+        for the right reason: modules of this corpus are reached by nothing
+        else. **No count of them**, because two static derivations and the
+        runtime reading disagree, over populations that move with the test
+        distribution and with any new import anywhere.
+        """
+        application_models()
+        names = _application_module_names()
+
+        assert names, "the corpus is empty, so every rule reading it is vacuous"
+        assert [name for name in names if name not in sys.modules] == []
+
+    def test_the_renaming_is_rebuilt_from_the_corpus(self) -> None:
+        """The layer this branch added, armed where it is written.
+
+        **Rebuilt rather than asserted about.** `_application_module_names`
+        turns the corpus into dotted names, and every reading downstream
+        starts from its answer, so an equality between any two of them moves
+        together under a skip written inside it. This rebuilds the renaming
+        from `_source_modules()` by string surgery where the helper uses path
+        parts: the two degrade differently, so a skip is a disagreement.
+
+        **The other side reads `_python_sources`, not `_source_modules`.**
+        It read the latter, which the helper under test also reads, so the
+        arm passed through it on both sides: exactly the condition it exists
+        to avoid one function up, and one line in it took a live declaration
+        to a whole file green. Reading the walk below instead is green on a
+        clean tree and red under that skip.
+
+        **Correctly silent on a narrowing one rung down.** A token added to
+        `_is_vendored` shrinks both sides equally and reds in
+        `TestTheApplicationCorpusIsStillTheApplication` instead, which is
+        where that decision belongs.
+        """
+        rebuilt = set()
+        for path in _python_sources():
+            dotted = (
+                str(path.relative_to(BACKEND))
+                .removesuffix(".py")
+                .replace("/", ".")
+                .removesuffix(".__init__")
+            )
+            if dotted != "__init__":
+                rebuilt.add(dotted)
+
+        assert set(_application_module_names()) == rebuilt
+
+    def test_the_rebuild_exercises_both_module_shapes(self) -> None:
+        """Anti vacuity for the arm above, as a property and not a count.
+
+        The equality holds over an empty corpus and over one where every
+        module sits at the root, and in the second the package branch of the
+        renaming is never taken. A corpus with both shapes is what makes the
+        comparison about the transformation rather than about the suffix.
+        """
+        names = _application_module_names()
+
+        assert [name for name in names if "." not in name], "no module at the root"
+        assert [name for name in names if "." in name], "no module inside a package"
+
+    def test_every_model_carries_a_schema_this_rule_can_read(self) -> None:
+        """A model whose validator is unbuilt carries a mock in place of its
+        compiled schema, and reading one raises rather than answering empty.
+
+        **`application_models` rebuilds those, and this says the rebuild
+        worked.** Measured 2026-10-02: one model in this corpus is unbuilt
+        until something uses it, because it names another through a forward
+        reference. Without the rebuild its declarations are unknown; without
+        this arm a model that could not be rebuilt would be a `LookupError`
+        inside whichever rule happened to ask, rather than a failure naming
+        the model.
+        """
+        unreadable = []
+        for cls in application_models():
+            for kind in ("model", "model-fields"):
+                try:
+                    _compiled_node(cls, kind)
+                except LookupError as exc:
+                    unreadable.append(str(exc))
+
+        assert not unreadable, unreadable
+
+    def test_the_reader_reaches_every_field_the_models_declare(self) -> None:
+        """The reader's loop and the lookup reader under it, against a
+        reading that goes through neither.
+
+        **The first version of this arm was circular and its own docstring
+        said otherwise.** It compared the reader against `_lookup_names`,
+        which both of its sides called, so three lines inside that function
+        took a live declaration to a whole file green. The right hand side
+        is now `model_fields`, which Pydantic builds from the class rather
+        than from the compiled schema, so neither the loop nor the compiled
+        reader is on it.
+
+        **Field names only, and deliberately.** The alias axis is the one
+        the compiled key exists to absorb, so comparing it here would red on
+        a legitimate new alias shape, which is the opposite of what that key
+        was chosen for. What this holds is that every declared field is
+        reached, which is the axis that was never measured: the refusal to
+        ship an equality was right about aliases, where no field in this
+        backend carries one, and that cleared the axis that happened to be
+        measured rather than the one the guard needed.
+
+        **It enters at the public function, not at the row helper below
+        it.** Lifting that helper so this arm could read it created a link
+        above it, the comprehension in `declared_schema_fields`, and an arm
+        reading the helper cannot see a predicate written there. Driven: two
+        lines in that comprehension with a live declaration gave a whole file
+        green. Entering at the door costs nothing and covers the loop, the
+        row helper and the lookup reader together.
+
+        **The comparison is on the field, with whatever column follows
+        dropped**, which is what keeps it field names only while reading the
+        rendered output: a field carrying an alias renders twice and both
+        entries carry the same prefix.
+
+        **Non empty by a wide margin**, so it is not an equality over
+        nothing: the population declares hundreds of fields and the figure is
+        deliberately not written here, because it moves whenever somebody
+        adds a field.
+        """
+        reached = {entry.split(" (")[0] for entry in declared_schema_fields(_EveryName())}
+        declared = {
+            f"{cls.__module__}.{cls.__name__}.{name}"
+            for cls in application_models()
+            for name in cls.model_fields
+        }
+
+        assert declared, "the population declares nothing, so this measures nothing"
+        assert reached == declared
+
+    def test_the_extras_reader_reaches_every_model(self) -> None:
+        """The sibling rule's loop, which had the identical hole.
+
+        **Written in the same commit as the declaration reader and short in
+        the same way**, which is the thing to notice rather than the
+        mechanic: both its plants hand it a population, so one line in its
+        comprehension hid a live opt in with nothing red. The right hand side
+        is the population, which that comprehension does not own.
+        """
+        reached = {name for name, _ in _extras_rows()}
+        population = {
+            f"{cls.__module__}.{cls.__name__}" for cls in application_models()
+        }
+
+        assert reached, "the population is empty, so the extras rule is vacuous"
+        assert reached == population
+
+    def test_the_extras_rows_are_what_the_configs_say(self) -> None:
+        """`_admits_extras`, which sits inside both rules and which nothing
+        else read.
+
+        **Worth stating precisely rather than overselling.** The keys half of
+        this equality duplicates `test_the_extras_reader_reaches_every_model`
+        and adds nothing. The **flags** half is the arm: it is green on a
+        clean tree, where every flag is false on both sides, and it reds only
+        when something is live behind a filter written in `_admits_extras`,
+        which is the only circumstance in which that filter matters.
+
+        **It has a mutant no other arm answers**, which is this file's test
+        for an arm against decoration: two lines in `_admits_extras` with a
+        live opt in behind them leave the reach arm green, because that one
+        compares names, and both plants green, because each hands its own
+        class.
+
+        **The earlier reason for not arming here was right about the output
+        and did not cover the inputs.** An equality over what that rule
+        *reports* is a must green over nothing, because it reports nothing on
+        a clean tree. This is an equality over what it was *told*, which is
+        non empty at every model in the population.
+        """
+        rows = dict(_extras_rows())
+        configured = {
+            f"{cls.__module__}.{cls.__name__}": cls.model_config.get("extra") == "allow"
+            for cls in application_models()
+        }
+
+        assert configured, "the population is empty, so this measures nothing"
+        assert rows == configured
+
+    def test_no_model_admits_an_undeclared_key_into_its_response(self) -> None:
+        """What keeps the declaration reader's answer complete.
+
+        A model opting into extras publishes keys it declares nowhere, so
+        every rule over declarations is silently narrower than it reads. The
+        splat spelling that would carry one is already live in this backend,
+        which makes the single config line the only thing in the way.
+        """
+        offenders = models_admitting_extras()
+
+        assert not offenders, (
+            "These models pass undeclared keys through into their response:\n  "
+            + "\n  ".join(offenders)
+            + "\nA `Model(**vars(row))` then publishes every attribute of the "
+            "row, which no rule over declared fields can see. Declare the "
+            "fields; or drop the setting, since the default already ignores "
+            "an undeclared key and is what a splat usually wanted; or use "
+            "`forbid`, which raises on one instead."
+        )
+
+    def test_a_model_admitting_extras_is_reported(self) -> None:
+        """Anti vacuity for the arm above, which holds over a tree where
+        nothing opts in and would hold over a reader that answers nothing.
+
+        **Each reading is asserted separately, not their union.** The first
+        version of `_admits_extras` read one key, read the wrong one, and
+        returned False for everything; a union would have gone green here as
+        soon as the other reading was added, leaving the broken half in the
+        tree. This is also what reds if Pydantic renames the compiled key.
+        """
+        leaky: type[BaseModel] = type(
+            "Leaky",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "model_config": pydantic.ConfigDict(extra="allow"),
+                "__annotations__": {"name": str},
+                "name": "",
+            },
+        )
+
+        assert _admits_extras(leaky) == (True, True)
+        assert models_admitting_extras([leaky]) == [f"{__name__}.Leaky"]
+
+    def test_an_undeclared_key_really_does_reach_the_body(self) -> None:
+        """What the arm above is about, driven rather than asserted of
+        Pydantic.
+
+        Without this the rule rests on a belief about what `extra="allow"`
+        does, and the splat spelling it is written against is live in this
+        backend.
+        """
+        leaky: type[BaseModel] = type(
+            "Leaky",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "model_config": pydantic.ConfigDict(extra="allow"),
+                "__annotations__": {"source": str},
+                "source": "",
+            },
+        )
+
+        class Row:
+            def __init__(self) -> None:
+                self.source = "a source"
+                self.created_by_user_id = 7
+
+        assert leaky(**vars(Row())).model_dump() == {
+            "source": "a source",
+            "created_by_user_id": 7,
+        }
+        assert declared_schema_fields({"created_by_user_id"}, [leaky]) == []
+
+    #: The two settings that do not publish an undeclared key.
+    #:
+    #: **The whole of the safe half that is written down, not a sample.**
+    #: Pydantic's own `ExtraValues` is `allow`, `ignore` and `forbid`, so
+    #: this is a closed set completed rather than enumerated: the member
+    #: left out of the walk is the member left out of the experiment.
+    #:
+    #: **The state space is four and not three**, because unset is a state
+    #: of its own and is the one every model in this corpus is in. It is
+    #: exercised by the live rule over the whole population rather than
+    #: here, which is why these are two arms rather than four.
+    SAFE_EXTRAS: Final = ("ignore", "forbid")
+
+    @pytest.mark.parametrize("setting", SAFE_EXTRAS)
+    def test_a_model_not_admitting_extras_is_not_reported(self, setting: str) -> None:
+        """The diagonal, over both safe values.
+
+        `ignore` drops the key and `forbid` raises, so neither publishes one
+        and neither is refused here.
+        """
+        strict: type[BaseModel] = type(
+            "Strict",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "model_config": pydantic.ConfigDict(extra=setting),  # type: ignore[typeddict-item]
+                "__annotations__": {"name": str},
+                "name": "",
+            },
+        )
+
+        assert _admits_extras(strict) == (False, False)
+        assert models_admitting_extras([strict]) == []
+
+    def test_the_registry_and_the_module_namespaces_agree(self) -> None:
+        """Two derivations that degrade differently.
+
+        The registry is `BaseModel.__subclasses__()` walked transitively; the
+        second reading is what the corpus modules **bind**. Driven
+        2026-10-02: narrowing the first to direct subclasses leaves the second
+        whole and reds this arm by name, so a narrowing is a disagreement
+        rather than a smaller population nobody sees.
+
+        **No count is written in the assertion**, because both sides move
+        together whenever somebody adds a model and a figure beside a rule
+        goes stale against the rule.
+
+        **What it cannot see is a model bound nowhere**, which is in the
+        registry and not in the namespaces. None exists today, so the
+        equality holds; the day one arrives it reds and somebody decides,
+        which is the direction this file prefers.
+        """
+        models = application_models()
+        corpus = set(_application_module_names())
+        bound = {
+            attribute
+            for name in corpus
+            for attribute in vars(sys.modules[name]).values()
+            if isinstance(attribute, type)
+            and issubclass(attribute, BaseModel)
+            and attribute.__module__ in corpus
+        }
+
+        assert set(models) == bound
+
+    def test_an_indirect_subclass_is_in_the_population(self) -> None:
+        """Anti vacuity for the transitive walk, as a property and not a count.
+
+        Stopping at `BaseModel.__subclasses__()` is one token and reds here.
+        """
+        indirect = [
+            cls for cls in application_models() if BaseModel not in cls.__bases__
+        ]
+
+        assert indirect, (
+            "no model in this corpus inherits from another, so nothing here "
+            "says `_every_subclass` still recurses"
+        )
+
+    #: Each spelling that reads a guarded column off a row while naming it
+    #: nowhere a reader of the source would look.
+    #:
+    #: **Witnesses rather than the coverage.** `_lookup_names` reads the
+    #: compiled schema and names no shape, so a spelling the library grows
+    #: next is caught without an edit here. What this list is for is to stop
+    #: the reader going quietly inert: each of these reds on its own.
+    #:
+    #: **Found by probing the installed Pydantic rather than by choosing**,
+    #: which is the half the author of a matcher gets wrong: the plain field
+    #: is the only one the ticket names, and every shape after it came out of
+    #: asking what actually drives the lookup. The generator is the one worth
+    #: reading twice: it renames every field of a model from the config, so
+    #: the guarded name appears in no class body anywhere, which is what no
+    #: walk over source can see.
+    DECLARATIONS: Final = (
+        "a plain field",
+        "a validation alias",
+        "an alias",
+        "an alias path",
+        "an alias choice",
+        "a config level alias generator",
+    )
+
+    def _planted(self, shape: str) -> type[BaseModel]:
+        guarded = "created_by_user_id"
+        match shape:
+            case "a plain field":
+                return type(
+                    "Planted",
+                    (BaseModel,),
+                    {
+                        "__module__": __name__,
+                        "__annotations__": {guarded: int | None},
+                        guarded: None,
+                    },
+                )
+            case "a validation alias":
+                field = pydantic.Field(default=None, validation_alias=guarded)
+            case "an alias":
+                field = pydantic.Field(default=None, alias=guarded)
+            case "an alias path":
+                field = pydantic.Field(default=None, validation_alias=AliasPath(guarded))
+            case "a config level alias generator":
+                return type(
+                    "Planted",
+                    (BaseModel,),
+                    {
+                        "__module__": __name__,
+                        "model_config": pydantic.ConfigDict(
+                            alias_generator=lambda _name: guarded
+                        ),
+                        "__annotations__": {"definer": int | None},
+                        "definer": None,
+                    },
+                )
+            case _:
+                field = pydantic.Field(
+                    default=None, validation_alias=AliasChoices("definer", guarded)
+                )
+        return type(
+            "Planted",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "__annotations__": {"definer": int | None},
+                "definer": field,
+            },
+        )
+
+    @pytest.mark.parametrize("shape", DECLARATIONS)
+    def test_a_planted_declaration_is_reported(self, shape: str) -> None:
+        planted = self._planted(shape)
+
+        assert declared_schema_fields({"created_by_user_id"}, [planted]), shape
+
+    def test_a_model_naming_no_guarded_column_is_clean(self) -> None:
+        """The diagonal. Without it every arm above is satisfied by a reader
+        that reports every field it meets."""
+        innocent = type(
+            "Innocent",
+            (BaseModel,),
+            {"__module__": __name__, "__annotations__": {"name": str}, "name": ""},
+        )
+
+        assert declared_schema_fields({"created_by_user_id"}, [innocent]) == []
+
+    def test_a_model_with_no_compiled_fields_raises_rather_than_answering_empty(
+        self,
+    ) -> None:
+        """The refusal `_lookup_names` promises.
+
+        A model whose schema this walk cannot reach declares something
+        unknown, and answering the empty set there is a guard that stops
+        guarding without ever failing. Driven against a class whose compiled
+        schema has been replaced by one carrying no field node.
+        """
+        opaque: type[BaseModel] = type(
+            "Opaque",
+            (BaseModel,),
+            {"__module__": __name__, "__annotations__": {"name": str}, "name": ""},
+        )
+        opaque.__pydantic_core_schema__ = {"type": "any"}
+
+        # Both kinds, because both readers descend through this one function
+        # and the extras half is the one that used to answer False here.
+        with pytest.raises(LookupError, match="no compiled model-fields node"):
+            _compiled_node(opaque, "model-fields")
+        with pytest.raises(LookupError, match="no compiled model node"):
+            _compiled_node(opaque, "model")
+        with pytest.raises(LookupError, match="no compiled model-fields node"):
+            _lookup_names(opaque)
+        with pytest.raises(LookupError, match="no compiled model node"):
+            _admits_extras(opaque)
+
+    def test_a_node_belonging_to_another_class_is_refused(self) -> None:
+        """The belonging check, and it is load bearing rather than tidy.
+
+        **Driven both ways.** Given another model's compiled schema, the
+        walk without this check reaches that model's fields and would report
+        them under this class's name, which for a guarded column is the
+        wrong class accused or the right one missed. With it, the read is
+        refused and names both classes.
+        """
+        borrower: type[BaseModel] = type(
+            "Borrower",
+            (BaseModel,),
+            {"__module__": __name__, "__annotations__": {"harmless": int}, "harmless": 0},
+        )
+        lender: type[BaseModel] = type(
+            "Lender",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "__annotations__": {"created_by_user_id": int},
+                "created_by_user_id": 0,
+            },
+        )
+        borrower.__pydantic_core_schema__ = lender.__pydantic_core_schema__
+
+        # What the walk would hand back without the check, which is the
+        # reason it is here rather than a tidiness.
+        assert set(_compiled_node(lender, "model-fields")["fields"]) == {
+            "created_by_user_id"
+        }
+        assert set(borrower.model_fields) == {"harmless"}
+
+        with pytest.raises(LookupError, match="belongs to"):
+            _compiled_node(borrower, "model")
+
+    def test_a_field_node_reached_before_its_model_node_is_refused(self) -> None:
+        """The second refusal, which a reader called unreachable and is not.
+
+        **No class Pydantic builds gets there**, because it always wraps a
+        field node in a model node, and that is the half the reader was
+        right about. **A spliced schema does**, by exactly the technique the
+        two arms above use, and the fields it carries then belong to no
+        class this walk can name. So it is armed rather than deleted, which
+        is the opposite call from the unexercised descent step: that one was
+        a key the library defines nowhere, and this one fires here.
+        """
+        donor: type[BaseModel] = type(
+            "Donor",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "__annotations__": {"created_by_user_id": int},
+                "created_by_user_id": 0,
+            },
+        )
+        headless: type[BaseModel] = type(
+            "Headless",
+            (BaseModel,),
+            {"__module__": __name__, "__annotations__": {"harmless": int}, "harmless": 0},
+        )
+        headless.__pydantic_core_schema__ = donor.__pydantic_core_schema__["schema"]
+        assert headless.__pydantic_core_schema__["type"] == "model-fields"
+
+        with pytest.raises(LookupError, match="before its own model node"):
+            _compiled_node(headless, "model-fields")
+
+
 def _provenance_reads(source: str, label: str = "probe.py") -> list[str]:
     """Every read of a declared provenance column in one module's source.
 
@@ -2827,6 +3841,31 @@ class TestProvenanceColumnsAreNeverRead:
     **Three spellings**, and `_provenance_reads` says why each is there and
     what separates the query clause from the constructor write. An attribute
     walk alone was the first version and two live shapes went past it.
+
+    **The archive is the exception the published prose names, and it is not
+    the only one.** Every spelling here is syntax, so a read written as a
+    **string** is past all three: raw SQL, a `_mapping` subscript, a plain
+    dict subscript and a column allowlist each return nothing, driven, where
+    the plain attribute is reported. There is no live instance of any of
+    them for a guarded column, so this is a condition rather than a hole, and
+    it is stated here rather than at the six published sites because those
+    say what is true of the design and this says what the instrument sees.
+
+    **And a fourth thing, which is not a spelling and needs its own
+    instrument.** A Pydantic field named for one of these columns is read by
+    the validator Pydantic builds from the annotation, so the column's value
+    reaches a client with no attribute access, no `getattr` and no keyword
+    anywhere in the source. Every arm of the source walk is satisfied and the
+    promise is false. `declared_schema_fields` is that instrument and
+    `test_no_schema_declares_a_provenance_column` is the arm;
+    `TestTheDeclarationReaderAndThePopulationItWalks` is what keeps its population
+    the whole application.
+
+    **The two halves answer the same question about different things**, which
+    is why neither subsumes the other: the source walk reads statements and
+    cannot see a declaration, and the declaration reader reads classes and
+    cannot see a statement. **A narrowing of either is invisible to the
+    other**, so each carries its own arming.
 
     ## What it accepts, which is one spelling and not a remedy
 
@@ -2946,6 +3985,85 @@ class TestProvenanceColumnsAreNeverRead:
             )
             + "."
         )
+
+    def test_no_schema_declares_a_provenance_column(self) -> None:
+        """The half no source walk can see.
+
+        **Free on this tree and that is what settled the ruling.** Measured
+        2026-10-02 over every Pydantic model the backend defines: nothing
+        declares a marked column under any name Pydantic would look up. The
+        sentences in `models.py`, `shelving.py` and `docs/data-model.md` claim
+        more than the source walk alone enforces, and closing a hole that
+        costs nothing is better than narrowing them to match.
+        """
+        marked, _unmarked = _declared_provenance()
+        offenders = declared_schema_fields(marked)
+
+        assert not offenders, (
+            "These Pydantic fields are named for a column a model declares as "
+            "provenance only, and something in the tree promises nothing reads "
+            "it:\n  "
+            + "\n  ".join(offenders)
+            + "\nA field named for a column is read off the row by the "
+            "validator, with no attribute access anywhere in the source. "
+            "Publish a derived answer instead, or delete the promise."
+        )
+
+    def test_a_planted_declaration_of_a_marked_column_is_reported(self) -> None:
+        """The arm above holds over a tree where nothing declares anything, so
+        this is what says it would notice one.
+
+        **The planted model is not in the live population**, because
+        `__module__` is set to this test module and `application_models()`
+        keeps the corpus only. Set rather than inherited: the three argument
+        `type` records `abc`, which would also be outside, but for a reason
+        that has nothing to do with this file.
+        """
+        marked, _unmarked = _declared_provenance()
+        planted = type(
+            "CollectionOutWithItsAuthor",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "__annotations__": {"created_by_user_id": int | None},
+                "created_by_user_id": None,
+            },
+        )
+
+        assert declared_schema_fields(marked, [planted]) == [
+            f"{__name__}.CollectionOutWithItsAuthor.created_by_user_id "
+            "(created_by_user_id)"
+        ]
+
+    def test_a_declaration_is_reported_for_the_owner_the_source_half_clears(
+        self,
+    ) -> None:
+        """The stated false refusal of the declaration half, pinned the way
+        `test_an_instance_read_is_reported_whatever_the_row_is` pins the
+        source half's. **Named for the one owner it drives**, not for every
+        row: it holds the hard case and claims no extent past it.
+
+        `CustomField` carries this column name and does not mark it, so a read
+        naming that class is cleared above. A **declaration** names no class:
+        which rows a model is validated from is a property of its call sites,
+        so the unmarked owner's column is refused here and allowed there. The
+        one legitimate reader pays for it by publishing `renamable` instead of
+        the member id, which is the choice `schemas/custom_field.py` records.
+        """
+        _marked, unmarked = _declared_provenance()
+        assert unmarked.get("created_by_user_id") == {"CustomField"}
+
+        planted = type(
+            "CustomFieldOutWithItsAuthor",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "__annotations__": {"created_by_user_id": int | None},
+                "created_by_user_id": None,
+            },
+        )
+
+        assert declared_schema_fields({"created_by_user_id"}, [planted])
 
     def test_a_read_on_the_model_that_marks_it_is_reported(self) -> None:
         assert _provenance_reads(

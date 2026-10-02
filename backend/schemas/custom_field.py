@@ -17,10 +17,17 @@ class CustomFieldOut(BaseModel):
     would be one somebody can build without supplying it.
 
     **`renamable` rather than the author's member id, and the choice is a
-    containment rather than a disclosure.** `fields.Fields` is the only reader
-    of `custom_fields.created_by_user_id`, said in three published places and
-    enforced by
-    `tests/test_fields.py::TestFieldsIsTheOnlyReaderOfTheAuthorColumn`. A
+    containment rather than a disclosure.** `fields.Fields` is the only module
+    that reads `custom_fields.created_by_user_id`, with one stated exception:
+    `backup.py` selects every column of every table it archives, so it reads
+    the column while naming it nowhere, and it is admin only for that reason.
+    **The sites arguing the design from that containment are named and not
+    counted**, because the count that stood here said three and the list that
+    replaced it elsewhere named four and missed the register: `fields.py`,
+    `models.py`, this module, `docs/data-model.md` and `docs/decisions.md`.
+    `tests/test_fields.py::TestFieldsIsTheOnlyReaderOfTheAuthorColumn`
+    enforces it in two instruments, because a declaration is not a statement
+    and the source walk cannot see one. A
     `created_by_user_id` field here would be read by Pydantic with no
     attribute access anywhere in the source, so it would pass that guard while
     falsifying what it guards, and every client would then hold its own copy

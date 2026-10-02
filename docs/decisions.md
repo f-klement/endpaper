@@ -20408,7 +20408,7 @@ which no pydantic model sees.
 
 | Reader | Before | After |
 |---|---|---|
-| `frontend/src/lib/date.ts`, every rendered date and time | a timestamp with no offset parses as **local** time by specification, so a UTC instant rendered as the UTC clock face wearing a local label | the instant, rendered in the viewer's zone. A value near midnight moves a day |
+| `frontend/src/lib/date.ts`, every rendered **`date-time`**. A calendar date is not an instant and is ruled separately, below | a timestamp with no offset parses as **local** time by specification, so a UTC instant rendered as the UTC clock face wearing a local label | the instant, rendered in the viewer's zone. A value near midnight moves a day |
 | The generated TypeScript client | a string | a string. No type moved, because the declaration never did |
 | The CSV, text and MARCXML exports | the date read off the row | unchanged. No export goes through a schema model |
 | `backup.py`, archive and restore | naive, round trips | unchanged |
@@ -20464,6 +20464,61 @@ is at the site.
 UTC verbatim, because the string says nothing about which zone it meant. What changed is a
 deadline posted **with** one: `schemas.common.UtcDateTimeIn` converts it, where before the
 SQLite formatter dropped it and stored the wrong instant.
+
+## A calendar date is not an instant, so the renderer reads the shape rather than the caller
+
+**The RFC 3339 ruling above is about instants and does not reach a calendar date.** Its
+reader table is right for every `date-time` the schema publishes and was wrong for the four
+properties it declares `format: date`, which are one field, `purchased_at`, reaching the
+wire through four models.
+
+**What was wrong.** The renderer in `frontend/src/lib/date.ts` parsed with `new Date`, which
+reads a bare `YYYY-MM-DD` as UTC midnight, so the Bought on column of
+`frontend/src/pages/Home/components/BookTable.tsx` showed the day before the purchase date
+for every viewer west of Greenwich, and the right day for everyone east of it. The module
+already contradicted itself: of its three readers of a date-only value, `endOfDayInstant`
+appended a clock and `monthLabel` built from numbers, and `monthLabel`'s comment refuses the
+UTC parse in those words. The renderer was the one that did it.
+
+**The decision is that the renderer detects the shape, and the caller does not declare the
+kind.** The alternative puts a parameter on a shared signature every call site feeds, in
+order to change the answer at the sites one of them names. **No count stands here**: that
+figure is over a corpus the module itself measures, it has already been wrong twice, and a
+second copy of it in a second file is the drift this register keeps warning about. It lives
+at the site, with the command that takes it, in `DATE_ONLY` and `parsed`.
+
+The shape is what the wire declares: RFC 3339 spells a `full-date` as ten characters and a
+`date-time` with a `T`, so no value carrying a clock can match the detection whatever the
+schema grows.
+
+**A second surface rendered the same field with no formatter at all.**
+`frontend/src/pages/components/BookCard.tsx` put `purchased_at` into its fold out as a raw
+string, so the card printed an ISO date where the table beside it printed a formatted one,
+in every language. It now goes through the same renderer. **The date door in
+`frontend/tests/houseRules.test.ts` cannot see that class**: it collects the names the
+platform publishes, and a field rendered with no formatting call names nothing, so widening
+its name list can never reach it. Closing the class needs a rule keyed on the field rather
+than on the call, which is a render position pass rather than a name match, and that is
+tracked separately.
+
+**What a member sees change.** The table's Bought on column moves forward by one day for
+readers west of Greenwich, onto the date the copy was actually bought. The card's Bought on
+line becomes a formatted date in the reader's own language instead of ISO text. Nothing east
+of Greenwich moves in the table, and no other field moves anywhere.
+
+**The guards, and the one that makes the others mean anything.**
+`frontend/tests/lib/date.test.ts` holds both sides of the detection, a calendar date on its
+own day and the same date with a clock still rendered as an instant, over three fixtures
+that between them leave none of the pattern's eight digit positions pinned to a single
+value. `frontend/tests/pages/Home/components/BookTable.test.tsx` drives the column and
+`frontend/tests/pages/components/BookCard.test.tsx` the card, in both languages.
+**All of them rest on the suite's zone being west of Greenwich, and until this change
+nothing enforced that.** At any offset of zero or east, a bare date parsed as UTC midnight
+lands on the day it names, so the arms pass on the broken parse: driven with the pin at
+`Asia/Tokyo`, the suite's failure set is identical with and without the defect, and the arms
+that do red look like fixtures wanting new expected values. `frontend/tests/setup.ts` now
+refuses a pin that is not west, with the reason in the message.
+
 
 ## A database side default on a naive column is the one ambiguous stored value, and the wire did not make it one
 
@@ -20636,3 +20691,56 @@ does **not** mark the column. An instance read stays reported whatever the row i
 refusal in the loud direction: it costs the one legitimate reader a query shaped read off the
 class. **An exemption keyed on a file or a function would have accepted every read inside it**,
 which is the trade this refuses.
+
+## A schema declaration counts as a read of a guarded column
+
+The rule above walks statements, and **a Pydantic field named for a guarded column is not a
+statement**. A model validated off a row is populated by Pydantic reading the attribute, so
+the column reaches every client with no attribute access, no `getattr` and no keyword
+written anywhere for a walk to match. Every arm of the source rule is satisfied while the
+thing it guards is false.
+
+**The alternative was to narrow the published sentences to say a declaration is not a read,
+and the instrument that settles it cost nothing**: no Pydantic model this backend defines
+declares one, so closing the hole refused nothing that existed. It was open because
+`CustomFieldOut` answers a derived `renamable` instead of the member id, and that choice was
+taken a round before anything enforced it.
+
+**The enforcement is two instruments rather than a further arm on one**, because the two
+read different things: statements in the source walk, classes in the declaration reader. A
+narrowing of either is invisible to the other, which is the cost, and one walk short for
+both at once is what a single instrument would have bought instead.
+
+**It does not consult `from_attributes`.** Validating with that flag passed at the call site
+reads the attribute whatever the class config says, so a reader keyed on the config would be
+right about the common case and blind to the one that matters.
+
+## The declaration reader is keyed on Pydantic's compiled schema, not on `FieldInfo`
+
+The first version enumerated the alias shapes and raised on a fourth it did not know. That
+is loud rather than silent, which is the right failure direction, but it is still an
+enumeration: it cannot see an alias injected by a custom core schema hook, because such an
+alias never passes through the shapes it enumerates.
+
+The compiled schema is what Pydantic itself resolves the wire name from, so reading it asks
+the question the client's view actually depends on.
+
+**An equality arm between the two readings was refused rather than shipped.** No field in
+this backend carries an alias at all, so the arm would be green whether or not the alias
+half existed, which is a guard that cannot fail for the reason it names.
+
+## What the two instruments hold is reading, with the archive as a stated exception
+
+A round of this work ruled the published verb should be **naming** rather than reading, on
+the reasoning that the module arm asserts no module while one site names the column. **That
+is false, and it made six published sentences false across five files before it was driven
+out.** The reader clears every row building call, so seven live sites across three modules
+name the column and are cleared by it, and two arms in the same class require a write not to
+be reported. The branch's own arms assert the counter-example.
+
+**The exception runs the other way and is stated rather than guarded.**
+`backup.build_archive` selects every column of every table it lists, so it reads every
+guarded column while naming none, and no walk over source can see that. It is admin only for
+exactly that reason, which `docs/security.md` records. Four published sentences promised one
+of these columns is read by nothing and were true only of the layer they were measured at;
+each now names the archive.

@@ -168,6 +168,35 @@ describe("BookTable", () => {
     expect(within(row).getByRole("link")).toHaveTextContent("Bare");
   });
 
+  it("dates Bought on to the day the copy was bought", () => {
+    // **The rendered half of the purchase date reading a day early.**
+    // `purchased_at` is the only `format: date` field the API publishes, a
+    // bare `YYYY-MM-DD`, and `new Date` reads one as UTC midnight. Against the
+    // zone pinned in `tests/setup.ts` this cell read `1/4/2026` for a copy
+    // bought on the fifth, for every member west of Greenwich, and no arm in
+    // the suite looked at this column.
+    //
+    // **Driven through the component rather than through `numericDate`,**
+    // because the unit arm beside it in `tests/lib/date.test.ts` cannot see
+    // the column being wired to the wrong renderer, which is the other way
+    // this cell can be a day out.
+    renderTable({ books: [{ ...DUNE(), purchased_at: "2026-01-05" }] });
+
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((cell) => cell.textContent ?? "");
+    const column = headers.findIndex((text) => text.includes("Bought on"));
+    // The column has to be drawn for the assertion below to mean anything: a
+    // missing header gives `-1`, which would read a cell from the end of the
+    // row and could pass on the wrong one.
+    expect(column).toBeGreaterThan(-1);
+
+    const row = screen.getAllByRole("row")[1]!;
+    expect(within(row).getAllByRole("cell")[column]).toHaveTextContent(
+      "1/5/2026",
+    );
+  });
+
   it("scrolls inside its own container", () => {
     // The page body must never scroll sideways: it would take the navigation
     // and the header with it, which on a touch device loses the app.

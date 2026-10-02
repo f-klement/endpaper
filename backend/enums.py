@@ -539,6 +539,15 @@ class AuthorityScheme(StrEnum):
     BNCHL = "bnchl"
 
 
+# **The inference the docstring sets aside is not available anyway**, and this
+# is a comment for the reason `BookFormat`'s own comment gives: a docstring here
+# is copied into `frontend/openapi.json`, so a maintenance note in one moves a
+# committed document for no reader's benefit. `created_by_user_id` is provenance
+# on both tables named below: no query may consult it and no schema may declare
+# a field named for it, which `models.py` states at each column and
+# `tests/test_house_rules.py::TestProvenanceColumnsAreNeverRead` enforces with
+# one instrument per half. So this value is the only route to the question
+# rather than the cheaper of two.
 class AuthorityProvenance(StrEnum):
     """Who said an author's identifier is that author's.
 

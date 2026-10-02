@@ -83,10 +83,18 @@ class Shelving:
     nothing here is public by construction.
 
     **And no ownership arm.** `Collection.created_by_user_id` exists and is
-    written, and no query in this tree reads it:
-    `tests/test_house_rules.py::TestProvenanceColumnsAreNeverRead` reports any
-    read of it anywhere, which makes the separation mechanical rather than
-    intended, and `docs/decisions.md` records what it is for. Arm 3 covers what
+    written, and no query in this tree reads it except the archive:
+    `tests/test_house_rules.py::TestProvenanceColumnsAreNeverRead` reports a
+    read of it written in a module of the application corpus, and a Pydantic
+    field named for it on any model that corpus defines, which makes the
+    separation mechanical rather than intended for those two shapes.
+
+    **The archive is the exception, because a whole table serialiser names no
+    column.** `backup.py` selects every column of every table it archives, so
+    the value is in the archive and past both instruments. The archive is
+    admin only for that reason, which `docs/security.md` records.
+
+    `docs/decisions.md` records what the column is for. Arm 3 covers what
     such an arm would mostly have been for, since a collection made one request
     ago carries nothing.
 

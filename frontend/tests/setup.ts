@@ -106,11 +106,34 @@ process.env.TZ = SUITE_TIMEZONE;
  * worse than no pin, because it reads as the discriminating zone while being
  * one that discriminates nothing.
  *
- * **Three things are checked, and none of them is redundant.**
+ * **Four things are checked, and none of them is redundant.**
  *
  * The **name** is what the runtime says about itself. The **offset** is what
  * `Date` actually does, and they can disagree if `Intl` carries zone data the
  * clock does not.
+ *
+ * The **hemisphere** is the table above read as a requirement rather than as an
+ * observation, and until it was checked nothing enforced it. A bare
+ * `YYYY-MM-DD` parsed as UTC midnight lands on the day it names in every zone
+ * whose offset is zero or east, so at such a pin the date-only arms in
+ * `tests/lib/date.test.ts` and the Bought on arm in
+ * `tests/pages/Home/components/BookTable.test.tsx` pass on the broken parse.
+ * Driven, pin moved to `Asia/Tokyo` with this check disarmed, which is how it
+ * has to be re-derived now that the check exists: six arms in four files red
+ * with the code correct, and **the identical six, same names and same counts,
+ * with the date-only parse reverted**. None of the six is a date-only arm. So
+ * east of here the defect is not harder to see, it is invisible, and every red
+ * looks like a fixture date wanting a new expected value. Updating them is the
+ * repair the failure invites and it would take this suite's whole regression
+ * coverage of that defect with it, plus the `monthLabel` mutant the table above
+ * says only a western pin catches.
+ *
+ * **The four compose, and that is worth more than any one of them.** No single
+ * edit moves the pin east past all four: changing the zone forces the name
+ * check, which forces the constant to change with it; the two seasonal readings
+ * then force that constant to be what the clock actually does; and this one
+ * refuses it once it is negative. Each check alone is evadable by editing its
+ * neighbour's input, and together they are not.
  *
  * The **second offset, six months out, is what holds the no DST constraint**.
  * The zone is chosen partly because it does not change offset, so a fixture's
@@ -147,6 +170,21 @@ function assertTheZoneIsPinned(): void {
       `${SUITE_TIMEZONE} is not at a constant ${SUITE_TIMEZONE_OFFSET} minutes: ` +
         `January reads ${winter} and August reads ${summer}. A suite zone that ` +
         `changes offset makes a fixture's rendered day depend on its month.`,
+    );
+  }
+  // `getTimezoneOffset` counts minutes BEHIND UTC, so west is positive. Read
+  // off the constant rather than off the clock, because the constant is what a
+  // person edits when they move the pin and it is already proved equal to the
+  // clock two lines above.
+  if (SUITE_TIMEZONE_OFFSET <= 0) {
+    throw new Error(
+      `the suite zone must be WEST of Greenwich and ${SUITE_TIMEZONE} is at ` +
+        `${SUITE_TIMEZONE_OFFSET} minutes. This is not a preference: a bare ` +
+        `YYYY-MM-DD parsed as UTC midnight lands on the day it names at every ` +
+        `offset of zero or east, so the date-only arms would pass on the ` +
+        `broken parse and the monthLabel mutant would go uncaught. Moving the ` +
+        `pin east reds the same arms whether or not those defects are present, ` +
+        `which is why this refuses by name here instead.`,
     );
   }
 }

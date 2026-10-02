@@ -37,7 +37,9 @@ import ast
 from datetime import UTC, datetime
 from typing import Final
 
+import pydantic
 import pytest
+from pydantic import BaseModel
 from sqlalchemy import event
 
 import custom_fields
@@ -49,6 +51,7 @@ from tests.test_house_rules import (
     _receiver_model,
     _source_modules,
     column_mentions,
+    declared_schema_fields,
 )
 from tests.test_shelf import _book_owned_offences, _statement_at
 from tests.test_tags import _reaches_private
@@ -1197,13 +1200,37 @@ class TestWhoMayRenameAField:
 
 
 class TestFieldsIsTheOnlyReaderOfTheAuthorColumn:
-    """The containment three published sentences argue the design from.
+    """The containment the published sentences argue the design from.
 
-    `fields.py`, `models.py` and `docs/data-model.md` each say this module is
-    the only reader of `custom_fields.created_by_user_id`. That is the privacy
-    containment the whole member axis rests on: the column decides who may
-    relabel a library wide name, and a second reader is a second place an
-    authorization clause can be written.
+    `fields.py`, `models.py`, `schemas/custom_field.py`, `docs/data-model.md`
+    and `docs/decisions.md` say this module is the only reader of
+    `custom_fields.created_by_user_id`. That is the privacy containment the
+    whole member axis rests on: the column decides who may relabel a library
+    wide name, and a second reader is a second place an authorization clause
+    can be written.
+
+    **The sites are named and not counted, and the first list of them was
+    short.** The count that stood here said three; the list that replaced it
+    named four and missed the register, which is the same defect one level
+    down. A count is one thing to keep in step and a list is one thing to
+    keep complete, and only the second can be checked by reading.
+
+    ## A declaration is a read, and the source walk below cannot see one
+
+    A Pydantic field named for this column, on a model validated off a
+    `CustomField` row, is populated by Pydantic reading the attribute. **There
+    is no attribute access, no `getattr` and no keyword anywhere in the
+    source**, so every arm of the walk below is satisfied while the column's
+    value reaches every client. `test_no_schema_declares_the_author_column` is
+    the second instrument, over `declared_schema_fields`, and it is a second
+    instrument rather than a further arm because the two read different
+    things: statements here, classes there. A narrowing of either is invisible
+    to the other.
+
+    **Nothing declared one when this was closed**, 2026-10-02, so it cost
+    nothing: the hole was what made `CustomFieldOut` publish a derived
+    `renamable` instead of the member id, and that choice was taken a round
+    before anything enforced it.
 
     **Nothing enforced it, and the obvious guard does not.**
     `tests/test_house_rules.py::TestProvenanceColumnsAreNeverRead` refuses
@@ -1285,10 +1312,106 @@ class TestFieldsIsTheOnlyReaderOfTheAuthorColumn:
 
         assert readers == {self.READER}, (
             "something outside `fields.Fields` reads which member defined a "
-            "custom field. Three published sentences say that module is the "
-            "only reader, and a second one is a second place the question of "
-            "who may relabel a library wide name gets answered."
+            f"custom field. `{self.READER}` is published as its only reader "
+            "in code this rule can see, and a second one is a second place "
+            "the question of who may relabel a library wide name gets "
+            "answered."
         )
+
+    def test_no_schema_declares_the_author_column(self) -> None:
+        """The half `_census` cannot see, over the classes rather than the
+        source.
+
+        **Redundant with `TestProvenanceColumnsAreNeverRead`'s declaration arm
+        today, and not decoration.** That rule refuses the same name because a
+        declaration has no receiver to clear it against, so the two coincide
+        while the keys coincide. They stop the moment either moves: that one
+        is keyed on `info={"provenance": ...}` and widens with a fourth marked
+        column, this one is keyed on `AUTHOR` and follows a rename of this
+        column. **The mutant only this arm reds** is the marker deleted from
+        all three models, which empties that rule's key and leaves it vacuous
+        over any declaration of this column.
+        """
+        offenders = declared_schema_fields({self.AUTHOR})
+
+        assert not offenders, (
+            "These Pydantic fields are named for the column that records who "
+            "defined a custom field:\n  "
+            + "\n  ".join(offenders)
+            + f"\n`{self.READER}` is published as its only reader, and a field "
+            "named for it is read off the row by the validator with no "
+            "attribute access anywhere in the source. Publish a derived answer "
+            "the way `CustomFieldOut.renamable` does."
+        )
+
+    #: Ways a Pydantic field reads this column off a row while naming it
+    #: nowhere a reader of the field names would look.
+    #:
+    #: **Witnesses, not the coverage.** `declared_schema_fields` reads the
+    #: compiled validator and enumerates no shape, so what this list is for
+    #: is to stop the reader going quietly inert on this rule's own column.
+    #: The generator is the one that cannot be found by reading source: it
+    #: renames the field from the model's config, so the guarded name is in
+    #: no class body anywhere.
+    DECLARED: Final = (
+        "the field name",
+        "a validation alias",
+        "a config level alias generator",
+    )
+
+    @pytest.mark.parametrize("shape", DECLARED)
+    def test_the_reader_sees_a_declaration_written_this_way(
+        self, shape: str
+    ) -> None:
+        """The arm above holds over a tree declaring nothing, so this says it
+        would notice one.
+
+        A model built here has this test module for its `__module__` and is
+        outside `application_models()`, which is why the population is armed
+        where it is derived rather than here.
+        """
+        body: dict[str, object]
+        match shape:
+            case "the field name":
+                body = {
+                    "__annotations__": {self.AUTHOR: int | None},
+                    self.AUTHOR: None,
+                }
+            case "a validation alias":
+                body = {
+                    "__annotations__": {"definer": int | None},
+                    "definer": pydantic.Field(
+                        default=None, validation_alias=self.AUTHOR
+                    ),
+                }
+            case _:
+                body = {
+                    "model_config": pydantic.ConfigDict(
+                        alias_generator=lambda _name: self.AUTHOR
+                    ),
+                    "__annotations__": {"definer": int | None},
+                    "definer": None,
+                }
+        planted = type(
+            "CustomFieldOutWithItsAuthor", (BaseModel,), {"__module__": __name__} | body
+        )
+
+        assert declared_schema_fields({self.AUTHOR}, [planted]), shape
+
+    def test_a_field_named_for_something_else_is_not_reported(self) -> None:
+        """The diagonal, without which the arms above are satisfied by a
+        reader that reports every field it meets."""
+        innocent = type(
+            "CustomFieldOut",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "__annotations__": {"renamable": bool},
+                "renamable": True,
+            },
+        )
+
+        assert declared_schema_fields({self.AUTHOR}, [innocent]) == []
 
     def test_one_module_writes_it(self) -> None:
         _readers, writers = self._census()

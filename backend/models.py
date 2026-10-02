@@ -230,9 +230,12 @@ class Collection(Base):
     already on, since the count has always been the caller's own; it adds none.
     `shelving.Shelving` is the rule.
 
-    `created_by_user_id` is provenance and nothing else. No query consults it,
-    which is what keeps the paragraph above true rather than merely intended,
-    and it is why the rule is written over books rather than over an owner.
+    `created_by_user_id` is provenance and nothing else. No query consults it
+    except the archive, which selects every column of every table it takes and
+    so reads this one while naming it nowhere, and no schema declares a field
+    named for it. That is what keeps the paragraph above true rather than
+    merely intended, and it is why the rule is written over books rather than
+    over an owner.
     Nullable, so deleting an account does not cascade away the library's
     shelving.
     """
@@ -283,6 +286,12 @@ class Collection(Base):
         # says so here rather than because it is spelled like its neighbours.
         # Removing the marker removes the protection, loudly: the guard
         # asserts which columns carry it.
+        #
+        # **Two instruments read this key, and neither sees what the other
+        # does.** One walks the source for a read written as a statement; the
+        # other walks the Pydantic models for a field named for the column,
+        # which is read off the row by the validator with nothing written in
+        # the source at all.
         info={"provenance": "models.Collection, docs/decisions.md, docs/data-model.md"},
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -387,7 +396,10 @@ class AuthorAlias(Base):
     # repaired without editing the book.
     canonical_name: Mapped[str] = mapped_column(String(AUTHOR_NAME_MAX), nullable=False)
 
-    # Provenance, like `Collection.created_by_user_id`, and read by nothing.
+    # Provenance, like `Collection.created_by_user_id`, and read by nothing
+    # but the archive: `backup.py` selects every column of every table it
+    # archives without naming any of them, which is why it is admin only.
+    # No schema declares a field reaching it either.
     # Deliberately not indexed: no query consults it and there is no
     # delete-account path whose child check it would speed up.
     created_by_user_id: Mapped[int | None] = mapped_column(
@@ -655,8 +667,9 @@ class AuthorIdentifier(Base):
     # Set only on a `MEMBER` row, and null on a `CATALOGUE` one by check
     # constraint. Deliberately not indexed, like `author_aliases`: no query
     # consults it. The CHECK above is SQL and reads the column in the
-    # database; the marker is about Python, which is where a filter or an
-    # authorisation clause would be written.
+    # database; the marker is about Python, which is where a filter, an
+    # authorisation clause, or a schema field publishing the id would be
+    # written.
     created_by_user_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("users.id"),
@@ -2685,6 +2698,14 @@ class CustomField(Base):
     # questions it answers are that class's fourth arm, a definition its
     # author may always be told about, and `renamable`, which is who may
     # relabel a Library wide name.
+    #
+    # **A schema field named for it would be a second reader**, and that is
+    # the half no walk over source can see: Pydantic populates such a field
+    # by reading the attribute off the row, so the column would reach every
+    # client with no attribute access written anywhere. `CustomFieldOut`
+    # publishes a derived `renamable` instead, and
+    # `tests/test_fields.py::TestFieldsIsTheOnlyReaderOfTheAuthorColumn`
+    # refuses the declaration as well as the statement.
     #
     # **Nullable, and null is not an error.** Every row defined before this
     # column existed has it, and so does every row from an archive taken

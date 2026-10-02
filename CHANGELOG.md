@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **A book's purchase date no longer shows the day before, and the card and the table now
+  spell it the same way.** The Bought on column of the library table rendered the date a copy
+  was bought a day early for every member west of Greenwich, and correctly for everyone east
+  of it. A purchase date is a calendar date rather than a moment, so it arrives as a bare day
+  with no clock and no offset, and the renderer was reading that as midnight UTC and then
+  showing it in the reader's own zone, which lands on the previous evening. It is now read as
+  the day it names, wherever the reader is. Separately, the card in the grid printed the same
+  date as raw ISO text in every language, because it never went through the date formatter at
+  all; it now reads like every other date. Nothing else dated moves: every other dated field
+  carries the moment it happened.
+
+- **A schema field named for a guarded column is now refused, and no response may carry an
+  undeclared key.** The rule that one module alone reads who defined a custom field walked
+  the source for the column's name, and a Pydantic field declared with that name is populated
+  by reading the row with nothing written in the source to match, so it would have passed the
+  rule while making it false. Both halves are closed, including a field renamed onto the
+  column by an alias or by a model's alias generator. Nothing in the tree did either, so no
+  behaviour changes and nothing a member sees moves.
+
 - **Automated dependency updates can land again, and a generated file stops shadowing the
   lockfile.** `backend/requirements.txt` was an export of `backend/uv.lock` that nothing
   installed from, kept so the source vulnerability scan had a familiar Python lockfile to

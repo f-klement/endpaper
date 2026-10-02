@@ -630,7 +630,16 @@ served as text. See [security.md](security.md).
 
 `custom_fields.created_by_user_id` is the member who defined the row, and it is **read**,
 which separates it from the three `created_by_user_id` columns described as provenance
-elsewhere on this page. It answers two questions nothing else could: a definer is told
+elsewhere on this page. **No module but `backend/fields.py` reads it, except the archive**,
+and that includes no schema: a Pydantic field named for a column is populated by reading the
+attribute off the row, so declaring one would publish the column to every client with no
+attribute access written anywhere. The API answers a derived `renamable` instead.
+
+**The archive is the exception and it is deliberate.** `backend/backup.py` selects every
+column of every table it archives and serialises the rows as they come, so it carries this
+value and the three provenance ones alike while naming none of them, which is why it is past
+both instruments. It is admin only for that reason, which [security.md](security.md) records.
+It answers two questions nothing else could: a definer is told
 their own field exists even when its only value sits on a book they cannot see, and a
 definer may rename it where another member may not. It is nullable and null is not an
 error: every row defined before the column has one, so does every row from an archive
@@ -646,8 +655,8 @@ indexes it answers on, and the bounds a search is held to. The primary key holds
 `sources.Plan.parse`, which validates a stored settings row against the enum, rather than
 anything in the column.
 
-**Seeded and read by nothing at runtime, and that is a security property rather than an
-oversight.** `main.seed_catalogue_targets` reconciles these rows against `targets.SEEDED`
+**Seeded and read by nothing on any lookup path, and that is a security property rather
+than an oversight.** `main.seed_catalogue_targets` reconciles these rows against `targets.SEEDED`
 on every start, so a corrected constant reaches the table instead of drifting from it; what
 the lookup path asks is the module constant, never the row. `fetch.py` and `z3950.py` both
 argue they need no host allowlist **because** a target's address is a constant, so
@@ -854,7 +863,7 @@ stopped being true when `author_identifiers` arrived.
 |---|---|
 | `alias_key` | the key of the spelling being folded away. **Unique**: a spelling means one person |
 | `canonical_name` | the name to show, as a member typed or picked it. Need not be a name any book carries |
-| `created_by_user_id` | provenance, read by nothing, nullable so deleting an account keeps the library's decisions |
+| `created_by_user_id` | provenance, read by nothing but the archive's whole table select, and named by no schema field, nullable so deleting an account keeps the library's decisions |
 
 Nothing in it is a foreign key, because there is no author row to point at, and that is what
 makes it survive: a spelling no book carries any more leaves an alias that matches nothing
@@ -871,7 +880,7 @@ means:
 | `scheme` | which file. The closed set is `enums.AuthorityScheme` and it is the only place that states how many there are: `gnd`, `isni`, `lcnaf`, `viaf`, `wikidata`, and one per national library for Brazil, Argentina, Spain, Portugal, Italy and Chile |
 | `identifier` | the number, stored bare without MARC's `(DE-588)` wrapper |
 | `provenance` | `catalogue` where a record for this book's own ISBN asserted it, `member` where a person confirmed a candidate |
-| `created_by_user_id` | set on a `member` row and null on a `catalogue` one, by check constraint |
+| `created_by_user_id` | set on a `member` row and null on a `catalogue` one, by check constraint. Provenance: read by nothing but the archive's whole table select, and named by no schema field |
 
 **Per spelling, not per person**, which is the same shape as the aliases and for a sharper
 reason: two spellings a member folded into one author may carry different numbers, and that
@@ -967,9 +976,12 @@ migration. So "in no collection" is an ordinary permanent state, like a null `fo
 **Never a privacy boundary.** Any member may create one, rename it, and file any book they
 can write to. Filing changes nothing about who can see the book: a book's visibility is
 decided by `visible_to()` alone, which is not given a collection to consult.
-`Collection.created_by_user_id` is provenance and no query reads it, which is what keeps that
-true rather than merely intended, and it is why the rule below is written over books rather
-than over an owner.
+`Collection.created_by_user_id` is provenance: no query reads it except the archive, which
+selects every column of every table it takes and so reads this one while naming it nowhere,
+and no schema declares a field named for it. That is what keeps that true rather than merely
+intended, and it is why the rule below is written over books rather than over an owner. Both halves are enforced:
+a declaration is read off the row by Pydantic with nothing written in the source, so it takes
+an instrument of its own.
 
 **A label is not library wide, and the count was never the only thing it could disclose.** A
 collection is named to a member when a book they can see is filed in it, when a book they can

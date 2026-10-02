@@ -434,10 +434,18 @@ BOOK_CHILDREN = frozenset(
 #: child with no foreign key to `users` was taken to have no viewer.** That
 #: predicate is wrong in this schema and the counter-examples are already
 #: documented in `models.py`. `collections.created_by_user_id` is "provenance
-#: and nothing else. No query consults it" (`models.py:118`),
-#: `author_aliases.created_by_user_id` says the same (`models.py:259`), and so
-#: does `author_identifiers`. Three tables, and they carry the argument on
-#: their own. So a `catalogued_by_user_id` on `classifications` would have
+#: and nothing else. No query consults it" (`models.Collection`),
+#: `author_aliases.created_by_user_id` says the same (`models.AuthorAlias`),
+#: and so does `models.AuthorIdentifier`. Three tables, and they carry the
+#: argument on their own.
+#:
+#: **Cited by class, because the line numbers that stood here were stale.**
+#: Both sent a reader to an unrelated paragraph. **No numbers here either,
+#: not even the right ones**: the first version of this sentence gave the
+#: real sites and one of them moved in the same commit, because that commit
+#: added lines above it. A line number in prose goes stale on the next edit
+#: to the file it names and nothing reds. So a
+#: `catalogued_by_user_id` on `classifications` would have
 #: dropped it out of the guard silently, which is the failure this file exists
 #: to prevent.
 #:

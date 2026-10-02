@@ -332,6 +332,38 @@ describe("BookCard fold out", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
 
+  it("spells the purchase date the way the rest of the app does", async () => {
+    // **The second surface of the same field.** `purchased_at` is the only
+    // `format: date` field the API sends, so it arrives as a bare
+    // `YYYY-MM-DD`. This list put it straight through `String(value)`, so the
+    // card printed `2026-01-05` where the table beside it on the same page
+    // printed `1/5/2026`, in both locales.
+    renderCard(makeBook({ title: "Dune", purchased_at: "2026-01-05" }));
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /Details for Dune/ }));
+
+    expect(screen.getByText("1/5/2026")).toBeInTheDocument();
+    expect(screen.queryByText("2026-01-05")).toBeNull();
+  });
+
+  it("spells the purchase date in the reader's own language", async () => {
+    // The locale arm, because the raw string this replaces was the same ten
+    // characters in every language: a German reader saw ISO on the card and
+    // `5.1.2026` everywhere else.
+    renderLocalised(
+      <BookCard
+        book={makeBook({ title: "Dune", purchased_at: "2026-01-05" })}
+      />,
+      { locale: Locale.de },
+    );
+
+    await userEvent.setup().click(screen.getByRole("button", { name: /Dune/ }));
+
+    expect(screen.getByText("5.1.2026")).toBeInTheDocument();
+  });
+
   it("keeps the toggle out of the link", () => {
     // A button inside an anchor is invalid, and browsers resolve the ambiguity
     // differently: some navigate, some fire the button.

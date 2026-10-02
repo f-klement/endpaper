@@ -15,6 +15,7 @@ import {
   type MessageKey,
   type Translate,
 } from "../../i18n";
+import { numericDate } from "../../lib/date";
 import { formatMinor } from "../../lib/money";
 import {
   CONDITION_LABELS,
@@ -99,7 +100,18 @@ function factsFor(
     ["field.pageCount", book.page_count],
     ["library.tags", hiddenTags.map((tag) => tagName(tag, locale)).join(", ")],
     ["copy.price", priceText(book)],
-    ["copy.purchasedAt", book.purchased_at],
+    // **Through the date module, like every other rendered date.** This is the
+    // one `format: date` field the API sends, so it arrives as a bare
+    // `YYYY-MM-DD`; put straight into the list it reached `String(value)` below
+    // and the card printed the ISO text where the table beside it printed
+    // `1/5/2026`, in both locales. `numericDate` answers `""` for an absent
+    // value, which the filter below already drops, so a card with no purchase
+    // date is unchanged. It answers `""` for an **unparseable** one too, so
+    // where the raw string used to print its own text this row now disappears:
+    // that is the residual `render` already states for every other dated field
+    // here, and the field is validated as a date at the door, so the live
+    // population is zero.
+    ["copy.purchasedAt", numericDate(book.purchased_at, locale)],
     ["copy.purchaseSource", book.purchase_source],
   ];
   return candidates

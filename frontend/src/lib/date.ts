@@ -142,12 +142,121 @@ function formatterFor(format: Format, locale: Locale): Intl.DateTimeFormat {
 }
 
 /**
- * The one place a timestamp becomes a rendered string.
+ * A bare `YYYY-MM-DD`, which is a calendar date and not an instant.
+ *
+ * **Derived from what the wire says rather than from what callers look like.**
+ * The API declares a field `format: date` exactly when it sends this shape, and
+ * RFC 3339 spells a `full-date` as these ten characters and a `date-time` with a
+ * `T` in the middle, so **no value carrying a clock can match this, whatever the
+ * schema grows**. That half needs no census. The half that does is which fields
+ * are date-only, and today it is one:
+ *
+ * ```sh
+ * jq '[paths(type=="object" and .format=="date")] | length' frontend/openapi.json
+ * ```
+ *
+ * answers 4, and dropping the `length` names them: `purchased_at` on each of
+ * `BookColumns`, `BookDetailsUpdate`, `BookOut` and `CopyCreate`, which is one
+ * field reaching the wire through four models.
+ *
+ * **The alternative was to declare the kind at the caller, and it was refused on
+ * that count.** Those four properties are one field. Against it, from
+ * `frontend/`:
+ *
+ * ```sh
+ * grep -rnoE '\b(numericDate|shortMonthDate|longMonthDate|clockTime)\(' \
+ *   src --include='*.ts' --include='*.tsx' | grep -cv '^src/lib/date.ts:'
+ * ```
+ *
+ * answers 20 call sites, the four it excludes being these functions' own
+ * declarations. **A second parameter would have to be passed at every one of
+ * them, to change the answer at the sites `numericDate` names below**, which is
+ * where that second number lives rather than here: two figures over one corpus
+ * drift apart, and this paragraph has already been wrong about this count
+ * twice. `monthLabel` below already reads its own date-only shape here rather
+ * than at the statistics page, for the same reason.
+ *
+ * **What it cannot see**: a date-only string that genuinely means UTC midnight
+ * would now render a day late west of Greenwich. There is no such field, and
+ * that is a property of the wire rather than of this pattern, so it is stated
+ * rather than guarded.
+ */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A calendar date at local midnight, anything else as the instant it is.
+ *
+ * **`new Date` reads a bare `YYYY-MM-DD` as UTC midnight**, which is the day
+ * before for every viewer west of Greenwich. This module has three readers of a
+ * date-only value and the other two were already right: `endOfDayInstant`
+ * appends a clock and `monthLabel` builds from numbers, and `monthLabel`'s
+ * comment refuses the UTC parse in those words. `render` was the one that did
+ * it, so the Bought on column of `pages/Home/components/BookTable.tsx` was a
+ * day early for anybody west of UTC.
+ *
+ * **Appending a clock rather than the numeric constructor, and the two are not
+ * interchangeable.** Both put the value at local midnight, and `monthLabel`
+ * below reaches for the other one. Splitting the string into three numbers
+ * would inherit two of the residuals that function's docstring records, and it
+ * would do so here where the value comes off the wire rather than out of a
+ * bucket key. Measured, both ways:
+ *
+ * | input | appended | three numbers |
+ * |---|---|---|
+ * | `0026-08-19`, a year under 100 | the year 26 | **1926** |
+ * | `2026-13-01`, an impossible month | `""`, refused | **January 2027** |
+ * | `2026-02-30`, an impossible day | March 2nd | March 2nd |
+ *
+ * **The third row is the one worth writing down, because it is the residual
+ * appending does not close.** An impossible day rolls into the next month
+ * either way, which `endOfDayInstant` already records one function up for the
+ * same mechanism. What appending buys is the year and the month, by keeping the
+ * engine's own validation of the date instead of handing `Date` three numbers
+ * it will roll without complaint.
+ *
+ * **What this now refuses that the bare parse accepted, and why the set is the
+ * size it is.** The engines' legacy parser reads the three fields of a string
+ * it does not recognise as month, day and year, so `0001-01-32` is the first of
+ * January 2032 and `0012-01-99` is the first of December 1999. A month is 1 to
+ * 12, so the divergent band is **years `0001` to `0012` and nothing outside
+ * them**: `0013-01-32` is already unparseable to both.
+ *
+ * Swept over the whole population, every one of the 100,000,000 strings this
+ * pattern matches: **2,728 in each of those twelve years, 32,736 in all**, are
+ * read by the bare parse and refused here, and zero in any other year. None is
+ * a well formed calendar date. Over the well formed strings, in month 01 to 12
+ * and day 01 to 31, the two agree on every one, and nothing is accepted here
+ * that the bare parse refused.
+ *
+ * **Two engines, because exactly one half of that is specified.** The well
+ * formed half is ECMA-262's own date time string format and does not vary; the
+ * 32,736 live entirely in the fallback every engine is free to write itself, so
+ * that figure is a property of the engines measured and not of the language.
+ * V8 through node 24 and JavaScriptCore through bun 1.4 agree on both halves
+ * exactly. Re-derive before quoting it for a third engine.
+ *
+ * **Local midnight is always the day it names.** Enumerated over all 418 IANA
+ * zones the runtime lists, for every day of 2026 and 2027, 305,140 pairs: zero
+ * land on another day. A zone whose clocks move at midnight shifts the instant
+ * and not the date. The same sweep with one clock changed, which is the only
+ * like for like comparison, puts `endOfDayInstant`'s 23:59:59 at **four** off
+ * day pairs in two zones, `America/Godthab` and `America/Scoresbysund` on the
+ * spring transition of each year. That function's own docstring counts absent
+ * and ambiguous evenings instead, fourteen in five zones, which is a different
+ * question: it says itself that every ambiguous one reads back on the right
+ * day, so those are not off day pairs at all.
+ */
+function parsed(iso: string): Date {
+  return DATE_ONLY.test(iso) ? new Date(`${iso}T00:00:00`) : new Date(iso);
+}
+
+/**
+ * The one place an API dated field becomes a rendered string.
  *
  * **Absent in, empty out**, which is `lib/year.ts`'s shape for a value that may
  * not be there, and which two call sites had each written for themselves.
  *
- * **An unparseable timestamp is empty too, rather than `Invalid Date`.** Every
+ * **An unparseable value is empty too, rather than `Invalid Date`.** Every
  * input is an ISO field the API sent, so this is not expected to fire; it is
  * here because this is the only place that can decide it, and the alternative
  * puts the words `Invalid Date` on a page.
@@ -158,7 +267,7 @@ function render(
   locale: Locale,
 ): string {
   if (iso === null || iso === undefined || iso === "") return "";
-  return formatted(format, new Date(iso), locale);
+  return formatted(format, parsed(iso), locale);
 }
 
 /**
@@ -177,7 +286,16 @@ function formatted(format: Format, when: Date, locale: Locale): string {
   return formatterFor(format, locale).format(when);
 }
 
-/** The date a timestamp falls on, at its plainest: `8/19/2026`, `19.8.2026`. */
+/**
+ * The date a value falls on, at its plainest: `8/19/2026`, `19.8.2026`.
+ *
+ * **The one renderer here fed a calendar date as well as an instant**, for
+ * `purchased_at`, by `pages/Home/components/BookTable.tsx` and
+ * `pages/components/BookCard.tsx`, which are the two sites that render that
+ * field and are now both through this module. `parsed` above tells the two
+ * kinds apart; that the signature cannot is the cost `DATE_ONLY`'s comment
+ * weighs against changing every call site.
+ */
 export function numericDate(
   iso: string | null | undefined,
   locale: Locale,

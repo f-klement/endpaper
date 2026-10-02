@@ -46,7 +46,12 @@ import { endOfDay } from "../factories";
 // **`date-time` and not every dated field**, which is the narrower claim and the
 // true one. Four properties are `format: date`, and all four are the purchase
 // date: a bare `YYYY-MM-DD` with no clock to carry an offset in the first place.
-// Nothing in this file renders one.
+// The three `BOUGHT_ON` values below are that shape, and they are the only
+// values in this file that reach `render`, the function `parsed` sits in, and
+// are not instants. Two other non-instants are here and neither does: the
+// `monthLabel` bucket keys, which are rendered but by `monthLabel`'s own
+// construction rather than through `render`, and the day `endOfDayInstant` is
+// handed, which is read rather than rendered at all.
 //
 // Midday, so the rendered day is the stamp's own day rather than its
 // neighbour's: the suite's zone is pinned in `tests/setup.ts`, and midday UTC
@@ -54,10 +59,82 @@ import { endOfDay } from "../factories";
 // pin and not of midday, which is why the pin is named rather than restated.
 const WHEN = "2026-08-19T12:00:00Z";
 
+// **The purchase date shape named above**, and the only inputs here whose
+// rendered day is decided by how they are parsed rather than by where the
+// viewer is.
+//
+// **Three of them, because the detection is a closed set of eight digit
+// positions and two fixtures pin seven of them.** `DATE_ONLY` is
+// `^\d{4}-\d{2}-\d{2}$`, and the eight positions are fixed by RFC 3339 rather
+// than by anyone's imagination, so this is a set to complete rather than to
+// sample. Over the first two values alone, seven of the eight positions take a
+// single value and only the day's units digit takes two, which means **every
+// narrowing of the other seven passes**: driven on the whole suite, a detection
+// narrowed to January is green at 4,369 tests while the filed defect is back
+// for eleven months of the year, and one narrowed to nine days of 2026 is green
+// too.
+//
+// `BOUGHT_ON_LONG_AGO` takes the pinned positions from seven of eight to zero,
+// every position then carrying at least two values, and it reds both of those
+// narrowings. It is also the year boundary from the other side, so it earns its
+// line twice: the naive parse turns the first of January into the previous
+// December, and the last of December into the previous day of the same month.
+//
+// **Eight positions is not the whole pattern, and the rest is stated rather
+// than claimed.** It also has two separators and two anchors. Driven, one
+// variant at a time: dropping the **trailing** anchor reds two arms, because an
+// instant then matches its own prefix and gets a clock appended to a string
+// that already has one. Dropping the **leading** anchor, or loosening either
+// separator, reds nothing. That is deliberate and not a hole: both only change
+// the answer for strings the wire cannot send, since the field is validated as
+// a date at the door.
+const BOUGHT_ON = "2026-01-05";
+const BOUGHT_ON_NEW_YEARS_DAY = "2026-01-01";
+const BOUGHT_ON_LONG_AGO = "1987-12-31";
+
 describe("numericDate", () => {
   it("renders the plainest date the app shows, per locale", () => {
     expect(numericDate(WHEN, Locale.en)).toBe("8/19/2026");
     expect(numericDate(WHEN, Locale.de)).toBe("19.8.2026");
+  });
+
+  it("renders a calendar date on the day it names, per locale", () => {
+    // **The regression arm for the purchase date rendering a day early.**
+    // `new Date` reads a bare `YYYY-MM-DD` as UTC midnight, so west of
+    // Greenwich it formats as the previous day: against the pin in
+    // `tests/setup.ts` these six assertions read `1/4/2026`, `4.1.2026`,
+    // `12/31/2025`, `31.12.2025`, `12/30/1987` and `30.12.1987` without the
+    // date-only parse.
+    //
+    // **It is observable only because that pin is west.** At or east of
+    // Greenwich a naive UTC parse and a local one put a bare date on the same
+    // day, so this arm would have passed on the broken code and guarded
+    // nothing. That is the whole of the blind set, exact by the arithmetic
+    // rather than sampled, and it is why `tests/setup.ts` refuses a pin that
+    // is not west.
+    expect(numericDate(BOUGHT_ON, Locale.en)).toBe("1/5/2026");
+    expect(numericDate(BOUGHT_ON, Locale.de)).toBe("5.1.2026");
+    expect(numericDate(BOUGHT_ON_NEW_YEARS_DAY, Locale.en)).toBe("1/1/2026");
+    expect(numericDate(BOUGHT_ON_NEW_YEARS_DAY, Locale.de)).toBe("1.1.2026");
+    expect(numericDate(BOUGHT_ON_LONG_AGO, Locale.en)).toBe("12/31/1987");
+    expect(numericDate(BOUGHT_ON_LONG_AGO, Locale.de)).toBe("31.12.1987");
+  });
+
+  it("still renders midnight UTC as an instant, which is the day before here", () => {
+    // **The other side of the detection, and the arm that stops it widening.**
+    // One character of clock is the whole difference between a calendar date
+    // and an instant that happens to fall at midnight, and the ruled behaviour
+    // for an instant is the viewer's day. A parse that read every value as
+    // local would render `1/5/2026` here and pass the arm above.
+    //
+    // **No direction is claimed, because it has none.** Such a parse puts every
+    // dated field on the literal date in its string rather than on the viewer's
+    // day, which is wrong wherever the viewer's offset carries the instant
+    // across midnight: west for a stamp early in the UTC day, east for one late
+    // in it. Driven at `00:00Z`, `20:00Z` and `23:00Z` across five zones, and
+    // each hour is wrong in a different hemisphere. This arm's value is the
+    // early case, which is why the west pin is what reds it.
+    expect(numericDate(`${BOUGHT_ON}T00:00:00Z`, Locale.en)).toBe("1/4/2026");
   });
 
   it("renders in the zone the device is in now, not the one it was built in", () => {
@@ -77,6 +154,21 @@ describe("numericDate", () => {
 
     const pinned = process.env.TZ;
     try {
+      // **Inside this block the suite is EAST of Greenwich, and the pin check
+      // cannot see it**: `tests/setup.ts` refuses an eastern pin, but it runs
+      // in teardown, after the restore below. **So no date-only assertion
+      // belongs in here**, because at +14 a bare `YYYY-MM-DD` parsed as UTC
+      // midnight and parsed as local midnight land on the same day, and such an
+      // assertion would pass on the broken parse exactly as it does under
+      // `UTC`. This is the only block in either tree that moves the zone.
+      //
+      // **And the blindness is not uniform, which is what makes it worth a
+      // comment rather than a shrug.** Kiritimati was at -10:00 until it
+      // crossed the date line in 1995, so measured here the two parses disagree
+      // for 1980 to 1994 and agree from 1995 on. A reader probing this block
+      // with `BOUGHT_ON_LONG_AGO` would see it red and conclude the block is
+      // safe; with either of the other two fixtures, or any present day date,
+      // it is not.
       process.env.TZ = "Pacific/Kiritimati";
       // **The second zone is proved to have taken, for the reason
       // `tests/setup.ts` proves the pin.** An unresolvable zone is ignored

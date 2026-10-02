@@ -46,6 +46,14 @@ import { langOf, withoutProse } from "./withoutProse";
 // spelling of that suffix below is checked against it rather than repeated.
 import viteConfig from "../vite.config.ts?raw";
 
+// The repository's own statement of what it refuses to version. Read so that
+// the directory a publish run's output cannot be **kept** in is pinned by a
+// fact this repository already maintains rather than by a name written here,
+// which is what the exclusion below used to be. Where the output lands is an
+// argument to the script and is the premise of this whole reading, so nothing
+// here may call any directory the one it is guaranteed to land in.
+import ignoreRules from "../../.gitignore?raw";
+
 // The one enumeration of `src/`, and the one thing that refuses a corpus that
 // is no longer the tree. The pattern used to be written here, where narrowing
 // it was one edit in the file holding the rules it disarmed.
@@ -2252,35 +2260,285 @@ describe("a decoder a runtime may not carry is never built at module scope", () 
 });
 
 /**
- * Every Markdown document this repository versions.
+ * `.` and `..` resolved, against a base given as segments.
  *
- * **The exclusion is stated and it is build output, not a corner of the
- * tree.** An earlier draft globbed the repository root and one level of
- * `docs/`, which is an inclusion list: it read 11 of the 18 published
- * documents and left the rest unjudged, `DOCKERHUB.md` among them, which is
- * derived from the README's feature bullets and so is the likeliest place a
- * deleted sentence is copied back to. `backend/tests/test_roster_counts.py`
- * measured that same shape, replaced it and pinned against it.
- *
- * **What decides publication is the declaration in a document's header**,
- * applied by `scope` below. It is the property the publish gate reads, so the
- * two cannot drift, and a document added anywhere needs no entry anywhere.
+ * **One home, because a document's key and a citation's target have to land in
+ * the same space.** They did not. The document half of `citingFiles` keyed by
+ * string replacement and `normalised` resolved, so the two documents the glob
+ * below reaches from its own directory were keyed against the repository root
+ * and a relative citation written in either resolved from there.
  */
-const DOCUMENTS = import.meta.glob(
+function resolveSegments(base: readonly string[], path: string): string[] {
+  const parts = [...base];
+  for (const part of path.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  return parts;
+}
+
+/**
+ * Where every glob in this file is written from, which is where this file sits.
+ *
+ * A move reds `reads every published document the glob hands over`: the
+ * directory set it asserts loses the test tree by name.
+ */
+const GLOBBED_FROM = ["frontend", "tests"];
+
+/** A glob key as a path from the repository root. */
+function repositoryPath(key: string): string {
+  return resolveSegments(GLOBBED_FROM, key).join("/");
+}
+
+/**
+ * Every document sitting under a directory that reproduces part of the tree.
+ *
+ * **The materialised publish tree, read off what it is rather than off what it
+ * is called.** The publish script takes its output directory as an argument
+ * and only falls back to a default, so a filter naming that default is blind
+ * to every other run. Measured by running the script for real at three
+ * directories, the default, another name at the root and one nested: each
+ * landed a copy of every published document in the corpus, and this returned
+ * exactly the copies at each.
+ *
+ * **Two conditions, and each has a shape that reds on its own** in `a
+ * directory reproducing the tree is read as a copy of it`. A directory counts
+ * as a copy when **every** document under it shadows a document outside it,
+ * and when **at least one** of those shadowed documents is itself inside a
+ * directory.
+ *
+ * **Both conditions pay for themselves on the live tree.** Without the first,
+ * a directory holding its own documents and one shadow is read as a copy.
+ * Without the second, so is every directory whose only document is a
+ * `README.md`, because the repository root holds one of those too, and the
+ * live tree reports under that mutation rather than staying clean.
+ *
+ * ## What this cannot see, and why it is not alone
+ *
+ * **The first condition is all or nothing over one directory**, because only
+ * the directory at depth one can ever satisfy it: the nested ones inside a
+ * copy shadow a handful of the documents under them and never all. So the
+ * whole verdict rests on one predicate over the whole copy, and **one
+ * document renamed or deleted in the working tree since the run takes it from
+ * every copy to none.** Driven against a real run of the script:
+ *
+ * | the tree after the run | copies this returns |
+ * |---|---|
+ * | unchanged | all of them |
+ * | a document added | all of them |
+ * | **a published document renamed** | **none** |
+ * | **a root document renamed** | **none** |
+ * | **a published document deleted** | **none** |
+ *
+ * A stale copy is exactly the case most likely to carry a path that has since
+ * gone, so this is blind in the state it exists for. That is why
+ * `thePublishTreeIn` does not use it alone.
+ *
+ * **What it refuses that is not a copy is silent, not loud.** A directory
+ * wrongly read as a copy drops out of the corpus and **no arm reds**, because
+ * the published set is derived from the same corpus, so both sides of the
+ * count equality shrink together. Three planted non copies went unjudged in
+ * silence.
+ *
+ * **So the residual is accepted on how narrow the shape is, and the margin is
+ * one document.** Three directories on a clean checkout already satisfy the
+ * first condition, each holding a single document that shadows the one at the
+ * repository root. **One document added under any of them is enough**: it
+ * supplies the nested tail the second condition wants, and because it is
+ * itself a copy of something the corpus holds it keeps the first condition
+ * intact, so the directory and the live document beside it both leave the
+ * corpus. Driven end to end over such an addition: nothing reds and a
+ * published document goes unjudged.
+ *
+ * **Re-derive the margin as that count of directories**, not as a count of
+ * nested tails. Group the corpus by every directory prefix and count the
+ * prefixes where **every** document held shadows one outside; a sentence
+ * counting the nested tails instead reports zero and reads as safety, which
+ * is the reading this paragraph replaced.
+ *
+ * **It is scoped to the corpus a run reads, which is not this filesystem.**
+ * The archive that ships the tree drops the agent working directories, each a
+ * whole checkout and so a wholesale shadow. **And it is deliberately not an
+ * arm**: an arm whose verdict depends on which filesystem it is read from is
+ * one whoever hits it deletes, and what it would guard is the justification
+ * for an accepted residual rather than a property of the thing judged.
+ *
+ * ## What was declined
+ *
+ * **Keying the corpus on what the repository versions** is the closure the
+ * rules below name, since an untracked document reaches no mirror. The suite
+ * runs in a container holding the working tree with the repository's own
+ * metadata directory excluded from the archive that ships it, so **no test
+ * there can query the repository.** A committed manifest of versioned paths
+ * would put the answer back within reach; it is not written because a
+ * manifest is a copy of a derived fact, which is the thing this repository
+ * keeps paying for, and because `UNVERSIONED_AT_THE_ROOT` gets the one
+ * directory that matters out of a statement the repository already maintains.
+ *
+ * **And refusing a corpus that holds two documents with the same path tail was
+ * measured and does not work.** Read as a basename, and read as a segment
+ * suffix, the live tree is already full of legitimate pairs: every directory
+ * holding a `README.md` shadows the one at the repository root. The two
+ * conditions above are what a bare tail test is short of.
+ */
+function materialisedCopies(paths: readonly string[]): string[] {
+  const corpus = new Set(paths);
+  const under = new Map<string, { held: number; shadowed: string[] }>();
+
+  for (const path of paths) {
+    const segments = path.split("/");
+    for (let depth = 1; depth < segments.length; depth += 1) {
+      const directory = segments.slice(0, depth).join("/");
+      const tail = segments.slice(depth).join("/");
+      const seen = under.get(directory) ?? { held: 0, shadowed: [] };
+      seen.held += 1;
+      if (corpus.has(tail)) seen.shadowed.push(tail);
+      under.set(directory, seen);
+    }
+  }
+
+  const copies = [...under]
+    .filter(
+      ([, seen]) =>
+        seen.shadowed.length === seen.held &&
+        seen.shadowed.some((tail) => tail.includes("/")),
+    )
+    .map(([directory]) => directory);
+
+  return [...paths]
+    .filter((path) => copies.some((copy) => path.startsWith(`${copy}/`)))
+    .sort();
+}
+
+/**
+ * The directories this repository refuses to version at its own root.
+ *
+ * **Derived from the ignore file rather than named here, and that is what
+ * makes it a pin rather than the literal it replaced.** The reason it is safe
+ * to drop everything under one of these is that nothing legitimate can live
+ * there, and that is a statement the repository already maintains, in the one
+ * place that is checked whenever somebody commits. A name written here would
+ * be a guess about where the publish script gets pointed; this is a fact
+ * about where its output cannot be kept.
+ *
+ * **A leading separator anchors an ignore entry to the repository root and a
+ * trailing one makes it a directory**, so this is the exact class a publish
+ * output tree falls into, and it is one member today. `pins the directory the
+ * repository refuses to version at its own root` is the arm, and it holds
+ * both directions: the pin's subject is a directory absent on every tree a
+ * run sees, so nothing in a corpus can witness it and the ignore file saying
+ * so is the whole of the evidence.
+ *
+ * **The file this reads is available wherever this is read**, which a
+ * derivation over a file in a repository that strips things on publish does
+ * not get for free. Verified three ways: it is tracked, the archive that
+ * ships the tree to the suite container carries it because that exclusion
+ * matches a path component rather than a prefix, and it reaches the mirror
+ * byte identical.
+ *
+ * **Deliberately not every ignored directory.** That is the closure above,
+ * and it would take the working notes out of the corpus too, which the
+ * document subset arm's own reasoning is built on today.
+ */
+const UNVERSIONED_AT_THE_ROOT: string[] = ignoreRules
+  .split("\n")
+  .map((line) => line.trim())
+  // **The obvious pattern for this reacts to a comment probe, and the way
+  // back from that is the one thing not to do.** A separator, a run of
+  // anything else, a separator is the shape of a block comment: written that
+  // way it matches three of the probes `withoutProse.test.ts` drives every
+  // matcher in this tree against, so that rule reads this file as having
+  // grown a second comment stripper and reds. Its corpus is every test entry
+  // besides itself, so the road back to green is an exemption entry for the
+  // largest rules file in the tree, which is where the next corpus rule
+  // lands. Found by the full run; a targeted run of this file cannot see it.
+  //
+  // **It is the spelling that reacts, not patterns in general**, and the
+  // distinction is worth the line because the next reader will reach for one.
+  // A pattern excluding the metacharacters as well is clean under the same
+  // probes, measured, and would have closed the dead member case the arm
+  // below closes. So this chain is a preference, not a forced move.
+  .filter(
+    (line) =>
+      line.length > 2 &&
+      line.startsWith("/") &&
+      line.endsWith("/") &&
+      !line.slice(1, -1).includes("/"),
+  )
+  .map((line) => line.slice(1, -1));
+
+/**
+ * Everything in a corpus that belongs to a materialised publish tree.
+ *
+ * **A union of a property and a pinned fact, because neither covers the
+ * other.** `materialisedCopies` reads a copy off its shape and so finds one
+ * under any directory name, and it goes blind on a copy that is stale, which
+ * is the state the exclusion exists for. The pin covers the one directory
+ * whose contents are output by construction, whatever has happened to the
+ * tree since, and covers nothing else. Measured: with a published document
+ * renamed after a real run at the default directory, the shape half returns
+ * nothing and the union returns every copy.
+ *
+ * **One home used by both sides of `reads the same documents a second pattern
+ * reaches`, and that does not collapse its two instruments.** The instruments
+ * there are the two glob patterns, which stay independently written: a
+ * narrowing in either shows up as a disagreement, demonstrated by planting
+ * one. What a change here does move on both sides is covered elsewhere, each
+ * half by its own arm: the shape by the corpus rows, the pin by the
+ * membership assertion beside them.
+ *
+ * **What the union still misses is a conjunction, and it is not the state
+ * measured above.** A run whose output directory is neither the one the
+ * repository refuses to version at its root nor still a whole shadow of the
+ * tree, which is any other directory over a tree that has since lost a
+ * published path, is caught by neither half. **Measured in that state: every
+ * published document sits in the corpus twice, one copy carries a path the
+ * source no longer has, and the whole file is green.** Deleting this filter
+ * outright reds nothing there, which is the honest statement of what it is
+ * worth in that corner.
+ */
+function thePublishTreeIn(paths: readonly string[]): string[] {
+  const pinned = paths.filter((path) =>
+    UNVERSIONED_AT_THE_ROOT.some((directory) =>
+      path.startsWith(`${directory}/`),
+    ),
+  );
+  const rest = paths.filter((path) => !pinned.includes(path));
+  return [...pinned, ...materialisedCopies(rest)].sort();
+}
+
+/** The glob's answer less the publish tree, by either route to it. */
+function withoutThePublishTree(
+  documents: Record<string, string>,
+): Record<string, string> {
+  const copies = new Set(
+    thePublishTreeIn(Object.keys(documents).map(repositoryPath)),
+  );
+  return Object.fromEntries(
+    Object.entries(documents).filter(
+      ([key]) => !copies.has(repositoryPath(key)),
+    ),
+  );
+}
+
+/**
+ * Every Markdown document on the filesystem, the machinery trees aside.
+ *
+ * **Read through `DOCUMENTS` and not directly.** This one still holds the
+ * publish tree when somebody has run the script locally, and a stale copy in
+ * the corpus reports a violation the source no longer has: measured
+ * 2026-09-10, a four day old copy of `docs/featurelist.md` failed the column
+ * count rule on a sentence deleted in the same merge. Whether that tree exists
+ * at all depends on whether somebody ran the script, which is not something a
+ * test result may turn on.
+ */
+const GLOBBED_DOCUMENTS = import.meta.glob(
   [
     "../../**/*.md",
     "!../../**/node_modules/**",
     "!../../**/.venv/**",
     "!../../**/.git/**",
-    // The stripped tree the publish script materialises at the repository root,
-    // gitignored. Every file in it is a copy of one already in scope, so
-    // including it scans the corpus twice, and a **stale** copy reports a
-    // violation the source no longer has: measured 2026-09-10, a four day old
-    // copy of `docs/featurelist.md` failed the column count rule on a sentence
-    // deleted in the same merge. Whether it exists at all depends on whether
-    // somebody ran the publish script locally, which is not something a test
-    // result may turn on.
-    "!../../public/**",
   ],
   {
     query: "?raw",
@@ -2288,6 +2546,25 @@ const DOCUMENTS = import.meta.glob(
     eager: true,
   },
 ) as Record<string, string>;
+
+/**
+ * Every Markdown document this repository versions.
+ *
+ * **The exclusion is stated and it is build output, not a corner of the
+ * tree.** An earlier draft globbed the repository root and one level of
+ * `docs/`, which is an inclusion list: it left most of the published
+ * documents unjudged, `DOCKERHUB.md` among them, which is derived from the
+ * README's feature bullets and so is the likeliest place a deleted sentence
+ * is copied back to. `backend/tests/test_roster_counts.py` measured that same
+ * shape, replaced it and pinned against it. The two counts that stood in this
+ * sentence were taken over a corpus that has since grown by half, and a
+ * reader takes a figure in a docstring as current.
+ *
+ * **What decides publication is the declaration in a document's header**,
+ * applied by `scope` below. It is the property the publish gate reads, so the
+ * two cannot drift, and a document added anywhere needs no entry anywhere.
+ */
+const DOCUMENTS = withoutThePublishTree(GLOBBED_DOCUMENTS);
 
 /**
  * No register is excluded, and the two that invite one are read.
@@ -2476,6 +2753,180 @@ function stated(n: number): RegExp {
  * which is a census with a verdict for every candidate rather than one noun
  * and one computed value.
  */
+describe("a directory reproducing the tree is read as a copy of it", () => {
+  // **Each row is a family the live tree or the publish script produces, and
+  // each of the reader's three decisions has one row that reds under its
+  // mutant and no other row.** A decision with no mutant of its own is
+  // decoration that reads like an arm, so they are named rather than
+  // counted. **The claim is scoped to these rows**, because relaxing the
+  // first condition also reds the per entry witness below, which is a
+  // different arm and not a reason to think the row is doing less work. The
+  // other two leave that witness green.
+  //
+  // **Relaxing "every document under it shadows one outside it"** reds `a
+  // directory of its own documents holding one copy of a nested one`.
+  // **Dropping "one shadowed document is itself inside a directory"** reds `a
+  // directory whose one document shares a root document's name`, and the live
+  // corpus with it. **Dropping the separator from the prefix test that
+  // collects a copy's documents** reds `a copy beside a directory whose name
+  // begins the same way`, and nothing else in the file sees it: measured,
+  // that one token takes documents out of the corpus with every other arm
+  // green.
+  /** One name for the copy and the sibling below it, so they move together. */
+  const COPY = "mirror";
+
+  const SHAPES: [string, string[], string[]][] = [
+    [
+      "a copy of the tree under a name that is not the default",
+      ["README.md", "docs/api.md", "mirror/README.md", "mirror/docs/api.md"],
+      ["mirror/README.md", "mirror/docs/api.md"],
+    ],
+    [
+      "a copy nested below the root",
+      [
+        "README.md",
+        "docs/api.md",
+        "build/out/README.md",
+        "build/out/docs/api.md",
+      ],
+      ["build/out/README.md", "build/out/docs/api.md"],
+    ],
+    [
+      "a directory whose one document shares a root document's name",
+      ["README.md", "docs/api.md", "doubles/README.md"],
+      [],
+    ],
+    [
+      "a directory of its own documents, one of them sharing a name",
+      ["README.md", "docs/api.md", "docs/README.md"],
+      [],
+    ],
+    [
+      "a directory of its own documents holding one copy of a nested one",
+      ["README.md", "docs/api.md", "notes/docs/api.md", "notes/own.md"],
+      [],
+    ],
+    [
+      "a directory holding nothing but a copy of a nested document",
+      ["docs/api.md", "keep/docs/api.md"],
+      ["keep/docs/api.md"],
+    ],
+    [
+      "a copy beside a directory whose name begins the same way",
+      [
+        "README.md",
+        "docs/api.md",
+        `${COPY}/README.md`,
+        `${COPY}/docs/api.md`,
+        // **Built from the same name, so the sibling cannot drift off the
+        // prefix in one token.** Written as two independent literals, renaming
+        // this one leaves the row green on shipped code while its name still
+        // claims the property, which is this file's own commonest defect.
+        // **Its document must shadow nothing**: give it a name the corpus
+        // holds and the directory is a copy on its own merits, the expected
+        // set changes, and the row stops being about the separator at all.
+        `${COPY}ed/own.md`,
+      ],
+      [`${COPY}/README.md`, `${COPY}/docs/api.md`],
+    ],
+    ["nothing at all", [], []],
+  ];
+
+  it.each(SHAPES)("reads %s", (_name, corpus, copies) => {
+    expect(materialisedCopies(corpus)).toEqual(copies);
+  });
+
+  it("pins the directory the repository refuses to version at its own root", () => {
+    // **Derive it and then assert it, which is this repository's standing
+    // remedy for a derived set feeding anything wider than itself.** The
+    // behaviour stays derived: nothing matches on this name. What the literal
+    // holds is that the ignore file still says what the pin was built on,
+    // which is the one thing a derivation cannot notice about itself.
+    //
+    // **Removal was armed and widening was not**, and the difference matters
+    // because they fail in opposite directions. Losing the entry leaves the
+    // union as the shape half alone, which goes blind on a stale copy. Gaining
+    // one takes a directory of documents out of the corpus unjudged. Measured
+    // with the ignore file grown by one root anchored entry over a directory
+    // holding documents: three documents left the corpus, this arm was
+    // **green**, and the only red was the cross check below, whose message
+    // names neither the ignore file nor the pin. That red is collateral and it
+    // goes away once that arm is correct, so this line is what replaces it.
+    expect(UNVERSIONED_AT_THE_ROOT).toEqual(["public"]);
+
+    // **What the prefix test can match at all.** An entry reaching here is
+    // used as a literal path prefix, so one carrying a separator or a glob
+    // metacharacter is admitted as a member that matches nothing: measured,
+    // an ignore file carrying a starred or a single character wildcard entry
+    // yields members the test below never fires on, and the separator only
+    // version of this line refused neither. A name this refuses is refused
+    // loudly, at the line, for somebody to decide: the alternative is
+    // dropping it inside the derivation, where a pin that has quietly stopped
+    // covering a directory looks exactly like one that never did.
+    expect(
+      UNVERSIONED_AT_THE_ROOT.filter((one) => !/^[\w.-]+$/.test(one)),
+    ).toEqual([]);
+
+    // **Four single token changes to the derivation above survive both lines
+    // and get no arm of their own, on purpose.** Dropping the length floor,
+    // either the trailing separator test or the interior one, or the trim,
+    // each returns the identical set against today's ignore file, so there is
+    // nothing to assert; dropping the **leading** separator widens it to
+    // every ignored directory and the membership equality above names them.
+    // An arm per no op is an arm that passes for a reason unrelated to what
+    // it says.
+    //
+    // **They are masked rather than inert, and three of the four are bounded
+    // while one is not.** What makes them no ops is the leading separator
+    // test plus an ignore file carrying exactly one anchored line, so the
+    // harmlessness is a joint property and not a fact about each token.
+    // Driven one plausible future entry at a time: a root anchored file, a
+    // nested directory and a bare separator each make their own token
+    // **widen** the set, and the equality reds. **The trim narrows**, and an
+    // equality against a literal cannot see a narrowing: with an indented
+    // entry in the ignore file, dropping the trim misses it, the derived set
+    // is again exactly the literal, the equality is green, and the pin has
+    // silently stopped covering a directory the repository refuses to
+    // version. That is the removal direction this arm's own first paragraph
+    // says fails silently, reached through the derivation instead of through
+    // the file.
+  });
+
+  it.each(UNVERSIONED_AT_THE_ROOT)(
+    "reads a stale copy under %s that the shape alone cannot",
+    (pinned) => {
+      // **The witness for the union, and it reds if either half goes.** The
+      // shape half needs every document under a directory to shadow one
+      // outside it, so a single rename in the working tree since the run
+      // takes it to nothing, which is measured on a real run of the script
+      // and written up at `materialisedCopies`. A stale copy is the case the
+      // exclusion exists for, so the half that is blind there is the half
+      // that matters.
+      //
+      // Driven over every entry rather than the first, because picking one by
+      // position is how a guard's subject moves when a file it reads changes.
+      // The arm above is what stops this going vacuous at zero entries.
+      const sources = ["README.md", "docs/api.md", "docs/legend.md"];
+      const copies = sources.map((path) => `${pinned}/${path}`);
+      const renamedSince = [
+        "README.md",
+        "docs/the-api.md",
+        "docs/legend.md",
+        ...copies,
+      ];
+
+      expect(materialisedCopies(renamedSince)).toEqual([]);
+      expect(thePublishTreeIn(renamedSince)).toEqual([...copies].sort());
+
+      // **The separator in the pin's own prefix test, which had no mutant.**
+      // Dropping it admits any sibling whose name merely begins the same way,
+      // and measured, that one token empties documents out of the corpus with
+      // every other arm in the file green.
+      expect(thePublishTreeIn([`${pinned}sibling/own.md`])).toEqual([]);
+    },
+  );
+});
+
 describe("the number of table columns is not written down", () => {
   const count = Object.keys(COLUMN_SPECS).length;
 
@@ -2490,11 +2941,26 @@ describe("the number of table columns is not written down", () => {
   }
 
   it("reads the source documents and not a materialised copy of them", () => {
-    // The exclusion above, asserted rather than trusted: a glob that silently
-    // stops excluding is the failure this arm exists for, and it costs nothing.
-    expect(
-      Object.keys(DOCUMENTS).filter((path) => path.startsWith("../../public/")),
-    ).toEqual([]);
+    // **Armed by splicing a copy into the live corpus, because no run ever
+    // sees one.** This asserted that no key began with the directory the
+    // publish script writes to by default. That directory is an argument to
+    // the script, so the arm was green with a copy of every published document
+    // in the corpus under any other name, which is the state that reports a
+    // correct rename as a violation out of a stale copy. The arm was named for
+    // the property and held the spelling.
+    //
+    // **The name spliced in here is deliberately not the default**, so what
+    // reds is the property. The corpus is the live one rather than a fixture,
+    // so the arm cannot go stale against a document added beside it.
+    const sources = Object.keys(DOCUMENTS).map(repositoryPath);
+    const spliced = sources.map((path) => `elsewhere/${path}`);
+
+    expect(thePublishTreeIn([...sources, ...spliced])).toEqual(
+      [...spliced].sort(),
+    );
+    // And the filter above took, so the corpus the rules read holds no copy
+    // whatever the directory it was written to was called.
+    expect(thePublishTreeIn(sources)).toEqual([]);
   });
 
   it("is a count this spelling table can spell", () => {
@@ -5828,16 +6294,38 @@ const UNFENCED = new RegExp("(" + TEST_FILE + ")::", "g");
  */
 const PRINTF = /%[sdifjo#]/;
 
+/**
+ * A repository path in the space a citation is written in.
+ *
+ * The code halves of the corpus are keyed `src/` and `tests/`, so a path under
+ * the frontend tree loses that segment. One home, because a citation's target
+ * and the key it has to find have both got to arrive here.
+ */
+const inCitationSpace = (path: string): string =>
+  path.replace(/^frontend\//, "");
+
 /** The cited path with `.` and `..` resolved, and the repository root off. */
 function normalised(from: string, cited: string): string {
-  const parts = cited.startsWith(".") ? from.split("/").slice(0, -1) : [];
-  for (const part of cited.split("/")) {
-    if (part === "" || part === ".") continue;
-    if (part === "..") parts.pop();
-    else parts.push(part);
-  }
-  return parts.join("/").replace(/^frontend\//, "");
+  const base = cited.startsWith(".") ? from.split("/").slice(0, -1) : [];
+  return inCitationSpace(resolveSegments(base, cited).join("/"));
 }
+
+/**
+ * A document's glob key, in the space a citation inside it resolves into.
+ *
+ * **Resolved rather than replaced, and that is the fix.** This was
+ * `path.replace("../../", "")`, which is correct for every key the glob
+ * reaches by climbing out of the directory it is written in and wrong for
+ * every key it reaches without climbing. The two documents under the test tree
+ * arrive `./COVERAGE.md` and `./doubles/README.md`, carry no prefix to strip,
+ * and were handed to `normalised` as their own base: a citation at or below
+ * such a document's own directory then resolved from the repository root, and
+ * only a citation climbing back into the source tree was right, because the
+ * stray segment is popped by the first `..`. None is written today, so this
+ * was silent, and it cost a review seat a wrong expectation.
+ */
+const citationKey = (globKey: string): string =>
+  inCitationSpace(repositoryPath(globKey));
 
 /**
  * Every string constant a module holds, folded where folding is exact.
@@ -6084,8 +6572,8 @@ function unwritten(files: Record<string, string>): string[] {
  * the eight documents in one, six are read. The exposure is the glob's rather
  * than this rule's, and the rule above reads the same six. The property that
  * would actually close it is what the repository versions, since an untracked
- * document reaches no mirror, and that names no stripped path either; it is
- * not done here because it is a change to a glob three rules share.
+ * document reaches no mirror; `materialisedCopies` says why that is not
+ * available to a test here and what closes the one shape of it that bit.
  *
  * **Named by the declaration rather than by directory on purpose.** The
  * publish gate refuses a published file that spells a stripped path, and this
@@ -6105,10 +6593,7 @@ function citingFiles(): Record<string, string> {
     ),
     ...Object.fromEntries(
       Object.entries(DOCUMENTS)
-        .map(([path, source]): [string, string] => [
-          path.replace("../../", ""),
-          source,
-        ])
+        .map(([path, source]): [string, string] => [citationKey(path), source])
         .filter(([, source]) => !declaresItselfInternal(source)),
     ),
   };
@@ -6611,6 +7096,36 @@ describe("a test cited by name still carries that name", () => {
       unwritten({
         "tests/theme/a.test.ts": `it("the name", () => {});`,
         "docs/notes.md": cite("../frontend/tests/theme/a.test.ts", "the name"),
+      }),
+    ).toEqual([]);
+  });
+
+  it("resolves a citation written inside a document under the test tree", () => {
+    // **The two documents the glob reaches without climbing out of its own
+    // directory**, keyed here through `citationKey` rather than written out,
+    // so this reds if that resolution regresses rather than agreeing with a
+    // literal somebody kept up to date.
+    //
+    // **The first case is the one that was wrong and the second is the one
+    // that was not.** A citation at or below such a document's own directory
+    // used to resolve from the repository root; a citation climbing back into
+    // the source tree landed correctly anyway, because the stray segment is
+    // popped by the first `..`. Both are here so the repair is not credited
+    // for the half it did not change.
+    const cite = (path: string, label: string) =>
+      "`" + path + "::" + label + "`";
+    const home = citationKey("./doubles/README.md");
+
+    expect(
+      unwritten({
+        "tests/doubles/a.test.ts": `it("the name", () => {});`,
+        [home]: cite("./a.test.ts", "the name"),
+      }),
+    ).toEqual([]);
+    expect(
+      unwritten({
+        "tests/theme/a.test.ts": `it("the name", () => {});`,
+        [home]: cite("../../../frontend/tests/theme/a.test.ts", "the name"),
       }),
     ).toEqual([]);
   });
@@ -7556,15 +8071,20 @@ const MEMBER_CITATION = new RegExp(
  * those arms exist for, one level up.
  */
 /**
- * The same documents, globbed a second way, with one exclusion left off.
+ * The same documents, globbed a second way, and filtered by nothing.
  *
  * **A second derivation rather than a third arm, because the count equality
  * beside it cannot see its own narrowing**: both sides of that one come from
  * `DOCUMENTS`, so a pattern added there moves both together and reddens
- * nothing. This pattern carries the three machinery exclusions and **not**
- * the content one, so any further narrowing written into `DOCUMENTS` alone
- * shows up here as a disagreement rather than as a smaller corpus nobody
+ * nothing. This pattern carries the three machinery exclusions and **no
+ * filter after the glob**, so any further narrowing written into `DOCUMENTS`
+ * alone shows up as a disagreement rather than as a smaller corpus nobody
  * sees. Narrowing the corpus now has to be written in two places.
+ *
+ * **It is deliberately not passed through `withoutThePublishTree`.** The arm
+ * that compares the two derives the difference it allows from this pattern's
+ * own keys, and running both sides through one filter is one instrument
+ * twice.
  *
  * **Names only and never read**, so this costs a directory walk and no file
  * contents. It reaches no module and no stylesheet, so it is outside
@@ -7935,13 +8455,20 @@ describe("a module member cited in prose is still declared there", () => {
     // narrowing reds here loudly; a subdirectory one is theirs. Said because
     // this guard has been graded by targeted runs of this file, and a
     // targeted run is the one thing that cannot observe the division.
-    const citing = Object.keys(citingFiles());
+    //
+    // **Split by suffix and not by prefix.** The document half is keyed the
+    // way a citation inside a document resolves, which puts the documents
+    // under the test tree in the same namespace as the test modules; a
+    // prefix alone then hands them to the equality below and reds it.
+    const modules = Object.keys(citingFiles()).filter(
+      (path) => !path.endsWith(".md"),
+    );
 
     expect(
-      sortedPaths(citing.filter((path) => path.startsWith("src/"))),
+      sortedPaths(modules.filter((path) => path.startsWith("src/"))),
     ).toEqual(sortedPaths(theSourceHalf()));
     expect(
-      sortedPaths(citing.filter((path) => path.startsWith("tests/"))),
+      sortedPaths(modules.filter((path) => path.startsWith("tests/"))),
     ).toEqual(sortedPaths(theTestHalf()));
   });
 
@@ -7960,6 +8487,18 @@ describe("a module member cited in prose is still declared there", () => {
     // rather than registered, which is this repository's own remedy for a
     // count in prose: one of them read as a roster count and the census that
     // walks every published file reported it.
+    //
+    // **The count equality is also what refuses a key collision, and it is
+    // the only thing that can be.** `citingFiles` builds its corpus by
+    // spread, so two documents resolving to one key silently become one
+    // entry; keying a document the way a citation in it resolves is what
+    // makes that reachable, since two documents at the same path below
+    // different trees now meet. It shows up here as a corpus one document
+    // short of the glob and reds in both directions. An arm comparing
+    // document keys against module keys **cannot** stand in for this: the
+    // module corpora are typescript globs, so no string ends in both
+    // suffixes and the intersection is empty whatever the keying does.
+    // Driven with a key function collapsing one document onto another's key.
     const published = Object.entries(DOCUMENTS).filter(
       ([, source]) => !declaresItselfInternal(source),
     );
@@ -7967,21 +8506,15 @@ describe("a module member cited in prose is still declared there", () => {
       path.endsWith(".md"),
     );
     //
-    // **Two documents arrive keyed relative to the globbing directory rather
-    // than to the repository**, `./COVERAGE.md` and `./doubles/README.md`,
-    // because the shared reader strips a `../../` prefix those two keys do not
-    // carry. That is the reader's property rather than this rule's, it is
-    // recorded here rather than repaired because the reader is the sibling
-    // rule's, and it matters to a reader of the failure message: a relative
-    // citation written in either of those two files would resolve against the
-    // wrong directory. None is written today.
+    // **The test tree is in the list below because two documents live there**,
+    // and it is the live witness that a document is keyed the way a citation
+    // inside it resolves. Those two used to arrive keyed against the
+    // repository root, carrying the globbing directory's own `./`, and the
+    // list named that instead: an arm naming the defect rather than reddening
+    // on it. `citationKey` holds what went wrong underneath.
     const where = new Set(
       read.map((path) =>
-        path.startsWith("./")
-          ? "the globbing directory"
-          : path.includes("/")
-            ? path.split("/")[0]!
-            : "the repository root",
+        path.includes("/") ? path.split("/")[0]! : "the repository root",
       ),
     );
 
@@ -7989,16 +8522,22 @@ describe("a module member cited in prose is still declared there", () => {
     // **A subset rather than an equality, and the equality was wrong in the
     // one place it fired.** The glob reads the filesystem rather than what
     // the repository versions, so a checkout holding working notes reads them
-    // too: measured at 23 documents in a worktree against 216 in the owner's
-    // own checkout, 193 of them notes under a directory nobody versions. An
+    // too, and most of what one holds can be notes under a directory nobody
+    // versions. The counts that stood here were taken over an agent working
+    // directory, which is a population that moves between two runs on one
+    // machine, so they are gone rather than re-derived. An
     // equality reds there permanently, on the presence of a scratch directory
     // and on no citation at all, and a permanent red for normal working state
     // is what teaches the next reader to delete the arm. The subset still
     // reds on the narrowing this exists for and gives up reddening on a new
     // documents directory, which is the cost.
-    const missing = ["backend", "conformance", "docs", "the repository root"]
-      .concat("the globbing directory")
-      .filter((one) => !where.has(one));
+    const missing = [
+      "backend",
+      "conformance",
+      "docs",
+      "tests",
+      "the repository root",
+    ].filter((one) => !where.has(one));
 
     expect(read.length).toBe(published.length);
     expect(missing).toEqual([]);
@@ -8012,33 +8551,46 @@ describe("a module member cited in prose is still declared there", () => {
     // that one glob, the directory subset because the directory survives a
     // narrowing that drops only part of it.
     //
-    // **The exclusion is a literal, and the sentence here said otherwise.**
-    // It names one directory: the one the publish script writes to **by
-    // default**, which is gitignored and exists only where somebody has run
-    // that script. A run given an explicit directory writes outside what this
-    // excludes, and nothing cleverer is available, because that directory is
-    // a runtime argument to a shell script. **The predicted consequence does
-    // not occur here**: a tree materialised under another name lands in both
-    // patterns, so the two agree and this arm stays green. Verified by two
-    // runs of the script with explicit refs.
+    // **What the two patterns are allowed to differ by is derived, not
+    // listed.** This filtered the difference by the directory the publish
+    // script writes to by default, which said nothing about a run given any
+    // other directory: that is an argument to the script, and a copy
+    // materialised under another name was in both patterns, so the two
+    // agreed and this arm was green while the corpus held every published
+    // document twice.
     //
-    // **Where it does land is the shared document glob, and that is a ticket
-    // rather than this arm's business**: with the script pointed elsewhere
-    // that glob stops excluding the materialised tree and the rule reads a
-    // stale copy of every document, which is the failure that glob's own
-    // comment already records from 2026-09-10. The property that closes it is
-    // the one the document arm above already names and already declines,
-    // keying on what the repository versions rather than on the filesystem,
-    // and the decline is now one demonstrated instance more expensive than
-    // when it was written.
+    // **The right hand side is a second derivation and not a restatement of
+    // the left.** It rebuilds the allowed difference from the second
+    // pattern's own keys, so a narrowing written into the first pattern alone
+    // arrives here as a disagreement rather than as a smaller corpus. Empty
+    // on both sides on a checkout nobody has run the script in, which is why
+    // `materialisedCopies` carries its own arms over planted corpora: an
+    // equality between two empty sets witnesses nothing by itself.
+    //
+    // **Through the whole union, not the shape half.** The left hand side is
+    // what the corpus dropped, which is the union; rebuilding it from the
+    // shape alone asserts that the pin found nothing the shape did not, which
+    // is the same sentence as the pin being redundant. The union exists
+    // because it is not. Driven over a checkout carrying a real publish tree:
+    // with one published document renamed or deleted since that run, the
+    // shape half finds nothing, the corpus is **correct**, and the shape
+    // sided version reds and names neither the pin nor the ignore file. One
+    // rename on the trunk without re-running the script is enough, and the
+    // history makes that ordinary.
+    //
+    // **It is still two instruments and the arm keeps its subject.** The
+    // instruments are the two patterns, and the filter is not an instrument.
+    // Driven in the same place: narrowing either pattern by a directory reds
+    // this, before and after.
     const theirs = Object.keys(DOCUMENTS);
     const mine = Object.keys(EVERY_DOCUMENT);
-    const onlyInTheSecond = mine
-      .filter((path) => !theirs.includes(path))
-      .filter((path) => !path.startsWith("../../public/"));
+    const onlyInTheSecond = mine.filter((path) => !theirs.includes(path));
     const onlyInTheFirst = theirs.filter((path) => !mine.includes(path));
 
-    expect([onlyInTheSecond, onlyInTheFirst]).toEqual([[], []]);
+    expect(sortedPaths(onlyInTheSecond.map(repositoryPath))).toEqual(
+      thePublishTreeIn(mine.map(repositoryPath)),
+    );
+    expect(onlyInTheFirst).toEqual([]);
   });
 
   it("reads a citation written after a fenced code block", () => {
