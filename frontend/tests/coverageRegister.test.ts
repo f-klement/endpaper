@@ -6,6 +6,7 @@
  */
 import { spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdtempSync,
   readFileSync,
   mkdirSync,
@@ -20,6 +21,8 @@ import {
   BEGIN,
   END,
   type Census,
+  REGISTER_PATH,
+  WRITE_SENTINEL,
   blockOf,
   countWrittenOut,
   covers,
@@ -27,8 +30,10 @@ import {
   problems,
   render,
   rowsOf,
+  writeInstruction,
+  writeLine,
 } from "./coverageRegister";
-import { MARKER } from "./coverageRegister.globalSetup";
+import { MARKER, registerReading } from "./coverageRegister.globalSetup";
 import CoverageRegisterReporter from "./coverageRegister.reporter";
 
 /**
@@ -107,6 +112,243 @@ describe("reading the document", () => {
   it("refuses a register with no measured block", () => {
     expect(() => blockOf("# Coverage\n\nNothing fenced here.\n")).toThrow(
       /no measured block/,
+    );
+  });
+});
+
+/**
+ * The write a run offers, which is the whole of what a deliberate write
+ * applies.
+ *
+ * **Every arm here is about the write being the check's own figures.** A
+ * writer that counted this suite a second way would be a second instrument,
+ * and a second instrument agrees with the first on almost every tree: the run
+ * where the two disagree is the run nobody is watching. So the write is read
+ * off the same findings the reporter prints, and the thing that applies it
+ * replaces bytes and computes nothing.
+ */
+describe("the write a run offers", () => {
+  it("offers nothing when the register already agrees with the run", () => {
+    const body = census({ "a.test.ts": 4 });
+
+    expect(writeInstruction(registerFor(body, [["a.test.ts", 4]]), body)).toBe(
+      null,
+    );
+  });
+
+  it("offers the row as the line the document has and the line to put there", () => {
+    const body = census({ "a.test.ts": 7 });
+    const register = registerFor(body, [["a.test.ts", 4]]);
+
+    expect(writeInstruction(register, body)?.lines).toEqual([
+      [
+        "| `a.test.ts` | 4 | What it covers |",
+        "| `a.test.ts` | 7 | What it covers |",
+      ],
+    ]);
+  });
+
+  it("writes the block the reporter compares against and no other", () => {
+    const body = census({ "a.test.ts": 4 });
+    const register = registerFor(body, [["a.test.ts", 4]]).replace(
+      "**4 tests",
+      "**400 tests",
+    );
+
+    expect(writeInstruction(register, body)?.block).toBe(
+      render(body, ["a.test.ts"]),
+    );
+  });
+
+  it("leaves a sentence carrying its own numbers alone", () => {
+    const body = census({ "a.test.ts": 7 });
+    const register = registerFor(body, [["a.test.ts", 4]]).replace(
+      "What it covers",
+      "12 shapes, and the 3 that are not",
+    );
+
+    expect(writeInstruction(register, body)?.lines).toEqual([
+      [
+        "| `a.test.ts` | 4 | 12 shapes, and the 3 that are not |",
+        "| `a.test.ts` | 7 | 12 shapes, and the 3 that are not |",
+      ],
+    ]);
+  });
+
+  it("offers nothing at all from a run that took fewer files than the tree has", () => {
+    // A narrowed run can say nothing about any count, so it has no write. The
+    // rules it can still ask are reported rather than applied, and drawing
+    // that line inside the write is what stops a caller reaching around it.
+    const body = census(
+      { "a.test.ts": 1 },
+      { "a.test.ts": 1 },
+      [],
+      ["a.test.ts", "b.test.ts"],
+    );
+
+    expect(writeInstruction(registerFor(body, [["a.test.ts", 9]]), body)).toBe(
+      null,
+    );
+  });
+
+  it("refuses rather than writes when a row names nothing in the tree", () => {
+    const body = census({ "a.test.ts": 4 });
+    const register = registerFor(body, [
+      ["a.test.ts", 4],
+      ["gone.test.ts", 2],
+    ]);
+
+    const instruction = writeInstruction(register, body);
+
+    expect(instruction?.lines).toEqual([]);
+    expect(instruction?.refused).toEqual([
+      "`gone.test.ts` matches no file in this test tree",
+    ]);
+  });
+
+  it("refuses when the written out instrument saw more than the run did", () => {
+    // The block calls a file generating when the two figures differ, which is
+    // also true when written out is the larger. Writing the block then
+    // publishes a sentence that is false in a way no row shows.
+    const body = census({ "a.test.ts": 4 }, { "a.test.ts": 6 });
+
+    const instruction = writeInstruction(
+      registerFor(body, [["a.test.ts", 4]]),
+      body,
+    );
+
+    expect(instruction?.lines).toEqual([]);
+    expect(instruction?.refused.join()).toContain(
+      "6 written out against 4 collected",
+    );
+  });
+
+  it("refuses when one file is summed into two rows", () => {
+    const body = census({ "lib/a.test.ts": 4 });
+    const register = registerFor(body, [
+      ["lib/a.test.ts", 4],
+      ["lib/*", 4],
+    ]);
+
+    expect(writeInstruction(register, body)?.refused.join()).toContain(
+      "is matched by 2 rows",
+    );
+  });
+
+  it("writes the figures even while a file is still owed a sentence", () => {
+    // A file with no row needs prose a run cannot write, and the rule saying
+    // so stays red until a person writes it. The figures around it are still
+    // this run's own, so refusing the whole register would make a wave's
+    // ordinary case unwritable.
+    const body = census({ "a.test.ts": 4, "b.test.ts": 2 });
+    const register = registerFor(body, [["a.test.ts", 9]]);
+
+    const instruction = writeInstruction(register, body);
+
+    expect(instruction?.refused).toEqual([]);
+    expect(instruction?.lines).toEqual([
+      [
+        "| `a.test.ts` | 9 | What it covers |",
+        "| `a.test.ts` | 4 | What it covers |",
+      ],
+    ]);
+  });
+
+  it("travels as one line and arrives unchanged", () => {
+    const body = census({ "a.test.ts": 7 });
+    const instruction = writeInstruction(
+      registerFor(body, [["a.test.ts", 4]]),
+      body,
+    );
+    if (instruction === null)
+      throw new Error("this register is stale by one row");
+
+    const line = writeLine(instruction);
+
+    expect(line).not.toContain("\n");
+    expect(line.startsWith(`${WRITE_SENTINEL} `)).toBe(true);
+    expect(JSON.parse(line.slice(WRITE_SENTINEL.length + 1))).toEqual(
+      instruction,
+    );
+  });
+
+  it("names the register this tree actually has", () => {
+    // **Resolved paths, not file contents.** The backend half of this rule
+    // compares paths; comparing bytes is a weaker instrument for the same
+    // claim, because two different documents with the same contents pass it
+    // and the thing being checked is which document a write lands in.
+    const named = join(import.meta.dirname, "..", "..", REGISTER_PATH);
+
+    expect(named).toBe(join(import.meta.dirname, "COVERAGE.md"));
+    // Anti vacuity: a derivation that resolved to nothing would satisfy an
+    // equality against another derivation of the same nothing.
+    expect(existsSync(named)).toBe(true);
+  });
+
+  /**
+   * The gate's permission, which had no witness at all.
+   *
+   * **Planting the gate permanently closed left all 64 arms green at exit
+   * zero.** Both assertions about the sentinel on a stream are negative and
+   * every other arm calls the renderer directly, so nothing anywhere said a
+   * write is ever offered. A vitest change or a root flag would have ended
+   * the write path forever in silence, and the applier would then have said
+   * there is no write and repeated its ambiguity sentence, which reads as
+   * the other register being current.
+   *
+   * So this drives the real reporter's real hook with this repository's own
+   * project root and requires a write on the stream. It is the one arm that
+   * reds when the gate closes.
+   *
+   * **What it still cannot witness**, and this is the honest residue: that
+   * the configuration names this reporter, and that vitest hands it this
+   * project. A suite cannot watch its own wiring from inside itself. The
+   * global setup's marker is what covers the first of those, by a different
+   * route, and nothing covers the second.
+   */
+  it("offers a write when the run is about this repository's register", async () => {
+    const frontend = join(import.meta.dirname, "..");
+    const ran = join(import.meta.dirname, "withoutProse.test.ts");
+    const said: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => void said.push(line);
+    const reporter = new CoverageRegisterReporter();
+    reporter.onInit({
+      projects: [
+        {
+          config: { root: frontend },
+          globTestFiles: () => Promise.resolve({ testFiles: [ran] }),
+        },
+      ],
+    });
+
+    try {
+      await reporter.onTestRunEnd(
+        [{ moduleId: ran, children: { allTests: () => [1] } }],
+        [],
+        "passed",
+      );
+    } catch {
+      // The register does not describe a run of one file, so the reporter
+      // throws after printing. The throw is another arm's subject; the
+      // printing is this one's.
+    } finally {
+      console.log = log;
+    }
+
+    expect(said.join("\n")).toContain(WRITE_SENTINEL);
+  });
+
+  it("distinguishes a register from no register", () => {
+    // The diagonal the backend reading has and this one did not. A reading
+    // answering one constant would satisfy every refusal by never moving,
+    // and the absent case is unreachable in this tree today, which is what
+    // makes an arm the only thing that would catch it becoming reachable.
+    expect(registerReading(join(import.meta.dirname, "no-such-file.md"))).toBe(
+      "absent",
+    );
+    expect(registerReading(join(import.meta.dirname, "COVERAGE.md"))).not.toBe(
+      "absent",
     );
   });
 });
@@ -779,8 +1021,10 @@ describe("the guard fails a run", () => {
    * Asserting only the first line is the other end and gives up too much. The
    * reporter's refusal is 110 characters over two non blank lines of **45** and
    * **63**, and those 63 are the only characters naming the row, which the
-   * literal these arms replaced asserted outright. For the global setup's
-   * refusal, 299 characters on one line, all three forms are the same assertion.
+   * literal these arms replaced asserted outright. A global setup refusal is
+   * one line, and there all three forms are the same assertion. **No figure
+   * for that half**: there are two of those refusals now, of different
+   * lengths, and a count beside one of them reads as a count of both.
    *
    * **What per line gives up, in full**: the blank line between the parts,
    * contiguity, order, and that the lines arrived as one block. All four are
@@ -1265,6 +1509,103 @@ export function teardown(): void {
     SPAWNED + 30_000,
   );
 
+  /**
+   * The property this half's safety rests on, which nothing pinned.
+   *
+   * **The backend half withholds its write when anything was deselected,
+   * because its gate is a file set and a name filter leaving one test in
+   * every file opens it on counts that are floors. This half needs no such
+   * counter, and that is a measurement rather than a judgement**: vitest
+   * marks a non matching task `skip` rather than removing it, and
+   * `allTests()` yields a skipped task, so a name filter moves no count and
+   * the register still describes the run.
+   *
+   * Measured over the real suite, `bun run test -t zip`: `Test Files 8
+   * passed | 194 skipped (202)`, `Tests 36 passed | 4381 skipped (4417)`,
+   * exit 0, no write printed and no complaint. The total is the collection's
+   * and not the execution's.
+   *
+   * **So the thing to guard is the vitest behaviour, not a narrowing.** A
+   * counter here would be armed by nothing and would read to the next person
+   * as a case somebody had seen. If this arm ever reddens, the counter is
+   * what the fix is, and the backend half already has one to copy.
+   */
+  it(
+    "offers no write and loses no count when a name filter narrows a run",
+    () => {
+      write(registerFor(body, rows));
+
+      const run = runThere("-t", "alone");
+
+      expect(run.refusals).toEqual([]);
+      // The constant, never the word written out: a literal here would put
+      // this file into the derived population that holds the three
+      // spellings of it equal.
+      expect(run.stdout).not.toContain(WRITE_SENTINEL);
+      expect(run.status).toBe(0);
+    },
+    SPAWNED + 30_000,
+  );
+
+  /**
+   * The witness the arm above cannot be.
+   *
+   * **No refusal, no sentinel and exit zero are all satisfied when nothing
+   * was checked at all**, so that arm cannot tell the counts surviving the
+   * filter from the counts never being asked. Its own neighbour twenty five
+   * lines up argues against exactly that shape, on a stream rather than on a
+   * channel.
+   *
+   * So this one is a **positive containment** on the channel this file
+   * prefers: the same name filter, a register stale by one row, and the
+   * reporter's refusal required to name the file and both counts. Only a run
+   * that counted under the filter can produce that sentence.
+   */
+  it(
+    "counts under a name filter, and says both figures when the row is stale",
+    () => {
+      write(oneTestOut());
+
+      const run = runThere("-t", "alone");
+
+      expect(refused(run, "reporter")).toContain(
+        "`a.test.ts`: the register says 3, the run counted 2 over 1 file",
+      );
+      expect(run.status).toBe(1);
+    },
+    SPAWNED + 30_000,
+  );
+
+  /**
+   * The write a nested run must not offer, driven rather than reasoned.
+   *
+   * **A child of this suite imports the real guard**, so the register path
+   * that guard derives from its own location was this repository's while
+   * every figure was the fixture's. The child pipes and two arms assert on
+   * its standard output, so a failing one prints what it received: a well
+   * formed write naming the real register, carrying another tree's counts,
+   * into an artefact.
+   *
+   * The reporter now asks whether the run's own register is the module's
+   * before offering a write at all. This drives a child whose register is
+   * stale, which is precisely when a write would have been printed, and
+   * requires none.
+   */
+  it(
+    "prints no write from a run over somebody else's library",
+    () => {
+      write(oneTestOut());
+
+      const run = runThere();
+
+      expect(refused(run, "reporter")).toContain("does not describe this run");
+      expect(run.stdout).not.toContain(WRITE_SENTINEL);
+      expect(run.stderr).not.toContain(WRITE_SENTINEL);
+      expect(run.status).toBe(1);
+    },
+    SPAWNED + 30_000,
+  );
+
   it(
     "fails a run whose reporters a command line flag replaced",
     () => {
@@ -1276,6 +1617,56 @@ export function teardown(): void {
         "the coverage register reporter did not run",
       );
       expect(run.status).toBe(1);
+    },
+    SPAWNED + 30_000,
+  );
+
+  /**
+   * The attempt the whole arrangement refuses, driven rather than described.
+   *
+   * **A guard that heals itself asserts nothing**, so what a run measures is
+   * printed and applying it is a separate invocation. The way a future edit
+   * undoes that is to make the run write the document it is checking, and
+   * this plants exactly that: a test file in the fixture library that
+   * rewrites the fixture's own register while the run is going.
+   *
+   * **Closed over the mechanism rather than over the spelling.** The refusal
+   * compares the register's bytes either side of the run, so it does not
+   * matter whether the write came from a test, from the reporter, from a
+   * setup file or from a plugin. A rule naming one way of writing a file
+   * would be a list of the ways somebody has thought of, and the next one is
+   * written by somebody who has not read the list.
+   *
+   * **It plants in the fixture and never in this tree**, which is what the
+   * global setup reading its own project's root buys: the attempt is real and
+   * the register this suite is checking is never touched by it.
+   */
+  it(
+    "fails a run that rewrote the register it was checking",
+    () => {
+      write(registerFor(body, rows));
+      const planted = join(fixture, "tests", "heals.test.ts");
+      writeFileSync(
+        planted,
+        `import { writeFileSync } from "node:fs";\n` +
+          `it("rewrites the register under the run", () => {\n` +
+          `  writeFileSync(${JSON.stringify(join(fixture, "tests", "COVERAGE.md"))}, "# Coverage\\n");\n` +
+          `  expect(1).toBe(1);\n});\n`,
+      );
+
+      try {
+        const run = runThere();
+
+        expect(refused(run, "globalSetup")).toContain(
+          "changed while the run that checks it was running",
+        );
+        expect(run.status).toBe(1);
+      } finally {
+        // Removed whatever happened above, because every other spawning arm
+        // here counts the files in this library and a leftover one moves
+        // every figure they assert.
+        rmSync(planted, { force: true });
+      }
     },
     SPAWNED + 30_000,
   );

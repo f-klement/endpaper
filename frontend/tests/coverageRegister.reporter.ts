@@ -53,10 +53,13 @@ import { join, relative } from "node:path";
 
 import {
   type Census,
+  THIS_REGISTER,
   countWrittenOut,
   declaresItselfInternal,
   isWhole,
   problems,
+  writeInstruction,
+  writeLine,
 } from "./coverageRegister";
 import { MARKER, OWNER } from "./coverageRegister.globalSetup";
 
@@ -165,10 +168,56 @@ export default class CoverageRegisterReporter {
         );
     }
 
-    const wrong = problems(
-      readFileSync(join(testRoot, "COVERAGE.md"), "utf8"),
-      census,
-    );
+    const itsRegister = join(testRoot, "COVERAGE.md");
+    const register = readFileSync(itsRegister, "utf8");
+
+    // **Printed, never applied.** This process is the one checking the
+    // register, so it is the one process that must not write it: a guard that
+    // heals itself asserts nothing. What it does instead is put the whole
+    // write on one line of the run's own output, where a separate and
+    // deliberate invocation can pick it up. Nothing here opens the register
+    // for writing, and the global setup fails the run if anything else does.
+    //
+    // **And only a run about this repository's own register offers one.** A
+    // write names a fixed path while these figures are whichever run's they
+    // are, and this suite spawns runs over fixture libraries that import
+    // this very module. Without this question such a child printed a well
+    // formed write naming the real register and carrying the fixture's
+    // counts, onto a stream two arms assert against and therefore into an
+    // artefact. The problems below are still reported, because they are
+    // true about the document this run read.
+    //
+    // **What this question catches and what it does not**, because a cross
+    // check written here caught neither and claimed both.
+    //
+    // It catches a run that wrongly believes a register is its own, which
+    // is the direction that writes a figure into the wrong document. That
+    // is driven end to end by a nested run over a fixture library.
+    //
+    // **It does not catch the gate wrongly closed**, which is a write
+    // withheld forever and reads downstream as the other register being
+    // current. A change to this code is covered by the in process witness
+    // in `coverageRegister.test.ts`, which drives this hook with this
+    // repository's own root and requires a write. **A change to the
+    // environment is covered by nothing**: a root the comparison never
+    // recognises, a symlinked checkout being the measured case, is silence
+    // at exit 0 and no arm here sees it.
+    //
+    // A second derivation from the working directory was tried and
+    // deleted. Gated on the question being open it cannot see the closed
+    // direction at all, and ungated it throws on every nested run, because
+    // the working directory does not follow a root flag and the two
+    // disagree there by construction.
+    //
+    // **What keeps this true today is a condition the runner guarantees by
+    // accident**: it ships the tree into a container and starts the suite
+    // with the project root as the real path this module resolves to, so
+    // the comparison holds without anything asserting that it must.
+    const instruction =
+      itsRegister === THIS_REGISTER ? writeInstruction(register, census) : null;
+    if (instruction !== null) console.log(writeLine(instruction));
+
+    const wrong = problems(register, census);
     if (wrong.length > 0)
       throw new Error(
         `tests/COVERAGE.md does not describe this run:\n\n${wrong.join("\n\n")}`,

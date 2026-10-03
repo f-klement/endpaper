@@ -10,6 +10,7 @@ import in the test suite.
 import atexit
 import contextlib
 import datetime
+import hashlib
 import os
 import shutil
 import sys
@@ -22,6 +23,50 @@ from typing import Any
 import pytest
 import respx
 from hypothesis import settings as hypothesis_settings
+
+# ── The register this session checks, read before this session does anything ──
+#
+# **As early in this file as it can be, and that is the whole reason it is
+# here rather than beside the rule it serves.** `_refuse_a_rewritten_register`
+# compares this reading against one taken at the end, so everything between
+# the two is covered and everything before the first is not. Taken from
+# `pytest_sessionstart` the window held every `pytest_configure` and this
+# file's own module scope, so a self heal written four lines above the rule
+# forbidding it reddened nothing.
+#
+# **It is also what puts the reading in every process.** A hook gated to the
+# controller leaves a worker's copy of the global unset, so the arm that
+# witnesses the arming ran in a worker and read a different copy from the one
+# the refusal reads. Module scope runs wherever this file is imported, which
+# is both.
+
+#: `COVERAGE.md`, which this session checks and must not write.
+_REGISTER = Path(__file__).resolve().parent / "COVERAGE.md"
+
+
+def _register_reading(path: Path | None = None) -> str:
+    """The document as one short string, or the word for not having one.
+
+    Size beside the digest because a refusal naming two hashes says a file
+    moved and nothing else, and the direction is usually the first question.
+
+    **The module global is read here rather than defaulted into the
+    signature.** A default is evaluated once, when this file is imported, so
+    the arm that drives this against a document of its own would have been
+    comparing two readings of the real register and finding them equal.
+    Measured: the refusal never fired and the arm reported a pass.
+    """
+    target = _REGISTER if path is None else path
+    if not target.exists():
+        return "absent"
+    content = target.read_bytes()
+    return f"{len(content)} bytes, {hashlib.sha256(content).hexdigest()}"
+
+
+#: That document as this process first saw it. Never `None` in a live run;
+#: the refusal treats `None` as a guard somebody removed rather than as a
+#: reason to pass.
+_REGISTER_WAS: str | None = _register_reading()
 
 # ── What the property based tests are allowed to spend ────────────────────────
 #
@@ -535,6 +580,95 @@ def _refuse_the_short_session(session: pytest.Session, lines: list[str]) -> None
     session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
+def _refuse_a_rewritten_register(session: pytest.Session) -> None:
+    """Refuse a run that wrote the document it was checking.
+
+    **A guard that heals itself asserts nothing**, so the figures a run takes
+    for `COVERAGE.md` are printed for a separate and deliberate invocation to
+    apply, and nothing in the suite opens that file for writing. This is what
+    makes that true rather than what says it.
+
+    **Closed over the mechanism, not over the spelling.** A rule forbidding one
+    way of writing a file is a list of the ways somebody has thought of, and
+    the next one is written by somebody who has not read the list. Comparing
+    the bytes either side of the run makes a write from a test, from a fixture,
+    from a plugin or from a hook one failure with one name.
+
+    **What it does not see, which is three things and not two.** A write that
+    lands after this call. A write by a process this run did not start. And a
+    write that lands **before** the baseline reading, which is why that
+    reading is taken at this file's module scope rather than from a session
+    hook: a hook runs after every `pytest_configure`, so a self heal written
+    four lines above this rule would have reddened nothing.
+
+    **Not even module scope closes the third**, and the sentence claiming any
+    of them unreachable is deleted rather than narrowed. What is left is this
+    file's own lines above the reading, and the import time code of any
+    plugin pytest loads before a conftest. The window is as early as this
+    file can make it and it is not empty.
+
+    The frontend register carries the same rule in its own global setup,
+    because a lesson learned in one half of a rule does not travel to the
+    other.
+    """
+    now = _register_reading()
+    if _REGISTER_WAS is None:
+        # **A refusal, never a quiet return.** The reading is taken
+        # unconditionally at module scope, so this state means somebody
+        # removed it, and a guard that is not armed reporting a pass is the
+        # whole failure this file is about. `test_coverage_register_writer`
+        # blanks the global and drives this.
+        _refuse_the_short_session(
+            session,
+            [
+                f"this run never read {_REGISTER.name} before it began, so it "
+                "cannot say whether it wrote one. That reading is taken at "
+                "the module scope of this file and nothing makes it optional, "
+                "so its absence is a guard that has been removed.",
+            ],
+        )
+        return
+    if now == _REGISTER_WAS:
+        return
+    _refuse_the_short_session(
+        session,
+        [
+            f"{_REGISTER.name} changed while the run that checks it was "
+            f"running, from {_REGISTER_WAS} to {now}. A run must not write the "
+            "register it is checking: what a run measures is printed, and "
+            "applying it is a separate invocation somebody makes on purpose.",
+        ],
+    )
+
+
+#: Every nodeid this run dropped after collecting it.
+#:
+#: **One cause agnostic hook rather than a list of flags.** `-k`, `-m`,
+#: `--deselect`, `--lf`, `--ff` and `--sw` all reach `pytest_deselected`, and
+#: pytest's own hookspec requires a plugin dropping items to call it, so this
+#: is not the enumeration the register's gate refuses.
+_DESELECTED: list[str] = []
+
+
+def pytest_deselected(items: list[pytest.Item]) -> None:
+    _DESELECTED.extend(item.nodeid for item in items)
+
+
+@pytest.fixture
+def deselected_items() -> list[str]:
+    """What this run dropped after collecting it, for the register's guard.
+
+    **The register's file set gate cannot see a narrowing inside a file.** A
+    `-k` leaving at least one test in every file changes no file's
+    membership, so that gate opens and the count arms red on figures that are
+    floors. That was loud and wrong, which is the cheaper direction, until
+    those same two arms began printing a write: loud and wrong became loud,
+    wrong and applicable by a tool that has no question to ask. This is what
+    the write is withheld on.
+    """
+    return list(_DESELECTED)
+
+
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Refuse a session that reported fewer tests than it collected.
 
@@ -542,6 +676,17 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     reader to diff two counts they do not have.
     """
     config = session.config
+    if not hasattr(config, "workerinput"):
+        # **Asked on the controller only, and that is not a narrowing.** The
+        # register is one file every worker shares, so the controller's own
+        # two readings span the whole run whichever process did the writing.
+        # Asking in a worker as well would report the same fault once per
+        # worker and leave each of them setting a status xdist does not read.
+        #
+        # **Before the reconciliation below, which returns early three ways.**
+        # A run that rewrote the register has nothing to say about it however
+        # it ended.
+        _refuse_a_rewritten_register(session)
     if hasattr(config, "workerinput"):
         # An xdist worker. It collects the whole suite and runs a slice of it,
         # so its own denominator is short by construction and says nothing about

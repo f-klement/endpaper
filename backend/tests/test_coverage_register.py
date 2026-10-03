@@ -46,6 +46,7 @@ is read off the file instead, in `_excused`.
 from __future__ import annotations
 
 import ast
+import json
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -1139,6 +1140,177 @@ def render(census: Census, table: list[tuple[str, int]]) -> str:
     )
 
 
+#: The word a run prints in front of the write it measured, so that a separate
+#: invocation can apply it.
+#:
+#: **Every figure in that write is this run's own.** A writer that recomputed
+#: them would be a second instrument, and a second instrument agrees with this
+#: one on almost every tree: the run where the two disagree is the run nobody
+#: is watching, and the register would then carry a figure no suite ever took.
+#: So what travels is the finished text, and what applies it carries no census
+#: at all.
+#:
+#: **Three files spell this word and none of them can import another.** The
+#: frontend half of the register is TypeScript and the applier is a script
+#: under a directory this published file may not name as a path. The three are
+#: held equal by an arm in the internal guard that reads all three, which is
+#: the only place that can.
+WRITE_SENTINEL = "COVERAGE-REGISTER-WRITE"
+
+#: This register, named from the repository root the way the write names it.
+#: Derived, so a moved register does not leave a literal pointing at nothing.
+#:
+#: **Derived from this module's location, which is safe here only because
+#: nothing spawns a nested run of this suite.** The frontend half of this
+#: rule derives the same constant the same way and is not safe: that suite
+#: runs whole vitest children over fixture libraries, and a child importing
+#: its guard named the real register while carrying the fixture's figures.
+#: Its reporter now asks whether the run's own register is the module's
+#: before offering a write at all. **The two halves therefore look symmetric
+#: and are not**, and this paragraph is here so the next reader does not copy
+#: the simpler one into a tree that has grown a fixture runner.
+REGISTER_PATH = REGISTER.relative_to(TESTS.parent.parent).as_posix()
+
+
+@dataclass(frozen=True)
+class WriteInstruction:
+    """The whole of what a run would change in the register, as text.
+
+    **Lines rather than figures, and that is what keeps the applier honest.**
+    Handing it a count would make it find the cell, which is a second spelling
+    of this file's row grammar and free to drift from it. Handing it the line
+    the document has today and the line this run would write instead makes the
+    application a byte replacement with no grammar in it, and a document whose
+    line has moved under the write is a refusal by name rather than a wrong
+    cell.
+    """
+
+    register: str
+    #: The text between the fences, or `None` where this run is offering no
+    #: block at all, which is every write carrying a refusal.
+    block: str | None
+    lines: tuple[tuple[str, str], ...]
+    #: What this run measured and will not write, with the reason. A register
+    #: carrying one of these is left alone entirely: every refusal here is a
+    #: cell whose own arm is red for a reason a new number would paper over.
+    refused: tuple[str, ...]
+
+    def payload(self) -> str:
+        """The one line a run prints, which is the whole write."""
+        return WRITE_SENTINEL + " " + json.dumps(
+            {
+                "register": self.register,
+                "block": self.block,
+                "lines": [list(pair) for pair in self.lines],
+                "refused": list(self.refused),
+            },
+            sort_keys=True,
+        )
+
+
+def _restated(register: str, match: re.Match[str], counted: int) -> tuple[str, str]:
+    """A row's line as the document has it, and as this run would write it.
+
+    **The digits are replaced where they sit and nothing else on the line is
+    touched**, so a description a person wrote survives a write that corrects
+    the number beside it. The row grammar is read once, here, off the same
+    expression every other rule in this file reads.
+
+    **No padding is reproduced, deliberately.** One of the two registers is
+    formatted by prettier, which pads this column to a fixed width, so a write
+    that changes a count's digit count leaves that file needing the formatter
+    the gate already runs last. Reproducing the alignment here would be a
+    second implementation of the formatter's rule in two languages, and its
+    failure would be silent; forgetting the formatter fails `format:check` by
+    name.
+    """
+    ends = register.find("\n", match.start())
+    line = register[match.start() :] if ends < 0 else register[match.start() : ends]
+    at = match.start(2) - match.start()
+    through = match.end(2) - match.start()
+    return line, line[:at] + str(counted) + line[through:]
+
+
+def write_instruction(census: Census, register: str) -> WriteInstruction | None:
+    """What this run would write into the register, or `None` when it is current.
+
+    **Rendered from the census every rule above is checked against**, so the
+    write and the check cannot disagree about a figure: there is one
+    computation and the applier has none.
+
+    **A row crossing zero is refused rather than written.** A 0 is not a count
+    in this document, it is the statement that this engine cannot run the file,
+    and the two arms outside the gate read it as one. A run that found a
+    counted file stated as 0, or a stated file collecting nothing, has found a
+    defect those arms name; replacing the digit would silence them and leave
+    the register asserting something no run checked. So such a register is left
+    alone in full, block included, because the block's own fourth figure counts
+    the rows stating 0 and would be rendered against a table about to change.
+    """
+    table = rows(register)
+    recorded = _rows_of_zero(table)
+    lines: list[tuple[str, str]] = []
+    refused: list[str] = []
+    for match in _ROW.finditer(register):
+        path, stated = match.group(1), int(match.group(2))
+        counted = census.counts.get(path, 0)
+        if counted == stated:
+            continue
+        if path in recorded or counted == 0:
+            refused.append(
+                f"{path}: the register says {stated} and this run collected "
+                f"{counted}. A 0 in this column records an engine that cannot "
+                "run the file rather than a count, so neither figure is a "
+                "digit to replace."
+            )
+            continue
+        lines.append(_restated(register, match, counted))
+    block = render(census, table)
+    _, current, _ = split(register)
+    if refused:
+        # **The whole register, and this is where that is decided rather than
+        # in whatever applies the write.** A rule the applier has to honour is
+        # a rule the next applier does not; carrying no block and no line
+        # makes the refusal a property of what this run offers.
+        return WriteInstruction(
+            register=REGISTER_PATH, block=None, lines=(), refused=tuple(refused)
+        )
+    if current == block and not lines:
+        return None
+    return WriteInstruction(
+        register=REGISTER_PATH, block=block, lines=tuple(lines), refused=()
+    )
+
+
+def _write_line(census: Census, register: str, deselected: Sequence[str]) -> str:
+    """The payload to print beside a failure, or nothing when there is none.
+
+    **Appended to the message of every arm that can be red on a stale
+    register**, so whichever of them a run reaches carries the same complete
+    write. Two arms printing one instruction is the applier's cross check: it
+    refuses two payloads for one register that disagree.
+
+    **A run that deselected anything offers no write, and that is the whole
+    reason this takes an argument.** The gate above these arms is a file set,
+    which cannot see a narrowing inside a file: a `-k` leaving at least one
+    test in every file opens it and leaves these two arms red on counts that
+    are floors. That was loud and wrong, which is the cheaper direction. It
+    stopped being the cheaper direction the moment these arms began printing
+    something a tool applies without a question to ask, so the counter the
+    gate's own note calls affordable is taken here. `conftest.pytest_deselected`
+    is the one cause agnostic hook every narrowing reaches.
+    """
+    if deselected:
+        return (
+            f"\nNo write is offered: this run deselected {len(deselected)} of "
+            "the items it collected, so every count above is a floor rather "
+            "than a count. The file set gate cannot see a narrowing inside a "
+            "file, which is why these figures are red and not writable."
+        )
+    instruction = write_instruction(census, register)
+    return "" if instruction is None else "\n" + instruction.payload()
+
+
 def _planted(counts: dict[str, int], on_disk: set[str]) -> Census:
     """A census this file made up, for driving the rules below against one.
 
@@ -1356,7 +1528,7 @@ def whole_tree(census: Census, register: str) -> Census:
 
 class TestEveryNumberInTheRegisterIsThisRunsOwn:
     def test_the_measured_block_is_what_this_run_collected(
-        self, whole_tree: Census, register: str
+        self, whole_tree: Census, register: str, deselected_items: list[str]
     ) -> None:
         _, block, _ = split(register)
         table = rows(register)
@@ -1366,10 +1538,11 @@ class TestEveryNumberInTheRegisterIsThisRunsOwn:
             "block is generated: replace the text between the fences with what "
             "follows, and read what moved rather than adjusting a figure by the "
             f"delta.\n{render(whole_tree, table)}"
+            f"{_write_line(whole_tree, register, deselected_items)}"
         )
 
     def test_every_row_states_the_count_this_run_collected(
-        self, whole_tree: Census, register: str
+        self, whole_tree: Census, register: str, deselected_items: list[str]
     ) -> None:
         """Every row, including one stating 0.
 
@@ -1386,7 +1559,9 @@ class TestEveryNumberInTheRegisterIsThisRunsOwn:
             if stated != whole_tree.counts.get(path, 0)
         ]
 
-        assert wrong == [], "\n".join(wrong)
+        assert wrong == [], "\n".join(wrong) + _write_line(
+            whole_tree, register, deselected_items
+        )
 
     def test_every_row_names_a_file_the_tree_has(
         self, census: Census, register: str
@@ -1507,6 +1682,26 @@ class TestEveryNumberInTheRegisterIsThisRunsOwn:
             "that has tests. A file with no test in it, or one whose module "
             "body cannot end its own collection, collects nothing everywhere "
             "and a 0 excuses it for good."
+        )
+
+    def test_this_run_deselected_nothing_and_the_counter_says_so(
+        self, deselected_items: list[str]
+    ) -> None:
+        """The arming check for the thing that withholds a write.
+
+        **Zero is the true value and there is no room under it**, which is
+        what makes this an arm rather than a floor: the day a plugin starts
+        dropping items on an ordinary run is the day these counts stop being
+        counts, and that is exactly when the write must stop being offered.
+
+        It also witnesses that the hook is wired at all. A counter nobody
+        calls reads as "nothing was deselected" forever, which is the silent
+        direction.
+        """
+        assert deselected_items == [], (
+            "this run dropped items after collecting them, so the counts the "
+            "register is checked against are floors. If that is deliberate, "
+            "it is the gate that needs widening and not this arm."
         )
 
     def test_nothing_collected_is_skipped_or_left_expected_to_fail(
@@ -1733,6 +1928,216 @@ class TestTheDocumentIsReadRatherThanAssumed:
         not the day to notice the sentence reads wrong."""
         assert _rows(1) == "1 row"
         assert _rows(2) == "2 rows"
+
+
+class TestTheWriteCarriesTheChecksOwnFigures:
+    """`write_instruction`, which is what a deliberate write applies.
+
+    **The subject of every arm here is that the write and the check are one
+    computation.** The register was recounted by hand until this existed, and
+    the obvious replacement, a tool that counts the suite a second way, is
+    worse than the hand: it would agree with the run on almost every tree, so
+    the one tree where it did not is the one nobody would look at. These arms
+    hold the write to the same `render` and the same `counts` the rules above
+    compare against, which is the only reason a generated figure is worth more
+    here than a careful reader.
+    """
+
+    @staticmethod
+    def _document(census: Census, table: list[tuple[str, int]]) -> str:
+        """A register whose block is current for `census` and whose rows are
+        whatever the caller asked for, so an arm moves one thing at a time."""
+        body = "".join(
+            f"| `{path}` | {stated} | What {path} covers |\n" for path, stated in table
+        )
+        return (
+            "# Backend test coverage\n\n"
+            f"{BEGIN}{render(census, table)}{END}\n\n"
+            "| File | Tests | Covers |\n|---|---:|---|\n" + body
+        )
+
+    def test_a_register_that_agrees_with_the_run_has_nothing_to_write(self) -> None:
+        census = _planted({"test_a.py": 10}, {"test_a.py"})
+        document = self._document(census, [("test_a.py", 10)])
+
+        assert write_instruction(census, document) is None
+        assert _write_line(census, document, []) == ""
+
+    def test_a_run_that_deselected_anything_offers_no_write(self) -> None:
+        """The narrowing the gate above these arms cannot see.
+
+        A `-k` leaving at least one test in every file changes no file's
+        membership, so that gate opens and the counts behind it are floors.
+        Before the write existed that was loud and wrong, which the gate's own
+        note calls the cheaper direction and rests its decision on. A complete
+        write carrying undercounts is not the cheaper direction, because the
+        thing that applies it has no question to ask.
+        """
+        census = _planted({"test_a.py": 12}, {"test_a.py"})
+        document = self._document(census, [("test_a.py", 10)])
+
+        said = _write_line(census, document, ["tests/test_a.py::test_one"])
+
+        assert WRITE_SENTINEL not in said
+        assert "deselected 1 of the items it collected" in said
+        # The diagonal: this register really is stale, so a line that said
+        # nothing whatever a run did would pass the assertion above.
+        assert write_instruction(census, document) is not None
+        assert WRITE_SENTINEL in _write_line(census, document, [])
+
+    def test_a_row_the_run_disagrees_with_is_written_as_two_whole_lines(self) -> None:
+        """The line the document has and the line this run would put there.
+
+        **The old line is in the write so that the applier can refuse**: a
+        document whose row has moved since the run is a replacement the applier
+        cannot find, which is a named refusal rather than a cell written in the
+        wrong place.
+        """
+        census = _planted({"test_a.py": 12}, {"test_a.py"})
+        document = self._document(census, [("test_a.py", 10)])
+
+        instruction = write_instruction(census, document)
+
+        assert instruction is not None
+        assert instruction.lines == (
+            ("| `test_a.py` | 10 | What test_a.py covers |",
+             "| `test_a.py` | 12 | What test_a.py covers |"),
+        )
+        assert instruction.refused == ()
+
+    def test_the_sentence_beside_a_corrected_count_is_carried_through(self) -> None:
+        """The descriptions are the half of this register a run cannot write,
+        so a write that corrects a figure must not touch them. The third cell
+        here holds digits of its own, which is the shape that would be lost by
+        a writer rebuilding the row instead of editing the cell."""
+        census = _planted({"test_a.py": 4}, {"test_a.py"})
+        document = self._document(census, [("test_a.py", 9)]).replace(
+            "What test_a.py covers", "**12 shapes**, and the 3 that are not"
+        )
+
+        instruction = write_instruction(census, document)
+
+        assert instruction is not None
+        assert instruction.lines == (
+            ("| `test_a.py` | 9 | **12 shapes**, and the 3 that are not |",
+             "| `test_a.py` | 4 | **12 shapes**, and the 3 that are not |"),
+        )
+
+    def test_the_block_it_writes_is_the_block_the_arm_compares(self) -> None:
+        """One computation, asserted rather than said. The arm above this class
+        compares the document against `render`; so does the write."""
+        census = _planted({"test_a.py": 10, "test_b.py": 7}, {"test_a.py", "test_b.py"})
+        table = [("test_a.py", 10), ("test_b.py", 7)]
+        document = self._document(census, table).replace(
+            "**17 tests", "**1700 tests"
+        )
+
+        instruction = write_instruction(census, document)
+
+        assert instruction is not None
+        assert instruction.block == render(census, rows(document))
+
+    def test_a_row_crossing_zero_is_refused_and_the_register_left_whole(self) -> None:
+        """A 0 is a statement about the engine, not a count, and two arms
+        outside the gate read it as one. A run that disagrees with one has
+        found what those arms are for, so nothing is written at all: the
+        block's own fourth figure counts the rows stating 0, and rendering it
+        against a table about to change is how a write leaves a register
+        stale in a second place.
+        """
+        census = _planted({"test_a.py": 3, "test_zero.py": 6}, {"test_a.py", "test_zero.py"})
+        document = self._document(census, [("test_a.py", 5), ("test_zero.py", 0)])
+
+        instruction = write_instruction(census, document)
+
+        assert instruction is not None
+        assert instruction.lines == ()
+        assert instruction.block is None
+        assert len(instruction.refused) == 1
+        assert "test_zero.py" in instruction.refused[0]
+
+    def test_a_file_the_run_lost_is_refused_rather_than_written_as_zero(self) -> None:
+        """The other direction across the same cell, and the cheapest wrong
+        write available: a row whose file is gone collects nothing, and
+        writing the 0 would hand it the permanent excuse a row of 0 carries."""
+        census = _planted({"test_a.py": 3}, {"test_a.py"})
+        document = self._document(census, [("test_a.py", 3), ("test_gone.py", 8)])
+
+        instruction = write_instruction(census, document)
+
+        assert instruction is not None
+        assert instruction.lines == ()
+        assert instruction.block is None
+        assert len(instruction.refused) == 1
+        assert "test_gone.py" in instruction.refused[0]
+
+    def test_the_write_travels_as_one_line_and_arrives_unchanged(self) -> None:
+        """The payload is printed into a suite artefact and read back out of
+        it, so it is one line and it survives the round trip. A block spans
+        several lines and a description can hold any character a person
+        types."""
+        census = _planted({"test_a.py": 12}, {"test_a.py"})
+        document = self._document(census, [("test_a.py", 10)])
+        instruction = write_instruction(census, document)
+        assert instruction is not None
+
+        payload = instruction.payload()
+
+        assert "\n" not in payload
+        assert payload.startswith(WRITE_SENTINEL + " ")
+        carried = json.loads(payload[len(WRITE_SENTINEL) + 1 :])
+        assert carried["register"] == REGISTER_PATH
+        assert carried["block"] == instruction.block
+        assert carried["lines"] == [list(pair) for pair in instruction.lines]
+        assert carried["refused"] == []
+
+    def test_the_register_it_names_is_the_register_this_file_reads(self) -> None:
+        """Derived rather than written down, so a moved register does not leave
+        the write naming a path the applier cannot find."""
+        assert (TESTS.parent.parent / REGISTER_PATH).resolve() == REGISTER.resolve()
+
+    def test_both_arms_that_can_be_red_on_a_stale_register_print_the_write(
+        self,
+    ) -> None:
+        """The seam, which had no witness on this side either.
+
+        **The renderer is positively witnessed as a function and its call
+        sites are not.** Both of them are interpolations inside assertion
+        messages that exist only when the register is stale, so on a green
+        tree deleting either one reds nothing at all and the write simply
+        stops being offered by that arm. The frontend half has the same
+        shape at its own seam and now has a positive arm; this is that arm
+        on this side.
+
+        **Structural rather than a text match**, so reformatting the message
+        or moving the call within it changes nothing here, and removing the
+        call is what reds.
+
+        **What it cannot witness**: that the message reaches an artefact, or
+        that pytest prints it. A suite cannot watch its own reporting from
+        inside itself, which is the same residue the frontend's own witness
+        states.
+        """
+        tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+        calling = {
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+            and any(
+                isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Name)
+                and inner.func.id == "_write_line"
+                for inner in ast.walk(node)
+            )
+        }
+
+        assert {
+            "test_the_measured_block_is_what_this_run_collected",
+            "test_every_row_states_the_count_this_run_collected",
+        } <= calling, (
+            "an arm that can be red on a stale register no longer offers the "
+            f"write beside its failure. These do: {sorted(calling)}"
+        )
 
 
 class TestWhatEndsAModulesOwnCollection:

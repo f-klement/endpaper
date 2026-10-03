@@ -25,7 +25,8 @@
  * rule is read as current long after it stops being so.
  */
 
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -43,7 +44,78 @@ export const MARKER = "ENDPAPER_COVERAGE_REGISTER_MARKER";
  */
 export const OWNER = "ENDPAPER_COVERAGE_REGISTER_OWNER";
 
-export function setup(): void {
+/**
+ * The register this run is about to check, as it stood when the run began.
+ *
+ * **A run must not write the document it is checking. A guard that heals
+ * itself asserts nothing**, so the write is a separate invocation and this is
+ * what makes that true rather than saying it. The figures a run measures are
+ * printed, and whether anything then applies them is somebody else's
+ * deliberate act.
+ *
+ * **Closed over the mechanism rather than over the spelling.** A rule
+ * forbidding one way of writing a file is a list of the ways somebody has
+ * thought of; this compares the bytes either side of the run, so a write from
+ * the reporter, from a test, from a setup file or from a plugin is one
+ * failure with one name. What it does not cover is said at the refusal.
+ *
+ * `null` where the file is absent, which is what a fixture tree has, so the
+ * comparison is between two readings rather than between a reading and an
+ * assumption.
+ */
+let registerWhenTheRunBegan: string | null = null;
+
+/**
+ * The register of the run in hand, which is not always this tree's.
+ *
+ * **Read off the project vitest is running**, so a run over a fixture library
+ * guards that library's register rather than this repository's. That is what
+ * makes the rule drivable end to end: a nested run can be made to rewrite its
+ * own document, which is the attempt, and no arm has to rewrite the register
+ * this suite is checking to show that the refusal works.
+ *
+ * **Refused rather than defaulted when vitest does not offer it.** A default
+ * here is a path somebody will believe, and the one it would fall back to is
+ * this repository's own register, so a vitest change that moved this would
+ * leave every run guarding the wrong file and saying nothing. The reporter
+ * takes the same stance about the same object and for the same reason.
+ */
+let register: string | null = null;
+
+/**
+ * One document as one short string, or the word for not having one.
+ *
+ * **Exported so it has a diagonal, and shaped like the backend's.** That half
+ * answers `"absent"` for a missing file and has an arm driving both answers;
+ * this one returned `null` and had none, so a reading that answered one
+ * constant would have satisfied every arm by never moving. The absent case is
+ * not reachable in this tree today, which is exactly why the arm is what
+ * would catch it becoming so.
+ *
+ * Size beside the digest because a refusal naming two hashes says a file
+ * moved and nothing else, and the direction is usually the first question.
+ */
+export function registerReading(path: string): string {
+  if (!existsSync(path)) return "absent";
+  const bytes = readFileSync(path);
+  return `${bytes.length} bytes, ${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
+function registerDigest(): string | null {
+  return register === null ? null : registerReading(register);
+}
+
+export function setup(project?: { config?: { root?: string } }): void {
+  const root = project?.config?.root;
+  if (typeof root !== "string")
+    throw new Error(
+      "the coverage register guard could not read this run's project root, " +
+        "so it cannot say which COVERAGE.md this run is checking. It is " +
+        "reading vitest's own global setup argument, so a vitest upgrade " +
+        "that moves it has to be followed here rather than silently skipped.",
+    );
+  register = join(root, "tests", "COVERAGE.md");
+  registerWhenTheRunBegan = registerDigest();
   process.env[MARKER] = join(
     mkdtempSync(join(tmpdir(), "endpaper-register-run-")),
     "reported",
@@ -59,9 +131,33 @@ export function teardown(): void {
         "coverage register was checked.",
     );
   const reported = existsSync(marker);
+  const moved = registerDigest();
+  const began = registerWhenTheRunBegan;
+  const named = register;
   rmSync(dirname(marker), { recursive: true, force: true });
   delete process.env[MARKER];
   delete process.env[OWNER];
+  registerWhenTheRunBegan = null;
+  register = null;
+  // **Before the reporter check, because this invalidates it.** A reporter
+  // that reported against a document the run then rewrote has checked
+  // nothing, and saying the reporter ran would read as the stronger claim.
+  //
+  // **What this does not cover, which is three things and not two**: a write
+  // landing after this hook, a write by a process this one did not start,
+  // and a write landing BEFORE the baseline reading. The third is the one a
+  // sentence here used to leave out while calling the others unreachable:
+  // this module is imported and the config module is evaluated before
+  // `setup` runs, so a self heal written in either precedes the reading. No
+  // claim of unreachability is made about any of the three.
+  if (moved !== began)
+    throw new Error(
+      `${named ?? "tests/COVERAGE.md"} changed while the run that checks it ` +
+        `was running, from ${began ?? "absent"} to ${moved ?? "absent"}. A ` +
+        "run must not write the register it is checking: a guard that heals " +
+        "itself asserts nothing, and the figures a run measures are printed " +
+        "for a separate invocation to apply.",
+    );
   if (!reported)
     throw new Error(
       "the coverage register reporter did not run, so tests/COVERAGE.md was " +

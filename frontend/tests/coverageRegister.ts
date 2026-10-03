@@ -10,6 +10,9 @@
  * files where a run had 82 over 180.
  */
 
+import { relative } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { parseAst } from "vite";
 
 import { langOf } from "./withoutProse";
@@ -25,6 +28,45 @@ export const END = "<!-- measured: end -->";
  * about what the file covers, full of numbers that are not test counts.
  */
 const ROW = /^\|[ \t]*`([^`]+)`[ \t]*\|[ \t]*(\d+)[ \t]*\|/gm;
+
+/**
+ * A row's line as the document has it, and as this run would write it.
+ *
+ * **The digits are replaced where they sit**, so the sentence beside them,
+ * which is the half of this register a run cannot write, survives a write that
+ * corrects the number. The grammar read here is `ROW` and nothing else, so
+ * there is no second spelling of a row anywhere in the write path.
+ *
+ * **The count cell is the last run of digits inside the match**, which the
+ * grammar decides rather than this line: `ROW` ends at the pipe that closes
+ * that cell, so nothing after the digits can be digits. A pattern carrying the
+ * same digits sits before them and is therefore not the last.
+ *
+ * **No alignment is reproduced, deliberately.** Prettier pads this column to a
+ * fixed width, so a write that changes a count's digit count leaves the file
+ * needing the formatter the gate already runs last. Reproducing that padding
+ * here would be a second implementation of the formatter's rule, in two
+ * languages, failing silently; forgetting the formatter fails `format:check`
+ * by name.
+ */
+function restated(
+  register: string,
+  match: RegExpExecArray,
+  counted: number,
+): [string, string] {
+  const ends = register.indexOf("\n", match.index);
+  const line =
+    ends < 0 ? register.slice(match.index) : register.slice(match.index, ends);
+  const [whole, , stated] = match;
+  const at = whole.lastIndexOf(stated as string);
+  return [
+    line,
+    whole.slice(0, at) +
+      String(counted) +
+      whole.slice(at + (stated as string).length) +
+      line.slice(whole.length),
+  ];
+}
 
 /**
  * How many tests a file writes out, as against generates.
@@ -177,8 +219,12 @@ export interface Row {
   stated: number;
 }
 
+function rowMatches(register: string): RegExpExecArray[] {
+  return [...register.matchAll(ROW)];
+}
+
 export function rowsOf(register: string): Row[] {
-  return [...register.matchAll(ROW)].flatMap((match) => {
+  return rowMatches(register).flatMap((match) => {
     const [, pattern, stated] = match;
     // Both groups are mandatory in the pattern, so a match without them cannot
     // happen; dropping the row rather than asserting it away keeps the failure
@@ -291,16 +337,47 @@ export function render(census: Census, patterns: string[]): string {
 }
 
 /**
- * Everything this run says the register has wrong, one line each.
+ * One thing this run says the register has wrong.
+ *
+ * **Structured rather than a sentence, because two readers need it.** The
+ * reporter turns each of these into the line a person reads; `writeInstruction`
+ * turns the two that are figures into the text a deliberate write applies, and
+ * every other kind into a refusal to write at all. Before this existed the
+ * only output was prose, so a writer would have had to parse the guard's own
+ * failure messages or count the suite a second way, and the second of those is
+ * the one that is worse than the hand transcription it replaces.
+ */
+export type Finding =
+  | {
+      kind: "writtenOutExceedsCollected";
+      file: string;
+      writtenOut: number;
+      count: number;
+    }
+  | { kind: "patternMatchesNothing"; pattern: string }
+  | {
+      kind: "countMoved";
+      pattern: string;
+      stated: number;
+      counted: number;
+      files: number;
+    }
+  | { kind: "fileMatchedBySeveralRows"; file: string; patterns: string[] }
+  | { kind: "internalFileCovered"; file: string }
+  | { kind: "filesWithNoRow"; files: string[] }
+  | { kind: "blockMoved"; fresh: string };
+
+/**
+ * Everything this run says the register has wrong, in the order it is read.
  *
  * A list rather than the first failure, because what a person needs when a wave
  * lands is every row that moved, not the alphabetically first one.
  */
-export function problems(register: string, census: Census): string[] {
+export function findings(register: string, census: Census): Finding[] {
   const declared = rowsOf(register);
   const patterns = declared.map((row) => row.pattern);
   const hits = matched(census, patterns);
-  const found: string[] = [];
+  const found: Finding[] = [];
   // **Which rules a narrowed run may still ask**, which is the half the
   // backend half of this register already had and this one did not. Every rule
   // here used to sit downstream of the reporter's early return, so a narrowed
@@ -333,12 +410,12 @@ export function problems(register: string, census: Census): string[] {
     // the other has no reachable case, and an arm for it would pin nothing.
     const writtenOut = census.writtenOut.get(file) ?? 0;
     if (writtenOut > count)
-      found.push(
-        `${file}: ${writtenOut} written out against ${count} collected. ` +
-          "Nothing writes out more than it collects, so the instrument counting " +
-          "written out has seen something the run did not, and both the " +
-          "generated figure and the count of files generating any are wrong.",
-      );
+      found.push({
+        kind: "writtenOutExceedsCollected",
+        file,
+        writtenOut,
+        count,
+      });
   }
 
   for (const { pattern, stated } of declared) {
@@ -346,29 +423,32 @@ export function problems(register: string, census: Census): string[] {
       patternsHit.includes(pattern),
     );
     if (covered.length === 0) {
-      found.push(`\`${pattern}\` matches no file in this test tree`);
+      found.push({ kind: "patternMatchesNothing", pattern });
       continue;
     }
     if (!whole) continue;
     const counted = sum(covered.map(([file]) => census.counts.get(file) ?? 0));
     if (counted !== stated)
-      found.push(
-        `\`${pattern}\`: the register says ${stated}, the run counted ${counted} over ${files(covered.length)}`,
-      );
+      found.push({
+        kind: "countMoved",
+        pattern,
+        stated,
+        counted,
+        files: covered.length,
+      });
   }
 
   for (const [file, patternsHit] of hits)
     if (patternsHit.length > 1)
-      found.push(
-        `${file} is matched by ${patternsHit.length} rows (${patternsHit.join(", ")}), so its tests are counted that many times`,
-      );
+      found.push({
+        kind: "fileMatchedBySeveralRows",
+        file,
+        patterns: patternsHit,
+      });
 
   for (const file of census.internal)
     if (patterns.some((pattern) => covers(pattern, file)))
-      found.push(
-        `${file} declares itself internal, so the publish gate strips it and a ` +
-          "row naming it fails that gate, but a row covers it",
-      );
+      found.push({ kind: "internalFileCovered", file });
 
   // **Named, never absorbed into a count.** A figure for the files nothing
   // describes is satisfied by any file, so a new one lands by editing a digit;
@@ -377,20 +457,185 @@ export function problems(register: string, census: Census): string[] {
     .filter(([, patternsHit]) => patternsHit.length === 0)
     .map(([file]) => file);
   if (unnamed.length > 0)
-    found.push(
-      `these files have no row: ${unnamed.join(", ")}. A row says what the file ` +
-        `covers, which is the half of this register a run cannot write.`,
-    );
+    found.push({ kind: "filesWithNoRow", files: unnamed });
 
   if (!whole) return found;
 
   const fresh = render(census, patterns);
-  if (blockOf(register) !== fresh)
-    found.push(
-      "the measured block is not what this run counted. It is generated: " +
-        "replace the text between the fences with what follows, and read what " +
-        `moved rather than adjusting a figure by the delta.\n${fresh}`,
-    );
+  if (blockOf(register) !== fresh) found.push({ kind: "blockMoved", fresh });
 
   return found;
+}
+
+/** One finding as the line a person reads. */
+function sentence(finding: Finding): string {
+  switch (finding.kind) {
+    case "writtenOutExceedsCollected":
+      return (
+        `${finding.file}: ${finding.writtenOut} written out against ${finding.count} collected. ` +
+        "Nothing writes out more than it collects, so the instrument counting " +
+        "written out has seen something the run did not, and both the " +
+        "generated figure and the count of files generating any are wrong."
+      );
+    case "patternMatchesNothing":
+      return `\`${finding.pattern}\` matches no file in this test tree`;
+    case "countMoved":
+      return `\`${finding.pattern}\`: the register says ${finding.stated}, the run counted ${finding.counted} over ${files(finding.files)}`;
+    case "fileMatchedBySeveralRows":
+      return `${finding.file} is matched by ${finding.patterns.length} rows (${finding.patterns.join(", ")}), so its tests are counted that many times`;
+    case "internalFileCovered":
+      return (
+        `${finding.file} declares itself internal, so the publish gate strips it and a ` +
+        "row naming it fails that gate, but a row covers it"
+      );
+    case "filesWithNoRow":
+      return (
+        `these files have no row: ${finding.files.join(", ")}. A row says what the file ` +
+        `covers, which is the half of this register a run cannot write.`
+      );
+    case "blockMoved":
+      return (
+        "the measured block is not what this run counted. It is generated: " +
+        "replace the text between the fences with what follows, and read what " +
+        `moved rather than adjusting a figure by the delta.\n${finding.fresh}`
+      );
+  }
+}
+
+/**
+ * Everything this run says the register has wrong, one line each.
+ */
+export function problems(register: string, census: Census): string[] {
+  return findings(register, census).map(sentence);
+}
+
+/**
+ * The word a run prints in front of the write it measured.
+ *
+ * **Transcribed in the backend's own census and in the applier, and neither
+ * can be imported here**: one is Python and the other sits under a directory
+ * this published file may not name as a path. The three spellings are held
+ * equal by an arm in an internal guard, which is the only file that can read
+ * all three.
+ */
+export const WRITE_SENTINEL = "COVERAGE-REGISTER-WRITE";
+
+/**
+ * This register, named from the repository root the way the write names it.
+ *
+ * **Derived from this module's own location, which is what the backend half
+ * does.** It was a literal here while the other side computed it, and the two
+ * halves of one rule drifting is the shape this repository keeps paying for.
+ * A moved register now leaves the write naming a path the applier refuses,
+ * rather than one it finds somewhere else.
+ */
+export const REGISTER_PATH = relative(
+  fileURLToPath(new URL("../../", import.meta.url)),
+  fileURLToPath(new URL("./COVERAGE.md", import.meta.url)),
+).replaceAll("\\", "/");
+
+/**
+ * The same document as a path on this machine, for asking whether a run is
+ * about it.
+ *
+ * **A write names `REGISTER_PATH`, which is this module's own register and
+ * not the register of whatever run is in hand.** This suite spawns whole
+ * vitest runs over fixture libraries, and those children import this module,
+ * so inside one of them that constant still named the real register while
+ * every figure was the fixture's. The child pipes, two arms assert on its
+ * standard output, and a failing assertion prints what it received, so a
+ * well formed write naming this repository's register with another tree's
+ * figures could reach an artefact.
+ *
+ * So the reporter asks whether the run's own register is this one before it
+ * offers a write at all. A run over somebody else's library has nothing to
+ * say about this document, whatever it found about its own.
+ */
+export const THIS_REGISTER = fileURLToPath(
+  new URL("./COVERAGE.md", import.meta.url),
+);
+
+export interface WriteInstruction {
+  register: string;
+  /**
+   * The text between the fences, or `null` where this run offers no block at
+   * all, which is every write carrying a refusal.
+   */
+  block: string | null;
+  lines: [string, string][];
+  /**
+   * What this run measured and will not write, with the reason.
+   *
+   * A register carrying one of these is left alone entirely. Every kind here
+   * is a defect in the row set rather than a figure that has moved: a row
+   * matching nothing, a file summed into two rows, a stripped file a row
+   * covers, or the written out instrument having seen more than the run. A
+   * number written into a table in one of those states is a figure no run
+   * checked, which is the failure this writer exists to end.
+   */
+  refused: string[];
+}
+
+/**
+ * What this run would write into the register, or `null` when it is current.
+ *
+ * **Read off the same findings the reporter prints**, so the write and the
+ * check cannot disagree about a figure: there is one computation, and the
+ * applier has none of its own. A writer that counted the suite a second way
+ * would agree with this one on almost every tree, and the tree where it did
+ * not is the one nobody would be looking at.
+ */
+export function writeInstruction(
+  register: string,
+  census: Census,
+): WriteInstruction | null {
+  // A narrowed run can say nothing about any count, so it has no write to
+  // offer at all. What it can still ask is reported rather than applied, which
+  // is the same line `problems` draws and is drawn here as well so that no
+  // caller can reach the write path around it.
+  if (!isWhole(census)) return null;
+  const lines: [string, string][] = [];
+  const refused: string[] = [];
+  const current = blockOf(register);
+  let block = current;
+  const byPattern = new Map(
+    rowMatches(register).map((match) => [match[1] as string, match]),
+  );
+  for (const finding of findings(register, census)) {
+    if (finding.kind === "blockMoved") {
+      block = finding.fresh;
+      continue;
+    }
+    if (finding.kind === "countMoved") {
+      const match = byPattern.get(finding.pattern);
+      // Unreachable: every pattern a finding names was read out of this same
+      // document by this same grammar. Refused rather than asserted away,
+      // because the cheap wrong answer here is a cell written somewhere else.
+      if (match === undefined)
+        refused.push(
+          `\`${finding.pattern}\` has no row this write can find, so the run ` +
+            "and the document are reading different tables",
+        );
+      else lines.push(restated(register, match, finding.counted));
+      continue;
+    }
+    // A file with no row is owed a sentence a run cannot write, and the rule
+    // that says so stays red until a person writes one. It is not a refusal:
+    // the figures around it are still this run's own.
+    if (finding.kind === "filesWithNoRow") continue;
+    refused.push(sentence(finding));
+  }
+  // **The whole register, and it is decided here rather than in whatever
+  // applies the write.** A rule the applier has to honour is a rule the next
+  // applier does not; carrying no block and no line makes the refusal a
+  // property of what this run offers.
+  if (refused.length > 0)
+    return { register: REGISTER_PATH, block: null, lines: [], refused };
+  if (lines.length === 0 && block === current) return null;
+  return { register: REGISTER_PATH, block, lines, refused };
+}
+
+/** The one line a run prints, which is the whole write. */
+export function writeLine(instruction: WriteInstruction): string {
+  return `${WRITE_SENTINEL} ${JSON.stringify(instruction)}`;
 }
