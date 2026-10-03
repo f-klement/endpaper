@@ -2538,7 +2538,7 @@ class TestTheShelfIsTheOnlyWayIn:
             self.test_the_rule_catches_the_shapes_that_defeated_its_earlier_versions.__doc__
             or ""
         )
-        table = re.findall(r"^\s*\|\s*(\d+)\s*\|.*?\|\s*(\d+)\s*\|\s*$", docstring, re.M)
+        table = re.findall(r"^\s*\|\s*(\d+)\s*\|.*?\|\s*(\d+)\s*\|\s*$", docstring, re.MULTILINE)
         assert table, "the round table is gone from the docstring"
         assert [int(r) for r, _ in table] == list(range(1, len(table) + 1)), (
             f"the rounds are not numbered 1..N: {[r for r, _ in table]}"

@@ -48,10 +48,10 @@ import signal
 import subprocess
 import sys
 import tomllib
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
+from xml.etree import ElementTree
 
 import pytest
 
@@ -106,7 +106,7 @@ class InnerRun:
         """
         assert self.report is not None, "no report to read"
         found: dict[str, tuple[str, str]] = {}
-        for case in ET.fromstring(self.report).iter("testcase"):
+        for case in ElementTree.fromstring(self.report).iter("testcase"):
             for child in case:
                 if child.tag in ("failure", "error"):
                     found[case.get("name", "")] = (child.tag, child.get("message") or "")
@@ -298,7 +298,8 @@ class TestAHangingTestArrivesAsANamedFailure:
         """
         require_a_report(hung_inner_run, "the armed run")
         assert hung_inner_run.report is not None
-        cases = {case.get("name") for case in ET.fromstring(hung_inner_run.report).iter("testcase")}
+        report = ElementTree.fromstring(hung_inner_run.report)
+        cases = {case.get("name") for case in report.iter("testcase")}
         assert cases == {"test_it_hangs", "test_it_passes_afterwards", "test_it_fails_for_real"}
 
     def test_a_slow_test_that_finishes_is_not_reddened(self, tmp_path: Path) -> None:
@@ -368,7 +369,7 @@ class TestTheInnerProjectIsNotDecidedByAnythingAboveIt:
         )
         require_a_report(run, "the run under a hostile parent ini")
         assert run.report is not None
-        cases = [case.get("name") for case in ET.fromstring(run.report).iter("testcase")]
+        cases = [case.get("name") for case in ElementTree.fromstring(run.report).iter("testcase")]
         assert cases == ["test_it_runs"], cases
         assert run.cases() == {}
         assert run.exit_code == 0

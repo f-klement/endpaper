@@ -637,6 +637,10 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
         # larger change than this one.
         # `tests/routers/test_auth.py` asserts the class is still named; it
         # asserts nothing about the site, because the site is gone.
+        #
+        # **`.error` and not `.exception`, which is the same decision.** A
+        # traceback names the line that raised, so it puts back exactly the
+        # three way distinction this paragraph says was removed on purpose.
         logger.error(
             "LDAP authentication failed for %s: %s", clipped(username), clipped(failure)
         )

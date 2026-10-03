@@ -160,7 +160,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> Respo
     quote request data back to whoever triggered it. The caller gets a generic
     message, which is all they can act on anyway.
     """
-    logger.exception(
+    # LOG004 reads the lexical position and reports this as an `.exception()`
+    # outside a handler, where a traceback would be `NoneType: None`. It is an
+    # exception handler: Starlette calls it with the exception, which is why
+    # `exc_info=exc` is passed explicitly rather than left to the ambient one.
+    # Narrowing to `.error(..., exc_info=exc)` to satisfy it would log the same
+    # bytes at the same level and lose the one word that says what this is.
+    logger.exception(  # noqa: LOG004  exc_info is explicit, see above
         "Unhandled error serving %s %s", request.method, request.url.path, exc_info=exc
     )
     if wants_html(request):

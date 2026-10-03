@@ -1010,5 +1010,5 @@ def resolve_and_store(
 
         return store(book_id, candidate, deadline) or candidate
     except Exception:
-        logger.error("Cover work failed for book %d", book_id, exc_info=True)
+        logger.exception("Cover work failed for book %d", book_id)
         return None

@@ -12,6 +12,7 @@ directory being written to.
 
 import json
 import zipfile
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from typing import Any, NamedTuple
 
@@ -180,6 +181,45 @@ class TestTheArchive:
             "the archive and the schema disagree about which tables exist: "
             f"missing {sorted(set(Base.metadata.tables) - tables)}, "
             f"unexpected {sorted(tables - set(Base.metadata.tables))}"
+        )
+
+    def test_records_when_it_was_taken_in_the_frame_its_rows_are_in(
+        self, client, admin, library, east_of_greenwich
+    ):
+        """`created_at` is naive UTC, which is what every `DateTime` column in
+        the same manifest holds.
+
+        It was the host's local wall clock, so an archive taken late in the
+        evening east of Greenwich carried a header hours ahead of every row it
+        describes, in a file that says nothing about which zone either meant.
+        Nothing reads this value back, which is why the defect was silent and
+        why the arm asserts the frame rather than a consumer.
+
+        **`east_of_greenwich`, and without it this arm is inert.** A local
+        frame value and a UTC value are the **same string** on a process at
+        UTC, and the pod this suite runs in sets no zone. Driven: the defect
+        of record planted back into `build_archive` reddened **nothing** here
+        until the fixture was requested, while an offset keeping plant beside
+        it reddened by name, so the green was inertness rather than absence.
+        The linter does not cover the gap either, because the rule fires on
+        the bare call and not on the converted one.
+
+        **Naive and recent, not equal to a clock read here.** An equality
+        would be a race; the window is wide enough that a loaded worker cannot
+        fail it and narrow enough that a value nine hours out cannot pass.
+        """
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        created_at = read_manifest(data)["created_at"]
+
+        parsed = datetime.fromisoformat(created_at)
+        assert parsed.tzinfo is None, (
+            f"the manifest timestamp carries an offset, {created_at!r}, where every "
+            "row beside it is naive: the two are now in frames a reader cannot compare"
+        )
+        drift = abs(parsed - datetime.now(UTC).replace(tzinfo=None))
+        assert drift < timedelta(minutes=1), (
+            f"the manifest says {created_at!r}, which is {drift} from UTC now. A whole "
+            "number of hours here is the host's local clock rather than UTC"
         )
 
     def test_holds_the_book_tag_links(self, client, admin, library):

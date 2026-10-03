@@ -1142,7 +1142,7 @@ class TestTheCountingStandInHoldsItsOwnPremise:
         async def hold() -> None:
             await slots.acquire()
             try:
-                return None
+                return
             finally:
                 slots.release()
 

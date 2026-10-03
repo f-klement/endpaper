@@ -188,7 +188,7 @@ class TestTheFetchPoolOutlivesTheRequest:
 
         def fake(book_id, isbn, supplied, budget=None):
             seen[-1].add(threading.current_thread())
-            return None
+            return
 
         _books(admin["headers"], make_book, 2)
         # Patched **after** the books exist: adding a book resolves its own cover

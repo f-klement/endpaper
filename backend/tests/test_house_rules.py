@@ -6247,7 +6247,7 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
                     model.model_json_schema(mode=mode)
                     for mode in ("validation", "serialization")
                 ]
-            except Exception as error:  # reported, never skipped
+            except Exception as error:  # noqa: BLE001  reported, never skipped
                 unreadable.append(f"{name}: {type(error).__name__}: {error}")
                 continue
             if any(self._serves_an_address(schema) for schema in schemas):
@@ -6532,7 +6532,7 @@ def test_every_seeded_source_is_covered_by_a_silencer():
                 continue
             try:
                 httpx.get(target.base_url, params={"probe": "1"})
-            except Exception as error:  # respx raises its own assertion type
+            except Exception as error:  # noqa: BLE001  respx raises its own assertion type
                 unanswered.append(f"{target.source.value}: {error!r}"[:120])
     assert not unanswered, (
         "these seeded sources are not answered by `silence_catalogues`, so a "
@@ -8545,7 +8545,7 @@ class TestAOneTimeCodeIsServedOnlyWhereItIsNamed:
                     model.model_json_schema(mode=mode)
                     for mode in ("validation", "serialization")
                 ]
-            except Exception as error:  # reported, never skipped
+            except Exception as error:  # noqa: BLE001  reported, never skipped
                 unreadable.append(f"{name}: {type(error).__name__}: {error}")
                 continue
             if any(self._serves_a_code(schema) for schema in schemas):

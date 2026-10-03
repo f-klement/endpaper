@@ -127,7 +127,12 @@ def _may_be_indexed(path: str) -> bool:
     session = SessionLocal()
     try:
         return settings_store.public_catalogue_may_be_indexed(session)
-    except Exception:
+    # The docstring above says the breadth is the design: anything that goes
+    # wrong leaves the response `noindex`. BLE001 would have this name the
+    # database and settings errors it expects, which is a list that has to be
+    # right for the failure to stay closed, where this one is closed whatever
+    # breaks.
+    except Exception:  # noqa: BLE001  failing to False is the contract
         return False
     finally:
         session.close()

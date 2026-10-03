@@ -281,9 +281,9 @@ def _series_from(info: dict[str, Any]) -> tuple[str | None, float | None]:
 
 _SERIES_PATTERNS = (
     # "Dune (Dune Chronicles #1)" and "Dune (Dune Chronicles, Book 1)"
-    re.compile(r"\(([^)]+?)[,\s]+(?:#|book\s+|bk\.?\s*)(\d+(?:\.\d+)?)\)\s*$", re.I),
+    re.compile(r"\(([^)]+?)[,\s]+(?:#|book\s+|bk\.?\s*)(\d+(?:\.\d+)?)\)\s*$", re.IGNORECASE),
     # "Dune, Book 1"
-    re.compile(r"^(?P<ignored>.*?),\s*book\s+(\d+(?:\.\d+)?)\s*$", re.I),
+    re.compile(r"^(?P<ignored>.*?),\s*book\s+(\d+(?:\.\d+)?)\s*$", re.IGNORECASE),
 )
 
 

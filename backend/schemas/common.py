@@ -132,7 +132,11 @@ UtcDateTimeIn = Annotated[UtcDateTime, AfterValidator(_as_stored)]
 #: here would change what somebody's name says. The refusals therefore stay at
 #: their own two sites: folding them in would let a width argued for a notation
 #: reach a person's name with nothing red.
-_CONTROL_CHARACTERS = dict.fromkeys([*range(0x00, 0x20), 0x7F, *range(0x80, 0xA0)])
+#: `range(0x00, 0x20)` and not `range(0x20)`, which is PIE808's fix and is why
+#: the directive is here: the three terms are C0, DEL and C1, and dropping the
+#: first bound stops the line reading as two blocks and a character. The rule
+#: is right that the argument is redundant and wrong that it is unnecessary.
+_CONTROL_CHARACTERS = dict.fromkeys([*range(0x00, 0x20), 0x7F, *range(0x80, 0xA0)])  # noqa: PIE808
 
 #: The control characters that are **not** whitespace: 55 of the 65.
 #:

@@ -622,9 +622,16 @@ def _parse_date(raw: str) -> date | None:
     # A bare year is deliberately NOT accepted. "1998" in a Date Read column
     # would become 1998-01-01, and a date is enough to infer that the book was
     # read, so a year alone would fabricate both a finish date and a status.
+    #
+    # **No `%z`, which DTZ007 asks for, because this is a calendar date and
+    # not an instant.** The cell says `03/06/2014`; a spreadsheet column has
+    # no zone to parse and adding the directive would make every pattern fail
+    # on every real input. The `datetime` here never leaves the expression:
+    # `.date()` takes the day out of it, and a day is what the column means
+    # and what the caller stores.
     for pattern in ("%Y/%m/%d", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y"):
         try:
-            return datetime.strptime(text, pattern).date()
+            return datetime.strptime(text, pattern).date()  # noqa: DTZ007  a day, not an instant
         except ValueError:
             continue
     return None

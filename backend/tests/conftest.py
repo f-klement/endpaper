@@ -9,10 +9,12 @@ import in the test suite.
 
 import atexit
 import contextlib
+import datetime
 import os
 import shutil
 import sys
 import tempfile
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -254,6 +256,96 @@ import ratelimit  # noqa: E402
 from database import Base, SessionLocal, engine  # noqa: E402
 from models import User  # noqa: E402
 from tests.helpers import cover_resolver  # noqa: E402
+
+# ── Moving the process off UTC, for anything that writes or reads a day ──────
+#
+# **Shared rather than per file, because the arm that needs it most is not the
+# one that looks like it needs it.** A value written in the host's local frame
+# and a value written in UTC are the **same string** on a process at UTC, and
+# the pod this suite runs in sets no zone on an image carrying no zone data.
+# So an arm that checks a stored timestamp's frame is inert there unless it
+# moves the process first: measured, the defect of record planted back into
+# `backup.build_archive` reddened nothing until the arm requested the fixture
+# below. The development host is an hour east, which is why the same arm is
+# armed on the one machine this repository forbids running a suite on.
+#
+# `tests/test_downloads.py` and `tests/test_backup.py` both use it.
+
+#: A POSIX offset string and **not** a zone name, deliberately.
+#:
+#: `time.tzset` resolves a name such as `Asia/Tokyo` out of the zoneinfo
+#: database, and a name it cannot resolve **silently becomes UTC**: measured,
+#: `Area/Nowhere` gives an offset of zero and raises nothing. A zone name
+#: would therefore make every arm below depend on files being installed in
+#: whatever image it runs in, and the failure would be silent. A POSIX string
+#: is read by the C library alone. The sign is inverted in that notation:
+#: `-9` is nine hours **east**.
+NINE_HOURS_EAST = "JST-9"
+
+#: The offset `NINE_HOURS_EAST` must produce, asserted rather than assumed by
+#: anything that wants to know the zone really moved.
+NINE_HOURS = datetime.timedelta(hours=9)
+
+#: A fixed instant to read an offset at, so the reading never depends on when
+#: the suite ran or on a daylight saving boundary.
+_A_FIXED_INSTANT = datetime.datetime(2026, 3, 13, 15, 30, tzinfo=datetime.UTC)
+
+
+@contextlib.contextmanager
+def at_zone(tz: str) -> Iterator[None]:
+    """Run the body at `tz`, and put the variable and the C library back.
+
+    **Both, because they are separate state.** The variable is what a later
+    reader sees; the C library holds the parsed zone until something calls
+    `tzset`. Putting one back without the other leaves them disagreeing.
+
+    **`TZ` is kept out of `monkeypatch` on purpose.** A fixture's teardown
+    runs before `monkeypatch`'s undo, since finalisers run in reverse setup
+    order and `monkeypatch` is set up first, so `monkeypatch.setenv("TZ", ...)`
+    restores the variable **last** and calls no `tzset`, leaving the library on
+    whatever the teardown left. Measured with the host setting `TZ` to an
+    offset its system zone does not share: the environment came back five
+    hours east while the library was on the system zone, for every later test
+    in that worker. A host that sets no `TZ` hides it, which is why it
+    survived a green suite.
+
+    **`time.tzname` is the witness and the offset alone is not**, because the
+    two C libraries this runs on disagree about the variable after it changes.
+    Measured on one instant, popping `TZ` and deliberately not calling
+    `tzset`: the development host keeps the parsed zone and answers nine hours
+    east, while the suite's container re-reads the variable and answers zero.
+    An offset check is armed on one and **inert on the other**, and that plant
+    took a container run green. `tzname` reported the stale zone on both.
+    """
+    before = os.environ.get("TZ")
+    before_zone = time.tzname
+    before_offset = _A_FIXED_INSTANT.astimezone().utcoffset()
+    os.environ["TZ"] = tz
+    time.tzset()
+    try:
+        yield
+    finally:
+        if before is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = before
+        time.tzset()
+        assert os.environ.get("TZ") == before, "this left TZ changed for every later test"
+        assert (time.tzname, _A_FIXED_INSTANT.astimezone().utcoffset()) == (
+            before_zone,
+            before_offset,
+        ), (
+            "the variable was put back and the C library was not, so the two now "
+            "disagree and every later test in this worker reads the wrong zone"
+        )
+
+
+@pytest.fixture
+def east_of_greenwich() -> Iterator[None]:
+    """Put the process nine hours east for one test."""
+    with at_zone(NINE_HOURS_EAST):
+        yield
+
 
 # ── The session's own denominator, reconciled on the controller ───────────────
 #

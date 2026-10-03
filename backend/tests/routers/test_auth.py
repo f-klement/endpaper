@@ -825,7 +825,7 @@ class TestARouteThatSendsNoBodyDocumentsNone:
         lives."""
         schema = main.app.openapi()
         promised = [
-            f"{sorted(route.methods)[0]} {route.path} declares "
+            f"{min(route.methods)} {route.path} declares "
             f"{sorted(_declared_content(route, schema))} for {route.status_code}"
             for route in _routes_answering_with_a_bare_response()
             if _declared_content(route, schema)
@@ -1202,7 +1202,7 @@ class TestAnUntrustedUsernameCannotForgeALogLine:
         """
         answers = {
             route.path: client.request(
-                sorted(route.methods)[0],
+                min(route.methods),
                 re.sub(r"\{[^}]+\}", "1", route.path),
                 json=_a_body_for(route),
             ).status_code

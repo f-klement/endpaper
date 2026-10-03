@@ -252,7 +252,55 @@ line-length = 110
 target-version = "py314"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "C4", "S", "ASYNC", "RUF"]
+# **Selecting by family is the thing this list is for, and it is also its one
+# gap.** A rule ruff adds INSIDE a named family arrives enforced; a family
+# nobody names is off forever and nothing ever reports it. So the question a
+# reader should be able to answer from here is not "why is each of these on"
+# but "what is deliberately off", and the answer is: everything under
+# `lint.ignore` and the two per-file blocks below, each with its reason and the
+# command that takes its count.
+#
+# The second group was added 2026-10-02. What each one buys, in the order a
+# reader cares about rather than alphabetically:
+#
+#   DTZ   a datetime with no zone. The register already argues that a calendar
+#         date is not an instant and that a naive stored value is the ambiguous
+#         one; this is that argument enforced instead of restated.
+#   BLE   a blind `except Exception`. A swallowed error surfaces as something
+#         not happening rather than as an error, which is the failure nobody
+#         reports because nobody sees it.
+#   LOG G the logging call is an operator's only view of a running container.
+#   PGH   a BLANKET `# noqa` or `# type: ignore`. Worth naming on its own: a
+#         comment starting `# noqa` suppresses every rule on its line whatever
+#         follows it, and this tree has shipped that twice, silently both times.
+#   T10   a committed `breakpoint()`.
+#   SLOT EXE YTT RSE PIE FURB ICN RET   small, mostly autofixable.
+#
+# **Four of them report nothing anywhere and are a pure ratchet**: T10, YTT,
+# RSE and PGH. Two more look like that from here and are not, and the
+# difference is the population: `SLOT` and `EXE` report nothing in
+# application code and each reported on the day they were added, `SLOT` once
+# in the test tree and `EXE` five times over the scripts outside this
+# directory. Both were taken in the change that selected them, a `__slots__`
+# on a `str` subclass built five hundred times a run and five scripts whose
+# shebang was a claim their mode did not support.
+#
+# **Three more were considered and refused rather than exempted**, `PERF`,
+# `T20` and `TRY`. They are below with the rest of the refusals, and they are
+# the ones worth reading, because none of the three was refused for its size.
+#
+# **This list is a superset constraint and not only a choice**, which is what
+# decided two of those three. A second lint configuration covers the Python
+# this repository versions outside this directory, seventeen command line
+# scripts, and a test requires every family named here to be named there too:
+# a family list is what enrols a rule ruff has not shipped yet, so a split
+# list leaves one tree silently behind. So a family is added here only if it
+# is also right over those scripts.
+select = [
+    "E", "F", "I", "UP", "B", "SIM", "C4", "S", "ASYNC", "RUF",
+    "DTZ", "BLE", "LOG", "G", "PGH",
+    "T10", "SLOT", "EXE", "YTT", "RSE", "PIE", "FURB", "ICN", "RET",
+]
 # W605 is an invalid escape sequence, `\d` in a non raw string. CPython warns
 # about it today and has it scheduled to become a SyntaxError, at which point the
 # file stops importing. This is the fast path: a column and an autofix, in a job
@@ -265,11 +313,156 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4", "S", "ASYNC", "RUF"]
 # whitespace in a generated Alembic header, which is a tidiness preference nobody
 # asked for. W605 alone reports nothing today.
 extend-select = ["W605"]
+#
+# ── The families deliberately NOT selected ──────────────────────────────────
+#
+# **Written down so the refusal is a fact somebody can disagree with rather
+# than an opinion they have to take on trust.** Each is a rewrite of the tree
+# rather than a ratchet over it: turning one on means either several hundred
+# edits or an exemption that reads as a decision and binds nothing.
+#
+# **Counts over the whole backend tree**, this directory and its test tree
+# together, this configuration plus the one family, taken 2026-10-02 with
+# ruff 0.16.7. **The population is named because it is where these go wrong**:
+# the same figures taken with `--exclude tests` are a different and equally
+# correct set, and a figure quoted without the population it was taken over
+# has already been read as the other one.
+#
+# **One class of figure below cannot be re-derived from a published copy of
+# this repository at all**, and it is the exception to the discipline this
+# block otherwise keeps: the readings over the Python outside this directory,
+# which the published tree does not carry. They are stated here because the
+# decision they support was taken over both corpora, and a reader who has
+# only this half should treat them as unverifiable rather than as measured.
+#
+#   ruff check --extend-select <family> --statistics .
+#
+#   PLR2004  1633   a literal in a comparison. Almost all of it is test arms.
+#   ARG        no    an unused argument, most of them method arguments, and a
+#             figure  signature a framework calls is not ours to narrow.
+#   SLF001    684   a private member read from outside. The test tree's whole
+#                   job here is to read the thing under test.
+#   Q000      552   single quotes, every one of them a rewrite of a line that
+#                   is correct today. Nothing here reformats Python, so there
+#                   is no tool to hand the work to.
+#   EM        305   an exception message as a literal rather than a name.
+#                   215 of those are in application code, which is the same
+#                   figure `TRY003` gives over the same half and is a
+#                   coincidence of two rules reading nearly the same `raise`
+#                   sites. Both readings are written out because the pair has
+#                   already been quoted as one rule disagreeing with itself.
+#   TC        278   an import that could move under `TYPE_CHECKING`. 27 of
+#                   those are TC006, a cast's first argument, which is a
+#                   different thing wearing the same prefix.
+#   INP001    no    a package with no `__init__.py`, over a test tree that is
+#             figure  deliberately a mirror of flat modules.
+#
+# **`ARG` and `INP001` carry no figure on purpose, and it is the one rule
+# this block is otherwise about.** Both count per test file or per test
+# method, so both move whenever the test tree grows, including when the very
+# commit that writes the figure adds a file. Measured: the first draft of
+# this block went stale inside its own commit, 937 against 943 and 214
+# against 215, because the corpus it counts holds the files the commit adds.
+# A number that cannot be kept true is worse than none, because it is read as
+# current. The command stays and the figure goes. The others here count
+# application sites or imports and did not move.
+#
+# ── The three refused on their merits rather than their size ────────────────
+#
+# **`PERF`**, 29 over this tree. **Four of those were read and twenty five
+# were not**, and the refusal is stated over the four: they are in
+# application code, which is where the rule's premise is strongest, and all
+# four are kept. A loop whose body carries the comment explaining its own
+# condition; a loop that binds a value once and reuses it per inner item; a
+# loop whose elements a named guard reads by their shape; and **one the rule
+# is simply right about**, a plain filtered append, kept for a reason outside
+# itself: it is the first of a pair appending to one list, the second cannot
+# be rewritten because its condition carries the comment explaining it, and
+# the order the two build is load bearing, so rewriting the half that can be
+# rewritten would spell one sequence two ways and hide that it is one.
+#
+# **The other twenty five are in the test tree and nobody has read them**, so
+# no rate is claimed over the family. What the four support is the kind of
+# thing the rule reports here: an **idiom** rather than a risk, where four
+# sites in the half that matters most are all answerable and one of them is
+# answered by a coupling rather than by the rule being wrong. Selecting a
+# family is a tree wide decision, so a reader who wants the extent has to
+# read the twenty five; the command above without `--statistics` lists them.
+#
+# Compare `BLE`, which **is** selected and is exempted at every one of its
+# seven live sites: that one reports a risk, and seven places somebody has
+# already thought about say nothing about the eighth. This one is refused on
+# the application's side alone; over the scripts outside this directory it
+# reports three, a size that goes in their backlog.
+#
+# **`T20`**, 11 here and 97 over the scripts outside this directory, and all
+# 108 are legitimate. Ten of the eleven here are the two command line tools,
+# where standard output is the interface, and the eleventh is a reporter
+# fallback that says so in its own docstring. Over there the rule fires in
+# **twelve of the seventeen files**, silent only in three unittest modules
+# and two libraries. A two file exemption here would have been cheap; the
+# superset above makes the real question whether the rule is right over those
+# twelve, and it is not.
+#
+# **`TRY`**, and the arithmetic is what settles it. `TRY003` is **304 over
+# this whole tree, 215 of them in application code**, and 35 over the
+# scripts; both populations are written out because the two readings of this
+# rule have already been quoted as a disagreement. The **application**
+# reading is the one that coincides with `EM`'s application reading above,
+# at 215 each; the whole tree figures differ, 304 against 305. A figure here
+# that does not name its population has already been read as the other one.
+# A style opinion at either size: satisfying it means a message class
+# per raise site, trading a sentence a reader sees at the `raise` for a name
+# they have to look up. The other eight rules report **six** sites here and
+# none there, and all six are answered at their sites: three where a
+# traceback would restore a log site one of them deliberately erased, three
+# where an `isinstance` refusal of a persisted row raises `ValueError` as its
+# siblings do rather than TRY004's `TypeError`. So the family is one
+# permanent refusal plus six, and nothing fixed.
+#
+# **And that second configuration cannot express a tree wide refusal, which
+# is the gap behind `T20` and `TRY` and not behind `PERF`.** It has a
+# per-file refusal, asserted to name exactly one file, and a whole tree
+# backlog whose entries are re-derived and must still fire. A permanent
+# refusal over twelve of seventeen scripts fits neither: putting it in the
+# backlog puts an entry that can never go stale in the list that exists to
+# catch stale entries. `lint.ignore` would be the slot and it refuses that
+# key for a measured reason of its own.
+#
+# **A family total is not the sum of the codes somebody happens to name**,
+# which is why the selector is written out beside every figure: `TC` as a
+# family is 278 where `TC001..TC003` is 251, the difference being a fourth
+# code with the same prefix and a different subject. `ARG` has the same
+# shape, two further codes past the two anybody quotes, and no figure here
+# for the reason given above. A figure quoted without its selector is not
+# re-derivable, and one quoted without its population has already been read
+# as the other one.
 ignore = [
     # FastAPI's dependency-injection idiom is a function call in a default
     # argument, which B008 exists to forbid.
     "B008",
 ]
+
+[tool.ruff.lint.flake8-import-conventions.extend-aliases]
+# **This tree spells it `ElementTree`, and ICN001's default map says `ET`.**
+# The spelling here is the one the code already had in all but one module, so
+# this records a convention rather than inventing one; the odd module was
+# changed to match. No count: the population is the tree and moves with it.
+#
+#   ruff check --select ICN --statistics .
+#
+# Written as the convention and NOT as a suppression, because a suppression
+# would also stop the rule noticing the next module that spells it a third
+# way, which is the only thing ICN is for.
+#
+# **`extend-aliases` and NOT `aliases`, and the difference is silent.**
+# `aliases` REPLACES ruff's whole default map rather than adding to it, so
+# spelling it that way would quietly drop every other convention the rule
+# knows. Driven 2026-10-02 against a file importing `numpy as nmpy` and
+# `pandas as pnds`: the default map reports both, `extend-aliases` reports
+# both, and `aliases` reports **nothing at all** and exits clean. Nothing
+# warns. Re-derive with that two line file before changing this key.
+"xml.etree.ElementTree" = "ElementTree"
 
 [tool.ruff.lint.per-file-ignores]
 # ── The whole `S` family, off in the test tree ───────────────────────────────
@@ -316,7 +509,50 @@ ignore = [
 # **`RUF002` and `RUF003` stay on**, over docstrings and comments, because those
 # are prose. The one docstring that legitimately quotes a confusable carries a
 # file level directive at its own head, where a reader of that file sees it.
-"tests/**" = ["S", "RUF012", "RUF001"]
+# ── `DTZ`, off in the test tree ─────────────────────────────────────────────
+#
+# Added 2026-10-02, and **it is the only one of the families added with it
+# that is scoped**: every other one runs over the test tree too, because its
+# premise holds there. A family turned on tree wide and then exempted a dozen
+# times is worse than one scoped on purpose, and a family scoped without a
+# premise is worse than both.
+#
+# **Stated as the family rather than as the codes it fires today**, for the
+# reason the `S` block above gives: a code list is an enumeration over
+# something ruff's authors control.
+#
+# `DTZ` asks whether a value will be compared against a real clock or stored.
+# A test's datetime is neither: it is a literal chosen so the answer is fixed,
+# and `datetime(2024, 1, 1)` with a zone bolted on is noise at best and a
+# different assertion at worst. One of its live sites is a test **of** the
+# naive calendar date parser `csv_import` keeps naive on purpose, so the rule
+# fires on a test for a decision that was taken.
+#
+# **What this costs, which is the half an exemption never states.** A real
+# naive datetime bug written into a test fixture is not reported. What bounds
+# that is the fixtures being literals: a wrong literal fails its own arm.
+#
+# **And that bound does not reach the whole key, which is the part worth
+# writing down.** It covers two of the three sites firing today, both
+# literal constructors; the third is a `strptime` in a test of the parser
+# this directory keeps naive on purpose, which is answered by that decision
+# rather than by the literal argument. Neither covers `DTZ005`, a
+# `datetime.now()` with no zone,
+# which is not a literal and is the one shape here that would read the host's
+# clock and pass on a machine set to UTC while failing anywhere else. There
+# is no such call in the test tree today and the key would not report the
+# first one. **Not a reason to narrow the key to a code list**: the block
+# above gives the standing reason, that a code list enumerates something
+# ruff's authors control. It is a reason to know which case the literal
+# argument is not making.
+#
+# Verify by removing the entry and watching the count move, never by reading
+# this line: a per-file key that binds nothing reads exactly like a decision.
+#
+#   ruff check --statistics tests
+#   ruff check --config 'lint.per-file-ignores = {}' --statistics tests
+"tests/**" = ["S", "RUF012", "RUF001", "DTZ"]
+
 
 [tool.mypy]
 python_version = "3.14"
@@ -334,6 +570,18 @@ mypy_path = "."
 [[tool.mypy.overrides]]
 # Tests assert on loosely-typed response bodies and deliberately pass invalid
 # values to check validation. Full strictness there costs more than it catches.
+#
+# **Measured rather than assumed, because an earlier probe of this was void.**
+# A command line `--strict` cannot answer the question: a per module override
+# beats a flag, so the flag reports a tree this block is still relaxing. The
+# instrument is removing the block itself and running the type check over
+# this directory, on a worker node rather than here.
+#
+# On 2026-10-02, over 297 source files, that reports 8,215 errors in 129 of
+# them, by code 6,970 `no-untyped-def`, 1,106 `no-untyped-call`, 78 `type-arg`,
+# 60 `no-any-return` and one `misc`. The first maps to the two `*_defs` flags
+# together and cannot be split between them by code. So this is a relaxation
+# with a live reason, not a suppression nobody has rechecked.
 module = "tests.*"
 disallow_untyped_defs = false
 disallow_untyped_calls = false

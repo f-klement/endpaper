@@ -616,6 +616,8 @@ class Target:
             # `Decoding.__post_init__` carries the same line, and needs its own:
             # the `is` site reads `Decoding.reader`, and a decoding built from a
             # file rather than from `Target.decoding` has passed no row.
+            # `ValueError` and not `TypeError` on a type test: the reason is at
+            # the matching refusal in `decoders.Decoding.__post_init__`.
             raise ValueError(f"{self.source}: {self.reader!r} is not a Reader")
         if self.reader in IMPORT_READERS:
             # **The registry refusing the other family's parser**, which is the
@@ -665,6 +667,7 @@ class Target:
             # refused at boot by `metadata.resolve`, which `main` runs over the
             # roster; a `Target` built from column values is not, and that is
             # the path `main.seed_catalogue_targets` names as still open.
+            # `ValueError` for the reason the reader refusal above gives.
             raise ValueError(f"{self.source}: {self.secret!r} is not a Secret")
         if self.secret is not Secret.NONE:
             # **The two halves of "this row may be handed that secret", refused

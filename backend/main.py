@@ -550,6 +550,12 @@ def storage_is_reachable() -> bool:
     _pending_stat = _storage_probe.submit(os.stat, DATA_DIR)
     try:
         _pending_stat.result(timeout=STORAGE_TIMEOUT_SECONDS)
+    # **`.error` and not `.exception` in both arms.** Each is an expected
+    # operating state rather than a bug, and this runs on every health check,
+    # so a traceback would be one per probe for as long as the mount stays
+    # hung. Neither carries anything either: the first exception is a bare
+    # timeout raised inside `concurrent.futures`, and the second is already
+    # interpolated into its own message.
     except FutureTimeoutError:
         logger.error("Data directory did not answer within %ds", STORAGE_TIMEOUT_SECONDS)
         return False

@@ -114,8 +114,7 @@ def restore_schema():
 
 def current_revision() -> str | None:
     with engine.connect() as connection:
-        row = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        return row
+        return connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
 
 
 def table_names() -> set[str]:

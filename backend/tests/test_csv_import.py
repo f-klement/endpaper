@@ -940,6 +940,12 @@ class TestOneCellCannotBuyUnboundedWork:
             tally this guards is built by hashing the row.
             """
 
+            #: This arm builds 501 of these, so the per instance `__dict__` a
+            #: `str` subclass would otherwise get is the one thing in here
+            #: that scales with the row. Empty, because a variable length
+            #: built in refuses a non empty one.
+            __slots__ = ()
+
             def __eq__(self, other):
                 nonlocal compared
                 compared += 1

@@ -169,7 +169,11 @@ class TestReplaceImage:
         def write(payload: bytes) -> None:
             try:
                 replace_image(tmp_path, "7", "png", payload)
-            except BaseException as error:
+            # **Nothing is swallowed: the arm asserts on `failures`.** BLE001
+            # wants `Exception`, which would let anything else escape a thread
+            # target, where it is printed by the threading module and the main
+            # thread then asserts on an empty list and passes.
+            except BaseException as error:  # noqa: BLE001  collected, then asserted on
                 failures.append(error)
 
         threads = [

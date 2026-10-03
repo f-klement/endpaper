@@ -2,9 +2,9 @@
 
 <!-- measured: begin -->
 
-**10074 tests, in 143 files**, counted by the run that reads this line.
-**The 125 rows below sum to 9057.**
-The other 1017 tests are in 19 files this register may not name.
+**10081 tests, in 144 files**, counted by the run that reads this line.
+**The 126 rows below sum to 9063.**
+The other 1018 tests are in 19 files this register may not name.
 The table also carries 1 file this engine does not run, stated as 0.
 <!-- measured: end -->
 
@@ -85,7 +85,7 @@ why the helper uses regexes.
 | `conformance/test_isbn.py` | 34 | **The Python half of the shared fixture set.** Holds no ISBN expectation of its own: `conformance/cases/isbn.json` is the specification, and this is a dispatch table plus the guards that stop the suite passing while testing nothing |
 | `conformance/test_subject.py` | 43 | The shared subject cases, run against the server's own per entry rule. Both the absolute arm and the equality arm, plus the guards that stop the file passing while testing nothing: the floor, the outcome partition, the guard dropping table in `conformance/subject.md`, and that every domain in the case directory has a runner on both sides |
 | `test_ddc.py` | 29 | **Dewey headings.** That a number splits from its caption and a year does not, that the segmentation prime is stripped rather than rejected, that the projection reads the number |
-| `test_backup.py` | 159 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores. |
+| `test_backup.py` | 160 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores. |
 | `test_lending.py` | 42 | **The loan clock.** Overdue, days overdue and days out, each arm of each; that a returned loan stops counting at its return; that `days_out`'s clamp is the reachable one |
 | `test_opds.py` | 99 | **The OPDS reader.** Which addresses this server will open, what one Atom entry becomes, the identifier the census says is not there, the doctype refusal, the decoder-on-a-file property, and the origin pin over paging. `TestNoResponseMovesTheOrigin` is the one to read first |
 | `routers/test_opds.py` | 44 | **The OPDS routes.** The admin gate on configuration against a member's right to sync, the credential lifecycle, and that deleting a server or moving it to another origin takes its login with it |
@@ -113,6 +113,7 @@ why the helper uses regexes.
 | `test_enums.py` | 18 | **The read end of an unconstrained enum column**, as a table of `(enum, stored) -> member | default` with no session and no HTTP, and that a stray value is logged with what it was |
 | `test_logvalues.py` | 12 | **The bound on what an untrusted value logs.** That the clip is on the repr rather than the value, that a newline cannot forge a second line, and that a poisoned column read through a page logs one bounded record rather than its own length |
 | `test_models.py` | 179 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary |
+| `test_downloads.py` | 5 | **The two facts both download routes share.** That the saved filename's day is UTC rather than whichever zone the host happens to be set to, driven nine hours east of Greenwich at an instant just past local midnight, with two further arms that refuse the run when the zone did not take, because an offset comparison is armed on a developer's machine and inert in the container where the suite runs; and the attachment header both routes send. |
 | `test_dialect_portability.py` | 58 | That the month bucket renders per dialect and refuses a third, that both statistics buckets reach Postgres as `to_char` with no `strftime` left, and that both dialects render the same predicate for every index in the schema |
 | `test_importing.py` | 141 | **Applying a parsed export to a library.** The private-book oracle: a row whose ISBN belongs to a book the member cannot see is counted, never named, writes nothing; that the second bound `stored_record` applies returns the documented value on each side of every bound, with the case generator asserting its own coverage so a lost branch is red rather than quietly narrower; that the two ceiling tables agree per name, which is what keeps the rebuild a truncation rather than a drop; and that no importer reaches a column off the tuple both its writers walk, with the record's own type minted in one place; and that a bound stating how many entries a list may hold is not read as a character width, driven by a 200 character value on the container field with the second reading agreeing about it and about a title still cut to its own width |
 | `test_import_readers.py` | 16 | **What a reader IS, and that the set of them is closed.** That a reader is handed decoded text and nothing about how the file arrived, that every registered one honours a column correction, and that a service fitting the candidate names is names alone and no code. |

@@ -3,22 +3,118 @@
   //
   // Three categories are enforced as errors. Every rule in them is on unless it
   // is listed below, so a rule oxlint adds in a future version arrives enforced
-  // rather than silently off. `pedantic`, `style` and `restriction` are not
-  // enforced: measured the day this landed, they produce 2053, 25604 and 6291
-  // findings over `src` and `tests`, which is a rewrite rather than a ratchet.
+  // rather than silently off. **That holds inside the five plugins named below
+  // and nowhere else**, which is the price of naming a list at all; the census
+  // in `oxlintRatchet.test.ts` is what keeps the other nine from being an
+  // accident. `pedantic`, `style` and `restriction` are not enforced: measured
+  // the day this landed, they produce 2053, 25604 and 6291 findings over `src`
+  // and `tests`, which is a rewrite rather than a ratchet.
   //
-  // THE LIST BELOW IS NOT ONE THING. It has two halves and they age differently:
-  // a refusal is permanent and carries the reason it is a refusal, and a backlog
-  // entry is a rule this tree would pass if somebody did the work. Adding to the
-  // backlog half is how this ratchet stops being one, so a new entry needs a
-  // count and a reason in the commit that adds it.
+  // THE SUPPRESSION LIST IS NOT ONE THING. It has two halves and they age
+  // differently: a refusal is permanent and carries the reason it is a refusal,
+  // and a backlog entry is a rule this tree would pass if somebody did the work.
+  // Adding to the backlog half is how this ratchet stops being one, so a new
+  // entry needs a count and a reason in the commit that adds it.
+  //
+  // `rules` opens with something that is NEITHER, and it is not a third kind of
+  // suppression: it is configuration, a rule left ON with an option, and it
+  // belongs with `plugins` and `categories` rather than with the two halves. It
+  // sits inside `rules` only because that is the key oxlint takes a rule's
+  // options under. Keep "the list" meaning the suppressions below it.
   "ignorePatterns": ["src/api/generated/**"],
+
+  // NAMING A PLUGIN LIST REPLACES THE DEFAULT SET. It does not add to it, and
+  // nothing warns. oxlint's default here is `unicorn`, `typescript` and `oxc`,
+  // which is asked of `oxlint --print-config` rather than read off a document,
+  // so a list that forgets one of those three turns that plugin off across the
+  // whole tree in silence. Driven on a file carrying one duplicate enum value
+  // and one duplicate object key: under `plugins: ["vitest"]` the typescript
+  // rule stops firing and the core rule still does, because the core rules are
+  // not a plugin in this sense and are always on. That is the opposite of what
+  // this file is for, so the three defaults are named back here.
+  //
+  // Naming them back reproduces the default set exactly. Measured with
+  // `pedantic`, `style` and `restriction` switched on so that tens of thousands
+  // of findings were in play, over the same 487 files: the two sets of whole
+  // diagnostics differ by NOTHING IN EITHER DIRECTION, three repetitions. The
+  // point total is deliberately not written here. Two seats derived it and got
+  // 34353 and 34349, each deterministic over three runs of its own, and neither
+  // could account for the four; the empty difference is the claim that carries
+  // the argument and it is the one both readings agree on.
+  //
+  // `react` and `vitest` are the two added. Neither is a default, so neither
+  // had ever run here, `react` in a React 19 application. Between them they put
+  // 64 more rules into the three categories below, 203 against 157 for react
+  // and 175 against 157 for vitest. **Eight of the 64 are turned off below**,
+  // the permanent react refusal and the seven backlog rows; every other one is
+  // live and finds nothing today, so they guard from the moment this lands.
+  // The configured rule is among the live ones and is clean BECAUSE of its
+  // option, not in spite of it: under the default it has findings, and the
+  // bound takes it to zero.
+  //
+  // Count the rows rather than subtracting. The subtraction that stood here
+  // was one out, and it put the configured rule among the rules with findings
+  // while the paragraph two screens down said the option takes it to none.
+  //
+  // RECOUNT WITH THIS, which is where every figure in this file came from:
+  //
+  //     ./node_modules/.bin/oxlint src tests --format json
+  //
+  // and read `number_of_rules` and `number_of_files` off the report, plus the
+  // `code` of each diagnostic for a per rule count. It reads 172 rules over 487
+  // files here, against 116 before this landed.
+  //
+  // **The `lint` script prints nothing at all, so do not look there.** The
+  // implicit renderer and the named default renderer are different renderers:
+  // with no format flag the run is silent on both streams, clean or dirty, and
+  // only with the renderer named explicitly do the two numbers appear, on
+  // standard output. `package.json` passes no flag. That is why the recount
+  // above goes through the structured report rather than through the command
+  // anybody actually types.
+  //
+  // oxlint ships fourteen plugins. `oxlintRatchet.test.ts` carries the other
+  // nine by name, each with the reason it is not here and what naming it would
+  // cost, and refuses a tenth that a future version adds with nothing said
+  // about it. That is where the scope limit noted at the top is held.
+  "plugins": ["typescript", "unicorn", "oxc", "react", "vitest"],
   "categories": {
     "correctness": "error",
     "suspicious": "error",
     "perf": "error"
   },
   "rules": {
+    // ---- CONFIGURATION, not a suppression. The rule stays ON. ----
+    //
+    // Read the header: this is here because oxlint takes a rule's options under
+    // `rules`, not because it is a third kind of suppression. The two halves
+    // begin below it.
+
+    // The default bound is one argument and that is jest's. vitest's `expect`
+    // takes a second argument, the message the failure prints, and this tree
+    // uses that form: under the default every finding is that one form, across
+    // 17 files, with no other message among them, and the option takes the tree
+    // to 0.
+    //
+    // No total is written here on purpose. The count moves whenever anybody
+    // writes another two argument assertion, including in the test file that
+    // guards this entry, which is itself inside the linted tree: the figure
+    // that stood here was already stale in the commit that corrected it.
+    //
+    // Two is the signature's own bound rather than a round number chosen to
+    // clear the tree, which is what makes this configuration and not a dressed
+    // up suppression: three arguments are still refused.
+    //
+    // IT COSTS NO COVERAGE HERE, AND THAT IS MEASURED RATHER THAN ASSERTED. An
+    // option can cost coverage, so the test for one is to plant the default's
+    // own cases and check they survive. Planted: four expects, one per shape.
+    // The default reports three of them, "at most 1 argument", "requires at
+    // least 1 argument" and "must have a corresponding matcher call". At
+    // `maxArgs` 2 it reports the same three, the first reading "at most 2". So
+    // the only thing that moved is the bound. Suppressing the rule would have
+    // thrown all three away, including the assertion that asserts nothing,
+    // which is the single most valuable thing the test plugin brings.
+    "vitest/valid-expect": ["error", { "maxArgs": 2 }],
+
     // ---- Refused, permanently. The rule is wrong about this codebase. ----
 
     // 47 sites. Every bulk write here is sequential BY DESIGN: a 300 book batch
@@ -27,8 +123,17 @@
     // it twice. Enabling this rule would flag the architecture.
     "no-await-in-loop": "off",
 
-    // 1 site, `lib/safeHref.ts`, where the U+0000 to U+0020 character class IS
-    // the URL sanitisation logic. The rule fires on the security control itself.
+    // 2 sites. In `lib/safeHref.ts` the U+0000 to U+0020 character class IS
+    // the URL sanitisation logic, so the rule fires on the security control
+    // itself. In `lib/pdf.ts` a second class strips the control characters a
+    // PDF producer pads its metadata with, which is the point of that
+    // function.
+    //
+    // **The second site is masked by an inline disable directive and this
+    // entry said one site for as long as that was true.** So the count read as
+    // one easy fix: turn the rule on, repair `safeHref.ts`, and leave a second
+    // site silently suppressed by a comment. The directive census in
+    // `oxlintRatchet.test.ts` is what stops the next one hiding.
     "no-control-regex": "off",
 
     // 1 site, `lib/sqlite.ts`: a zero width space inside a docstring's glob
@@ -41,6 +146,16 @@
     // no collection id can reach it. If that stops being true this is a defect,
     // not a suppression.
     "no-loss-of-precision": "off",
+
+    // 2694 sites, and the rule is WRONG about this tree rather than unpaid. It
+    // requires React in scope for JSX, which the automatic runtime removed.
+    // `tsconfig.json` sets `"jsx": "react-jsx"`, so the compiler supplies the
+    // factory and no component imports React to render; the one file that
+    // imports it, `src/main.tsx`, does so for `StrictMode`. Satisfying this
+    // rule would mean adding 2694 imports the build does not want. It must
+    // never be fixed, and it is here rather than in the backlog for that
+    // reason: there is no work behind it.
+    "react/react-in-jsx-scope": "off",
 
     // ---- Backlog. Counts measured 2026-09-19 over `src` and `tests`. ----
     // Each is a rule this tree could pass. None was triaged, deliberately: the
@@ -58,6 +173,35 @@
     "typescript/no-extraneous-class": "off", // 1
     "oxc/no-accumulating-spread": "off", // 1
     "preserve-caught-error": "off", // 1
-    "no-useless-concat": "off" // 1
+    "no-useless-concat": "off", // 1
+
+    // ---- Backlog, from the two plugins named above. Counts measured
+    // 2026-10-03 over the same 487 files under the same three categories. A
+    // separate block rather than merged into the one above because the counts
+    // were taken on a different day over a tree that has moved, and one date
+    // over both would be false for half the rows. ----
+    //
+    // Not triaged here, on the same terms as the block above and for a sharper
+    // reason: these land in test files and in components that open tickets
+    // rewrite, and a plugin list is a config change. Turning any of them on is
+    // a pass of its own. The three react rows under 10 are the ones to do
+    // first, because each names a defect rather than a habit: 9 effects setting
+    // state synchronously, 5 reads of a ref during render, and one effect
+    // missing a dependency with one carrying an extra.
+    //
+    // `no-conditional-expect` is the fourth of that kind rather than a habit,
+    // and it is filed here only because it is six sites in a wave that is not
+    // triaging. An assertion behind a branch is an assertion that does not run
+    // when the branch does not, which is the same family as the assertion with
+    // no matcher that the configured rule above was kept alive to catch. Four
+    // of the six are in one file. The remaining three rows are habits, and the
+    // 401 is one habit repeated across 81 test files.
+    "vitest/require-mock-type-parameters": "off", // 401, over 81 files
+    "vitest/require-to-throw-message": "off", // 18
+    "react/no-array-index-key": "off", // 12
+    "react/set-state-in-effect": "off", // 9
+    "vitest/no-conditional-expect": "off", // 6
+    "react/refs": "off", // 5
+    "react/exhaustive-effect-dependencies": "off" // 2
   }
 }

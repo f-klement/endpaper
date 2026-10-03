@@ -623,7 +623,14 @@ def build_archive(db: Session) -> bytes:
     """
     manifest: dict[str, Any] = {
         "format_version": FORMAT_VERSION,
-        "created_at": datetime.now().isoformat(),
+        # **Naive UTC, which is the frame every other timestamp in this file
+        # is in.** `datetime.now()` is the host's local wall clock, so this one
+        # header was in a different frame from the table values beside it and
+        # said nothing about which: an archive taken at 01:00 in Berlin read as
+        # an hour that the rows it describes had not reached. The spelling is
+        # `_settle_restored_accounts`'s rather than a second way of writing the
+        # same thing.
+        "created_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
         "tables": {},
     }
 

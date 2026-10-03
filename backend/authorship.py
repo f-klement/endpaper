@@ -657,14 +657,13 @@ class Authorship:
                     # `merge` may still do it: one merge is a person choosing a
                     # name, and renaming is the thing it is for.
                     continue
-                else:
-                    row = AuthorAlias(
-                        alias_key=key,
-                        canonical_name=keep_name,
-                        created_by_user_id=by_user_id,
-                    )
-                    self._db.add(row)
-                    by_alias_key[key] = row
+                row = AuthorAlias(
+                    alias_key=key,
+                    canonical_name=keep_name,
+                    created_by_user_id=by_user_id,
+                )
+                self._db.add(row)
+                by_alias_key[key] = row
 
         self._db.commit()
 

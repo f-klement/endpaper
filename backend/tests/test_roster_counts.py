@@ -407,7 +407,7 @@ _NOUN = r"(?:sources?|catalogues?|providers?)"
 #: `test_a_number_in_one_table_cell_does_not_claim_the_next_one`, which does not
 #: depend on any prose surviving.
 _CLAIM = re.compile(
-    rf"(?=\b({_NUMBER})\b((?:[ \t]+[^\s|]+){{0,2}}[ \t]+)({_NOUN})\b)", re.I
+    rf"(?=\b({_NUMBER})\b((?:[ \t]+[^\s|]+){{0,2}}[ \t]+)({_NOUN})\b)", re.IGNORECASE
 )
 
 #: A line break plus whatever prefix the next line carries in a comment or a
@@ -591,7 +591,7 @@ NOT_PROSE = ("/generated/", "/dist/")
 #: Either number moving alone turns one of those two red. It cannot be named
 #: from here, for the reason two paragraphs up.
 _INTERNAL = re.compile(
-    r"^[^A-Za-z0-9]{0,6}[ \t]*\*\*This file is internal\.\*\*", re.M
+    r"^[^A-Za-z0-9]{0,6}[ \t]*\*\*This file is internal\.\*\*", re.MULTILINE
 )
 
 #: The opening lines a declaration has to sit in, which is the publish gate's

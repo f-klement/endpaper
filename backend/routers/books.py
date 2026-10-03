@@ -4,7 +4,7 @@ import io
 import logging
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, wait
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any, Final, Literal, NamedTuple, cast
 
 from fastapi import (
@@ -1198,7 +1198,7 @@ def export_books(
     export_limiter.check(current_user.username)
 
     extension = _EXPORT_EXTENSIONS.get(format, format.value)
-    filename = f"endpaper-export-{date.today().isoformat()}.{extension}"
+    filename = f"endpaper-export-{downloads.datestamp()}.{extension}"
 
     if format is ExportFormat.MARCXML:
         if not settings_store.library_mode(db):

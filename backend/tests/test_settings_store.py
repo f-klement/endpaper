@@ -2002,7 +2002,7 @@ class TestThePlanAndTheLoginsAgreeOnWhoNeedsOne:
 
         admitted = self._admitted_by_a_credential()
         assert admitted, "nothing is admitted on a credential, so this proves nothing"
-        stranded = sorted(admitted)[0]
+        stranded = min(admitted)
 
         monkeypatch.setattr(
             metadata,

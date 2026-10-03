@@ -4,7 +4,6 @@ Admin only, both directions. A backup contains every account's password hash
 and every member's private books, and a restore replaces the lot.
 """
 
-from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
@@ -91,7 +90,7 @@ def download_backup(
     backup_limiter.check(current_user.username)
 
     archive = backup_service.build_archive(db)
-    filename = f"endpaper-backup-{date.today().isoformat()}.zip"
+    filename = f"endpaper-backup-{downloads.datestamp()}.zip"
     return StreamingResponse(
         iter([archive]),
         media_type=ARCHIVE_MEDIA_TYPE,
