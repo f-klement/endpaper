@@ -31,15 +31,16 @@ const FACETS: ClassificationFacets = {
   ],
 };
 
-function renderPicker(
-  overrides: Partial<Parameters<typeof ClassificationPicker>[0]> = {},
-) {
+/** The picker's props, which it does not export. */
+type PickerProps = Parameters<typeof ClassificationPicker>[0];
+
+function renderPicker(overrides: Partial<PickerProps> = {}) {
   const props = {
     facets: FACETS,
     selectedHeadings: [],
     selectedDivisions: [],
-    onToggleHeading: vi.fn(),
-    onToggleDivision: vi.fn(),
+    onToggleHeading: vi.fn<PickerProps["onToggleHeading"]>(),
+    onToggleDivision: vi.fn<PickerProps["onToggleDivision"]>(),
     ...overrides,
   };
   renderLocalised(<ClassificationPicker {...props} />);

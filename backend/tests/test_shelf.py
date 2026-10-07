@@ -1955,7 +1955,8 @@ class TestTheShelfIsTheOnlyWayIn:
         )
         token = "func.count(Reference.id)"
         statement = _statement_at(narrowed, 2)
-        assert token in statement and token in _statement_at(widened, 2)
+        assert token in statement
+        assert token in _statement_at(widened, 2)
 
         assert _entries_off_their_statements(narrowed, [2], [(token, "why")])
         assert not _entries_off_their_statements(narrowed, [2], [(statement, "why")])
@@ -2495,7 +2496,11 @@ class TestTheShelfIsTheOnlyWayIn:
         """
         source = self.BOOK_OWNED_EVASIONS[shape]
         assert _book_owned_offences(source), f"{shape} evades the book-owned rule"
-        assert _query_offences(source) == [] and _join_offences(source) == [], (
+        assert _query_offences(source) == [], (
+            f"{shape} is caught by an older pass, so it proves nothing about "
+            "the fourth one"
+        )
+        assert _join_offences(source) == [], (
             f"{shape} is caught by an older pass, so it proves nothing about "
             "the fourth one"
         )
@@ -3685,7 +3690,8 @@ class TestStatementCost:
             books, total = Shelf.seen_by(db, viewer_id).page(
                 0, 25, Book.id.asc(), load=Loading.SERIALISED
             )
-            assert len(books) == 25 and total == 25
+            assert len(books) == 25
+            assert total == 25
             assert books[0].added_by is not None
 
         page()  # warm up outside the window
@@ -4327,7 +4333,8 @@ class TestThePublicShelfHasNoOwnershipArm:
         """The half that stops the check above being satisfied by no predicate
         at all, which would be the worse bug and would read as a pass."""
         sql = _sql_after_the_projection(Shelf.seen_by_the_public(db)._query)
-        assert "is_private" in sql and "deleted_at" in sql
+        assert "is_private" in sql
+        assert "deleted_at" in sql
 
     def test_the_owner_column_survives_neither_the_filter_chain_nor_a_select(self, db):
         """Every narrowing a public caller reaches for, not only the

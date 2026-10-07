@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CustomFieldOut } from "../../../../../src/api/generated/model";
 import CustomFieldsSection from "../../../../../src/pages/SettingsPage/LibrarySettingsPage/components/CustomFieldsSection";
-import type { RenameCallbacks } from "../../../../../src/pages/SettingsPage/LibrarySettingsPage/hooks";
 import { renderLocalised } from "../../../../utils";
 
 const LINK: CustomFieldOut = {
@@ -23,15 +22,17 @@ const TEXT: CustomFieldOut = {
   renamable: true,
 };
 
+type SectionProps = React.ComponentProps<typeof CustomFieldsSection>;
+
 /** A rename the server accepts, which is what closes the edit row. */
 const accepts = () =>
-  vi.fn((_id: number, _name: string, callbacks: RenameCallbacks) =>
+  vi.fn<SectionProps["onRename"]>((_id, _name, callbacks) =>
     callbacks.onSuccess(),
   );
 
 /** A rename the server refuses, with the sentence it would have sent. */
 const refuses = (message: string) =>
-  vi.fn((_id: number, _name: string, callbacks: RenameCallbacks) =>
+  vi.fn<SectionProps["onRename"]>((_id, _name, callbacks) =>
     callbacks.onError(new Error(message)),
   );
 
@@ -41,9 +42,9 @@ function renderSection(overrides = {}) {
     isAdmin: true,
     isBusy: false,
     error: null,
-    onDefine: vi.fn(),
+    onDefine: vi.fn<SectionProps["onDefine"]>(),
     onRename: accepts(),
-    onRemove: vi.fn(),
+    onRemove: vi.fn<SectionProps["onRemove"]>(),
     ...overrides,
   };
   renderLocalised(<CustomFieldsSection {...props} />);

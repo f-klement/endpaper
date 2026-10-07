@@ -345,7 +345,8 @@ class TestADigitIsNotAlwaysADigit:
         """
         forged = self.ARABIC_INDIC_ZERO * 9 + "0"
         assert len(forged) == 10
-        assert forged.isdigit() and not forged.isascii()
+        assert forged.isdigit()
+        assert not forged.isascii()
         assert is_valid_isbn10(forged) is False
         assert parse(forged) is None
 
@@ -385,7 +386,8 @@ class TestADigitIsNotAlwaysADigit:
         than about what it stores. Worth keeping and worth not overselling.
         """
         forged = "044101359" + self.ARABIC_INDIC_SEVEN
-        assert forged.isdigit() and not forged.isascii()
+        assert forged.isdigit()
+        assert not forged.isascii()
         assert is_valid_isbn10(forged) is False
         assert parse(forged) is None
         # **The same book, which is the point rather than an aside.** With the
@@ -567,7 +569,8 @@ class TestParseAnswersForAnything:
         if canonical is None:
             return
         assert len(canonical) == 13
-        assert canonical.isascii() and canonical.isdigit()
+        assert canonical.isascii()
+        assert canonical.isdigit()
         assert canonical.startswith(BOOKLAND_PREFIXES)
         assert is_valid_isbn13(canonical)
 

@@ -260,7 +260,7 @@ describe("writing", () => {
   });
 
   it("tells a reader", () => {
-    const heard = vi.fn();
+    const heard = vi.fn<() => void>();
     const stop = colour.subscribe(heard);
     colour.write("red");
     expect(heard).toHaveBeenCalled();
@@ -274,7 +274,7 @@ describe("writing", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("quota");
     });
-    const heard = vi.fn();
+    const heard = vi.fn<() => void>();
     const stop = colour.subscribe(heard);
     colour.write("red");
     expect(heard).toHaveBeenCalled();
@@ -284,7 +284,7 @@ describe("writing", () => {
   it("tells the readers of every preference, not only its own", () => {
     // One listener set for all of them, which is free because an untouched
     // preference hands its reader back the value it already held.
-    const heard = vi.fn();
+    const heard = vi.fn<() => void>();
     const stop = colour.subscribe(heard);
     lastLocationPreference.write("Loft");
     expect(heard).toHaveBeenCalled();
@@ -292,7 +292,7 @@ describe("writing", () => {
   });
 
   it("stops telling a reader that unsubscribed", () => {
-    const heard = vi.fn();
+    const heard = vi.fn<() => void>();
     colour.subscribe(heard)();
     colour.write("red");
     expect(heard).not.toHaveBeenCalled();

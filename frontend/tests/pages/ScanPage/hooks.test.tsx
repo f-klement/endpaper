@@ -1044,7 +1044,7 @@ describe("useScanFlow and a book already on the shelf", () => {
   });
 
   it("opens the new copy once it exists", async () => {
-    const onAdded = vi.fn();
+    const onAdded = vi.fn<(bookId: number) => void>();
     const { result } = await scanADuplicate(onAdded);
     api.on("/api/books/7/copies", { body: makeBook({ id: 99 }) }, "POST");
 

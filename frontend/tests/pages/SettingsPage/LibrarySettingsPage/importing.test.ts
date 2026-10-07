@@ -26,6 +26,7 @@ import {
   statusOf,
   writeBooks,
   type ImportProgress,
+  type WriteHooks,
 } from "../../../../src/pages/SettingsPage/LibrarySettingsPage/importing";
 
 function bodies(count: number): BookCreate[] {
@@ -97,7 +98,7 @@ describe("writing a shelf somebody already had", () => {
   it("asks between every request whether it was stopped", async () => {
     // A function rather than a value, and this is why: the answer changes
     // while the loop runs, and a boolean read once says `false` for ever.
-    const post = vi.fn(async () => {});
+    const post = vi.fn<WriteHooks["post"]>(async () => {});
     let done = 0;
 
     const outcome = await writeBooks(bodies(5), {
@@ -113,7 +114,7 @@ describe("writing a shelf somebody already had", () => {
   });
 
   it("does nothing at all for a pick with nothing importable in it", async () => {
-    const post = vi.fn(async () => {});
+    const post = vi.fn<WriteHooks["post"]>(async () => {});
 
     const outcome = await writeBooks([], {
       post,

@@ -340,7 +340,8 @@ class TestCreateTestAccount:
             )
 
         created = [r for r in caplog.records if "created the test account" in r.message]
-        assert created and created[0].levelno == logging.WARNING
+        assert created
+        assert created[0].levelno == logging.WARNING
         assert "'admin'" in created[0].getMessage()
         assert "'tester'" in created[0].getMessage()
 

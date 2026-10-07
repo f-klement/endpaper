@@ -16,17 +16,17 @@ import TestAccounts from "../../../../../src/pages/SettingsPage/DataSettingsPage
 import { makeUser } from "../../../../factories";
 import { renderLocalised } from "../../../../utils";
 
-function renderSection(
-  overrides: Partial<React.ComponentProps<typeof TestAccounts>> = {},
-) {
+type Props = React.ComponentProps<typeof TestAccounts>;
+
+function renderSection(overrides: Partial<Props> = {}) {
   const props = {
     accounts: [makeUser({ username: "tester" })],
     isLoading: false,
     error: null,
-    onCreate: vi.fn(),
+    onCreate: vi.fn<Props["onCreate"]>(),
     isCreating: false,
     createError: null,
-    onSwitch: vi.fn(),
+    onSwitch: vi.fn<Props["onSwitch"]>(),
     isSwitching: false,
     switchError: null,
     mode: AuthMode.local,

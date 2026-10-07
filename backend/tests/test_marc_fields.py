@@ -526,7 +526,7 @@ class TestTheComponentPartRefusal:
     """
 
     @pytest.mark.parametrize(
-        "leader, expected",
+        ('leader', 'expected'),
         [
             ("00733naa a2200229zc 4500", True),
             ("00733nab a2200229zc 4500", True),
@@ -618,7 +618,7 @@ class TestTheCarrierDecides:
     """
 
     @pytest.mark.parametrize(
-        "leader, controls, expected",
+        ('leader', 'controls', 'expected'),
         [
             # An online resource: one electronic carrier and nothing else.
             ("01533nam a2200505 c 4500", {"007": "cr#|||||||||||"}, False),

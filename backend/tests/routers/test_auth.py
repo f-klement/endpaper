@@ -626,7 +626,8 @@ class TestSwitchAccount:
             )
 
         switches = [r for r in caplog.records if "switched into" in r.message]
-        assert switches and switches[0].levelno == logging.WARNING
+        assert switches
+        assert switches[0].levelno == logging.WARNING
         assert "'admin'" in switches[0].getMessage()
         assert "'tester'" in switches[0].getMessage()
 
@@ -1238,7 +1239,8 @@ class TestAnUntrustedUsernameCannotForgeALogLine:
         """
         for name, tail in zip(_THE_FORGED_NAMES, _THE_FORGED_LINES, strict=True):
             assert _CONTROL_CHARACTERS & set(name)
-            assert tail and tail != name
+            assert tail
+            assert tail != name
         # And one control character that is NOT a line break, or the width of
         # `_CONTROL_CHARACTERS` is never exercised and the rule is a newline
         # rule wearing a wider name. Measured 2026-09-28: with this line

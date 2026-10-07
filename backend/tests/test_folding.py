@@ -36,7 +36,8 @@ def _load_folding() -> None:
     every later test in the process reading a module with no `fold` in it.
     """
     spec = importlib.util.spec_from_file_location("folding_under_test", FOLDING)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     spec.loader.exec_module(importlib.util.module_from_spec(spec))
 
 

@@ -13,7 +13,7 @@ function row(overrides = {}) {
     <LoanRow
       loan={makeLoan({ book: makeBook({ title: "Piranesi" }), ...overrides })}
       isReturning={false}
-      onMarkReturned={vi.fn()}
+      onMarkReturned={vi.fn<(loanId: number) => void>()}
     />,
   );
 }

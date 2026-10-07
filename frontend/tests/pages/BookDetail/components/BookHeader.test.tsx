@@ -4,6 +4,7 @@ import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  type BookIdentifierOut,
   BookIdentifierScheme,
   Locale,
 } from "../../../../src/api/generated/model";
@@ -18,10 +19,10 @@ function renderHeader(book = makeBook(), locale: Locale = Locale.en) {
       isRefreshing={false}
       refreshError={null}
       showGoodreadsLink={false}
-      onBack={vi.fn()}
-      onUploadCover={vi.fn()}
-      onRefreshMetadata={vi.fn()}
-      onRemoveIdentifier={vi.fn()}
+      onBack={vi.fn<() => void>()}
+      onUploadCover={vi.fn<(file: File) => void>()}
+      onRefreshMetadata={vi.fn<() => void>()}
+      onRemoveIdentifier={vi.fn<(identifier: BookIdentifierOut) => void>()}
     />,
     { locale },
   );

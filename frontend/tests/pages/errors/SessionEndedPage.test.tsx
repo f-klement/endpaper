@@ -12,7 +12,11 @@ import { renderLocalised } from "../../utils";
 beforeEach(() => {
   Object.defineProperty(window, "location", {
     configurable: true,
-    value: { href: "http://localhost/", pathname: "/", reload: vi.fn() },
+    value: {
+      href: "http://localhost/",
+      pathname: "/",
+      reload: vi.fn<Location["reload"]>(),
+    },
   });
 });
 

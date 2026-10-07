@@ -41,7 +41,7 @@ describe("StoreIdentifiersSection", () => {
   });
 
   it("runs on a click", async () => {
-    const onRun = vi.fn();
+    const onRun = vi.fn<() => void>();
     renderLocalised(
       <StoreIdentifiersSection
         result={null}

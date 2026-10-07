@@ -11,7 +11,10 @@ describe("HelpButton", () => {
   it("is named by what it explains, not by its glyph", () => {
     // "?" read aloud tells nobody anything.
     renderLocalised(
-      <HelpButton label="About searching Google Books" onClick={vi.fn()} />,
+      <HelpButton
+        label="About searching Google Books"
+        onClick={vi.fn<() => void>()}
+      />,
     );
 
     expect(
@@ -20,7 +23,7 @@ describe("HelpButton", () => {
   });
 
   it("reports a click", async () => {
-    const onClick = vi.fn();
+    const onClick = vi.fn<() => void>();
     renderLocalised(<HelpButton label="Help" onClick={onClick} />);
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Help" }));

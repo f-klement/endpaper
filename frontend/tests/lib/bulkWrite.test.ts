@@ -17,7 +17,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { parseAst } from "vite";
 
-import { writeOneAtATime, type BulkProgress } from "../../src/lib/bulkWrite";
+import {
+  writeOneAtATime,
+  type BulkHooks,
+  type BulkProgress,
+} from "../../src/lib/bulkWrite";
 // The one enumeration of `src/`, which refuses a corpus that is no longer the
 // tree. The pattern used to be written here, where narrowing it was one edit
 // in the file holding the rule it disarmed.
@@ -85,7 +89,7 @@ describe("writing a shelf one book at a time", () => {
   it("asks between every item whether it was stopped", async () => {
     // A function rather than a value, and this is why: the answer changes
     // while the loop runs, and a boolean read once says `false` for ever.
-    const post = vi.fn(async () => {});
+    const post = vi.fn<BulkHooks<string>["post"]>(async () => {});
     let done = 0;
 
     const outcome = await writeOneAtATime(items(5), {
@@ -167,7 +171,7 @@ describe("writing a shelf one book at a time", () => {
   });
 
   it("does nothing at all for a run with nothing in it", async () => {
-    const post = vi.fn(async () => {});
+    const post = vi.fn<BulkHooks<string>["post"]>(async () => {});
 
     const outcome = await writeOneAtATime([], {
       post,

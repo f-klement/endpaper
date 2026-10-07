@@ -39,7 +39,7 @@ class TestPrivateBooksAreInvisible:
         return make_book(admin["headers"], title="Diary", is_private=True)
 
     @pytest.mark.parametrize(
-        "label,method,suffix,body", BOOK_ENDPOINTS, ids=[e[0] for e in BOOK_ENDPOINTS]
+        ("label", "method", "suffix", "body"), BOOK_ENDPOINTS, ids=[e[0] for e in BOOK_ENDPOINTS]
     )
     def test_another_member_gets_404(
         self, client, member, private_book, label, method, suffix, body
@@ -179,14 +179,14 @@ class TestPrivacyIsTheOwnersDecision:
 
 class TestUnknownBooks:
     @pytest.mark.parametrize(
-        "label,method,suffix,body", BOOK_ENDPOINTS, ids=[e[0] for e in BOOK_ENDPOINTS]
+        ("label", "method", "suffix", "body"), BOOK_ENDPOINTS, ids=[e[0] for e in BOOK_ENDPOINTS]
     )
     def test_every_endpoint_404s(self, client, admin, label, method, suffix, body):
         res = call(client, method, f"/api/books/999999{suffix}", admin["headers"], body)
         assert res.status_code == 404
 
     @pytest.mark.parametrize(
-        "label,method,suffix,body", BOOK_ENDPOINTS, ids=[e[0] for e in BOOK_ENDPOINTS]
+        ("label", "method", "suffix", "body"), BOOK_ENDPOINTS, ids=[e[0] for e in BOOK_ENDPOINTS]
     )
     def test_every_endpoint_requires_a_token(self, client, admin, make_book, label, method, suffix, body):
         book = make_book(admin["headers"])

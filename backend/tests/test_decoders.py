@@ -315,7 +315,8 @@ class TestADecodingIsValidatedWhereverItIsBuilt:
             reads_author_identifiers=True,
         )
 
-        assert carried.refuses_component_parts and carried.reads_author_identifiers
+        assert carried.refuses_component_parts
+        assert carried.reads_author_identifiers
 
     def test_the_safe_answer_is_what_omission_gives(self):
         """`requires_isbn_claim` cannot be refused here, because the rule naming
@@ -538,7 +539,8 @@ class TestTwoFamiliesMeanTwoRegistries:
         name = _OF_FAMILY[SourceFamily.IMPORT]
 
         assert name not in {source.value for source in CatalogueSource}
-        assert name.replace("_", "").isalnum() and name.islower()
+        assert name.replace("_", "").isalnum()
+        assert name.islower()
 
     def test_the_catalogue_registry_is_the_catalogue_family(self):
         """Which family `targets.SEEDED` is, in one line.
@@ -752,7 +754,7 @@ class TestEverySerialisationDecodesWithNoSocket:
     )
 
     @pytest.mark.parametrize(
-        "reader, document, title",
+        ("reader", "document", "title"),
         [
             (decoders.Reader.MARC_GND, MARC, "Stoner"),
             (decoders.Reader.MARC_PLAIN, MARC, "Stoner"),

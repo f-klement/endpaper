@@ -794,7 +794,8 @@ class TestWhatTheListSaysAboutRenaming:
         # The control. An agreement loop is satisfied by a payload that is
         # constant and a route that refuses everything, or by both saying yes
         # to everything, so say that both answers were reached.
-        assert asked[True] and asked[False], asked
+        assert asked[True], asked
+        assert asked[False], asked
 
 
 class TestDeletingAField:

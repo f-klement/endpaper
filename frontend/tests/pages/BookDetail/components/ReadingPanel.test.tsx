@@ -9,7 +9,12 @@ import { makeBook } from "../../../factories";
 import { renderLocalised } from "../../../utils";
 
 function renderPanel(book: Partial<BookOut> = {}) {
-  renderLocalised(<ReadingPanel book={makeBook(book)} onRate={vi.fn()} />);
+  renderLocalised(
+    <ReadingPanel
+      book={makeBook(book)}
+      onRate={vi.fn<(rating: number | null) => void>()}
+    />,
+  );
 }
 
 describe("ReadingPanel", () => {

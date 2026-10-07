@@ -321,7 +321,8 @@ class TestCrawlersAreNotInvitedUntilSomebodySaysSo:
 
     def test_robots_disallows_everything_on_a_private_deployment(self, client):
         body = client.get("/robots.txt").text
-        assert "Disallow: /" in body and "Allow:" not in body
+        assert "Disallow: /" in body
+        assert "Allow:" not in body
 
     def test_robots_still_disallows_a_published_but_unindexed_catalogue(
         self, client, db

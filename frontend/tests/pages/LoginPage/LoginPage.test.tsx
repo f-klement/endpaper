@@ -9,6 +9,8 @@ import LoginPage from "../../../src/pages/LoginPage";
 import { makeUser, resetIds } from "../../factories";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
 
+type OnSignIn = NonNullable<React.ComponentProps<typeof LoginPage>["onSignIn"]>;
+
 let api: MockApi;
 
 beforeEach(() => {
@@ -33,7 +35,7 @@ async function fillAndSubmit(username: string, password: string) {
 
 describe("LoginPage", () => {
   it("renders the sign-in form", async () => {
-    renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+    renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
     expect(
       await screen.findByRole("button", { name: "Sign In" }),
     ).toBeInTheDocument();
@@ -49,7 +51,7 @@ describe("LoginPage", () => {
           user: account,
         },
       });
-      const onSignIn = vi.fn();
+      const onSignIn = vi.fn<OnSignIn>();
       renderWithProviders(<LoginPage onSignIn={onSignIn} />);
 
       await fillAndSubmit("kim", "password123");
@@ -63,7 +65,7 @@ describe("LoginPage", () => {
       api.on("/auth/login", {
         body: { access_token: "t", token_type: "bearer", user: makeUser() },
       });
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
 
       await fillAndSubmit("kim", "password123");
 
@@ -80,7 +82,7 @@ describe("LoginPage", () => {
         status: 401,
         body: { detail: "Incorrect username or password" },
       });
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
 
       await fillAndSubmit("kim", "wrong");
 
@@ -94,7 +96,7 @@ describe("LoginPage", () => {
         status: 401,
         body: { detail: "Incorrect username or password" },
       });
-      const onSignIn = vi.fn();
+      const onSignIn = vi.fn<OnSignIn>();
       renderWithProviders(<LoginPage onSignIn={onSignIn} />);
 
       await fillAndSubmit("kim", "wrong");
@@ -105,7 +107,7 @@ describe("LoginPage", () => {
 
     it("re-enables the button after a failure so you can retry", async () => {
       api.on("/auth/login", { status: 401, body: { detail: "nope" } });
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
 
       await fillAndSubmit("kim", "wrong");
 
@@ -118,7 +120,7 @@ describe("LoginPage", () => {
         status: 429,
         body: { detail: "Too many attempts. Please wait and try again." },
       });
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
 
       await fillAndSubmit("kim", "wrong");
 
@@ -130,7 +132,7 @@ describe("LoginPage", () => {
 
   describe("registration", () => {
     it("offers the register tab when signups are open", async () => {
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
       expect(
         await screen.findByRole("button", { name: "Switch to registration" }),
       ).toBeInTheDocument();
@@ -138,7 +140,7 @@ describe("LoginPage", () => {
 
     it("hides the tabs when signups are closed", async () => {
       api.on("/auth/config", { body: { registration_enabled: false } });
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
 
       await waitFor(() =>
         expect(
@@ -157,7 +159,7 @@ describe("LoginPage", () => {
           token: { access_token: "t", token_type: "bearer", user: makeUser() },
         },
       });
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
 
       const user = userEvent.setup();
       await user.click(
@@ -172,7 +174,7 @@ describe("LoginPage", () => {
     });
 
     it("explains that the first account becomes admin", async () => {
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
       const user = userEvent.setup();
       await user.click(
         await screen.findByRole("button", { name: "Switch to registration" }),
@@ -186,7 +188,7 @@ describe("LoginPage", () => {
     // #103. The address is part of making the account, and it is optional at
     // both ends: the field may be left empty and the payload then carries none.
     it("offers no address field on the sign-in form", async () => {
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
       await screen.findByLabelText("Username");
 
       expect(screen.queryByLabelText(/email address/i)).not.toBeInTheDocument();
@@ -202,7 +204,7 @@ describe("LoginPage", () => {
           token: { access_token: "t", token_type: "bearer", user: makeUser() },
         },
       });
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
 
       const user = userEvent.setup();
       await user.click(
@@ -233,7 +235,7 @@ describe("LoginPage", () => {
           token: { access_token: "t", token_type: "bearer", user: makeUser() },
         },
       });
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
 
       const user = userEvent.setup();
       await user.click(
@@ -254,7 +256,7 @@ describe("LoginPage", () => {
         status: 401,
         body: { detail: "Incorrect username or password" },
       });
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
 
       await fillAndSubmit("kim", "wrong");
       await screen.findByRole("alert");
@@ -277,7 +279,7 @@ describe("LoginPage", () => {
     });
 
     it("still offers a login form", async () => {
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
       expect(
         await screen.findByRole("button", { name: "Sign In" }),
       ).toBeInTheDocument();
@@ -287,7 +289,7 @@ describe("LoginPage", () => {
       // waitFor, not a findBy: the tabs render optimistically before the
       // config request lands, so asserting straight away would pass on the
       // pre-config frame whatever the server said.
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
       await waitFor(() =>
         expect(
           screen.queryByRole("button", { name: "Switch to registration" }),
@@ -298,7 +300,7 @@ describe("LoginPage", () => {
     it("says where the accounts come from", async () => {
       // Otherwise a directory member with no local password is looking at a
       // form with nothing saying which credentials it wants.
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
       expect(await screen.findByText(/directory/i)).toBeInTheDocument();
     });
 
@@ -307,7 +309,7 @@ describe("LoginPage", () => {
       api.on("/auth/login", {
         body: { access_token: "t", token_type: "bearer", user: makeUser() },
       });
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
 
       await fillAndSubmit("kim", "password123");
 
@@ -322,7 +324,7 @@ describe("LoginPage", () => {
       api.on("/auth/config", {
         body: { auth_mode: AuthMode.local, registration_enabled: true },
       });
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
       await screen.findByRole("button", { name: "Sign In" });
       expect(screen.queryByText(/directory/i)).not.toBeInTheDocument();
     });
@@ -334,7 +336,7 @@ describe("LoginPage", () => {
         body: { url: "/covers/login_bg.png" },
       });
       const { container } = renderWithProviders(
-        <LoginPage onSignIn={vi.fn()} />,
+        <LoginPage onSignIn={vi.fn<OnSignIn>()} />,
       );
 
       await waitFor(() =>
@@ -345,7 +347,7 @@ describe("LoginPage", () => {
     });
 
     it("renders fine when none is set", async () => {
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
       expect(
         await screen.findByRole("button", { name: "Sign In" }),
       ).toBeInTheDocument();
@@ -356,7 +358,7 @@ describe("LoginPage", () => {
         "user",
         JSON.stringify(makeUser({ is_admin: true })),
       );
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
       expect(
         await screen.findByText("Set background image"),
       ).toBeInTheDocument();
@@ -367,7 +369,7 @@ describe("LoginPage", () => {
         "user",
         JSON.stringify(makeUser({ is_admin: false })),
       );
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
 
       await screen.findByRole("button", { name: "Sign In" });
       expect(
@@ -376,7 +378,7 @@ describe("LoginPage", () => {
     });
 
     it("hides the upload control when nobody is signed in", async () => {
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
       await screen.findByRole("button", { name: "Sign In" });
       expect(
         screen.queryByText("Set background image"),
@@ -386,7 +388,7 @@ describe("LoginPage", () => {
     it("survives a corrupt cached account", async () => {
       // A half-written localStorage value must not blank the login page.
       localStorage.setItem("user", "{not json");
-      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
       expect(
         await screen.findByRole("button", { name: "Sign In" }),
       ).toBeInTheDocument();
@@ -403,7 +405,7 @@ describe("LoginPage", () => {
         "POST",
       );
       const { container } = renderWithProviders(
-        <LoginPage onSignIn={vi.fn()} />,
+        <LoginPage onSignIn={vi.fn<OnSignIn>()} />,
       );
 
       const label = await screen.findByText(

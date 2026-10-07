@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import ColumnPicker from "../../../../src/pages/Home/components/ColumnPicker";
 import type { ColumnChoice } from "../../../../src/pages/Home/hooks";
+import type { ColumnKey } from "../../../../src/lib/libraryColumns";
 import { renderLocalised } from "../../../utils";
 
 /**
@@ -85,7 +86,7 @@ describe("ColumnPicker", () => {
   });
 
   it("asks the caller to turn one on", async () => {
-    const onToggle = vi.fn();
+    const onToggle = vi.fn<(key: ColumnKey) => void>();
     renderPicker({ toggle: onToggle });
     await open();
 
@@ -100,7 +101,7 @@ describe("ColumnPicker", () => {
     // Drawn rather than left out: a picker whose list disagrees with the
     // table's headers gives the reader no way to learn that the missing
     // control is not their mistake.
-    const onToggle = vi.fn();
+    const onToggle = vi.fn<(key: ColumnKey) => void>();
     renderPicker({ toggle: onToggle });
     await open();
 
@@ -154,7 +155,7 @@ describe("ColumnPicker", () => {
   });
 
   it("offers the way back once the set has been changed", async () => {
-    const onReset = vi.fn();
+    const onReset = vi.fn<() => void>();
     renderPicker({ isDefault: false, reset: onReset });
     await open();
 
@@ -170,7 +171,7 @@ describe("ColumnPicker before the mode is known", () => {
   it("disables every chip", async () => {
     // A toggle in that window writes the household's key whatever mode the
     // flags turn out to name, and nothing says so afterwards.
-    const onToggle = vi.fn();
+    const onToggle = vi.fn<(key: ColumnKey) => void>();
     renderPicker({ canChange: false, toggle: onToggle });
     await open();
 
@@ -183,7 +184,7 @@ describe("ColumnPicker before the mode is known", () => {
   it("disables the reset rather than hiding it", async () => {
     // Hiding it would read as "there is nothing to reset", which is the
     // opposite of what a set that is not the default means.
-    const onReset = vi.fn();
+    const onReset = vi.fn<() => void>();
     renderPicker({ canChange: false, isDefault: false, reset: onReset });
     await open();
 

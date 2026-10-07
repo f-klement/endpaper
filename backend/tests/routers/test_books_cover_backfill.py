@@ -206,7 +206,8 @@ class TestTheFetchPoolOutlivesTheRequest:
             )
 
         first, second = seen
-        assert first and second, f"no fetch ran, so this arm measured nothing: {seen}"
+        assert first, f"no fetch ran, so this arm measured nothing: {seen}"
+        assert second, f"no fetch ran, so this arm measured nothing: {seen}"
         assert first & second, (
             "the second press ran on none of the first press's worker threads, which "
             "is what a pool built inside the handler and shut down with the request "

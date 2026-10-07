@@ -856,7 +856,7 @@ def _schema_once() -> None:
 
 
 @pytest.fixture(autouse=True)
-def clean_database(_schema_once: None) -> Iterator[None]:
+def clean_database(_schema_once: None) -> None:
     """Empty every table and reseed the predefined tags, on one connection.
 
     **Deletes rows; does not rebuild the schema.** Measured in the CI pod with
@@ -896,7 +896,6 @@ def clean_database(_schema_once: None) -> Iterator[None]:
     the suite.
     """
     _empty_and_reseed()
-    yield
 
 
 def _empty_and_reseed() -> None:
@@ -1200,7 +1199,7 @@ TEST_PASSWORD = "password123"
 
 
 @pytest.fixture(scope="session")
-def _password_hash() -> str:
+def password_hash() -> str:
     """Hash the shared fixture password once for the whole session.
 
     bcrypt is deliberately slow, and the account fixtures below are used by
@@ -1249,21 +1248,21 @@ def _make_account(password_hash: str, username: str, *, is_admin: bool) -> dict:
 
 
 @pytest.fixture
-def admin(_password_hash: str) -> dict:
+def admin(password_hash: str) -> dict:
     """An admin account, matching what the app grants the first signup."""
-    return _make_account(_password_hash, "admin", is_admin=True)
+    return _make_account(password_hash, "admin", is_admin=True)
 
 
 @pytest.fixture
-def member(_password_hash: str, admin: dict) -> dict:
+def member(password_hash: str, admin: dict) -> dict:
     """A second, non-admin account. Depends on `admin` so it is never first."""
-    return _make_account(_password_hash, "member", is_admin=False)
+    return _make_account(password_hash, "member", is_admin=False)
 
 
 @pytest.fixture
-def other_user(_password_hash: str, admin: dict) -> dict:
+def other_user(password_hash: str, admin: dict) -> dict:
     """A third account, for 'some unrelated user' permission checks."""
-    return _make_account(_password_hash, "other", is_admin=False)
+    return _make_account(password_hash, "other", is_admin=False)
 
 
 # ── Domain helpers ────────────────────────────────────────────────────────────

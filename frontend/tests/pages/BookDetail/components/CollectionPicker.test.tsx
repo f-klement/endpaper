@@ -10,6 +10,8 @@ import { renderLocalised } from "../../../utils";
 
 beforeEach(resetIds);
 
+type Props = React.ComponentProps<typeof CollectionPicker>;
+
 function renderPicker(overrides = {}) {
   const props = {
     book: makeBook({ collection_id: null }),
@@ -18,8 +20,8 @@ function renderPicker(overrides = {}) {
       makeCollection({ id: 4, name: "Sold" }),
     ],
     isSaving: false,
-    onChange: vi.fn(),
-    onCreate: vi.fn(),
+    onChange: vi.fn<Props["onChange"]>(),
+    onCreate: vi.fn<Props["onCreate"]>(),
     ...overrides,
   };
   renderLocalised(<CollectionPicker {...props} />);

@@ -175,23 +175,21 @@
     "preserve-caught-error": "off", // 1
     "no-useless-concat": "off", // 1
 
-    // ---- Backlog, from the two plugins named above. Counts measured
+    // ---- Backlog, from the react plugin. Counts measured
     // 2026-10-03 over the same 487 files under the same three categories. A
     // separate block rather than merged into the one above because the counts
     // were taken on a different day over a tree that has moved, and one date
     // over both would be false for half the rows. ----
     //
     // Not triaged here, on the same terms as the block above and for a sharper
-    // reason: these land in test files and in components that open tickets
-    // rewrite, and a plugin list is a config change. Turning any of them on is
-    // a pass of its own. The three react rows under 10 are the ones to do
-    // first, because each names a defect rather than a habit: 9 effects setting
-    // state synchronously, 5 reads of a ref during render, and one effect
-    // missing a dependency with one carrying an extra.
+    // reason: these land in components that open tickets rewrite, and a plugin
+    // list is a config change. Turning any of them on is a pass of its own. The
+    // three react rows under 10 are the ones to do first, because each names a
+    // defect rather than a habit: 9 effects setting state synchronously, 5
+    // reads of a ref during render, and one effect missing a dependency with
+    // one carrying an extra.
     //
-    // The other two rows are habits: the 401 is one habit repeated across 81
-    // test files, and an index used as a key is another.
-    "vitest/require-mock-type-parameters": "off", // 401, over 81 files
+    // The other row is a habit: an index used as a key.
     "react/no-array-index-key": "off", // 12
     "react/set-state-in-effect": "off", // 9
     "react/refs": "off", // 5

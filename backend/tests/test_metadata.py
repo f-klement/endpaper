@@ -1651,7 +1651,7 @@ class TestTheResponseSizeCap:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "host, body, isbn",
+        ("host", "body", "isbn"),
         [
             (DNB, "_marc_over_cap", ENGLISH_ISBN),
             (K10PLUS, "_marc_over_cap", ENGLISH_ISBN),
@@ -1697,7 +1697,7 @@ class TestTheResponseSizeCap:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "host, body",
+        ("host", "body"),
         [
             (DNB, "_marc_over_cap"),
             (K10PLUS, "_marc_over_cap"),
@@ -6385,7 +6385,7 @@ class TestTheDublinCoreAndModsSourcesRefuseInTheirOwnTerms:
         assert bibliographic.is_physical_book("1 ressource dematerialisee", "Clean Code")
 
     @pytest.mark.parametrize(
-        "form, expected",
+        ("form", "expected"),
         [
             ('<form authority="marcform">print</form>', True),
             ('<form authority="rdamedia">unmediated</form>', True),
@@ -8056,7 +8056,8 @@ class TestACatalogueLoginReachesTheRequestItWasStoredFor:
                 access=access(logins={CatalogueSource.DNB: self._login(DNB)}),
             )
 
-        assert dnb.called and k10plus.called
+        assert dnb.called
+        assert k10plus.called
         assert dnb.calls.last.request.headers["authorization"] == self.SENT
         assert "authorization" not in k10plus.calls.last.request.headers
 
@@ -8073,7 +8074,8 @@ class TestACatalogueLoginReachesTheRequestItWasStoredFor:
                 access=access(logins={CatalogueSource.DNB: self._login(DNB)}),
             )
 
-        assert dnb.called and k10plus.called
+        assert dnb.called
+        assert k10plus.called
         assert dnb.calls.last.request.headers["authorization"] == self.SENT
         assert "authorization" not in k10plus.calls.last.request.headers
 
@@ -8435,7 +8437,8 @@ class TestOnlyTheKeysOwnerIsHandedIt:
             if targets.SEEDED[source].secret is not targets.Secret.NONE
         ]
 
-        assert owners and len(owners) < len(self.BESPOKE)
+        assert owners
+        assert len(owners) < len(self.BESPOKE)
 
 
 class TestWhichDoorCarriesALogin:

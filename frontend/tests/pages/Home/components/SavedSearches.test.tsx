@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import SavedSearches from "../../../../src/pages/Home/components/SavedSearches";
 import type { SavedSearch } from "../../../../src/lib/savedSearches";
+import type { SavedSearchChoice } from "../../../../src/pages/Home/hooks";
 import {
   DEFAULT_FILTERS,
   type BookFilters,
@@ -29,11 +30,11 @@ function renderSaved(
   const props = {
     saved: {
       searches: overrides.searches ?? [LOFT],
-      save: vi.fn(),
-      remove: vi.fn(),
+      save: vi.fn<SavedSearchChoice["save"]>(),
+      remove: vi.fn<SavedSearchChoice["remove"]>(),
     },
     canSave: overrides.canSave ?? true,
-    onApply: vi.fn(),
+    onApply: vi.fn<(filters: BookFilters) => void>(),
   };
   renderLocalised(<SavedSearches {...props} />);
   return props;
@@ -69,9 +70,13 @@ describe("SavedSearches", () => {
   it("renders nothing at all with no views and nothing to save", () => {
     const { container } = renderLocalised(
       <SavedSearches
-        saved={{ searches: [], save: vi.fn(), remove: vi.fn() }}
+        saved={{
+          searches: [],
+          save: vi.fn<(name: string) => void>(),
+          remove: vi.fn<(id: string) => void>(),
+        }}
         canSave={false}
-        onApply={vi.fn()}
+        onApply={vi.fn<(filters: BookFilters) => void>()}
       />,
     );
     expect(container).toBeEmptyDOMElement();

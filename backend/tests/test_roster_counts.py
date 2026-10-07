@@ -2220,7 +2220,8 @@ class TestTheCensusSeesWhatItClaimsTo:
         index, complaint = judge(
             occurrence, [Counts("SEARCH_SOURCES"), Counts("x")], occurrences=1
         )
-        assert index is None and "needs a `near`" in complaint
+        assert index is None
+        assert "needs a `near`" in complaint
 
     def test_one_verdict_covering_two_sentences_needs_an_anchor_too(self):
         """**The rule is the occurrence count, not the verdict count**, and this
@@ -2237,7 +2238,8 @@ class TestTheCensusSeesWhatItClaimsTo:
         index, complaint = judge(
             occurrence, [NotTheRoster("the table above")], occurrences=2
         )
-        assert index is None and "needs a `near`" in complaint
+        assert index is None
+        assert "needs a `near`" in complaint
         assert "covers 2 occurrences" in complaint
 
     def test_an_anchor_has_to_tell_two_sentences_apart_not_merely_exist(self, monkeypatch):
@@ -2330,7 +2332,8 @@ class TestTheCensusSeesWhatItClaimsTo:
             "tests.test_roster_counts.census", lambda: iter(both[:1])
         )
         named = [o for o in orphans() if o.startswith("f.py")]
-        assert len(named) == 1 and "entry[1]" in named[0], named
+        assert len(named) == 1, named
+        assert "entry[1]" in named[0], named
 
     def test_an_unanchored_verdict_whose_sentence_is_gone_is_still_an_orphan(
         self, monkeypatch
@@ -2402,7 +2405,8 @@ class TestTheCensusSeesWhatItClaimsTo:
             [Counts("SEARCH_SOURCES", near="alpha"), Counts("LOOKUP_SOURCES", near="beta")],
             occurrences=1,
         )
-        assert index is None and "exactly one must" in complaint
+        assert index is None
+        assert "exactly one must" in complaint
 
 
 class TestThisFileCountsItself:

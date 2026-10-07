@@ -32,7 +32,7 @@ describe("ChoiceTile", () => {
   });
 
   it("chooses on a click", async () => {
-    const onSelect = vi.fn();
+    const onSelect = vi.fn<() => void>();
     renderLocalised(
       <ChoiceTile name="Nord" selected={false} onSelect={onSelect}>
         <span />

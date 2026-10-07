@@ -12,6 +12,9 @@ import type {
 } from "../../../../src/pages/ScanPage/hooks";
 import { renderLocalised } from "../../../utils";
 
+/** The component's props, which it does not export. */
+type RapidQueueProps = Parameters<typeof RapidQueue>[0];
+
 /**
  * The queue, in a locale.
  *
@@ -36,9 +39,7 @@ const FIGURES: QueueFigures = {
  * means one thing by it. Flat here and assembled below, so a test naming one
  * figure does not have to restate the rest.
  */
-type QueueOverrides = Partial<
-  Omit<Parameters<typeof RapidQueue>[0], "figures">
-> &
+type QueueOverrides = Partial<Omit<RapidQueueProps, "figures">> &
   Partial<QueueFigures>;
 
 /** The figures an override names, over the ones already in force. */
@@ -73,20 +74,20 @@ function renderQueue(
     isAdding: false,
     progress: null,
     result: null,
-    onRemove: vi.fn(),
-    onAddAll: vi.fn(),
-    onDiscard: vi.fn(),
-    onStopAdding: vi.fn(),
+    onRemove: vi.fn<RapidQueueProps["onRemove"]>(),
+    onAddAll: vi.fn<RapidQueueProps["onAddAll"]>(),
+    onDiscard: vi.fn<RapidQueueProps["onDiscard"]>(),
+    onStopAdding: vi.fn<RapidQueueProps["onStopAdding"]>(),
     figures,
     isLookingUp: false,
-    onLookUp: vi.fn(),
-    onStopLookUp: vi.fn(),
-    onChoose: vi.fn(),
-    onKeepName: vi.fn(),
-    onKeepAllForNow: vi.fn(),
-    onLookUpKept: vi.fn(),
-    onSplit: vi.fn(),
-    onDropSubject: vi.fn(),
+    onLookUp: vi.fn<RapidQueueProps["onLookUp"]>(),
+    onStopLookUp: vi.fn<RapidQueueProps["onStopLookUp"]>(),
+    onChoose: vi.fn<RapidQueueProps["onChoose"]>(),
+    onKeepName: vi.fn<RapidQueueProps["onKeepName"]>(),
+    onKeepAllForNow: vi.fn<RapidQueueProps["onKeepAllForNow"]>(),
+    onLookUpKept: vi.fn<RapidQueueProps["onLookUpKept"]>(),
+    onSplit: vi.fn<RapidQueueProps["onSplit"]>(),
+    onDropSubject: vi.fn<RapidQueueProps["onDropSubject"]>(),
     ...rest,
   };
   const { container, rerender } = renderLocalised(<RapidQueue {...props} />, {
@@ -795,8 +796,8 @@ describe("RapidQueue and a book taken from its file name", () => {
   });
 
   it("offers each record, for one file, to be taken or left", () => {
-    const onChoose = vi.fn();
-    const onKeepName = vi.fn();
+    const onChoose = vi.fn<RapidQueueProps["onChoose"]>();
+    const onKeepName = vi.fn<RapidQueueProps["onKeepName"]>();
     renderQueue({
       entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
       onChoose,
@@ -821,7 +822,7 @@ describe("RapidQueue and a book taken from its file name", () => {
 
   it("names the record a member takes", async () => {
     const user = userEvent.setup();
-    const onChoose = vi.fn();
+    const onChoose = vi.fn<RapidQueueProps["onChoose"]>();
     const entry = { ...derived, state: "choosing" as const, matches: [MATCH] };
     renderQueue({ entries: [entry], onChoose });
 
@@ -836,7 +837,7 @@ describe("RapidQueue and a book taken from its file name", () => {
 
   it("names the file whose records a member rejects", async () => {
     const user = userEvent.setup();
-    const onKeepName = vi.fn();
+    const onKeepName = vi.fn<RapidQueueProps["onKeepName"]>();
     const entry = { ...derived, state: "choosing" as const, matches: [MATCH] };
     renderQueue({ entries: [entry], onKeepName });
 
@@ -856,7 +857,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     // member navigating by button list met thirty called "Keep this name and
     // stop asking" and could not tell which book each one answered.
     const user = userEvent.setup();
-    const onKeepName = vi.fn();
+    const onKeepName = vi.fn<RapidQueueProps["onKeepName"]>();
     const second: ScannedEntry = {
       ...derived,
       key: "file:The Left Hand of Darkness.epub:10:0",
@@ -1008,7 +1009,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     // 250 presses for a folder of 300 files that matched 250 is what this
     // replaces. The count beside it is the one the batch will leave.
     const user = userEvent.setup();
-    const onKeepAllForNow = vi.fn();
+    const onKeepAllForNow = vi.fn<RapidQueueProps["onKeepAllForNow"]>();
     renderQueue({
       entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
       deciding: 1,
@@ -1091,7 +1092,7 @@ describe("RapidQueue and a book taken from its file name", () => {
 
   it("offers a second pass over the names kept in bulk", async () => {
     const user = userEvent.setup();
-    const onLookUpKept = vi.fn();
+    const onLookUpKept = vi.fn<RapidQueueProps["onLookUpKept"]>();
     renderQueue({
       entries: [{ ...derived, answered: "records-for-now" as const }],
       keptForNow: 2,

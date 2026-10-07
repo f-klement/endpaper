@@ -542,7 +542,7 @@ class TestListBooks:
         assert titles(client.get("/api/books", headers=admin["headers"])) == ["Apple", "Mango", "Zebra"]
 
     @pytest.mark.parametrize(
-        "sort,expected",
+        ("sort", "expected"),
         [
             ("title_desc", ["Zebra", "Mango", "Apple"]),
             ("year_asc", ["Apple", "Mango", "Zebra"]),
@@ -2109,7 +2109,8 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
             # The position is asserted rather than assumed: a fixture that
             # drifted so the flip landed behind the cursor would leave an arm
             # that passes because the book was already written.
-            assert ahead is not None and ahead.id > first[-1].id
+            assert ahead is not None
+            assert ahead.id > first[-1].id
             hidden = ahead.id
             ahead.is_private = True
             other.commit()
@@ -2365,7 +2366,8 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
         # The abstract branch, and the reason it is a branch: a deque is a
         # Sequence, so admitting the family readmits the diagonal above.
         assert _containers_holding_book_rows(Sequence[Book]) == {Sequence}
-        assert inspect.isabstract(Sequence) and issubclass(deque, Sequence)
+        assert inspect.isabstract(Sequence)
+        assert issubclass(deque, Sequence)
         assert not inspect.isabstract(deque)
         # The walk opens a mapping through a branch of its own and the
         # opener reads the tuple, so the mapping type has to be in that
@@ -2546,9 +2548,13 @@ def _export_text_lines() -> list[tuple[str, bool]]:
         assert isinstance(element, ast.JoinedStr), ast.unparse(element)
         label, *rest = element.values
         assert isinstance(label, ast.Constant), ast.unparse(element)
-        assert len(rest) == 1 and isinstance(rest[0], ast.FormattedValue), (
-            f"{ast.unparse(element)} interpolates more than one value, so this "
-            "guard cannot say which of them is flattened."
+        assert len(rest) == 1, (
+            f"{ast.unparse(element)} carries {len(rest)} parts after its label, so "
+            "this guard cannot say which value is flattened."
+        )
+        assert isinstance(rest[0], ast.FormattedValue), (
+            f"{ast.unparse(element)} follows its label with text rather than an "
+            "interpolation, so there is no value for this guard to check."
         )
         value = rest[0].value
         lines.append(

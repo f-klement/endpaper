@@ -1168,7 +1168,11 @@ class TestEverySettingsWriteClearsWhatItInvalidates:
         # bound to one, so neither a second writer nor an aliased import can
         # rename its way out.
         writers = {name for name in dir(settings_store) if name.startswith("set_")}
-        assert "set_value" in writers and "set_json" in writers, (
+        assert "set_value" in writers, (
+            "The writer names are derived from `settings_store`; if that module "
+            "renamed them, this rule is now guarding nothing."
+        )
+        assert "set_json" in writers, (
             "The writer names are derived from `settings_store`; if that module "
             "renamed them, this rule is now guarding nothing."
         )

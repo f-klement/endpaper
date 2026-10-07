@@ -388,7 +388,7 @@ class TestOneAssociationIsOneClock:
         # searches admitted 10.0 four times over under a constant that says 10.
         client = FakeClient(FakeSession(delay=0.2))
         started = time.monotonic()
-        with pytest.raises(z3950.DeadlineExceeded):
+        with pytest.raises(z3950.DeadlineExceeded):  # noqa: PT012  the association is what is timed
             async with z3950.association(
                 TARGET, client=client, deadline=time.monotonic() + 0.3
             ) as open_association:
@@ -528,7 +528,7 @@ class TestAnAssociationIsNeverLeftBehind:
         # clock always expires first. Measured before the fix, under
         # `asyncio.timeout(0.05)`: 3 of 3 runs left a live connection handle 3.0s later.
         client = FakeClient(open_delay=0.3)
-        with pytest.raises(TimeoutError):
+        with pytest.raises(TimeoutError):  # noqa: PT012  the cancellation is what is under test
             async with asyncio.timeout(0.05):
                 async with z3950.association(TARGET, client=client):
                     pass

@@ -258,7 +258,7 @@ describe("an edge sign-out", () => {
   beforeEach(() => {
     Object.defineProperty(window, "location", {
       configurable: true,
-      value: { href: "/", pathname: "/", reload: vi.fn() },
+      value: { href: "/", pathname: "/", reload: vi.fn<Location["reload"]>() },
     });
   });
 
@@ -346,7 +346,7 @@ describe("the reload an edge sign-out triggers is counted", () => {
   beforeEach(() => {
     Object.defineProperty(window, "location", {
       configurable: true,
-      value: { href: "/", pathname: "/", reload: vi.fn() },
+      value: { href: "/", pathname: "/", reload: vi.fn<Location["reload"]>() },
     });
   });
 
@@ -368,7 +368,7 @@ describe("the reload an edge sign-out triggers is counted", () => {
     // opaque redirects in one batch. Counting calls rather than page loads made
     // the other five believe they were looping.
     const mutator = await freshPageLoad();
-    const ended = vi.fn();
+    const ended = vi.fn<() => void>();
     const stop = mutator.onSessionEnded(ended);
 
     for (let n = 0; n < 5; n += 1) await expiredAtTheEdge(mutator.customFetch);
@@ -384,7 +384,7 @@ describe("the reload an edge sign-out triggers is counted", () => {
     // is exactly the state a reloaded tab boots into.
     sessionStorage.setItem(MARKER, String(Date.now() - 1000));
     const mutator = await freshPageLoad();
-    const ended = vi.fn();
+    const ended = vi.fn<() => void>();
     const stop = mutator.onSessionEnded(ended);
 
     await expiredAtTheEdge(mutator.customFetch);
@@ -408,7 +408,7 @@ describe("the reload an edge sign-out triggers is counted", () => {
     // exactly the unbounded loop this guard exists for, so the dead-end screen
     // is the safe answer rather than the fallback.
     const mutator = await freshPageLoad();
-    const ended = vi.fn();
+    const ended = vi.fn<() => void>();
     const stop = mutator.onSessionEnded(ended);
     const setItem = vi
       .spyOn(window.sessionStorage, "setItem")
@@ -564,8 +564,8 @@ describe("downloadFile", () => {
   const objectUrl = "blob:mock-url";
 
   beforeEach(() => {
-    URL.createObjectURL = vi.fn(() => objectUrl);
-    URL.revokeObjectURL = vi.fn();
+    URL.createObjectURL = vi.fn<typeof URL.createObjectURL>(() => objectUrl);
+    URL.revokeObjectURL = vi.fn<(url: string) => void>();
   });
 
   /**

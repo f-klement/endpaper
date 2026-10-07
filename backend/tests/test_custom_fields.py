@@ -513,7 +513,8 @@ class TestOnlyABookReachesAValue:
         node = ast.parse(source).body[0]
         assert isinstance(node, ast.FunctionDef)
         if reported_by == "touch":
-            assert _touches_the_table(node) and not _takes_a_book(node)
+            assert _touches_the_table(node)
+            assert not _takes_a_book(node)
         else:
             assert any(
                 "book" in parameter.lower() and "Book" not in annotation

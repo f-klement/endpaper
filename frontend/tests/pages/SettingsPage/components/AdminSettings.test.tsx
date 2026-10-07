@@ -15,7 +15,10 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { SettingsOut } from "../../../../src/api/generated/model";
+import type {
+  SettingsOut,
+  SettingsUpdate,
+} from "../../../../src/api/generated/model";
 import AdminSettings from "../../../../src/pages/SettingsPage/components/AdminSettings";
 import type { UseSettingsResult } from "../../../../src/pages/SettingsPage/hooks";
 import { renderLocalised } from "../../../utils";
@@ -34,7 +37,7 @@ function state(patch: Partial<UseSettingsResult> = {}): UseSettingsResult {
     isLoading: false,
     error: null,
     isForbidden: false,
-    save: vi.fn(),
+    save: vi.fn<(data: SettingsUpdate) => void>(),
     isSaving: false,
     saveError: null,
     hasSaved: false,

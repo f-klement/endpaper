@@ -1354,7 +1354,8 @@ class TestRestoringTheCollectionFold:
 
         assert res.status_code == 400, res.text
         detail = res.json()["detail"]
-        assert "Ästhetik" in detail and "ästhetik" in detail
+        assert "Ästhetik" in detail
+        assert "ästhetik" in detail
 
     def test_two_collections_spelled_identically_are_refused(
         self, client, admin, library, db

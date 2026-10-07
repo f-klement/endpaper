@@ -110,7 +110,7 @@ export function mockApi(): MockApi {
   const handlers: Handler[] = [];
   const calls: MockApi["calls"] = [];
 
-  const fetchMock = vi.fn(
+  const fetchMock = vi.fn<typeof fetch>(
     async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = String(input);
       const method = (init.method ?? "GET").toUpperCase();

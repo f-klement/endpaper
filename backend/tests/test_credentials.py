@@ -544,7 +544,7 @@ class TestAnEnvelopeIsBoundToTheAddressItIsFor:
         url"` and opening over `"file:///etc/passwd"` then round trips, because
         `origin_of` answers `""` for both and two empty origins compare equal.
         """
-        with pytest.raises(credentials.CredentialError):
+        with pytest.raises(credentials.CredentialError):  # noqa: PT012  the round trip, as the docstring says
             envelope = credentials.seal(key, "bne", "not a url", "alice:hunter2")
             credentials.unseal(key, "bne", "file:///etc/passwd", envelope)
 
@@ -1132,13 +1132,15 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
         from collections.abc import Mapping
         from types import MappingProxyType
 
-        assert isinstance(targets.SEEDED, Mapping) and targets.SEEDED
+        assert isinstance(targets.SEEDED, Mapping)
+        assert targets.SEEDED
         assert isinstance(targets.SEEDED, MappingProxyType), (
             "the roster is writable, so an edited row moves the address a "
             "superseded envelope opens at"
         )
         for target in targets.SEEDED.values():
-            assert isinstance(target.base_url, str) and target.base_url
+            assert isinstance(target.base_url, str)
+            assert target.base_url
 
     def test_and_no_write_to_it_is_accepted(self):
         """The three shapes, two of which every ast walk here missed."""
@@ -1650,7 +1652,7 @@ class TestThisBuildShipsExactlyTheDefaultsItSaysItDoes:
             )
 
     @pytest.mark.parametrize(
-        "username, password, refusal",
+        ("username", "password", "refusal"),
         [
             ("", "p", "needs both a username and a password"),
             ("u", "", "needs both a username and a password"),
@@ -2037,7 +2039,8 @@ class TestAKeyIsNotMintedOverLoginsItCannotOpen:
 
         said = str(refusal.value)
         assert "recovery phrase" in said
-        assert "bne" in said and "dnb" in said
+        assert "bne" in said
+        assert "dnb" in said
 
     def test_the_phrase_opens_them_again(self, db):
         phrase, _ = credentials.generate_key(db)

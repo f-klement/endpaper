@@ -496,7 +496,8 @@ class TestThePublicSerialiserCannotAskWhoIsAsking:
         to be harmless would not be needed to keep this true, and a `Session`
         smuggled in as the second element of a tuple still fails."""
         rendered = " ".join(str(a) for a in self._annotations().values())
-        assert "Session" not in rendered and "User" not in rendered
+        assert "Session" not in rendered
+        assert "User" not in rendered
 
     def test_the_signed_in_serialiser_still_takes_both(self):
         """The diagonal. Without it the assertions above would pass on a

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **The whole pytest style family and the frontend's typed mocks are now enforced, and the
+  last test rule in the frontend's lint backlog is gone.** On the backend every rule of the
+  family is selected, so one ruff adds later arrives enforced: 148 findings were cleared,
+  mostly composite assertions split so a failure names which half failed, and six deliberate
+  exceptions carry their reason at the site. On the frontend all 401 test mocks name the
+  signature they stand in for, and where one signature repeated through a file it is now
+  derived from the component prop itself, so that prop changing shape reddens the test rather
+  than leaving its mocks recording the old one; typing them exposed two tests reading a call
+  that might not have happened, which now refuse by name. Two ways of switching a lint rule
+  off that nothing checked are refused, and the tooling scripts' own refusal assertions now
+  name their message. Nothing a member sees moves.
+
 - **A test asserting that something refuses now has to say which refusal it means.** Sixty
   eight assertions across both trees passed on any error of a broad type, so a test named for
   one rule went on passing when a different rule refused first. Each now names the message or

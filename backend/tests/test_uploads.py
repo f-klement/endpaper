@@ -31,7 +31,7 @@ def upload(data: bytes, filename: str = "whatever.png") -> UploadFile:
 
 class TestSniffImageExtension:
     @pytest.mark.parametrize(
-        "data,expected",
+        ("data", "expected"),
         [
             (PNG_BYTES, "png"),
             (JPEG_BYTES, "jpg"),

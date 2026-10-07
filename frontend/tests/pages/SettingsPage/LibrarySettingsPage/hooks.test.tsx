@@ -1115,8 +1115,8 @@ describe("which custom field failure the section is told about", () => {
 
     await act(async () =>
       result.current.rename(1, "Ebook", {
-        onSuccess: vi.fn(),
-        onError: vi.fn(),
+        onSuccess: vi.fn<() => void>(),
+        onError: vi.fn<(error: unknown) => void>(),
       }),
     );
 
@@ -1154,8 +1154,8 @@ describe("which custom field failure the section is told about", () => {
 
     await act(async () =>
       result.current.library.rename(1, "Ebook", {
-        onSuccess: vi.fn(),
-        onError: vi.fn(),
+        onSuccess: vi.fn<() => void>(),
+        onError: vi.fn<(error: unknown) => void>(),
       }),
     );
 

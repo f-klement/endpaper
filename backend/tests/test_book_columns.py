@@ -240,7 +240,8 @@ def _load_book_columns() -> None:
     module with none of its sets in it.
     """
     spec = importlib.util.spec_from_file_location("book_columns_under_test", BOOK_COLUMNS)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     spec.loader.exec_module(importlib.util.module_from_spec(spec))
 
 

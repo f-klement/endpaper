@@ -47,7 +47,9 @@ const DUNE = () =>
     discuss_with: [makeUser({ username: "ana" })],
   });
 
-function renderTable(props: Partial<Parameters<typeof BookTable>[0]> = {}) {
+type TableProps = Parameters<typeof BookTable>[0];
+
+function renderTable(props: Partial<TableProps> = {}) {
   return renderLocalised(
     <BookTable
       books={[DUNE()]}
@@ -122,7 +124,7 @@ describe("BookTable", () => {
   });
 
   it("asks the server for the other direction", async () => {
-    const onSortChange = vi.fn();
+    const onSortChange = vi.fn<TableProps["onSortChange"]>();
     renderTable({ sort: BookSort.title_asc, onSortChange });
 
     await userEvent
@@ -359,7 +361,7 @@ describe("BookTable, the cataloguer's columns", () => {
     // the word "Dewey". `BookSort.ddc` is `min` of the scheme's filing key, in
     // SQL, over the whole table rather than over the page that has been
     // loaded: see `_shelf_order` in `backend/shelf.py`.
-    const onSortChange = vi.fn();
+    const onSortChange = vi.fn<TableProps["onSortChange"]>();
     renderTable({
       books: [CATALOGUED()],
       columns: ["title", "callNumber"],
@@ -378,7 +380,7 @@ describe("BookTable, the cataloguer's columns", () => {
     // schemes. `BF75` files before `BF575` on a shelf and after it under a
     // Dewey rule, so an LCC library was reading a wrong order with nothing
     // saying so.
-    const onSortChange = vi.fn();
+    const onSortChange = vi.fn<TableProps["onSortChange"]>();
     renderTable({
       books: [CATALOGUED()],
       columns: ["title", "callNumber"],
@@ -395,7 +397,7 @@ describe("BookTable, the cataloguer's columns", () => {
   it("comes back round to the Dewey order", async () => {
     // The cycle closes rather than stopping on the last scheme, which is what
     // a header offering one order already did.
-    const onSortChange = vi.fn();
+    const onSortChange = vi.fn<TableProps["onSortChange"]>();
     renderTable({
       books: [CATALOGUED()],
       columns: ["title", "callNumber"],
@@ -443,7 +445,7 @@ describe("BookTable, the cataloguer's columns", () => {
     // The property the cycle must not have broken. `author` offers ascending
     // only, so pressing it while it is active re-asks for it rather than
     // turning the column off.
-    const onSortChange = vi.fn();
+    const onSortChange = vi.fn<TableProps["onSortChange"]>();
     renderTable({ sort: BookSort.author, onSortChange });
 
     const header = screen.getByRole("columnheader", { name: /Author/ });
@@ -518,7 +520,7 @@ describe("BookTable, the cataloguer's columns", () => {
 
 describe("BookTable, paging", () => {
   it("offers the next page when there is one", async () => {
-    const onLoadMore = vi.fn();
+    const onLoadMore = vi.fn<TableProps["onLoadMore"]>();
     renderTable({ hasMore: true, onLoadMore });
 
     await userEvent

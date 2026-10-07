@@ -1565,7 +1565,7 @@ class TestAScalarThatIsNotTextIsDroppedRatherThanMeasured:
         """
         assert getattr(Record(**{field: cast(Any, True)}), field) is None
 
-    @pytest.mark.parametrize("field,value", [("year", 1965), ("page_count", 412)])
+    @pytest.mark.parametrize(("field", "value"), [("year", 1965), ("page_count", 412)])
     def test_a_number_inside_its_range_is_untouched(self, field, value):
         assert getattr(Record(**{field: cast(Any, value)}), field) == value
 

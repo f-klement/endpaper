@@ -795,7 +795,8 @@ class TestWhoMayBeToldATagExists:
         on no premise about rename routes: `Tag._drop_the_key_on_a_rename`
         clears the key and the row falls back on the count arm."""
         seeded = db.query(Tag).filter(Tag.is_predefined.is_(True)).first()
-        assert seeded is not None and seeded.key is not None
+        assert seeded is not None
+        assert seeded.key is not None
         seeded.name = "A Household's Own Word"
         db.commit()
 

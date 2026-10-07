@@ -11,6 +11,7 @@ import {
   OverdueSender,
   type SenderHealth,
   type SettingsOut,
+  type SettingsUpdate,
 } from "../../../../../src/api/generated/model";
 import OverdueSection from "../../../../../src/pages/SettingsPage/LendingSettingsPage/components/OverdueSection";
 import { renderLocalised } from "../../../../utils";
@@ -38,8 +39,8 @@ function renderSection(
     health?: SenderHealth;
   } = {},
 ) {
-  const onSave = vi.fn();
-  const onSendNow = vi.fn();
+  const onSave = vi.fn<(patch: SettingsUpdate) => void>();
+  const onSendNow = vi.fn<() => void>();
   const rendered = renderLocalised(
     <OverdueSection
       settings={makeSettings(settings)}

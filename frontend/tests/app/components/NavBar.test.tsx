@@ -18,14 +18,18 @@ let api: MockApi;
 beforeEach(() => {
   resetIds();
   api = mockApi();
-  URL.createObjectURL = vi.fn(() => "blob:mock-url");
-  URL.revokeObjectURL = vi.fn();
+  URL.createObjectURL = vi.fn<typeof URL.createObjectURL>(
+    () => "blob:mock-url",
+  );
+  URL.revokeObjectURL = vi.fn<(url: string) => void>();
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 });
 
+type Props = React.ComponentProps<typeof NavBar>;
+
 function renderNav(
   mode: AuthMode = AuthMode.local,
-  onSignOut = vi.fn(),
+  onSignOut = vi.fn<Props["onSignOut"]>(),
   isSwitched = false,
 ) {
   renderWithProviders(

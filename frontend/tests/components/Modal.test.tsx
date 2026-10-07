@@ -7,10 +7,12 @@ import { describe, expect, it, vi } from "vitest";
 import Modal from "../../src/components/Modal";
 import { renderLocalised } from "../utils";
 
+type OnClose = NonNullable<React.ComponentProps<typeof Modal>["onClose"]>;
+
 describe("Modal", () => {
   it("is a labelled dialog", () => {
     renderLocalised(
-      <Modal title="How this works" onClose={vi.fn()}>
+      <Modal title="How this works" onClose={vi.fn<OnClose>()}>
         body
       </Modal>,
     );
@@ -22,7 +24,7 @@ describe("Modal", () => {
 
   it("renders what it is given", () => {
     renderLocalised(
-      <Modal title="T" onClose={vi.fn()}>
+      <Modal title="T" onClose={vi.fn<OnClose>()}>
         <p>the explanation</p>
       </Modal>,
     );
@@ -31,7 +33,7 @@ describe("Modal", () => {
   });
 
   it("closes on the close button", async () => {
-    const onClose = vi.fn();
+    const onClose = vi.fn<OnClose>();
     renderLocalised(
       <Modal title="T" onClose={onClose}>
         body
@@ -50,7 +52,7 @@ describe("Modal", () => {
     // optional rather than assumed. Without that this throws on mount.
     expect(() =>
       renderLocalised(
-        <Modal title="T" onClose={vi.fn()}>
+        <Modal title="T" onClose={vi.fn<OnClose>()}>
           body
         </Modal>,
       ),

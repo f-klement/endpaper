@@ -487,7 +487,8 @@ class TestTheOrderFollowsTheMeasurement:
             and sources.MEASURED[source].p90_seconds
             <= sources.FIRST_TIER_BUDGET_SECONDS
         ]
-        assert kept and excluded
+        assert kept
+        assert excluded
         low = max(self._concentration(s) for s in kept)
         high = min(self._concentration(s) for s in excluded)
         assert low < sources.TIER_MAX_CONCENTRATION < high

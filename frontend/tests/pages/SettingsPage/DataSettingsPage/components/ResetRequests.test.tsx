@@ -16,6 +16,13 @@ import { Locale } from "../../../../../src/api/generated/model";
 import ResetRequests from "../../../../../src/pages/SettingsPage/DataSettingsPage/components/ResetRequests";
 import { renderLocalised } from "../../../../utils";
 
+type OnApprove = NonNullable<
+  React.ComponentProps<typeof ResetRequests>["onApprove"]
+>;
+type OnDecline = NonNullable<
+  React.ComponentProps<typeof ResetRequests>["onDecline"]
+>;
+
 const request = {
   user_id: 7,
   username: "kim",
@@ -36,8 +43,8 @@ function draw(
       isLoading={false}
       error={null}
       codes={{}}
-      onApprove={vi.fn()}
-      onDecline={vi.fn()}
+      onApprove={vi.fn<OnApprove>()}
+      onDecline={vi.fn<OnDecline>()}
       isWorking={false}
       actionError={null}
       {...overrides}
@@ -181,8 +188,8 @@ describe("ResetRequests", () => {
   });
 
   it("approves and declines by member id", async () => {
-    const onApprove = vi.fn();
-    const onDecline = vi.fn();
+    const onApprove = vi.fn<(userId: number) => void>();
+    const onDecline = vi.fn<(userId: number) => void>();
     draw({ onApprove, onDecline });
 
     const user = userEvent.setup();

@@ -274,7 +274,7 @@ describe("a session that ended at the reverse proxy", () => {
         pathname: "/",
         search: "",
         hash: "",
-        reload: vi.fn(),
+        reload: vi.fn<Location["reload"]>(),
       },
     });
   });

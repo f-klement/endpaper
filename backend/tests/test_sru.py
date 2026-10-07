@@ -95,7 +95,8 @@ def record_ids(root: ElementTree.Element) -> list[int]:
 
 def number_of_records(root: ElementTree.Element) -> int:
     element = root.find(f"{SRW}numberOfRecords")
-    assert element is not None and element.text is not None
+    assert element is not None
+    assert element.text is not None
     return int(element.text)
 
 
@@ -349,7 +350,8 @@ class TestExplainReportsTheIndexesThatExist:
         found = {}
         for element in explain.iter(f"{EXPLAIN}index"):
             name = element.find(f"{EXPLAIN}map/{EXPLAIN}name")
-            assert name is not None and name.text is not None
+            assert name is not None
+            assert name.text is not None
             qualified = f"{name.get('set')}.{name.text}" if name.get("set") else name.text
             found[qualified] = tuple(
                 supports.text or ""
@@ -1402,7 +1404,8 @@ class TestPagingThroughAResultSet:
             db, operation="searchRetrieve", query="Windmill", maximumRecords="2"
         )
         following = response.find(f"{SRW}nextRecordPosition")
-        assert following is not None and following.text == "3"
+        assert following is not None
+        assert following.text == "3"
 
     def test_the_last_page_says_there_is_no_next_one(self, db, many):
         response = respond(
@@ -1619,7 +1622,8 @@ class TestAnIntegerTheCatalogueCannotHoldIsRefusedRatherThanRaised:
         response = respond(db, query="Chartreuse", startRecord=str(2**63))
         assert diagnostic_of(response) == sru.Diagnostic.UNSUPPORTED_PARAMETER_VALUE
         details = details_of(response)
-        assert details is not None and details.startswith("startRecord is outside")
+        assert details is not None
+        assert details.startswith("startRecord is outside")
 
 
 class TestSortingIsRefusedInBothSpellings:
@@ -1691,7 +1695,8 @@ class TestAHostileQueryCannotBreakTheDocument:
     def test_a_long_index_name_is_truncated_rather_than_echoed(self, db):
         response = respond(db, query="dc." + "n" * 400 + "=dog")
         details = response.find(f"{SRW}diagnostics/{DIAG}diagnostic/{DIAG}details")
-        assert details is not None and details.text is not None
+        assert details is not None
+        assert details.text is not None
         assert len(details.text) <= 60
 
     def test_markup_echoed_into_a_diagnostic_is_escaped(self, db):
@@ -1711,7 +1716,8 @@ class TestAHostileQueryCannotBreakTheDocument:
         response = ElementTree.fromstring(raw)
         assert diagnostic_of(response) == sru.Diagnostic.UNSUPPORTED_PARAMETER
         details = response.find(f"{SRW}diagnostics/{DIAG}diagnostic/{DIAG}details")
-        assert details is not None and details.text == "<script>"
+        assert details is not None
+        assert details.text == "<script>"
 
     def test_a_parameter_sent_twice_is_refused(self, db):
         """Neither taking the first nor taking the last is right, because the
@@ -2114,7 +2120,8 @@ class TestTheParametersClientsActuallySend:
         response = respond(db, operation="searchRetrieve", query="Chartreuse")
         assert diagnostic_of(response) is None
         version = response.find(f"{SRW}version")
-        assert version is not None and version.text == sru.DEFAULT_VERSION
+        assert version is not None
+        assert version.text == sru.DEFAULT_VERSION
 
     @pytest.mark.parametrize("version", sru.SUPPORTED_VERSIONS)
     def test_a_supported_version_is_echoed_back(self, db, shelf, version):
@@ -2122,7 +2129,8 @@ class TestTheParametersClientsActuallySend:
             db, operation="searchRetrieve", query="Chartreuse", version=version
         )
         echoed = response.find(f"{SRW}version")
-        assert echoed is not None and echoed.text == version
+        assert echoed is not None
+        assert echoed.text == version
 
     def test_a_query_with_no_operation_is_a_search(self, db, shelf):
         """SRU 2.0's rule, applied here because it is what clients do."""
@@ -2206,8 +2214,10 @@ class TestTheResponseIsARecordAnotherSystemCanRead:
         for record in response.iter(f"{SRW}record"):
             schema = record.find(f"{SRW}recordSchema")
             packing = record.find(f"{SRW}recordPacking")
-            assert schema is not None and schema.text == sru.MARCXML_SCHEMA
-            assert packing is not None and packing.text == "xml"
+            assert schema is not None
+            assert schema.text == sru.MARCXML_SCHEMA
+            assert packing is not None
+            assert packing.text == "xml"
 
     def test_a_record_reads_back_through_this_application_own_marc_reader(
         self, db, shelf
@@ -2451,7 +2461,7 @@ class TestParsingAQueryHasTwoOutcomesAndNoThird:
         try:
             node = sru.parse(query)
         except sru.SruError as error:
-            assert isinstance(error.diagnostic, sru.Diagnostic)
+            assert isinstance(error.diagnostic, sru.Diagnostic)  # noqa: PT017  raising is optional here
             return
         assert isinstance(node, sru.Clause | sru.Boolean)
 
@@ -2464,8 +2474,8 @@ class TestParsingAQueryHasTwoOutcomesAndNoThird:
         try:
             sru.parse(query)
         except sru.SruError as error:
-            assert error.details.isprintable() or error.details == ""
-            assert len(error.details) <= sru._DETAILS_CHARS
+            assert error.details.isprintable() or error.details == ""  # noqa: PT017  optional raise
+            assert len(error.details) <= sru._DETAILS_CHARS  # noqa: PT017  optional raise
 
     @given(query=ANY_QUERY)
     def test_parsing_is_not_a_source_of_state(self, query):

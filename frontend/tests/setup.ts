@@ -218,11 +218,11 @@ if (typeof window !== "undefined" && !window.matchMedia) {
     matches: false,
     media: query,
     onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
+    addListener: vi.fn<MediaQueryList["addListener"]>(),
+    removeListener: vi.fn<MediaQueryList["removeListener"]>(),
+    addEventListener: vi.fn<MediaQueryList["addEventListener"]>(),
+    removeEventListener: vi.fn<MediaQueryList["removeEventListener"]>(),
+    dispatchEvent: vi.fn<MediaQueryList["dispatchEvent"]>(),
   })) as unknown as typeof window.matchMedia;
 }
 

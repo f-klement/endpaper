@@ -711,7 +711,11 @@ class TestEveryConcurrencyBoundIsBuiltOnceForThePodAndNotPerRequest:
             "reads as absent here rather than as unread"
         )
         where = _constructed(built_by, _concurrency_classes(tree))
-        assert where is not None and _is_a_class_of(*where), (
+        assert where is not None, (
+            "the bound is not built by a class of a concurrency module: "
+            f"{ast.unparse(built_by.func)}"
+        )
+        assert _is_a_class_of(*where), (
             "the bound is not built by a class of a concurrency module: "
             f"{ast.unparse(built_by.func)}"
         )
@@ -748,7 +752,12 @@ class TestTheImageRunsOneWorkerSoProcessWideIsPodWide:
 
         assert run, "no CMD or ENTRYPOINT found, so this arm is measuring nothing"
         for line in run:
-            assert "--workers" not in line and "-w " not in line, (
+            assert "--workers" not in line, (
+                "the image runs more than one worker, so every module level bound "
+                "in the route layer is per worker rather than per pod and the "
+                f"response budget is exceeded by that factor: {line.strip()}"
+            )
+            assert "-w " not in line, (
                 "the image runs more than one worker, so every module level bound "
                 "in the route layer is per worker rather than per pod and the "
                 f"response budget is exceeded by that factor: {line.strip()}"

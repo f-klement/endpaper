@@ -9,13 +9,17 @@ import StatusPicker from "../../../../src/pages/BookDetail/components/StatusPick
 import { STATUS_ORDER } from "../../../../src/pages/types";
 import { renderLocalised } from "../../../utils";
 
+type OnChange = NonNullable<
+  React.ComponentProps<typeof StatusPicker>["onChange"]
+>;
+
 describe("StatusPicker", () => {
   it("offers every status the shelf can hold, in the shared order", () => {
     // The picker used to carry its own list of five, which is why this file
     // exists: the type could not see a status left out of that list, so a sixth
     // would have been unreachable here while the card and the table printed it.
     renderLocalised(
-      <StatusPicker current={ReadStatus.unread} onChange={vi.fn()} />,
+      <StatusPicker current={ReadStatus.unread} onChange={vi.fn<OnChange>()} />,
     );
 
     const offered = screen
@@ -33,7 +37,10 @@ describe("StatusPicker", () => {
 
   it("marks the reader's current status as pressed, and only that one", () => {
     renderLocalised(
-      <StatusPicker current={ReadStatus.reading} onChange={vi.fn()} />,
+      <StatusPicker
+        current={ReadStatus.reading}
+        onChange={vi.fn<OnChange>()}
+      />,
     );
 
     const pressed = screen
@@ -48,7 +55,7 @@ describe("StatusPicker", () => {
     // No button carries a value of its own any more: each is built from the
     // status, so this is what says the right one is still wired to the right
     // word.
-    const onChange = vi.fn();
+    const onChange = vi.fn<OnChange>();
     renderLocalised(
       <StatusPicker current={ReadStatus.unread} onChange={onChange} />,
     );
@@ -65,7 +72,7 @@ describe("StatusPicker", () => {
     // say the glyph reaches the DOM, or that it stays decorative: announced,
     // it makes a screen reader say each status twice.
     renderLocalised(
-      <StatusPicker current={ReadStatus.unread} onChange={vi.fn()} />,
+      <StatusPicker current={ReadStatus.unread} onChange={vi.fn<OnChange>()} />,
     );
 
     for (const button of screen.getAllByRole("button")) {
@@ -84,7 +91,7 @@ describe("StatusPicker", () => {
     // rendering as a row of five with an orphan underneath, which the picker's
     // own comment records paying for once.
     const { container } = renderLocalised(
-      <StatusPicker current={ReadStatus.unread} onChange={vi.fn()} />,
+      <StatusPicker current={ReadStatus.unread} onChange={vi.fn<OnChange>()} />,
     );
 
     expect(container.querySelector("div.grid")?.className).toContain(

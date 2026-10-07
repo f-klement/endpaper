@@ -134,7 +134,7 @@ class TestAPageCountIsBoundedAtBothEnds:
     """
 
     @pytest.mark.parametrize(
-        "extent, expected",
+        ("extent", "expected"),
         [
             ("390 Seiten", 390),
             ("348 S.", 348),
@@ -365,7 +365,7 @@ class TestTheTwoLanguageTablesAreOneTable:
             assert LANGUAGES[written] == stored
 
     @pytest.mark.parametrize(
-        "stored, code",
+        ("stored", "code"),
         [("de", "ger"), ("fr", "fre"), ("nl", "dut")],
     )
     def test_a_language_with_two_codes_is_written_in_the_bibliographic_one(
@@ -1246,7 +1246,7 @@ class TestARoleWordCanBeTheSurname:
         )
 
     @pytest.mark.parametrize(
-        "cell, settles_at",
+        ("cell", "settles_at"),
         [
             # An abbreviation, which is the shape a flip can hand back: see
             # the arm below.

@@ -1651,7 +1651,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         _, _, examined = _planted("import sources\nsources.in_force(plan, ready)\n")
         assert examined == 0
 
-    @pytest.mark.parametrize("subject, spelling", _ATTRIBUTE_SPELLINGS)
+    @pytest.mark.parametrize(("subject", "spelling"), _ATTRIBUTE_SPELLINGS)
     def test_a_reader_reached_as_an_attribute_on_an_importing_module_is_reported(
         self, subject, spelling
     ):
@@ -1676,7 +1676,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         assert offenders, spelling
         assert not unreadable
 
-    @pytest.mark.parametrize("subject, spelling", _ATTRIBUTE_SPELLINGS)
+    @pytest.mark.parametrize(("subject", "spelling"), _ATTRIBUTE_SPELLINGS)
     def test_the_same_read_through_a_re_exported_in_force_door_is_not_reported(
         self, subject, spelling
     ):
@@ -1717,11 +1717,11 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
 
     @pytest.mark.parametrize(
         "opener",
-        (
+        [
             "def send(db):\n    read = settings_store.get_bool\n    return read\n",
             "async def send(db):\n    read = settings_store.get_bool\n    return read\n",
             "class R:\n    read = settings_store.get_bool\n",
-        ),
+        ],
     )
     def test_a_reader_bound_inside_a_scope_of_its_own_is_not_an_attribute_on_that_module(
         self, opener
@@ -1780,7 +1780,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
 
     @pytest.mark.parametrize(
         "shadow",
-        (
+        [
             "def send(db, helpers):\n"
             "    return helpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
             "def send(db):\n"
@@ -1798,7 +1798,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
             "def helpers():\n"
             "    return None\n"
             "helpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
-        ),
+        ],
     )
     def test_a_name_this_module_also_binds_itself_is_not_the_module_it_imported(
         self, shadow

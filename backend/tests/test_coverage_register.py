@@ -3091,7 +3091,8 @@ class TestTheGateComparesTwoInstruments:
         from_the_walk = _refusal(walk_short, frozenset())
         from_the_run = _refusal(run_short, frozenset())
 
-        assert from_the_walk is not None and from_the_run is not None
+        assert from_the_walk is not None
+        assert from_the_run is not None
         assert "the remedy is a row of 0 for it" not in from_the_walk
         assert "the walk going wrong" in from_the_walk
         assert "the remedy is a row of 0 for it" in from_the_run

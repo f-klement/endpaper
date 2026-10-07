@@ -9,6 +9,7 @@ import {
   OverdueSender,
   type SenderHealth,
   type SettingsOut,
+  type SettingsUpdate,
 } from "../../../../../src/api/generated/model";
 import ReminderSendersSection from "../../../../../src/pages/SettingsPage/LendingSettingsPage/components/ReminderSendersSection";
 import { renderLocalised } from "../../../../utils";
@@ -50,7 +51,7 @@ function renderSection(
   settings: Partial<SettingsOut> = {},
   health: Partial<Record<OverdueSender, SenderHealth>> = {},
 ) {
-  const onSave = vi.fn();
+  const onSave = vi.fn<(patch: SettingsUpdate) => void>();
   const rendered = renderLocalised(
     <ReminderSendersSection
       settings={makeSettings(settings)}

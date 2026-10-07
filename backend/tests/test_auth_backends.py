@@ -102,7 +102,8 @@ class TestAuthenticateLdap:
         directory_with(monkeypatch)
         second = auth_backends.authenticate_ldap(db, "kim", "correct-horse")
 
-        assert first is not None and second is not None
+        assert first is not None
+        assert second is not None
         assert first.id == second.id
         assert db.query(User).filter(User.username == "kim").count() == 1
 
@@ -186,14 +187,16 @@ class TestLdapAdminGroup:
 
         user = auth_backends.authenticate_ldap(db, "kim", "correct-horse")
 
-        assert user is not None and user.is_admin is True
+        assert user is not None
+        assert user.is_admin is True
 
     def test_absence_does_not(self, db, ldap_mode, monkeypatch, not_first):
         directory_with(monkeypatch, groups=["cn=readers,ou=groups,dc=example,dc=org"])
 
         user = auth_backends.authenticate_ldap(db, "kim", "correct-horse")
 
-        assert user is not None and user.is_admin is False
+        assert user is not None
+        assert user.is_admin is False
 
     def test_admin_is_re_evaluated_on_every_sign_in(
         self, db, ldap_mode, monkeypatch, not_first
@@ -202,12 +205,14 @@ class TestLdapAdminGroup:
         effect, rather than being frozen at whatever it was on first login."""
         directory_with(monkeypatch, groups=["cn=librarians,ou=groups,dc=example,dc=org"])
         promoted = auth_backends.authenticate_ldap(db, "kim", "correct-horse")
-        assert promoted is not None and promoted.is_admin is True
+        assert promoted is not None
+        assert promoted.is_admin is True
 
         directory_with(monkeypatch, groups=[])
         demoted = auth_backends.authenticate_ldap(db, "kim", "correct-horse")
 
-        assert demoted is not None and demoted.is_admin is False
+        assert demoted is not None
+        assert demoted.is_admin is False
 
 
 # ── Proxy ─────────────────────────────────────────────────────────────────────
@@ -251,14 +256,16 @@ class TestProxyHeaders:
             db, request_with({"Remote-User": "kim", "Remote-Groups": "readers,librarians"})
         )
 
-        assert user is not None and user.is_admin is True
+        assert user is not None
+        assert user.is_admin is True
 
     def test_other_groups_do_not(self, db, not_first):
         user = auth_backends.user_from_proxy_headers(
             db, request_with({"Remote-User": "kim", "Remote-Groups": "readers"})
         )
 
-        assert user is not None and user.is_admin is False
+        assert user is not None
+        assert user.is_admin is False
 
     def test_a_custom_header_name_is_honoured(self, db, monkeypatch):
         monkeypatch.setenv("PROXY_USER_HEADER", "X-Forwarded-User")
@@ -267,13 +274,15 @@ class TestProxyHeaders:
             db, request_with({"X-Forwarded-User": "kim"})
         )
 
-        assert user is not None and user.username == "kim"
+        assert user is not None
+        assert user.username == "kim"
 
     def test_the_same_member_reuses_one_account(self, db):
         first = auth_backends.user_from_proxy_headers(db, request_with({"Remote-User": "kim"}))
         second = auth_backends.user_from_proxy_headers(db, request_with({"Remote-User": "kim"}))
 
-        assert first is not None and second is not None
+        assert first is not None
+        assert second is not None
         assert first.id == second.id
 
 
@@ -298,7 +307,7 @@ class TestDispatch:
         assert auth_backends.authenticate(db, "kim", "password123") is None
 
     @pytest.mark.parametrize(
-        "mode,expected", [("local", True), ("ldap", False), ("proxy", False)]
+        ("mode", "expected"), [("local", True), ("ldap", False), ("proxy", False)]
     )
     def test_signup_is_only_offered_when_we_own_the_passwords(
         self, monkeypatch, mode, expected
@@ -399,7 +408,8 @@ class TestProxyIdentityIsBounded:
             )
 
         created = [r for r in caplog.records if "Created account" in r.message]
-        assert created and created[0].levelno == logging.WARNING
+        assert created
+        assert created[0].levelno == logging.WARNING
 
     def test_an_unchanged_identity_writes_nothing(self, db):
         """Every request reaches this in proxy mode.
@@ -660,7 +670,8 @@ class TestATestAccountIsNeverAdopted:
             )
 
         renames = [r for r in caplog.records if "Renamed the test account" in r.message]
-        assert renames and renames[0].levelno == logging.WARNING
+        assert renames
+        assert renames[0].levelno == logging.WARNING
         assert "'alice-2'" in renames[0].getMessage()
 
     def test_an_ordinary_local_account_is_still_adopted(self, db):
@@ -856,7 +867,8 @@ class TestADirectoryNameWiderThanTheColumnIsRefused:
         refusals = [
             r for r in caplog.records if "users.username cannot hold" in r.getMessage()
         ]
-        assert refusals and refusals[0].levelno == logging.WARNING
+        assert refusals
+        assert refusals[0].levelno == logging.WARNING
         assert str(width + 1) in refusals[0].getMessage()
         assert clipped(refused) in refusals[0].getMessage()
 
@@ -1239,7 +1251,16 @@ class TestTheDirectorySuccessPathCannotForgeALogLine:
             callee = node.func
             assert isinstance(callee, ast.Attribute)  # `_emitting_calls` selects these
             receiver = callee.value
-            assert isinstance(receiver, ast.Name) and receiver.id in receivers, (
+            assert isinstance(receiver, ast.Name), (
+                f"line {node.lineno}: `{ast.unparse(callee)}` calls a method "
+                f"this rule reads as an emitter, on a receiver it cannot "
+                f"resolve to a logger. If it is a logger, teach "
+                f"`_logger_names` the binding. If it is not, the population "
+                f"selects on the method name alone and has outgrown this "
+                f"module: narrow it at `_emitting_calls`, which says what "
+                f"that costs"
+            )
+            assert receiver.id in receivers, (
                 f"line {node.lineno}: `{ast.unparse(callee)}` calls a method "
                 f"this rule reads as an emitter, on a receiver it cannot "
                 f"resolve to a logger. If it is a logger, teach "
@@ -1259,7 +1280,11 @@ class TestTheDirectorySuccessPathCannotForgeALogLine:
             # template carrying no positional arguments out of the rule in
             # silence, and an f-string is a template that can carry a repr of
             # a repr.
-            assert isinstance(template, ast.Constant) and isinstance(
+            assert isinstance(template, ast.Constant), (
+                f"line {node.lineno}: the format string is not a string literal, "
+                f"so this rule cannot pair it with its arguments"
+            )
+            assert isinstance(
                 template.value, str
             ), (
                 f"line {node.lineno}: the format string is not a string literal, "
@@ -1488,7 +1513,8 @@ class TestTheDirectoryWritesTheAddress:
             auth_backends.authenticate_ldap(db, "kim", "password123")
 
         refusals = [r for r in caplog.records if "not an address" in r.getMessage()]
-        assert refusals and refusals[0].levelno == logging.WARNING
+        assert refusals
+        assert refusals[0].levelno == logging.WARNING
         assert "'mail'" in refusals[0].getMessage()
         # The length, never the value: an address is a member's, and this line
         # goes to a log an operator reads.
@@ -1576,7 +1602,8 @@ class TestTheProxyHeaderCarriesAnAddress:
         assert user is not None
         assert user.email is None
         refusals = [r for r in caplog.records if "not an address" in r.getMessage()]
-        assert refusals and refusals[0].levelno == logging.WARNING
+        assert refusals
+        assert refusals[0].levelno == logging.WARNING
         assert "10.0.0.1" in refusals[0].getMessage()
         assert "@" not in refusals[0].getMessage()
 

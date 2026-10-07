@@ -87,7 +87,8 @@ class TestItLeavesEveryView:
         """Otherwise a deleted book is offered as a duplicate of its replacement."""
         make_book(admin["headers"], title="Deleted Book", author="A Writer")
         report = client.get("/api/books/duplicates", headers=admin["headers"]).json()
-        assert report["groups"] == [] and report["total_groups"] == 0
+        assert report["groups"] == []
+        assert report["total_groups"] == 0
 
     def test_it_is_gone_from_the_series_gaps(self, client, admin, make_book):
         book = make_book(admin["headers"], series_name="Discworld", series_index=2)

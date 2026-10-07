@@ -691,7 +691,8 @@ class TestTheBoundsAreStatedInOnePlace:
         # the sync budget is. Re-derived here from the two constants rather than
         # read off the call.
         assert fetch.TIMEOUT_SECONDS < 10_000
-        assert seen and seen[0] - started < fetch.TIMEOUT_SECONDS
+        assert seen
+        assert seen[0] - started < fetch.TIMEOUT_SECONDS
 
     @respx.mock
     async def test_a_refusal_never_names_the_address(self):

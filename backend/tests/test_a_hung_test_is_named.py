@@ -632,7 +632,8 @@ class TestASessionThatLostATestIsRefusedByName:
         )
         assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
         said = "\n".join(reporter.lines)
-        assert "t.py::b" in said and "t.py::c" in said, said
+        assert "t.py::b" in said, said
+        assert "t.py::c" in said, said
 
     def test_a_truncated_failing_run_is_refused_too(
         self, monkeypatch: pytest.MonkeyPatch

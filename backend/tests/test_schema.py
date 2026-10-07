@@ -3263,7 +3263,8 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
     @staticmethod
     def _ceiling(table_name: str, column: str) -> int:
         width = Base.metadata.tables[table_name].c[column].type
-        assert isinstance(width, String) and width.length
+        assert isinstance(width, String)
+        assert width.length
         return width.length
 
     @pytest.mark.parametrize(("table_name", "column", "others"), _TEXT_CEILINGS)
@@ -5668,7 +5669,8 @@ class TestEveryConfinementArmedConstraintIsProbedToo:
         """
         table = Base.metadata.tables[table_name]
         declared = table.c[column].type
-        assert isinstance(declared, String) and declared.length
+        assert isinstance(declared, String)
+        assert declared.length
         at_the_ceiling = widest + "a" * (declared.length - len(widest))
 
         with self._probe(table_name) as connection:

@@ -124,7 +124,8 @@ class TestLookupByIsbn:
             return_value=httpx.Response(200, json={"items": [VOLUME]})
         )
         fields = await lookup_by_isbn("9780441013593", "key")
-        assert fields is not None and fields["title"] == "Dune"
+        assert fields is not None
+        assert fields["title"] == "Dune"
 
     async def test_returns_none_when_google_has_nothing(self, google):
         google.get(url__startswith=VOLUMES).mock(

@@ -8,6 +8,7 @@ import {
   useExportLibrary,
   useFeatureFlagsState,
   useScopedPreference,
+  type RememberedPerScope,
 } from "../../src/app/hooks";
 import { declareScopedPreference } from "../../src/lib/preference";
 import {
@@ -21,8 +22,10 @@ let api: MockApi;
 
 beforeEach(() => {
   api = mockApi();
-  URL.createObjectURL = vi.fn(() => "blob:mock-url");
-  URL.revokeObjectURL = vi.fn();
+  URL.createObjectURL = vi.fn<typeof URL.createObjectURL>(
+    () => "blob:mock-url",
+  );
+  URL.revokeObjectURL = vi.fn<(url: string) => void>();
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 });
 
@@ -179,7 +182,9 @@ describe("useScopedPreference", () => {
   it("refuses that too, and calls nothing, while no scope has arrived", () => {
     // Calls nothing, rather than calling it with the reading scope: a value
     // computed under the unknown scope is exactly the wrong write this refuses.
-    const compute = vi.fn((known: "near" | "far") => `shelf ${known}`);
+    const compute = vi.fn<
+      Parameters<RememberedPerScope<"near" | "far", string>["setFromScope"]>[0]
+    >((known) => `shelf ${known}`);
     const { result } = renderHook(() => useScopedPreference(shelf, undefined));
 
     act(() => result.current.setFromScope(compute));

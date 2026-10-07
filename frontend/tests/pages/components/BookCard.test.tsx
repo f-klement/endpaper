@@ -35,7 +35,7 @@ function renderCard(book: BookOut) {
 }
 
 function renderSelectable(book: BookOut, isSelected = false) {
-  const onToggleSelect = vi.fn();
+  const onToggleSelect = vi.fn<(bookId: number) => void>();
   renderLocalised(
     <BookCard
       book={book}

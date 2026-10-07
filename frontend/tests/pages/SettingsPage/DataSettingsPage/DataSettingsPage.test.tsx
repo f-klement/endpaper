@@ -21,9 +21,9 @@ import { mockApi, renderWithProviders, type MockApi } from "../../../utils";
 
 let api: MockApi;
 
-function render(
-  props: Partial<React.ComponentProps<typeof DataSettingsPage>> = {},
-) {
+type PageProps = React.ComponentProps<typeof DataSettingsPage>;
+
+function render(props: Partial<PageProps> = {}) {
   return renderWithProviders(
     <DataSettingsPage mode={AuthMode.local} onSignIn={() => {}} {...props} />,
   );
@@ -153,7 +153,7 @@ describe("DataSettingsPage", () => {
           user: TESTER,
         },
       });
-      const onSignIn = vi.fn();
+      const onSignIn = vi.fn<PageProps["onSignIn"]>();
       render({ onSignIn });
       const user = userEvent.setup();
 
@@ -180,7 +180,7 @@ describe("DataSettingsPage", () => {
         status: 401,
         body: { detail: "Incorrect password for that account" },
       });
-      const onSignIn = vi.fn();
+      const onSignIn = vi.fn<PageProps["onSignIn"]>();
       render({ onSignIn });
       const user = userEvent.setup();
 

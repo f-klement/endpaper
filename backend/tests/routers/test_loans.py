@@ -492,7 +492,7 @@ class TestTheNestedBook:
         assert "cover_url" in loan["book"]
 
     def test_a_page_of_loans_costs_the_same_whatever_its_length(
-        self, client, admin, make_book, _password_hash
+        self, client, admin, make_book, password_hash
     ):
         """It was 53 statements for 25 loans: the N+1 the docs say was fixed.
 
@@ -532,11 +532,11 @@ class TestTheNestedBook:
         10 at three loans and 17 at ten, against the 7 below at both lengths.
         """
         for index in range(3):
-            lend_between_strangers(client, make_book, _password_hash, index)
+            lend_between_strangers(client, make_book, password_hash, index)
         short_cost, short_total = selects_for(client, admin["headers"], "/api/loans")
 
         for index in range(3, 10):
-            lend_between_strangers(client, make_book, _password_hash, index)
+            lend_between_strangers(client, make_book, password_hash, index)
         long_cost, long_total = selects_for(client, admin["headers"], "/api/loans")
 
         # The rows really were built, so a cost met by returning nothing cannot
@@ -558,7 +558,7 @@ class TestTheNestedBook:
         assert long_cost == 7, f"{long_cost} selects for 10 loans"
 
     def test_a_page_of_returned_loans_costs_the_same_whatever_its_length(
-        self, client, admin, make_book, _password_hash
+        self, client, admin, make_book, password_hash
     ):
         """A page of returned loans costs what a page of open ones costs.
 
@@ -575,7 +575,7 @@ class TestTheNestedBook:
         itself: a returned loan is in no such fetch by anybody.
         """
         for index in range(10):
-            row = lend_between_strangers(client, make_book, _password_hash, index)
+            row = lend_between_strangers(client, make_book, password_hash, index)
             client.put(f"/api/loans/{row['id']}/return", headers=admin["headers"])
             if index == 2:
                 short_cost, short_total = selects_for(
@@ -1025,7 +1025,7 @@ class TestListOverdue:
         assert body["total"] == 0
 
     def test_the_overdue_page_costs_the_same_whatever_its_length(
-        self, client, admin, make_book, _password_hash
+        self, client, admin, make_book, password_hash
     ):
         """The eager loads were copied from `list_loans`; this is the test that
         makes them mean something.
@@ -1066,13 +1066,13 @@ class TestListOverdue:
         read which loan is pinned in `tests/test_notifications.py`.
         """
         for index in range(3):
-            lend_between_strangers(client, make_book, _password_hash, index)
+            lend_between_strangers(client, make_book, password_hash, index)
         short_cost, short_total = selects_for(
             client, admin["headers"], "/api/loans/overdue"
         )
 
         for index in range(3, 10):
-            lend_between_strangers(client, make_book, _password_hash, index)
+            lend_between_strangers(client, make_book, password_hash, index)
         long_cost, long_total = selects_for(
             client, admin["headers"], "/api/loans/overdue"
         )

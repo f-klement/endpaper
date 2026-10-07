@@ -300,6 +300,7 @@ select = [
     "E", "F", "I", "UP", "B", "SIM", "C4", "S", "ASYNC", "RUF",
     "DTZ", "BLE", "LOG", "G", "PGH",
     "T10", "SLOT", "EXE", "YTT", "RSE", "PIE", "FURB", "ICN", "RET",
+    "PT",
 ]
 # W605 is an invalid escape sequence, `\d` in a non raw string. CPython warns
 # about it today and has it scheduled to become a SyntaxError, at which point the
@@ -313,12 +314,15 @@ select = [
 # whitespace in a generated Alembic header, which is a tidiness preference nobody
 # asked for. W605 alone reports nothing today.
 #
-# PT011 is a `pytest.raises` on a broad exception with no `match`, which passes
-# when the code under test refuses for a different reason than the test names.
-# Not hypothetical: one test here asserted two arms of one function, and its
+# **`PT` is selected above for one rule and kept for the rest.** PT011 is a
+# `pytest.raises` on a broad exception with no `match`, which passes when the
+# code under test refuses for a different reason than the test names. Not
+# hypothetical: one test here asserted two arms of one function, and its
 # lookup case still passed with the lookup arm deleted, because the search arm
-# refused the same row with the same bare `ValueError`. The one rule rather
-# than the `PT` family, which is mostly style over parametrisation idioms.
+# refused the same row with the same bare `ValueError`. The rest of the family
+# is mostly style, and it was cleared rather than left out so that a rule ruff
+# ships next arrives enforced; the tooling tree refuses the family per file
+# for its unittest scripts, which is that tree's own business.
 #
 # **Broad is ruff's default set plus the six below** in
 # `[tool.ruff.lint.flake8-pytest-style]`, each one this tree's tests raise.
@@ -327,17 +331,20 @@ select = [
 # `TimeoutError` is left out because asyncio raises it with an empty
 # message, so there is nothing to match.
 #
-# Measured 2026-10-07 on the tree before PT011 was cleared, suppressions cleared:
+# Measured 2026-10-07 before any rule of the family was cleared, PT011
+# included, with suppressions cleared:
 #
 #   ruff check --config 'lint.per-file-ignores = {}' --select PT --statistics .
 #
-#   183 findings: PT018 composite assertions 103, and PT006, PT007, PT019 and
-#   PT022 39 together, all style; PT011 34, now 0;
-#   PT012 4, of which one hid which of two mechanisms refused and was split,
-#   one is a round trip asserted whole on purpose and two are deadline tests
-#   whose `async with` is the thing under test; PT017 3, property tests where
+#   183 findings, now 0 with six directives. PT018 composite assertions 103,
+#   split, each half keeping the message the whole carried where it was true of
+#   that half; PT006 and PT007, 35, parametrise spellings; PT019 3, a fixture
+#   with a value named as if it had none, renamed; PT022 1; PT011 34. PT012 4:
+#   one hid which of two mechanisms refused and was split, and three carry a
+#   directive, a round trip asserted whole and two deadline tests whose `async
+#   with` is what is under test. PT017 3, all directives: property tests where
 #   raising is optional.
-extend-select = ["W605", "PT011"]
+extend-select = ["W605"]
 #
 # ── The families deliberately NOT selected ──────────────────────────────────
 #

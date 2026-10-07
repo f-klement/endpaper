@@ -1614,16 +1614,24 @@ class TestTheTwoDoorsIntoTheCategoriesColumn:
         field = BookCreate.model_fields["categories"]
         count = _stated_ceiling(field)
         entry = _element_ceiling(field)
-        assert count is not None and entry is not None, (
+        assert count is not None, (
+            "the create body's subject list states no count or no entry width, "
+            "so the column bound is no longer derived from anything"
+        )
+        assert entry is not None, (
             "the create body's subject list states no count or no entry width, "
             "so the column bound is no longer derived from anything"
         )
 
         widest = join_categories(["x" * entry] * count)
 
-        assert widest is not None and len(widest) == CATEGORIES_MAX, (
+        assert widest is not None, (
+            f"{count} subjects of {entry} characters do not join at all, and the "
+            f"column holds {CATEGORIES_MAX}"
+        )
+        assert len(widest) == CATEGORIES_MAX, (
             f"{count} subjects of {entry} characters join to "
-            f"{len(widest or '')}, and the column holds {CATEGORIES_MAX}"
+            f"{len(widest)}, and the column holds {CATEGORIES_MAX}"
         )
 
     def test_the_two_factors_are_the_ones_the_column_width_is_computed_from(
@@ -1795,7 +1803,8 @@ class TestTheTwoDoorsIntoTheCategoriesColumn:
             "pass on that bound rather than on the ordering"
         )
         rejoined = join_categories(split_categories(payload))
-        assert rejoined is not None and len(rejoined) > CATEGORIES_MAX
+        assert rejoined is not None
+        assert len(rejoined) > CATEGORIES_MAX
 
         with pytest.raises(ValidationError):
             BookMatch(categories=payload)
@@ -1814,7 +1823,11 @@ class TestTheTwoDoorsIntoTheCategoriesColumn:
         subjects = split_categories(payload)
         assert len(subjects) == MAX_CATEGORIES_PER_BOOK + 1
         rejoined = join_categories(subjects)
-        assert rejoined is not None and len(rejoined) < CATEGORIES_MAX, (
+        assert rejoined is not None, (
+            "the driving value now trips the width bound too, so this arm would "
+            "pass without the count bound existing"
+        )
+        assert len(rejoined) < CATEGORIES_MAX, (
             "the driving value now trips the width bound too, so this arm would "
             "pass without the count bound existing"
         )
@@ -1864,7 +1877,8 @@ class TestTheTwoDoorsIntoTheCategoriesColumn:
             "would refuse it and this arm would pass on the wrong bound"
         )
         joined = join_categories(split_categories(payload))
-        assert joined is not None and len(joined) == CATEGORIES_MAX + parts - 1
+        assert joined is not None
+        assert len(joined) == CATEGORIES_MAX + parts - 1
 
         with pytest.raises(ValidationError):
             BookMatch(categories=payload)
@@ -1923,7 +1937,8 @@ def _load_schemas_book() -> None:
     spec = importlib.util.spec_from_file_location(
         "schemas_book_under_test", _SCHEMAS_BOOK
     )
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     spec.loader.exec_module(importlib.util.module_from_spec(spec))
 
 

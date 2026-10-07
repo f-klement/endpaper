@@ -4776,7 +4776,8 @@ class TestNoDatabaseFoldIsComparedAgainstAPythonFold:
 
         comparisons = [node for node in ast.walk(tree) if isinstance(node, ast.Compare)]
 
-        assert comparisons and self._folds_in_sql(comparisons[0].left)
+        assert comparisons
+        assert self._folds_in_sql(comparisons[0].left)
 
 
 class TestOnlyOneHelperTurnsForeignKeysOff:
@@ -7788,7 +7789,8 @@ class TestEveryPythonFileCompilesWithoutAWarning:
         # group non empty, plus the file making the assertion, rather than a
         # floor: a literal count here is the defect this class's docstring
         # records, and one that has drifted low never fails.
-        assert set(_python_sources()) and set(_test_sources())
+        assert set(_python_sources())
+        assert set(_test_sources())
         assert Path(__file__).resolve() in {path.resolve() for path in walked}
 
     @pytest.mark.parametrize(
@@ -8464,7 +8466,11 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
             checked[node.name] = sorted(
                 argument.arg for argument in node.args.kwonlyargs
             )
-            assert not node.args.defaults and not any(node.args.kw_defaults), (
+            assert not node.args.defaults, (
+                f"{node.name} carries a default, so a call site can leave the "
+                "answer to it"
+            )
+            assert not any(node.args.kw_defaults), (
                 f"{node.name} carries a default, so a call site can leave the "
                 "answer to it"
             )
@@ -9191,7 +9197,8 @@ class TestEverySchemeCheckListsItsOwnEnum:
         # rewritten to close. Those two are loud anyway, in
         # `test_each_one_lists_exactly_its_own_enum`, which is what makes the
         # pair sound rather than this assertion alone.
-        assert reported is not None and "permits" in reported
+        assert reported is not None
+        assert "permits" in reported
 
     def test_it_reads_the_clause_that_bounds_the_column(self):
         """Collection and extraction have to select the **same** clause.
@@ -9212,7 +9219,8 @@ class TestEverySchemeCheckListsItsOwnEnum:
 
         reported = self._disagreement("book_identifiers", decoy, "ck")
 
-        assert reported is not None and "permits" in reported
+        assert reported is not None
+        assert "permits" in reported
         # The clause that bounds the column, not the one that merely ends in
         # its name. Asserting the **values** rather than only that something
         # was reported: reading the decoy also reports, for the wrong reason,
@@ -9993,9 +10001,11 @@ class TestEveryTextCeilingBindsOnBytesToo:
         if expected is None:
             assert (ceilings, unreadable) == ([], [])
         elif expected == self.UNREADABLE:
-            assert unreadable and not ceilings
+            assert unreadable
+            assert not ceilings
         else:
-            assert ceilings == [expected] and not unreadable
+            assert ceilings == [expected]
+            assert not unreadable
 
     def test_the_rule_is_reading_the_constraints_it_thinks_it_is(self) -> None:
         """A matcher that stopped matching would retire the rule above in silence.

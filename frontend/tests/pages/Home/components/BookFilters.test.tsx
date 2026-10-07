@@ -15,6 +15,8 @@ import { renderLocalised } from "../../../utils";
 
 beforeEach(resetIds);
 
+type Props = React.ComponentProps<typeof BookFilters>;
+
 const FACETS: ClassificationFacets = {
   divisions: [{ division: "150", label: "Psychology", book_count: 3 }],
   headings: [
@@ -32,17 +34,17 @@ function renderFilters(overrides: Record<string, unknown> = {}) {
     filters: DEFAULT_FILTERS,
     tags: [],
     showTagPanel: false,
-    onToggleTagPanel: vi.fn(),
-    onFilterChange: vi.fn(),
+    onToggleTagPanel: vi.fn<Props["onToggleTagPanel"]>(),
+    onFilterChange: vi.fn<Props["onFilterChange"]>(),
     locations: [],
     collections: [],
     classifications: undefined,
     showClassificationPanel: false,
-    onToggleClassificationPanel: vi.fn(),
+    onToggleClassificationPanel: vi.fn<Props["onToggleClassificationPanel"]>(),
     view: {
       value: "grid" as const,
-      set: vi.fn(),
-      setFromScope: vi.fn(),
+      set: vi.fn<Props["view"]["set"]>(),
+      setFromScope: vi.fn<Props["view"]["setFromScope"]>(),
       canSet: true,
     },
     ...overrides,
@@ -248,8 +250,8 @@ describe("the view group", () => {
     const props = renderFilters({
       view: {
         value: "grid",
-        set: vi.fn(),
-        setFromScope: vi.fn(),
+        set: vi.fn<Props["view"]["set"]>(),
+        setFromScope: vi.fn<Props["view"]["setFromScope"]>(),
         canSet: false,
       },
     });
@@ -281,8 +283,8 @@ describe("the view group", () => {
     renderFilters({
       view: {
         value: "list",
-        set: vi.fn(),
-        setFromScope: vi.fn(),
+        set: vi.fn<Props["view"]["set"]>(),
+        setFromScope: vi.fn<Props["view"]["setFromScope"]>(),
         canSet: false,
       },
     });
@@ -300,8 +302,8 @@ describe("the view group", () => {
     renderFilters({
       view: {
         value: "list",
-        set: vi.fn(),
-        setFromScope: vi.fn(),
+        set: vi.fn<Props["view"]["set"]>(),
+        setFromScope: vi.fn<Props["view"]["setFromScope"]>(),
         canSet: false,
       },
     });

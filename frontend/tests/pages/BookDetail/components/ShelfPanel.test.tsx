@@ -4,13 +4,16 @@ import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { BookOut } from "../../../../src/api/generated/model";
+import type {
+  BookDetailsUpdate,
+  BookOut,
+} from "../../../../src/api/generated/model";
 import ShelfPanel from "../../../../src/pages/BookDetail/components/ShelfPanel";
 import { makeBook } from "../../../factories";
 import { renderLocalised } from "../../../utils";
 
 function renderPanel(book: Partial<BookOut> = {}) {
-  const onSave = vi.fn();
+  const onSave = vi.fn<(fields: BookDetailsUpdate) => void>();
   renderLocalised(
     <ShelfPanel
       book={makeBook(book)}

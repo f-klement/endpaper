@@ -149,7 +149,7 @@ describe("BookList", () => {
   });
 
   it("offers the next page only when there is one", async () => {
-    const onLoadMore = vi.fn();
+    const onLoadMore = vi.fn<() => void>();
     const { rerender } = renderList({ hasMore: false, onLoadMore });
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
 

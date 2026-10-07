@@ -1102,10 +1102,10 @@ class TestTheSecondBoundHasOneConstructibleBypass:
 
     @pytest.mark.parametrize(
         "generate",
-        (
+        [
             pytest.param(_outside_each_bound, id="outside"),
             pytest.param(_inside_each_bound, id="inside"),
-        ),
+        ],
     )
     def test_the_sweep_below_reaches_every_side_of_every_bound(self, generate):
         """What the two tests below cannot say about themselves: which sides they

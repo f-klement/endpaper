@@ -21,6 +21,7 @@ import {
   CatalogueSource,
   type CatalogueSourceOut,
   type SettingsOut,
+  type SettingsUpdate,
 } from "../../../../../src/api/generated/model";
 import { de, en } from "../../../../../src/i18n";
 import ProviderSection from "../../../../../src/pages/SettingsPage/CatalogueSettingsPage/components/ProviderSection";
@@ -61,7 +62,7 @@ function row(
 }
 
 function draw(sources: CatalogueSourceOut[] = ROSTER) {
-  const onSave = vi.fn();
+  const onSave = vi.fn<(data: SettingsUpdate) => void>();
   renderLocalised(
     <ProviderSection
       settings={{ catalogue_sources: sources } as SettingsOut}
@@ -69,6 +70,15 @@ function draw(sources: CatalogueSourceOut[] = ROSTER) {
     />,
   );
   return onSave;
+}
+
+/** The roster the first save carried, refused by name when there was none. */
+function sentRoster(
+  onSave: ReturnType<typeof draw>,
+): NonNullable<SettingsUpdate["catalogue_sources"]> {
+  const sent = onSave.mock.calls[0]?.[0].catalogue_sources;
+  if (!sent) throw new Error("the first save carried no catalogue sources");
+  return sent;
 }
 
 /** Run out the debounce the component collects a burst of presses with. */
@@ -119,11 +129,7 @@ describe("ProviderSection", () => {
     settle();
 
     expect(onSave).toHaveBeenCalledTimes(1);
-    expect(
-      onSave.mock.calls[0]?.[0].catalogue_sources.map(
-        (entry: { source: string }) => entry.source,
-      ),
-    ).toEqual([
+    expect(sentRoster(onSave).map((entry) => entry.source)).toEqual([
       "dnb",
       "oenb",
       "k10plus",
@@ -138,9 +144,7 @@ describe("ProviderSection", () => {
     const onSave = draw();
     fireEvent.click(screen.getByLabelText("Move Austrian National Library up"));
     settle();
-    expect(onSave.mock.calls[0]?.[0].catalogue_sources).toHaveLength(
-      ROSTER.length,
-    );
+    expect(sentRoster(onSave)).toHaveLength(ROSTER.length);
   });
 
   it("collects a burst of presses into one save", () => {
@@ -161,9 +165,7 @@ describe("ProviderSection", () => {
     up();
     up();
     settle();
-    const order = onSave.mock.calls[0]?.[0].catalogue_sources.map(
-      (entry: { source: string }) => entry.source,
-    );
+    const order = sentRoster(onSave).map((entry) => entry.source);
     expect(order.indexOf("loc")).toBe(4);
   });
 
@@ -199,14 +201,13 @@ describe("ProviderSection", () => {
     const onSave = draw();
     fireEvent.click(screen.getByLabelText("Google Books"));
     settle();
-    const sent = onSave.mock.calls[0]?.[0].catalogue_sources;
-    expect(sent.map((entry: { source: string }) => entry.source)).toEqual(
+    const sent = sentRoster(onSave);
+    expect(sent.map((entry) => entry.source)).toEqual(
       ROSTER.map((entry) => entry.source),
     );
-    expect(
-      sent.find((entry: { source: string }) => entry.source === "google_books")
-        .enabled,
-    ).toBe(false);
+    expect(sent.find((entry) => entry.source === "google_books")?.enabled).toBe(
+      false,
+    );
   });
 
   it("names the card below when the key is there and the source is off", () => {
@@ -423,7 +424,7 @@ describe("ProviderSection", () => {
     // fallback would be a new array on every render, and the effect that
     // re-seeds from the server depends on its identity, so the pair would
     // render forever. This test times out rather than failing if that returns.
-    const onSave = vi.fn();
+    const onSave = vi.fn<(data: SettingsUpdate) => void>();
     renderLocalised(
       <ProviderSection settings={{} as SettingsOut} onSave={onSave} />,
     );

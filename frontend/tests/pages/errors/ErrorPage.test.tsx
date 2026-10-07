@@ -19,7 +19,7 @@ describe("ErrorPage", () => {
   });
 
   it("offers a way to recover", async () => {
-    const onReset = vi.fn();
+    const onReset = vi.fn<() => void>();
     renderLocalised(<ErrorPage onReset={onReset} />);
 
     await userEvent
