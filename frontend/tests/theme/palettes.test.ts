@@ -1447,7 +1447,7 @@ describe("withPalette", () => {
       withPalette("nord", () => {
         throw new Error("no");
       }),
-    ).toThrow();
+    ).toThrow(/^no$/);
 
     expect(document.documentElement.dataset.theme).toBe("gruvbox");
   });

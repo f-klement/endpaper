@@ -408,7 +408,7 @@ describe("counting what a file writes out", () => {
   });
 
   it("refuses a source it cannot parse rather than returning a figure", () => {
-    expect(() => ts("it('unclosed', () => {\n")).toThrow();
+    expect(() => ts("it('unclosed', () => {\n")).toThrow("did not parse");
   });
 });
 

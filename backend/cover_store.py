@@ -267,18 +267,28 @@ def restore(name: str, data: bytes) -> Path:
     folding, and folding it would merge two entries an archive spelled apart.
 
     Raises `ValueError` for a name that is not a bare `<stem>.<ext>` this app
-    serves, `NotAnImage` for bytes that are not one, and `OSError` if the write
-    fails. `backup.restore` declines the entry on any of the three rather than
-    failing a restore whose rows are already committed.
+    serves or one whose destination resolves outside the covers directory, each
+    with its own message so a test can tell the two arms apart, `NotAnImage`
+    for bytes that are not one, and `OSError` if the write fails.
+    `backup.restore` declines the entry on any of the three rather than failing
+    a restore whose rows are already committed.
     """
     stored = Path(name)
     extension = stored.suffix.lstrip(".").lower()
-    if stored.name != name or not stored.stem or extension not in ALLOWED_IMAGE_EXTENSIONS:
+    # The NUL is refused here because no path holding one resolves: left to
+    # the containment arm below, it was refused only because `_within` swallows
+    # the resolve error, and under a message saying it resolved elsewhere.
+    if (
+        stored.name != name
+        or not stored.stem
+        or "\x00" in name
+        or extension not in ALLOWED_IMAGE_EXTENSIONS
+    ):
         raise ValueError(f"Not a cover filename: {name!r}")
     _identify(data)
     destination = COVERS_DIR / f"{stored.stem}.{extension}"
     if not _within(destination):
-        raise ValueError(f"Not a cover filename: {name!r}")
+        raise ValueError(f"{name!r} resolves outside the covers directory")
     return write_image(COVERS_DIR, stored.stem, extension, data)
 
 

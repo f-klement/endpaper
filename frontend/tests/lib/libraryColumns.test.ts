@@ -256,7 +256,7 @@ describe("reading and writing a column set", () => {
     // surfacing later as somebody else's wrong table. The cast is what a caller
     // would have to write to get here: the type already refuses it.
     const columns = libraryColumnsPreference.read("household") as ColumnKey[];
-    expect(() => columns.pop()).toThrow();
+    expect(() => columns.pop()).toThrow(TypeError);
     expect(libraryColumnsPreference.read("household")).toEqual([
       ...DEFAULT_COLUMNS.household,
     ]);

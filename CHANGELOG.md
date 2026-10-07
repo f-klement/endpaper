@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **A test asserting that something refuses now has to say which refusal it means.** Sixty
+  eight assertions across both trees passed on any error of a broad type, so a test named for
+  one rule went on passing when a different rule refused first. Each now names the message or
+  type it expects, measured from what the code under test actually raised rather than read
+  from it, and the linters refuse a new one in either tree. Six assertions that ran only on
+  some branches now always run. Two real gaps surfaced: one test of two arms passed with one
+  of them deleted, and the cover restore gave two different refusals one message, so no test
+  could tell them apart. They now read differently, and a NUL in a restored cover's name is
+  refused by the name check rather than by the containment check's fallback. Nothing a member
+  sees moves.
+
 - **A book's purchase date no longer shows the day before, and the card and the table now
   spell it the same way.** The Bought on column of the library table rendered the date a copy
   was bought a day early for every member west of Greenwich, and correctly for everyone east

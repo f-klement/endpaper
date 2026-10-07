@@ -953,7 +953,7 @@ function pluginsInTheCatalogue(catalogue: string): string[] {
  * candidates carrying what they would cost.
  */
 const NOT_NAMED: Record<string, string> = {
-  jest: "the wrong test runner. Its rules restate the vitest ones against an API this tree does not use, so naming it would double-report the require-to-throw-message and no-conditional-expect families at 18 and 6, and the valid-expect family at a number that moves with every two-argument assertion anybody writes. Permanent, so the total is not worth tracking.",
+  jest: "the wrong test runner. Its rules restate the vitest ones against an API this tree does not use, so naming it would double-report the require-to-throw-message and no-conditional-expect families the vitest plugin already enforces, and the valid-expect family at a number that moves with every two-argument assertion anybody writes. Permanent, so the total is not worth tracking.",
   nextjs:
     "not a Next.js application. 21 rules for 8 findings, every one of them about a framework that is not here. Permanent.",
   vue: "not a Vue application. 33 rules and 0 findings, which is the shape of a plugin that cannot say anything about this tree. Permanent.",

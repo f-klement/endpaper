@@ -331,7 +331,9 @@ class TestTheModuleRefusesToImport:
         monkeypatch.setattr(
             models, "Book", _book_whose_table_has([*_columns(), "shelf_mark"])
         )
-        with pytest.raises(RuntimeError) as raised:
+        with pytest.raises(
+            RuntimeError, match="The column partition and `books` disagree"
+        ) as raised:
             _load_book_columns()
         message = str(raised.value)
         assert "shelf_mark" in message

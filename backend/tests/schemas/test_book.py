@@ -2454,7 +2454,9 @@ class TestTheSchemaModuleRefusesToImport:
         monkeypatch.setattr(
             models, "Book", _book_whose_table_has([c for c in _book_columns() if c != "location"])
         )
-        with pytest.raises(RuntimeError) as refusal:
+        with pytest.raises(
+            RuntimeError, match="`BookCreate` and the create route disagree"
+        ) as refusal:
             _load_schemas_book()
 
         assert "RESHAPED_FOR_ITS_COLUMN" in str(refusal.value)

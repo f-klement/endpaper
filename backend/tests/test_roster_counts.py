@@ -1887,7 +1887,44 @@ class TestEveryRosterCountInTheTreeIsAccountedFor:
         "a local of that name": TABLE + "def f():\n    CLAIMS = {}\n    return CLAIMS\n",
     }
 
-    @pytest.mark.parametrize("shape", sorted(REFUSED))
+    #: The one refused shape the helper reads without objecting: a duplicate
+    #: key is a well formed literal, refused by the key count the audit of the
+    #: real table runs after it.
+    #: Kept in `REFUSED` because the binding count mutation below reads the
+    #: whole table, and tested apart so each refusal is pinned to the mechanism
+    #: that makes it. One `raises` over both would pass on either.
+    COUNTED = "a duplicate key"
+
+    #: What each other shape is refused for. A bare `AssertionError` passed on
+    #: any of the helper's refusals, so a shape it stopped catching for its own
+    #: reason went on passing whenever another check happened to fire.
+    REFUSAL = {
+        "a second binding": "bound 2 times at module scope",
+        "an augmented assignment": "bound 2 times at module scope",
+        "a walrus": "bound 2 times at module scope",
+        "a for target": "bound 2 times at module scope",
+        "a tuple unpack": "bound 2 times at module scope",
+        "a with block": "bound 2 times at module scope",
+        "an import": "bound 2 times at module scope",
+        "an except handler": "bound 2 times at module scope",
+        "a match case": "bound 2 times at module scope",
+        "a match mapping rest": "bound 2 times at module scope",
+        "a def": "bound 2 times at module scope",
+        "a class": "bound 2 times at module scope",
+        "a global declaration": "`global` or `nonlocal` declaration names CLAIMS",
+        "dict()": "no longer a dict literal",
+        "a | merge": "no longer a dict literal",
+        "a ** spread": r"built with a `\*\*` spread",
+        "update()": r"CLAIMS\.update\(\) is not a read",
+        "a subscript": "assigned into or deleted from after the literal",
+        "a delete": "assigned into or deleted from after the literal",
+        "a second name": "bound to a second name",
+    }
+
+    def test_every_refused_shape_names_its_refusal(self):
+        assert set(self.REFUSAL) == set(self.REFUSED) - {self.COUNTED}
+
+    @pytest.mark.parametrize("shape", sorted(set(REFUSED) - {COUNTED}))
     def test_a_table_it_cannot_audit_is_refused(self, shape):
         """Driven, one construction at a time, rather than read.
 
@@ -1907,9 +1944,13 @@ class TestEveryRosterCountInTheTreeIsAccountedFor:
         code named as arms, in the docstring of the test that demonstrates the
         mechanism, in a ticket about stated counts that nothing recomputes.
         """
-        with pytest.raises(AssertionError):
-            keys = claims_keys_in(self.REFUSED[shape])
-            assert len(keys) == len(set(keys)), "duplicate key"
+        with pytest.raises(AssertionError, match=self.REFUSAL[shape]):
+            claims_keys_in(self.REFUSED[shape])
+
+    def test_a_duplicate_key_is_returned_twice_for_the_count_to_refuse(self):
+        keys = claims_keys_in(self.REFUSED[self.COUNTED])
+        assert len(keys) == 2
+        assert len(set(keys)) == 1
 
     @pytest.mark.parametrize("shape", sorted(ALLOWED))
     def test_a_table_it_can_audit_is_allowed(self, shape):
@@ -1922,7 +1963,7 @@ class TestEveryRosterCountInTheTreeIsAccountedFor:
 
         `len(CLAIMS)` is compared with the key count because reading the literal
         proves nothing if something adds to the table afterwards. The
-        constructions are driven one at a time by the two tests above rather
+        constructions are driven one at a time by the three tests above rather
         than listed here, which is what stops this paragraph going stale: it
         used to name "no annotation" among those refused, and an unannotated
         table is not refused at all, only caught when it also carries a

@@ -1650,13 +1650,18 @@ class TestThisBuildShipsExactlyTheDefaultsItSaysItDoes:
             )
 
     @pytest.mark.parametrize(
-        "username, password", [("", "p"), ("u", ""), ("a:b", "p")]
+        "username, password, refusal",
+        [
+            ("", "p", "needs both a username and a password"),
+            ("u", "", "needs both a username and a password"),
+            ("a:b", "p", "may not contain a colon"),
+        ],
     )
     def test_a_shipped_pair_follows_the_rule_every_other_pair_follows(
-        self, username, password
+        self, username, password, refusal
     ):
         """One representation for the shipped, sealed and pinned spellings."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=refusal):
             targets.ShippedCredential(username, password)
 
     def test_every_shipped_pair_would_be_accepted_by_the_store(self, db):

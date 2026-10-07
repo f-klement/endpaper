@@ -317,6 +317,8 @@ describe("a question the file cannot answer", () => {
     const database = await open(await databaseOf("CREATE TABLE shelf (title)"));
     database.close();
 
-    expect(() => database.query("SELECT 1")).toThrow();
+    expect(() => database.query("SELECT 1")).toThrow(
+      "query on a closed database",
+    );
   });
 });

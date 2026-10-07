@@ -1171,7 +1171,7 @@ class TestFoldingCollectionNamesOutsideAscii:
                 )
             )
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="has been stopped and nothing was changed"):
             schema.upgrade_to_head()
 
         assert current_revision() == self.PREVIOUS

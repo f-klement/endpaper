@@ -233,7 +233,8 @@ describe("a snapshot", () => {
   it("cannot be edited by the reader it was handed to", () => {
     localStorage.setItem("test.list", "a,b");
     const held = list.read() as string[];
-    expect(() => held.push("c")).toThrow();
+    expect(Object.isFrozen(held)).toBe(true);
+    expect(() => held.push("c")).toThrow(TypeError);
   });
 });
 

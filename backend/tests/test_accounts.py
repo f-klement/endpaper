@@ -462,13 +462,13 @@ class TestOnlyAnAdminAssertionNamesAnAdmin:
         assert user.email_verification_source == source.value
 
     def test_an_admin_assertion_without_an_admin_is_refused(self) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="admin with by=None"):
             accounts.record_verification(User(username="x"), VerificationProvenance.ADMIN)
 
     def test_another_provenance_with_an_admin_is_refused(self) -> None:
         admin = User(username="a")
         admin.id = 1
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=r"email with by=(?!None)"):
             accounts.record_verification(
                 User(username="x"), VerificationProvenance.EMAIL, by=admin
             )

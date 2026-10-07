@@ -429,7 +429,7 @@ class TestTheSignatureIsTheBound:
         """
         book = Book(title="Dune", page_count=None)
 
-        with pytest.raises(AttributeError):
+        with pytest.raises(AttributeError, match="'dict' object has no attribute"):
             merge_into(book, _volume_to_fields(VOLUME), overwrite=False)  # type: ignore[arg-type]
 
         assert book.page_count is None
@@ -1019,7 +1019,7 @@ class TestAHostileVolumePayload:
         assert len(body) < fetch.MAX_RESPONSE_BYTES
         google.get(VOLUME_URL).mock(return_value=httpx.Response(200, content=body))
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="nested too deeply"):
             await lookup_by_volume_id("gbid00000001", "key")
 
     async def test_categories_of_mixed_types(self, google):

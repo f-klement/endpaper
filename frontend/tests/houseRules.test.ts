@@ -4818,8 +4818,8 @@ describe("the number of table columns is not written down", () => {
     expect(count).toBeGreaterThan(0);
     // The edges of the table, so a count growing past it is known to stop the
     // run rather than to leave the digit arm guarding on its own.
-    expect(() => inWords(100)).toThrow();
-    expect(() => inWords(-1)).toThrow();
+    expect(() => inWords(100)).toThrow("no spelling for 100");
+    expect(() => inWords(-1)).toThrow("no spelling for -1");
   });
 
   it("appears in no source file and no published document", () => {
@@ -7113,11 +7113,11 @@ describe("a date reaches a reader through one module", () => {
     );
 
     for (const name of derived) {
-      if (publishersOf(name)[0] === Date) {
-        expect(RENDERS_A_DATE).toContain(name);
-      } else {
-        expect(RENDERS_SOMETHING_ELSE).toContain(name);
-      }
+      const expected =
+        publishersOf(name)[0] === Date
+          ? RENDERS_A_DATE
+          : RENDERS_SOMETHING_ELSE;
+      expect(expected, name).toContain(name);
     }
 
     // Four of the five, and the fifth is the ambiguous one. Stated as the
@@ -7247,8 +7247,7 @@ describe("a date reaches a reader through one module", () => {
       for (const [name, source] of CASES) {
         const named = namesIn("x.ts", source);
         const found = narrowed.filter((one) => named.has(one));
-        if (name === dropped) expect(found).toEqual([]);
-        else expect(found).toContain(name);
+        expect(found).toEqual(name === dropped ? [] : [name]);
       }
     }
   });
@@ -8305,7 +8304,7 @@ describe("a dated field named in a JSX child is handed to a door call", () => {
         "x.tsx",
         "const C = () => <p>{(ok, book.due_at)}</p>;",
       ),
-    ).toThrow();
+    ).toThrow("may not use the comma operator");
     expect(
       datesRenderedRawIn(
         "x.tsx",
@@ -8320,7 +8319,7 @@ describe("a dated field named in a JSX child is handed to a door call", () => {
         "x.tsx",
         "const C = () => <p>{<string>book.due_at}</p>;",
       ),
-    ).toThrow();
+    ).toThrow("Parse failed");
   });
 
   it("leaves the shapes this tree already writes alone", () => {

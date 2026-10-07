@@ -131,10 +131,10 @@ describe("what a store is", () => {
     // catalogue edit under a row would leave behind.
     for (const id of STORE_IDS) {
       const store = STORES[id];
-      for (const key of [store.name, store.explain, store.choose]) {
+      const caveat = store.caveat === null ? [] : [store.caveat];
+      for (const key of [store.name, store.explain, store.choose, ...caveat]) {
         expect(en[key]).toBeTruthy();
       }
-      if (store.caveat !== null) expect(en[store.caveat]).toBeTruthy();
       expect(store.accept).not.toBe("");
     }
   });

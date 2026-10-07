@@ -284,7 +284,9 @@ describe("an edge sign-out", () => {
     // followed across origins.
     const mutator = await freshPageLoad();
     mockApi().on("/api/books", { status: 0, type: "opaqueredirect" });
-    await expect(mutator.customFetch("/api/books")).rejects.toThrow();
+    await expect(mutator.customFetch("/api/books")).rejects.toThrow(
+      "session has expired",
+    );
     expect(window.location.reload).toHaveBeenCalled();
   });
 
@@ -292,7 +294,9 @@ describe("an edge sign-out", () => {
     const mutator = await freshPageLoad();
     mutator.setSession("stale", makeUser());
     mockApi().on("/api/books", { status: 0, type: "opaqueredirect" });
-    await expect(mutator.customFetch("/api/books")).rejects.toThrow();
+    await expect(mutator.customFetch("/api/books")).rejects.toThrow(
+      "session has expired",
+    );
     expect(localStorage.getItem("token")).toBeNull();
   });
 
@@ -349,7 +353,7 @@ describe("the reload an edge sign-out triggers is counted", () => {
   /** Answer one request the way an expired portal session does. */
   async function expiredAtTheEdge(fetcher: typeof customFetch): Promise<void> {
     mockApi().on("/api/books", { status: 0, type: "opaqueredirect" });
-    await expect(fetcher("/api/books")).rejects.toThrow();
+    await expect(fetcher("/api/books")).rejects.toThrow("session has expired");
   }
 
   it("reloads the first time", async () => {
@@ -436,7 +440,9 @@ describe("401 handling", () => {
       body: { detail: "Not authenticated" },
     });
 
-    await expect(customFetch("/api/books")).rejects.toThrow();
+    await expect(customFetch("/api/books")).rejects.toThrow(
+      "session has expired",
+    );
 
     expect(localStorage.getItem("token")).toBeNull();
     expect(localStorage.getItem("user")).toBeNull();
@@ -444,7 +450,9 @@ describe("401 handling", () => {
 
   it("redirects to the login page", async () => {
     mockApi().on("/api/books", { status: 401, body: {} });
-    await expect(customFetch("/api/books")).rejects.toThrow();
+    await expect(customFetch("/api/books")).rejects.toThrow(
+      "session has expired",
+    );
     expect(window.location.href).toBe("/login");
   });
 
@@ -459,7 +467,7 @@ describe("401 handling", () => {
 
     await expect(
       customFetch("/auth/login", { method: "POST" }),
-    ).rejects.toThrow();
+    ).rejects.toThrow("Incorrect");
 
     expect(window.location.href).toBe("/login");
   });
@@ -501,7 +509,7 @@ describe("401 handling", () => {
 
       await expect(
         customFetch("/auth/login", { method: "POST" }),
-      ).rejects.toThrow();
+      ).rejects.toThrow("Incorrect");
 
       expect(getToken()).toBe("still-valid");
     });

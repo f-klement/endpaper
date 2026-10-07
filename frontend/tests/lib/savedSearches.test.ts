@@ -214,7 +214,9 @@ describe("a stored entry this version cannot use", () => {
     expect(Object.isFrozen(entry)).toBe(true);
     expect(Object.isFrozen(entry.filters)).toBe(true);
     expect(Object.isFrozen(entry.filters.tagIds)).toBe(true);
-    expect(() => (entry.filters.tagIds as number[]).push(99)).toThrow();
+    expect(() => (entry.filters.tagIds as number[]).push(99)).toThrow(
+      TypeError,
+    );
   });
 
   it("never hands out a list the defaults own", () => {
@@ -224,7 +226,9 @@ describe("a stored entry this version cannot use", () => {
     const entry = savedSearchesPreference.read()[0]!;
 
     expect(Object.isFrozen(entry.filters.headings)).toBe(true);
-    expect(() => (entry.filters.headings as string[]).push("x")).toThrow();
+    expect(() => (entry.filters.headings as string[]).push("x")).toThrow(
+      TypeError,
+    );
     expect(DEFAULT_FILTERS.headings).toEqual([]);
   });
 

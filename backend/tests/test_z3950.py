@@ -315,18 +315,18 @@ class TestTheAnswerIsBoundedInBytes:
     async def test_a_caller_cannot_raise_the_cap_above_the_module_constant(self):
         # A bound a caller can raise is not a bound. Without this,
         # `limit=209_715_200` was accepted and returned 4.8x the maximum, no error.
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="limit must not exceed MAX_RESPONSE_BYTES"):
             await z3950.search_once(
                 TARGET, "q", limit=z3950.MAX_RESPONSE_BYTES + 1, client=FakeClient()
             )
 
     async def test_a_cap_of_nothing_is_refused_rather_than_looping(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="limit must be at least 1"):
             await z3950.search_once(TARGET, "q", limit=0, client=FakeClient())
 
     async def test_the_cap_is_checked_before_the_target_is_asked(self):
         client = FakeClient()
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="limit must not exceed MAX_RESPONSE_BYTES"):
             await z3950.search_once(
                 TARGET, "q", limit=z3950.MAX_RESPONSE_BYTES + 1, client=client
             )
@@ -357,13 +357,13 @@ class TestALargeHitCountCostsWhatASmallOneCosts:
     async def test_asking_for_more_than_the_record_bound_is_a_bug_and_not_a_clamp(self):
         # A clamp is silent, and a caller asking for a thousand records has a bug that a
         # smaller number would hide.
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="records must not exceed MAX_RECORDS"):
             await z3950.search_once(
                 TARGET, "q", records=z3950.MAX_RECORDS + 1, client=FakeClient()
             )
 
     async def test_asking_for_no_records_is_refused(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="records must be at least 1"):
             await z3950.search_once(TARGET, "q", records=0, client=FakeClient())
 
 
@@ -448,7 +448,7 @@ class TestOneAssociationIsOneClock:
         # ceiling a caller can raise is not a ceiling. Same treatment as `limit` and
         # `records`, which is the other two thirds of this shape.
         client = FakeClient()
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="deadline must not be more than TIMEOUT_SECONDS"):
             async with z3950.association(
                 TARGET, client=client, deadline=time.monotonic() + z3950.TIMEOUT_SECONDS + 1
             ):
@@ -501,7 +501,7 @@ class TestAnAssociationIsNeverLeftBehind:
 
     async def test_it_is_released_when_the_body_raises(self):
         client = FakeClient()
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match=r"^boom$"):
             async with z3950.association(TARGET, client=client):
                 raise RuntimeError("boom")
         await settle(lambda: client.session.closes == 1)
@@ -556,7 +556,7 @@ class TestAnAssociationIsNeverLeftBehind:
 
     async def test_a_failing_close_does_not_replace_the_bodys_exception(self):
         client = FakeClient(FakeSession(close_error=RuntimeError("stuck")))
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="the real failure"):
             async with z3950.association(TARGET, client=client):
                 raise ValueError("the real failure")
 

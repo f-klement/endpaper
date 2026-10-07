@@ -1552,7 +1552,7 @@ class TestTheSourceWalkSeesOnlyThisProject:
         assert _is_vendored(BACKEND / ".uv-cache" / "pygments" / "lexers.py", repo)
         assert not _is_vendored(BACKEND / "shelf.py", repo)
         assert not _is_vendored(repo / "frontend" / "src" / "main.tsx", repo)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="is not in the subpath of"):
             _is_vendored(repo / "frontend" / "src" / "main.tsx")
 
     @pytest.mark.parametrize("kind", sorted(VENDORED_KINDS))
@@ -6414,12 +6414,12 @@ class TestEveryTargetResolvesToADoorAndAReader:
         function knows.
         """
         readable = targets.SEEDED[CatalogueSource.LOC]
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="answers a search and open_library reads none"):
             metadata.resolve(
                 dataclasses.replace(readable, reader=targets.Reader.OPEN_LIBRARY)
             )
         bespoke = targets.SEEDED[CatalogueSource.OPEN_LIBRARY]
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="answers a lookup and marc_gnd reads none"):
             metadata.resolve(
                 dataclasses.replace(bespoke, reader=targets.Reader.MARC_GND)
             )

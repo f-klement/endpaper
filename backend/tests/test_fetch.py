@@ -687,7 +687,7 @@ class TestDecodingMatchesWhatHttpxWouldHaveDone:
             respx.get(URL).mock(return_value=httpx.Response(200, text="<html>"))
             answer = await fetch.get_once(URL)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Expecting value"):
             answer.json()
 
     @pytest.mark.asyncio
@@ -706,7 +706,7 @@ class TestDecodingMatchesWhatHttpxWouldHaveDone:
             respx.get(URL).mock(return_value=httpx.Response(200, content=nested))
             answer = await fetch.get_once(URL)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="nested too deeply"):
             answer.json()
 
     @pytest.mark.asyncio
@@ -1451,7 +1451,7 @@ class TestWhichClassAnAddressIsIn:
         """A resolver answering something unreadable is not a reason to connect."""
         assert not fetch.HOUSEHOLD_ADDRESSES.permits(nonsense)
         assert not fetch.PUBLIC_ADDRESSES.permits(nonsense)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="does not appear to be an IPv4 or IPv6 address"):
             fetch.classify(nonsense)
 
     def test_the_two_shipped_policies_differ_where_the_doors_differ(self):

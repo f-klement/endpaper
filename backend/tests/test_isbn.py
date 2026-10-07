@@ -305,7 +305,7 @@ class TestADigitIsNotAlwaysADigit:
         assert self.SUPERSCRIPT_TWO.isdigit()
         assert self.ARABIC_INDIC_ZERO.isdigit()
         assert self.ARABIC_INDIC_SEVEN.isdigit()
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="invalid literal for int"):
             int(self.SUPERSCRIPT_TWO)
         assert int(self.ARABIC_INDIC_ZERO) == 0
         assert int(self.ARABIC_INDIC_SEVEN) == 7

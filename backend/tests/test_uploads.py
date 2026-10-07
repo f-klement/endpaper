@@ -202,7 +202,7 @@ class TestReplaceImage:
 
         monkeypatch.setattr(Path, "write_bytes", full_disk)
 
-        with pytest.raises(OSError):
+        with pytest.raises(OSError, match="No space left on device"):
             replace_image(tmp_path, "7", "png", PNG_BYTES)
 
         assert (tmp_path / "7.jpg").read_bytes() == JPEG_BYTES
@@ -213,7 +213,7 @@ class TestReplaceImage:
 
         monkeypatch.setattr(Path, "write_bytes", full_disk)
 
-        with pytest.raises(OSError):
+        with pytest.raises(OSError, match="No space left on device"):
             replace_image(tmp_path, "7", "png", PNG_BYTES)
 
         assert list(tmp_path.iterdir()) == []

@@ -444,7 +444,9 @@ class TestTheTableRefusesToBuild:
             if verb.value != "set_shelf_mark"
         }
 
-        with pytest.raises(RuntimeError) as raised:
+        with pytest.raises(
+            RuntimeError, match="BulkAction and the bulk dispatch table disagree"
+        ) as raised:
             books_router._dispatch_table(handlers, set(verbs))
 
         assert "_BULK_HANDLERS" in str(raised.value)

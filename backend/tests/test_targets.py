@@ -126,7 +126,7 @@ class TestARowCannotCarryQueryStructure:
         ["num=1 or num", "alma isbn", 'dc."isbn"', "dc.isbn\n", "(num)", "", "1num"],
     )
     def test_an_index_that_is_not_a_name_is_refused(self, index):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="not an index name"):
             _seeded(isbn_index=index)
 
     @pytest.mark.parametrize("index", ["num", "WOE", "pica.isb", "alma.isbn", "dc.t_x"])
@@ -150,7 +150,7 @@ class TestARowCannotCarryQueryStructure:
     )
     def test_a_query_parameter_may_not_displace_an_sru_parameter(self, parameter):
         """Otherwise the query replaces the version and no query is sent."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="is an SRU parameter already"):
             _seeded(query_parameter=parameter)
 
     def test_the_parameter_the_roster_uses_is_still_accepted(self):
@@ -163,7 +163,7 @@ class TestARowCannotCarryQueryStructure:
         So membership alone built a row whose query could not be sent, which is
         one rule enforced in two places and disagreeing about it.
         """
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=r"not a PQF use attribute: 7\.0"):
             _seeded(
                 query_language=targets.QueryLanguage.PQF,
                 isbn_index="",
@@ -179,7 +179,7 @@ class TestARowCannotCarryQueryStructure:
         Three statements of one rule, and they have to agree: the dataclass, the
         constraint a restore writes through, and the roster pin above.
         """
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="only the DNB may waive the ISBN identity check"):
             _seeded(requires_isbn_claim=False)
         waived = dataclasses.replace(
             targets.SEEDED[CatalogueSource.DNB], requires_isbn_claim=False
@@ -188,7 +188,7 @@ class TestARowCannotCarryQueryStructure:
 
     def test_a_use_attribute_this_application_does_not_know_is_refused(self):
         """The column is an integer and SQLite's affinity is a preference."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="not a PQF use attribute"):
             _seeded(
                 query_language=targets.QueryLanguage.PQF,
                 isbn_index="",
@@ -212,11 +212,11 @@ class TestARowCannotCarryQueryStructure:
     def test_a_pqf_target_may_not_answer_a_title_search(self):
         """This is what makes `_sru_search` catching only `targets.BadQuery`
         correct: a PQF query cannot be built on the search path at all."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="only a CQL target can answer a search"):
             _seeded(query_language=targets.QueryLanguage.PQF, isbn_attribute=7)
 
     def test_there_is_no_z3950_door_yet(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=r"no Z39\.50 door yet"):
             _seeded(transport=targets.Transport.Z3950)
 
     def test_a_catalogue_row_may_not_name_the_other_familys_reader(self):
@@ -243,7 +243,7 @@ class TestARowCannotCarryQueryStructure:
     def test_a_bespoke_row_carries_no_query_grammar(self):
         """An index sitting unused on a row is a row somebody reads as the one
         being asked."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="a bespoke target carries no SRU fields"):
             targets.Target(
                 source=CatalogueSource.OPEN_LIBRARY,
                 rank=2,
@@ -259,7 +259,7 @@ class TestARowCannotCarryQueryStructure:
             )
 
     def test_a_marc_knob_on_a_reader_that_reads_no_marc_is_refused(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="a MARC knob on a reader that reads no MARC"):
             _seeded(
                 reader=targets.Reader.MODS,
                 answers_lookup=False,
@@ -268,7 +268,7 @@ class TestARowCannotCarryQueryStructure:
             )
 
     def test_a_lookup_that_asks_for_no_records_is_refused(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="answers a lookup and asks for no records"):
             _seeded(lookup_records=0)
 
 

@@ -189,18 +189,11 @@
     // state synchronously, 5 reads of a ref during render, and one effect
     // missing a dependency with one carrying an extra.
     //
-    // `no-conditional-expect` is the fourth of that kind rather than a habit,
-    // and it is filed here only because it is six sites in a wave that is not
-    // triaging. An assertion behind a branch is an assertion that does not run
-    // when the branch does not, which is the same family as the assertion with
-    // no matcher that the configured rule above was kept alive to catch. Four
-    // of the six are in one file. The remaining three rows are habits, and the
-    // 401 is one habit repeated across 81 test files.
+    // The other two rows are habits: the 401 is one habit repeated across 81
+    // test files, and an index used as a key is another.
     "vitest/require-mock-type-parameters": "off", // 401, over 81 files
-    "vitest/require-to-throw-message": "off", // 18
     "react/no-array-index-key": "off", // 12
     "react/set-state-in-effect": "off", // 9
-    "vitest/no-conditional-expect": "off", // 6
     "react/refs": "off", // 5
     "react/exhaustive-effect-dependencies": "off" // 2
   }

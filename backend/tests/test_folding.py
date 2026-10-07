@@ -448,7 +448,9 @@ class TestTheModuleRefusesToImport:
             "children_of_books",
             lambda metadata: children_of_books(metadata) | {extra},
         )
-        with pytest.raises(RuntimeError) as raised:
+        with pytest.raises(
+            RuntimeError, match="TRANSFERS and the children of `books` disagree"
+        ) as raised:
             _load_folding()
         message = str(raised.value)
         assert "shelf_marks" in message

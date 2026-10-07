@@ -289,7 +289,7 @@ class TestADecodingIsValidatedWhereverItIsBuilt:
     """
 
     def test_a_marc_knob_on_a_reader_that_reads_no_marc_is_refused(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="a MARC knob on a reader that reads no MARC"):
             decoders.Decoding(
                 source="a folder of files",
                 reader=decoders.Reader.DUBLIN_CORE,
@@ -299,7 +299,7 @@ class TestADecodingIsValidatedWhereverItIsBuilt:
     def test_the_other_marc_knob_is_refused_the_same_way(self):
         """Both arms, because a version checking one passed with the other
         deleted."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="a MARC knob on a reader that reads no MARC"):
             decoders.Decoding(
                 source="a folder of files",
                 reader=decoders.Reader.MODS,

@@ -166,7 +166,9 @@ class TestTheClosedSetHasNoMemberWithoutAReader:
                 for reader, function in csv_import.READERS.items()
                 if reader is not missing
             }
-            with pytest.raises(RuntimeError) as error:
+            with pytest.raises(
+                RuntimeError, match="import readers with no implementation"
+            ) as error:
                 csv_import._complete(partial)
             assert missing.value in str(error.value)
 
@@ -240,7 +242,7 @@ class TestEveryReaderHonoursAColumnCorrection:
         given["title"] = "Name"
 
         assert extraction.overrides == {"author": "By"}
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="does not support item assignment"):
             extraction.overrides["title"] = "Name"  # type: ignore[index]
 
 

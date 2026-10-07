@@ -814,7 +814,7 @@ class TestTheSilencerNamesTheSourcesATestAnswers:
     def test_a_url_that_is_not_a_lookup_row_is_refused(self):
         with (
             respx.mock(assert_all_called=False) as mock,
-            pytest.raises(AssertionError),
+            pytest.raises(AssertionError, match="not the base URL of an SRU lookup target"),
         ):
             silence_other_lookup_catalogues(mock, "https://catalogue.bnf.fr")
 
@@ -7888,7 +7888,7 @@ class TestSearchingHarder:
             raise RuntimeError("the fan out fell over")
 
         monkeypatch.setattr(metadata, "_within_deadline", boom)
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="the fan out fell over"):
             await metadata.search(
                 "moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True
             )
@@ -8291,7 +8291,7 @@ class TestOnlyTheKeysOwnerIsHandedIt:
         )
         seen = self._captured(monkeypatch)
 
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError, match=r"Reader\.GOOGLE_BOOKS"):
             await metadata._lookup_one(row, self.ISBN, self.KEY, credential=None)
 
         assert seen == []

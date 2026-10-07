@@ -312,7 +312,32 @@ select = [
 # Measured 2026-09-02: `--select W` reports one further finding, W291 trailing
 # whitespace in a generated Alembic header, which is a tidiness preference nobody
 # asked for. W605 alone reports nothing today.
-extend-select = ["W605"]
+#
+# PT011 is a `pytest.raises` on a broad exception with no `match`, which passes
+# when the code under test refuses for a different reason than the test names.
+# Not hypothetical: one test here asserted two arms of one function, and its
+# lookup case still passed with the lookup arm deleted, because the search arm
+# refused the same row with the same bare `ValueError`. The one rule rather
+# than the `PT` family, which is mostly style over parametrisation idioms.
+#
+# **Broad is ruff's default set plus the six below** in
+# `[tool.ruff.lint.flake8-pytest-style]`, each one this tree's tests raise.
+# The default alone missed 16 more unmatched raises on 2026-10-07, several
+# over a function that raises the same type for more than one reason.
+# `TimeoutError` is left out because asyncio raises it with an empty
+# message, so there is nothing to match.
+#
+# Measured 2026-10-07 on the tree before PT011 was cleared, suppressions cleared:
+#
+#   ruff check --config 'lint.per-file-ignores = {}' --select PT --statistics .
+#
+#   183 findings: PT018 composite assertions 103, and PT006, PT007, PT019 and
+#   PT022 39 together, all style; PT011 34, now 0;
+#   PT012 4, of which one hid which of two mechanisms refused and was split,
+#   one is a round trip asserted whole on purpose and two are deadline tests
+#   whose `async with` is the thing under test; PT017 3, property tests where
+#   raising is optional.
+extend-select = ["W605", "PT011"]
 #
 # ── The families deliberately NOT selected ──────────────────────────────────
 #
@@ -463,6 +488,13 @@ ignore = [
 # both, and `aliases` reports **nothing at all** and exits clean. Nothing
 # warns. Re-derive with that two line file before changing this key.
 "xml.etree.ElementTree" = "ElementTree"
+
+[tool.ruff.lint.flake8-pytest-style]
+# Why, beside `extend-select` above. Not mirrored in the tooling tree's
+# configuration: no script there raises inside `pytest.raises`.
+raises-extend-require-match-for = [
+    "AssertionError", "AttributeError", "KeyError", "LookupError", "RuntimeError", "TypeError",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # ── The whole `S` family, off in the test tree ───────────────────────────────
