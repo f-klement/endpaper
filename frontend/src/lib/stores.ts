@@ -897,29 +897,44 @@ function fromDigitalEditions(library: DigitalEditionsLibrary): StoreLibrary {
  * database became. `moonReader.ts` owns both steps and this only sequences them.
  */
 async function openMoonReader(file: File): Promise<StoreReading> {
-  const [{ openZip }, { openSqliteFile }, moon] = await Promise.all([
-    import("./zip"),
-    import("./sqlite"),
-    import("./moonReader"),
-  ]);
-  const archive = await openZip(file);
-  const namesEntry = moon.namesEntryIn(archive.entries);
-  if (namesEntry === null)
-    return { ok: false, failure: "not-a-moon-reader-backup" };
-  const names = archive.find(namesEntry);
-  if (names === undefined)
-    return { ok: false, failure: "not-a-moon-reader-backup" };
-  const tag = moon.databaseTagName(
-    namesEntry,
-    new TextDecoder().decode(await archive.read(names, MOON_INDEX_LIMIT)),
-  );
-  if (tag === null) return { ok: false, failure: "not-a-moon-reader-backup" };
-  const entry = archive.find(tag);
-  if (entry === undefined)
-    return { ok: false, failure: "not-a-moon-reader-backup" };
-  const opened = await openSqliteFile(
-    new File([await archive.read(entry, MOON_DATABASE_LIMIT)], tag),
-  );
+  const [{ openZip, ZipError, zipFailureAs }, { openSqliteFile }, moon] =
+    await Promise.all([
+      import("./zip"),
+      import("./sqlite"),
+      import("./moonReader"),
+    ]);
+  // **Every refusal the seam makes is answered, never thrown.** The seam
+  // rejects with a `ZipError` by design, for a file that is not a zip and for
+  // an entry past its limit alike, and until this caught it a member picking
+  // the wrong file met the hook's report of a bug in a reader rather than one
+  // skipped source. `tests/lib/stores.test.ts` holds every opener to that by
+  // property, which is what found it.
+  let database: File;
+  try {
+    const archive = await openZip(file);
+    const namesEntry = moon.namesEntryIn(archive.entries);
+    if (namesEntry === null)
+      return { ok: false, failure: "not-a-moon-reader-backup" };
+    const names = archive.find(namesEntry);
+    if (names === undefined)
+      return { ok: false, failure: "not-a-moon-reader-backup" };
+    const tag = moon.databaseTagName(
+      namesEntry,
+      new TextDecoder().decode(await archive.read(names, MOON_INDEX_LIMIT)),
+    );
+    if (tag === null) return { ok: false, failure: "not-a-moon-reader-backup" };
+    const entry = archive.find(tag);
+    if (entry === undefined)
+      return { ok: false, failure: "not-a-moon-reader-backup" };
+    database = new File([await archive.read(entry, MOON_DATABASE_LIMIT)], tag);
+  } catch (error) {
+    if (!(error instanceof ZipError)) throw error;
+    return {
+      ok: false,
+      failure: zipFailureAs(error, "not-a-moon-reader-backup"),
+    };
+  }
+  const opened = await openSqliteFile(database);
   if (!opened.ok) return { ok: false, failure: opened.failure };
   try {
     const read = moon.readMoonReaderLibrary(opened.database);
@@ -937,9 +952,11 @@ async function openMoonReader(file: File): Promise<StoreReading> {
  * takes a limit from its caller. The index is a line per file and the database
  * is a catalogue: neither is a book, so both are bounded well below the engine's
  * own ceiling rather than at it.
+ *
+ * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const MOON_INDEX_LIMIT = 4 * 1024 * 1024;
-const MOON_DATABASE_LIMIT = 64 * 1024 * 1024;
+export const MOON_INDEX_LIMIT = 4 * 1024 * 1024;
+export const MOON_DATABASE_LIMIT = 64 * 1024 * 1024;
 
 function fromMoonReader(library: MoonReaderLibrary): StoreLibrary {
   return {

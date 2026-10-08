@@ -20830,3 +20830,455 @@ guarded column while naming none, and no walk over source can see that. It is ad
 exactly that reason, which `docs/security.md` records. Four published sentences promised one
 of these columns is read by nothing and were true only of the layer they were measured at;
 each now names the archive.
+
+## An unattended release is started by a HIGH and carries every fixable advisory
+
+Owner's ruling, 2026-10-03. **What starts a release and what it carries are two sets.** The
+trigger stays a fixable advisory scored HIGH or worse, `RELEASE_BAR`; once a night has one, the
+release bumps every fixable advisory the Python and JavaScript audits report, at any severity.
+`finalise` releases on the severity it recorded for each cleared or rebuilt finding rather than on
+a flag the plan wrote: a prototype keyed on the flag failed 28 of 96 arms and one keyed on the
+severity passed all 96. A finding the ignore file, the ledger, the age window or the name check
+refused stays out of the content.
+
+**Trivy stays at the bar, which is a narrowing.** Every Trivy command in the release jobs declares
+one `--severity`, HIGH and CRITICAL, and the test holding that reads every Trivy command in those
+jobs rather than a list of subcommands, because `trivy i` and `trivy filesystem` each got past a
+list of two. Below the bar the content comes from the two language audits alone: nothing verifies
+that an Alpine rebuild cleared a MEDIUM, so an Alpine MEDIUM is not carried. A Trivy command added
+to those jobs that is not a scan reds for having no `--severity`, which is the loud direction.
+
+## An unfixable Python advisory is recorded against its release and package, or it blocks
+
+Owner's ruling, 2026-10-03: an unfixable MEDIUM or LOW does not hold a release back, and anything
+else unfixable does. The gate is one pure function over a real `pip-audit` report of the tree being
+cut: a vulnerability passes only when it is recorded and its `fix_versions` is empty in that
+report, and a missing, empty or unreadable report refuses. It applies where that report reaches,
+which is PyPI.
+
+**The record is a file in the commit the tag points at**, `accepted-unfixable.txt`, opening with a
+`release <tag>` line. `release-audit` takes `--release`, which `test:backend` passes as the tag or
+the patch branch's version, and a record naming another release, none, or two honours nothing. The
+forward port carries the file to `main`, so without the line a tag a person cut there honoured a
+severity judged on another night for another tree, and `main`'s own plain audit refused the
+lockfile its tag passed.
+
+**Two alternatives were refused.** Requiring the tag message's autopatch line is a second channel
+for one fact. Deleting the file in the forward port's own commit does not happen when the forward
+port fails, which is when it matters. A reader that predates the line reports it as "not an
+accepted advisory, ignored" and honours the rest.
+
+**A record matches pip-audit's own id and the package, never an alias.** A record line is `<id>
+<severity> <date> <package>`, honoured only when the vulnerability's own `id` and its dependency's
+PEP 503 name are a recorded pair. An alias is shared across records and packages, one CVE in two
+wheels bundling one C library being the ordinary case, so a record honouring any alias in any
+package passed an advisory published after the night that judged it, at a severity nobody
+established. Matching the pair retired the shared id subtraction, which refused and paged a release
+the gate would pass whenever an npm finding shared the CVE. The cost: if pip-audit's primary id for
+one vulnerability differs between the decider's run and the branch's, the branch refuses, which is
+loud.
+
+## The carve out asks OSV again, and reads it more strictly than the trigger does
+
+For an unfixable MEDIUM or LOW, `recheck_carve_out` asks every id that night, never reads the cache
+when OSV can be asked, and makes the advisory UNKNOWN, which blocks, when any id was not answered: a
+transport failure, another HTTP status, a body that is not JSON, or an id the lookup grammar
+refuses. **A 404 and a record with no score are answers with no opinion.** Read as UNKNOWN they
+would block most unfixable advisories, since a CVE OSV does not hold and a PYSEC record with no
+CVSS are both common.
+
+**The two questions fail in opposite directions**, which is why they read one service two ways. For
+the trigger an unresolved id is a missed release, the quiet direction, so it keeps the cache and the
+worst answer it has. For the carve out an unresolved id is a waiver of the one gate that is
+otherwise absolute. The recheck also masks a wrong order in the general alias loop for anything it
+would waive, so that loop's order is held by a trigger arm, where nothing masks it.
+
+**The lookup has a grammar of its own.** `OSV_LOOKUP_ID`, letters and digits joined by single
+hyphens, flagless, gates every OSV path in both questions; `ADVISORY_ID` stays the grammar of the
+ledger and the record. Narrowing the lookup to `ADVISORY_ID` dropped an alias in any other
+namespace out of a finding's worst: an unfixable vulnerability whose only HIGH sat on a `BIT-`
+alias was waived at MEDIUM, and a fixable one released nothing. So an alias in another namespace
+that OSV answers with a 404 is no opinion, as a CVE OSV does not hold already is.
+
+**A malicious package record is unanswered, and blocks.** A `MAL-` record carries no score by
+convention, and read as a record with no score it waived a MEDIUM aliased to it. The carve out
+exempts only an established MEDIUM or LOW, and such a record establishes none. A `MAL-` id that OSV
+answers with a 404 is still no opinion; whether a malicious package id should block on its
+namespace alone is the owner's open question.
+
+**A carried advisory is judged over every PyPI finding its ids reach.** `_carried_severity` takes
+the closure over shared ids and answers any severity outside `BELOW_THE_BAR` first, else the worst.
+Which finding `_index`'s merge picks to hold an id depends on the hash seed; the closure does not.
+It refuses, legitimately, a MEDIUM whose ids reach a HIGH or an unanswered finding through an alias
+another record shares.
+
+## A blocked night is exit 3, armed it pages its own summary, and unarmed it is a report
+
+`decide.py plan` exits `BLOCKED`, 3, when a release was due and the release audit would refuse it;
+1 stays a crash and 2 argparse. The plan job reads the status: armed, it pages the summary naming
+what refused the release and fails, so that sentence is the first failing push and the one Gatus
+sends, the precedent `gitlab.py verify` set for a branch it leaves; unarmed, it passes, because a
+report night has no release to refuse. Before, the generic `autopatch:page` sentence went out and
+the summary composed for the night reached nobody.
+
+**A block that stands pages once.** `endpaper-autopatch` alerts on the transition into failure, and
+the resolve never runs on a failed pipeline, so nothing pages again, that stop or any other, until a
+night completes. Whether a standing block should re-page nightly is the owner's question and is not
+answered here.
+
+## The release acts only on what its own run made
+
+Owner's ruling, 2026-10-03: the job that refuses a release deletes the branch it cut, so a refused
+night no longer leaves a branch that stops every later night at the leftover check. `gitlab.py
+verify` deletes on every exit that is not green, a failed, cancelled, skipped or timed out pipeline
+and an API error alike, and **only the branch this run cut**: the name the branch job recorded must
+be a patch branch name, the branch must still answer the sha this run pushed, and the release tag
+must not exist. Otherwise it deletes nothing and says why. The release job deletes nothing, and the
+leftover check stays as the backstop for a killed job.
+
+**A branch 404 counts as gone only once the pushed commit reads back.** GitLab answers 404 for a
+project the token cannot see and for a route that is not there, as well as for a missing branch,
+and night one of the 2026-10 outage was that disguise. `_refuse_deletion` therefore reads a branch
+404 as absence only when `repository/commits/<the sha this run pushed>` answers with that sha;
+otherwise it reports a leftover, which pages. The control is a request rather than GitLab's message
+text, which nothing here could read live.
+
+**The release tags the sha verify proved green.** `cmd_release` tagged whatever the branch held when
+it fetched, so a push between the green poll and the release was tagged unverified. It tags
+`AUTOPATCH_CUT_SHA` and refuses if the branch moved off it, and `autopatch:release` needs
+`autopatch:branch` for the dotenv that carries the sha.
+
+## Every call carrying a release credential leaves through one pinned opener
+
+The API token, the page token and the push token were each sent to an address taken from a runner
+variable, through urllib's default opener, which re-sends a header across a redirect. Measured on
+loopback with a dummy token: 8 of 8 followed redirects carried it, and a POST answered 302 came back
+as a token bearing GET read as the created pipeline.
+
+**One function opens a URL now, and it compares rather than parses.** It speaks https alone, refuses
+every redirect, and attaches the credential only after the request's own scheme and host, the two
+fields the handler connects with, equal a literal. Equality on those fields rather than a parse,
+because `urlsplit` and urllib disagree on a backslash, a `%23@` and a tab in the host. The runner's
+API URL and the pager URL are checked against the literal rather than used. Its handshake is held
+to verifying the chain and the hostname against a TLS server on loopback, with a CA nothing trusts
+refused end to end. **The reach is the Python**: the shell steps also run git, wget, uv and bun,
+none of them carrying a release token.
+
+**`S310` is refused at that one site and is not the guard.** It asks whether a URL could open
+`file:` or a custom scheme; at the pinned function it cannot, and the rule cannot see why. Nor can it
+see an opener's `open` at all, so the falling count when the pin landed was partly the rule going
+blind rather than the property closing. The guard is a walk of the syntax tree over every module of
+the release tooling that refuses any opening call outside the pinned function, with each module's
+imports held exactly. The refusal is keyed on the basename `fetch.py`, the one spelling that binds
+from every working directory, so an `S310` site anywhere else reports at the run that adds it. The
+application has a module of the same name, and the key would bind it too if the tooling's
+configuration were ever run over the application, which nothing does.
+
+## The HTTP library's request lines are switched off by level, not redacted
+
+httpx logs every request at INFO with its full URL, and three of the application's outbound URLs
+carry a secret, so the bot token and the Google Books key reached the log on every send and lookup.
+The `httpx` and `httpcore` loggers sit at WARNING, set on the library loggers themselves so that an
+operator raising the root to DEBUG does not reopen the leak. The token tests capture at DEBUG,
+because the one that captured at WARNING could not see a line logged at INFO and stayed green
+through the leak.
+
+**A redaction filter was the alternative, and it fails the wrong way.** It keeps the per request
+lines, which is what the level costs, but it has to recognise every shape a secret takes in a URL
+and misses the next one silently. The level fails by losing lines, which somebody notices.
+**The residue**: a later httpx adding a WARNING line that names the URL would pass the level; the
+DEBUG captures would red on it for the paths they drive.
+
+## A refusal over a whole lint population is `lint.ignore`, read by selecting it again
+
+The second ruff configuration covers the command line scripts outside the application. It had two
+suppression lists in one table: a backlog of work nobody has done, keyed on the whole tree and
+re-derived by clearing the table inline, and per file refusals keyed on one basename each. A rule
+wrong about **every** script fitted neither: in the backlog it is an entry that can never go stale
+in the list that exists to catch stale ones, and a basename names one file.
+
+**The slot is ruff's own `lint.ignore`, not a third key in the per file table.** The objection to
+that key was measured and true: no inline override clears it. But a later selection re-enables an
+ignored rule, so the cleared run passes `--extend-select` with the ignore list and sees the findings
+of all three lists at once, with the per file keys and site directives still in force. A directory
+keyed list was the alternative and was refused on two measurements: the population is not a
+directory, since one member lives under the frontend tree, and a directory key binds or does not by
+the caller's working directory, where `lint.ignore` holds no path at all.
+
+**Re-selection asks per named code and cannot ask what else the key hides**, so the list is pinned
+by value, and each entry must still fire, must be selected at all, and must expand under ruff to
+itself alone. The bar is asked of ruff's expansion rather than of the string because `ALL`, `T` and
+`T2` each pass a prefix test, and because ruff remaps a removed code onto its successor: `TRY200`
+in the list would silently ignore `B904`, and the expansion equality refuses it.
+
+**The bar refuses three things, in `lint.ignore` and in every per file key on both sides**: a
+selector wider than one rule, a `flake8-bandit` rule, and any rule ruff describes as checking a
+suppression comment. The last was measured into the bar: `PGH004` in the application's list let
+`shell=True` behind a bare `# noqa` through the lint of a copy with every arm green, because the
+plant that wants the suppression supplies the site that keeps the entry firing, and the same entry
+in a per file key did the same for one file. That set is derived from ruff's rule list by three
+routes that degrade differently, the `pygrep-hooks` linter, the rule's name, and the opening
+paragraph of its documentation, and then asserted, so a rule a later ruff adds is a decision rather
+than a widening. Names alone missed `RUF102`, which checks `noqa` codes and says so only in its
+documentation.
+
+**"Security" in that bar means `flake8-bandit` and is written so.** A rule outside bandit that
+guards against hostile input, the confusable character rules among them, is admissible in
+`lint.ignore`, and review is what stops it; a literal list of such rules would be an enumeration
+over a class ruff does not name. Bidirectional control characters in source, `PLE2502`, are
+selected on both sides as one rule, with nothing to fix.
+
+## The application's `lint.ignore` refuses two exception rules, and B008 is on
+
+The application's list held `B008`, for FastAPI's dependency idiom written as a call in a default
+argument, and nothing read the key. Three sites carried the idiom, all in the identity module; every
+router already wrote `Annotated[..., Depends(...)]`. **The three were rewritten to that form**
+rather than the rule being configured or moved:
+
+| alternative | why not |
+|---|---|
+| keep the entry, pin it by value | a pin cannot see the entry going stale |
+| move it to a per file key | `auth.py` as a key binds the identity module and the router of the same name |
+| configure the call as immutable | sound, and invisible to every suppression arm, so it needs a probe of its own |
+
+**`TRY` is selected on both sides, and the application's list is read the way the second
+configuration's is.** The arm came first, in its own commit, before anything sat in the slot: it is
+parametrised over both configurations, each side reading its own list off its own file and
+re-selecting it in its own cleared run. **A witness the two sides disagree on proves it reads the
+right one**: the two selections are one constant, so an application arm reading the second
+configuration's run would be green by coincidence. `E701` fires over the scripts and nowhere in the
+application, and planted in the application's list it reds the application's arm alone.
+
+**Two of the family's rules are refused, for reasons about this code:**
+
+| rule | where | why |
+|---|---|---|
+| `TRY003` | both sides | an exception class per raise site trades a sentence at the `raise` for a name to look up; a style opinion at any size. One home for the reason, the application's configuration; the second points at it |
+| `TRY400` | the application | its remedy is the leak: a traceback writes the exception's message, which this tree treats as a route for a caller's value and a credential. Ruff's own fix at the directory login refusal brings back the forged log line, and the test of that refusal reds on it. An error level handler around a messaging send would have the rule demand a traceback whose message carries the bot token in its URL. It reports nothing over the scripts, so it stays on there. The entry lasts while the rule reports; the reason outlives it, and a later handler answers at its site with a directive |
+
+**Every other rule is enforced.** `TRY004`'s three sites keep `ValueError` on a type test, each with
+a directive under the reason already at the site: every other refusal of the same constructor raises
+it, five tests pin it, and none of the three can fire on an application path today. One `TRY301`
+site goes to the second configuration's backlog.
+
+**The asymmetry is the cost to watch.** The application has no backlog, so its `lint.ignore` and its
+test tree key are the two slots on that side that can take hundreds of findings in a line, and
+nothing can tell a refusal from unpaid work filed as one. One sentence at each states the rule the
+second configuration already states for its own refusals: an entry says why the rule is wrong here,
+never that the work is large. `EM` and `TC` are the next candidates, both are work, and each has a
+test tree half that would fit the second slot.
+
+| alternative | why not |
+|---|---|
+| select `TRY` with `TRY003` refused by a per file key | there is no key for "every file" on the application's side that the per file arm can read as a refusal rather than a backlog |
+| `TRY400` taken, `.exception` at the three sites | the directory login site reintroduces the forged line; the storage probe's traceback is a bare timeout repeated per health probe |
+| `TRY400` enforced with three directives | acceptable, and offered by the security review; refused because the next handler is not held: both known channels are tested by name, and the rule applies to every `except` |
+| `TypeError` at the `TRY004` sites | splits one constructor's refusals into two classes for every catcher, and reds five tests by design |
+| a constant shared by the two `lint.ignore` pins | nothing ties the two lists: the second configuration legitimately refuses `T201` alone, and a constant would make the next side specific refusal a split |
+
+## The application's per file table is read
+
+Nothing read it: `"*" = ["S602"]`, a key for one file, and `"!tests/**"` each switched the rule off
+with every arm green. Each entry is now asked of ruff with that entry alone against the cleared
+table, a key is the test tree or a literal path carrying a separator, and a security rule may be
+refused only in the test tree. **The `./` in a key such as `./recover.py` is load bearing**: a key
+with no separator is matched against every basename.
+
+## A backlog count is held by equality, and a security entry by file
+
+Two stated counts had moved with every arm green, each a new site that arrived silently. Each count
+now sits on its code's own line and equals ruff's figure over findings no refusal covers, read from
+the run that honours no inline directive. **Equality, not a ceiling**, because a fix that lowers a
+count without editing it leaves slack for the next site. A security entry also names each file and
+its share, held as a multiset, because a fix in one file and a new site in another leave a total
+unchanged.
+
+## The keys of both ruff configurations are pinned
+
+Every arm reads ruff through one clearing override, and a base configuration named by `extend`
+survives it: on a planted copy that took a security finding past every arm. Ruff refuses an unknown
+key, so each configuration's key set is a closed set and is pinned, and every setting but the per
+file table is pinned by value too, since a value can switch a rule off as well as a key: `S` or
+`PGH` narrowed to some members, a longer line length, a quiet family. The ruff configuration files,
+the ignore files on the application's walk, and the walk itself against what the repository
+versions are pinned beside it. A module only ruff's default exclusion hides, under `site-packages`
+or `node_modules`, is refused, because the application's corpus guards share that blindness.
+
+## The frontend backlog counts are read over a copy with every disable directive blanked
+
+The tooling side holds its backlog counts against ruff run with directives ignored, because a
+directive naming the counted rule slips a new site past a count read from the honouring run. On
+this side the hiding is wider than directive suppression: a hooks disable directive stands down
+every React compiler based rule in its whole enclosing component, enforced rules included, because
+those rules read the comment text themselves. Measured: the option
+`respectEslintDisableDirectives: false` brings back the named rule's own sites and leaves the three
+react backlog rows at the honouring run's figures, 9, 5 and 2, against 10, 6 and 4 with the text
+removed. oxlint 1.83.0 has no flag that ignores directives either.
+
+**So the ratchet copies the linted trees and the configuration side by side into a temporary
+directory**, links followed and refused if the copy shares a link or an inode with its source so no
+write can reach the checkout, asks oxlint where every directive is, blanks each reported comment
+with spaces, and repeats until oxlint reports none. The counts are read there, and each backlog
+count is held equal to that figure both ways. What the copy adds outside the backlog is held by
+equality as `(code, file)` pairs down to the message, `WAIVED`, so a waiver of an enforced rule
+reds by name. The copy is checked against the checkout's file count, rule count and every finding
+the honouring run reports, and against the directive pattern as a second instrument.
+
+**Rejected.** Parsing the rule names out of each directive and refusing one that names a backlog
+rule: a spelling enumeration, and it could not see the compiler bailout, since the directive names
+a live rule rather than a backlog one. The respect option above: it leaves the bailout standing. A
+future flag is measured against the react rows before it replaces the copy.
+
+**Consequence.** The three react rows count more than the honouring run reports, because the two
+hooks directives hide sites of them. Refusals are pinned by value, `REFUSALS`, so dropping a count
+by relabelling a backlog row costs an edit to that list, with the reason above the entry in the
+configuration. A stated 0 and an option on an off entry are refused, because each lets a count
+agree with a run that cannot see the sites.
+
+## The frontend's property runs draw a fresh seed, and say where they are
+
+Every frontend property draws a fresh seed per run from `crypto.getRandomValues`, as the backend
+does, at 200 examples. Before each example the runner writes `property <name> seed <s>` once and
+then `run <i>` to standard error with a synchronous write; once an example fails, what follows is
+announced as `shrink <k>`. `replay(arbitrary, seed, i)` regenerates the input a killed run's last
+line names. `ENDPAPER_PROPERTY_SEED` pins a seed for reproducing a red and nothing else.
+
+**Why.** A fixed seed is one sweep repeated forever, the reason the backend's properties are not
+derandomised either. The argument for fixing it is answered rather than ignored: no timer can
+interrupt a synchronous loop in the runtimes this suite runs on, and fast-check reports only on
+failure, so a fresh input that spins hangs a run with nothing printed. The progress line is what a
+kill leaves behind, and it names the input. Measured by planting a synchronous loop on a copy and
+killing the run in the suite pod with a timeout: the last line read `run 53`, and `replay` at that
+seed and index regenerated the first input that spins. `--pool=threads`, proposed so one kill takes
+every worker, cannot run this suite at all: the setup's timezone pin needs a process per worker.
+
+**Cost.** A red can need its seed to reproduce, which the failure prints. A witness holds at any
+seed or not at all, so every hostile class is weighted until a run from any seed draws it. And the
+progress lines are on standard error in every run.
+
+**The seed guard refuses loader inputs by existence.** No top level dotenv file may exist under the
+frontend, `vite.config.ts` sets neither `envDir` nor `envPrefix`, and `bunfig.toml`'s keys are
+pinned by equality. Bun loads `.env.test` and `.env.test.local` into each worker, vitest copies
+Vite's prefixed variables from `.env.local` among others, and a `bunfig.toml` preload ran in every
+bun process of a run: each pinned every seed with the guard green, measured. A scan for the name
+cannot see a file read by convention or code that computes the name. **Residue**: code that runs
+before the runner, a setup file or a global setup, can still set the variable under a computed
+name. Whether the suite pod should refuse every pin, as the pipeline does, is the owner's decision.
+
+## One module runs every property, and the door is closed by derivation where one exists
+
+Only `tests/property.ts` may name a fast-check runner, global or plugin; a property calls
+`holds(arbitrary, predicate)` and passes no options. `tests/propertyBudget.test.ts` holds this by
+parse.
+
+**Why.** The backend guard refuses a list of option keywords. fast-check 4.10 moved its time limits
+into plugins, so a keyword list here would have been one spelling short on the day it was written;
+refusing the call outside one module is closed whatever the next version renames. Under `isolate:
+false` a `configureGlobal` in one file reaches every later property in its worker, in an order
+nobody chose. A global plugin cannot be read back at all, which is why the runner counts the
+examples that executed rather than reading any setting. `@fast-check/vitest` was refused: its
+`test.prop` takes run parameters at every call site, a per test budget lowering by construction, and
+it is a second package from the same single maintainer account.
+
+**The runner's drawing exports are derived by parse of the runner and pinned**, `holds`, `replay`
+and `witness`, and any other is refused outside the budget guard. A witness in a module with no
+property is refused. The runner is recognised by resolving a specifier as the bundler does. A
+re-export of the runner, a subpath import, the manifest's `imports`, the type checker's `paths`, and
+the name `generate` in any spelling are refused, loudly. Each file's count of properties naming a
+reach is pinned. Each was measured past the round before with every arm green: `replay` in a loop at
+a fixed seed, a witness asserting inside its predicate, `../property.js`, `#gen`, a computed
+`generate` over a duck typed random source, a reach deleted. **Residue**: a module with a property
+can still assert inside an extra witness's predicate, and a name computed at run time is read by no
+parse.
+
+## The oracle for a reader is counted work, not "did it throw"
+
+A reader property is held to the reader's own exported bounds by a meter at the doors every byte
+arrives through: reads of the `Blob` it was handed, output of the inflater, replaced for one call by
+a counting one, and every string handed to `DOMParser.parseFromString`, so a door that applies the
+entity rule is held to it there, whatever it answered. The assertion is that no chunk is pulled
+after a bound was crossed, not that the total is at most the bound.
+
+**Why.** The PDF reader that charged bytes read and not bytes inflated answered `ok` in 801 ms with
+nothing thrown, so a property over "never throws" is green on it, and the meter's property reds on
+it. The breach is recorded before the meter's sentinel is thrown, because `zip.ts` turns any
+inflater rejection into its own named failure; the contract reads the breach first, whatever the
+reader answered. "At most the bound" would refuse a correct reader: both inflaters count the chunk
+that crosses before refusing, and the chunk size is the engine's, 16 KiB under node and 64 KiB under
+bun, measured.
+
+**The aggregate's slack is one chunk, plus one for every read the reader stopped.** A reader keeping
+a total charges a refused read its granted ceiling, and the inflater was allowed the chunk that
+crossed it, so each refusal leaves at most one chunk uncharged. One chunk in all refused a correct
+Takeout reader: five sidecars refused at their ceiling, then a package refused at the EPUB's,
+measured by the named case in `takeout.test.ts`. A total stays at one chunk: the PDF reader charges
+every chunk as it arrives.
+
+**And a reader's property asserts what its run reached, read off the meter.** `holds(arbitrary,
+predicate, reaches)` takes named reaches, each asked of an example and of what its predicate
+answered; a run that passes and reaches none of one is a failure naming the seed. A witness over the
+spec certifies what was drawn, not that it got anywhere: a bomb behind a header, a type field or a
+declared size the reader refuses first is drawn, passes every spec predicate, and reaches no
+inflater. Measured with reader defects live: the PDF header and the MOBI type field each left
+property and witness green. Each reach is weighted until any seed reaches it: over 15 fresh seeds on
+builder, every reach of the eight doors was hit in every run, the rarest 11 times in 200.
+
+**What it does not see.** Allocation from bytes already counted, a `Blob` a reader builds for
+itself, wasm memory, and a synchronous loop that touches none of the doors.
+
+## Every bound a door declares is held by a control, and a ledger refuses one without
+
+`overrunBreach(door, overrun)` keeps the door's own `ceilings` and replaces what reads with a stub
+that overruns one bound; the arm asserts the breach names that bound. A property over a correct
+reader is green whatever its door declares. Measured: every door's ceilings emptied, every arm
+green, a MOBI and a PDF defect live behind them, and EPUB green over a reader that lost both read
+limits after two test side edits.
+
+**The ledger closes the next one.** `tests/lib/doorLedger.ts` records, per test file, each bound a
+driven door's `ceilings` declared and each bound a positive control overran and the meter named; the
+suite's setup opens it per file and fails the file when a declared bound has no control. It is keyed
+by the `ceilings` function a door and its control share, and per file rather than per worker,
+because a worker holds whichever files the pool gave it. Thirteen doors had declared bounds no
+control held: emptied over two runs, every arm green, and an entity defect in the Kindle reader went
+from four reds to none behind them. **Residue**: a bound deleted from `ceilings` together with its
+control declares nothing and is seen by nothing.
+
+**A control charges a read to the meter rather than making it.** A control over a read bound calls
+the meter's read with the size a file would charge; an inflation stays real, through the meter's own
+inflater; a parse hands the meter's parser a string one unit past the bound, refused before the
+engine sees it. A database's read bound is 64 MiB with one read allowed, so a real read past it is a
+64 MiB buffer in a shared worker.
+
+**For the same reason the SQLite property draws no file past the byte ceiling.** Its arm padding a
+database past `MAX_DATABASE_BYTES` was one constant spec, about 29 draws a run of the same 64 MiB
+file, copied by every patch and by the metered file, and it was what killed the smaller worker
+node's run: removing it took that worker from 1250.6 to 659.6 MiB. The size refusal reads no byte,
+so no patch can change it; a named case holds it with a file that allocates nothing, and the control
+holds the read bound.
+
+**The store property fuzzes the catalogue openers at their size edges.** The Kindle and Digital
+Editions store doors draw each reader's accepted document, unpadded or padded to one under, at and
+one past its cap, plus the property's patches. Drawn as trees they were each reader's own arbitrary
+fuzzed a second time under a second parser, and under happy-dom a quarter of those draws were read
+as HTML. The document space is each reader's own property's, under jsdom; this one is about the
+opener.
+
+## The build refuses a bundle that loads or emits the property generator
+
+`vite.config.ts` carries a build only plugin, ahead of every other and named in `worker.plugins`
+too, since a worker is built with that list alone. Its `load` throws on any module under
+`node_modules/fast-check`, `node_modules/pure-rand` or `node_modules/@fast-check/`, and a
+`generateBundle` check reads each chunk's modules and each asset's source files, since a `new URL`
+asset is copied without a load. The house rule over `src/` refuses the package named by any string,
+which names the file; the plugin asks the bundler.
+
+**Why.** The image installs development dependencies before it builds, so a stray load ships the
+generator to a member's browser with the build green. Four spellings did, each built and grepped: a
+template literal import, a `require`, a path into `node_modules`, an `import.meta.glob`. A parse of
+specifiers passed all four; the bundler's resolver sees all of them as one path. A worker importing
+the package and a `new URL` asset of its entry each built with every guard green before the worker
+and emit halves, and each fails the build after, naming the module.
+
+**Cost, measured.** None found: three alternating clean builds on one worker node, byte identical
+with and without the plugin, the wall times overlapping. **What it does not hold**: the package's
+bytes committed outside `node_modules`, which no path names.

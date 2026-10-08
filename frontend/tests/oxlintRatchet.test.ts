@@ -1,14 +1,22 @@
 import { execFileSync, type StdioOptions } from "node:child_process";
 import {
   closeSync,
+  cpSync,
+  mkdirSync,
   mkdtempSync,
   openSync,
   readdirSync,
+  linkSync,
+  lstatSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -66,20 +74,22 @@ import { afterAll, describe, expect, it } from "vitest";
  * either run is not stale**: the residual error leaves a suppression standing
  * rather than accusing a live one.
  *
- * Cost on the `builder` worker: **six invocations in the steady state, of
- * which only two lint anything.** Two runs of the linter proper, two of the
- * config dump, one of the help, one of the rule catalogue. **The ceiling is
- * those six plus one per SUPPRESSED entry**, reached when every entry looks
- * clean in one run at once, or when the run enabled fewer rules than it
- * denied.
+ * Cost on the `builder` worker: **one invocation per call site in the steady
+ * state, except the census loop over the blanked copy, which runs twice while
+ * the tree holds a directive.** Only the `lint` calls walk the tree, and the
+ * census rounds are `lint` calls that run no rule. **The ceiling adds one per
+ * SUPPRESSED entry**, reached when every entry looks clean in one run at once,
+ * or when the run enabled fewer rules than it denied, **and one more census
+ * round while any range of lines stands**, whatever the number of ranges,
+ * since every closing directive goes in one round and every opening one in
+ * the next. `ROUNDS` bounds it.
  *
- * **Recount both halves rather than trusting that sentence. Each has gone
- * stale within one commit of being written.** The ceiling was once a flat 20
- * over a list of 17; its replacement counted every line of `rules`, which
- * includes the configured rule that is never denied because it is never
- * suppressed; and the fixed count has now said three, then five, while the
- * file grew past both. Neither half is written as a product for that reason:
- * count the call sites, and count the entries that are off.
+ * **No total is written, because every one written here went stale within a
+ * commit.** The ceiling was once a flat 20 over a list of 17; its replacement
+ * counted every line of `rules`, which includes the configured rule that is
+ * never denied because it is never suppressed; and the fixed count said three,
+ * then five, then six over a file making seven calls. Count the call sites,
+ * and count the entries that are off.
  *
  * `LINTED` below bounds a single invocation and `BUDGET` bounds the arm.
  */
@@ -262,9 +272,20 @@ afterAll(() => {
  * a `-D` is shown to have done anything.
  */
 type Report = {
-  diagnostics: { code: string }[];
+  diagnostics: Finding[];
   number_of_files: number;
   number_of_rules: number;
+};
+
+/**
+ * One diagnostic. `code` is absent on an unused directive, which only the
+ * census run asks for and `directivesIn` reads; the span is in bytes.
+ */
+type Finding = {
+  code: string;
+  filename?: string;
+  message?: string;
+  labels?: { span: { offset?: number; length?: number } }[];
 };
 
 /**
@@ -314,18 +335,32 @@ function rulesNamedInConfig(): string[] {
  * satisfy by narrowing both.
  */
 function rulesNamedInTheText(): string[] {
-  const lines = readFileSync(CONFIG, "utf8").split("\n");
-  const opens = lines.findIndex((line) => /^\s*"rules"\s*:\s*\{/.test(line));
-  if (opens === -1) {
-    throw new Error(`${CONFIG} has no rules block, so nothing can be read.`);
-  }
   const names: string[] = [];
-  for (const line of lines.slice(opens + 1)) {
-    if (/^\s{2}\}/.test(line)) break;
+  for (const line of linesOfTheRulesBlock(readFileSync(CONFIG, "utf8"))) {
     const match = /^\s{4}"([^"]+)"\s*:/.exec(line);
     if (match?.[1] !== undefined) names.push(match[1]);
   }
   return names;
+}
+
+/**
+ * The lines between the config's `rules` opening and the line that closes it,
+ * which both text readers walk. Shared, and safely: each reader is held equal
+ * to a different instrument, `rulesNamedInTheText` to the parse and
+ * `backlogIn` to oxlint's own levels, so a narrowing here reds both.
+ */
+function linesOfTheRulesBlock(raw: string): string[] {
+  const lines = raw.split("\n");
+  const opens = lines.findIndex((line) => /^\s*"rules"\s*:\s*\{/.test(line));
+  if (opens === -1) {
+    throw new Error(`${CONFIG} has no rules block, so nothing can be read.`);
+  }
+  const block: string[] = [];
+  for (const line of lines.slice(opens + 1)) {
+    if (/^\s{2}\}/.test(line)) break;
+    block.push(line);
+  }
+  return block;
 }
 
 /**
@@ -494,22 +529,36 @@ function deniedNothing(
   );
 }
 
-function lint(deny: string[]): Report {
+/**
+ * One run over the trees, read off a file. `tree` is the directory the run
+ * stands in, and so the one whose config it reads: the checkout by default, or
+ * the blanked copy `treeWithEveryDirectiveBlanked` builds. `flags` go after
+ * the denials and before the format.
+ */
+function lint(
+  deny: string[],
+  tree = ".",
+  flags: string[] = [],
+  label = deny.length === 0
+    ? "the baseline run"
+    : `the run denying ${String(deny.length)} rule(s)`,
+): Report {
   const args = [...TREES];
   for (const rule of deny) args.push("-D", rule);
-  args.push("--format", "json");
-
-  const label =
-    deny.length === 0
-      ? "the baseline run"
-      : `the run denying ${String(deny.length)} rule(s)`;
+  args.push(...flags, "--format", "json");
 
   // The report goes to the descriptor, for the reason at `REPORT`. Only
   // stderr comes back through a pipe, and oxlint's own complaints are short.
   const fd = openSync(REPORT, "w");
   try {
     const stdio: StdioOptions = ["ignore", fd, "pipe"];
-    execFileSync(OXLINT, args, { stdio, timeout: LINTED });
+    // Resolved here, because a relative binary under another `cwd` is looked
+    // up from that directory, where the copy carries no `node_modules`.
+    execFileSync(resolve(OXLINT), args, {
+      stdio,
+      timeout: LINTED,
+      cwd: tree,
+    });
   } catch (thrown) {
     // Called for its refusal and not for its value: the report is on disk, and
     // every status but 1 means the run did not happen. Dropping this call
@@ -764,6 +813,559 @@ describe("the oxlint suppression list", () => {
 });
 
 /**
+ * The refusals: the entries that are off for good, because the rule is wrong
+ * about this codebase rather than unpaid. Every other suppression is a backlog
+ * entry and carries its count.
+ *
+ * **Held by value, because a count arm opens a new door.** With every backlog
+ * count held, the cheapest way past one is to drop it and call the row a
+ * refusal. That is a decision, and here it costs an edit to this list, with
+ * the reason written above the entry in the config, rather than nothing. The
+ * reasons live there alone, so this is a bare list rather than a record.
+ *
+ * **A refusal's figure in the config is prose and is read by nothing.** Two
+ * are arguments about the architecture. Three argue from named sites, so a new
+ * site anywhere is suppressed by a reason that does not cover it, with every
+ * arm green; the config says so once, above the first of them.
+ */
+const REFUSALS = [
+  "no-await-in-loop",
+  "no-control-regex",
+  "no-irregular-whitespace",
+  "no-loss-of-precision",
+  "react/react-in-jsx-scope",
+];
+
+/**
+ * A backlog entry's line: the rule, its level, and its count as the whole of a
+ * trailing comment, `"rule": "off", // 12`.
+ *
+ * **Anything after the digits drops the line from this reader, on purpose.** A
+ * breakdown beside a total, a file count or a share, is a figure nothing
+ * holds, and it goes stale under a total that is held. Dropping the line reds
+ * the equality with oxlint's own levels, so the breakdown is refused rather
+ * than read.
+ */
+const BACKLOG_LINE = /^\s*"([^"]+)"\s*:[^/]*\/\/\s*(\d+)\s*$/;
+
+type Stated = { rule: string; stated: number };
+
+/** Every line of the rules block carrying a count, as the rule and its figure. */
+function backlogIn(raw: string): Stated[] {
+  const backlog: Stated[] = [];
+  for (const line of linesOfTheRulesBlock(raw)) {
+    const match = BACKLOG_LINE.exec(line);
+    if (match?.[1] !== undefined && match[2] !== undefined) {
+      backlog.push({ rule: match[1], stated: Number(match[2]) });
+    }
+  }
+  return backlog;
+}
+
+/**
+ * The `code` oxlint reports a config key under: `plugin/rule` as
+ * `plugin(rule)`, and a bare rule as `eslint(rule)`.
+ *
+ * **Exact, unlike `bareName`, because the safe direction is reversed.** For
+ * staleness a shared bare name can only keep an entry standing. For a count it
+ * adds another rule's findings to this one's, so two entries sharing a name
+ * would each be held to the sum, and both could be stated at it.
+ *
+ * **An alias reads zero here.** oxlint accepts a key under an alias plugin
+ * prefix, `react-hooks/`, `@typescript-eslint/`, `eslint-plugin-unicorn/` and
+ * others, and reports its findings under the canonical code, so such a key
+ * finds nothing under this spelling. That reds only because a stated zero is
+ * refused: stated anything else, the count differs; stated zero, the entry arm
+ * refuses it. So the key is not canonicalised here, which would make an alias
+ * work rather than red, and nothing needs it to.
+ */
+function codeOf(configKey: string): string {
+  const slash = configKey.indexOf("/");
+  if (slash === -1) return `eslint(${configKey})`;
+  return `${configKey.slice(0, slash)}(${configKey.slice(slash + 1)})`;
+}
+
+/** Every `(rule, stated, found)` where the count is not oxlint's. */
+function countsThatDiffer(
+  backlog: Stated[],
+  report: Report,
+): [string, number, number][] {
+  const found = new Map<string, number>();
+  for (const { code } of report.diagnostics) {
+    found.set(code, (found.get(code) ?? 0) + 1);
+  }
+  return backlog.flatMap(({ rule, stated }): [string, number, number][] => {
+    const count = found.get(codeOf(rule)) ?? 0;
+    return count === stated ? [] : [[rule, stated, count]];
+  });
+}
+
+/** A finding as one string, so two reports can be compared as sets. */
+function findingKey({ code, filename, labels }: Finding): string {
+  return `${code} ${String(filename)} ${String(labels?.[0]?.span.offset)}`;
+}
+
+/**
+ * The findings of `honoured` that `copy` does not have. Blanking a
+ * directive can only add a finding, so anything here means the copy is not
+ * the tree.
+ */
+function findingsMissingFrom(copy: Report, honoured: Report): string[] {
+  const present = new Set(copy.diagnostics.map(findingKey));
+  return honoured.diagnostics
+    .map(findingKey)
+    .filter((key) => !present.has(key));
+}
+
+/** One disable directive, where oxlint says it is. */
+type Directive = { filename: string; offset: number; length: number };
+
+/**
+ * The directives a census run reported, or a refusal.
+ *
+ * The census allows every rule and asks for unused directives, so every
+ * directive is unused and every one is reported. **That holds only while no
+ * rule runs**: a directive suppressing a live finding counts as used and is
+ * not reported, so a run that enabled anything is refused rather than read.
+ * And a diagnostic carrying a rule's `code` is a finding rather than a
+ * directive, which the same condition makes impossible and this refuses anyway.
+ */
+function directivesIn(report: Report, label: string): Directive[] {
+  if (report.number_of_rules !== 0) {
+    throw new Error(
+      `${label} ran ${String(report.number_of_rules)} rules where it allowed ` +
+        `all of them, so a directive suppressing one of their findings counts ` +
+        `as used and goes unreported.`,
+    );
+  }
+  return report.diagnostics.map((diagnostic) => {
+    const { code, filename } = diagnostic as Partial<Finding>;
+    const span = diagnostic.labels?.[0]?.span;
+    if (
+      code !== undefined ||
+      typeof filename !== "string" ||
+      typeof span?.offset !== "number" ||
+      typeof span.length !== "number"
+    ) {
+      throw new Error(
+        `${label} reported something that is not a directive with a span: ` +
+          `${JSON.stringify(diagnostic).slice(0, 200)}`,
+      );
+    }
+    return { filename, offset: span.offset, length: span.length };
+  });
+}
+
+/**
+ * The byte range to blank for one reported directive: the comment it is, or a
+ * refusal.
+ *
+ * **The span is in bytes, not characters**, measured on a file carrying non
+ * ASCII text before its directive, where the same offset read as characters
+ * lands in code. So the file is handled as bytes.
+ *
+ * **Two shapes are accepted, and nothing else.** A span opening a comment is
+ * the comment, which is every disable oxlint reports. And an unused enable is
+ * reported by a span INSIDE its comment: the body after the opener for a bare
+ * enable closing a named range, which is the range form ESLint documents, and
+ * the rule name for an enable naming a rule the range never disabled. That
+ * span is widened to the whole comment when the comment is the first thing on
+ * its line, a JSX brace aside, and its text begins with the enable keyword. Anything else is
+ * refused, because it means either the offset is not what this reads it as or
+ * the span is not a directive, and blanking it would edit code.
+ */
+function commentToBlank(
+  source: Buffer,
+  { filename, offset, length }: Directive,
+): [number, number] {
+  const refusal = new Error(
+    `the directive oxlint reported in ${filename} at byte ${String(offset)} ` +
+      `neither opens a comment nor sits inside an enable comment, so either ` +
+      `the offset is not a byte offset or the span is not a directive, and ` +
+      `blanking it would edit code.`,
+  );
+  if (offset + length > source.length) throw refusal;
+
+  const opener = source.subarray(offset, offset + 2).toString("latin1");
+  if (opener === "//" || opener === "/*") return [offset, offset + length];
+
+  const lineStart = source.lastIndexOf(0x0a, offset - 1) + 1;
+  // A brace may precede the opener, because inside JSX children a comment can
+  // only be written as `{/* ... */}`.
+  const lead = /^[ \t]*\{?[ \t]*(\/\/|\/\*)/.exec(
+    source.subarray(lineStart, offset).toString("latin1"),
+  );
+  if (lead?.[1] === undefined) throw refusal;
+  const start = lineStart + lead[0].length - 2;
+
+  let stop: number;
+  let body: string;
+  if (lead[1] === "//") {
+    const newline = source.indexOf(0x0a, start);
+    stop = newline === -1 ? source.length : newline;
+    body = source.subarray(start + 2, stop).toString("latin1");
+  } else {
+    const close = source.indexOf("*/", start + 2, "latin1");
+    if (close === -1) throw refusal;
+    stop = close + 2;
+    body = source.subarray(start + 2, close).toString("latin1");
+  }
+  if (offset + length > stop) throw refusal;
+  if (!/^\s*(?:eslint|oxlint)-enable\b/.test(body)) throw refusal;
+  return [start, stop];
+}
+
+/**
+ * The file with every range overwritten by spaces, line breaks kept.
+ *
+ * Every range is resolved against the same unmodified bytes before any is
+ * written, by the caller, because two reports can fall in one comment: the
+ * second resolved after the first was blanked would no longer sit in a comment
+ * and be refused.
+ */
+function blankedRanges(source: Buffer, ranges: [number, number][]): Buffer {
+  const copy = Buffer.from(source);
+  for (const [from, to] of ranges) {
+    for (let at = from; at < to; at += 1) {
+      if (copy[at] !== 0x0a && copy[at] !== 0x0d) copy[at] = 0x20;
+    }
+  }
+  return copy;
+}
+
+/** Where the blanked copy is built, inside the directory `afterAll` removes. */
+const BLANKED = join(REPORTS, "blanked");
+
+/**
+ * How many census rounds a copy may take before it is a refusal.
+ *
+ * A round blanks every directive oxlint reports, and the last round must
+ * report none. **One blanking round is not always enough**: oxlint reports a
+ * range by its closing directive while that stands, and the opening one only
+ * once it is gone. Measured on a range pair, round one named the closing
+ * comment and round two the opening one. Five covers that, the confirming
+ * round, and room; a tree needing more is behaving in a way nobody measured.
+ */
+const ROUNDS = 5;
+
+/**
+ * Each named path under `from`, copied to the same path under `to`, links
+ * followed.
+ *
+ * **`dereference` is load bearing.** Without it a symlink is copied as a link
+ * to its target's absolute path in the checkout, so blanking a directive in
+ * the copy writes through the link and edits the checkout: measured, the
+ * directive in a linked component was gone from the source after one run.
+ * oxlint follows both kinds of link, so the dereferenced copy holds what it
+ * reads in the checkout. `sharedWithItsSource` is the arm that reds if a link
+ * or a shared file ever survives into the copy.
+ */
+function copyBeside(from: string, to: string, paths: string[]): void {
+  for (const path of paths) {
+    cpSync(join(from, path), join(to, path), {
+      recursive: true,
+      dereference: true,
+      filter: (source) => basename(source) !== "node_modules",
+    });
+  }
+}
+
+/**
+ * Every path in the copy that is a link, or that is the same file as its
+ * source, so that writing to it would write to the checkout. A walk of the
+ * copy by `lstat`, which does not follow what it is asking about, and a
+ * comparison of device and inode with the source by `stat`.
+ */
+function sharedWithItsSource(
+  copy: string,
+  source: string,
+  paths: string[],
+): string[] {
+  const shared: string[] = [];
+  const visit = (path: string): void => {
+    const here = lstatSync(join(copy, path));
+    if (here.isSymbolicLink()) {
+      shared.push(path);
+      return;
+    }
+    if (here.isDirectory()) {
+      for (const entry of readdirSync(join(copy, path))) {
+        visit(join(path, entry));
+      }
+      return;
+    }
+    const there = statSync(join(source, path));
+    if (there.ino === here.ino && there.dev === here.dev) shared.push(path);
+  };
+  for (const path of paths) visit(path);
+  return shared.sort();
+}
+
+/**
+ * The config and the linted trees, copied side by side into `BLANKED`.
+ *
+ * **The config is copied beside the trees** because `ignorePatterns` resolves
+ * against the config's own directory: one left behind would walk the whole
+ * generated client. Whether the copy is the tree is then asked rather than
+ * assumed, by the arm that reads it.
+ */
+function copyOfTheCheckout(): string {
+  rmSync(BLANKED, { recursive: true, force: true });
+  mkdirSync(BLANKED);
+  copyBeside(".", BLANKED, [CONFIG, ...TREES]);
+  return BLANKED;
+}
+
+/**
+ * Every disable directive in `copy` blanked, which is the tree the backlog
+ * counts are read over.
+ *
+ * **Which comments are directives is oxlint's answer, not a pattern's.** Each
+ * census run allows every rule and reports unused directives, so every
+ * directive oxlint honours is reported with its span; `directivesIn` refuses a
+ * run where that does not hold.
+ *
+ * **And no write leaves the copy.** `copyBeside` follows links and the arm
+ * checks none survived; this refuses a path that resolves outside the copy all
+ * the same, so a regression names its cause here rather than reddening some
+ * other arm on a checkout that has been edited.
+ */
+function blankEveryDirective(copy: string, baseline: Report): void {
+  const inside = realpathSync(copy) + sep;
+  for (let round = 1; round <= ROUNDS; round += 1) {
+    const label = `census round ${String(round)} over the blanked copy`;
+    const census = lint(
+      [],
+      copy,
+      ["-A", "all", "--report-unused-disable-directives"],
+      label,
+    );
+    const elsewhere = differentTree(baseline, census, label);
+    if (elsewhere !== null) throw new Error(elsewhere);
+
+    const directives = directivesIn(census, label);
+    if (directives.length === 0) return;
+    const byFile = new Map<string, Directive[]>();
+    for (const directive of directives) {
+      byFile.set(directive.filename, [
+        ...(byFile.get(directive.filename) ?? []),
+        directive,
+      ]);
+    }
+    for (const [filename, inFile] of byFile) {
+      const path = join(copy, filename);
+      if (!realpathSync(path).startsWith(inside)) {
+        throw new Error(
+          `${filename} in the blanked copy resolves outside it, so blanking ` +
+            `it would edit the checkout.`,
+        );
+      }
+      const source = readFileSync(path);
+      const ranges = inFile.map((directive) =>
+        commentToBlank(source, directive),
+      );
+      writeFileSync(path, blankedRanges(source, ranges));
+    }
+  }
+  throw new Error(
+    `oxlint still reported a directive after ${String(ROUNDS)} rounds of ` +
+      `blanking every one it named, so the copy cannot be cleared and no count ` +
+      `read over it is evidence.`,
+  );
+}
+
+/**
+ * What the blanked copy reports that the checkout does not, outside the
+ * backlog, as `[code, file, message]` triples.
+ *
+ * **This is what a directive waives in an enforced rule**, and it is held by
+ * equality with `WAIVED`. The backlog's share is held by the counts instead.
+ */
+function waivedIn(
+  counted: Report,
+  honoured: Report,
+  backlogCodes: ReadonlySet<string>,
+): [string, string, string][] {
+  const present = new Set(honoured.diagnostics.map(findingKey));
+  return counted.diagnostics
+    .filter(
+      (finding) =>
+        !present.has(findingKey(finding)) && !backlogCodes.has(finding.code),
+    )
+    .map(({ code, filename, message }): [string, string, string] => [
+      code,
+      String(filename),
+      String(message),
+    ]);
+}
+
+/**
+ * **A count beside a backlog entry is a measurement unless something
+ * re-derives it.** The staleness arm above fires only when an entry reports
+ * nothing, so a count could move either way with every arm green, and most
+ * had: the first run of this arm found the stated figures wrong on most rows,
+ * in both directions.
+ *
+ * **Equality, not a ceiling.** With found at most stated, a fix that lowers a
+ * count without editing it leaves slack, and the next new site fills it green.
+ * So every fix and every new site moves a number in the config, and the
+ * failure prints each `(rule, stated, found)` that differs, so the repair is
+ * one edit per row.
+ *
+ * **The count reads a tree with no directive text in it.** A directive
+ * naming a backlog rule hides its site from any run that honours it, and the
+ * directive census further down is per file, so one more in a file it already
+ * names passes there too. So the count reads the copy `copyOfTheCheckout`
+ * builds and `blankEveryDirective` clears.
+ *
+ * **Removing the text is the only thing that works, and a flag is not a
+ * substitute.** A hooks disable directive switches off every React compiler
+ * based rule in its whole enclosing component, enforced rules included,
+ * because those rules read the comment text themselves rather than going
+ * through directive suppression. The config option
+ * `respectEslintDisableDirectives: false` was measured: it brings back the
+ * named rule's own sites and leaves the three react backlog rows exactly where
+ * the honouring run reads them. So a future oxlint flag that ignores
+ * directives is measured against those rows before it replaces the copy.
+ *
+ * **What the copy adds outside the backlog is held too**, by equality with
+ * `WAIVED` as `(code, file)` pairs. That is where the compiler rules a hooks
+ * directive stands down appear, and where a second directive in a named file
+ * hiding any enforced rule appears, which the per file directive census cannot
+ * see. A second waived site in a named file reds by name, and so does a waiver
+ * that has gone.
+ *
+ * **No finding is covered twice.** Every finding carries one rule, and the key
+ * set arm refuses any per path scoping, so a directive is the only cover a
+ * backlog finding can have besides its own entry, and the copy removes it.
+ *
+ * **What the copy is checked against**: no link or shared file with the
+ * checkout, the baseline's file count and rule count, every finding the
+ * honouring run reports, and the directive pattern,
+ * which reads the copy's text with no help from oxlint. The last is the second
+ * instrument for the census: a spelling oxlint honours without reporting it as
+ * unused survives the blanking and reds there, if the pattern knows it. A
+ * spelling both miss is past this arm.
+ *
+ * **What equality on a total cannot see**: a fix and a new site of the same
+ * rule in one change, which leaves the total where it was, and the same for
+ * one waived site swapped for another in the same file. And a count edited to
+ * match a new site is green: the edit is in the diff beside the reason, and
+ * review is what reads it.
+ */
+describe("every backlog count", () => {
+  it(
+    "sits on its own entry's line, and the entries carrying one are the backlog",
+    () => {
+      const suppressed = suppressedIn(rulesNamedInConfig(), effectiveLevels());
+      const backlog = backlogIn(readFileSync(CONFIG, "utf8")).map(
+        ({ rule }) => rule,
+      );
+
+      const stated = [...REFUSALS, ...backlog];
+      // Named in the message, because the equality's own diff truncates a list
+      // this long before the entry that differs.
+      const uncounted = suppressed.filter((rule) => !stated.includes(rule));
+      const unexpected = stated.filter(
+        (rule, at) => !suppressed.includes(rule) || stated.indexOf(rule) !== at,
+      );
+
+      expect(
+        stated.sort(),
+        `${CONFIG}'s suppressed rules are not exactly REFUSALS plus the ` +
+          `entries whose line ends in a count. Off with neither a count nor ` +
+          `a refusal: [${uncounted.join(", ")}]. Counted or refused and not ` +
+          `off, or named twice: [${unexpected.join(", ")}]. A backlog entry ` +
+          `carries its count as the whole of a trailing comment on its own line, ` +
+          `"rule": "off", // N. A count on another line, anything after the ` +
+          `digits, or an entry written twice reads as a different list here. ` +
+          `A rule that is wrong about this codebase rather than unpaid is a ` +
+          `refusal: add it to REFUSALS, write its reason above the entry in ` +
+          `the config, and give it no count.`,
+      ).toEqual([...suppressed].sort());
+    },
+    BUDGET,
+  );
+
+  it("is never zero", () => {
+    expect(
+      backlogIn(readFileSync(CONFIG, "utf8"))
+        .filter(({ stated }) => stated === 0)
+        .map(({ rule }) => rule),
+      `a backlog entry stating 0 is either stale, a rule with no findings that ` +
+        `should be turned on, or a key spelled under an alias plugin prefix, ` +
+        `which oxlint accepts and reports under the canonical code, so the ` +
+        `count reads zero and would agree with it. Delete a stale entry; spell ` +
+        `an alias the way the report's code reads.`,
+    ).toEqual([]);
+  });
+
+  it(
+    "is the number oxlint finds with every disable directive blanked",
+    () => {
+      const backlog = backlogIn(readFileSync(CONFIG, "utf8"));
+      const rules = backlog.map(({ rule }) => rule);
+      const baseline = lint([]);
+      const honoured = lint(rules);
+      const copy = copyOfTheCheckout();
+
+      expect(
+        sharedWithItsSource(copy, ".", [CONFIG, ...TREES]),
+        `these paths in the copy are links, or the same file as in the ` +
+          `checkout, so blanking a directive in them writes to the checkout ` +
+          `this file is measuring. The copy must follow every link.`,
+      ).toEqual([]);
+
+      blankEveryDirective(copy, baseline);
+      const label = "the run denying the backlog over the blanked copy";
+      const counted = lint(rules, copy, [], label);
+
+      expect(differentTree(baseline, counted, label)).toBeNull();
+      expect(deniedNothing(baseline, counted, rules.length, label)).toBeNull();
+      expect(
+        findingsMissingFrom(counted, honoured),
+        `the blanked copy lacks findings the checkout reports. Blanking a ` +
+          `directive can only add one, so the copy is not the tree and no ` +
+          `count read over it describes ${CONFIG}.`,
+      ).toEqual([]);
+      expect(
+        filesNamed(LINTABLE).filter((path) =>
+          DIRECTIVE.test(readFileSync(join(copy, path), "utf8")),
+        ),
+        `these files in the blanked copy still carry text the directive ` +
+          `pattern reads, which oxlint's census did not report. Either oxlint ` +
+          `honours a spelling it does not report as unused, and a count here ` +
+          `would miss what it hides, or the pattern reads text oxlint ignores.`,
+      ).toEqual([]);
+
+      expect(
+        waivedIn(counted, honoured, new Set(rules.map(codeOf))).sort(),
+        `with every disable directive blanked, these findings outside the ` +
+          `backlog appear that the checkout does not report, so a directive ` +
+          `waives them, and WAIVED does not say so. A hooks directive stands ` +
+          `down every React compiler based rule in its component, enforced ` +
+          `ones included. The message names what an omitted dependency ` +
+          `waiver omits, so a new or swapped dependency reds here too. Remove ` +
+          `the finding, or list the triple in WAIVED ` +
+          `beside the directive's reason in DIRECTIVES.`,
+      ).toEqual([...WAIVED].sort());
+
+      const wrong = countsThatDiffer(backlog, counted);
+      expect(
+        wrong,
+        `(rule, stated, found): ${JSON.stringify(wrong)}. Each backlog count ` +
+          `in ${CONFIG} is held equal to what oxlint finds with every disable ` +
+          `directive blanked. Write the found figure on the entry's own line, ` +
+          `in the commit that moved it. A found 0 means the entry is stale, ` +
+          `or its key is under an alias prefix the report does not use: ` +
+          `delete it, or spell the key as the report's code reads.`,
+      ).toEqual([]);
+    },
+    BUDGET,
+  );
+});
+
+/**
  * The rules the config names and leaves ON, which the arm above cannot see.
  *
  * **A suppression list cannot police a configured rule, by construction, and
@@ -786,7 +1388,7 @@ describe("the oxlint suppression list", () => {
  *
  * It costs one more `--print-config`, which lints nothing.
  */
-const CONFIGURED_ON = ["vitest/valid-expect"];
+const CONFIGURED_ON = ["vitest/valid-expect", "vitest/expect-expect"];
 
 /**
  * The exact option each configured rule carries.
@@ -805,6 +1407,18 @@ const CONFIGURED_ON = ["vitest/valid-expect"];
  */
 const CONFIGURED_OPTIONS: Record<string, unknown> = {
   "vitest/valid-expect": ["error", { maxArgs: 2 }],
+  "vitest/expect-expect": [
+    "error",
+    {
+      assertFunctionNames: [
+        "expect",
+        "expectTypeOf",
+        "assert",
+        "assertType",
+        "witness",
+      ],
+    },
+  ],
 };
 
 /** oxlint's own help, read off a descriptor for the reason at `REPORT`. */
@@ -943,8 +1557,9 @@ function pluginsInTheCatalogue(catalogue: string): string[] {
  * reason for running two.
  *
  * **The counts below are a measurement, not a guard. Nothing re-derives them.**
- * That is the real difference from a suppression, whose reason is a finding the
- * ratchet re-derives on every run: an exclusion's reason is a number, no arm
+ * That is the real difference from a suppression, whose reason is a finding,
+ * and whose count, the ratchet re-derives on every run: an exclusion's reason
+ * is a number, no arm
  * reads it, and it goes stale in silence. One of them already did, between two
  * commits on this branch, with every arm green. Re-measure before relying on
  * one.
@@ -1186,6 +1801,30 @@ describe("a suppression the ratchet could not see", () => {
     ).toEqual([...CONFIG_KEYS].sort());
   });
 
+  it(
+    "cannot narrow a count with an option on an entry that is off",
+    () => {
+      // `-D` keeps the options the config gives a rule, so an off entry written
+      // with an allow list is counted with that list in force, and a new site of
+      // the allowed shape is never counted. Measured: an allow list of five names
+      // on `no-shadow` took its count from 35 to 14, with every arm green once
+      // the 14 was written. An option belongs with the rule when it is turned on.
+      const rules = readConfig().rules ?? {};
+      const suppressed = suppressedIn(Object.keys(rules), effectiveLevels());
+
+      expect(
+        suppressed.filter((rule) => {
+          const value = rules[rule];
+          return Array.isArray(value) && value.length > 1;
+        }),
+        `these entries are off and carry options. An option narrows what the ` +
+          `count arm counts, because a denial keeps it, so a new site of the ` +
+          `shape it allows is never counted. Write the entry as plain "off".`,
+      ).toEqual([]);
+    },
+    BUDGET,
+  );
+
   it("cannot be written as a category downgraded to a warning", () => {
     expect(
       readConfig().categories,
@@ -1232,9 +1871,12 @@ describe("a suppression the ratchet could not see", () => {
  * Every inline disable directive in the linted trees, and why each stands.
  *
  * **A directive is the sixth spelling of a suppression, and it is the one the
- * config cannot see at all.** It suppresses a rule for one line, carries no
- * count, and is re-derived by nothing. oxlint's unused-directive report does
- * not reach these.
+ * config cannot see at all.** It suppresses a rule for the line it names, and
+ * a hooks directive far further: every React compiler based rule in its whole
+ * enclosing component, enforced ones included, which `WAIVED` holds. It
+ * carries no count, and this census re-derives nothing but the files.
+ * The lint script asks for no unused directive report, so nothing reports
+ * these in CI; the census the backlog counts run is a separate invocation.
  *
  * **This branch made two of them load bearing and said nothing.** Both
  * `exhaustive-deps` directives were inert while the react plugin was off.
@@ -1249,16 +1891,49 @@ describe("a suppression the ratchet could not see", () => {
  * entry.
  *
  * The set is pinned by equality, with a reason beside each, which is the
- * contract the suppression list already has. A new directive reds here.
+ * contract the suppression list already has. **It is a set of files**: a
+ * directive in a file not named here reds, and a second one in a named file
+ * does not. What that second one hides from a backlog rule is still counted,
+ * by the backlog count arm, which reads a copy with every directive blanked.
  */
 const DIRECTIVES: Record<string, string> = {
   "src/pages/components/SearchBar.tsx":
-    "exhaustive-deps. The debounce effect omits onSearch on purpose, because Home passes an inline callback and including it would restart the debounce on every render. LIVE since the react plugin was named.",
+    "exhaustive-deps. The debounce effect omits onSearch on purpose, because Home passes an inline callback and including it would restart the debounce on every render. LIVE since the react plugin was named. It also stands down every React compiler based rule in this component, enforced ones included: the backlog counts include what it hides, and WAIVED holds the rest.",
   "src/pages/ScanPage/components/BarcodeScanner.tsx":
-    "exhaustive-deps. The teardown effect omits the deps the rule wants, which would restart the camera. LIVE since the react plugin was named.",
+    "exhaustive-deps. The teardown effect omits the deps the rule wants, which would restart the camera. LIVE since the react plugin was named. It also stands down every React compiler based rule in this component, enforced ones included: the backlog counts include what it hides, and WAIVED holds the rest.",
   "src/lib/pdf.ts":
     "no-control-regex, and it is the SECOND site of a refusal the config documents. Stripping the control characters a PDF producer pads metadata with is the point of that function. Inert while the rule is off at top level.",
 };
+
+/**
+ * What the blanked copy reports outside the backlog that the checkout does
+ * not, as `[code, file, message]` triples, each a finding a directive in
+ * `DIRECTIVES` waives. Held by equality in the count arm.
+ *
+ * **Today it is each hooks directive's own rule, once per file**, which is the
+ * waiver its reason argues for. A compiler based rule a hooks directive stands
+ * down, or any enforced rule a second directive in a named file hides, arrives
+ * here as a new triple and reds by name.
+ *
+ * **The message is held because it names the omitted dependencies**, which is
+ * what each reason argues about. Without it the same file could swap the
+ * waived effect for another, or the waived effect could read one more prop it
+ * does not declare, with the code and the file unchanged and every arm green:
+ * both measured, with lint at exit 0. The cost is an oxlint upgrade that
+ * rewords the message, which reds with the new text printed.
+ */
+const WAIVED: [string, string, string][] = [
+  [
+    "react-hooks(exhaustive-deps)",
+    "src/pages/ScanPage/components/BarcodeScanner.tsx",
+    "React Hook useEffect has a missing dependency: 't'",
+  ],
+  [
+    "react-hooks(exhaustive-deps)",
+    "src/pages/components/SearchBar.tsx",
+    "React Hook useEffect has a missing dependency: 'onSearch'",
+  ],
+];
 
 const DIRECTIVE = /\b(?:oxlint|eslint)-disable(?:-next-line|-line)?\b/;
 
@@ -1521,5 +2196,363 @@ describe("a rule absent from the run that denied everything", () => {
     );
 
     expect(confirmations).toBe(0);
+  });
+});
+
+/** A config's text holding these lines as its rules block. */
+function configWith(...rules: string[]): string {
+  return ["{", '  "rules": {', ...rules, "  }", "}"].join("\n");
+}
+
+describe("a backlog line", () => {
+  it("is read with its count when the count is the whole trailing comment", () => {
+    const raw = configWith(
+      '    "no-await-in-loop": "off",',
+      '    "no-shadow": "off", // 35',
+      '    "react/refs": "off" // 6',
+    );
+
+    expect(backlogIn(raw)).toEqual([
+      { rule: "no-shadow", stated: 35 },
+      { rule: "react/refs", stated: 6 },
+    ]);
+  });
+
+  it("is not read when anything follows the count", () => {
+    expect(
+      backlogIn(configWith('    "no-shadow": "off", // 35, over 4 files')),
+    ).toEqual([]);
+  });
+
+  it("is not read when its count sits on the line below", () => {
+    expect(
+      backlogIn(configWith('    "no-shadow": "off",', "    // 35")),
+    ).toEqual([]);
+  });
+
+  it("is not read outside the rules block", () => {
+    const raw = ["{", '  "plugins": ["oxc"], // 3', '  "rules": {}', "}"].join(
+      "\n",
+    );
+
+    expect(backlogIn(raw)).toEqual([]);
+  });
+});
+
+describe("the code a config key is reported under", () => {
+  it("is the plugin with the rule in parentheses", () => {
+    expect(codeOf("unicorn/no-array-sort")).toBe("unicorn(no-array-sort)");
+  });
+
+  it("is spelled eslint for an unprefixed rule", () => {
+    expect(codeOf("no-shadow")).toBe("eslint(no-shadow)");
+  });
+});
+
+describe("a stated count", () => {
+  const report = (...codes: string[]): Report => ({
+    ...BASELINE,
+    diagnostics: codes.map((code) => ({ code })),
+  });
+
+  it("names every rule whose count differs, either way", () => {
+    const found = report(
+      "eslint(no-shadow)",
+      "eslint(no-shadow)",
+      "react(refs)",
+    );
+    const backlog = [
+      { rule: "no-shadow", stated: 1 },
+      { rule: "react/refs", stated: 2 },
+    ];
+
+    expect(countsThatDiffer(backlog, found)).toEqual([
+      ["no-shadow", 1, 2],
+      ["react/refs", 2, 1],
+    ]);
+  });
+
+  it("is held to zero for a rule the run did not report", () => {
+    expect(
+      countsThatDiffer([{ rule: "no-shadow", stated: 3 }], report()),
+    ).toEqual([["no-shadow", 3, 0]]);
+  });
+
+  it("does not take the findings of another plugin's rule of the same name", () => {
+    const found = report("eslint(no-shadow)", "typescript(no-shadow)");
+
+    expect(countsThatDiffer([{ rule: "no-shadow", stated: 1 }], found)).toEqual(
+      [],
+    );
+  });
+});
+
+describe("a census of disable directives", () => {
+  const unused = {
+    code: undefined as unknown as string,
+    filename: "src/a.ts",
+    labels: [{ span: { offset: 4, length: 30 } }],
+  };
+
+  it("is read as each directive's file and byte span", () => {
+    const census = { ...BASELINE, number_of_rules: 0, diagnostics: [unused] };
+
+    expect(directivesIn(census, "a probe")).toEqual([
+      { filename: "src/a.ts", offset: 4, length: 30 },
+    ]);
+  });
+
+  it("is refused when the run enabled a rule", () => {
+    const census = { ...BASELINE, number_of_rules: 1, diagnostics: [unused] };
+
+    expect(() => directivesIn(census, "a probe")).toThrow(/goes unreported/);
+  });
+
+  it("is refused when it carries a finding rather than a directive", () => {
+    const census = {
+      ...BASELINE,
+      number_of_rules: 0,
+      diagnostics: [{ ...unused, code: "eslint(no-shadow)" }],
+    };
+
+    expect(() => directivesIn(census, "a probe")).toThrow(/not a directive/);
+  });
+});
+
+describe("a blanked directive", () => {
+  const source = Buffer.from("const a = 1; // a note\nconst b = 2;\n");
+  const at = source.indexOf("//");
+
+  it("is spaces over its range, the rest of the file untouched", () => {
+    expect(blankedRanges(source, [[at, at + 9]]).toString()).toBe(
+      `const a = 1; ${" ".repeat(9)}\nconst b = 2;\n`,
+    );
+  });
+
+  it("keeps the line breaks inside a block comment", () => {
+    const block = Buffer.from("/* one\ntwo */\nx;\n");
+
+    expect(blankedRanges(block, [[0, 13]]).toString()).toBe(
+      `${" ".repeat(6)}\n${" ".repeat(6)}\nx;\n`,
+    );
+  });
+});
+
+/** Where `text` starts in `source`, as a span of its own length. */
+function spanOf(source: Buffer, text: string): Directive {
+  return {
+    filename: "a.ts",
+    offset: source.indexOf(text),
+    length: text.length,
+  };
+}
+
+describe("the range blanked for a reported directive", () => {
+  it("is the span itself when the span opens a comment", () => {
+    const source = Buffer.from("x;\n// a note\ny;\n");
+
+    expect(commentToBlank(source, spanOf(source, "// a note"))).toEqual([
+      3, 12,
+    ]);
+  });
+
+  it("is the whole comment when an enable is reported by its body", () => {
+    const source = Buffer.from("x;\n  /* eslint-enable */\ny;\n");
+    const from = source.indexOf("/*");
+
+    expect(commentToBlank(source, spanOf(source, " eslint-enable "))).toEqual([
+      from,
+      source.indexOf("*/") + 2,
+    ]);
+  });
+
+  it("is the whole comment when an enable is reported by a rule it names", () => {
+    const source = Buffer.from("/* eslint-enable no-shadow, no-console */\n");
+
+    expect(commentToBlank(source, spanOf(source, "no-console"))).toEqual([
+      0,
+      source.indexOf("*/") + 2,
+    ]);
+  });
+
+  it("is the whole comment when an enable in JSX children is reported by its body", () => {
+    const source = Buffer.from("    <b />\n    {/* eslint-enable */}\n");
+    const from = source.indexOf("/*");
+
+    expect(commentToBlank(source, spanOf(source, " eslint-enable "))).toEqual([
+      from,
+      source.indexOf("*/") + 2,
+    ]);
+  });
+
+  it("is refused when code precedes the brace that holds the comment", () => {
+    const source = Buffer.from("x; {/* eslint-enable */}\n");
+
+    expect(() =>
+      commentToBlank(source, spanOf(source, " eslint-enable ")),
+    ).toThrow(/neither opens a comment/);
+  });
+
+  it("is the rest of the line for an enable written as a line comment", () => {
+    const source = Buffer.from("x;\n  // oxlint-enable no-shadow\ny;\n");
+
+    expect(commentToBlank(source, spanOf(source, "no-shadow"))).toEqual([
+      source.indexOf("//"),
+      source.indexOf("\ny;"),
+    ]);
+  });
+
+  it("is refused when the span sits in code", () => {
+    const source = Buffer.from("const a = 1;\n");
+
+    expect(() => commentToBlank(source, spanOf(source, "const"))).toThrow(
+      /neither opens a comment/,
+    );
+  });
+
+  it("is refused when the comment holding the span is not an enable", () => {
+    const source = Buffer.from("/* a note */\n");
+
+    expect(() => commentToBlank(source, spanOf(source, "note"))).toThrow(
+      /neither opens a comment/,
+    );
+  });
+
+  it("is refused when the comment holding the span does not begin its line", () => {
+    const source = Buffer.from("x; /* eslint-enable */\n");
+
+    expect(() =>
+      commentToBlank(source, spanOf(source, " eslint-enable ")),
+    ).toThrow(/neither opens a comment/);
+  });
+
+  it("is refused when the span runs past the comment's close", () => {
+    const source = Buffer.from("/* eslint-enable */ x;\n");
+
+    expect(() => commentToBlank(source, spanOf(source, "enable */ x"))).toThrow(
+      /neither opens a comment/,
+    );
+  });
+});
+
+describe("a copy of the trees", () => {
+  const fixture = join(REPORTS, "links");
+  const source = join(fixture, "source");
+
+  /** A tree holding a linked file and a linked directory. */
+  const linkedTree = (): void => {
+    rmSync(fixture, { recursive: true, force: true });
+    mkdirSync(join(source, "t"), { recursive: true });
+    mkdirSync(join(source, "elsewhere"));
+    writeFileSync(join(source, "t", "a.ts"), "export const a = 1;\n");
+    writeFileSync(join(source, "elsewhere", "b.ts"), "export const b = 2;\n");
+    symlinkSync("a.ts", join(source, "t", "alias.ts"));
+    symlinkSync(join("..", "elsewhere"), join(source, "t", "dir"));
+  };
+
+  it("follows every link, so nothing in it is shared with the source", () => {
+    linkedTree();
+    const copy = join(fixture, "copy");
+    copyBeside(source, copy, ["t"]);
+
+    expect(sharedWithItsSource(copy, source, ["t"])).toEqual([]);
+    expect(readFileSync(join(copy, "t", "dir", "b.ts"), "utf8")).toBe(
+      "export const b = 2;\n",
+    );
+  });
+
+  it("names every link a copy that kept them carries", () => {
+    linkedTree();
+    const kept = join(fixture, "kept");
+    cpSync(join(source, "t"), join(kept, "t"), { recursive: true });
+
+    expect(sharedWithItsSource(kept, source, ["t"])).toEqual([
+      join("t", "alias.ts"),
+      join("t", "dir"),
+    ]);
+  });
+
+  it("names a file that is the source file itself", () => {
+    linkedTree();
+    const hard = join(fixture, "hard");
+    mkdirSync(join(hard, "t"), { recursive: true });
+    linkSync(join(source, "t", "a.ts"), join(hard, "t", "a.ts"));
+
+    expect(sharedWithItsSource(hard, source, ["t"])).toEqual([
+      join("t", "a.ts"),
+    ]);
+  });
+});
+
+describe("what a directive waives", () => {
+  const honoured = {
+    ...BASELINE,
+    diagnostics: [findingAt("eslint(no-shadow)", 9)],
+  };
+
+  it("is what the copy adds outside the backlog, as code, file and message", () => {
+    const counted = {
+      ...BASELINE,
+      diagnostics: [
+        findingAt("eslint(no-shadow)", 9),
+        findingAt("react(refs)", 40),
+        findingAt("react(purity)", 50, "the render reads Math.random"),
+      ],
+    };
+
+    expect(waivedIn(counted, honoured, new Set(["react(refs)"]))).toEqual([
+      ["react(purity)", "src/a.ts", "the render reads Math.random"],
+    ]);
+  });
+
+  it("is nothing when the copy adds only backlog findings", () => {
+    const counted = {
+      ...BASELINE,
+      diagnostics: [
+        findingAt("eslint(no-shadow)", 9),
+        findingAt("react(refs)", 40),
+      ],
+    };
+
+    expect(waivedIn(counted, honoured, new Set(["react(refs)"]))).toEqual([]);
+  });
+});
+
+/** A finding of `code` at one byte of one file. */
+function findingAt(code: string, offset: number, message = "a note"): Finding {
+  return {
+    code,
+    filename: "src/a.ts",
+    message,
+    labels: [{ span: { offset } }],
+  };
+}
+
+describe("a blanked copy compared with the checkout", () => {
+  it("lacks nothing when it reports every finding the checkout does, and more", () => {
+    const honoured = {
+      ...BASELINE,
+      diagnostics: [findingAt("eslint(no-shadow)", 9)],
+    };
+    const copy = {
+      ...BASELINE,
+      diagnostics: [
+        findingAt("eslint(no-shadow)", 9),
+        findingAt("react(refs)", 40),
+      ],
+    };
+
+    expect(findingsMissingFrom(copy, honoured)).toEqual([]);
+  });
+
+  it("names a finding the copy lost", () => {
+    const honoured = {
+      ...BASELINE,
+      diagnostics: [findingAt("eslint(no-shadow)", 9)],
+    };
+
+    expect(findingsMissingFrom({ ...BASELINE }, honoured)).toEqual([
+      "eslint(no-shadow) src/a.ts 9",
+    ]);
   });
 });

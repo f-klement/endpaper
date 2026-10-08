@@ -132,8 +132,10 @@ const PDB_TYPE_AT = 60;
  * book: it is a file whose offset table disagrees with itself, which is what
  * `damaged` says. "This file is too large to read here" would send somebody to
  * look for a smaller copy of a file that may be 200 kB.
+ *
+ * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const MAX_RECORD_ZERO_BYTES = 1024 * 1024;
+export const MAX_RECORD_ZERO_BYTES = 1024 * 1024;
 
 /**
  * The smallest record 0 that could hold a MOBI header at all.

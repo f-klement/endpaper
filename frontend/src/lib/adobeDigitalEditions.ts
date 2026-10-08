@@ -293,8 +293,10 @@ export const MAX_CATALOGUE_BYTES = 16 * 1024 * 1024;
  * document are literals spelled here and a member supplied file decides which of
  * them are found and never what they are. `kindle.ts::ELEMENTS` makes the
  * argument in full.
+ *
+ * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const ELEMENTS = [
+export const ELEMENTS = [
   "contentRecord",
   "title",
   "creator",
@@ -573,7 +575,14 @@ export function readDigitalEditionsLibrary(
     return { ok: false, failure: "not-a-digital-editions-catalogue" };
   }
 
-  const document = new DOMParser().parseFromString(xml, "application/xml");
+  // Caught for `fb2.ts::readFb2Description`'s reason: a parser this reader
+  // does not choose may throw where the specification answers `parsererror`.
+  let document: Document;
+  try {
+    document = new DOMParser().parseFromString(xml, "application/xml");
+  } catch {
+    return { ok: false, failure: "not-a-digital-editions-catalogue" };
+  }
   // A parse error yields a document whose root is `parsererror`, which is an
   // element like any other and holds no records, so both halves of "this is not
   // the catalogue" land on the one arm below.

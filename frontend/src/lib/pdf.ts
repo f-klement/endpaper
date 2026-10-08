@@ -266,9 +266,11 @@ const OBJECT_WINDOW_BYTES = 64 * 1024;
  * **These are one stream's ceilings, and neither bounds a file.** A file
  * chooses how many streams it has; the running total below is what stops them
  * adding up.
+ *
+ * The second is exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
 const MAX_STREAM_BYTES = 8 * 1024 * 1024;
-const MAX_INFLATED_BYTES = 16 * 1024 * 1024;
+export const MAX_INFLATED_BYTES = 16 * 1024 * 1024;
 
 /**
  * The total this reader will spend on one file: read, inflated and parsed.
@@ -303,8 +305,10 @@ const MAX_INFLATED_BYTES = 16 * 1024 * 1024;
  * either**, and it charges a second time for bytes that stream already paid to
  * inflate, so the real headroom is smaller than 8.2 by an amount nobody has
  * measured.
+ *
+ * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const MAX_BUDGET_BYTES = 32 * 1024 * 1024;
+export const MAX_BUDGET_BYTES = 32 * 1024 * 1024;
 
 /**
  * How deep a nested container may go, and how long a reference chain may be.
@@ -319,8 +323,10 @@ const MAX_BUDGET_BYTES = 32 * 1024 * 1024;
  * label: nothing in the corpus nests or chains deep enough to be near either,
  * so there is no distribution to take a headroom from. What they are set
  * against is the stack and this reader's own patience, not a file.
+ *
+ * The first is exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const MAX_DEPTH = 32;
+export const MAX_DEPTH = 32;
 const MAX_RESOLVE_STEPS = 16;
 
 /**
@@ -1611,7 +1617,16 @@ function readXmp(packet: string): XmpRecord | null {
   if (end < open.index) return null;
   const xml = packet.slice(open.index, end + closing.length);
 
-  const document = new DOMParser().parseFromString(xml, "application/xml");
+  // Caught for `fb2.ts::readFb2Description`'s reason: a parser this reader
+  // does not choose may throw where the specification answers `parsererror`.
+  // The DOM's own, spelled through the parser: `Document` in this module is
+  // the PDF's.
+  let document: ReturnType<DOMParser["parseFromString"]>;
+  try {
+    document = new DOMParser().parseFromString(xml, "application/xml");
+  } catch {
+    return null;
+  }
   const root = document.documentElement;
   if (!root || root.localName !== "RDF") return null;
 

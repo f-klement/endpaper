@@ -24,6 +24,17 @@
 import { describe, expect, it } from "vitest";
 
 import { readOpf } from "../../src/lib/opf";
+import type { FileMetadata } from "../../src/lib/fileReaders";
+import * as opf from "../../src/lib/opf";
+import { holds, PROFILE, PROPERTY, witness } from "../property";
+import { expectAnswer, overrunBreach, type ValueDoor } from "./readerContract";
+import {
+  declares,
+  OPF,
+  render,
+  xmlDocument,
+  type XmlDocument,
+} from "./xmlArbitrary";
 
 function epub2(metadata: string): string {
   return `<?xml version="1.0" encoding="utf-8"?>
@@ -505,5 +516,67 @@ describe("a file that names very many authors", () => {
       ),
     );
     expect(record?.authors).toEqual(["Ursula K. Le Guin", "Joanna Russ"]);
+  });
+});
+
+/**
+ * `readOpf` as a door: a document in, a record or `null` out.
+ *
+ * **Held at the parser door the meter counts**: no XML parse is handed a
+ * declaration. What the property draws is a tree over this reader's own
+ * names, mostly grafted into one it accepts, so its walk behind the root is
+ * reached, and damage no tree can express inserted on top.
+ */
+const xmlDoor: ValueDoor<XmlDocument, FileMetadata | null> = {
+  module: opf,
+  ceilings: () => ({ refusesEntities: true }),
+  open: (document) => readOpf(render(document)),
+};
+
+describe("any package document an EPUB carries", () => {
+  it(
+    "is read or refused, and never parsed while it declares an entity",
+    PROPERTY,
+    async () => {
+      expect(
+        await holds(xmlDocument(OPF), async (document) => {
+          await expectAnswer(xmlDoor, document);
+        }),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("is metered, so the parse ceilings above are not held over nothing", async () => {
+    const { outcome, counted } = await expectAnswer(xmlDoor, {
+      declaration: "none",
+      root: OPF.accepted,
+      insertions: [],
+      padTo: undefined,
+    });
+
+    expect(outcome).toMatchObject({ answered: { title: "Dune" } });
+    expect(counted.parses).toBe(1);
+  });
+
+  it("declares the parse ceiling it is held to, so deleting it reds", async () => {
+    // **The positive control for a door handed a value**: a stub hands the
+    // meter's parser a declaring document through this door's own ceilings.
+    expect(
+      await overrunBreach(xmlDoor, { ceiling: "refusesEntities" }),
+    ).toContain("declaring an entity");
+  });
+
+  it("draws documents it reads, and documents that declare", async () => {
+    // **Asked of the reader rather than of the tree**: whether a drawn
+    // document is one this reader reads is the reader's to say, and a
+    // vocabulary that stopped matching it is what turns this red.
+    await witness(xmlDocument(OPF), {
+      "the reader reads": async (document) => {
+        if (document.padTo !== undefined) return false;
+        const { outcome } = await expectAnswer(xmlDoor, document);
+        return "answered" in outcome && outcome.answered !== null;
+      },
+      "declares an entity": declares,
+    });
   });
 });

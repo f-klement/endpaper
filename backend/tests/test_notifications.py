@@ -368,15 +368,27 @@ class TestRunDigest:
         assert result["skipped_private"] == 1
 
     async def test_a_failure_logs_the_host_and_not_the_url(self, configured, lend, caplog):
-        """The URL may carry a token in its path or query string."""
+        """The URL may carry a token in its path or query string. Captured at
+        DEBUG so no level hides an app line naming it. A connection failure
+        means the HTTP library logs no request line at all, so the leak that
+        line carried is caught by the success arm below, not by this one."""
         lend()
-        with caplog.at_level(logging.WARNING), respx.mock as mock:
+        with caplog.at_level(logging.DEBUG), respx.mock as mock:
             mock.post(HOOK).mock(side_effect=httpx.ConnectError("refused"))
             await notifications.run_digest(configured)
 
         logged = caplog.text
         assert "hooks.example.org" in logged
         assert "abcdef" not in logged
+
+    async def test_a_successful_send_never_logs_the_url(self, configured, lend, caplog):
+        """A line logged only on success would carry the URL on every send."""
+        lend()
+        with caplog.at_level(logging.DEBUG), respx.mock as mock:
+            mock.post(HOOK).mock(return_value=httpx.Response(200))
+            await notifications.run_digest(configured)
+
+        assert "abcdef" not in caplog.text
 
 
 class TestTheReplyIsNeverRead:
@@ -704,15 +716,31 @@ class TestTelegram:
     @pytest.mark.asyncio
     async def test_a_failure_never_logs_the_token(self, telegram_on, lend, caplog):
         """Telegram takes the token in the URL **path**, so a log line naming
-        the request URL is a log line naming the credential."""
+        the request URL is a log line naming the credential.
+
+        Captured at DEBUG, not WARNING, because the line that leaked was the
+        HTTP library's own request line at INFO: a capture at WARNING could not
+        see it and was green while the token reached the log on every send."""
         lend()
-        with caplog.at_level(logging.WARNING), respx.mock as mock:
+        with caplog.at_level(logging.DEBUG), respx.mock as mock:
             mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(500))
             await notifications.run_digest(telegram_on)
 
         assert BOT_TOKEN not in caplog.text
         assert "AAaaBBbb" not in caplog.text
         assert "api.telegram.org" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_a_successful_send_never_logs_the_token(self, telegram_on, lend, caplog):
+        """The failure arm above cannot see a line logged only on success, and a
+        success happens on every send, so a leak there is a leak every hour."""
+        lend()
+        with caplog.at_level(logging.DEBUG), respx.mock as mock:
+            mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(200, json={"ok": True}))
+            await notifications.run_digest(telegram_on)
+
+        assert BOT_TOKEN not in caplog.text
+        assert "AAaaBBbb" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_a_refusal_never_names_the_token(self, db, lend):

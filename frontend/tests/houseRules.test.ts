@@ -35,6 +35,7 @@ import { declarePreference } from "../src/lib/preference";
 // The refusal this file and the ScanPage guard both apply, in one home: the
 // module says why it is not a copy per guard.
 import { CARRIES_A_BOOK } from "./carriesABook";
+import { namesTheGenerator } from "./property";
 
 // The comment stripper every rule below reads its sources through, and what
 // decides how a path is parsed. One home for the same reason: the tree had two
@@ -11913,5 +11914,117 @@ describe("a module member cited in prose is still declared there", () => {
 
     expect(Object.keys(citingFiles())).toContain("tests/houseRules.test.ts");
     expect(mine.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Every string under one module naming the property generator: a literal, or
+ * a template with no expression, wherever it sits.
+ *
+ * **Every string and not every specifier**, because the specifier reader below
+ * this file's other rules use sees `source` nodes only, and four spellings put
+ * the generator in the bundle past it, measured by building each: a template
+ * literal import, a `require`, a path into `node_modules`, and an
+ * `import.meta.glob`. What they share is the package named as a string.
+ */
+function generatorNamed(path: string, source: string): string[] {
+  const out: string[] = [];
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value as unknown[]) walk(item);
+      return;
+    }
+    if (!isNode(value)) return;
+    const spelling =
+      value.type === "Literal" && typeof value.value === "string"
+        ? value.value
+        : value.type === "TemplateLiteral" &&
+            (value.expressions as unknown[]).length === 0
+          ? ((value.quasis as { value: { cooked?: string } }[])[0]?.value
+              .cooked ?? null)
+          : null;
+    if (spelling !== null && namesTheGenerator(spelling)) out.push(spelling);
+    for (const key of Object.keys(value)) walk(value[key]);
+  };
+  walk(parseAst(source, { lang: langOf(path) }));
+  return out;
+}
+
+describe("the property generator never reaches the application", () => {
+  /**
+   * **The exposure the supply chain review rests on.** `fast-check` is a
+   * development dependency, run only under the suite in the cluster, so a
+   * compromised release reaches a test pod and not a member's browser. One
+   * stray load under `src/` would put it in the bundle and make that sentence
+   * false, with the build green.
+   *
+   * **Two halves, and this is the early one.** It names the file, which is
+   * what a person fixing it needs. What it cannot read is a name it never
+   * sees as a string naming the package: one computed at run time, and one a
+   * resolver maps, a package subpath import being the measured case. The
+   * other half is the build's own refusal in `vite.config.ts`, which asks the
+   * bundler what it loaded in the page and worker builds and what the build
+   * emits; that docstring states what it does not hold.
+   */
+  it("is named by nothing under src", () => {
+    expect(
+      entries()
+        .map(([path, source]) => [path, generatorNamed(path, source)] as const)
+        .filter(([, named]) => named.length > 0),
+    ).toEqual([]);
+  });
+
+  it("reads every spelling that bundled it, and leaves prose alone", () => {
+    // Counted rather than spelled, because an expected value spelling the
+    // package is itself a string naming it, which the door rule in
+    // `propertyBudget.test.ts` refuses in any test module.
+    const rows: [string, number][] = [
+      [`import fc from "fast-check";`, 1],
+      ["export const x = () => import(`fast-check`);", 1],
+      [`const x = require("fast-check");`, 1],
+      [`import fc from "../../node_modules/fast-check/lib/fast-check.js";`, 1],
+      [`import.meta.glob("/node_modules/fast-check/lib/fast-check.js");`, 1],
+      [`import * as prand from "pure-rand/generator/mersenne";`, 1],
+      [`import { check } from "@fast-check/vitest";`, 1],
+      [`const s = "a fast-check counterexample";`, 0],
+      [`import { a } from "./fast-checker";`, 0],
+    ];
+
+    expect(
+      rows.map(([source]) => generatorNamed("lib/row.ts", source).length),
+    ).toEqual(rows.map(([, named]) => named));
+  });
+
+  it("reads the imports there are, so the rule above is not vacuous", () => {
+    // A reader that stopped reading reports nothing. `react` is imported
+    // throughout the shell, and a lazy reader is loaded by literal.
+    const all = new Set(
+      entries().flatMap(([path, source]) => specifiersOf(path, source)),
+    );
+    expect(all.has("react")).toBe(true);
+    expect(all.has("./pdf")).toBe(true);
+  });
+
+  it("is refused by the build as well, by what the bundler loads and emits", () => {
+    // **The other half, held by its text**: the configuration is read rather
+    // than run, because no test here builds. The refusal is the plugin, built
+    // only, ahead of every other, matching the path a load resolves to; named
+    // in the worker build too, which never sees the page's plugins; and
+    // checking every chunk's modules and every asset's sources as emitted,
+    // which is where a `new URL` asset arrives without a load. Each line here
+    // is a half that went green with every other guard, measured.
+    expect(viteConfig).toContain("withoutTheGenerator(),\n    react(),");
+    expect(viteConfig).toMatch(/apply: "build",\n\s+enforce: "pre",/);
+    expect(viteConfig).toContain(
+      "worker: { plugins: () => [withoutTheGenerator()] },",
+    );
+    expect(viteConfig).toMatch(
+      /generateBundle\(_options, bundle\) \{\n\s+for \(const output of Object\.values\(bundle\)\) \{\n\s+const sources =\n\s+output\.type === "chunk" \? output\.moduleIds : output\.originalFileNames;/,
+    );
+    // Anchored at the start, which an emitted asset's root relative source
+    // name needs: the unanchored pattern let one through, measured.
+    expect(viteConfig).toContain(
+      "const GENERATOR =\n  /(?:^|[\\\\/])node_modules",
+    );
   });
 });

@@ -45,6 +45,17 @@ import {
   type DigitalEditionsBook,
   type DigitalEditionsLibrary,
 } from "../../src/lib/adobeDigitalEditions";
+import * as digitalEditions from "../../src/lib/adobeDigitalEditions";
+import { type DigitalEditionsReading } from "../../src/lib/adobeDigitalEditions";
+import { holds, PROFILE, PROPERTY, witness } from "../property";
+import { expectAnswer, overrunBreach, type ValueDoor } from "./readerContract";
+import {
+  declares,
+  DIGITAL_EDITIONS,
+  render,
+  xmlDocument,
+  type XmlDocument,
+} from "./xmlArbitrary";
 
 // The module's own source, for the two rules below that recompute a list rather
 // than restating it. A `?raw` specifier is a different module id, so this is a
@@ -1174,5 +1185,79 @@ describe("the document this reader will parse is bounded", () => {
       failure: "too-large",
     });
     expect(text).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `readDigitalEditionsLibrary` as a door: a document in, a library or a named refusal out.
+ *
+ * **Held at the parser door the meter counts**: no XML parse is handed a
+ * declaration, nor a document past `MAX_CATALOGUE_BYTES`. What the property draws is a tree over this reader's own
+ * names, mostly grafted into one it accepts, so its walk behind the root is
+ * reached, and damage no tree can express inserted on top.
+ */
+const xmlDoor: ValueDoor<XmlDocument, DigitalEditionsReading> = {
+  module: digitalEditions,
+  ceilings: () => ({ refusesEntities: true, parsed: MAX_CATALOGUE_BYTES }),
+  open: (document) => readDigitalEditionsLibrary(render(document)),
+};
+
+describe("any Digital Editions catalogue a member picks", () => {
+  it(
+    "is read or refused, and never parsed while it declares an entity or runs past its cap",
+    PROPERTY,
+    async () => {
+      expect(
+        await holds(
+          xmlDocument(DIGITAL_EDITIONS, [MAX_CATALOGUE_BYTES]),
+          async (document) => {
+            await expectAnswer(xmlDoor, document);
+          },
+        ),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("is metered, so the parse ceilings above are not held over nothing", async () => {
+    const { outcome, counted } = await expectAnswer(xmlDoor, {
+      declaration: "none",
+      root: DIGITAL_EDITIONS.accepted,
+      insertions: [],
+      padTo: undefined,
+    });
+
+    expect(outcome).toMatchObject({ answered: { ok: true } });
+    expect(counted.parses).toBe(1);
+  });
+
+  it("declares the parse ceilings it is held to, so one deleted or loosened reds", async () => {
+    // **The positive control for a door handed a value**: a stub hands the
+    // meter's parser a string one code unit past the cap, and a declaring
+    // document, through this door's own ceilings.
+    expect(
+      await overrunBreach(xmlDoor, {
+        ceiling: "parsed",
+        bound: MAX_CATALOGUE_BYTES,
+      }),
+    ).toContain(`code units against a ceiling of ${MAX_CATALOGUE_BYTES}`);
+    expect(
+      await overrunBreach(xmlDoor, { ceiling: "refusesEntities" }),
+    ).toContain("declaring an entity");
+  });
+
+  it("draws documents it reads, and documents that declare, and past its cap", async () => {
+    // **Asked of the reader rather than of the tree**: whether a drawn
+    // document is one this reader reads is the reader's to say, and a
+    // vocabulary that stopped matching it is what turns this red.
+    await witness(xmlDocument(DIGITAL_EDITIONS, [MAX_CATALOGUE_BYTES]), {
+      "the reader reads": async (document) => {
+        if (document.padTo !== undefined) return false;
+        const { outcome } = await expectAnswer(xmlDoor, document);
+        return "answered" in outcome && outcome.answered.ok;
+      },
+      "declares an entity": declares,
+      "pads past the catalogue cap": (one) =>
+        (one.padTo ?? 0) > MAX_CATALOGUE_BYTES,
+    });
   });
 });

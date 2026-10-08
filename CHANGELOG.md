@@ -2,6 +2,75 @@
 
 ## Unreleased
 
+- **The exception rules family is now enforced on the backend and the tooling scripts, with two
+  of its rules refused for reasons written beside them.** A rule ruff adds to the family later
+  arrives enforced. The one asking for an exception class per raise site is refused as a style
+  opinion, and the one asking every error log in a handler to carry a traceback is refused on the
+  backend because here the traceback is how a caller's value or a credential would reach the log.
+  The list that holds such refusals over the whole backend is now asked, like the scripts' one,
+  whether each entry still fires, and no list or per file entry on either side may switch off a
+  rule that polices a suppression comment. Bidirectional control characters in Python source,
+  which make a line read differently from how it runs, are now refused on both sides. Nothing a
+  member sees moves.
+
+- **The readers that parse a file a member picks are tested over generated files.** Every reader
+  a stranger's file reaches has a property: the zip seam, EPUB, comic archives, both FictionBook
+  doors, Google Takeout archives, PDF, MOBI and both audiobook formats, every store's import
+  opener, the SQLite seam, the Calibre intake and its description cleaner, the XML catalogue and
+  metadata readers, and the name, query and path doors. The oracle is the bounds each reader
+  itself declares, held by counting what it reads, inflates and parses rather than by asking
+  whether it threw: against the PDF reader from before its inflation budget, which answered a
+  decompression bomb with no error, the property fails on the first run. Every bound a reader
+  declares has a control that reads past it and must be refused, and a test file whose reader
+  declares a bound no control overran fails. Each run draws a fresh seed and writes where it is
+  before each example, so a run that hangs names its input. `fast-check` is added as a
+  development dependency, pinned exactly, and the build refuses a bundle that loads or emits it,
+  in the page and in every worker.
+
+- **A Moon+ Reader pick that is not a zip, or whose database inflates past its limit, is
+  reported as one skipped source rather than as a bug in a reader.** Separately, every reader that
+  parses an XML document answers a parser that throws on it the way it answers a document that
+  does not parse, rather than rejecting. Browsers answer such a document with a parse error; the
+  test DOM threw, and the new properties found it in the FictionBook, Kindle and Digital Editions
+  readers.
+
+- **The release pipeline refuses a vulnerability scan that could not see.** A scan report that is
+  not a report, that has no result for a lockfile the tree owns, or in which an advisory vanished
+  from a package that did not move now fails the night rather than reading as clean, and every
+  scan of a release reads the ignore file of the tag it starts from.
+
+- **The Telegram bot token and the Google Books key no longer reach the server log.** The HTTP
+  client library logs every request it sends at INFO with its full address, the bot token is part
+  of the Telegram address and the Books key is a query parameter, so both were written to the log
+  on every send and every lookup, successful or not, and a webhook address carrying a token went
+  the same way. Those request lines are now off, and a refused catalogue redirect is logged
+  without its query. **If you keep this server's logs, treat the bot token and the Books key as
+  exposed and replace them.** The price is that the log no longer has a line per outbound
+  request, and setting the server's log level to DEBUG does not bring it back.
+
+- **An automatic patch release now carries every fixable advisory, not only the one that
+  triggered it.** What starts an unattended release is unchanged, a fixable advisory scored HIGH
+  or worse; once one does, every fixable advisory the Python and JavaScript dependency audits
+  report goes into the same release. A Python advisory with no fix, rechecked that night and
+  established as MEDIUM or LOW, is recorded against that release and package in the tagged commit
+  and the release goes ahead; any other unfixable Python advisory, one whose severity could not be
+  established included, blocks the release and pages once with the reason. A release the pipeline
+  refuses deletes the branch it cut and only that one, and a release is tagged at the commit its
+  verification proved green. Every call carrying the pipeline's credentials now goes to a fixed
+  host over verified TLS and follows no redirect, where a redirect could previously carry a token
+  elsewhere.
+
+- **Every lint suppression list is read, and every backlog count is the linter's own.** Both
+  ruff configurations are pinned key by key and value by value, so narrowing a family or
+  lengthening a line can no longer switch a check off with every test green, and a second
+  configuration file or an ignore file on the lint walk is refused. A rule wrong about every
+  tooling script has a list of its own, read by selecting it again, and no list covering a whole
+  tree may hold a bandit rule. Every backlog entry, in both ruff configurations and in the
+  frontend linter's, states its count and is held equal to what the linter finds with every
+  inline directive ignored, so a fix and a new site each move the number in the commit that makes
+  it; twelve of the frontend's seventeen counts were wrong when this landed. Nothing a member sees
+  moves.
+
 - **The whole pytest style family and the frontend's typed mocks are now enforced, and the
   last test rule in the frontend's lint backlog is gone.** On the backend every rule of the
   family is selected, so one ruff adds later arrives enforced: 148 findings were cleared,

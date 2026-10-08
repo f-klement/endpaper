@@ -203,10 +203,15 @@ describe("a module that reads a zip does not map its failures itself", () => {
     // opens two archives per book and has two sites where a `ZipError` becomes
     // a word for a member. Both go through the helper, which is what the
     // equality above asserts; this is the half that says it is here at all.
+    //
+    // **Nor is `lib/stores.ts`**: its Moon+ opener reads a backup that is a
+    // zip, and answers the seam's refusals through the helper rather than
+    // letting them reach the card as a bug in a reader.
     expect(naming("zipFailureAs(")).toEqual([
       "lib/cbz.ts",
       "lib/epub.ts",
       "lib/fb2.ts",
+      "lib/stores.ts",
       "lib/takeout.ts",
     ]);
   });

@@ -29,6 +29,16 @@
  * * `TPE2` named the **narrator**, which is why nothing reads it
  */
 
+import fc from "fast-check";
+
+import {
+  MAX_ENTRY_BYTES,
+  MAX_ID3_BYTES,
+  MAX_READS,
+} from "../src/lib/audiobook";
+import { edges, sometimes, type Total } from "./property";
+import { around, type Zeroes } from "./zipFixtures";
+
 const encoder = new TextEncoder();
 
 function concat(parts: readonly Uint8Array[]): Uint8Array<ArrayBuffer> {
@@ -300,4 +310,254 @@ export function mp3(
     tail = new Uint8Array(0),
   } = parts;
   return new Blob([head, audio, tail] as BlobPart[]);
+}
+
+// --- specs and arbitraries over the builders above ---------------------------
+//
+// The builders take bytes, so a property drawing bytes would print bytes. These
+// specs describe the same files as data, render through the builders above, and
+// print as literals a named case can be written in.
+
+/** One box as data: a name, what it claims, and zero bytes inside. */
+export interface BoxSpec {
+  readonly type: string;
+  /** A length to declare instead of the true one. */
+  readonly declared: number | undefined;
+  /** Carry the length as 64 bits, which a size of 1 means. */
+  readonly long: boolean | undefined;
+  /** How many zero bytes it holds. */
+  readonly payload: number | undefined;
+}
+
+function renderBox(spec: BoxSpec): Uint8Array {
+  const payload = new Uint8Array(spec.payload ?? 0);
+  if (spec.declared !== undefined) {
+    return brokenBox(spec.type, spec.declared, payload);
+  }
+  return spec.long === true
+    ? longBox(spec.type, payload)
+    : box(spec.type, payload);
+}
+
+/** One `ilst` entry as data. A run of zeroes is the value too large to read. */
+export interface IlstEntrySpec {
+  readonly key: string;
+  readonly value: string | Zeroes;
+  readonly kind: number | undefined;
+}
+
+/** An M4B as data, laid out by `m4b`. */
+export interface Mp4Spec {
+  readonly entries: readonly IlstEntrySpec[];
+  readonly moovChildren: readonly BoxSpec[];
+  readonly before: readonly BoxSpec[];
+  /**
+   * How many empty boxes sit before `moov`, all alike. **A crowd is what a
+   * slice budget is for**: small on disk and one read each to walk.
+   */
+  readonly crowd: number;
+  readonly metaIsFullBox: boolean | undefined;
+  readonly withoutTags: boolean | undefined;
+}
+
+export async function buildM4b(
+  spec: Mp4Spec,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const free = box("free");
+  const blob = m4b({
+    entries: spec.entries.map((entry) =>
+      ilstEntry(
+        entry.key,
+        typeof entry.value === "string"
+          ? entry.value
+          : new Uint8Array(entry.value.zeroes),
+        entry.kind,
+      ),
+    ),
+    moovChildren: spec.moovChildren.map(renderBox),
+    before: [
+      ...Array.from({ length: spec.crowd }, () => free),
+      ...spec.before.map(renderBox),
+    ],
+    metaIsFullBox: spec.metaIsFullBox,
+    withoutTags: spec.withoutTags,
+  });
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+/** One ID3 frame as data: its id, its encoding byte and latin-1 text. */
+export interface Id3FrameSpec {
+  readonly id: string;
+  readonly encoding: number;
+  readonly text: string;
+  readonly flags: number | undefined;
+}
+
+/** An MP3 as data: a head tag, a tail tag, either absent. */
+export interface Mp3Spec {
+  readonly head:
+    | {
+        readonly major: number | undefined;
+        readonly frames: readonly Id3FrameSpec[];
+        readonly unsynchronised: boolean | undefined;
+        /** Zero bytes of extended header, which sets the flag. */
+        readonly extendedHeader: number | undefined;
+        readonly padding: number | undefined;
+        readonly plainSize: boolean | undefined;
+      }
+    | undefined;
+  readonly tail: Id3v1Fields | undefined;
+}
+
+export async function buildMp3(
+  spec: Mp3Spec,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const head =
+    spec.head === undefined
+      ? undefined
+      : id3v2({
+          major: spec.head.major,
+          frames: spec.head.frames.map((frame) =>
+            textFrame(
+              frame.id,
+              concat([new Uint8Array([frame.encoding]), latin1(frame.text)]),
+              frame.flags,
+            ),
+          ),
+          unsynchronised: spec.head.unsynchronised,
+          extendedHeader:
+            spec.head.extendedHeader === undefined
+              ? undefined
+              : new Uint8Array(spec.head.extendedHeader),
+          padding: spec.head.padding,
+          plainSize: spec.head.plainSize,
+        });
+  const blob = mp3({
+    head,
+    tail: spec.tail === undefined ? undefined : id3v1(spec.tail),
+  });
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+const boxSpec = fc.record({
+  type: fc.constantFrom(
+    "free",
+    "moov",
+    "udta",
+    "meta",
+    "ilst",
+    "mdat",
+    "\u0000\u0000\u0000\u0000",
+  ),
+  declared: sometimes(fc.constantFrom(0, 1, 7, 8, 0xffffffff)),
+  long: sometimes(fc.boolean()),
+  payload: sometimes(fc.constantFrom(0, 8, 64)),
+} satisfies Total<BoxSpec>);
+
+const ilstEntrySpec = fc.record({
+  key: fc.constantFrom("\u00a9alb", "\u00a9ART", "\u00a9nam", "covr", "aART"),
+  value: fc.oneof(
+    { arbitrary: fc.string({ maxLength: 24 }), weight: 3 },
+    {
+      arbitrary: fc
+        .constantFrom(...around(MAX_ENTRY_BYTES))
+        .map((zeroes): Zeroes => ({ zeroes })),
+      weight: 1,
+    },
+  ),
+  kind: sometimes(fc.constantFrom(0, 1, 2, 13, 21)),
+} satisfies Total<IlstEntrySpec>);
+
+/**
+ * The file that costs the reader most, as `audiobook.test.ts` builds it by
+ * hand: entries carrying a wanted key and a value it will not decode, so the
+ * walk never finds its three and never stops early.
+ */
+const costliest = fc.record({
+  entries: fc.constant(
+    Array.from({ length: 200 }, () => ({
+      key: "\u00a9alb",
+      value: { zeroes: 20_000 },
+      kind: 13,
+    })),
+  ),
+  moovChildren: fc.constant([]),
+  before: fc.constant([]),
+  crowd: fc.constant(0),
+  metaIsFullBox: fc.constant(undefined),
+  withoutTags: fc.constant(undefined),
+} satisfies Total<Mp4Spec>);
+
+/** An M4B: any structure drawn, or the costliest walk there is. */
+export function m4bSpec(): fc.Arbitrary<Mp4Spec> {
+  const any = fc.record({
+    entries: fc.array(ilstEntrySpec, { maxLength: 4 }),
+    moovChildren: fc.array(boxSpec, { maxLength: 3 }),
+    before: fc.array(boxSpec, { maxLength: 3 }),
+    crowd: fc.oneof(
+      { arbitrary: fc.constant(0), weight: 3 },
+      { arbitrary: fc.constantFrom(...edges(MAX_READS), 10_000), weight: 1 },
+    ),
+    metaIsFullBox: sometimes(fc.boolean()),
+    withoutTags: sometimes(fc.boolean()),
+  } satisfies Total<Mp4Spec>);
+  return fc.oneof(
+    { arbitrary: any, weight: 5 },
+    { arbitrary: costliest, weight: 1 },
+  );
+}
+
+const frameSpec = fc.record({
+  id: fc.constantFrom(
+    "TALB",
+    "TPE1",
+    "TIT2",
+    "TAL",
+    "TP1",
+    "TT2",
+    "APIC",
+    "\u0000\u0000\u0000\u0000",
+  ),
+  encoding: fc.constantFrom(0, 1, 2, 3, 0xff),
+  text: fc.string({ maxLength: 24 }),
+  flags: sometimes(fc.constantFrom(0x0040, 0x0002, 0xffff)),
+} satisfies Total<Id3FrameSpec>);
+
+/** An MP3: either tag, or both, drawn, with a head tag at its read ceiling. */
+export function mp3Spec(): fc.Arbitrary<Mp3Spec> {
+  const head = fc.record({
+    major: sometimes(fc.constantFrom(2, 3, 4, 5)),
+    frames: fc.array(frameSpec, { maxLength: 4 }),
+    unsynchronised: sometimes(fc.boolean()),
+    extendedHeader: sometimes(fc.constantFrom(0, 4, 10)),
+    padding: sometimes(
+      fc.oneof(
+        { arbitrary: fc.constantFrom(0, 16), weight: 3 },
+        { arbitrary: fc.constantFrom(...around(MAX_ID3_BYTES)), weight: 1 },
+      ),
+    ),
+    plainSize: sometimes(fc.boolean()),
+  } satisfies Total<NonNullable<Mp3Spec["head"]>>);
+  // **A tag past its ceiling, composed**, so a run from any seed draws one: as
+  // an override among overrides it landed on a few runs in a hundred, measured.
+  const longTag = head.map((drawn) => ({
+    ...drawn,
+    padding: MAX_ID3_BYTES + 1,
+  }));
+  return fc.record({
+    // Mostly present, unlike an override: the head tag is what is read first.
+    head: fc.oneof(
+      { arbitrary: head, weight: 3 },
+      { arbitrary: longTag, weight: 1 },
+      { arbitrary: fc.constant(undefined), weight: 1 },
+    ),
+    tail: sometimes(
+      fc.record({
+        title: sometimes(fc.string({ maxLength: 40 })),
+        artist: sometimes(fc.string({ maxLength: 40 })),
+        album: sometimes(fc.string({ maxLength: 40 })),
+        year: sometimes(fc.string({ maxLength: 6 })),
+      } satisfies Total<Id3v1Fields>),
+    ),
+  } satisfies Total<Mp3Spec>);
 }

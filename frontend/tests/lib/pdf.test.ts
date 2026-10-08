@@ -18,18 +18,36 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { readPdf } from "../../src/lib/pdf";
+import * as pdf from "../../src/lib/pdf";
 import {
+  MAX_BUDGET_BYTES,
+  MAX_INFLATED_BYTES,
+  readPdf,
+  type PdfReading,
+} from "../../src/lib/pdf";
+import { holds, PROFILE, PROPERTY, witness } from "../property";
+import {
+  buildPdf,
   classicPdf,
   concat,
   deflate,
+  isOverBudget,
   latin,
   object,
+  pdfSpec,
   streamObject,
   streamPdf,
   text,
   xmpPacket,
+  type PdfSpec,
 } from "../pdfFixtures";
+import {
+  expectNamedOutcome,
+  hostile,
+  overrunBreach,
+  type Door,
+  type Hostile,
+} from "./readerContract";
 import { withoutDecompressionStream } from "./withoutDecompression";
 // One module's text from the armed corpus, which refuses a name the tree does
 // not hold. The glob this replaced took the first value of its own result and
@@ -97,7 +115,7 @@ function startxrefOf(bytes: Uint8Array): number {
 }
 
 /** The failure or the title, so one assertion covers both arms. */
-function outcome(reading: Awaited<ReturnType<typeof readPdf>>): string {
+function verdict(reading: Awaited<ReturnType<typeof readPdf>>): string {
   return reading.ok ? `read: ${reading.metadata.title}` : reading.failure;
 }
 
@@ -154,7 +172,7 @@ describe("the text a string carries", () => {
       ),
     );
 
-    expect(outcome(reading)).toBe("read: Das Buch");
+    expect(verdict(reading)).toBe("read: Das Buch");
   });
 
   it("falls back for a runtime that has no utf-16be", async () => {
@@ -189,7 +207,7 @@ describe("the text a string carries", () => {
     // characters and each NUL becomes the space that `clean` collapses. Stated
     // in full rather than as "not the title", because a fallback that produced
     // nothing at all would also satisfy that.
-    expect(outcome(reading)).toBe("read: þÿ D a s B u c h");
+    expect(verdict(reading)).toBe("read: þÿ D a s B u c h");
   });
 
   it("reads the 32 bytes where PDFDocEncoding is not Latin-1", async () => {
@@ -206,7 +224,7 @@ describe("the text a string carries", () => {
     // literal in the source says that less exactly. It also keeps this file
     // clear of a dash, which `tests/houseRules.test.ts` reads `src/` for and
     // the writing rule asks of everything.
-    expect(outcome(reading)).toBe(
+    expect(verdict(reading)).toBe(
       "read: VBA Developer's Handbook\u2122 Second\u2013Edition",
     );
   });
@@ -214,13 +232,13 @@ describe("the text a string carries", () => {
   it("reads a string that escapes its own parentheses", async () => {
     const reading = await read(withInfo("/Title (Think Bayes \\(2nd\\))"));
 
-    expect(outcome(reading)).toBe("read: Think Bayes (2nd)");
+    expect(verdict(reading)).toBe("read: Think Bayes (2nd)");
   });
 
   it("reads an octal escape", async () => {
     const reading = await read(withInfo("/Title (Caf\\351)"));
 
-    expect(outcome(reading)).toBe("read: Café");
+    expect(verdict(reading)).toBe("read: Café");
   });
 });
 
@@ -230,7 +248,7 @@ describe("a title the file carries but this reader will not use", () => {
     // which for this format is the ordinary path rather than the exception.
     const reading = await read(withInfo("/Title () /Author (Anon)"));
 
-    expect(outcome(reading)).toBe("read: null");
+    expect(verdict(reading)).toBe("read: null");
   });
 
   it("refuses a title that names a file", async () => {
@@ -240,7 +258,7 @@ describe("a title the file carries but this reader will not use", () => {
       "Algebra_Cheat_Sheet.doc",
       "Sammelmappe1.pdf",
     ]) {
-      expect(outcome(await read(withInfo(`/Title (${junk})`)))).toBe(
+      expect(verdict(await read(withInfo(`/Title (${junk})`)))).toBe(
         "read: null",
       );
     }
@@ -253,7 +271,7 @@ describe("a title the file carries but this reader will not use", () => {
     // accepts, and so a rule that started refusing `Node.js` to catch these
     // would fail here as well as there.
     for (const kept of ["thesis.pdf", "manuscript.docx", "untitled.indd"]) {
-      expect(outcome(await read(withInfo(`/Title (${kept})`)))).toBe(
+      expect(verdict(await read(withInfo(`/Title (${kept})`)))).toBe(
         `read: ${kept}`,
       );
     }
@@ -264,7 +282,7 @@ describe("a title the file carries but this reader will not use", () => {
     // before the dot is one run of letters. Dropping it would throw away titles
     // this very library is full of.
     for (const real of ["Node.js", "ASP.NET", "Vue.js"]) {
-      expect(outcome(await read(withInfo(`/Title (${real})`)))).toBe(
+      expect(verdict(await read(withInfo(`/Title (${real})`)))).toBe(
         `read: ${real}`,
       );
     }
@@ -373,13 +391,13 @@ describe("the XMP packet", () => {
     // already have, so preferring it would only ever swap one for another.
     const reading = await withXmp(xmpPacket({ title: "A Different Title" }));
 
-    expect(outcome(reading)).toBe("read: Big Data");
+    expect(verdict(reading)).toBe("read: Big Data");
   });
 
   it("supplies a title when the information dictionary has none", async () => {
     const reading = await withXmp(xmpPacket({ title: "Fluent React" }), "");
 
-    expect(outcome(reading)).toBe("read: Fluent React");
+    expect(verdict(reading)).toBe("read: Fluent React");
   });
 
   it("expands no entity, because the document it parses has no prolog", async () => {
@@ -445,14 +463,14 @@ describe("a cross reference this reader has to follow", () => {
     // 46 of the household's 123 declare one and all 46 declare /Predictor 12.
     // Without the row filter the offsets come out as differences, which reads
     // as a file carrying no metadata rather than as an error.
-    expect(outcome(await read(await streamPdf(objects, trailer)))).toBe(
+    expect(verdict(await read(await streamPdf(objects, trailer)))).toBe(
       "read: Learning Spark",
     );
   });
 
   it("reads a cross reference stream with no predictor", async () => {
     expect(
-      outcome(
+      verdict(
         await read(await streamPdf(objects, trailer, { predictor: false })),
       ),
     ).toBe("read: Learning Spark");
@@ -463,7 +481,7 @@ describe("a cross reference this reader has to follow", () => {
     // information dictionary there, and a byte scanning reader found 41 titles
     // against this one's 71.
     expect(
-      outcome(await read(await streamPdf(objects, trailer, { packed: [[1]] }))),
+      verdict(await read(await streamPdf(objects, trailer, { packed: [[1]] }))),
     ).toBe("read: Learning Spark");
   });
 
@@ -485,7 +503,7 @@ describe("a cross reference this reader has to follow", () => {
       { prefix: inner },
     );
 
-    expect(outcome(await read(outer))).toBe(
+    expect(verdict(await read(outer))).toBe(
       "read: Kafka: The Definitive Guide",
     );
   });
@@ -504,26 +522,26 @@ describe("a cross reference this reader has to follow", () => {
       { prefix: original },
     );
 
-    expect(outcome(await read(updated))).toBe("read: Second Edition");
+    expect(verdict(await read(updated))).toBe("read: Second Edition");
   });
 });
 
 describe("a file that is not a PDF", () => {
   it("is refused on its header, before an offset in it is believed", async () => {
-    expect(outcome(await read(latin("PK\x03\x04not a pdf at all")))).toBe(
+    expect(verdict(await read(latin("PK\x03\x04not a pdf at all")))).toBe(
       "not-a-pdf",
     );
   });
 
   it("is refused when it has a header and no cross reference", async () => {
-    expect(outcome(await read(latin("%PDF-1.7\nnothing else here\n")))).toBe(
+    expect(verdict(await read(latin("%PDF-1.7\nnothing else here\n")))).toBe(
       "not-a-pdf",
     );
   });
 
   it("accepts any version, because PDF 2.0 exists", async () => {
     expect(
-      outcome(await read(withInfoVersion("%PDF-2.0\n", "/Title (New)"))),
+      verdict(await read(withInfoVersion("%PDF-2.0\n", "/Title (New)"))),
     ).toBe("read: New");
   });
 });
@@ -551,7 +569,7 @@ describe("a document that is encrypted", () => {
       ),
     );
 
-    expect(outcome(reading)).toBe("protected");
+    expect(verdict(reading)).toBe("protected");
   });
 
   it("is not refused for an /Encrypt that resolves to null", async () => {
@@ -568,7 +586,7 @@ describe("a document that is encrypted", () => {
       ),
     );
 
-    expect(outcome(reading)).toBe("read: Effective Java");
+    expect(verdict(reading)).toBe("read: Effective Java");
   });
 });
 
@@ -585,7 +603,7 @@ describe("an object graph that does not terminate", () => {
       ),
     );
 
-    expect(outcome(reading)).toBe("read: null");
+    expect(verdict(reading)).toBe("read: null");
   });
 
   it("refuses a nest deeper than the stack would take", async () => {
@@ -597,7 +615,7 @@ describe("an object graph that does not terminate", () => {
       ),
     );
 
-    expect(outcome(reading)).toBe("damaged");
+    expect(verdict(reading)).toBe("damaged");
   });
 
   it("refuses an object stream whose own /Length lives inside it", async () => {
@@ -648,7 +666,7 @@ describe("an object graph that does not terminate", () => {
       ),
     );
 
-    expect(outcome(reading)).toBe("read: null");
+    expect(verdict(reading)).toBe("read: null");
   });
 
   it("refuses a cross reference chain longer than it will walk", async () => {
@@ -666,7 +684,7 @@ describe("an object graph that does not terminate", () => {
       );
     }
 
-    expect(outcome(await read(file))).toBe("read: null");
+    expect(verdict(await read(file))).toBe("read: null");
   });
 
   it("refuses a cross reference chain that points at itself", async () => {
@@ -684,7 +702,7 @@ describe("an object graph that does not terminate", () => {
       { startxref: at },
     );
 
-    expect(outcome(await read(looping))).toBe("read: Loop");
+    expect(verdict(await read(looping))).toBe("read: Loop");
   });
 });
 
@@ -698,7 +716,7 @@ describe("a number the file supplied that does not agree with the file", () => {
       text(bytes).replace("xref\n0 3\n", "xref\n0 4000000000\n"),
     );
 
-    expect(outcome(await read(broken))).toBe("damaged");
+    expect(verdict(await read(broken))).toBe("damaged");
   });
 
   it("refuses an object whose offset points at a different object", async () => {
@@ -718,7 +736,7 @@ describe("a number the file supplied that does not agree with the file", () => {
       table.replace(`\n${first} 00000 n `, `\n${second} 00000 n `),
     );
 
-    expect(outcome(await read(swapped))).toBe("read: null");
+    expect(verdict(await read(swapped))).toBe("read: null");
   });
 
   it("refuses a cross reference table whose subsection header is not a number", async () => {
@@ -736,7 +754,7 @@ describe("a number the file supplied that does not agree with the file", () => {
         text(bytes).replace("xref\n0 3\n", `xref\n${delimiter} 3\n`),
       );
 
-      expect(outcome(await read(broken))).toBe("not-a-pdf");
+      expect(verdict(await read(broken))).toBe("not-a-pdf");
     }
   });
 
@@ -803,7 +821,7 @@ describe("a number the file supplied that does not agree with the file", () => {
       "/Info 1 0 R /Root 2 0 R",
     );
 
-    expect(outcome(await read(bytes))).toBe("damaged");
+    expect(verdict(await read(bytes))).toBe("damaged");
   });
 
   it("says the browser cannot inflate, not that the stream is broken", async () => {
@@ -826,9 +844,9 @@ describe("a number the file supplied that does not agree with the file", () => {
     );
     // The same file reads on a runtime that can inflate, which is what says the
     // fixture is not simply broken.
-    expect(outcome(await read(bytes))).toBe("read: Fine");
+    expect(verdict(await read(bytes))).toBe("read: Fine");
 
-    expect(outcome(await withoutDecompressionStream(() => read(bytes)))).toBe(
+    expect(verdict(await withoutDecompressionStream(() => read(bytes)))).toBe(
       "no-inflate",
     );
   });
@@ -847,15 +865,15 @@ describe("a number the file supplied that does not agree with the file", () => {
       "/Info 1 0 R /Root 2 0 R",
     );
 
-    expect(outcome(await read(bytes))).toBe("damaged");
+    expect(verdict(await read(bytes))).toBe("damaged");
   });
 });
 
 /**
  * What each object stream in the two files below inflates to.
  *
- * `MAX_INFLATED_BYTES`, restated because the module keeps its bounds private
- * the way every other reader does. One of these streams is inside the budget
+ * `MAX_INFLATED_BYTES`, the per stream ceiling, read from the module rather
+ * than restated. One of these streams is inside the budget
  * and three of them are 16.8 MB past it, which is the pair below: a reader that
  * charges nothing for what a stream inflates to reads them both, since neither
  * file is large and neither stream is over its own ceiling.
@@ -869,7 +887,7 @@ describe("a number the file supplied that does not agree with the file", () => {
  * built: it would be a test that a later edit to the fixture breaks without
  * touching the reader.
  */
-const INFLATED_PER_STREAM = 16 * 1024 * 1024;
+const INFLATED_PER_STREAM = MAX_INFLATED_BYTES;
 
 /**
  * A file whose `/Info` is a chain of `links` references, one per object stream.
@@ -901,7 +919,7 @@ describe("what one file may spend altogether", () => {
 
     // 16,777,256 bytes inflated and 37,727 read, measured on `builder`
     // 2026-09-08, against a budget of 33,554,432.
-    expect(outcome(await read(bytes))).toBe("read: Deep");
+    expect(verdict(await read(bytes))).toBe("read: Deep");
   });
 
   it("refuses three streams that inflate past the budget together", async () => {
@@ -910,7 +928,7 @@ describe("what one file may spend altogether", () => {
     // A 49,598 byte file. Uncharged it inflated 50,331,720 bytes and answered
     // `read: Deep` in 33 ms; charged it stops at 33,488,968 with 87,024 read,
     // both measured on `builder` 2026-09-08.
-    expect(outcome(await read(bytes))).toBe("damaged");
+    expect(verdict(await read(bytes))).toBe("damaged");
   });
 
   it("charges what an object stream's members take to parse", async () => {
@@ -937,7 +955,7 @@ describe("what one file may spend altogether", () => {
       { packed: [[1, 2, 3, 4]], inflateTo: 12 * 1024 * 1024 },
     );
 
-    expect(outcome(await read(bytes))).toBe("damaged");
+    expect(verdict(await read(bytes))).toBe("damaged");
   });
 
   it("charges a member that parses, not only one that fails", async () => {
@@ -973,7 +991,7 @@ describe("what one file may spend altogether", () => {
       },
     );
 
-    expect(outcome(await read(bytes))).toBe("damaged");
+    expect(verdict(await read(bytes))).toBe("damaged");
   });
 
   it("adds to the running total in exactly one place", () => {
@@ -1037,5 +1055,117 @@ describe("no file makes the reader throw", () => {
       }
     }
     expect(Date.now() - started).toBeLessThan(SWEEP_CEILING_MS);
+  });
+});
+
+/**
+ * `readPdf` as a door, held to its per stream ceiling and its file budget.
+ *
+ * **The meter is this property's only teeth on the budget.** The reader that
+ * charged reads and not inflation answered `ok`, in 801 ms, with nothing
+ * thrown, so "never rejects" alone is green on it. What sees it is the count
+ * of what came out of the inflater against `MAX_BUDGET_BYTES`, and only for a
+ * file with three or more streams at the ceiling, which the witness below
+ * asserts by name.
+ *
+ * **What it does not see**: the parse of an object stream's members, which
+ * the reader charges a second time for bytes already inflated. The meter
+ * counts what arrives, so its total is at most the reader's and a breach here
+ * is a breach there.
+ */
+const door: Door<PdfSpec, PdfReading> = {
+  module: pdf,
+  ceilings: () => ({ perInflate: MAX_INFLATED_BYTES, total: MAX_BUDGET_BYTES }),
+  build: buildPdf,
+  open: (file) => readPdf(file),
+};
+
+describe("any PDF a member picks", () => {
+  it(
+    "is read or refused by name, inflating no chunk past a stream's ceiling or the file's budget",
+    PROPERTY,
+    async () => {
+      // **The reach is asked of the meter**, because a spec can be the
+      // budget's combination and still reach no inflater: measured, a header
+      // the reader refuses first left a witness over the spec green while no
+      // draw was inflated.
+      expect(
+        await holds(
+          hostile(pdfSpec()),
+          async (input) => expectNamedOutcome(door, input),
+          {
+            // Inflated to the stream's ceiling, and not to the budget: the
+            // reader also charges the parse of a stream's members, so it
+            // refuses the file after the first stream at the ceiling.
+            "inflated the budget's combination to a stream's ceiling": (
+              { spec, patches },
+              { counted },
+            ) =>
+              patches.length === 0 &&
+              isOverBudget(spec, MAX_BUDGET_BYTES) &&
+              counted.inflated >= MAX_INFLATED_BYTES - 1,
+          },
+        ),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("is metered, so the ceilings above are not held over nothing", async () => {
+    const { outcome, counted } = await expectNamedOutcome(door, {
+      spec: {
+        xref: "stream",
+        header: "%PDF-1.5\n",
+        links: 1,
+        packed: true,
+        inflateTo: undefined,
+        info: "<< /Title (Deep) >>",
+        cycle: false,
+        catalog: "",
+        trailer: "",
+      },
+      patches: [],
+    });
+
+    expect(outcome).toMatchObject({
+      answered: { ok: true, metadata: { title: "Deep" } },
+    });
+    // The cross reference stream and the object stream.
+    expect(counted.inflaters).toBe(2);
+    expect(counted.inflated).toBeGreaterThan(0);
+    // **Both halves of the total**, which is read plus inflated: a reader
+    // reading by a route the meter does not count would hold the total over
+    // its inflation alone.
+    expect(counted.read).toBeGreaterThan(0);
+  });
+
+  it("declares the bounds it is held to, so one deleted or loosened reds", async () => {
+    expect(
+      await overrunBreach(door, {
+        ceiling: "perInflate",
+        bound: MAX_INFLATED_BYTES,
+      }),
+    ).toContain(`against a bound of ${MAX_INFLATED_BYTES}`);
+    // The total by each of its halves: read alone, and inflated in streams
+    // each inside the per stream bound.
+    expect(
+      await overrunBreach(door, { ceiling: "total", bound: MAX_BUDGET_BYTES }),
+    ).toContain(`read past the total of ${MAX_BUDGET_BYTES}`);
+    expect(
+      await overrunBreach(door, {
+        ceiling: "total",
+        bound: MAX_BUDGET_BYTES,
+        each: MAX_INFLATED_BYTES,
+      }),
+    ).toContain(`against a total of ${MAX_BUDGET_BYTES}`);
+  });
+
+  it("draws three or more streams at the ceiling, together past the budget", async () => {
+    await witness(hostile(pdfSpec()), {
+      "puts three or more streams at the ceiling, together past the budget": ({
+        spec,
+        patches,
+      }: Hostile<PdfSpec>) =>
+        patches.length === 0 && isOverBudget(spec, MAX_BUDGET_BYTES),
+    });
   });
 });

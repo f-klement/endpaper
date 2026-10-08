@@ -20,24 +20,46 @@
 
 import { describe, expect, it } from "vitest";
 
-import { readTakeoutArchive } from "../../src/lib/takeout";
+import { MAX_CONTAINER_BYTES, MAX_PACKAGE_BYTES } from "../../src/lib/epub";
+import * as takeout from "../../src/lib/takeout";
+import {
+  MAX_BOOK_BYTES,
+  MAX_INFLATION_RATIO,
+  MAX_SIDECAR_BYTES,
+  readTakeoutArchive,
+  type TakeoutReading,
+} from "../../src/lib/takeout";
+import { holds, PROFILE, PROPERTY, witness } from "../property";
 import {
   buildEpub,
   buildZip,
   bytes,
   CONTAINER_XML,
+  FAR_PAST,
   STORED,
   type EntrySpec,
 } from "../zipFixtures";
 import {
+  expectNamedOutcome,
+  hostile,
+  overrunBreach,
+  type Door,
+  type Hostile,
+} from "./readerContract";
+import {
   A_VOLUME_ID,
+  bookEntries,
+  buildTakeout,
   FINISHED_SENTENCE,
   hugePackage,
   LIBRARY_FOLDER,
   padding,
   sidecar,
   takeoutFile,
+  takeoutCeilings,
+  takeoutSpec,
   type BookSpec,
+  type TakeoutSpec,
 } from "./takeoutFixtures";
 
 async function read(books: BookSpec[] = [{}], extra: EntrySpec[] = []) {
@@ -440,7 +462,7 @@ describe("what the archive is allowed to inflate to", () => {
     // archive's own ratio out of the way.
     const found = library(
       await read(
-        [{ declaredSize: 33 * 1024 * 1024 }],
+        [{ declaredSize: MAX_BOOK_BYTES + 1024 * 1024 }],
         [padding(4 * 1024 * 1024)],
       ),
     );
@@ -683,8 +705,8 @@ describe("what the archive has inflated so far", () => {
         { name: "META-INF/container.xml", data: CONTAINER_XML() },
         {
           name: "OEBPS/content.opf",
-          data: hugePackage(4 * 1024 * 1024 + 64 * 1024),
-          centralUncompressedSize: 4 * 1024 * 1024 - 1,
+          data: hugePackage(MAX_PACKAGE_BYTES + 64 * 1024),
+          centralUncompressedSize: MAX_PACKAGE_BYTES - 1,
         },
       ],
     });
@@ -717,7 +739,7 @@ describe("what the archive has inflated so far", () => {
         { name: "META-INF/container.xml", data: CONTAINER_XML() },
         {
           name: "OEBPS/content.opf",
-          data: hugePackage(4 * 1024 * 1024 + 64 * 1024),
+          data: hugePackage(MAX_PACKAGE_BYTES + 64 * 1024),
         },
       ],
     });
@@ -763,5 +785,181 @@ describe("what the archive has inflated so far", () => {
         failure: "too-large",
       },
     ]);
+  });
+});
+
+/**
+ * `readTakeoutArchive` as a door, held to its inflation budget, whose terms
+ * are at `takeoutCeilings`: the store opener that reads the same archive is
+ * held to the same ones.
+ */
+const door: Door<TakeoutSpec, TakeoutReading> = {
+  module: takeout,
+  ceilings: takeoutCeilings,
+  build: buildTakeout,
+  open: (file) => readTakeoutArchive(file),
+};
+
+/** What the archive may inflate to before the EPUB's own overspend. */
+const allowance = (size: number) => size * MAX_INFLATION_RATIO;
+
+/** Several books, each with a package document just under the EPUB's ceiling. */
+const spendsTogether = ({ spec, patches }: Hostile<TakeoutSpec>) =>
+  patches.length === 0 &&
+  spec.books.length >= 2 &&
+  spec.books.every(
+    (book) =>
+      typeof book.opf === "object" &&
+      "zeroes" in book.opf &&
+      book.opf.zeroes === MAX_PACKAGE_BYTES - 1,
+  );
+
+/** A book whose file inflates past what the directory declared for it. */
+const lies = ({ spec, patches }: Hostile<TakeoutSpec>) =>
+  patches.length === 0 &&
+  spec.books.some(
+    (book) =>
+      typeof book.file === "object" &&
+      "zeroes" in book.file &&
+      book.declaredSize !== undefined &&
+      book.declaredSize < book.file.zeroes,
+  );
+
+/** A sidecar inflating past its own ceiling, and the book file beside it. */
+function sidecarBomb(n: number): EntrySpec[] {
+  return [
+    {
+      name: `${LIBRARY_FOLDER}/S${n}/S${n}.html`,
+      data: { zeroes: MAX_SIDECAR_BYTES + FAR_PAST },
+      centralUncompressedSize: 1,
+    },
+    { name: `${LIBRARY_FOLDER}/S${n}/S${n}.pdf`, data: "never read" },
+  ];
+}
+
+describe("any Takeout archive a member picks", () => {
+  it(
+    "is read or refused by name, inflating no chunk past its budget",
+    PROPERTY,
+    async () => {
+      // **Each reach is asked of what the meter counted**, so a class the
+      // generator still draws and the reader now refuses at a gate before
+      // inflating is a red here: measured, a lying book whose declared size
+      // the reader refuses first satisfied a witness over the spec alone.
+      expect(
+        await holds(
+          hostile(takeoutSpec()),
+          async (input) => expectNamedOutcome(door, input),
+          {
+            "spent books together past the archive's allowance": (
+              input,
+              { counted, size },
+            ) => spendsTogether(input) && counted.inflated >= allowance(size),
+            "inflated a lying book to the archive's allowance": (
+              input,
+              { counted, size },
+            ) => lies(input) && counted.inflated >= allowance(size),
+          },
+        ),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("is metered, so the budget above is not held over nothing", async () => {
+    const { outcome, counted } = await expectNamedOutcome(door, {
+      spec: { books: [{}], extra: [] },
+      patches: [],
+    });
+
+    expect(outcome).toMatchObject({
+      answered: { ok: true, library: { books: [{ title: "Dune" }] } },
+    });
+    // The sidecar, the book, and inside it the container and the package.
+    expect(counted.inflaters).toBe(4);
+    expect(counted.inflated).toBeGreaterThan(0);
+  });
+
+  it("declares the budget it is held to, so a ceiling deleted or loosened reds", async () => {
+    // **The positive control**: a stub reading the door's own ceilings past
+    // each bound. The aggregate is spread over inflaters under the per book
+    // bound, so only the aggregate can refuse it, over a file of one byte,
+    // whose allowance is the ratio once. **The per book bound binds in no
+    // archive this file's generator draws**: under about 1.5 MB the aggregate
+    // is the smaller, so only this control reaches it.
+    expect(
+      await overrunBreach(door, {
+        ceiling: "perInflate",
+        bound: MAX_BOOK_BYTES,
+        // An archive whose allowance alone is the per book bound, so the
+        // per book bound is what binds.
+        size: MAX_BOOK_BYTES / MAX_INFLATION_RATIO,
+      }),
+    ).toContain(`against a bound of ${MAX_BOOK_BYTES}`);
+    const total = allowance(1) + MAX_CONTAINER_BYTES + MAX_PACKAGE_BYTES;
+    expect(
+      await overrunBreach(door, {
+        ceiling: "inflated",
+        bound: total,
+        each: MAX_PACKAGE_BYTES,
+      }),
+    ).toContain(`inflated against a ceiling of ${total}`);
+    expect(await overrunBreach(door, { ceiling: "refusesEntities" })).toContain(
+      "declaring an entity",
+    );
+  });
+
+  it("holds a correct reader whose refused reads each kept the chunk that crossed", async () => {
+    // **What the aggregate's slack is for, as a case.** Five sidecars refused
+    // at their own ceiling are each charged that ceiling and each inflated one
+    // chunk past it; then a book's package document is refused at the EPUB's
+    // ceiling with the archive's allowance nearly spent. The reader charged
+    // exactly what its own rule says, and the meter used to allow one chunk in
+    // all, so it refused this reader. The allowance is aimed between the two:
+    // enough left for the book's file, little enough that the five chunks
+    // nobody charged lie past one chunk of slack.
+    const book = await buildEpub({
+      storedAt: "OEBPS/elsewhere.opf",
+      extra: [
+        {
+          name: "OEBPS/content.opf",
+          data: { zeroes: MAX_PACKAGE_BYTES + FAR_PAST },
+          centralUncompressedSize: 1,
+        },
+      ],
+    });
+    const before = [1, 2, 3, 4, 5].flatMap(sidecarBomb);
+    const last = await bookEntries({ name: "Last", file: book });
+    const withPadding = (length: number): TakeoutSpec => ({
+      books: [],
+      extra: [...before, ...last, padding(length)],
+    });
+    const aimedAt = 5 * MAX_SIDECAR_BYTES + book.length + 4 * 1024;
+    const bare = (await buildTakeout(withPadding(0))).length;
+    const spec = withPadding(Math.ceil(aimedAt / MAX_INFLATION_RATIO) - bare);
+
+    const { outcome, counted, size } = await expectNamedOutcome(door, {
+      spec,
+      patches: [],
+    });
+
+    expect(outcome).toMatchObject({
+      answered: {
+        ok: true,
+        library: { books: [], skipped: 5, refused: [{ failure: "too-large" }] },
+      },
+    });
+    // The premise, so the case cannot pass by missing what it is about: the
+    // inflation really is past one chunk of slack over the budget.
+    expect(counted.inflated).toBeGreaterThan(
+      takeoutCeilings(size).inflated! + counted.largestChunk,
+    );
+    expect(counted.ended.filter((ended) => !ended)).toHaveLength(6);
+  });
+
+  it("draws books that spend the budget together, and a book file that lies", async () => {
+    await witness(hostile(takeoutSpec()), {
+      "spends the budget together": spendsTogether,
+      "lies about a book file's size": lies,
+    });
   });
 });

@@ -355,8 +355,10 @@ export const MAX_CACHE_BYTES = 16 * 1024 * 1024;
  * **A store that cannot be read is one skipped source and never a broken
  * import**: every outcome is a value in a closed union, so a caller importing
  * from several places at once loses this one and keeps the rest.
+ *
+ * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const ELEMENTS = [
+export const ELEMENTS = [
   "response",
   "add_update_list",
   "meta_data",
@@ -517,7 +519,14 @@ export function readKindleLibrary(xml: string): KindleReading {
     return { ok: false, failure: "not-a-kindle-library" };
   }
 
-  const document = new DOMParser().parseFromString(xml, "application/xml");
+  // Caught for `fb2.ts::readFb2Description`'s reason: a parser this reader
+  // does not choose may throw where the specification answers `parsererror`.
+  let document: Document;
+  try {
+    document = new DOMParser().parseFromString(xml, "application/xml");
+  } catch {
+    return { ok: false, failure: "not-a-kindle-library" };
+  }
   // Both halves are needed. A parse error yields a document whose root is
   // `parsererror`, and a well formed document that is not this catalogue yields
   // a root that is simply something else.

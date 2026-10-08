@@ -255,12 +255,19 @@ file by a docblock:
 
 * **happy-dom** by default, because it builds a DOM substantially faster than jsdom for
   the API surface this suite uses, and that cost is paid once per file.
-* **`@vitest-environment node`** for the 18 files that touch no DOM at all, because
+* **`@vitest-environment node`** for the files that touch no DOM at all, because
   building one costs more than they spend running.
-* **`@vitest-environment jsdom`** for 3 files, pinned deliberately: happy-dom does not
-  inherit CSS custom properties down the tree, and those files solve colours against a
-  palette that has to reach a child. Each says so in its own docblock, and
-  `docs/decisions.md` records that the pin comes off if happy-dom fixes it.
+* **`@vitest-environment jsdom`** where happy-dom gets something wrong that a file depends
+  on, pinned deliberately and said in each file's own docblock: happy-dom does not inherit
+  CSS custom properties down the tree, which the files solving colours against a palette
+  need, and its XML parser misreads documents the readers of a member's files parse.
+  `docs/decisions.md` records that the palette pin comes off if happy-dom fixes it. **One
+  reader's file runs happy-dom on purpose**: `fb2.test.ts`, whose named case for a header its
+  parser throws on asserts how the FictionBook reader answers a parser that throws, which is
+  happy-dom's behaviour.
+
+Which files those are is the docblocks' to say; list them with
+`grep -rlE '^\s*\*\s*@vitest-environment jsdom' frontend/tests`.
 
 The suite runs with `isolate: false`, so the files in a worker share one environment. That
 is worth roughly half the wall clock and it is what the module rule below exists to pay
@@ -280,6 +287,87 @@ expect(api.lastCall("/api/books/scan", "POST")?.body).toMatchObject({ is_private
 ```
 
 Anything not explicitly stubbed rejects loudly rather than reaching the network.
+
+### Properties over a member's file
+
+The readers that parse a file a member picked, and the doors a picked file's name and path go
+through, are fuzzed with `fast-check`, pinned to an exact version. A bump is merged without a
+person when it only moves a patch or minor version, so what holds it is the guard's pinned export
+list: a version adding a runner or a plugin reds there, and that red stops the merge until
+somebody decides which side of the door the new name is on.
+
+- **One door.** `tests/property.ts` is the only module that runs a property: a property calls
+  `holds(arbitrary, predicate)` inside `it(name, PROPERTY, body)` and passes no options, so it
+  cannot lower its own example count, pin a seed or add a plugin. The runner fails a run that
+  executed fewer examples than its profile. `tests/propertyBudget.test.ts` holds the door by
+  parse over every module under `frontend/` but `src/`, refusing the package named by any string
+  that is not an import's specifier, and finds a property by what it binds to rather than by
+  its name. It pins the generator's export list, so a version adding a runner reds once.
+- **Never in the application.** A house rule refuses the package named by a string anywhere
+  under `src/`. The build refuses a bundle that loads it, in the page build and in every worker
+  build, and one that emits it, checking each chunk's modules and each asset's source files, since
+  the image installs development dependencies before it builds. Both match a path into
+  `node_modules`, so a copy of the package's bytes committed elsewhere is named by neither.
+- **A fresh seed per property per run**, as the backend draws one: a fixed seed would sweep
+  the same inputs forever. No timer in this suite's runtimes can interrupt a synchronous loop,
+  so the runner writes `property <name> seed <s>` and then `run <i>` to standard error before
+  each example, written synchronously. The last line before a killed run names the input, and
+  `replay(arbitrary, seed, i)` regenerates it. Setting `ENDPAPER_PROPERTY_SEED` pins a seed for
+  reproducing a red, and the runner refuses it where `CI` is set. The budget guard refuses the
+  name in any module under `frontend/` and in the manifest; refuses a dotenv file at the top of
+  `frontend/` by its existence, since bun and Vite each load one into the workers; reads Vite's
+  resolved configuration for where it loads one, which variables it copies and the suite's own
+  environment, refusing a second suite configuration by its existence; and pins the keys of
+  bun's configuration, whose `preload` runs code in every worker. That configuration is resolved
+  as the worker running the guard resolves it, so one that answers differently in vitest's main
+  process, which is the one that loads the environment, passes as the worker sees it. Code that
+  runs before the runner can still set the variable under a computed name, and a configuration
+  vitest is pointed at by a flag or a project is read only for the name spelled out; none of that
+  reads either.
+- **Counted work is the oracle, not "did it throw".** The PDF reader once charged bytes read
+  and not bytes inflated, and answered `ok` with nothing thrown. `tests/lib/meter.ts` counts
+  what a reader reads off the file it was handed, what comes out of the inflater and what is
+  handed to the XML parser, and holds each to the reader's own exported bound.
+- **One contract.** `expectNamedOutcome(door, input)` and `expectAnswer(door, value)` in
+  `tests/lib/readerContract.ts` read the meter, then refuse a throw the door's own module does
+  not export.
+- **Arbitraries draw a builder's spec, not bytes**, total over the spec by type, plus a few
+  single byte patches. A run of zeroes is a named atom at, around and far past a bound, so a
+  counterexample prints as a literal a person can read. An XML document is drawn as a tree over
+  the reader's own element names, and text as code points up to the bound its callers enforce
+  and one past it.
+- **Every module with a property has a witness for each**: at a fresh seed of its own, the
+  values an arbitrary draws include each hostile shape named, and the witness throws naming
+  the one it missed. A witness holds at any seed or it is a witness of one, so each class is
+  weighted until a run from any seed draws it.
+- **A property over a door that inflates, slices or queries names what its run must reach**,
+  asked of what the meter counted or the door answered rather than of the spec: a bomb drawn
+  behind a header the reader refuses first reaches no inflater and satisfies any predicate over
+  the spec. Each reach follows the run's own seed. A property over a door handed a string or a
+  tree names none; its witness is what says the shape is drawn. The budget guard pins how many
+  properties in each file name one, so a reach dropped is a red.
+- **Every bound a door declares has a positive control in the same file**: a stub reading,
+  inflating or parsing past it under the door's own ceilings, which must be refused by name. A
+  property is green over a correct reader whatever its door declares, so without one a ceiling
+  deleted or loosened reds nothing. A ledger the suite's setup keeps per file refuses a bound a
+  driven door declared and no control in that file overran.
+- **Every door has a property**, or is named as reached only through one: every module the
+  six roots named in `tests/propertyBudget.test.ts` reach for a value, following every relative
+  import under `src/` but the generated client's. A door outside what those roots reach is
+  outside the rule, and the budget guard names the one there is.
+
+**What a counterexample becomes.** The same rule for any property in this tree, whatever its
+arbitrary draws:
+
+1. A named `it` in the file holding the property, calling the same contract on the literal
+   the runner printed and asserting the **exact** answer, never only that nothing threw.
+2. **In the same commit as its fix, never ahead of it.** The test tree publishes, so a case
+   parked as a skipped or expected failure is a working exploit against the shipped version.
+3. Named for the behaviour, never for a seed or a run. No seed, replay path or example list
+   is pinned in a committed file, and the property stays.
+4. The spec, never opaque bytes: a bomb committed as a literal costs the mirror and reads as
+   nothing in review. A run of zeroes or of repeated text is drawn as a named atom so it prints
+   as one.
 
 ### Three render helpers, by how much context the subject needs
 

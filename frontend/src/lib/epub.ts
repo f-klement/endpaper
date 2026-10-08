@@ -47,8 +47,10 @@ import {
  * Measured at 269 bytes over 79 real files, median 252. 64 KiB is 243 times the
  * largest seen, which leaves room for a producer that indents strangely and
  * still refuses anything that is not a container document.
+ *
+ * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const MAX_CONTAINER_BYTES = 64 * 1024;
+export const MAX_CONTAINER_BYTES = 64 * 1024;
 
 /**
  * How much the package document may inflate to.
@@ -105,7 +107,14 @@ function packagePath(xml: string): string | null {
   // The container is parsed by the same engine and is the same exposure. See
   // `declaresEntities`.
   if (declaresEntities(xml)) return null;
-  const document = new DOMParser().parseFromString(xml, "application/xml");
+  // Caught for `fb2.ts::readFb2Description`'s reason: a parser this reader
+  // does not choose may throw where the specification answers `parsererror`.
+  let document: Document;
+  try {
+    document = new DOMParser().parseFromString(xml, "application/xml");
+  } catch {
+    return null;
+  }
   const root = document.documentElement;
   if (!root || root.localName !== "container") return null;
 

@@ -127,8 +127,10 @@ import { openZip, ZipError, zipFailureAs, type ZipArchive } from "./zip";
  * It is a bound on **output**, so a document declaring itself small and
  * inflating to gigabytes is stopped by this rather than by the declaration.
  * `lib/zip.ts` carries that rule.
+ *
+ * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const MAX_COMIC_INFO_BYTES = 1024 * 1024;
+export const MAX_COMIC_INFO_BYTES = 1024 * 1024;
 
 /** The entry, wherever it sits. Compared lowercased: writers differ on case. */
 const COMIC_INFO_NAME = "comicinfo.xml";
@@ -324,7 +326,14 @@ function readTitle(
  */
 export function readComicInfo(xml: string): FileMetadata | null {
   if (declaresEntities(xml)) return null;
-  const document = new DOMParser().parseFromString(xml, "application/xml");
+  // Caught for `fb2.ts::readFb2Description`'s reason: a parser this reader
+  // does not choose may throw where the specification answers `parsererror`.
+  let document: Document;
+  try {
+    document = new DOMParser().parseFromString(xml, "application/xml");
+  } catch {
+    return null;
+  }
   // Both halves are needed. A parse error yields a document whose root is
   // `parsererror`, and a well formed document that is not a ComicInfo yields a
   // root that is simply something else.

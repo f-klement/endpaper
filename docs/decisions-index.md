@@ -834,4 +834,22 @@ repeat the argument.
 |  | [A schema declaration counts as a read of a guarded column](decisions.md#a-schema-declaration-counts-as-a-read-of-a-guarded-column) | 234 |
 |  | [The declaration reader is keyed on Pydantic's compiled schema, not on `FieldInfo`](decisions.md#the-declaration-reader-is-keyed-on-pydantics-compiled-schema-not-on-fieldinfo) | 128 |
 |  | [What the two instruments hold is reading, with the archive as a stated exception](decisions.md#what-the-two-instruments-hold-is-reading-with-the-archive-as-a-stated-exception) | 169 |
+|  | [An unattended release is started by a HIGH and carries every fixable advisory](decisions.md#an-unattended-release-is-started-by-a-high-and-carries-every-fixable-advisory) | 209 |
+|  | [An unfixable Python advisory is recorded against its release and package, or it blocks](decisions.md#an-unfixable-python-advisory-is-recorded-against-its-release-and-package-or-it-blocks) | 338 |
+|  | [The carve out asks OSV again, and reads it more strictly than the trigger does](decisions.md#the-carve-out-asks-osv-again-and-reads-it-more-strictly-than-the-trigger-does) | 420 |
+|  | [A blocked night is exit 3, armed it pages its own summary, and unarmed it is a report](decisions.md#a-blocked-night-is-exit-3-armed-it-pages-its-own-summary-and-unarmed-it-is-a-report) | 144 |
+|  | [The release acts only on what its own run made](decisions.md#the-release-acts-only-on-what-its-own-run-made) | 257 |
+|  | [Every call carrying a release credential leaves through one pinned opener](decisions.md#every-call-carrying-a-release-credential-leaves-through-one-pinned-opener) | 346 |
+|  | [The HTTP library's request lines are switched off by level, not redacted](decisions.md#the-http-librarys-request-lines-are-switched-off-by-level-not-redacted) | 173 |
+|  | [A refusal over a whole lint population is `lint.ignore`, read by selecting it again](decisions.md#a-refusal-over-a-whole-lint-population-is-lintignore-read-by-selecting-it-again) | 506 |
+|  | [The application's `lint.ignore` refuses two exception rules, and B008 is on](decisions.md#the-applications-lintignore-refuses-two-exception-rules-and-b008-is-on) | 745 |
+|  | [The application's per file table is read](decisions.md#the-applications-per-file-table-is-read) | 83 |
+|  | [A backlog count is held by equality, and a security entry by file](decisions.md#a-backlog-count-is-held-by-equality-and-a-security-entry-by-file) | 93 |
+|  | [The keys of both ruff configurations are pinned](decisions.md#the-keys-of-both-ruff-configurations-are-pinned) | 131 |
+|  | [The frontend backlog counts are read over a copy with every disable directive blanked](decisions.md#the-frontend-backlog-counts-are-read-over-a-copy-with-every-disable-directive-blanked) | 387 |
+|  | [The frontend's property runs draw a fresh seed, and say where they are](decisions.md#the-frontends-property-runs-draw-a-fresh-seed-and-say-where-they-are) | 384 |
+|  | [One module runs every property, and the door is closed by derivation where one exists](decisions.md#one-module-runs-every-property-and-the-door-is-closed-by-derivation-where-one-exists) | 295 |
+|  | [The oracle for a reader is counted work, not "did it throw"](decisions.md#the-oracle-for-a-reader-is-counted-work-not-did-it-throw) | 441 |
+|  | [Every bound a door declares is held by a control, and a ledger refuses one without](decisions.md#every-bound-a-door-declares-is-held-by-a-control-and-a-ledger-refuses-one-without) | 458 |
+|  | [The build refuses a bundle that loads or emits the property generator](decisions.md#the-build-refuses-a-bundle-that-loads-or-emits-the-property-generator) | 211 |
 <!-- index: end -->

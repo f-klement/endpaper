@@ -256,9 +256,25 @@ target-version = "py314"
 # gap.** A rule ruff adds INSIDE a named family arrives enforced; a family
 # nobody names is off forever and nothing ever reports it. So the question a
 # reader should be able to answer from here is not "why is each of these on"
-# but "what is deliberately off", and the answer is: everything under
-# `lint.ignore` and the two per-file blocks below, each with its reason and the
-# command that takes its count.
+# but "what is deliberately off", and the answer is: the families listed below
+# as not selected, the rules `lint.ignore` refuses, and the per-file table at
+# the end, each with its reason.
+#
+# **`lint.ignore` is the refusal over the whole application**, with its reasons
+# beside the key. It is read by selecting it again: no inline override clears
+# that key, but a later selection re-enables an ignored rule while the per-file
+# table and the site directives stay in force. So each entry is asked to still
+# fire and to be selected at all, and must expand under ruff to the one rule it
+# names, never to a `flake8-bandit` rule, and never to one ruff describes as
+# checking a suppression comment. That is what is held, and it is not every rule
+# that guards against hostile input: the confusable character rules are outside
+# bandit and admissible, and review is what stops them. The per-file table can
+# be cleared, and each of its entries is asked whether it still suppresses
+# something, and refused a suppression rule as this key is. **B008 is on**: FastAPI's dependency idiom is
+# written as `Annotated[..., Depends(...)]` throughout, which the rule does not
+# read as a call in a default, so a real one, a value built once at import and
+# shared by every call, is still reported, unless the parameter is annotated
+# with an immutable type.
 #
 # The second group was added 2026-10-02. What each one buys, in the order a
 # reader cares about rather than alphabetically:
@@ -285,22 +301,29 @@ target-version = "py314"
 # on a `str` subclass built five hundred times a run and five scripts whose
 # shebang was a claim their mode did not support.
 #
-# **Three more were considered and refused rather than exempted**, `PERF`,
-# `T20` and `TRY`. They are below with the rest of the refusals, and they are
-# the ones worth reading, because none of the three was refused for its size.
+# **`T20`** is a committed `print`. Selected, with per-file refusals in the
+# table at the end and the reason at each key.
 #
-# **This list is a superset constraint and not only a choice**, which is what
-# decided two of those three. A second lint configuration covers the Python
-# this repository versions outside this directory, seventeen command line
-# scripts, and a test requires every family named here to be named there too:
-# a family list is what enrols a rule ruff has not shipped yet, so a split
-# list leaves one tree silently behind. So a family is added here only if it
-# is also right over those scripts.
+# **One more was considered and refused rather than exempted**, `PERF`. It is
+# below with the rest of the refusals, and it is the one worth reading, because
+# it was not refused for its size.
+#
+# **This list is a superset constraint and not only a choice.** A second lint
+# configuration covers the Python this repository versions outside this
+# directory, its command line scripts, and a test requires every family named
+# here to be named there too: a family list is what enrols a rule ruff has not
+# shipped yet, so a split list leaves one tree silently behind. So a family is
+# added here only if it is also right over those scripts, or that
+# configuration can refuse the rule over all of them, which it can for one rule
+# at a time and never for a `flake8-bandit` one.
+#
+# **`TRY` is selected**, with two of its rules refused in `lint.ignore` below for
+# the reasons there and the rest enforced.
 select = [
     "E", "F", "I", "UP", "B", "SIM", "C4", "S", "ASYNC", "RUF",
     "DTZ", "BLE", "LOG", "G", "PGH",
-    "T10", "SLOT", "EXE", "YTT", "RSE", "PIE", "FURB", "ICN", "RET",
-    "PT",
+    "T10", "T20", "SLOT", "EXE", "YTT", "RSE", "PIE", "FURB", "ICN", "RET",
+    "PT", "TRY",
 ]
 # W605 is an invalid escape sequence, `\d` in a non raw string. CPython warns
 # about it today and has it scheduled to become a SyntaxError, at which point the
@@ -344,7 +367,47 @@ select = [
 #   directive, a round trip asserted whole and two deadline tests whose `async
 #   with` is what is under test. PT017 3, all directives: property tests where
 #   raising is optional.
-extend-select = ["W605"]
+#
+# **`PLE2502` is a bidirectional control character in source**, the class
+# that makes a line render as one thing and parse as another, which nobody
+# reading a diff can see. One rule rather than the `PL` family, which is a
+# rewrite of the tree; it reports nothing here or over the scripts, so it
+# arrives as a ratchet.
+extend-select = ["W605", "PLE2502"]
+
+# ── `lint.ignore`, the rules wrong about the whole application ───────────────
+#
+# **An entry here says why a rule is wrong about this code, never that the work
+# is large.** This side has no backlog, so this and the test tree's per-file
+# key are the two slots that can take hundreds of findings in a line, and
+# filing unpaid work in either as a refusal would be the cheapest way to land a
+# family. The rule holds at both. No arm can tell the two apart; a test holds
+# this list by value, so each entry arrives in a diff beside its reason, which
+# is where a reviewer reads which it is.
+#
+# **`TRY003`, a style opinion at any size.** Satisfying it means an exception
+# class per raise site, trading a sentence a reader sees at the `raise` for a
+# name they have to look up. The second configuration refuses it over its
+# scripts for this reason.
+#
+# **`TRY400`, because its remedy is the leak.** It asks for `.exception` where a
+# handler logs `.error`, and a traceback writes the exception's own message to
+# the log, which this tree already treats as a route for a caller's value and
+# for a credential. ruff's own fix at the directory login refusal writes the
+# caller's forged line past the clipping that call applies, and a test of that
+# refusal reds on it. A messaging transport failure logged at `.error` would
+# have the rule demand a traceback whose message carries the bot token in its
+# URL. None of the handlers it reported on the day it was selected took its
+# advice, each for the reason at its site. It reports nothing over the scripts
+# the second configuration covers, so it stays on there. **The reason outlives
+# the entry**: a test keeps an entry only while its rule reports, so once no
+# handler here logs `.error` the entry has to go, and the next one that does
+# answers the rule at its own site, with a directive under this reason, rather
+# than by taking the traceback.
+#
+# **Every other rule in the family is enforced.** The `TRY004` sites keep
+# `ValueError` on a type test, each with a directive under its reason.
+ignore = ["TRY003", "TRY400"]
 #
 # ── The families deliberately NOT selected ──────────────────────────────────
 #
@@ -353,12 +416,12 @@ extend-select = ["W605"]
 # rather than a ratchet over it: turning one on means either several hundred
 # edits or an exemption that reads as a decision and binds nothing.
 #
-# **Counts over the whole backend tree**, this directory and its test tree
-# together, this configuration plus the one family, taken 2026-10-02 with
-# ruff 0.16.7. **The population is named because it is where these go wrong**:
-# the same figures taken with `--exclude tests` are a different and equally
-# correct set, and a figure quoted without the population it was taken over
-# has already been read as the other one.
+# **The command counts over the whole backend tree**, this directory and its
+# test tree together, this configuration plus the one family. **The population
+# is named because it is where these go wrong**: the same command with
+# `--exclude tests` counts a different and equally correct set, and a figure
+# quoted without the population it was taken over has already been read as the
+# other one.
 #
 # **One class of figure below cannot be re-derived from a published copy of
 # this repository at all**, and it is the exception to the discipline this
@@ -369,37 +432,29 @@ extend-select = ["W605"]
 #
 #   ruff check --extend-select <family> --statistics .
 #
-#   PLR2004  1633   a literal in a comparison. Almost all of it is test arms.
-#   ARG        no    an unused argument, most of them method arguments, and a
-#             figure  signature a framework calls is not ours to narrow.
-#   SLF001    684   a private member read from outside. The test tree's whole
-#                   job here is to read the thing under test.
-#   Q000      552   single quotes, every one of them a rewrite of a line that
-#                   is correct today. Nothing here reformats Python, so there
-#                   is no tool to hand the work to.
-#   EM        305   an exception message as a literal rather than a name.
-#                   215 of those are in application code, which is the same
-#                   figure `TRY003` gives over the same half and is a
-#                   coincidence of two rules reading nearly the same `raise`
-#                   sites. Both readings are written out because the pair has
-#                   already been quoted as one rule disagreeing with itself.
-#   TC        278   an import that could move under `TYPE_CHECKING`. 27 of
-#                   those are TC006, a cast's first argument, which is a
-#                   different thing wearing the same prefix.
-#   INP001    no    a package with no `__init__.py`, over a test tree that is
-#             figure  deliberately a mirror of flat modules.
+#   PLR2004  a literal in a comparison. Almost all of it is test arms.
+#   ARG      an unused argument, most of them method arguments, and a
+#            signature a framework calls is not ours to narrow.
+#   SLF001   a private member read from outside. The test tree's whole
+#            job here is to read the thing under test.
+#   Q000     single quotes, every one of them a rewrite of a line that is
+#            correct today. Nothing here reformats Python, so there is no
+#            tool to hand the work to.
+#   EM       an exception message as a literal rather than a name.
+#   TC       an import that could move under `TYPE_CHECKING`. Part of it is
+#            TC006, a cast's first argument, which is a different thing
+#            wearing the same prefix.
+#   INP001   a package with no `__init__.py`, over a test tree that is
+#            deliberately a mirror of flat modules.
 #
-# **`ARG` and `INP001` carry no figure on purpose, and it is the one rule
-# this block is otherwise about.** Both count per test file or per test
-# method, so both move whenever the test tree grows, including when the very
-# commit that writes the figure adds a file. Measured: the first draft of
-# this block went stale inside its own commit, 937 against 943 and 214
-# against 215, because the corpus it counts holds the files the commit adds.
-# A number that cannot be kept true is worse than none, because it is read as
-# current. The command stays and the figure goes. The others here count
-# application sites or imports and did not move.
+# **No row carries a figure, on purpose.** Each counts over a corpus that
+# grows with the test tree, including in the very commit that writes the
+# figure: the first draft of this block went stale inside its own commit, 937
+# against 943 and 214 against 215. A number that cannot be kept true is worse
+# than none, because it is read as current. The command stays and the figure
+# goes.
 #
-# ── The three refused on their merits rather than their size ────────────────
+# ── The one refused on its merits rather than its size ──────────────────────
 #
 # **`PERF`**, 29 over this tree. **Four of those were read and twenty five
 # were not**, and the refusal is stated over the four: they are in
@@ -427,53 +482,12 @@ extend-select = ["W605"]
 # the application's side alone; over the scripts outside this directory it
 # reports three, a size that goes in their backlog.
 #
-# **`T20`**, 11 here and 97 over the scripts outside this directory, and all
-# 108 are legitimate. Ten of the eleven here are the two command line tools,
-# where standard output is the interface, and the eleventh is a reporter
-# fallback that says so in its own docstring. Over there the rule fires in
-# **twelve of the seventeen files**, silent only in three unittest modules
-# and two libraries. A two file exemption here would have been cheap; the
-# superset above makes the real question whether the rule is right over those
-# twelve, and it is not.
-#
-# **`TRY`**, and the arithmetic is what settles it. `TRY003` is **304 over
-# this whole tree, 215 of them in application code**, and 35 over the
-# scripts; both populations are written out because the two readings of this
-# rule have already been quoted as a disagreement. The **application**
-# reading is the one that coincides with `EM`'s application reading above,
-# at 215 each; the whole tree figures differ, 304 against 305. A figure here
-# that does not name its population has already been read as the other one.
-# A style opinion at either size: satisfying it means a message class
-# per raise site, trading a sentence a reader sees at the `raise` for a name
-# they have to look up. The other eight rules report **six** sites here and
-# none there, and all six are answered at their sites: three where a
-# traceback would restore a log site one of them deliberately erased, three
-# where an `isinstance` refusal of a persisted row raises `ValueError` as its
-# siblings do rather than TRY004's `TypeError`. So the family is one
-# permanent refusal plus six, and nothing fixed.
-#
-# **And that second configuration cannot express a tree wide refusal, which
-# is the gap behind `T20` and `TRY` and not behind `PERF`.** It has a
-# per-file refusal, asserted to name exactly one file, and a whole tree
-# backlog whose entries are re-derived and must still fire. A permanent
-# refusal over twelve of seventeen scripts fits neither: putting it in the
-# backlog puts an entry that can never go stale in the list that exists to
-# catch stale entries. `lint.ignore` would be the slot and it refuses that
-# key for a measured reason of its own.
-#
 # **A family total is not the sum of the codes somebody happens to name**,
-# which is why the selector is written out beside every figure: `TC` as a
-# family is 278 where `TC001..TC003` is 251, the difference being a fourth
-# code with the same prefix and a different subject. `ARG` has the same
-# shape, two further codes past the two anybody quotes, and no figure here
-# for the reason given above. A figure quoted without its selector is not
-# re-derivable, and one quoted without its population has already been read
-# as the other one.
-ignore = [
-    # FastAPI's dependency-injection idiom is a function call in a default
-    # argument, which B008 exists to forbid.
-    "B008",
-]
+# which is why the command names the selector: `TC` as a family counts a
+# fourth code past `TC001..TC003`, with the same prefix and a different
+# subject, and `ARG` two further codes past the two anybody quotes. A figure
+# quoted without its selector is not re-derivable, and one quoted without its
+# population has already been read as the other one.
 
 [tool.ruff.lint.flake8-import-conventions.extend-aliases]
 # **This tree spells it `ElementTree`, and ICN001's default map says `ET`.**
@@ -587,10 +601,31 @@ raises-extend-require-match-for = [
 #
 # Verify by removing the entry and watching the count move, never by reading
 # this line: a per-file key that binds nothing reads exactly like a decision.
+# A test asks each entry, alone against the cleared table, whether it still
+# suppresses something; an entry another key already covers passes it.
 #
 #   ruff check --statistics tests
 #   ruff check --config 'lint.per-file-ignores = {}' --statistics tests
+#
+# **An entry under this key says why a rule is wrong about the test tree, never
+# that the work there is large**, the rule `lint.ignore` states, for the same
+# reason: this key can take a family's test tree half in one line.
 "tests/**" = ["S", "RUF012", "RUF001", "DTZ"]
+
+# ── `T20`, off in the three files whose output is their interface ────────────
+#
+# Two command line tools, run by an operator who reads what they print, and
+# the suite's own refusal of a short session, which prints only where no
+# terminal reporter exists and says so in its docstring. Stated as the
+# family, for the reason the `S` block gives.
+#
+# **Every key outside the test tree is a path with a `/`, and the `./` is load
+# bearing.** A key with no separator is matched against every basename, so
+# `recover.py` would refuse the rule in any file of that name anywhere in this
+# tree; `./recover.py` names this one. A test refuses a key without one.
+"./recover.py" = ["T20"]
+"scripts/postgres_database.py" = ["T20"]
+"tests/conftest.py" = ["T20"]
 
 
 [tool.mypy]

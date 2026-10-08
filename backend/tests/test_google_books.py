@@ -5,6 +5,7 @@ is worth pinning is the field mapping and, above all, the merge rule:
 enrichment adds what is missing and does not overrule what a member typed.
 """
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -146,6 +147,17 @@ class TestLookupByIsbn:
         )
         await lookup_by_isbn("9780441013593", "secret-key")
         assert "key=secret-key" in str(route.calls[0].request.url)
+
+    async def test_the_key_never_reaches_the_log(self, google, caplog):
+        """The key rides in the query string, so the HTTP library's own request
+        line names it. Captured at DEBUG because that line is logged at INFO,
+        which a capture at WARNING cannot see."""
+        google.get(url__startswith=VOLUMES).mock(
+            return_value=httpx.Response(200, json={"items": [VOLUME]})
+        )
+        with caplog.at_level(logging.DEBUG):
+            await lookup_by_isbn("9780441013593", "secret-key")
+        assert "secret-key" not in caplog.text
 
 
 class TestErrors:

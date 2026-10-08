@@ -18,27 +18,77 @@
 
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sourceText } from "../sourceModules";
 import { en } from "../../src/i18n";
+import { MAX_CATALOGUE_BYTES } from "../../src/lib/adobeDigitalEditions";
+import { MAX_CACHE_BYTES } from "../../src/lib/kindle";
+import { MAX_PACKAGE_BYTES } from "../../src/lib/epub";
+import { MAX_DATABASE_BYTES } from "../../src/lib/sqlite";
+import * as stores from "../../src/lib/stores";
+import { MAX_BOOK_BYTES, MAX_INFLATION_RATIO } from "../../src/lib/takeout";
 import {
+  MOON_DATABASE_LIMIT,
+  MOON_INDEX_LIMIT,
   PRODUCED_VALUE,
   producedValue,
   storeIdentifier,
   STORES,
   STORE_IDS,
+  type StoreId,
   type StoreIdentifierScheme,
   type StoreReading,
 } from "../../src/lib/stores";
 import {
   A_VOLUME_ID,
   bookEntries,
+  buildTakeout,
   LIBRARY_FOLDER,
+  takeoutCeilings,
   takeoutFile,
+  takeoutSpec,
+  type TakeoutSpec,
 } from "./takeoutFixtures";
-import { databaseOf } from "./sqliteFixtures";
-import { buildZip, packageDocument } from "../zipFixtures";
+import {
+  buildDatabase,
+  databaseOf,
+  schemaSpec,
+  shapesOf,
+  type DatabaseSpec,
+} from "./sqliteFixtures";
+import {
+  buildZip,
+  bytes,
+  FAR_PAST,
+  packageDocument,
+  type EntrySpec,
+} from "../zipFixtures";
+import {
+  edges,
+  holds,
+  PROFILE,
+  PROPERTY,
+  witness,
+  type Total,
+} from "../property";
+import { type Ceilings } from "./meter";
+import {
+  expectNamedOutcome,
+  hostile,
+  overrunBreach,
+  stoppedAt,
+  type Door,
+  type Hostile,
+} from "./readerContract";
+import {
+  DIGITAL_EDITIONS,
+  KINDLE,
+  render,
+  type Vocabulary,
+  type XmlDocument,
+} from "./xmlArbitrary";
 
 const require = createRequire(import.meta.url);
 
@@ -49,15 +99,12 @@ beforeEach(() => {
       const url = String(input);
       if (!url.endsWith(".wasm")) throw new Error(`unexpected fetch: ${url}`);
       const path = require.resolve("sql.js/dist/sql-wasm-browser.wasm");
-      const bytes = readFileSync(path);
+      const wasm = readFileSync(path);
       return {
         ok: true,
         status: 200,
         arrayBuffer: async () =>
-          bytes.buffer.slice(
-            bytes.byteOffset,
-            bytes.byteOffset + bytes.byteLength,
-          ),
+          wasm.buffer.slice(wasm.byteOffset, wasm.byteOffset + wasm.byteLength),
       } as unknown as Response;
     }),
   );
@@ -1214,5 +1261,643 @@ describe("a reader's library says nothing the seam drops", () => {
       `${adapter.library} declares this and ${adapter.name} never reads it: ` +
         "give the member a consumer at the seam, or take it out of the reader",
     ).toEqual([]);
+  });
+});
+
+// --- every store's opener, fuzzed ------------------------------------------
+
+/** A Moon+ backup: its index, the database the index names, and the rest. */
+interface MoonSpec {
+  /** The build's backup directory, which the index sits in. */
+  readonly directory: string;
+  /** The index's lines, or a run of zeroes that inflates past its limit. */
+  readonly index: readonly string[] | { readonly bomb: number };
+  /**
+   * Which line's number the database entry is named for, from one, or
+   * `undefined` for the line the index names it on, which is what a backup
+   * writes.
+   */
+  readonly tag: number | undefined;
+  /** The database, or a run of zeroes past its limit. */
+  readonly database: DatabaseSpec | { readonly bomb: number };
+  /** Not a zip at all, which is a file a member picks by mistake. */
+  readonly notAZip: boolean;
+}
+
+/** A run of zeroes declared as one byte: a bomb under any limit. */
+function lyingEntry(name: string, zeroes: number): EntrySpec {
+  return { name, data: { zeroes }, centralUncompressedSize: 1 };
+}
+
+async function buildMoon(spec: MoonSpec): Promise<Uint8Array<ArrayBuffer>> {
+  if (spec.notAZip) return bytes("a Moon+ backup, honestly");
+  const names = `${spec.directory}_names.list`;
+  const line =
+    "bomb" in spec.index
+      ? 0
+      : spec.index.findIndex((name) => name.endsWith("mrbooks.db"));
+  const tagged = `${spec.directory}${spec.tag ?? line + 1}.tag`;
+  return buildZip({
+    entries: [
+      "bomb" in spec.index
+        ? lyingEntry(names, spec.index.bomb)
+        : { name: names, data: spec.index.join("\n") },
+      "bomb" in spec.database
+        ? lyingEntry(tagged, spec.database.bomb)
+        : { name: tagged, data: await buildDatabase(spec.database) },
+    ],
+  });
+}
+
+/** What each store's opener is handed, by store. */
+interface StoreSpecs {
+  readonly kobo: DatabaseSpec;
+  readonly playBooks: TakeoutSpec;
+  readonly appleBooks: DatabaseSpec;
+  readonly kindle: XmlDocument;
+  readonly adobe: XmlDocument;
+  readonly moonReader: MoonSpec;
+}
+
+/** One store's generator, its builder, and what its opener may spend. */
+interface StoreFuzz<Spec> {
+  readonly spec: fc.Arbitrary<Spec>;
+  readonly build: (spec: Spec) => Promise<Uint8Array<ArrayBuffer>>;
+  readonly ceilings: (size: number) => Ceilings;
+}
+
+const KOBO_SHAPES = await shapesOf(KOBO_SCHEMA);
+
+const KOBO_COLUMNS = {
+  ContentID: [
+    "a1b2c3d4-0000-4000-8000-000000000001",
+    "file:///mnt/onboard/Dune.epub",
+  ],
+  BookID: [null, "a1b2c3d4-0000-4000-8000-000000000001"],
+  MimeType: [
+    "application/epub+zip",
+    "application/x-kobo-epub+zip",
+    "application/pdf",
+    "image/png",
+  ],
+  Title: ["Dune", ""],
+  Attribution: ["Frank Herbert"],
+  ISBN: ["9780441013593", "0000000000"],
+  Series: ["Dune Chronicles", null],
+  SeriesNumber: ["1", "x"],
+  DateCreated: ["1965-08-01T00:00:00.000", "garbage"],
+  Accessibility: [-1, 1, 2, 4, 6, 8, 9, 3],
+  IsDownloaded: ["true", "false", 1, 0, "1"],
+};
+
+const APPLE_SHAPES = {
+  ZBKLIBRARYASSET: [
+    "Z_PK",
+    "ZASSETID",
+    "ZTITLE",
+    "ZAUTHOR",
+    "ZEPUBID",
+    "ZYEAR",
+    "ZLANGUAGE",
+    "ZPATH",
+    "ZISSAMPLE",
+    "ZISEPHEMERAL",
+    "ZISHIDDEN",
+  ],
+};
+
+const APPLE_COLUMNS = {
+  Z_PK: [1, 2],
+  ZASSETID: ["9F1C2B6A0D4E", ""],
+  ZTITLE: ["Dune"],
+  ZAUTHOR: ["Frank Herbert"],
+  ZEPUBID: ["urn:isbn:9780441013593", "9780441013593", "x"],
+  ZYEAR: ["1965", "1965-08-01", "x"],
+  ZLANGUAGE: ["en"],
+  ZPATH: [
+    "/Users/m/Dune.epub",
+    "/Users/m/Dune.PDF",
+    "/Users/m/Dune.ibooks",
+    "x",
+  ],
+  ZISSAMPLE: [0, 1, 2],
+  ZISEPHEMERAL: [0, 1],
+  ZISHIDDEN: [0, 1],
+};
+
+const MOON_SHAPES = {
+  books: ["filename", "book", "author"],
+  tmpbooks: ["filename", "book", "author"],
+};
+
+const MOON_COLUMNS = {
+  filename: ["/sdcard/Books/Dune.epub", "/sdcard/Books/Saga.cbz", "/x", ""],
+  book: ["Dune", "", null],
+  author: ["Frank Herbert", " ", null],
+};
+
+const anyMoon: fc.Arbitrary<MoonSpec> = fc.record({
+  directory: fc.constantFrom(
+    "com.flyersoft.moonreaderp/",
+    "com.flyersoft.moonreader/",
+    "",
+    "../",
+  ),
+  index: fc.oneof(
+    {
+      // The database named on a drawn line, which is what a backup writes.
+      arbitrary: fc
+        .tuple(
+          fc.array(fc.constantFrom<string>("positions10.xml", "covers.dat"), {
+            maxLength: 3,
+          }),
+          fc.constantFrom("mrbooks.db", "com.flyersoft.moonreaderp/mrbooks.db"),
+        )
+        .map(([before, database]) => before.concat(database)),
+      weight: 4,
+    },
+    {
+      arbitrary: fc.array(
+        fc.constantFrom(
+          "mrbooks.db",
+          "positions10.xml",
+          "../mrbooks.db",
+          "oldmrbooks.db",
+        ),
+        { maxLength: 4 },
+      ),
+      weight: 2,
+    },
+    {
+      arbitrary: fc
+        .constantFrom(MOON_INDEX_LIMIT + FAR_PAST)
+        .map((bomb) => ({ bomb })),
+      weight: 1,
+    },
+  ),
+  tag: fc.oneof(
+    { arbitrary: fc.constant(undefined), weight: 4 },
+    { arbitrary: fc.integer({ min: 0, max: 4 }), weight: 1 },
+  ),
+  // **No database bomb drawn**: one past a sixty four mebibyte limit is that
+  // much inflated per draw, and with the other workers' files it took the
+  // suite pod past its memory limit, measured. The named case below holds
+  // that limit by its exact answer instead, which reds if it goes.
+  database: schemaSpec(
+    MOON_SHAPES,
+    { tables: ["books"], columns: ["filename"], values: ["x"] },
+    MOON_COLUMNS,
+  ),
+  notAZip: fc.oneof(
+    { arbitrary: fc.constant(false), weight: 6 },
+    { arbitrary: fc.constant(true), weight: 1 },
+  ),
+} satisfies Total<MoonSpec>);
+
+/**
+ * A backup whose index inflates past its limit, and nothing else wrong:
+ * composed and weighted so a run from any seed draws it, which as one choice
+ * among a store's six and an index's three it did not.
+ */
+const indexBomb: fc.Arbitrary<MoonSpec> = anyMoon.map((spec) => ({
+  ...spec,
+  index: { bomb: MOON_INDEX_LIMIT + FAR_PAST },
+  notAZip: false,
+}));
+
+const moonSpec = fc.oneof(
+  { arbitrary: anyMoon, weight: 1 },
+  { arbitrary: indexBomb, weight: 1 },
+);
+
+/**
+ * A catalogue at its opener's size edges: the reader's own accepted document,
+ * unpadded, or padded to one under the cap, the cap, or one past it, with the
+ * property's patches on top.
+ *
+ * **The opener, and not the document space**, which is each reader's own
+ * property's, under jsdom in that reader's file. Drawn as a tree here it was
+ * the same arbitrary fuzzed twice under two parsers, and under this file's
+ * happy-dom a quarter of those draws, the single quoted declaration, were
+ * read as HTML and reached no walk, which `opf.test.ts` measured.
+ */
+function catalogueAtTheCap(
+  vocabulary: Vocabulary,
+  cap: number,
+): fc.Arbitrary<XmlDocument> {
+  return fc.record({
+    declaration: fc.constant("none" as const),
+    root: fc.constant(vocabulary.accepted),
+    insertions: fc.constant([]),
+    padTo: fc.oneof(
+      { arbitrary: fc.constant(undefined), weight: 7 },
+      { arbitrary: fc.constantFrom(...edges(cap)), weight: 1 },
+    ),
+  } satisfies Total<XmlDocument>);
+}
+
+/** A database opener's ceilings: the size refused before a byte is read. */
+const databaseCeilings = (): Ceilings => ({
+  read: MAX_DATABASE_BYTES,
+  reads: 1,
+});
+
+/** A catalogue opener's: the size refused before it is read, and the parse. */
+const catalogueCeilings = (cap: number) => (): Ceilings => ({
+  read: cap,
+  reads: 1,
+  parsed: cap,
+  refusesEntities: true,
+});
+
+/**
+ * Every store's generator, **a total `Record` over the registry's keys**: a
+ * store added to `STORES` is a compile error here until it has one, because a
+ * new opener fed bytes nobody shaped for it only ever reaches its first
+ * refusal.
+ */
+const FUZZ: { readonly [K in StoreId]: StoreFuzz<StoreSpecs[K]> } = {
+  kobo: {
+    spec: schemaSpec(
+      KOBO_SHAPES,
+      { tables: ["content"], columns: ["ContentID"], values: ["x"] },
+      KOBO_COLUMNS,
+    ),
+    build: buildDatabase,
+    ceilings: databaseCeilings,
+  },
+  playBooks: {
+    spec: takeoutSpec(),
+    build: buildTakeout,
+    ceilings: takeoutCeilings,
+  },
+  appleBooks: {
+    spec: schemaSpec(
+      APPLE_SHAPES,
+      { tables: ["ZBKLIBRARYASSET"], columns: ["Z_PK"], values: [1] },
+      APPLE_COLUMNS,
+    ),
+    build: buildDatabase,
+    ceilings: databaseCeilings,
+  },
+  kindle: {
+    spec: catalogueAtTheCap(KINDLE, MAX_CACHE_BYTES),
+    build: async (document) => bytes(render(document)),
+    ceilings: catalogueCeilings(MAX_CACHE_BYTES),
+  },
+  adobe: {
+    spec: catalogueAtTheCap(DIGITAL_EDITIONS, MAX_CATALOGUE_BYTES),
+    build: async (document) => bytes(render(document)),
+    ceilings: catalogueCeilings(MAX_CATALOGUE_BYTES),
+  },
+  moonReader: {
+    spec: moonSpec,
+    build: buildMoon,
+    // The two reads take different limits and the meter cannot tell which
+    // read an inflater serves, so each is held to the larger and the archive
+    // to both together: a lost index limit under the database's is seen by
+    // nothing here, `epub.test.ts`'s residue in the same shape.
+    ceilings: () => ({
+      perInflate: MOON_DATABASE_LIMIT,
+      inflated: MOON_INDEX_LIMIT + MOON_DATABASE_LIMIT,
+    }),
+  },
+};
+
+/** One store and what its opener was handed, as fast-check prints it. */
+type StoreInput = {
+  readonly [K in StoreId]: {
+    readonly store: K;
+    readonly input: Hostile<StoreSpecs[K]>;
+  };
+}[StoreId];
+
+/** One store's opener as a door. */
+function doorOf<K extends StoreId>(store: K): Door<StoreSpecs[K], unknown> {
+  const fuzz: StoreFuzz<StoreSpecs[K]> = FUZZ[store];
+  return {
+    module: stores,
+    ceilings: fuzz.ceilings,
+    build: fuzz.build,
+    open: (file) => STORES[store].open(file),
+  };
+}
+
+function drawn<K extends StoreId>(store: K): fc.Arbitrary<StoreInput> {
+  const fuzz: StoreFuzz<StoreSpecs[K]> = FUZZ[store];
+  return hostile(fuzz.spec).map(
+    (input) => ({ store, input }) as unknown as StoreInput,
+  );
+}
+
+const storeInput = fc.oneof(...STORE_IDS.map(drawn));
+
+async function check<K extends StoreId>(drawnInput: {
+  readonly store: K;
+  readonly input: Hostile<StoreSpecs[K]>;
+}) {
+  return expectNamedOutcome(doorOf(drawnInput.store), drawnInput.input);
+}
+
+/**
+ * That one store's generator draws, at a fresh seed, a file its opener reads
+ * as a library. A padded catalogue and a bomb are passed over unread: neither
+ * is a library and either is costly to open.
+ */
+async function readsOne<K extends StoreId>(store: K): Promise<void> {
+  const fuzz: StoreFuzz<StoreSpecs[K]> = FUZZ[store];
+  await witness(hostile(fuzz.spec), {
+    [`is a library the ${store} opener reads`]: async (input) => {
+      const spec = input.spec as { padTo?: unknown; index?: unknown };
+      const bombed =
+        typeof spec.index === "object" &&
+        spec.index !== null &&
+        "bomb" in spec.index;
+      if (spec.padTo !== undefined || bombed) return false;
+      const { outcome } = await expectNamedOutcome(doorOf(store), input);
+      return "answered" in outcome && (outcome.answered as StoreReading).ok;
+    },
+  });
+}
+
+describe("any file a member picks for a store", () => {
+  it(
+    "is read or refused by name, by whichever store it was picked for",
+    PROPERTY,
+    async () => {
+      // **A reach, asked of what the meter counted**: a run must stop a Moon+
+      // index bomb at the index's own limit, which is the one bound here a
+      // header refused first would hide, and the one the per inflater bound
+      // this door declares cannot hold, since that is the database's.
+      expect(
+        await holds(storeInput, async (value) => check(value), {
+          "stopped a Moon+ index bomb at the index's limit": (
+            { store },
+            { counted },
+          ) => store === "moonReader" && stoppedAt(counted, MOON_INDEX_LIMIT),
+        }),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("is metered, at every door a store reads through", async () => {
+    // **One file per kind of door**: a database read once, a catalogue read
+    // once and parsed, an archive inflated. A store whose opener stopped
+    // reading through the file it was handed counts nothing here.
+    const kobo = await check({
+      store: "kobo",
+      input: {
+        spec: {
+          tables: [
+            {
+              name: "content",
+              columns: ["ContentID", "BookID", "Title", "Accessibility"],
+              rows: [["a1", null, "Dune", 1]],
+              counted: undefined,
+            },
+          ],
+          padTo: undefined,
+        },
+        patches: [],
+      },
+    });
+    const kindle = await check({
+      store: "kindle",
+      input: {
+        spec: {
+          declaration: "none",
+          root: KINDLE.accepted,
+          insertions: [],
+          padTo: undefined,
+        },
+        patches: [],
+      },
+    });
+    const moon = await check({
+      store: "moonReader",
+      input: {
+        spec: {
+          directory: "com.flyersoft.moonreaderp/",
+          index: ["mrbooks.db"],
+          tag: undefined,
+          database: {
+            tables: [
+              {
+                name: "books",
+                columns: ["filename", "book", "author"],
+                rows: [["/sdcard/Books/Dune.epub", "Dune", "Frank Herbert"]],
+                counted: undefined,
+              },
+            ],
+            padTo: undefined,
+          },
+          notAZip: false,
+        },
+        patches: [],
+      },
+    });
+
+    expect(kobo.outcome).toMatchObject({ answered: { ok: true } });
+    expect(kobo.counted.reads).toBe(1);
+    expect(kindle.outcome).toMatchObject({ answered: { ok: true } });
+    expect(kindle.counted.reads).toBe(1);
+    expect(kindle.counted.parses).toBe(1);
+    expect(moon.outcome).toMatchObject({ answered: { ok: true } });
+    expect(moon.counted.inflaters).toBe(2);
+  });
+
+  it("declares the ceilings each store is held to, so one deleted or loosened reds", async () => {
+    // **The positive control, per store's ceilings**: a stub reading,
+    // inflating or parsing past each bound under the store's own ceilings. A
+    // read is charged rather than made, so a database's sixty four mebibytes
+    // cost no buffer of that size. Kobo and Apple Books share one function, so
+    // one door holds both.
+    const kobo = doorOf("kobo");
+    expect(
+      await overrunBreach(kobo, { ceiling: "read", bound: MAX_DATABASE_BYTES }),
+    ).toContain(`bytes against a ceiling of ${MAX_DATABASE_BYTES}`);
+    expect(await overrunBreach(kobo, { ceiling: "reads", bound: 1 })).toContain(
+      "made read 2 against a ceiling of 1",
+    );
+    for (const [store, cap] of [
+      ["kindle", MAX_CACHE_BYTES],
+      ["adobe", MAX_CATALOGUE_BYTES],
+    ] as const) {
+      const door = doorOf(store);
+      expect(
+        await overrunBreach(door, { ceiling: "read", bound: cap }),
+        store,
+      ).toContain(`bytes against a ceiling of ${cap}`);
+      expect(
+        await overrunBreach(door, { ceiling: "reads", bound: 1 }),
+        store,
+      ).toContain("made read 2 against a ceiling of 1");
+      expect(
+        await overrunBreach(door, { ceiling: "parsed", bound: cap }),
+        store,
+      ).toContain(`code units against a ceiling of ${cap}`);
+      expect(
+        await overrunBreach(door, { ceiling: "refusesEntities" }),
+        store,
+      ).toContain("declaring an entity");
+    }
+    // Takeout's ceilings are `takeout.test.ts`'s door's too, held there the
+    // same way; held here again because a control answers for its own file.
+    const playBooks = doorOf("playBooks");
+    expect(
+      await overrunBreach(playBooks, {
+        ceiling: "perInflate",
+        bound: MAX_BOOK_BYTES,
+        size: MAX_BOOK_BYTES / MAX_INFLATION_RATIO,
+      }),
+    ).toContain(`against a bound of ${MAX_BOOK_BYTES}`);
+    const allowance = takeoutCeilings(1).inflated!;
+    expect(
+      await overrunBreach(playBooks, {
+        ceiling: "inflated",
+        bound: allowance,
+        each: MAX_PACKAGE_BYTES,
+      }),
+    ).toContain(`inflated against a ceiling of ${allowance}`);
+    expect(
+      await overrunBreach(playBooks, { ceiling: "refusesEntities" }),
+    ).toContain("declaring an entity");
+    const moon = doorOf("moonReader");
+    expect(
+      await overrunBreach(moon, {
+        ceiling: "perInflate",
+        bound: MOON_DATABASE_LIMIT,
+      }),
+    ).toContain(`against a bound of ${MOON_DATABASE_LIMIT}`);
+    const both = MOON_INDEX_LIMIT + MOON_DATABASE_LIMIT;
+    expect(
+      await overrunBreach(moon, {
+        ceiling: "inflated",
+        bound: both,
+        each: MOON_DATABASE_LIMIT,
+      }),
+    ).toContain(`inflated against a ceiling of ${both}`);
+  });
+
+  it("answers a Moon+ pick that is not a zip as not a backup, rather than throwing", async () => {
+    // **What the property above found**, as it printed it: the seam's refusal
+    // escaped the opener, and the card reported a bug in a reader for a member
+    // who had picked the wrong file.
+    const { outcome } = await check({
+      store: "moonReader",
+      input: {
+        spec: {
+          directory: "com.flyersoft.moonreaderp/",
+          index: ["mrbooks.db"],
+          tag: undefined,
+          database: {
+            tables: [
+              {
+                name: "books",
+                columns: ["filename", "book", "author"],
+                rows: [],
+                counted: undefined,
+              },
+              {
+                name: "tmpbooks",
+                columns: ["filename", "book", "author"],
+                rows: [],
+                counted: undefined,
+              },
+            ],
+            padTo: undefined,
+          },
+          notAZip: true,
+        },
+        patches: [{ at: -1, byte: 0 }],
+      },
+    });
+
+    expect(outcome).toEqual({
+      answered: { ok: false, failure: "not-a-moon-reader-backup" },
+    });
+  });
+
+  it("answers a Moon+ database past its limit as too large, rather than throwing", async () => {
+    // The seam's other refusal on the same path, which no shrink of the case
+    // above reaches: an entry inflating past the limit its caller passed.
+    const { outcome } = await check({
+      store: "moonReader",
+      input: {
+        spec: {
+          directory: "com.flyersoft.moonreaderp/",
+          index: ["mrbooks.db"],
+          tag: undefined,
+          database: { bomb: MOON_DATABASE_LIMIT + FAR_PAST },
+          notAZip: false,
+        },
+        patches: [],
+      },
+    });
+
+    expect(outcome).toEqual({ answered: { ok: false, failure: "too-large" } });
+  });
+
+  it("answers a Kindle catalogue whose declaration a patch broke as not one, rather than throwing", async () => {
+    // **What the property above found once its seed was fresh**, as it printed
+    // it: a byte at offset 2 turns `<?xml` into an instruction whose target is
+    // not a name, and this suite's parser threw on it where a browser's answers
+    // a parse error. The reader now answers either one the same way.
+    // Only happy-dom throws here, and the generator beside this case no longer
+    // draws the shape; it stays as the regression arm for the catch in `src`.
+    const { outcome } = await check({
+      store: "kindle",
+      input: {
+        spec: {
+          declaration: "single",
+          root: { element: "response", attributes: [], children: [] },
+          insertions: [],
+          padTo: undefined,
+        },
+        patches: [{ at: 2, byte: 0 }],
+      },
+    });
+
+    expect(outcome).toEqual({
+      answered: { ok: false, failure: "not-a-kindle-library" },
+    });
+  });
+
+  it("answers a Digital Editions catalogue whose declaration a patch broke as not one, rather than throwing", async () => {
+    // The same throw at the same kind of site, found in the other catalogue
+    // reader by the same property: offset 5 is offset 2 behind a byte order
+    // mark.
+    // Only happy-dom throws here, and the generator beside this case no longer
+    // draws the shape; it stays as the regression arm for the catch in `src`.
+    const { outcome } = await check({
+      store: "adobe",
+      input: {
+        spec: {
+          declaration: "bom",
+          root: DIGITAL_EDITIONS.accepted,
+          insertions: [],
+          padTo: undefined,
+        },
+        patches: [{ at: 5, byte: 0 }],
+      },
+    });
+
+    expect(outcome).toEqual({
+      answered: { ok: false, failure: "not-a-digital-editions-catalogue" },
+    });
+  });
+
+  it("draws a library every store reads, and a Moon+ index past its limit", async () => {
+    // **Each store's own generator, at a seed of its own**, because the
+    // property draws one store in six and a class reached that rarely is one a
+    // fresh seed misses: measured, a store's library was a fortieth of the
+    // property's draws. **Asked of each opener rather than of the spec**:
+    // whether a drawn file is a library its store reads is the opener's to
+    // say, and a vocabulary that stopped matching its reader turns this red.
+    for (const store of STORE_IDS) await readsOne(store);
+    await witness(hostile(moonSpec), {
+      "bombs a Moon+ index past its limit": ({ spec, patches }) =>
+        patches.length === 0 && !spec.notAZip && "bomb" in spec.index,
+    });
   });
 });

@@ -391,7 +391,14 @@ function readSeries(
  */
 export function readOpf(xml: string): FileMetadata | null {
   if (declaresEntities(xml)) return null;
-  const document = new DOMParser().parseFromString(xml, "application/xml");
+  // Caught for `fb2.ts::readFb2Description`'s reason: a parser this reader
+  // does not choose may throw where the specification answers `parsererror`.
+  let document: Document;
+  try {
+    document = new DOMParser().parseFromString(xml, "application/xml");
+  } catch {
+    return null;
+  }
   // Both halves are needed. A parse error yields a document whose root is
   // `parsererror`, and a well formed document that is not an OPF yields a root
   // that is simply something else.

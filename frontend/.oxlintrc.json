@@ -17,7 +17,7 @@
   // entry needs a count and a reason in the commit that adds it.
   //
   // `rules` opens with something that is NEITHER, and it is not a third kind of
-  // suppression: it is configuration, a rule left ON with an option, and it
+  // suppression: it is configuration, rules left ON with an option, and it
   // belongs with `plugins` and `categories` rather than with the two halves. It
   // sits inside `rules` only because that is the key oxlint takes a rule's
   // options under. Keep "the list" meaning the suppressions below it.
@@ -45,12 +45,15 @@
   // `react` and `vitest` are the two added. Neither is a default, so neither
   // had ever run here, `react` in a React 19 application. Between them they put
   // 64 more rules into the three categories below, 203 against 157 for react
-  // and 175 against 157 for vitest. **Eight of the 64 are turned off below**,
-  // the permanent react refusal and the seven backlog rows; every other one is
-  // live and finds nothing today, so they guard from the moment this lands.
-  // The configured rule is among the live ones and is clean BECAUSE of its
-  // option, not in spite of it: under the default it has findings, and the
-  // bound takes it to zero.
+  // and 175 against 157 for vitest. **The ones turned off below are the
+  // permanent react refusal and the react backlog rows**; every other one is
+  // live and finds nothing today, so they guard from the moment this lands,
+  // **except inside a component carrying a hooks disable directive**, where
+  // every React compiler based rule stands down, enforced ones included. The
+  // ratchet test holds what those two directives waive, by file.
+  // The configured rules are among the live ones and are clean BECAUSE of
+  // their options, not in spite of them: under each default the rule has
+  // findings, and its option takes it to zero.
   //
   // Count the rows rather than subtracting. The subtraction that stood here
   // was one out, and it put the configured rule among the rules with findings
@@ -61,8 +64,11 @@
   //     ./node_modules/.bin/oxlint src tests --format json
   //
   // and read `number_of_rules` and `number_of_files` off the report, plus the
-  // `code` of each diagnostic for a per rule count. It reads 172 rules over 487
-  // files here, against 116 before this landed.
+  // `code` of each diagnostic for a per rule count, adding `-D <rule>` for a
+  // rule turned off below. **A count a directive masks is the exception**,
+  // every backlog count and the `no-control-regex` figure: the ratchet test
+  // takes a backlog count over a copy with every disable directive blanked,
+  // which this command does not, and its failure prints the figure to write.
   //
   // **The `lint` script prints nothing at all, so do not look there.** The
   // implicit renderer and the named default renderer are different renderers:
@@ -91,9 +97,8 @@
 
     // The default bound is one argument and that is jest's. vitest's `expect`
     // takes a second argument, the message the failure prints, and this tree
-    // uses that form: under the default every finding is that one form, across
-    // 17 files, with no other message among them, and the option takes the tree
-    // to 0.
+    // uses that form: under the default every finding is that one form, with
+    // no other message among them, and the option takes the tree to 0.
     //
     // No total is written here on purpose. The count moves whenever anybody
     // writes another two argument assertion, including in the test file that
@@ -115,6 +120,30 @@
     // which is the single most valuable thing the test plugin brings.
     "vitest/valid-expect": ["error", { "maxArgs": 2 }],
 
+    // The default names four assertion functions: `expect`, `expectTypeOf`,
+    // `assert` and `assertType`. This adds one, the property runner's
+    // `witness`, which asserts inside and returns nothing, so an `it` holding
+    // only a witness is an assertion this rule could not see. The four are
+    // named back because the list replaces the default rather than adding to
+    // it.
+    //
+    // IT COSTS NO COVERAGE HERE, measured the same way as the entry above: a
+    // probe of six `it`s, one each with only a witness, nothing, an `expect`,
+    // an `expectTypeOf`, an `assert` and an `assertType`. The default reports
+    // the witness and the empty one; this reports the empty one alone.
+    "vitest/expect-expect": [
+      "error",
+      {
+        "assertFunctionNames": [
+          "expect",
+          "expectTypeOf",
+          "assert",
+          "assertType",
+          "witness"
+        ]
+      }
+    ],
+
     // ---- Refused, permanently. The rule is wrong about this codebase. ----
 
     // 47 sites. Every bulk write here is sequential BY DESIGN: a 300 book batch
@@ -132,8 +161,12 @@
     // **The second site is masked by an inline disable directive and this
     // entry said one site for as long as that was true.** So the count read as
     // one easy fix: turn the rule on, repair `safeHref.ts`, and leave a second
-    // site silently suppressed by a comment. The directive census in
-    // `oxlintRatchet.test.ts` is what stops the next one hiding.
+    // site silently suppressed by a comment.
+    //
+    // **Nothing holds the site count, here or at the two refusals below that
+    // also argue from named sites.** The rule is off across the tree, so a
+    // third site anywhere needs no directive and is suppressed by a reason
+    // that does not cover it, with every arm green.
     "no-control-regex": "off",
 
     // 1 site, `lib/sqlite.ts`: a zero width space inside a docstring's glob
@@ -147,52 +180,60 @@
     // not a suppression.
     "no-loss-of-precision": "off",
 
-    // 2694 sites, and the rule is WRONG about this tree rather than unpaid. It
+    // The rule is WRONG about this tree rather than unpaid, at every JSX site. It
     // requires React in scope for JSX, which the automatic runtime removed.
     // `tsconfig.json` sets `"jsx": "react-jsx"`, so the compiler supplies the
     // factory and no component imports React to render; the one file that
     // imports it, `src/main.tsx`, does so for `StrictMode`. Satisfying this
-    // rule would mean adding 2694 imports the build does not want. It must
-    // never be fixed, and it is here rather than in the backlog for that
-    // reason: there is no work behind it.
+    // rule would mean an import in every component, which the build does not
+    // want. It must never be fixed, and it is here rather than in the backlog
+    // for that reason: there is no work behind it.
     "react/react-in-jsx-scope": "off",
 
-    // ---- Backlog. Counts measured 2026-09-19 over `src` and `tests`. ----
+    // ---- Backlog. Each count is what oxlint finds over `src` and `tests`
+    // with every disable directive blanked, and `oxlintRatchet.test.ts` holds
+    // it EQUAL, so a fix and a new site each move it. Write the figure its
+    // failure prints, as the whole of the comment on the entry's own line: a
+    // breakdown beside it is a figure nothing holds, and is refused. So are a
+    // count of 0 and an option on an off entry, which would narrow what the
+    // count counts. ----
     // Each is a rule this tree could pass. None was triaged, deliberately: the
     // wave that adopted oxlint was told not to, because turning a noisy rule on
     // produces findings in files other open tickets rewrite.
-    "unicorn/consistent-function-scoping": "off", // 110
-    "unicorn/no-array-sort": "off", // 91
-    "no-shadow": "off", // 25
-    "unicorn/no-array-reverse": "off", // 5
-    "oxc/no-map-spread": "off", // 5
-    "unicorn/prefer-set-has": "off", // 3
+    "unicorn/no-array-sort": "off", // 179
+    "unicorn/consistent-function-scoping": "off", // 95
+    "no-shadow": "off", // 35
+    "unicorn/prefer-set-has": "off", // 14
+    "no-useless-concat": "off", // 11
+    "oxc/no-map-spread": "off", // 8
+    "unicorn/no-array-reverse": "off", // 6
+    "preserve-caught-error": "off", // 5
+    "unicorn/no-useless-spread": "off", // 4
     "unicorn/prefer-string-starts-ends-with": "off", // 2
-    "unicorn/no-useless-spread": "off", // 2
     "no-underscore-dangle": "off", // 2
     "typescript/no-extraneous-class": "off", // 1
     "oxc/no-accumulating-spread": "off", // 1
-    "preserve-caught-error": "off", // 1
-    "no-useless-concat": "off", // 1
 
-    // ---- Backlog, from the react plugin. Counts measured
-    // 2026-10-03 over the same 487 files under the same three categories. A
-    // separate block rather than merged into the one above because the counts
-    // were taken on a different day over a tree that has moved, and one date
-    // over both would be false for half the rows. ----
+    // ---- Backlog, from the react plugin, counted and held the same way. A
+    // separate block because the reasoning below is about these rows alone. ----
     //
     // Not triaged here, on the same terms as the block above and for a sharper
     // reason: these land in components that open tickets rewrite, and a plugin
     // list is a config change. Turning any of them on is a pass of its own. The
-    // three react rows under 10 are the ones to do first, because each names a
-    // defect rather than a habit: 9 effects setting state synchronously, 5
-    // reads of a ref during render, and one effect missing a dependency with
-    // one carrying an extra.
+    // three rows after the first are the ones to do first, because each names
+    // a defect rather than a habit: an effect setting state synchronously, a
+    // ref read during render, and an effect whose dependencies are wrong.
+    //
+    // **All three have sites behind the two hooks disable directives the
+    // ratchet test lists, and their counts include those sites.** A hooks
+    // directive stands down every React compiler based rule in its whole
+    // enclosing component, not only on the line it names, so turning one of
+    // these on will not report those sites while the directive stands.
     //
     // The other row is a habit: an index used as a key.
     "react/no-array-index-key": "off", // 12
-    "react/set-state-in-effect": "off", // 9
-    "react/refs": "off", // 5
-    "react/exhaustive-effect-dependencies": "off" // 2
+    "react/set-state-in-effect": "off", // 10
+    "react/refs": "off", // 6
+    "react/exhaustive-effect-dependencies": "off" // 4
   }
 }

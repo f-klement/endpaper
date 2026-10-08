@@ -57,7 +57,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Final, Protocol
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -874,6 +874,17 @@ def _port(url: httpx.URL) -> int:
     return url.port or (443 if url.scheme == "https" else 80)
 
 
+def _shown(url: str) -> str:
+    """A URL as a log line or an error message may name it: no query, no fragment, 200 characters.
+
+    **The query is where a credential rides**, the Google Books key among them, so a
+    `Location` echoing the request's query would otherwise put the key in the log and in
+    an exception message a caller logs again. Split with `urlsplit`, which is string
+    handling only and asks nothing of the host.
+    """
+    return urlsplit(url)._replace(query="", fragment="").geturl()[:200]
+
+
 def _same_host_hop(response: httpx.Response) -> str:
     """The URL of the next hop, if it is on the same host. Raises if it is not.
 
@@ -895,9 +906,9 @@ def _same_host_hop(response: httpx.Response) -> str:
         logger.warning(
             "Refused a catalogue redirect off %s to %s",
             here.host,
-            str(there)[:200],
+            _shown(str(there)),
         )
-        raise RedirectedOffHost(f"{here.host} tried to redirect to {str(there)[:200]}")
+        raise RedirectedOffHost(f"{here.host} tried to redirect to {_shown(str(there))}")
     return str(there)
 
 
@@ -997,10 +1008,10 @@ async def _walk_hops(
             # this: `URL()` constructs fine and `.host` is what raises, by which
             # point `stream` has already raised. Measured both ways.
             logger.warning(
-                "Refused a catalogue redirect with an unusable host: %s", target[:200]
+                "Refused a catalogue redirect with an unusable host: %s", _shown(target)
             )
             raise RedirectedOffHost(
-                f"{target[:200]} sent a Location naming an unusable host"
+                f"{_shown(target)} sent a Location naming an unusable host"
             ) from error
 
     raise TooManyRedirects(f"{url[:200]} redirected more than {MAX_REDIRECTS} times")

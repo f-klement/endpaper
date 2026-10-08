@@ -1,7 +1,7 @@
 /// <reference types="vitest/config" />
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 // Lever A is applied per file with a `@vitest-environment node` docblock, not
@@ -20,6 +20,77 @@ import { VitePWA } from "vite-plugin-pwa";
 
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+
+/**
+ * The property generator and its random source, as the bundler resolves them.
+ *
+ * **A path and not a specifier**, because a specifier has more spellings than
+ * any reader of the source holds: a template literal import, a `require`, a
+ * path into `node_modules`, an `import.meta.glob`, each measured bundling the
+ * package while a parse of the specifiers passed it. Whatever the spelling,
+ * the module the bundler loads lives here, a package subpath import's
+ * included, which this refused while the house rule passed it, measured.
+ *
+ * **Anchored at the start as well as after a separator**: an emitted asset
+ * names its source relative to the root, `node_modules/fast-check/...` with no
+ * separator before it, and the unanchored pattern let one through, measured.
+ */
+const GENERATOR =
+  /(?:^|[\\/])node_modules[\\/](?:fast-check|pure-rand|@fast-check[\\/][^\\/]+)[\\/]/;
+
+/**
+ * Refuse to build a bundle holding the property generator.
+ *
+ * `fast-check` is a development dependency run only under the suite, so a
+ * compromised release reaches a test pod and not a member's browser. **The
+ * image installs development dependencies before it builds**, so one stray
+ * load of it would ship it with the build green. `tests/houseRules.test.ts` is
+ * the early half, which names a file under `src/`; this is the half that asks
+ * the bundler, and it holds two things by mechanism:
+ *
+ * - **What the bundler loads**, by `load`, in the page build and, through
+ *   `worker.plugins` below, in every worker build. A worker is bundled with
+ *   that list alone and never sees the page's plugins: measured, a worker
+ *   under `scripts/` importing the package shipped it with every guard green
+ *   before the worker build carried this.
+ * - **What the build emits**, by `generateBundle`, which reads each chunk's
+ *   modules and each asset's source files. A `new URL(path, import.meta.url)`
+ *   asset is copied by reading the file and is never loaded, so `load` alone
+ *   passed the package's entry into the bundle, measured.
+ *
+ * **What it does not hold, stated**: the package's bytes committed somewhere
+ * outside `node_modules`, which no path names as the generator.
+ *
+ * **Build only.** The suite runs through this same configuration and loads
+ * the generator on purpose, and the development server ships nothing. A clean
+ * tree builds the same bytes with this as without it, measured.
+ */
+function withoutTheGenerator(): Plugin {
+  const refuse = (what: string, id: string): never => {
+    throw new Error(
+      `the bundle would ${what} ${id}, the property generator, which is a ` +
+        "development dependency and must never reach the application. " +
+        "tests/houseRules.test.ts names the rule.",
+    );
+  };
+  return {
+    name: "endpaper:without-the-generator",
+    apply: "build",
+    enforce: "pre",
+    load(id) {
+      if (GENERATOR.test(id)) refuse("load", id);
+      return null;
+    },
+    generateBundle(_options, bundle) {
+      for (const output of Object.values(bundle)) {
+        const sources =
+          output.type === "chunk" ? output.moduleIds : output.originalFileNames;
+        const hit = sources.find((id) => GENERATOR.test(id));
+        if (hit !== undefined) refuse("emit", hit);
+      }
+    },
+  };
+}
 
 /**
  * The version the app shows, derived rather than declared.
@@ -68,7 +139,12 @@ function junit(): ["junit", { outputFile: string }][] {
 
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(appVersion()) },
+  // A worker is built with this list and never with `plugins` below, so the
+  // generator guard is named in both; `withoutTheGenerator` says what each
+  // holds.
+  worker: { plugins: () => [withoutTheGenerator()] },
   plugins: [
+    withoutTheGenerator(),
     react(),
     // Tailwind 4 runs as a Vite plugin; there is no postcss.config.js any more.
     tailwindcss(),

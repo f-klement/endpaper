@@ -2,9 +2,9 @@
 
 <!-- measured: begin -->
 
-**10173 tests, in 146 files**, counted by the run that reads this line.
-**The 126 rows below sum to 9075.**
-The other 1098 tests are in 21 files this register may not name.
+**10199 tests, in 146 files**, counted by the run that reads this line.
+**The 126 rows below sum to 9080.**
+The other 1119 tests are in 21 files this register may not name.
 The table also carries 1 file this engine does not run, stated as 0.
 <!-- measured: end -->
 
@@ -98,8 +98,8 @@ why the helper uses regexes.
 | `test_auth_backends.py` | 100 | Local, LDAP and proxy identity sources, and that a directory identity never adopts a test account |
 | `test_csv_import.py` | 170 | **Reading anybody's export.** One real shape per service, and the awkward part of each |
 | `test_schemas.py` | 69 | Request/response contracts and their validation rules |
-| `test_google_books.py` | 103 | Volume mapping, the gap-filling merge, upstream failures, and that `merge_into` takes a `BookMatch` rather than a dictionary, pinned on the signature itself so a third call site inherits the bound. Also the join onto `books.categories`: a subject carrying the separator the column is joined on is dropped there rather than refused, driven by a list holding two such subjects among four and by a volume whose only category holds one, and the count is capped at the join with the two offending subjects at the front, so truncating before dropping answers short |
-| `test_notifications.py` | 129 | **The overdue digest.** Selection and the reminder interval, that a private book never reaches the wire, the signature, redirects refused, that a failure leaves the loan to retry |
+| `test_google_books.py` | 104 | Volume mapping, the gap-filling merge, upstream failures, and that `merge_into` takes a `BookMatch` rather than a dictionary, pinned on the signature itself so a third call site inherits the bound. Also the join onto `books.categories`: a subject carrying the separator the column is joined on is dropped there rather than refused, driven by a list holding two such subjects among four and by a volume whose only category holds one, and the count is capped at the join with the two offending subjects at the front, so truncating before dropping answers short |
+| `test_notifications.py` | 131 | **The overdue digest.** Selection and the reminder interval, that a private book never reaches the wire, the signature, redirects refused, that a failure leaves the loan to retry |
 | `test_sources.py` | 100 | **The provider roster.** That off means not asked rather than deprioritised, that the stored order is the order sources are asked and not which is believed, and the catalogue remit: a remit may only be declared for a source the committed sample measures, the Argentine frame cannot give that catalogue one, and the derived table holds the rows' own objects, plus that every seeded target answers something, which is what makes the refusal when nothing is asked derivable rather than true by coincidence of the seed data |
 | `test_tags.py` | 88 | **The one place a tag is decided from a name.** That nothing outside the mint and the seed constructs one, read by two instruments that go blind on different shapes, with a twenty nine row battery naming what each sees; which of a case differing pair wins; the normaliser the route and the import now share; and the ceiling on one Book, held against the single route and the bulk verb |
 | `test_targets.py` | 94 | **A catalogue as a row.** The seeded roster field by field, what a row may carry, and the two query builders |
@@ -151,7 +151,7 @@ why the helper uses regexes.
 | `test_env_example.py` | 4 | **Operator documentation that goes stale silently.** That every environment name `config.py` reads appears in `.env.example` and nothing appears there that the code ignores |
 | `test_database.py` | 86 | Engine setup, the session dependency, and the TLS posture every `DATABASE_SSL_MODE` resolves to, read off the context before any socket exists, and that the application's own engine is built from the setting |
 | `test_database_tls_on_a_real_server.py` | 0 | That the modes refusing a downgrade refuse a server with no TLS, that the tolerant two reach it, and that the cleartext probe can still see the driver's socket. Skipped off Postgres, so this run collects none of it |
-| `test_fetch.py` | 123 | **The only door outwards.** That the body cap counts raw wire bytes and compression is never requested |
+| `test_fetch.py` | 125 | **The only door outwards.** That the body cap counts raw wire bytes and compression is never requested |
 | `test_deadline.py` | 38 | How much of a deadline is left, and which clock answers: that the two names are the whole door, that neither grows a parameter, and that the module imports nothing but the standard library |
 | `test_dialect.py` | 104 | One rule, two engines: that each dialect's arm renders where the rule is rendered and a third is refused there, that the SQLite arm of every ported constraint is the text it always was, and that no SQLite arm lost a clause the Postgres arm is allowed to omit, and that each revision's Postgres arm is the next one's starting point |
 | `test_catalogue.py` | 241 | Folding what one source repeats, filling one row from another, merging two catalogues of one printing, how complete a record is, the two draft shapes, and what a source may not assert about this deployment's own files, and that rewriting a scalar after the fold refuses every collection, leaves each one the same object, and re-enters every dropper, so the locality rule needs no second belt on the import path |

@@ -8,8 +8,10 @@
  * refusing are values a real library carries.
  */
 
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
+import * as calibre from "../../src/lib/calibre";
 import {
   CALIBRE_PLACEHOLDER,
   crossCheck,
@@ -19,10 +21,38 @@ import {
   plainText,
   readCalibreLibrary,
   type CalibreBook,
+  type CalibreReading,
 } from "../../src/lib/calibre";
 import type { FileMetadata } from "../../src/lib/fileReaders";
-import { openSqlite } from "../../src/lib/sqlite";
-import { CALIBRE_SCHEMA, databaseOf, engine } from "./sqliteFixtures";
+import {
+  MAX_CELL_BYTES,
+  MAX_DATABASE_BYTES,
+  MAX_ROWS_PER_QUERY,
+  openSqlite,
+  openSqliteFile,
+  type SqliteFailure,
+} from "../../src/lib/sqlite";
+import { holds, PROFILE, PROPERTY, witness } from "../property";
+import {
+  expectAnswer,
+  expectNamedOutcome,
+  hostile,
+  overrunBreach,
+  type Door,
+  type ValueDoor,
+} from "./readerContract";
+import {
+  CALIBRE_SCHEMA,
+  buildDatabase,
+  graftDatabase,
+  databaseOf,
+  engine,
+  schemaSpec,
+  shapesOf,
+  type DatabaseSpec,
+  type TableSpec,
+} from "./sqliteFixtures";
+import { el, render, xmlDocument, type XmlDocument } from "./xmlArbitrary";
 
 // The value rule this walk applies, asked directly, so the arm below can say
 // the walk consults it rather than that two literals match.
@@ -1009,5 +1039,370 @@ describe("which of a library's identifiers reach the endpoint", () => {
     expect(new Set(swept.map((one) => one.kept))).toEqual(
       new Set([true, false]),
     );
+  });
+});
+
+/**
+ * The values a Calibre library reads meaning into: the ids its links join on,
+ * its placeholders, its undefined date, a comment carrying markup to clean.
+ */
+const CALIBRE_VALUES = [
+  1,
+  2,
+  3,
+  "Dune",
+  "Unknown",
+  "Frank Herbert",
+  "Herbert, Frank/Dune (1)",
+  "1965-08-01 00:00:00+00:00",
+  "0101-01-01 00:00:00+00:00",
+  "<p>A desert planet.</p><script>alert(1)</script>",
+  "<div><p>One</p><br>Two</div>",
+  "isbn",
+  "9780441013593",
+  "google",
+  "eng",
+  "EPUB",
+  1.0,
+];
+
+/** The schema's own tables and columns, read back off the engine. */
+const CALIBRE_SHAPES = await shapesOf(CALIBRE_SCHEMA);
+
+/** Each column's own values, so the joins a book is made of are drawn. */
+const IDS = [1, 2];
+const CALIBRE_COLUMNS = {
+  id: IDS,
+  book: IDS,
+  author: IDS,
+  publisher: IDS,
+  series: IDS,
+  "books_languages_link.lang_code": IDS,
+  "languages.lang_code": ["eng", "deu", ""],
+  title: ["Dune", "Unknown", ""],
+  name: ["Frank Herbert", "Unknown", "Chilton Books", "Dune Chronicles"],
+  pubdate: ["1965-08-01 00:00:00+00:00", "0101-01-01 00:00:00+00:00"],
+  series_index: [1.0, 2.5],
+  path: ["Herbert, Frank/Dune (1)"],
+  text: [
+    "<p>A desert planet.</p><script>alert(1)</script>",
+    "<div><p>One</p><br>Two</div>",
+    "<p>  </p>",
+  ],
+  type: ["isbn", "google", "amazon"],
+  val: ["9780441013593", "0441013597", "x"],
+  format: ["EPUB", "PDF"],
+};
+
+const drawnLibrary = schemaSpec(
+  CALIBRE_SHAPES,
+  {
+    tables: Object.keys(CALIBRE_SHAPES),
+    columns: Object.values(CALIBRE_SHAPES).flat(),
+    values: CALIBRE_VALUES,
+  },
+  CALIBRE_COLUMNS,
+);
+
+/** The one book's own values, by column. Two columns refuse a NULL. */
+const BOOK_ROW: Readonly<Record<string, string | number>> = {
+  id: 1,
+  title: "Dune",
+  series_index: 1.0,
+  path: "Herbert, Frank/Dune (1)",
+};
+
+/** One book with an author and a description, in the schema's own columns. */
+const ONE_DESCRIBED_BOOK: TableSpec[] = [
+  {
+    name: "books",
+    columns: CALIBRE_SHAPES["books"]!,
+    // Every column a value, because two of them refuse a NULL.
+    rows: [CALIBRE_SHAPES["books"]!.map((column) => BOOK_ROW[column] ?? null)],
+    counted: undefined,
+  },
+  {
+    name: "authors",
+    columns: CALIBRE_SHAPES["authors"]!,
+    rows: [[1, "Frank Herbert", null]],
+    counted: undefined,
+  },
+  {
+    name: "books_authors_link",
+    columns: CALIBRE_SHAPES["books_authors_link"]!,
+    rows: [[1, 1, 1]],
+    counted: undefined,
+  },
+  {
+    name: "comments",
+    columns: CALIBRE_SHAPES["comments"]!,
+    rows: [[1, 1, "<p>A desert planet.</p>"]],
+    counted: undefined,
+  },
+];
+
+/** A drawn library, mostly with one described book grafted back into it. */
+const calibreSpec = fc.oneof(
+  { arbitrary: drawnLibrary, weight: 1 },
+  {
+    arbitrary: drawnLibrary.map((spec) =>
+      graftDatabase(spec, ONE_DESCRIBED_BOOK),
+    ),
+    weight: 3,
+  },
+);
+
+/** Bytes a string costs, the unit `MAX_CELL_BYTES` is in. */
+function bytesOf(value: string | null): number {
+  return value === null ? 0 : new TextEncoder().encode(value).length;
+}
+
+/**
+ * The Calibre intake as the library card runs it: the picked file opened,
+ * read, and closed.
+ *
+ * **`readCalibreLibrary` catches nothing and needs to catch nothing**, since
+ * `query` never throws for a statement the file cannot answer, so the clause
+ * about a throw here is about this module's own walk over values it did not
+ * choose. **The bounds are the rest of its teeth**: no more books than one
+ * statement may hand back, and no field of one wider than a cell may be.
+ */
+const intake: Door<DatabaseSpec, CalibreReading | SqliteFailure> = {
+  module: calibre,
+  ceilings: () => ({ read: MAX_DATABASE_BYTES, reads: 1 }),
+  build: buildDatabase,
+  open: async (file, meter) => {
+    const opened = await openSqliteFile(file, engine);
+    if (!opened.ok) return opened.failure;
+    try {
+      const reading = readCalibreLibrary(opened.database);
+      if (!reading.ok) return reading;
+      meter.require(
+        reading.books.length <= MAX_ROWS_PER_QUERY,
+        `${reading.books.length} books against a ceiling of ${MAX_ROWS_PER_QUERY}`,
+      );
+      for (const book of reading.books) {
+        const fields = [
+          book.title,
+          book.path,
+          book.publisher,
+          book.language,
+          book.description,
+          book.seriesName,
+          ...book.authors,
+          ...book.formats,
+          ...book.identifiers.flatMap(({ type, value }) => [type, value]),
+        ];
+        for (const field of fields) {
+          meter.require(
+            bytesOf(field) <= MAX_CELL_BYTES,
+            `a book carried a field of ${bytesOf(field)} bytes against a ceiling of ${MAX_CELL_BYTES}`,
+          );
+        }
+      }
+      return reading;
+    } finally {
+      opened.database.close();
+    }
+  },
+};
+
+describe("any Calibre library a member picks", () => {
+  it(
+    "is read or refused by name, never a book wider than the engine hands back",
+    PROPERTY,
+    async () => {
+      // **A reach, asked of what the intake answered**: a run must read a
+      // library holding a book, which is what puts the per book walk and its
+      // field bounds under the property rather than only its refusals.
+      expect(
+        await holds(
+          hostile(calibreSpec),
+          async (input) => expectNamedOutcome(intake, input),
+          {
+            "read a library holding a book": (_, { outcome }) =>
+              "answered" in outcome &&
+              typeof outcome.answered === "object" &&
+              outcome.answered.ok &&
+              outcome.answered.books.length > 0,
+          },
+        ),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("is metered, so the read ceiling above is not held over nothing", async () => {
+    const { outcome, counted } = await expectNamedOutcome(intake, {
+      spec: {
+        tables: [
+          {
+            name: "books",
+            columns: ["id", "title"],
+            rows: [[1, "Dune"]],
+            counted: undefined,
+          },
+          {
+            name: "books_authors_link",
+            columns: ["id", "book", "author"],
+            rows: [],
+            counted: undefined,
+          },
+        ],
+        padTo: undefined,
+      },
+      patches: [],
+    });
+
+    expect(outcome).toMatchObject({
+      answered: { ok: true, books: [{ id: 1, title: "Dune" }] },
+    });
+    expect(counted.reads).toBe(1);
+  });
+
+  it("declares the read ceilings it is held to, so one deleted or loosened reds", async () => {
+    // **The positive control**: a stub charging the meter as the file would,
+    // through this door's own ceilings. The size is refused before any read in
+    // the seam, so no property draw here reaches the read ceiling, and nothing
+    // but this would red were it deleted. A read is charged rather than made,
+    // so the sixty four mebibyte bound costs no buffer of that size.
+    expect(
+      await overrunBreach(intake, {
+        ceiling: "read",
+        bound: MAX_DATABASE_BYTES,
+      }),
+    ).toContain(`bytes against a ceiling of ${MAX_DATABASE_BYTES}`);
+    expect(
+      await overrunBreach(intake, { ceiling: "reads", bound: 1 }),
+    ).toContain("made read 2 against a ceiling of 1");
+  });
+
+  it("draws libraries the reader reads, with a description it cleaned", async () => {
+    // **Asked of the reader rather than of the spec**: whether a drawn
+    // library has the joins that make a book is a question about rows, and
+    // the reader is the instrument that answers it without a second opinion.
+    await witness(calibreSpec, {
+      "is a library with a described book by someone": async (spec) => {
+        const opened = await openSqlite(await buildDatabase(spec), engine);
+        if (!opened.ok) return false;
+        const reading = readCalibreLibrary(opened.database);
+        opened.database.close();
+        return (
+          reading.ok &&
+          reading.books.some(
+            (book) => book.description !== null && book.authors.length > 0,
+          )
+        );
+      },
+    });
+  });
+});
+
+/** Element names a description arrives with, the silent ones among them. */
+const HTML_NAMES = [
+  "p",
+  "div",
+  "br",
+  "li",
+  "tr",
+  "i",
+  "b",
+  "h1",
+  "script",
+  "style",
+  "template",
+  "noscript",
+  "iframe",
+  "object",
+];
+
+/** What only a silent element holds, and must never reach a description. */
+const HIDDEN = "HIDDEN";
+
+/** The elements whose text never reaches a description, as `calibre.ts` lists them. */
+const SILENT = ["script", "style", "template", "noscript", "iframe", "object"];
+
+/**
+ * Whether the marker is text a reader of the parsed document would see:
+ * parsed by the same parser, the silent elements removed through the DOM's
+ * own API, and the body's text asked.
+ *
+ * **The parsed document and not the drawn tree**, because the two differ: a
+ * `script` inside a `script` ends the outer one at its own end tag, and
+ * happy-dom does not parse an `iframe`'s content as raw text, so text drawn
+ * inside a silent element is visible text by the time a reader walks it.
+ * Measured: an oracle reasoning over the tree reported both as the reader's
+ * fault on eight runs in twenty. **A second instrument, not a copy of the
+ * first**: removal and `textContent` against the reader's own walk.
+ */
+function visibleMarker(html: string): boolean {
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  for (const silent of parsed.body.querySelectorAll(SILENT.join(","))) {
+    silent.remove();
+  }
+  return (parsed.body.textContent ?? "").includes(HIDDEN);
+}
+
+const description = xmlDocument({
+  roots: ["div", "p", "body"],
+  names: HTML_NAMES,
+  // **No `src`**: happy-dom fetches what a parsed document names, which the
+  // inert document a browser's parser builds never does. Measured: drawn, it
+  // sent this property's text values to a server on localhost.
+  attributes: ["onerror", "class", "title"],
+  texts: [HIDDEN, "A desert planet.", "alert(1)", " "],
+  accepted: el("div", [
+    el("p", ["A desert planet."]),
+    el("script", [HIDDEN]),
+    el("p", [el("i", ["Dune"]), el("br")]),
+  ]),
+});
+
+/**
+ * `plainText` as a door: a comment's markup in, a description out.
+ *
+ * **What the meter cannot see here, it cannot see because nothing is there**:
+ * a `text/html` parse has no internal subset, so neither parse ceiling applies
+ * and none is declared. The teeth are the value: whatever sat only inside a
+ * silent element never reaches the text, and no run of blank lines survives.
+ */
+const cleaning: ValueDoor<XmlDocument, string | null> = {
+  module: calibre,
+  ceilings: () => ({}),
+  open: (document, meter) => {
+    const out = plainText(render(document));
+    meter.require(
+      out === null || !/\n{3,}/.test(out),
+      `a description kept a run of blank lines: ${JSON.stringify(out)}`,
+    );
+    const html = render(document);
+    meter.require(
+      (out ?? "").includes(HIDDEN) === visibleMarker(html),
+      `the description ${(out ?? "").includes(HIDDEN) ? "kept" : "lost"} text the parsed document ${visibleMarker(html) ? "shows" : "hides"}: ${JSON.stringify(out)}`,
+    );
+    return out;
+  },
+};
+
+describe("any comment a library carries", () => {
+  it(
+    "becomes text that carries what the document shows and nothing a silent element held",
+    PROPERTY,
+    async () => {
+      expect(
+        await holds(description, async (document) => {
+          await expectAnswer(cleaning, document);
+        }),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("draws the marker hidden in a silent element, and shown outside one", async () => {
+    await witness(description, {
+      "hides the marker in a silent element": (document) => {
+        const html = render(document);
+        return html.includes(HIDDEN) && !visibleMarker(html);
+      },
+      "shows the marker": (document) => visibleMarker(render(document)),
+    });
   });
 });

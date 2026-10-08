@@ -239,12 +239,13 @@ class Decoding:
         """
         if not isinstance(self.reader, Reader):
             # **`ValueError` and not `TypeError`, although this is a type
-            # test.** The category is "this row is malformed", not "the caller
-            # passed the wrong type": the value arrives from a database column,
-            # and every other refusal in this method and in `targets.Target`'s
-            # raises `ValueError` for the same category. Splitting it in two
-            # buys a reader nothing and costs every catcher a second name.
-            raise ValueError(f"{self.source}: {self.reader!r} is not a Reader")
+            # test.** The category is "this value object is malformed", not "the
+            # caller passed the wrong type": a decoding built from a file or a
+            # member's library has passed no row, so the value need not have come
+            # from a column at all. Every other refusal of this constructor and of
+            # `targets.Target`'s raises `ValueError`, so a caller of either
+            # catches one name; splitting it in two costs every catcher a second.
+            raise ValueError(f"{self.source}: {self.reader!r} is not a Reader")  # noqa: TRY004
         if self.reader not in MARC_READERS and (
             self.refuses_component_parts or self.reads_author_identifiers
         ):

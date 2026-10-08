@@ -28,6 +28,7 @@ catalogue.
 import ast
 import asyncio
 import gzip
+import logging
 import re
 import socket
 import time
@@ -800,6 +801,23 @@ class TestTheRedirectPolicy:
         assert not landed.called
 
     @pytest.mark.asyncio
+    async def test_a_refused_redirect_never_names_its_query(self, caplog):
+        """A `Location` can echo the request's query, and the query is where the
+        Google Books key rides. The refusal is logged and raised; neither may
+        carry the query. Captured at DEBUG so no level hides a line."""
+        location = "https://elsewhere.example/v?key=secret-key&q=x"
+        with caplog.at_level(logging.DEBUG), respx.mock:
+            respx.get(URL).mock(
+                return_value=httpx.Response(302, headers={"location": location})
+            )
+            with pytest.raises(fetch.RedirectedOffHost) as raised:
+                await fetch.get_once(URL)
+
+        assert "secret-key" not in caplog.text
+        assert "secret-key" not in str(raised.value)
+        assert "elsewhere.example" in caplog.text
+
+    @pytest.mark.asyncio
     async def test_a_downgrade_to_plaintext_on_the_same_name_is_refused(self):
         """Same host, and still somewhere an on-path attacker can rewrite."""
         with respx.mock:
@@ -876,6 +894,25 @@ class TestTheRedirectPolicy:
 
         # The assertion that matters to the call sites: not a bare ValueError.
         assert isinstance(raised.value, httpx.HTTPError)
+
+    @pytest.mark.asyncio
+    async def test_an_unusable_host_refusal_never_names_the_query_it_followed(self, caplog):
+        """That arm names the URL which sent the bad `Location`, and after a same
+        host hop that URL is itself a `Location` echoing the query, where the
+        Google Books key rides. Driven through a same host hop first, because
+        from the first hop the arm's input is the bare URL and never carries a
+        query, so the test above cannot see this."""
+        hops = [
+            httpx.Response(302, headers={"location": f"{URL}?key=secret-key&q=x"}),
+            httpx.Response(302, headers={"location": "http://xn--a.gov/x"}),
+        ]
+        with caplog.at_level(logging.DEBUG), respx.mock:
+            respx.get(url__startswith=URL).mock(side_effect=hops)
+            with pytest.raises(fetch.RedirectedOffHost) as raised:
+                await fetch.get_once(URL)
+
+        assert "secret-key" not in caplog.text
+        assert "secret-key" not in str(raised.value)
 
     @pytest.mark.asyncio
     async def test_a_redirect_with_no_location_is_refused(self):

@@ -1,11 +1,15 @@
 import "@testing-library/jest-dom/vitest";
 
 import { cleanup } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, vi } from "vitest";
 
 import { forgetPreferences } from "../src/lib/preference";
 import { resetZxingDouble } from "./doubles/zxing";
-import { hadDecompressionStream } from "./lib/withoutDecompression";
+import { openLedger, uncontrolled } from "./lib/doorLedger";
+import {
+  hadDecompressionStream,
+  realDecompressionStream,
+} from "./lib/withoutDecompression";
 
 /**
  * The zone every run of this suite is in, pinned rather than inherited.
@@ -510,6 +514,13 @@ const REAL_MEDIA_DEVICES =
     ? undefined
     : Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
 
+//: The parser this file's environment shipped, read before any test can wrap
+//: it. **Per file and not memoised per worker**, unlike the inflater below:
+//: the inflater is the runtime's and survives an environment, while happy-dom
+//: and jsdom each bring their own `DOMParser`, and this module is evaluated
+//: once per test file, after that file's environment is built.
+const REAL_DOM_PARSER = (globalThis as { DOMParser?: unknown }).DOMParser;
+
 //: Whether this environment can inflate, seeded before any test can take it
 //: away.
 //:
@@ -535,6 +546,23 @@ const REAL_MEDIA_DEVICES =
 //: An environment that never had one is not a leak, which is why this is a
 //: question about what this worker started with rather than an assertion.
 hadDecompressionStream();
+realDecompressionStream();
+
+//: **A fresh door ledger per file**, opened at module scope, which runs once
+//: per test file before any of its tests, and read after its last one.
+//: `tests/lib/doorLedger.ts` says why it is per file and not per worker.
+openLedger();
+afterAll(() => {
+  const missing = uncontrolled();
+  if (missing.length > 0) {
+    throw new Error(
+      "A door this file drives declares a bound no positive control in this " +
+        "file overran, so deleting or loosening it reds nothing: " +
+        `${missing.join("; ")}. Add an overrunBreach arm per bound, from ` +
+        "tests/lib/readerContract.ts.",
+    );
+  }
+});
 
 afterEach(() => {
   // `cleanup()` unmounts React trees, of which a node-environment file has none.
@@ -592,6 +620,32 @@ afterEach(() => {
         "reports a member's file as one this browser cannot inflate. Remove " +
         "it with withoutDecompressionStream() from tests/lib/" +
         "withoutDecompression.ts, which puts it back in a finally.",
+    );
+  }
+  // **And the same object, which presence cannot say.** The meter replaces the
+  // inflater with a counting one for one call; one left installed is present,
+  // so the check above passes it, and every later file in the worker inflates
+  // through a meter nobody reads.
+  if (
+    hadDecompressionStream() &&
+    (globalThis as { DecompressionStream?: unknown }).DecompressionStream !==
+      realDecompressionStream()
+  ) {
+    throw new Error(
+      "This test left a replacement DecompressionStream installed. Under " +
+        "isolate: false every later file in the worker inflates through it. " +
+        "Install one with the meter in tests/lib/meter.ts, which puts the " +
+        "original back in a finally.",
+    );
+  }
+
+  // **The parser, by the same identity.** The meter wraps it for one call to
+  // count what a reader hands it; one left installed reaches every later test
+  // in this file, which then parses through a meter nobody reads.
+  if ((globalThis as { DOMParser?: unknown }).DOMParser !== REAL_DOM_PARSER) {
+    throw new Error(
+      "This test left a replacement DOMParser installed. Install one with the " +
+        "meter in tests/lib/meter.ts, which puts the original back in a finally.",
     );
   }
 

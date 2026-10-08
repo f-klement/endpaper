@@ -61,6 +61,18 @@ from routers import (
 from schema import upgrade_to_head
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+# httpx logs every request at INFO with its full URL, and three of this app's URLs carry a
+# secret: the Telegram bot token is a path segment, the Google Books key is a query
+# parameter, and a webhook URL may carry one in its path or query. At INFO each reached
+# the log verbatim on every request, success included. In the installed versions httpx
+# logs nothing but that request line and httpcore nothing above DEBUG, failures arriving
+# as exceptions, so WARNING switches both off entirely. What that costs is the one record
+# of every outbound request, and raising the root to DEBUG no longer brings it back; the
+# app's own lines name the host for Telegram and the webhook, and a URL without its
+# query for Google Books. Removing this puts the secrets back in the log, which the token
+# tests in test_notifications.py and test_google_books.py read at DEBUG.
+for _library in ("httpx", "httpcore"):
+    logging.getLogger(_library).setLevel(logging.WARNING)
 logger = logging.getLogger("endpaper")
 
 

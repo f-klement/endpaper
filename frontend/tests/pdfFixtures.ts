@@ -15,6 +15,12 @@
  * shape misses at least 42% of the field.
  */
 
+import fc from "fast-check";
+
+import { MAX_DEPTH, MAX_INFLATED_BYTES } from "../src/lib/pdf";
+import { edges, sometimes, type Total } from "./property";
+import { around } from "./zipFixtures";
+
 /**
  * A string as bytes, one byte per character.
  *
@@ -173,6 +179,29 @@ export function classicPdf(
   );
 }
 
+/**
+ * Object streams padded with zeroes, deflated, by their objects and length.
+ *
+ * **Kept because a property draws the same few streams again and again**, and
+ * each is sixteen mebibytes to deflate: the objects come from a small set of
+ * spellings, so the key repeats. Per worker under `isolate: false`.
+ */
+const PADDED = new Map<string, Uint8Array<ArrayBuffer>>();
+
+async function padded(
+  payload: Uint8Array,
+  length: number,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const key = `${length}|${text(payload)}`;
+  const known = PADDED.get(key);
+  if (known) return known;
+  const built = await deflate(
+    concat(payload, new Uint8Array(length - payload.length)),
+  );
+  PADDED.set(key, built);
+  return built;
+}
+
 /** Where a packed object ended up: which object stream, and at which index. */
 interface Packing {
   readonly stream: number;
@@ -259,17 +288,16 @@ export async function streamPdf(
     const pairRows = options.packedHeader ?? derived;
     const pairs = pairRows.map(([num, at]) => `${num} ${at} `).join("");
     const first = latin(pairs).length;
-    let payload = concat(pairs, bodies);
+    const payload = concat(pairs, bodies);
+    let packedBytes: Uint8Array<ArrayBuffer>;
     if (options.inflateTo !== undefined) {
       if (payload.length > options.inflateTo) {
         throw new Error("inflateTo is under what the objects themselves take");
       }
-      payload = concat(
-        payload,
-        new Uint8Array(options.inflateTo - payload.length),
-      );
+      packedBytes = await padded(payload, options.inflateTo);
+    } else {
+      packedBytes = await deflate(payload);
     }
-    const packedBytes = await deflate(payload);
     all.push(
       options.objStmLength === undefined
         ? streamObject(
@@ -396,5 +424,165 @@ export function xmpPacket(
     `<${prefix}:RDF xmlns:${prefix}="http://www.w3.org/1999/02/22-rdf-syntax-ns#">` +
     `<${prefix}:Description xmlns:dc="http://purl.org/dc/elements/1.1/">${body}</${prefix}:Description>` +
     `</${prefix}:RDF>\n<?xpacket end="w"?>`
+  );
+}
+
+/**
+ * One PDF as a property draws it: an `/Info` reached through a chain of
+ * references, each link optionally an object stream of its own.
+ *
+ * **The chain is the spine because it is what `readPdf` follows**, and a
+ * stream on every link is what makes a small file expensive: each costs a
+ * whole inflate for a few bytes of file. The rest are the places a crafted
+ * file is wrong on purpose.
+ */
+export interface PdfSpec {
+  /** A classic table, or a cross reference stream with or without a predictor. */
+  readonly xref: "table" | "stream" | "stream-unpredicted";
+  /** The first line of the file. */
+  readonly header: string;
+  /** How many objects `/Info` is reached through. At least one. */
+  readonly links: number;
+  /** Whether each link lives in an object stream of its own. A table cannot. */
+  readonly packed: boolean;
+  /** What each of those object streams inflates to, padded with zeroes. */
+  readonly inflateTo: number | undefined;
+  /** The information dictionary at the end of the chain. */
+  readonly info: string;
+  /** Whether the last link points back at the first instead. */
+  readonly cycle: boolean;
+  /** Further entries in the catalogue. */
+  readonly catalog: string;
+  /** Further entries in the trailer. */
+  readonly trailer: string;
+}
+
+/** The bytes of a `PdfSpec`. */
+export async function buildPdf(
+  spec: PdfSpec,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const links = Math.max(1, spec.links);
+  const chain: PdfObject[] = [];
+  for (let num = 1; num <= links; num += 1) {
+    const body =
+      num < links ? `${num + 1} 0 R` : spec.cycle ? "1 0 R" : spec.info;
+    chain.push(object(num, body));
+  }
+  const objects = [
+    ...chain,
+    object(links + 1, `<< /Type /Catalog ${spec.catalog} >>`),
+  ];
+  const trailer = `/Info 1 0 R /Root ${links + 1} 0 R ${spec.trailer}`;
+  if (spec.xref === "table") {
+    return classicPdf(objects, trailer, { header: spec.header });
+  }
+  return streamPdf(objects, trailer, {
+    header: spec.header,
+    predictor: spec.xref === "stream",
+    packed: spec.packed ? chain.map((item) => [item.num]) : undefined,
+    inflateTo: spec.packed ? spec.inflateTo : undefined,
+  });
+}
+
+/**
+ * Information dictionaries: whole, broken, nested around the reader's depth
+ * bound, and pointing where nothing is.
+ *
+ * The nests are drawn at `MAX_DEPTH`, read from the module, and one either
+ * side of it, so the nests move with the bound rather than with a number
+ * written here.
+ */
+const INFO = [
+  "<< /Title (Deep) >>",
+  "<< /Title <FEFF00440065> /Author (A. Person) >>",
+  "<< /Title (unterminated >>",
+  ...edges(MAX_DEPTH).map(
+    (depth) => `<< /Title ${"[".repeat(depth)}${"]".repeat(depth)} >>`,
+  ),
+  "<< /Title 99 0 R >>",
+  "<< /Title (x) /Author 1 0 R >>",
+  "null",
+  "(",
+];
+
+/**
+ * The combination the inflation budget exists for, composed: three or more
+ * streams at the per stream ceiling, each inside its own bound and together
+ * past the file's.
+ *
+ * **The only shape that reached the defect `pdf.ts` records**, where the
+ * reader charged bytes read and not bytes inflated: no single stream is over
+ * anything, so a generator drawing sizes independently makes the combination
+ * rare enough to miss in a run.
+ */
+const OVER_BUDGET = fc.record({
+  xref: fc.constantFrom<PdfSpec["xref"]>("stream", "stream-unpredicted"),
+  header: fc.constant("%PDF-1.5\n"),
+  links: fc.integer({ min: 3, max: 5 }),
+  packed: fc.constant(true),
+  inflateTo: fc.constantFrom(MAX_INFLATED_BYTES - 1, MAX_INFLATED_BYTES),
+  info: fc.constant("<< /Title (Deep) >>"),
+  cycle: fc.constant(false),
+  catalog: fc.constant(""),
+  trailer: fc.constant(""),
+} satisfies Total<PdfSpec>);
+
+/** A PDF: any field drawn, or the budget's own combination. */
+export function pdfSpec(): fc.Arbitrary<PdfSpec> {
+  const any = fc.record({
+    xref: fc.constantFrom<PdfSpec["xref"]>(
+      "table",
+      "stream",
+      "stream-unpredicted",
+    ),
+    header: fc.constantFrom(
+      "%PDF-1.5\n",
+      "%PDF-2.0\n",
+      "%PDF-\n",
+      "%PDX-1.5\n",
+    ),
+    links: fc.integer({ min: 1, max: 6 }),
+    packed: fc.boolean(),
+    inflateTo: sometimes(fc.constantFrom(...around(MAX_INFLATED_BYTES))),
+    info: fc.constantFrom(...INFO),
+    cycle: fc.oneof(
+      { arbitrary: fc.constant(false), weight: 4 },
+      { arbitrary: fc.constant(true), weight: 1 },
+    ),
+    catalog: fc.constantFrom("", "/Metadata 99 0 R", "/Metadata 1 0 R"),
+    trailer: fc.constantFrom(
+      "",
+      "/Encrypt << /Filter /Standard >>",
+      "/Encrypt null",
+      "/Prev 0",
+      "/Prev 99999",
+    ),
+  } satisfies Total<PdfSpec>);
+  return fc.oneof(
+    { arbitrary: any, weight: 4 },
+    { arbitrary: OVER_BUDGET, weight: 1 },
+  );
+}
+
+/**
+ * Whether a spec is the combination `OVER_BUDGET` builds, for a witness: its
+ * streams together past `budget`, **and every field it fixes as it fixes
+ * them**, because a header or a trailer the reader refuses first makes the
+ * same streams reach no inflater. Measured: a header of `%PDX-1.5` planted in
+ * `OVER_BUDGET` left the witness green while the reader refused every draw
+ * before inflating.
+ */
+export function isOverBudget(spec: PdfSpec, budget: number): boolean {
+  return (
+    spec.header === "%PDF-1.5\n" &&
+    spec.info === "<< /Title (Deep) >>" &&
+    spec.catalog === "" &&
+    spec.trailer === "" &&
+    spec.xref !== "table" &&
+    spec.packed &&
+    !spec.cycle &&
+    spec.inflateTo !== undefined &&
+    spec.inflateTo <= MAX_INFLATED_BYTES &&
+    spec.links * spec.inflateTo > budget
   );
 }

@@ -86,8 +86,10 @@ import { openZip, ZipError, zipFailureAs } from "./zip";
  * very long annotation is a FictionBook and a member told it is not one has been
  * told something false. The two are told apart by what the prefix holds: a
  * `<description>` opened and never closed, in a read that filled its bound.
+ *
+ * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const MAX_HEADER_BYTES = 256 * 1024;
+export const MAX_HEADER_BYTES = 256 * 1024;
 
 /**
  * How large a `.fb2.zip` entry may be at all.
@@ -102,8 +104,10 @@ const MAX_HEADER_BYTES = 256 * 1024;
  * 32 MiB is 5.97 times the largest file in the corpus, 5,616,072 bytes. The
  * headroom is for the `<binary>` blocks: FB2 carries its cover, and sometimes
  * every illustration, base64 encoded inside the same document.
+ *
+ * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const MAX_ARCHIVED_BYTES = 32 * 1024 * 1024;
+export const MAX_ARCHIVED_BYTES = 32 * 1024 * 1024;
 
 /**
  * How far in the XML declaration is looked for.
@@ -470,7 +474,18 @@ export function readFb2Description(xml: string): FileMetadata | null {
   const header = headerDocument(xml);
   if (header === null) return null;
 
-  const document = new DOMParser().parseFromString(header, "application/xml");
+  // **Caught, because a parser this reader does not choose may throw.**
+  // `parseFromString` answers a document it cannot read with a `parsererror`
+  // root, by the DOM Parsing specification, which is the refusal below.
+  // happy-dom's XML parser throws instead on some, measured on a processing
+  // instruction whose target a patch broke, and a reader answers rather than
+  // throws whichever parser it meets: `fileReaders.FileReader`'s contract.
+  let document: Document;
+  try {
+    document = new DOMParser().parseFromString(header, "application/xml");
+  } catch {
+    return null;
+  }
   // Both halves are needed. A parse error yields a document whose root is
   // `parsererror`, and a well formed document that is not a FictionBook yields
   // a root that is simply something else.

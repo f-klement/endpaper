@@ -116,8 +116,10 @@ import {
  * Measured at 3,643 bytes over the 24 in that export, smallest 2,434. 256 KiB
  * is seventy times the largest, which leaves room for a member who highlighted
  * a great deal and still refuses a file that is not a page of metadata.
+ *
+ * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const MAX_SIDECAR_BYTES = 256 * 1024;
+export const MAX_SIDECAR_BYTES = 256 * 1024;
 
 /**
  * How much one book file may inflate to.
@@ -132,8 +134,10 @@ const MAX_SIDECAR_BYTES = 256 * 1024;
  * inflates up to 4.06 MiB more inside. So one book at a time costs up to about
  * 68 MiB and is released before the next is touched. The whole file has to be
  * in hand because a zip is read from its end.
+ *
+ * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const MAX_BOOK_BYTES = 32 * 1024 * 1024;
+export const MAX_BOOK_BYTES = 32 * 1024 * 1024;
 
 /**
  * How much more than its own size the archive may inflate to, plus one file's
@@ -190,8 +194,10 @@ const MAX_BOOK_BYTES = 32 * 1024 * 1024;
  * document. What it does not charge is the 20 byte signature read, and each
  * archive's central directory, which is stored rather than deflated and so is a
  * slice of bytes already paid for.
+ *
+ * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const MAX_INFLATION_RATIO = 20;
+export const MAX_INFLATION_RATIO = 20;
 
 /**
  * The OCF signature, and it is a signature rather than a name.
