@@ -8,6 +8,7 @@ import ast
 import csv
 import inspect
 import io
+import json
 import sys
 import types
 import typing
@@ -404,6 +405,31 @@ class TestIsbnLookup:
             if call.request.url.path == "/isbn/9780743273565.json"
         ]
         assert len(edition_calls) == 1
+
+    def test_a_lone_surrogate_in_a_json_answer_is_mojibake_and_not_a_500(
+        self, client, admin
+    ):
+        """`json.loads` turns a `\\ud800` escape into a surrogate with no
+        partner, which no encoder writes back out, so serialising the lookup
+        answered 500. `fetch.Fetched.json` now repairs it, the way `.text`
+        repairs a charset that decodes to one. The escape is written by
+        `json.dumps`, as any server's encoder may write it."""
+        body = json.dumps({"title": "A\ud800B", "publishers": ["Scribner"]}).encode()
+        assert b"\\ud800" in body
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=DNB).mock(return_value=_sru_empty())
+            mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
+            silence_sru_catalogues(mock)
+            mock.get(OPEN_LIBRARY_ISBN).mock(return_value=httpx.Response(200, content=body))
+            silence_covers(mock)
+            res = client.get(
+                "/api/books/lookup",
+                params={"isbn": "9780743273565"},
+                headers=admin["headers"],
+            )
+
+        assert res.status_code == 200, res.text
+        assert res.json()["title"] == "A\N{REPLACEMENT CHARACTER}B"
 
     def test_short_isbn_is_rejected_before_any_request(self, client, admin):
         res = client.get("/api/books/lookup", params={"isbn": "123"}, headers=admin["headers"])
@@ -955,6 +981,38 @@ class TestRefreshMetadata:
         book = make_book(admin["headers"])
         res = client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"])
         assert res.status_code == 400
+
+    def test_a_book_no_catalogue_holds_is_404_and_keeps_what_it_had(
+        self, client, admin, make_book, open_library_miss
+    ):
+        book = make_book(admin["headers"], title="Typed by hand", isbn="9780743273565")
+
+        res = client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"])
+
+        assert res.status_code == 404
+        after = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
+        assert after["title"] == "Typed by hand"
+
+    def test_a_catalogue_that_cannot_be_reached_is_503_and_keeps_what_it_had(
+        self, client, admin, make_book
+    ):
+        """Not 404: that tells the member to type the book in by hand, when the
+        honest answer is to try again."""
+        book = make_book(admin["headers"], title="Typed by hand", isbn="9780743273565")
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=DNB).mock(return_value=_sru_empty())
+            mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
+            silence_sru_catalogues(mock)
+            mock.get(url__startswith="https://openlibrary.org/").mock(
+                return_value=httpx.Response(503)
+            )
+            silence_covers(mock)
+            res = client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"])
+
+        assert res.status_code == 503
+        assert "Could not reach the book catalogues" in res.json()["detail"]
+        after = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
+        assert after["title"] == "Typed by hand"
 
     def test_unknown_book_is_404(self, client, admin):
         assert client.put("/api/books/9999/refresh", headers=admin["headers"]).status_code == 404

@@ -122,6 +122,7 @@ import httpx
 import fetch
 import isbn as isbn_module
 import metadata
+import xml_parse
 from bibliographic import flip_catalogue_name
 from catalogue import Record
 from credentials import Credential, origin_of
@@ -194,6 +195,16 @@ MAX_PAGES: Final = 200
 #: rather than read off disk: the wire cost is `MAX_PAGES` requests and the
 #: write cost is one `Book` per entry.
 MAX_ENTRIES: Final = 10_000
+
+#: This door's half of its allocation bound: a call of `read_page` peaks, by
+#: `tracemalloc`, under this times the bytes of the page plus
+#: `xml_parse.ALLOCATION_FLOOR`, which says what the bound is and what holds it.
+#:
+#: Measured on CPython 3.14.0: empty elements back to back, the costliest
+#: shape per byte that still parses, peaked at 20.2 times the page and
+#: ordinary entries near 10. A nest past `xml_parse.MAX_DEPTH` is refused within
+#: one chunk.
+ALLOCATION_FACTOR: Final = 24
 
 #: The wall clock a whole sync may spend fetching, redirects and bodies included.
 #:
@@ -485,7 +496,8 @@ def read_page(body: str, decoding: Decoding = DECODING) -> Page:
     if metadata.DOCTYPE in body:
         raise FeedUnreadable("Refused a feed carrying a document type declaration.")
     try:
-        root = ElementTree.fromstring(body)  # noqa: S314  doctype refused above, bytes capped
+        parser = ElementTree.XMLParser(target=xml_parse.DepthBoundedTree())  # noqa: S314  doctype refused above, bytes capped, depth bounded
+        root = xml_parse.fed(parser, body)
     except (ElementTree.ParseError, ValueError) as error:
         # `ValueError` as well, for `marc._parsed`'s measured reason:
         # `ElementTree.fromstring` raises it, not `ParseError`, for a declared
@@ -556,6 +568,64 @@ class Holdings:
     not_held: int
     #: Whether a cap or the deadline stopped the walk before the feed ran out.
     truncated: bool
+
+
+async def _fetch_page(
+    client: httpx.AsyncClient,
+    target: str,
+    *,
+    deadline: float,
+    credential: Credential | None,
+    origin: str,
+) -> fetch.Fetched:
+    """One page of a feed, or the refusal a person reading the error acts on.
+
+    An address this library will not connect to is `UnusableAddress`; anything
+    else the transport or `fetch`'s bounds refuse, and any status from 400 up,
+    is `OpdsError`. `origin` is what the log names, never the page's address.
+    `deadline` is the earlier of the walk's and one request's, for the reason
+    `holdings` gives where it computes it.
+    """
+    try:
+        answer = await fetch.get(
+            client,
+            target,
+            deadline=deadline,
+            credential=credential,
+        )
+    except fetch.AddressRefused as refusal:
+        # Ahead of the `httpx.HTTPError` arm below, which this is a
+        # subclass of. A refused address is a fact about the address an
+        # admin configured rather than about the server being down, and
+        # the two need different messages: "unavailable" would send
+        # somebody looking for a server that answered fine.
+        logger.warning("OPDS feed at %s is at a refused address: %s", origin, refusal)
+        raise UnusableAddress(
+            "That server is at an address this library will not connect to."
+        ) from refusal
+    except httpx.HTTPError as refusal:
+        # `fetch.FetchRefused` is an `httpx.HTTPError` on purpose, so
+        # one arm covers this module's four bounds and every transport
+        # failure underneath them.
+        #
+        # **The message names the failure and never the address.**
+        # `fetch`'s four refusals all format `{url[:200]}` and
+        # `RedirectedOffHost` adds the host it was sent to, and this
+        # error reaches a member as a 502 detail while the address is
+        # otherwise admin only: a sleeping server is the case a member
+        # will actually hit. The address goes to the log, where the
+        # person who configured it can read it.
+        logger.warning("OPDS feed at %s could not be read: %s", origin, refusal)
+        raise OpdsError(
+            "That server did not answer with a feed this library could read."
+        ) from refusal
+    if answer.status_code >= 400:
+        # 401 is the ordinary one and it is the message a person acts
+        # on, so the status is named rather than folded into "failed".
+        raise OpdsError(
+            f"That server answered {answer.status_code} for its feed."
+        )
+    return answer
 
 
 async def holdings(
@@ -635,53 +705,21 @@ async def holdings(
                 break
             seen.add(target)
 
-            try:
-                answer = await fetch.get(
-                    client,
-                    target,
-                    # **Both bounds, and the smaller one wins per page.**
-                    # `fetch.get` takes one deadline and treats a supplied one
-                    # as the whole budget, so handing it `ends` alone would let
-                    # a single page spend the entire sync: the per request bound
-                    # this module claims would exist only as
-                    # `catalogue_client`'s per socket operation timeout, which
-                    # bounds a read and not a request. Found by a critic reading
-                    # the bounds table against `fetch.py:497`.
-                    deadline=min(ends, in_(fetch.TIMEOUT_SECONDS)),
-                    credential=credential,
-                )
-            except fetch.AddressRefused as refusal:
-                # Ahead of the `httpx.HTTPError` arm below, which this is a
-                # subclass of. A refused address is a fact about the address an
-                # admin configured rather than about the server being down, and
-                # the two need different messages: "unavailable" would send
-                # somebody looking for a server that answered fine.
-                logger.warning("OPDS feed at %s is at a refused address: %s", origin, refusal)
-                raise UnusableAddress(
-                    "That server is at an address this library will not connect to."
-                ) from refusal
-            except httpx.HTTPError as refusal:
-                # `fetch.FetchRefused` is an `httpx.HTTPError` on purpose, so
-                # one arm covers this module's four bounds and every transport
-                # failure underneath them.
-                #
-                # **The message names the failure and never the address.**
-                # `fetch`'s four refusals all format `{url[:200]}` and
-                # `RedirectedOffHost` adds the host it was sent to, and this
-                # error reaches a member as a 502 detail while the address is
-                # otherwise admin only: a sleeping server is the case a member
-                # will actually hit. The address goes to the log, where the
-                # person who configured it can read it.
-                logger.warning("OPDS feed at %s could not be read: %s", origin, refusal)
-                raise OpdsError(
-                    "That server did not answer with a feed this library could read."
-                ) from refusal
-            if answer.status_code >= 400:
-                # 401 is the ordinary one and it is the message a person acts
-                # on, so the status is named rather than folded into "failed".
-                raise OpdsError(
-                    f"That server answered {answer.status_code} for its feed."
-                )
+            answer = await _fetch_page(
+                client,
+                target,
+                # **Both bounds, and the smaller one wins per page.**
+                # `fetch.get` takes one deadline and treats a supplied one as
+                # the whole budget, so handing it `ends` alone would let a
+                # single page spend the entire sync: the per request bound this
+                # module claims would exist only as `catalogue_client`'s per
+                # socket operation timeout, which bounds a read and not a
+                # request. Found by a critic reading the bounds table against
+                # `fetch.py:497`.
+                deadline=min(ends, in_(fetch.TIMEOUT_SECONDS)),
+                credential=credential,
+                origin=origin,
+            )
 
             page = read_page(answer.text)
             pages += 1

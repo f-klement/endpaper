@@ -5748,20 +5748,35 @@ because `POST /api/loans/overdue/notify` runs the same pass and had the same def
 the run that "races the ticker" in the ticket's own words, and with the write in one caller a
 household pressing "Send now" would leave the panel describing an older run.
 
-**When a channel counts as broken** is the judgement, and it is two rules rather than one
-threshold, because the two kinds of failure carry different evidence.
+**When a channel counts as broken** is the judgement, and it is three rules rather than one
+threshold, because the three kinds of failure carry different evidence.
 
 A **refusal** counts at once. `NO_URL` and `MISCONFIGURED` come out of `_REFUSALS`, and all
 three of those are raised before a socket is opened: `checked_url` is string handling,
-`send_telegram` matches both regexes before `_post`, and `mailer.checked_config` raises at
-`mailer.py:109` to `162` while the socket is opened at `mailer.py:230`. Nothing was dialled,
-so there is no outage to wait out.
+`send_telegram` matches both regexes before `_post`, and `mailer.checked_config` raises
+before `mailer.send` opens the socket. Nothing was dialled, so there is no outage to wait out.
+A mail username or password outside ASCII is one of its refusals: the mail library encodes both
+as ASCII under every login mechanism it offers, so such a credential fails against every server,
+and read as a transport failure it waited a day for a fault nobody could wait out.
 
 A **transport failure** counts only after `BROKEN_AFTER_HOURS`, 24, **and** at least two
 consecutive failures. Both, and the second clause is the one that is easy to leave out: a
 working webhook beside a broken mail server stamps `notified_at`, so mail is attempted once
 per reminder interval rather than once an hour, and its single failure would otherwise cross
 the window having failed exactly once, which is the network event the bar exists to ignore.
+
+An **unexpected failure** counts at once too, for a different reason. `UNEXPECTED` is what
+`_run_sender`'s third arm records for an exception that is neither a refusal nor in
+`_TRANSPORT`: a case the code does not anticipate, so nothing says it is transient, and it
+is not added to `_CONFIGURATION_REASONS`, whose claim that nothing was dialled is not known
+for it. Under the window it would wait a whole reminder interval beside a channel that
+works, because the working channel stamps the loans and the broken one is then attempted
+once an interval. The arm catches `Exception` and never `BaseException`, so a cancellation
+still stops the run, and it logs the type, a group's member types and the frames, never the
+message: `httpx.HTTPStatusError` renders the webhook's URL and Telegram's bot token. With
+it, `_TRANSPORT` membership decides the classification rather than whether the run
+survives, and each refusal decides whether a fault reads as a setting to fix rather than as
+a defect.
 
 24 hours is deliberately not `overdue_reminder_days`. That interval says how often a loan is
 chased; this says how long a channel may be broken before somebody is interrupted on a
@@ -16813,9 +16828,11 @@ the opposite, and a list of names is what goes stale when the tool grows.
 **The suppression list has two halves and conflating them is the failure mode.** A refusal
 is permanent and carries the reason the rule is wrong about this codebase. `no-await-in-loop`
 is the clearest: every bulk write here is sequential by design, because a 300 book batch
-would otherwise open 300 concurrent requests against one SQLite writer, and that rule fires
-on 47 sites that are all correct. `no-control-regex` fires on `lib/safeHref.ts`, where the
-character class **is** the URL sanitisation. A backlog entry is different: a rule this tree
+would otherwise open 300 concurrent requests against one SQLite writer, and every other site
+it fires on is one where order matters too. It is argued from those sites by kind, so the
+frontend lint configuration holds their count and their files beside the reason: a new site
+reds unless a counted site in the same file goes in the same change. `no-control-regex` fires
+on `lib/safeHref.ts`, where the character class **is** the URL sanitisation. A backlog entry is different: a rule this tree
 would pass if somebody did the work, and it carries its count.
 
 **One refusal records that the rule is right.** `no-loss-of-precision` on
@@ -16944,10 +16961,14 @@ buys two critic seats for.
 | `-O` on a backslash continuation of `CMD` | `test_no_line_of_a_container_surface_carries_an_optimise_flag` |
 | lower case `entrypoint` beside the real `CMD` | `test_no_line_of_a_container_surface_carries_an_optimise_flag` |
 | `CMD ["/app/start.sh"]` | `test_every_start_command_names_a_program_this_rule_can_read` |
-| `env_file:` in a compose file | `test_no_compose_file_loads_an_environment_this_rule_cannot_read` |
-| a ninth `# noqa: S101` in a fifth module | `test_the_suppressed_asserts_are_the_four_files_this_rule_was_written_for` |
+| `env_file:` in a compose file | `test_no_compose_file_reaches_a_file_this_rule_cannot_read` |
+| a ninth `# noqa: S101` in a fifth module | `test_the_suppressed_asserts_are_the_eight_this_rule_was_written_for` |
 | `ElementTree.XML` in a module that does not parse | both XML arms |
 | `ElementTree.XML` inside a module that already parses | `test_the_three_use_only_spellings_the_linter_can_report` |
+
+The arms are named by their current names, which follow the fixes above: the compose arm
+refuses every key reaching another file, and the assert arm holds the eight suppressions
+rather than the four files.
 
 **The last two rows are one mutation split in half, deliberately.** The first changes two
 things at once, a fourth parsing module and a spelling the linter cannot see, so a verdict on
@@ -21282,3 +21303,189 @@ and emit halves, and each fails the build after, naming the module.
 **Cost, measured.** None found: three alternating clean builds on one worker node, byte identical
 with and without the plugin, the wall times overlapping. **What it does not hold**: the package's
 bytes committed outside `node_modules`, which no path names.
+
+## A coverage gap is answered where the instrument is configured or the code is tested, never by a figure
+
+Nothing gates on a coverage figure, and the measurement that found the gaps recommended against
+one. So the question per file was whether a gap is a missed test or a fact about the instrument,
+and the answer is written at the instrument's configuration or at the test, never as a number.
+
+| file | decision | where it is said |
+|---|---|---|
+| `scripts/dump_openapi.py` | **omitted from measurement.** Every backend run executes it as a child process, through the drift test that compares what it prints with the committed schema byte for byte. Coverage follows the parent, so it read as never run | the backend's coverage configuration, at `omit` |
+| `scripts/postgres_database.py` | **measured.** `_safe_name` is unit tested, since it is the only thing between a name and DDL that takes no bind parameter. The server half runs only against Postgres, through `conftest.py` under a Postgres `DATABASE_URL` and the pipeline's Postgres job, so a SQLite run leaves it unreached by design | the docstring of its test file, and the comment above `omit` |
+| `migrations/` | **measured, not covered further.** Upgrades build the schema every run uses. A downgrade is reached only where a test drives one on purpose; the rest show as unreached rather than vanishing, which is the honest reading | the comment above `omit` |
+
+Within `migrations/`, `env.py`'s offline mode is the SQL emitting upgrade, an operator tool nothing
+in the application calls. The seeded tag keying migration's refusal of two rows claiming one key is a
+data guard rather than a schema step, so it is the one migration arm where a test pins behaviour
+rather than a number, and it has one.
+
+## A webhook address is refused where the URL parser would raise, at save and at send
+
+`urlparse` raises on an unclosed IPv6 bracket, and checks a port's range only when `.port` is read,
+which neither the settings check nor `notifications.checked_url` did. So
+`https://127.0.0.1:99999/...` saved with a 200, and the send failed inside the connect as an
+`ExceptionGroup` around `OverflowError`: the manual send answered 500 and the hourly run stopped
+before mail, Telegram and the health record. Both checks now read `.port` inside the `try` that
+refuses the bracket, and answer a constant sentence that never echoes the URL.
+
+**The one side effect, accepted**: `:8_080` is refused, because Python's `.port` rejects the
+underscore while httpx reads it as 8080. That refuses an odd spelling of a destination, not a
+destination.
+
+**The address is logged by a host only when the host is a clean name.** Five malformed addresses
+the save check admits make `urlparse` take path text for the host, a token in the path included, so
+`notifications._host` answers `unknown` unless every character is a letter, a digit or one of
+`.-_:[]`. An internationalised name is logged in the form httpx dials, through the `idna` package
+rather than Python's codec, which implements an older standard and maps `straße` to a different
+name that may exist.
+
+## An error whose message can quote a value is logged by its type, place and frames
+
+**The rule is the one the application's lint configuration gives for refusing `TRY400`**: in this
+tree a traceback writes the exception's message, and the message is a route for a member's value
+or a credential. Each site below logs the type, enough place to find it, and the frames, never
+the message:
+
+| error | what its message carries |
+|---|---|
+| a reminder sender's unexpected failure | `httpx.HTTPStatusError` renders the webhook URL and the Telegram bot token |
+| a database error, by `errors.database_error_summary` | on Postgres the driver's detail quotes the conflicting value, and a CHECK or NOT NULL violation the whole row; pg8000 renders its field dict whole. The constraint name is kept where the driver gives one |
+| `PendingRollbackError`, the next use of a session after a failed flush | the flush error's whole text, while wrapping nothing |
+| a validation error behind a 500 | the value that failed, in the message and in each entry's input; each entry's type, location and message are kept |
+| a failed confirmation code mail | the refused recipient addresses, or one password character and its position |
+
+**The bound values are a second half and are closed at the source.** Every engine sets
+`hide_parameters=True`, so SQLAlchemy's own rendering of a statement error names no parameter
+wherever it is logged, and a house rule refuses an engine built without it anywhere outside the
+tests, the migrations' engine included. **Residue**: an engine builder reached through an
+assignment rather than called by name or imported under another one.
+
+## A route's crash is answered inside the app, so the server logs it once
+
+Starlette's `ServerErrorMiddleware` calls the `Exception` handler and then re-raises to the server,
+and uvicorn logs the whole traceback again, so the handler's care over a validation error's value
+was undone one layer out. `errors.AnswerUnhandledErrors`, added innermost, catches a route's
+exception before its response starts and answers the 500 through the same handler, so nothing is
+re-raised. Measured on uvicorn started as the image starts it: one line for the 500, the value
+nowhere.
+
+| alternative | why not |
+|---|---|
+| a filter on uvicorn's error logger dropping the duplicate | it keys on uvicorn's own message text |
+| an ASGI wrapper outside Starlette's stack | it changes the application object the image starts |
+
+**It passes three things through**: a cancellation, a client disconnect, and an exception after
+the response started, which the server still logs whole. The 500 now carries the security headers,
+since it is answered inside them.
+
+**It switched the suite's crash net off, and the net is a fixture now.** The test client re-raised
+a route's exception at the call, which made every route test a crash test; answered inside the app,
+a test discarding the response passed over a crash. An autouse fixture watches the error handler's
+logger and raises the route's own exception again at teardown, unless the test is marked
+`answers_500` with the exception types it crashes with on purpose, and it fails loudly when that
+logger is disabled. **Residue**: `logging.disable` is not reflected in the logger's own flag, so
+the disabled check does not see it.
+
+## A security waiver in the application stays at its line, and is held by value
+
+A suppression comment naming a `flake8-bandit` rule in an application module was read by nothing: a
+file level waiver atop a module took a `shell=True` call past the lint step and every check. **The
+shape first proposed, moving each waiver into the per file table, is refused**, because a table entry
+is that rule off over the whole file, which is wider than the line waiver it replaces: on a planted
+copy, one entry let a further unargued narrowing assert through and another a second XML parse with
+no doctype refusal, both in one lint run reporting nothing. That is the case *Three more ruff
+families* gives for suppressing `S314` per site, and the table already refuses a security key outside
+the test tree.
+
+So the waiver stays per site, with its reason beside it, and a test now holds it twice. **What ruff
+waived**: the application is linted the way its step lints it with every suppression comment set
+aside, and each security finding is held, by file, code and every row of the statement, or the
+header of a compound statement or `match` case, holding it, as a multiset equal to a reviewed register. So a new waiver fails, a fixed one left registered
+fails, an edit to any row of a waived statement fails, and a swap inside one file fails unless the
+two statements read the same. The statement and not the finding's own range, because ruff's range
+for a call wrapped over several rows covers the callee alone. **Where it is written**: each waived
+finding must sit on the row where ruff itself says its directive belongs, so a file level, file wide
+or range waiver fails by name. A third check plants each directive kind that names a code and
+confirms setting directives aside still sees past it.
+
+**What stays open, stated as conditions**: a swap between two statements of identical text in one
+file; an edit outside the waived statement that changes what reaches it, such as deleting the check
+a waiver's reason names, which a behaviour test beside the module has to hold; a directive kind a
+later ruff adds that setting directives aside does not read; and the register is edited by the same
+author as the waiver, so review is what reads that edit. A shell started through `subprocess` or `os`
+with its flag passed indirectly is reported under a neighbouring code of the same family and held
+the same way. A process started through `asyncio`, `os.posix_spawn` or `pty` is reported by no rule
+the application selects, so a house rule refuses those calls in the application by name; a name
+computed at run time is left to review.
+
+## A suppression comment is read the way ruff reads it, and may not name a policing rule
+
+The bar that keeps a rule checking suppression comments out of every list and per file key did not
+reach the comments themselves: a file level `# ruff: noqa: PGH004, RUF100` let a bare `# noqa` hide
+a `shell=True` in that file with every arm and the application's lint step green. The derived set
+of policing rules is now read against every suppression comment, file, range and line level, in
+every file either lint walks, and a file level blanket is refused as naming every rule.
+
+**Read as ruff reads it, and held against ruff rather than against a pattern.** Ruff honours a code
+list written with a stray or a missing comma, with a warning; a code list ruff warns it could not
+read cleanly is refused as a blanket, and its warnings are held equal to the reader's verdict.
+Stubs are read and a notebook, whose comments the tokenizer cannot see, is refused by name. The
+file is read as text with every line ending ruff reads, since a file ending its lines in a bare
+carriage return reached the tokenizer as one line. Ruff's unused directive rule, selected alone,
+lists every directive it reads, and a site it reads that the reader misses reds by name.
+
+**What stays open here**: a file level comment naming any other code still waives that code over
+the whole file. For a security code, *A security waiver in the application stays at its line, and
+is held by value* refuses it.
+
+**The frontend refusals argued from named sites are held to their sites**, by count and by the
+files they sit in, over the same copy with every disable directive blanked that the backlog counts
+read, so a site moved into another file reds as well as a new one. `no-await-in-loop` is one of
+them: its first reason, bulk writes, covered one site, so it is argued from its sites by kind.
+
+## A parsed XML document is bounded by depth while it parses, and fed to its parser in chunks
+
+An element costs its parser memory and produces no character, so a chain of them was invisible to
+every answer a byte door gave, and cost about twice what any other shape did. The three byte doors
+that parse XML, the MARC upload, the catalogue response and the OPDS page, build through one tree
+builder in `xml_parse.py` that refuses an element deeper than `MAX_DEPTH`, and feed the parser
+`PARSE_CHUNK` at a time, because expat goes on reading whatever it was handed after a handler
+raises. The figures behind both constants are at the constants.
+
+**Width is not bounded at runtime.** Flat elements cost about half what nested ones do, and each
+door declares its `ALLOCATION_FACTOR`, which a generated property holds `tracemalloc`'s peak to, so
+a rise reds and the absolute figure is bounded by nothing here. **Allocation, not
+time**: the property budget entry refuses a wall clock deadline, and a traced peak is deterministic
+where a timing is not. The peak is taken on a second call with logging off, so it is the input's
+cost rather than a first traceback filling a source cache; a door keeping state per input reads as
+free under that, and its docstring says so.
+
+**The properties draw a spec and build the bytes from it**, because raw bytes reached nothing past
+the MARC door's parse. The rules every property follows on both sides are in the testing
+documentation's *Generated input* section, once.
+
+**A quadratic expression found on a decode path is replaced by string searches, and the expression
+is kept in the test as the oracle.** The BnF publisher's trailing place and Google Books'
+parenthesised series each backtracked from every opening parenthesis; each now reads from the end
+inwards, and a property holds it to the expression it replaced. **The obvious repair is the trap**:
+for the publisher, a pattern excluding both parentheses was linear on a run of them and slower than
+the original on spaces then one parenthesis then text.
+
+## The coverage register's write is printed in a loop until every byte is out
+
+Once vitest touches standard output, bun marks the pipe non blocking on the descriptor every later
+writer shares, and its `console.log` then keeps what the pipe takes at once and drops the rest with
+no error. The frontend register's write is one long line, so a write moving nine padded rows arrived
+cut. The fix is at the printer, because the cause is in the printing process: the reporter writes
+synchronously in a loop, retrying only on `EAGAIN`, throws on any other error, and fails the run
+when no byte moves before a deadline, so a reader that closes or stalls is loud rather than a
+silent loss. Chunked lines and an awaited stream callback were each measured to lose bytes, and a
+file artefact was not needed.
+
+**The applier takes only what a guard could have printed.** It writes only the two named registers,
+refuses one reached through a symbolic or hard link, takes a pair only as a whole table row looked
+up in the register as it was, with one digit run per row and one pair per row, and a block only in
+plain sentence characters. **Residue**: a second print site beside the printer, which the applier
+refuses at merge rather than in the run.

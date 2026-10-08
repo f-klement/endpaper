@@ -407,6 +407,38 @@ class TestResetIsRefusedWhereTheAppDoesNotHoldThePassword:
         assert res.status_code == 403
         assert fragment in res.json()["detail"]
 
+    @pytest.mark.parametrize(
+        ("mode", "fragment"),
+        [("ldap", "directory"), ("proxy", "signs you in")],
+    )
+    def test_the_redeem_route_refuses_too_before_a_code_is_looked_at(
+        self, client, admin, member, monkeypatch, mode, fragment
+    ) -> None:
+        """A code an admin approved while the mode was local must not set a
+        password the app no longer checks: the refusal comes first."""
+        client.post("/auth/reset/request", json={"username": "member"})
+        code = client.post(
+            f"/api/users/password-resets/{member['user']['id']}/approve",
+            headers=admin["headers"],
+        ).json()["code"]
+        monkeypatch.setenv("AUTH_MODE", mode)
+        res = client.post(
+            "/auth/reset/redeem",
+            json={"username": "member", "code": code, "new_password": "brandnew123"},
+        )
+        assert res.status_code == 403
+        assert fragment in res.json()["detail"]
+
+        # **The order, and not only the status.** A refusal checked after the
+        # redeem would spend the code and set the password, then answer the
+        # same 403. Unspent, the code still works once the mode is local again.
+        monkeypatch.setenv("AUTH_MODE", "local")
+        again = client.post(
+            "/auth/reset/redeem",
+            json={"username": "member", "code": code, "new_password": "brandnew123"},
+        )
+        assert again.status_code == 204, again.text
+
     def test_the_login_page_is_told_not_to_offer_it(
         self, client, monkeypatch
     ) -> None:

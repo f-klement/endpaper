@@ -823,18 +823,80 @@ describe("the oxlint suppression list", () => {
  * the reason written above the entry in the config, rather than nothing. The
  * reasons live there alone, so this is a bare list rather than a record.
  *
- * **A refusal's figure in the config is prose and is read by nothing.** Two
- * are arguments about the architecture. Three argue from named sites, so a new
- * site anywhere is suppressed by a reason that does not cover it, with every
- * arm green; the config says so once, above the first of them.
+ * **Which refusals carry a count is the config's rule**, stated once above
+ * its refusals. This file holds it: `SITED` names the refusals argued from
+ * their sites, the arm below refuses one that has lost its count or a refusal
+ * outside it that carries one, and the count arm holds each count and each
+ * set of files.
  */
 const REFUSALS = [
   "no-await-in-loop",
   "no-control-regex",
-  "no-irregular-whitespace",
   "no-loss-of-precision",
   "react/react-in-jsx-scope",
 ];
+
+/**
+ * The refusals argued from their sites, each with the files its findings sit
+ * in over the blanked copy, held by equality in the count arm.
+ *
+ * **The files, and not only the total**, because the file is what the reason
+ * is about. A named site removed and a new one added in another file leave
+ * the total where it was: measured, a lossy literal moved out of
+ * `lib/bookBounds.ts` into a page passed every arm while this held totals
+ * alone. The backend's bandit shares are held per file for the same reason.
+ */
+const SITED: Record<string, string[]> = {
+  "no-await-in-loop": [
+    "src/lib/audiobook.ts",
+    "src/lib/bulkWrite.ts",
+    "src/lib/pdf.ts",
+    "src/lib/takeout.ts",
+    "src/lib/zip.ts",
+    "src/pages/ScanPage/hooks.ts",
+    "src/pages/SettingsPage/LibrarySettingsPage/hooks.ts",
+    "tests/api/mutator.test.ts",
+    "tests/houseRules.test.ts",
+    "tests/lib/adobeDigitalEditions.test.ts",
+    "tests/lib/audiobook.test.ts",
+    "tests/lib/fileReaders.test.ts",
+    "tests/lib/mobi.test.ts",
+    "tests/lib/pdf.test.ts",
+    "tests/lib/readerContract.ts",
+    "tests/lib/stores.test.ts",
+    "tests/lib/takeoutFixtures.ts",
+    "tests/lib/xmlEntities.test.ts",
+    "tests/lib/zip.test.ts",
+    "tests/pages/BookDetail/BookDetail.test.tsx",
+    "tests/pages/BookDetail/components/IdentifierChips.test.tsx",
+    "tests/pages/SettingsPage/LibrarySettingsPage/hooks.test.tsx",
+    "tests/pages/SettingsPage/SettingsPage.test.tsx",
+    "tests/pdfFixtures.ts",
+    "tests/property.ts",
+    "tests/propertyBudget.test.ts",
+    "tests/zipFixtures.ts",
+  ],
+  "no-control-regex": ["src/lib/pdf.ts", "src/lib/safeHref.ts"],
+  "no-loss-of-precision": ["src/lib/bookBounds.ts"],
+};
+
+/**
+ * Each rule of `SITED` with the set of files a report finds it in. A set, so
+ * the comparison ignores order without a sort, which this tree's backlog
+ * counts.
+ */
+function filesOfSited(report: Report): Record<string, Set<string>> {
+  return Object.fromEntries(
+    Object.keys(SITED).map((rule) => [
+      rule,
+      new Set(
+        report.diagnostics
+          .filter(({ code }) => code === codeOf(rule))
+          .map(({ filename }) => String(filename)),
+      ),
+    ]),
+  );
+}
 
 /**
  * A backlog entry's line: the rule, its level, and its count as the whole of a
@@ -1201,7 +1263,8 @@ function waivedIn(
 
 /**
  * **A count beside a backlog entry is a measurement unless something
- * re-derives it.** The staleness arm above fires only when an entry reports
+ * re-derives it**, and so is one beside a refusal in `SITED`, which these arms
+ * read as one more counted line. The staleness arm above fires only when an entry reports
  * nothing, so a count could move either way with every arm green, and most
  * had: the first run of this arm found the stated figures wrong on most rows,
  * in both directions.
@@ -1249,20 +1312,31 @@ function waivedIn(
  *
  * **What equality on a total cannot see**: a fix and a new site of the same
  * rule in one change, which leaves the total where it was, and the same for
- * one waived site swapped for another in the same file. And a count edited to
+ * one waived site swapped for another in the same file. For a refusal in
+ * `SITED` the files are held too, so that swap passes only within one file. And a count edited to
  * match a new site is green: the edit is in the diff beside the reason, and
  * review is what reads it.
  */
 describe("every backlog count", () => {
   it(
-    "sits on its own entry's line, and the entries carrying one are the backlog",
+    "sits on its own entry's line, and the entries carrying one are the backlog and the sited refusals",
     () => {
       const suppressed = suppressedIn(rulesNamedInConfig(), effectiveLevels());
-      const backlog = backlogIn(readFileSync(CONFIG, "utf8")).map(
+      const counted = backlogIn(readFileSync(CONFIG, "utf8")).map(
         ({ rule }) => rule,
       );
 
-      const stated = [...REFUSALS, ...backlog];
+      // A sited refusal without its count reads as uncounted and reds below,
+      // and one that is not a refusal at all reds here.
+      expect(
+        Object.keys(SITED).filter((rule) => !REFUSALS.includes(rule)),
+        `SITED names a rule REFUSALS does not, so it would be counted as a ` +
+          `backlog row under a refusal's name.`,
+      ).toEqual([]);
+      const stated = [
+        ...REFUSALS.filter((rule) => !(rule in SITED)),
+        ...counted,
+      ];
       // Named in the message, because the equality's own diff truncates a list
       // this long before the entry that differs.
       const uncounted = suppressed.filter((rule) => !stated.includes(rule));
@@ -1272,16 +1346,19 @@ describe("every backlog count", () => {
 
       expect(
         stated.sort(),
-        `${CONFIG}'s suppressed rules are not exactly REFUSALS plus the ` +
-          `entries whose line ends in a count. Off with neither a count nor ` +
-          `a refusal: [${uncounted.join(", ")}]. Counted or refused and not ` +
-          `off, or named twice: [${unexpected.join(", ")}]. A backlog entry ` +
+        `${CONFIG}'s suppressed rules are not exactly the refusals outside ` +
+          `SITED plus the entries whose line ends in a count. Off with neither ` +
+          `a count nor an uncounted refusal, or in SITED without its count: ` +
+          `[${uncounted.join(", ")}]. Counted or refused and not off, named ` +
+          `twice, or a refusal outside SITED carrying a count: ` +
+          `[${unexpected.join(", ")}]. A counted entry ` +
           `carries its count as the whole of a trailing comment on its own line, ` +
           `"rule": "off", // N. A count on another line, anything after the ` +
           `digits, or an entry written twice reads as a different list here. ` +
           `A rule that is wrong about this codebase rather than unpaid is a ` +
-          `refusal: add it to REFUSALS, write its reason above the entry in ` +
-          `the config, and give it no count.`,
+          `refusal: add it to REFUSALS and write its reason above the entry in ` +
+          `the config. A reason about its named sites puts it in SITED with ` +
+          `their count; a reason about the codebase gives it none.`,
       ).toEqual([...suppressed].sort());
     },
     BUDGET,
@@ -1350,11 +1427,23 @@ describe("every backlog count", () => {
           `beside the directive's reason in DIRECTIVES.`,
       ).toEqual([...WAIVED].sort());
 
+      expect(
+        filesOfSited(counted),
+        `a refusal in SITED is argued from its sites, so the files its findings ` +
+          `sit in over the blanked copy are held as well as its count: a site ` +
+          `moved to another file keeps the count and leaves the reason. Fix the ` +
+          `new site, or argue it at the entry in ${CONFIG} and add its file here.`,
+      ).toEqual(
+        Object.fromEntries(
+          Object.entries(SITED).map(([rule, files]) => [rule, new Set(files)]),
+        ),
+      );
+
       const wrong = countsThatDiffer(backlog, counted);
       expect(
         wrong,
-        `(rule, stated, found): ${JSON.stringify(wrong)}. Each backlog count ` +
-          `in ${CONFIG} is held equal to what oxlint finds with every disable ` +
+        `(rule, stated, found): ${JSON.stringify(wrong)}. Each count in ` +
+          `${CONFIG}, a backlog row's or a sited refusal's, is held equal to what oxlint finds with every disable ` +
           `directive blanked. Write the found figure on the entry's own line, ` +
           `in the commit that moved it. A found 0 means the entry is stale, ` +
           `or its key is under an alias prefix the report does not use: ` +
@@ -1884,16 +1973,15 @@ describe("a suppression the ratchet could not see", () => {
  * findings to 2, and both are that rule. So a plugin was adopted and two of
  * its findings were suppressed in the same change, invisibly.
  *
- * **One of them also falsified a refusal.** `no-control-regex` is documented
- * in the config as one site; the directive in `lib/pdf.ts` is the second,
- * masked, so the entry read as one easy fix. It is inert only while the rule
- * is off at top level, and becomes a defect the moment somebody acts on that
- * entry.
+ * **One of them masks a refusal's site.** The directive in `lib/pdf.ts` is
+ * the second site of `no-control-regex`, which is in `SITED`, so its count
+ * reads through the blanked copy and states both. The directive is inert only
+ * while the rule is off at top level.
  *
  * The set is pinned by equality, with a reason beside each, which is the
  * contract the suppression list already has. **It is a set of files**: a
  * directive in a file not named here reds, and a second one in a named file
- * does not. What that second one hides from a backlog rule is still counted,
+ * does not. What that second one hides from a counted rule is still counted,
  * by the backlog count arm, which reads a copy with every directive blanked.
  */
 const DIRECTIVES: Record<string, string> = {

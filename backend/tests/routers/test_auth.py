@@ -2,6 +2,7 @@
 
 import logging
 import re
+import smtplib
 import typing
 import unicodedata
 from typing import Any
@@ -13,8 +14,11 @@ from ldap3.core.exceptions import LDAPException, LDAPInvalidValueError
 from pydantic import ValidationError
 
 import auth_backends
+import mailer
 import main
+import settings_store
 from auth import COVER_COOKIE_NAME
+from enums import SettingKey
 from models import USERNAME_MAX, User
 from tests.helpers import (
     FakeConnection,
@@ -157,6 +161,97 @@ class TestAnAddressCanBeGivenWhileTheAccountIsBeingMade:
             },
         ).json()["token"]
         assert "email" not in body["user"]
+
+
+class TestAConfirmationCodeIsMailedAfterTheResponse:
+    """Where the library confirms new accounts and a mail server is set.
+
+    The send is handed to the background so registering never waits on a
+    mail host. `TestClient` runs that task before it returns, so what the
+    mailer was handed is readable here.
+    """
+
+    @pytest.fixture
+    def confirming(self, db, admin, monkeypatch) -> list[tuple[Any, str, str]]:
+        """The policy on, a mail server set, and every send recorded."""
+        settings_store.set_value(db, SettingKey.ACCOUNTS_OPEN_TO_OUTSIDERS, "true")
+        settings_store.set_value(db, SettingKey.MAIL_SERVER, "smtp.example.org")
+        settings_store.set_value(db, SettingKey.MAIL_DEFAULT_SENDER, "library@example.org")
+        sent: list[tuple[Any, str, str]] = []
+        monkeypatch.setattr(
+            mailer, "send", lambda config, subject, body: sent.append((config, subject, body))
+        )
+        return sent
+
+    def _register(self, client) -> Any:
+        return client.post(
+            "/auth/register",
+            json={"username": "kim", "password": "pw12345678", "email": "kim@example.org"},
+        )
+
+    def test_the_code_goes_to_the_address_the_account_was_made_with(
+        self, client, confirming
+    ):
+        res = self._register(client)
+
+        assert res.status_code == 201
+        assert res.json()["verification_required"] is True
+        [(config, _, _)] = confirming
+        assert config.recipients == ("kim@example.org",)
+
+    def test_the_code_the_mail_carries_is_the_one_that_confirms_the_account(
+        self, client, confirming
+    ):
+        self._register(client)
+        [(_, _, body)] = confirming
+        code = re.search(r"Your confirmation code is: (\S+)", body)
+        assert code is not None
+
+        res = client.post("/auth/verify", json={"username": "kim", "code": code[1]})
+
+        assert res.status_code == 204
+
+    def test_a_send_that_fails_is_a_log_line_and_the_account_stands(
+        self, client, db, confirming, monkeypatch, caplog
+    ):
+        """The response has gone by the time the send runs, so a raise there
+        reaches nobody. The member asks for the code again."""
+
+        def refuse(config, subject, body):
+            raise smtplib.SMTPServerDisconnected("gone")
+
+        monkeypatch.setattr(mailer, "send", refuse)
+        with caplog.at_level(logging.ERROR):
+            res = self._register(client)
+
+        assert res.status_code == 201
+        assert db.query(User).filter(User.username == "kim").one() is not None
+        assert "Could not send a confirmation code" in caplog.text
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            smtplib.SMTPRecipientsRefused({"refused-marker@example.org": (550, b"no such user")}),
+            # A stand in for any message nobody checked. `checked_config` now
+            # refuses the credential this one came from before a send is built.
+            UnicodeEncodeError("ascii", "pass-marker", 5, 6, "ordinal not in range(128)"),
+        ],
+    )
+    def test_a_failed_send_logs_its_type_and_never_its_message(
+        self, client, confirming, monkeypatch, caplog, error
+    ):
+        """The send's own message can be the address it refused, or anything
+        else nobody checked."""
+        def refuse(config, subject, body):
+            raise error
+
+        monkeypatch.setattr(mailer, "send", refuse)
+        with caplog.at_level(logging.DEBUG):
+            self._register(client)
+
+        assert f"Could not send a confirmation code: {type(error).__name__}" in caplog.text
+        assert str(error) not in caplog.text
+        assert "marker" not in caplog.text
 
 
 class TestRegistrationDisabled:

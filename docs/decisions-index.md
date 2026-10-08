@@ -269,7 +269,7 @@ repeat the argument.
 | Product | [No bookshop or retailer is a catalogue source](decisions.md#no-bookshop-or-retailer-is-a-catalogue-source) | 252 |
 |  | [Multi workstation is joined terminals, and the container stays the documented alternative](decisions.md#multi-workstation-is-joined-terminals-and-the-container-stays-the-documented-alternative) | 496 |
 |  | [VIAF is the wrong supplier for resolution and the right one for discovery](decisions.md#viaf-is-the-wrong-supplier-for-resolution-and-the-right-one-for-discovery) | 447 |
-|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 16,588 |
+|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 16,793 |
 | An identifier two files disagree about is shown and never stored | [VIAF was refused as a supplier and is used as an enrichment, and both are right](decisions.md#viaf-was-refused-as-a-supplier-and-is-used-as-an-enrichment-and-both-are-right) | 251 |
 | An identifier two files disagree about is shown and never stored | [A VIAF cluster is verified against the confirmed record, never trusted](decisions.md#a-viaf-cluster-is-verified-against-the-confirmed-record-never-trusted) | 300 |
 | An identifier two files disagree about is shown and never stored | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts) | 173 |
@@ -278,7 +278,7 @@ repeat the argument.
 | An identifier two files disagree about is shown and never stored | [The in app reminder is a sender, and it is the one that does not stamp `notified_at`](decisions.md#the-in-app-reminder-is-a-sender-and-it-is-the-one-that-does-not-stamp-notified_at) | 165 |
 | An identifier two files disagree about is shown and never stored | [A sender includes exactly what its audience may see](decisions.md#a-sender-includes-exactly-what-its-audience-may-see) | 198 |
 | An identifier two files disagree about is shown and never stored | [A new endpoint is classified for cache invalidation, or the inventory guard fails](decisions.md#a-new-endpoint-is-classified-for-cache-invalidation-or-the-inventory-guard-fails) | 96 |
-| An identifier two files disagree about is shown and never stored | [One failed send is a network. Every send failing for a day is a configuration](decisions.md#one-failed-send-is-a-network-every-send-failing-for-a-day-is-a-configuration) | 388 |
+| An identifier two files disagree about is shown and never stored | [One failed send is a network. Every send failing for a day is a configuration](decisions.md#one-failed-send-is-a-network-every-send-failing-for-a-day-is-a-configuration) | 593 |
 | An identifier two files disagree about is shown and never stored | [YAZ is compiled, not packaged, and the image stays Alpine](decisions.md#yaz-is-compiled-not-packaged-and-the-image-stays-alpine) | 511 |
 | An identifier two files disagree about is shown and never stored | [The YAZ builder image is named after what it is built from](decisions.md#the-yaz-builder-image-is-named-after-what-it-is-built-from) | 284 |
 | An identifier two files disagree about is shown and never stored | [The runtime `COPY` shipped with the builder image, not with the transport](decisions.md#the-runtime-copy-shipped-with-the-builder-image-not-with-the-transport) | 188 |
@@ -718,8 +718,8 @@ repeat the argument.
 |  | [The result banner is never drawn over a run](decisions.md#the-result-banner-is-never-drawn-over-a-run) | 99 |
 |  | [The rapid add's progress is not a live region](decisions.md#the-rapid-adds-progress-is-not-a-live-region) | 74 |
 |  | [The rule that one module writes a shelf in bulk is two assertions, not one](decisions.md#the-rule-that-one-module-writes-a-shelf-in-bulk-is-two-assertions-not-one) | 334 |
-|  | [oxlint is adopted as a ratchet, and the suppression list is two lists](decisions.md#oxlint-is-adopted-as-a-ratchet-and-the-suppression-list-is-two-lists) | 524 |
-|  | [Three more ruff families, and what each suppression is standing on](decisions.md#three-more-ruff-families-and-what-each-suppression-is-standing-on) | 1,904 |
+|  | [oxlint is adopted as a ratchet, and the suppression list is two lists](decisions.md#oxlint-is-adopted-as-a-ratchet-and-the-suppression-list-is-two-lists) | 565 |
+|  | [Three more ruff families, and what each suppression is standing on](decisions.md#three-more-ruff-families-and-what-each-suppression-is-standing-on) | 1,939 |
 |  | [The tooling tree's disciplines run in the backend suite, not in a job step](decisions.md#the-tooling-trees-disciplines-run-in-the-backend-suite-not-in-a-job-step) | 250 |
 |  | [Turning a linter on is not the same as fixing what it finds](decisions.md#turning-a-linter-on-is-not-the-same-as-fixing-what-it-finds) | 282 |
 |  | [A floor that nothing drives is not a floor](decisions.md#a-floor-that-nothing-drives-is-not-a-floor) | 164 |
@@ -852,4 +852,12 @@ repeat the argument.
 |  | [The oracle for a reader is counted work, not "did it throw"](decisions.md#the-oracle-for-a-reader-is-counted-work-not-did-it-throw) | 441 |
 |  | [Every bound a door declares is held by a control, and a ledger refuses one without](decisions.md#every-bound-a-door-declares-is-held-by-a-control-and-a-ledger-refuses-one-without) | 458 |
 |  | [The build refuses a bundle that loads or emits the property generator](decisions.md#the-build-refuses-a-bundle-that-loads-or-emits-the-property-generator) | 211 |
+|  | [A coverage gap is answered where the instrument is configured or the code is tested, never by a figure](decisions.md#a-coverage-gap-is-answered-where-the-instrument-is-configured-or-the-code-is-tested-never-by-a-figure) | 280 |
+|  | [A webhook address is refused where the URL parser would raise, at save and at send](decisions.md#a-webhook-address-is-refused-where-the-url-parser-would-raise-at-save-and-at-send) | 198 |
+|  | [An error whose message can quote a value is logged by its type, place and frames](decisions.md#an-error-whose-message-can-quote-a-value-is-logged-by-its-type-place-and-frames) | 260 |
+|  | [A route's crash is answered inside the app, so the server logs it once](decisions.md#a-routes-crash-is-answered-inside-the-app-so-the-server-logs-it-once) | 256 |
+|  | [A security waiver in the application stays at its line, and is held by value](decisions.md#a-security-waiver-in-the-application-stays-at-its-line-and-is-held-by-value) | 449 |
+|  | [A suppression comment is read the way ruff reads it, and may not name a policing rule](decisions.md#a-suppression-comment-is-read-the-way-ruff-reads-it-and-may-not-name-a-policing-rule) | 321 |
+|  | [A parsed XML document is bounded by depth while it parses, and fed to its parser in chunks](decisions.md#a-parsed-xml-document-is-bounded-by-depth-while-it-parses-and-fed-to-its-parser-in-chunks) | 329 |
+|  | [The coverage register's write is printed in a loop until every byte is out](decisions.md#the-coverage-registers-write-is-printed-in-a-loop-until-every-byte-is-out) | 209 |
 <!-- index: end -->

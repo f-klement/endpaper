@@ -1252,9 +1252,9 @@ TAG_READERS: Final = {
             'the order SQLAlchemy flushes these in is not the order of this # '
             'loop. No key can move here: every row arrives null, `tags.name` is'
             ' # unique, and `PREDEFINED_TAGS` maps 105 distinct names onto 105 '
-            '# distinct keys, so this writes each key at most once. Delete the '
-            '# `_parse_row` block and this becomes an `IntegrityError` on a '
-            'restore. seeded_key = keys_by_name.get(tag.name) should_be = '
+            '# distinct keys, so this writes each key at most once. Delete # '
+            '`_blank_tag_key` and this becomes an `IntegrityError` on a restore. '
+            'seeded_key = keys_by_name.get(tag.name) should_be = '
             'seeded_key is not None if tag.is_predefined != should_be or '
             'tag.key != seeded_key: tag.is_predefined = should_be tag.key = '
             'seeded_key changed += 1',

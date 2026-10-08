@@ -633,6 +633,19 @@ class TestMergeRefusals:
 
         assert res.status_code == 400
 
+    def test_a_keeper_the_caller_cannot_see_is_404_and_nothing_moves(
+        self, client, admin, member, make_book
+    ):
+        """404 and not 400, which is how a book that is not there answers: a
+        400 here would confirm the private row exists."""
+        private = make_book(admin["headers"], title="Dune", is_private=True)
+        mine = make_book(member["headers"], title="Dune")
+
+        res = merge(client, member["headers"], [mine["id"], private["id"]], private["id"])
+
+        assert res.status_code == 404
+        assert client.get(f"/api/books/{mine['id']}", headers=member["headers"]).status_code == 200
+
     def test_requires_authentication(self, client):
         assert client.post("/api/books/merge", json={"book_ids": [1, 2], "keep_id": 1}).status_code == 401
 

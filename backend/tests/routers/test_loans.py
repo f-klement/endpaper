@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import respx
 from fastapi import HTTPException
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
@@ -779,6 +780,37 @@ class TestOverdueNotify:
         matched against `{loan_id}`."""
         res = client.post("/api/loans/overdue/notify", headers=admin["headers"])
         assert res.status_code == 200
+
+
+    def test_a_webhook_port_out_of_range_is_refused_at_the_endpoint(self, client, admin, db):
+        """Written by a restore, past the settings check: the send refuses it
+        rather than failing inside the connect. The host is passed through so
+        the suite's own router cannot answer for the connect. The reason is
+        what pins the refusal: any failure inside a sender answers 200 now."""
+        settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_ENABLED, "true")
+        settings_store.set_value(
+            db, SettingKey.OVERDUE_WEBHOOK_URL, "https://127.0.0.1:99999/hooks/t/abcdef"
+        )
+        book = Book(title="Dune", is_private=False, added_by_user_id=admin["user"]["id"])
+        db.add(book)
+        db.flush()
+        db.add(
+            Loan(
+                book_id=book.id,
+                loaned_to_name="Kim",
+                loaned_by_user_id=admin["user"]["id"],
+                due_at=(datetime.now(UTC) - timedelta(days=3)).replace(tzinfo=None),
+            )
+        )
+        db.commit()
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.route(host="127.0.0.1").pass_through()
+            res = client.post("/api/loans/overdue/notify", headers=admin["headers"])
+
+        assert res.status_code == 200
+        assert res.json()["reason"] == "no_url"
+        assert res.json()["sent"] is False
 
 
 class TestMyOverdue:

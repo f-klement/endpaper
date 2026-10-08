@@ -1206,6 +1206,11 @@ class Document {
     );
     if (w.length !== 3 || w.some((width) => width < 0)) return dictionary;
     const record = w[0]! + w[1]! + w[2]!;
+    // **A bound on work, not on the answer.** A record of no bytes never moves
+    // the cursor, so the end of data check below can never stop it, and every
+    // run `/Index` names would be walked to its count while reading nothing and
+    // remembering nothing. The answer is the same without this line; what a
+    // crafted file costs to read is not.
     if (record === 0) return dictionary;
 
     const size = dictionary.entries.get("Size");
@@ -1227,6 +1232,11 @@ class Document {
         throw new PdfError("damaged", "a cross reference run of no real size");
       }
       for (let step = 0; step < count; step += 1) {
+        // **A bound and an answer both.** Past the end every field reads `NaN`,
+        // which remembers nothing, so without this a run is walked to the count
+        // it promises. And a last record cut inside its last field still has a
+        // whole type and offset, and would be remembered from bytes the stream
+        // does not hold.
         if (cursor + record > data.length) break;
         const fields = [0, 0, 0];
         for (let field = 0; field < 3; field += 1) {

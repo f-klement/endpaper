@@ -424,6 +424,9 @@ def is_fetchable(url: str) -> bool:
     if port not in (None, 443):
         return False
     host = (parsed.hostname or "").lower()
+    # Not discharged by the loop below, though the shipped list makes it look
+    # so: an entry with no scheme has no hostname either, and would match an
+    # empty host. `test_a_url_with_no_host_is_refused_whatever_the_list_holds`.
     if not host:
         return False
 

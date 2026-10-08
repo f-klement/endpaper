@@ -202,6 +202,73 @@ async function padded(
   return built;
 }
 
+/**
+ * Encode rows of `columns` bytes under PNG row filters, the inverse of the
+ * reader's `unpredict`.
+ *
+ * `filterOf` picks the filter for each row, so a test can ask for one filter
+ * throughout or a different one per row, which is what a PNG encoder choosing
+ * per row writes. Each row is predicted from the **decoded** row above it and
+ * the decoded byte to its left, as the format defines; predicting from the
+ * encoded bytes instead would build a fixture only a reader with the same
+ * mistake can read. A short last row is padded with zeroes.
+ */
+export function predict(
+  data: Uint8Array,
+  columns: number,
+  filterOf: (row: number) => number,
+): Uint8Array<ArrayBuffer> {
+  const rows = Math.ceil(data.length / columns);
+  const out = new Uint8Array(rows * (columns + 1));
+  let previous = new Uint8Array(columns);
+  for (let row = 0; row < rows; row += 1) {
+    const current = new Uint8Array(columns);
+    current.set(data.subarray(row * columns, row * columns + columns));
+    const filter = filterOf(row);
+    const at = row * (columns + 1);
+    out[at] = filter;
+    for (let index = 0; index < columns; index += 1) {
+      const left = index > 0 ? current[index - 1]! : 0;
+      const up = previous[index]!;
+      const upLeft = index > 0 ? previous[index - 1]! : 0;
+      out[at + 1 + index] =
+        (current[index]! - estimate(filter, left, up, upLeft)) & 0xff;
+    }
+    previous = current;
+  }
+  return out;
+}
+
+/** What a PNG row filter predicts a byte from, before the difference. */
+function estimate(
+  filter: number,
+  left: number,
+  up: number,
+  upLeft: number,
+): number {
+  switch (filter) {
+    case 1:
+      return left;
+    case 2:
+      return up;
+    case 3:
+      return (left + up) >> 1;
+    case 4: {
+      const guess = left + up - upLeft;
+      const dLeft = Math.abs(guess - left);
+      const dUp = Math.abs(guess - up);
+      const dUpLeft = Math.abs(guess - upLeft);
+      if (dLeft <= dUp && dLeft <= dUpLeft) return left;
+      return dUp <= dUpLeft ? up : upLeft;
+    }
+    default:
+      // Filter 0 and any number PNG does not define: written through as the
+      // literal byte, so a test can plant an unknown filter in a row that is
+      // otherwise well formed.
+      return 0;
+  }
+}
+
 /** Where a packed object ended up: which object stream, and at which index. */
 interface Packing {
   readonly stream: number;
@@ -258,9 +325,24 @@ export async function streamPdf(
      * only, since it names one stream.
      */
     readonly objStmLength?: string;
+    /**
+     * The PNG row filter each cross reference row is written under, by row.
+     * Filter 0 throughout when absent. Ignored with `predictor: false`.
+     */
+    readonly rowFilter?: (row: number) => number;
+    /**
+     * The cross reference stream's `/W`, `[1 4 2]` when absent.
+     *
+     * A zero first width is the format's way of saying every row is type 1,
+     * so it cannot carry a packed object, and asking for both is refused.
+     */
+    readonly widths?: readonly [number, number, number];
   } = {},
 ): Promise<Uint8Array<ArrayBuffer>> {
   const header = options.header ?? "%PDF-1.5\n";
+  if (options.widths?.[0] === 0 && (options.packed ?? []).length > 0) {
+    throw new Error("a zero type width cannot write a packed object's row");
+  }
   const groups = options.packed ?? [];
   if (options.objStmLength !== undefined && groups.length !== 1) {
     throw new Error("objStmLength names one object stream, so pass one group");
@@ -334,27 +416,34 @@ export async function streamPdf(
     else rows.push([0, 0, 0]);
   }
 
-  const width = [1, 4, 2];
-  const columns = width[0]! + width[1]! + width[2]!;
-  const flat = new Uint8Array(
-    rows.length * (columns + (options.predictor === false ? 0 : 1)),
-  );
+  const width = options.widths ?? [1, 4, 2];
+  const columns = width[0] + width[1] + width[2];
+  const literal = new Uint8Array(rows.length * columns);
   let at = 0;
   for (const row of rows) {
-    // Filter 0, which is "this row is literal": the reader has to undo the
-    // predictor either way, and a row filter it never sees is one it could get
-    // wrong without a test noticing.
-    if (options.predictor !== false) {
-      flat[at] = 0;
-      at += 1;
-    }
     for (let field = 0; field < 3; field += 1) {
+      // A value too wide for its field would be written truncated, a different
+      // number than the row asked for, and a test would read that number
+      // believing it had asked for another. A zero width writes nothing and is
+      // the format's default, so it is not a value to fit: every type 1 row
+      // under `/W [0 ...]` asks for a 1 it has no byte for.
+      if (width[field]! > 0 && row[field]! >= 256 ** width[field]!) {
+        throw new Error(
+          `a field of ${row[field]} does not fit a /W width of ${width[field]}`,
+        );
+      }
       for (let byte = width[field]! - 1; byte >= 0; byte -= 1) {
-        flat[at] = (row[field]! / 256 ** byte) & 0xff;
+        literal[at] = (row[field]! / 256 ** byte) & 0xff;
         at += 1;
       }
     }
   }
+  // Filter 0 unless a test asks otherwise, which is "this row is literal": the
+  // reader has to undo the predictor either way.
+  const flat =
+    options.predictor === false
+      ? literal
+      : predict(literal, columns, options.rowFilter ?? (() => 0));
 
   const parms =
     options.predictor === false

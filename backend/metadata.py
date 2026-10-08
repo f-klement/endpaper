@@ -55,6 +55,7 @@ import identity
 import marc_fields
 import sources
 import targets
+import xml_parse
 import z3950
 from bibliographic import (
     LANGUAGES,
@@ -819,6 +820,16 @@ def _google_record(fields: dict[str, Any], isbn: str | None = None) -> Record:
 #: admits no module at all.
 DOCTYPE: Final = "<!DOCTYPE"
 
+#: The catalogue response path's half of its allocation bound: see
+#: `xml_parse.ALLOCATION_FLOOR`.
+#:
+#: Measured by `tracemalloc` on CPython 3.14.0 through the MARC lookup reader,
+#: whose per field structures are the costliest a catalogue can make it build:
+#: empty `datafield` elements back to back peaked at 25.7 times their bytes,
+#: text bearing records near 11, and a nest past `xml_parse.MAX_DEPTH` is
+#: refused within one chunk.
+ALLOCATION_FACTOR: Final = 32
+
 
 def _parsed(body: str) -> ElementTree.Element:
     """A catalogue's XML, refusing the one thing that unbounds its cost.
@@ -836,7 +847,7 @@ def _parsed(body: str) -> ElementTree.Element:
     substituted response `docs/decisions.md` records the Library of Congress as
     reachable for, over plaintext HTTP.
 
-    Raised as `ParseError` because all eleven callers already catch it: a catalogue
+    Raised as `ParseError` because both callers already catch it: a catalogue
     that starts sending a doctype degrades to "this source is unavailable"
     rather than to a 500.
 
@@ -847,7 +858,8 @@ def _parsed(body: str) -> ElementTree.Element:
     """
     if DOCTYPE in body:
         raise ElementTree.ParseError("Refused a catalogue response carrying a doctype.")
-    return ElementTree.fromstring(body)  # noqa: S314  doctype refused above, bytes capped
+    parser = ElementTree.XMLParser(target=xml_parse.DepthBoundedTree())  # noqa: S314  doctype refused above, bytes capped, depth bounded
+    return xml_parse.fed(parser, body)
 
 
 # ── MARC21, shared ────────────────────────────────────────────────────────────
@@ -2273,7 +2285,7 @@ def _bnf_record(record: ElementTree.Element, *, source: str) -> Record | None:
     # "M. J. Minard, Lettres modernes (Paris)" is publisher then place.
     publisher = next((value for value in texts("publisher")), None)
     if publisher:
-        publisher = re.sub(r"\s*\([^)]*\)\s*$", "", publisher).strip()
+        publisher = _without_trailing_place(publisher)
 
     year_match = re.search(r"\d{4}", " ".join(texts("date")))
 
@@ -2292,6 +2304,34 @@ def _bnf_record(record: ElementTree.Element, *, source: str) -> Record | None:
         # dialect: see `catalogue.uncontrolled`.
         subjects=uncontrolled(texts("subject")),
     )
+
+
+def _without_trailing_place(publisher: str) -> str:
+    """A BnF publisher with its trailing parenthesised place removed, stripped.
+
+    **The answer the regular expression it replaced gave, computed in time
+    linear in the value rather than quadratic.** That expression backtracked
+    from every `(` and every space to the end of the value, and nothing ahead
+    of it bounds the field: `texts` strips only the ends. Measured on CPython
+    3.14, a 32,150 byte body decoded in 1.26 seconds and each doubling of the
+    length cost about four times the time, on the event loop, where a search's
+    deadline cannot interrupt it. `tests/test_metadata.py` keeps the expression
+    as the oracle this is held to.
+
+    **Equal to that pattern on every input, not only the real ones**, which is
+    why it reads the previous `)` rather than the last `(`. The leftmost match
+    starts at the first `(` after the last `)` that is not the final one, so
+    `Z ((a)` loses `((a)` here as it did there. **The obvious repair is not
+    this**: narrowing the class to `[^()]` is linear on a run of `(` and was
+    measured slower than the original on a run of spaces before one `(`.
+    """
+    body = publisher.rstrip()
+    if not body.endswith(")"):
+        return publisher.strip()
+    opening = body.find("(", body.rfind(")", 0, len(body) - 1) + 1)
+    if opening == -1:
+        return publisher.strip()
+    return body[:opening].strip()
 
 
 def _bnf_authors(creators: list[str]) -> str | None:
@@ -2363,6 +2403,74 @@ def _loc_record(record: ElementTree.Element, *, source: str) -> Record | None:
     if not _loc_carrier_is_book(record):
         return None
 
+    titled = _loc_title(record)
+    if titled is None:
+        return None
+    title, subtitle = titled
+
+    extent_element = record.find(f"{_MODS}physicalDescription/{_MODS}extent")
+    extent = extent_element.text.strip() if extent_element is not None and extent_element.text else None
+    if not is_physical_book(extent, title):
+        return None
+
+    isbn = next(
+        (
+            parsed
+            for element in record.findall(f"{_MODS}identifier")
+            if element.text
+            for parsed in [parse_isbn(element.text)]
+            if parsed is not None
+        ),
+        None,
+    )
+
+    years = [
+        element.text
+        for element in record.findall(f"{_MODS}originInfo/{_MODS}dateIssued")
+        if element.text
+    ]
+    year_match = re.search(r"\d{4}", " ".join(years))
+
+    language_element = record.find(
+        f"{_MODS}language/{_MODS}languageTerm"
+    )
+    language = (
+        LANGUAGES.get((language_element.text or "").strip().lower())
+        if language_element is not None
+        else None
+    )
+
+    return Record(
+        source=source,
+        isbn=isbn,
+        title=title,
+        subtitle=subtitle,
+        author=_loc_authors(record),
+        publisher=_loc_publisher(record),
+        year=int(year_match.group()) if year_match else None,
+        language=language,
+        page_count=pages_from_extent(extent),
+        cover_url=covers.open_library_url(isbn) if isbn else None,
+        subjects=_loc_subjects(record),
+        # The shelf classifications first and the subject headings after,
+        # which is load bearing rather than tidy. `Record.match_headings`
+        # slices to `MAX_CLASSIFICATIONS_PER_BOOK` and
+        # `routers/books._headings` applies `_SCHEME_ORDER` only afterwards, so
+        # on the search path a record's own order decides what survives. One
+        # live record carries 14 LCSH headings (measured over 900 records,
+        # 2026-08-24); putting them in front would cost this record its Dewey
+        # number and its call number, which are the two schemes nothing else in
+        # the chain supplies together.
+        headings=tuple(_loc_classifications(record) + _loc_subject_headings(record)),
+    )
+
+
+def _loc_title(record: ElementTree.Element) -> tuple[str, str | None] | None:
+    """A MODS record's title and subtitle, or None where it has no usable title.
+
+    None for no `titleInfo`, an empty `title` and a placeholder, which are the
+    three ways `_loc_record` refuses a record for its title.
+    """
     title_info = record.find(f"{_MODS}titleInfo")
     if title_info is None:
         return None
@@ -2389,9 +2497,15 @@ def _loc_record(record: ElementTree.Element, *, source: str) -> Record | None:
         if subtitle_element is not None and subtitle_element.text
         else None
     )
+    return title, subtitle
 
-    # A `name` with no role is the main entry. Roles are spelled out in MODS
-    # ("author", "editor"), so a translator can be dropped by name.
+
+def _loc_authors(record: ElementTree.Element) -> str | None:
+    """The people a MODS record credits with writing it, as one credit line.
+
+    A `name` with no role is the main entry. Roles are spelled out in MODS
+    ("author", "editor"), so a translator can be dropped by name.
+    """
     authors: list[str] = []
     for name in record.findall(f"{_MODS}name"):
         roles = " ".join(
@@ -2403,72 +2517,20 @@ def _loc_record(record: ElementTree.Element, *, source: str) -> Record | None:
         part = name.find(f"{_MODS}namePart")
         if part is not None and part.text:
             authors.append(flip_catalogue_name(part.text.strip().rstrip(",.")))
+    return ", ".join(authors) or None
 
-    extent_element = record.find(f"{_MODS}physicalDescription/{_MODS}extent")
-    extent = extent_element.text.strip() if extent_element is not None and extent_element.text else None
-    if not is_physical_book(extent, title):
-        return None
 
-    isbn = next(
-        (
-            parsed
-            for element in record.findall(f"{_MODS}identifier")
-            if element.text
-            for parsed in [parse_isbn(element.text)]
-            if parsed is not None
-        ),
-        None,
-    )
-
+def _loc_publisher(record: ElementTree.Element) -> str | None:
+    """A MODS record's publisher, from `originInfo` or, failing that, its agent."""
     publisher_element = record.find(f"{_MODS}originInfo/{_MODS}publisher")
     if publisher_element is None:
         publisher_element = record.find(
             f"{_MODS}originInfo/{_MODS}agent/{_MODS}namePart"
         )
-    publisher = (
+    return (
         publisher_element.text.strip()
         if publisher_element is not None and publisher_element.text
         else None
-    )
-
-    years = [
-        element.text
-        for element in record.findall(f"{_MODS}originInfo/{_MODS}dateIssued")
-        if element.text
-    ]
-    year_match = re.search(r"\d{4}", " ".join(years))
-
-    language_element = record.find(
-        f"{_MODS}language/{_MODS}languageTerm"
-    )
-    language = (
-        LANGUAGES.get((language_element.text or "").strip().lower())
-        if language_element is not None
-        else None
-    )
-
-    return Record(
-        source=source,
-        isbn=isbn,
-        title=title,
-        subtitle=subtitle,
-        author=", ".join(authors) or None,
-        publisher=publisher,
-        year=int(year_match.group()) if year_match else None,
-        language=language,
-        page_count=pages_from_extent(extent),
-        cover_url=covers.open_library_url(isbn) if isbn else None,
-        subjects=_loc_subjects(record),
-        # The shelf classifications first and the subject headings after,
-        # which is load bearing rather than tidy. `Record.match_headings`
-        # slices to `MAX_CLASSIFICATIONS_PER_BOOK` and
-        # `routers/books._headings` applies `_SCHEME_ORDER` only afterwards, so
-        # on the search path a record's own order decides what survives. One
-        # live record carries 14 LCSH headings (measured over 900 records,
-        # 2026-08-24); putting them in front would cost this record its Dewey
-        # number and its call number, which are the two schemes nothing else in
-        # the chain supplies together.
-        headings=tuple(_loc_classifications(record) + _loc_subject_headings(record)),
     )
 
 

@@ -10,6 +10,7 @@
  * files where a run had 82 over 180.
  */
 
+import { writeSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -638,4 +639,96 @@ export function writeInstruction(
 /** The one line a run prints, which is the whole write. */
 export function writeLine(instruction: WriteInstruction): string {
   return `${WRITE_SENTINEL} ${JSON.stringify(instruction)}`;
+}
+
+/**
+ * How long the printer waits with no byte moving before it fails the run.
+ *
+ * **A reader that has stopped reading would otherwise be a lost write, and
+ * this makes it a loud one.** Measured 2026-10-08: in the suite container an
+ * 800,000 byte line needed 12 pauses of 1 ms in all, and on a development
+ * machine an 801,461 byte line into a reader that slept a second before
+ * reading was whole after under 200 pauses of 5 ms. A gap of thirty seconds
+ * with nothing moving is a stall rather than a slow reader. It must stay well
+ * under any time limit a caller puts on a suite run, the shortest of which is
+ * minutes, so the run fails here with the reason rather than being killed
+ * with none.
+ */
+export const STALLED_FOR = 30_000;
+
+/**
+ * How long the printer sleeps after the pipe refuses a byte, before trying
+ * again.
+ *
+ * **It is the latency added per refill**: about this long passes between
+ * the reader draining and the next write, since `Atomics.wait` sleeps at
+ * least its timeout rather than at most. Each pause costs one thrown
+ * `EAGAIN`, so a whole stall of `STALLED_FOR` is about thirty thousand of
+ * them, which is cheap against a run that is failing anyway.
+ */
+export const PAUSE_MS = 1;
+
+/**
+ * Print one line, and return only once the kernel holds every byte of it.
+ *
+ * **Not `console.log` and not the stream, and both are measured.** vitest's own
+ * logger touches `process.stdout` before any reporter runs, and bun then marks
+ * the pipe non blocking, on the open file description every later writer in
+ * that session shares. `console.log` then keeps what fits the 65,536 byte pipe
+ * buffer and drops the rest without an error, and a write moving a handful of
+ * this register's padded rows is past it. Awaiting the stream's write callback
+ * was whole in one
+ * full run of two and lost its last 10,937 bytes in the other. Turning this
+ * back into either returns the cut line, which the applier refuses at merge.
+ *
+ * **So it loops on `EAGAIN` until the kernel has taken every byte**, which
+ * leaves nothing in any buffer of this process to lose when the run exits.
+ * Every other error is thrown: a reader that closed (`EPIPE`) is a write that
+ * can never arrive, and retrying it would spin until the deadline instead of
+ * saying so.
+ *
+ * **Synchronous on purpose**: nothing else in this process runs while the
+ * loop does, so no output of this process lands inside the line. **Another
+ * process writing to the same descriptor is not excluded.** vitest 5 forks its
+ * workers with their output piped back through this process, so none of them
+ * can; a process this one starts with inherited output, or a changed pool
+ * setting, could. Output ending in a newline splits the line, which the
+ * applier refuses. A fragment with no newline, quote or control character
+ * landing in the block would parse, and what refuses most of those is the
+ * applier's character set for a block.
+ *
+ * **The deadline needs a non blocking descriptor to fire.** On a blocking one
+ * the kernel holds the call itself until the reader drains, which is whole and
+ * cannot be timed out from here. A run's pipe is non blocking by the time a
+ * reporter runs, which is why the stall is reachable at all.
+ */
+export function printWhole(
+  line: string,
+  fd = 1,
+  stalledFor = STALLED_FOR,
+): void {
+  const bytes = Buffer.from(`${line}\n`);
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  let written = 0;
+  let moved = Date.now();
+  while (written < bytes.length) {
+    let took = 0;
+    try {
+      took = writeSync(fd, bytes, written, bytes.length - written);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EAGAIN") throw error;
+    }
+    if (took > 0) {
+      written += took;
+      moved = Date.now();
+      continue;
+    }
+    if (Date.now() - moved > stalledFor)
+      throw new Error(
+        `the coverage register write stalled: ${written} of ${bytes.length} ` +
+          `bytes reached the reader and none moved for ${stalledFor} ms, so ` +
+          "the run fails here rather than ending with half a write.",
+      );
+    Atomics.wait(pause, 0, 0, PAUSE_MS);
+  }
 }

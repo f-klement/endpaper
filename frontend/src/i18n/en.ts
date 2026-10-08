@@ -920,6 +920,8 @@ export const en = {
     "Nothing was sent: a channel is switched on and its settings cannot be used. The message below says which.",
   "settings.overdueNotSentInAppOnly":
     "Nothing was sent outward: the in app notice is the only channel switched on, and every member reads it in the library.",
+  "settings.overdueNotSentUnexpected":
+    "Nothing was sent: a channel failed in a way the app did not expect. The message below says which, and the server log names the cause.",
   // One line per channel that was tried, because "sent" over three channels
   // hides the one that failed, and the loans were still stamped.
   "settings.overdueSenderInApp": "In the app",
@@ -937,6 +939,8 @@ export const en = {
     "could not be reached. It will be tried again.",
   "settings.overdueRowMisconfigured": "its settings cannot be used.",
   "settings.overdueRowInAppOnly": "nothing to send outward.",
+  "settings.overdueRowUnexpected":
+    "failed in a way the app did not expect. The server log names the cause.",
   "settings.overdueRowNothingSent": "nothing was sent.",
 
   // ── In app reminders, and whether a channel is working ──────────────────

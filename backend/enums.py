@@ -866,6 +866,14 @@ class OverdueNotifyReason(StrEnum):
     #: the app. It is also the reason `notified_at` is not stamped on such a
     #: run, because no reminder went out to be stamped for.
     IN_APP_ONLY = "in_app_only"
+    #: A sender raised something that is neither a refusal nor a transport
+    #: failure: a case the code does not anticipate. Distinct from
+    #: `UNREACHABLE`, because nothing says a request was made, and from
+    #: `MISCONFIGURED`, because nothing says a setting is wrong. It is that
+    #: channel's failure, so the others still run, and it is broken at once,
+    #: because nothing says it is transient either. The server log names the
+    #: exception's type and where it was raised; the loans are left to retry.
+    UNEXPECTED = "unexpected"
 
 
 class Locale(StrEnum):

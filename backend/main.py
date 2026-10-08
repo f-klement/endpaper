@@ -36,7 +36,7 @@ from config import (
 from database import engine
 from dependencies import DbSession
 from enums import TagCategory, TagKey
-from errors import register_error_handlers, wants_html
+from errors import AnswerUnhandledErrors, register_error_handlers, wants_html
 from middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from models import CatalogueTarget, Tag
 
@@ -399,9 +399,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Added first, so it sits innermost: the refusal still happens before anything
-# reads the body, and it picks up the security and CORS headers of the layers
-# around it rather than answering bare.
+# Added first of all, so it sits innermost: a route's unhandled exception is
+# answered here and never reaches Starlette's last resort, which would re-raise
+# it to the server. See `errors.AnswerUnhandledErrors`. **Every middleware added
+# below is outside it**, so that middleware's own crash takes the old path and
+# is logged twice, once by the handler and once whole by the server.
+app.add_middleware(AnswerUnhandledErrors)
+
+# Added next, so it sits inside everything but that: the refusal still happens
+# before anything reads the body, and it picks up the security and CORS headers
+# of the layers around it rather than answering bare.
 app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 

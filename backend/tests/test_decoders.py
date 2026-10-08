@@ -28,14 +28,22 @@ import inspect
 import pathlib
 import xml.etree.ElementTree as ElementTree
 from collections.abc import Callable
+from typing import Final
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+from hypothesis.strategies import SearchStrategy
 
 import decoders
+import marc
 import metadata
+import opds
 import sources
 import targets
+from catalogue import Record
 from enums import Capability, CatalogueSource, SourceFamily
+from tests.strategies import Node, answer_of, field_values, marc_records, witness, xml_of
 from tests.test_house_rules import _is_vendored
 
 BACKEND = pathlib.Path(__file__).resolve().parent.parent
@@ -783,3 +791,179 @@ class TestEverySerialisationDecodesWithNoSocket:
         is covered by adding its row.
         """
         assert set(metadata._SEARCH_READERS) <= set(metadata.READERS)
+
+
+# ── Generated elements, one builder per reader ────────────────────────────────
+
+_DC: Final = "http://purl.org/dc/elements/1.1/"
+_MODS: Final = "http://www.loc.gov/mods/v3"
+_ATOM: Final = "http://www.w3.org/2005/Atom"
+
+
+def _optional(*children: SearchStrategy[Node]) -> SearchStrategy[tuple[Node, ...]]:
+    """Each child present or absent, in order."""
+    return st.tuples(*(st.none() | child for child in children)).map(
+        lambda drawn: tuple(child for child in drawn if child is not None)
+    )
+
+
+def _leaf(tag: str, value: SearchStrategy[str] | None = None, **attrs: str) -> SearchStrategy[Node]:
+    return st.builds(
+        lambda text: Node(tag, tuple(attrs.items()), text),
+        field_values() if value is None else value,
+    )
+
+
+def _branch(tag: str, *children: SearchStrategy[Node]) -> SearchStrategy[Node]:
+    return _optional(*children).map(lambda drawn: Node(tag, children=drawn))
+
+
+def _marc_elements() -> SearchStrategy[ElementTree.Element]:
+    """A MARC record, parsed inside the namespaced collection that gives it its tag."""
+    return marc_records().map(
+        lambda record: ElementTree.fromstring(
+            f'<collection xmlns="{marc.NAMESPACE}">{xml_of(record)}</collection>'
+        )[0]
+    )
+
+
+def _dublin_core_records() -> SearchStrategy[ElementTree.Element]:
+    """A namespaced Dublin Core record, the BnF's shape, over the names it reads."""
+    kinds = st.sampled_from(
+        ["texte imprimé | printed text | text", "text", "electronic resource", "image"]
+    )
+    return _optional(
+        _leaf("dc:title"),
+        _leaf("dc:creator"),
+        _leaf("dc:type", kinds),
+        _leaf("dc:format"),
+        _leaf("dc:identifier", st.from_regex(r"ISBN 97[89][0-9]{10}", fullmatch=True)),
+        _leaf("dc:publisher"),
+        _leaf("dc:date"),
+        _leaf("dc:language", st.sampled_from(["fre", "eng", "ger", "xx"])),
+        _leaf("dc:subject"),
+    ).map(
+        lambda children: ElementTree.fromstring(
+            xml_of(Node("record", (("xmlns:dc", _DC),), children=children))
+        )
+    )
+
+
+def _mods_records() -> SearchStrategy[ElementTree.Element]:
+    """A MODS record, the Library of Congress's shape, over the names it reads."""
+    return _optional(
+        _leaf("typeOfResource", st.sampled_from(["text", "text", "still image"])),
+        _branch("titleInfo", _leaf("nonSort"), _leaf("title"), _leaf("subTitle")),
+        _branch(
+            "name",
+            _leaf("namePart"),
+            _branch("role", _leaf("roleTerm", st.sampled_from(["author", "editor"]))),
+        ),
+        _branch(
+            "physicalDescription",
+            _leaf("extent"),
+            _leaf("form", st.sampled_from(["print", "electronic"]), authority="marcform"),
+        ),
+        _leaf("identifier", st.from_regex(r"97[89][0-9]{10}", fullmatch=True), type="isbn"),
+        _branch("originInfo", _leaf("publisher"), _leaf("dateIssued")),
+        _branch("language", _leaf("languageTerm", st.sampled_from(["eng", "ger"]))),
+        _branch("subject", _leaf("topic")),
+        _leaf("classification", authority="ddc"),
+    ).map(
+        lambda children: ElementTree.fromstring(
+            xml_of(Node("mods", (("xmlns", _MODS),), children=children))
+        )
+    )
+
+
+def _atom_entries() -> SearchStrategy[ElementTree.Element]:
+    """An OPDS entry over the names `opds.entry_record` reads."""
+    rels = st.sampled_from([*sorted(opds.HOLDING_RELS), "subsection"])
+    link = st.builds(
+        lambda rel: Node("link", (("rel", rel), ("href", "/d/1"))), rels
+    )
+    return _optional(
+        _leaf("title"),
+        _branch("author", _leaf("name")),
+        link,
+        _leaf("dcterms:identifier", st.from_regex(r"urn:isbn:97[89][0-9]{10}", fullmatch=True)),
+        _leaf("summary"),
+    ).map(
+        lambda children: ElementTree.fromstring(
+            xml_of(
+                Node(
+                    "entry",
+                    (("xmlns", _ATOM), ("xmlns:dcterms", "http://purl.org/dc/terms/")),
+                    children=children,
+                )
+            )
+        )
+    )
+
+
+#: The element each decoder is handed, drawn over the names that reader reads.
+#:
+#: **Keyed on the reader, and the keys are asserted to be every decoder there
+#: is**, so a new reader reds until it has a builder rather than going
+#: undrawn. The names are hand seeded per format, from each reader's own
+#: element names; a name a reader builds at runtime, such as a loop over a list
+#: of tags, is reached only where that list is drawn too.
+_ELEMENTS: Final[dict[decoders.Reader, SearchStrategy[ElementTree.Element]]] = {
+    decoders.Reader.MARC_GND: _marc_elements(),
+    decoders.Reader.MARC_PLAIN: _marc_elements(),
+    decoders.Reader.DUBLIN_CORE: _dublin_core_records(),
+    decoders.Reader.MODS: _mods_records(),
+    decoders.Reader.OPDS_ATOM: _atom_entries(),
+}
+
+#: Every decoder there is, catalogue and import alike.
+_DECODERS: Final = {**metadata.READERS, **opds.READERS}
+
+
+def _decodings(reader: decoders.Reader) -> SearchStrategy[decoders.Decoding]:
+    """A decoding for this reader, with the MARC knobs drawn where they mean anything."""
+    if reader not in decoders.MARC_READERS:
+        return st.just(decoders.Decoding(source="generated", reader=reader))
+    return st.builds(
+        decoders.Decoding,
+        source=st.just("generated"),
+        reader=st.just(reader),
+        refuses_component_parts=st.booleans(),
+        requires_isbn_claim=st.booleans(),
+        reads_author_identifiers=st.booleans(),
+    )
+
+
+class TestADecoderAnswersARecordOrNoneAndNeverRaises:
+    """`decoders.py`'s contract, over generated elements: one bad record costs
+    one record. **A decoder declares no refusal**, so any exception is the
+    property failing, and it is load bearing rather than tidy: a search calls
+    its decoder outside every `try`, and the fan out gathers without
+    `return_exceptions`, so one raise costs every source's answer.
+
+    **The answer's type alone, and no value derived from the spec**, which is
+    narrower than every byte door property beside it: the spec is lost in each
+    builder's `.map`, so nothing here could say which record an element should
+    have become."""
+
+    def test_every_decoder_has_a_builder(self):
+        assert sorted(_ELEMENTS) == sorted(_DECODERS)
+
+    @pytest.mark.property
+    @pytest.mark.parametrize("reader", sorted(_DECODERS))
+    @given(data=st.data())
+    def test_it_answers_a_record_or_none(self, reader, data):
+        element = data.draw(_ELEMENTS[reader])
+        decoding = data.draw(_decodings(reader))
+        answer_of(_DECODERS[reader], element, decoding, answers=(Record, type(None)), refuses=None)
+
+    @pytest.mark.parametrize("reader", sorted(_DECODERS))
+    def test_the_generator_still_reaches_a_record(self, reader):
+        witness(
+            _ELEMENTS[reader],
+            lambda element: isinstance(
+                _DECODERS[reader](element, decoders.Decoding(source="generated", reader=reader)),
+                Record,
+            ),
+            reaches=f"an element {reader} reads into a record",
+        )

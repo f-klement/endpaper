@@ -197,6 +197,13 @@ SSL_MODE: Final = _SSL_MODE_AS_SET or DEFAULT_SSL_MODE
 engine = create_engine(
     DATABASE_URL,
     connect_args=_connect_args(DATABASE_URL, _SSL_MODE_AS_SET, _SSL_ROOT_CERT),
+    # **A statement error names its statement and never its bound values.**
+    # Without this an unhandled database error carries `[parameters: ...]`,
+    # and the handlers that log one with its traceback, the 500 handler and the
+    # overdue ticker, write whatever was bound: a settings save under a held
+    # lock wrote the bot token, a duplicate first write the mail password, and
+    # any table's write a member's text or a password hash.
+    hide_parameters=True,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

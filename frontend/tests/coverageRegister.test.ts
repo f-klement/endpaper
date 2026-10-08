@@ -6,8 +6,10 @@
  */
 import { spawnSync } from "node:child_process";
 import {
+  closeSync,
   existsSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   mkdirSync,
   rmSync,
@@ -15,6 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseAst } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -33,7 +36,11 @@ import {
   writeInstruction,
   writeLine,
 } from "./coverageRegister";
-import { MARKER, registerReading } from "./coverageRegister.globalSetup";
+import {
+  MARKER,
+  registerReading,
+  teardown,
+} from "./coverageRegister.globalSetup";
 import CoverageRegisterReporter from "./coverageRegister.reporter";
 
 /**
@@ -221,6 +228,11 @@ describe("the write a run offers", () => {
     expect(instruction?.refused.join()).toContain(
       "6 written out against 4 collected",
     );
+    // **And no block, which is what keeps a minus sign out of one.** This is
+    // the only state in which the generated figure goes negative, and the
+    // applier refuses a block holding `-`, so a block written here would be a
+    // write refused at merge rather than a figure published.
+    expect(instruction?.block).toBeNull();
   });
 
   it("refuses when one file is summed into two rows", () => {
@@ -309,10 +321,12 @@ describe("the write a run offers", () => {
   it("offers a write when the run is about this repository's register", async () => {
     const frontend = join(import.meta.dirname, "..");
     const ran = join(import.meta.dirname, "withoutProse.test.ts");
-    const said: string[] = [];
-    const log = console.log;
-    console.log = (line: string) => void said.push(line);
-    const reporter = new CoverageRegisterReporter();
+    // **A file, never this worker's standard output**, which is the run's
+    // artefact too: printed there, this arm's one file write was a real
+    // write in the artefact, refusing every row.
+    const sink = mkdtempSync(join(tmpdir(), "register-witness-"));
+    const out = openSync(join(sink, "out"), "w");
+    const reporter = new CoverageRegisterReporter({ out });
     reporter.onInit({
       projects: [
         {
@@ -333,10 +347,12 @@ describe("the write a run offers", () => {
       // throws after printing. The throw is another arm's subject; the
       // printing is this one's.
     } finally {
-      console.log = log;
+      closeSync(out);
     }
+    const said = readFileSync(join(sink, "out"), "utf8");
+    rmSync(sink, { recursive: true });
 
-    expect(said.join("\n")).toContain(WRITE_SENTINEL);
+    expect(said).toContain(WRITE_SENTINEL);
   });
 
   it("distinguishes a register from no register", () => {
@@ -350,6 +366,220 @@ describe("the write a run offers", () => {
     expect(registerReading(join(import.meta.dirname, "COVERAGE.md"))).not.toBe(
       "absent",
     );
+  });
+});
+
+/** Past several pipe buffers, which is what a register write reaches. */
+const LINE = 1 << 20;
+
+/**
+ * What a shell line puts in front of a child, so that no mutant of the
+ * printer can hang the suite. A printer that retries every error and has no
+ * deadline spins on `EPIPE` forever, and a `spawnSync` timeout would kill the
+ * shell by pid and leave the child behind.
+ *
+ * **`KILL`, not the default `TERM`.** Measured in the suite container: such
+ * a mutant outlived a plain `timeout 25` by twenty minutes and held the run,
+ * and the node, the whole time. The same line on a development machine
+ * ended it at the bound, so why the signal was lost there is not known;
+ * `KILL` cannot be caught, ignored or deferred, which is the property this
+ * needs whatever the cause.
+ */
+const BOUNDED = "timeout -s KILL 25";
+
+/**
+ * A bun child that prints through the real printer, on a pipe it has first
+ * confirmed is non blocking, then runs `body`, with the child's `line` set to
+ * the expression given.
+ *
+ * **Driven in a child because the loss is a property of the process, not of
+ * the string.** Once a bun process touches `process.stdout` its pipe is non
+ * blocking, and every printer this replaced was whole on a blocking one.
+ *
+ * **So the child refuses to print when its pipe is still blocking**, exiting 3
+ * with a sentence: on a blocking pipe the first arm and the slow reader arm
+ * would pass with their subjects deleted, and the stall arm would red for a
+ * reason that is not its own. A bun that stops marking the pipe is a reason to revisit them,
+ * not to keep them, and this reads `/proc`, so a suite run off Linux reds
+ * here.
+ */
+function printerChild(
+  body: string[],
+  line = `"x".repeat(${String(LINE)})`,
+): string {
+  const printer = join(import.meta.dirname, "coverageRegister.ts");
+  return [
+    `import { readFileSync, writeFileSync } from "node:fs";`,
+    `import { printWhole } from ${JSON.stringify(printer)};`,
+    `process.stdout.write("");`,
+    `const fd = readFileSync("/proc/self/fdinfo/1", "utf8");`,
+    `const flags = /flags:\\s+([0-7]+)/.exec(fd);`,
+    `if (!flags || (parseInt(flags[1], 8) & 0o4000) === 0) {`,
+    `  process.stderr.write("standard output is blocking, so nothing here can be cut");`,
+    `  process.exit(3);`,
+    `}`,
+    `const line = ${line};`,
+    ...body,
+  ].join("\n");
+}
+
+describe("the printer a write travels through", () => {
+  /**
+   * **The child kills itself the moment the call returns**, with a signal
+   * nothing can flush on. What survives is only what the kernel already
+   * holds, which is the property the reporter needs and the one a printer
+   * returning before its bytes are written cannot have, however it waits.
+   * A printer awaiting the stream's write callback was whole in one full
+   * run of two and lost its last 10,937 bytes in the other. No child
+   * reproduced that loss, so this arm does not chase it; it asks for the
+   * property that rules it out.
+   *
+   * **The line is three byte characters, counted in bytes**, because a
+   * printer advancing through a string by the bytes the pipe took is whole
+   * on ASCII and cut on anything else: such a printer passed this arm on a
+   * line of `x` and delivered a third of this one. A register's cells are
+   * prose a person wrote, so the first one past ASCII would be that cut.
+   */
+  it("is whole in the pipe when the printer returns", () => {
+    const expected = Buffer.from(`${"\u2026".repeat(LINE / 2)}\n`);
+    const run = spawnSync(
+      process.execPath,
+      [
+        "-e",
+        printerChild(
+          [`printWhole(line);`, `process.kill(process.pid, "SIGKILL");`],
+          `"\\u2026".repeat(${String(LINE / 2)})`,
+        ),
+      ],
+      { maxBuffer: 1 << 24, timeout: 25_000, killSignal: "SIGKILL" },
+    );
+
+    expect(run.stderr.toString()).toBe("");
+    expect(run.signal).toBe("SIGKILL");
+    expect(run.stdout.length).toBe(expected.length);
+    expect(run.stdout.equals(expected)).toBe(true);
+  });
+
+  /**
+   * **A reader that closed is a write that can never arrive**, and only
+   * `EAGAIN` is worth retrying. A printer that retried everything would spin
+   * here until its deadline and then report a stall that never happened,
+   * which is the wrong reason for the right failure.
+   *
+   * `true` closes the pipe's read end by exiting, so the child's write meets
+   * `EPIPE` whether it starts before or after that.
+   */
+  it("throws on a reader that has closed rather than retrying", () => {
+    const run = spawnSync(
+      "sh",
+      [
+        "-c",
+        `${BOUNDED} "$0" -e "$1" | true`,
+        process.execPath,
+        printerChild([
+          `try {`,
+          `  printWhole(line, 1, 2000);`,
+          `  process.stderr.write("returned");`,
+          `} catch (error) {`,
+          `  process.stderr.write("threw " + String(error.code));`,
+          `}`,
+        ]),
+      ],
+      { encoding: "utf8" },
+    );
+
+    expect(run.stderr).toBe("threw EPIPE");
+  });
+
+  /**
+   * **A reader that stays open and never reads is the silent loss this
+   * deadline makes loud.** The reader here is a loop that never touches its
+   * input and leaves once the child says it is done, so the arm costs at most
+   * a second past the deadline.
+   *
+   * **The reader leaves after twenty seconds whatever the child does**, and
+   * the child is bounded as the arm above bounds it. A printer with no
+   * deadline then meets `EPIPE` when the reader goes, and the arm reds on
+   * the reason.
+   */
+  it("fails the run when no byte moves for the deadline", () => {
+    const dir = mkdtempSync(join(tmpdir(), "register-stall-"));
+    const done = join(dir, "done");
+    const run = spawnSync(
+      "sh",
+      [
+        "-c",
+        `${BOUNDED} "$0" -e "$1" | (i=0; until [ -e "$2" ] || [ $i -ge 20 ]; do sleep 1; i=$((i + 1)); done)`,
+        process.execPath,
+        printerChild([
+          `try {`,
+          `  printWhole(line, 1, 200);`,
+          `  process.stderr.write("returned");`,
+          `} catch (error) {`,
+          `  process.stderr.write(String(error.message));`,
+          `} finally {`,
+          `  writeFileSync(${JSON.stringify(done)}, "");`,
+          `}`,
+        ]),
+        done,
+      ],
+      { encoding: "utf8" },
+    );
+    rmSync(dir, { recursive: true });
+
+    expect(run.stderr).toMatch(
+      new RegExp(
+        `stalled: \\d+ of ${String(LINE + 1)} bytes .* none moved for 200 ms`,
+      ),
+    );
+  });
+
+  /**
+   * **The deadline is a gap with nothing moving, not a limit on the whole
+   * write.** A reader that keeps draining, slowly, is a reader the printer
+   * must wait for. Here it takes 32 KiB every 100 ms, so the line takes
+   * about three seconds to drain against a deadline of one, and no gap
+   * comes near it. A deadline measured from the start of the write fails
+   * this reader at one second, saying no byte moved while bytes were moving.
+   *
+   * The reader stops at the line's length or at the end of its input, and
+   * both children are bounded as the arms above bound them.
+   */
+  it("waits on a reader that is slow and never stops", () => {
+    const reader = [
+      `import { readSync } from "node:fs";`,
+      `const pause = new Int32Array(new SharedArrayBuffer(4));`,
+      `const chunk = Buffer.alloc(32768);`,
+      `let total = 0;`,
+      `while (total < ${String(LINE + 1)}) {`,
+      `  Atomics.wait(pause, 0, 0, 100);`,
+      `  const took = readSync(0, chunk, 0, chunk.length, null);`,
+      `  if (took === 0) break;`,
+      `  total += took;`,
+      `}`,
+      `process.stdout.write(String(total));`,
+    ].join("\n");
+    const run = spawnSync(
+      "sh",
+      [
+        "-c",
+        `${BOUNDED} "$0" -e "$1" | ${BOUNDED} "$0" -e "$2"`,
+        process.execPath,
+        printerChild([
+          `try {`,
+          `  printWhole(line, 1, 1000);`,
+          `  process.stderr.write("returned");`,
+          `} catch (error) {`,
+          `  process.stderr.write(String(error.message));`,
+          `}`,
+        ]),
+        reader,
+      ],
+      { encoding: "utf8" },
+    );
+
+    expect(run.stderr).toBe("returned");
+    expect(run.stdout).toBe(String(LINE + 1));
   });
 });
 
@@ -712,6 +942,111 @@ describe("the guard is wired into the suite it guards", () => {
 
   it("ran that global setup before this file, so a marker is waiting", () => {
     expect(process.env[MARKER]).toBeDefined();
+  });
+});
+
+/**
+ * A global setup refusal keeps its text whatever formats stacks after it is
+ * thrown.
+ *
+ * **One sighting, and this is what it shows and no more.** A full run once
+ * printed a teardown stack where the refusal's text should have been. A stack
+ * string is built on first read under whichever `Error.prepareStackTrace` is
+ * installed then, and vitest prints this half's refusal from its stack, later.
+ * These arms force that order in process: the refusal is built, a formatter
+ * that drops every message is installed, and only then is the stack read.
+ * Whether that is what happened in the sighting is not established.
+ *
+ * **`stackTraceLimit` is not raced here, because it is not lazy**: measured
+ * 2026-10-08 under bun 1.4.2 and node 24, a limit set to 0 after construction
+ * left the stack's frames in place, while a formatter installed after
+ * construction replaced the whole string.
+ */
+describe("a global setup refusal is printed with its text", () => {
+  it("keeps its text when a formatter is installed after it is thrown", () => {
+    const marker = process.env[MARKER];
+    const formatter = Error.prepareStackTrace;
+    let thrown: unknown = undefined;
+    // **The one refusal that throws before teardown touches anything**, so
+    // driving it in this worker removes nothing of the run's own: with the
+    // marker unset it refuses on its first line.
+    delete process.env[MARKER];
+    try {
+      teardown();
+    } catch (error) {
+      thrown = error;
+    } finally {
+      if (marker !== undefined) process.env[MARKER] = marker;
+    }
+    if (!(thrown instanceof Error))
+      throw new Error("teardown with no marker refused nothing");
+
+    let stack: string | undefined;
+    Error.prepareStackTrace = () => "Error";
+    try {
+      stack = thrown.stack;
+    } finally {
+      Error.prepareStackTrace = formatter;
+    }
+
+    expect(stack).toContain(thrown.message);
+    expect(thrown.message).toContain("unset at teardown");
+  });
+
+  /**
+   * **The arm above drives one of the file's refusals**, so this is what
+   * stops the others being built some other way: every `throw` in the file
+   * throws a call to `refusal`. Read off the parse, so a comment naming the
+   * constructor is not counted.
+   *
+   * **Throws, not constructions, because a construction can be spelled many
+   * ways.** A count of `new Error` missed `throw Error(...)` and
+   * `new globalThis.Error`, measured, and refused the helper written as an
+   * arrow function bound to a `const`. What this cannot see is the helper's
+   * own body, which the arm above holds by driving it.
+   *
+   * **And exactly one declaration binds that name**, as a function or as a
+   * variable, because a second one declared in a block shadows the helper
+   * there: a `const refusal` building a bare `Error` passed the throw rule
+   * alone, measured. A shadow through a function parameter or a `catch`
+   * binding still passes, since neither is a declaration this counts.
+   */
+  it("throws nothing but a call to the one helper that formats it", () => {
+    const path = join(import.meta.dirname, "coverageRegister.globalSetup.ts");
+    const thrown: string[] = [];
+    let declared = 0;
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const child of node) walk(child);
+        return;
+      }
+      if (typeof node !== "object" || node === null) return;
+      const here = node as {
+        type?: string;
+        id?: { type?: string; name?: string } | null;
+        argument?: { type?: string; callee?: { type?: string; name?: string } };
+      };
+      if (
+        (here.type === "FunctionDeclaration" ||
+          here.type === "VariableDeclarator") &&
+        here.id?.type === "Identifier" &&
+        here.id.name === "refusal"
+      )
+        declared += 1;
+      if (here.type === "ThrowStatement")
+        thrown.push(
+          here.argument?.type === "CallExpression" &&
+            here.argument.callee?.type === "Identifier"
+            ? (here.argument.callee.name ?? "")
+            : (here.argument?.type ?? ""),
+        );
+      for (const value of Object.values(node)) walk(value);
+    };
+    walk(parseAst(readFileSync(path, "utf8"), { lang: "ts" }));
+
+    expect(thrown).not.toHaveLength(0);
+    expect(new Set(thrown)).toEqual(new Set(["refusal"]));
+    expect(declared).toBe(1);
   });
 });
 
@@ -1717,6 +2052,12 @@ export function teardown(): void {
    * second arm's stream to `error during close [Error]` and leaves the first
    * arm's untouched. **The second arm is the only thing in this file that goes
    * red under it**, which is why it is here rather than left to the channel.
+   *
+   * **That measurement predates the global setup reading its own stack where
+   * it builds the refusal**, and has not been driven again since. A formatter
+   * in place before the throw still reaches the text; one installed after it
+   * no longer does, which the block named for a global setup refusal being
+   * printed with its text holds in process.
    */
   it(
     "prints the reporter's refusal where an operator reads it",

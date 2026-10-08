@@ -840,8 +840,12 @@ that property away and buy nothing, since a different host would not be Telegram
 The **bot token is a path segment** in every Telegram call, which makes the request URL a
 secret and makes a token containing `/` or `..` a way to choose the method being called.
 It is matched against `<digits>:<secret>` before it reaches a URL, and the failure log
-names `api.telegram.org` rather than the URL. Nothing logs the exception's own message
-either: `httpx.HTTPStatusError` renders the request URL.
+names `api.telegram.org` rather than the URL. No sender failure logs an exception's own
+message, except a refusal's, which is one of the app's own sentences naming a field and never
+its value: `httpx.HTTPStatusError` renders the request URL. The log gets the type and, for a
+failure the code does not anticipate, the frames where it was raised. A failure outside the
+senders belongs to no channel, and is still logged by the hourly ticker with its whole
+traceback.
 
 **The SMTP TLS context is built in `mailer.send` and takes no parameter.** There is no
 setting, no environment variable and no request field that relaxes certificate or hostname
@@ -858,6 +862,26 @@ beside the Google Books key and the webhook secret in `settings_store.SECRET_KEY
 test walks that set rather than naming fields, so a fifth is covered the moment it is
 added. `MailConfig.password` is `repr=False` for the same reason: a frozen dataclass prints
 every field, so one `logger.exception` would put the mail password in a log.
+
+**A database error never names the parameters it bound.** Every engine the backend builds
+sets `hide_parameters`: the application's, the one migrations run on and the database setup
+script's, and a test refuses one that does not. A statement error otherwise renders every
+value it bound. Measured before it was set: a settings save that met a held lock logged the
+bot token, and two first writes of one key logged the mail password.
+
+**That does not reach the driver's own message**, and on Postgres the message can quote the
+data: a unique violation names the conflicting value ("Key (email)=(...) already exists"),
+and a CHECK or NOT NULL violation the whole failing row, which pg8000 renders. So the two
+places that log an unexpected database error, the 500 handler and the hourly ticker, log
+its types, the constraint it broke where the driver names one, and the frames, never the
+message. SQLite's messages name columns rather than values, and are left out the same way.
+An error that quotes one is treated the same: SQLAlchemy's `PendingRollbackError`, raised by
+the next use of a session after a failed flush, wraps no driver error and carries the flush
+error's whole text in its own message, so it is logged by its type alone. The cost is that a
+database error in the log no longer shows what it failed on. Two still reach the log whole:
+one that arrives chained to another exception, logged through that one's traceback, and one
+raised after a response has started, such as part way through a streamed export, which the
+server logs as well.
 
 **`MAIL_DEBUG` is deliberately not honoured**, though it is one of the eight standard
 `MAIL_*` names this app reuses. smtplib's debug output writes the AUTH exchange to stderr,
@@ -1732,7 +1756,12 @@ the internet** make authenticated calls to the API on a signed-in member's behal
 ## Errors
 
 A crash returns a generic 500 and **never** a traceback: a traceback names internal paths
-and can quote request data back to whoever triggered it. The detail is logged instead.
+and can quote request data back to whoever triggered it. The detail is logged instead,
+once: the app answers a route that crashes before its response starts itself, so the server
+logs no second copy of the traceback. A crash once the response has started, or in the
+middleware around the routes, is left to the server, which logs it whole. A validation
+failure is logged by its type, where it failed and the frames, and never the value that
+failed, which is a member's data.
 
 Error pages are content-negotiated (a browser gets HTML, a `fetch()` call gets
 `{"detail": ...}`) and the wording comes from a fixed table, so an internal exception
@@ -1964,6 +1993,13 @@ Worth knowing before exposing this beyond a private network:
   is on by default and delivers nothing, so counting it would stamp every loan on every run
   and cut the three that do push from one attempt an hour to one per reminder interval,
   seven days by default.
+- **One channel failing, in any way, does not stop the others.** A sender's refusal, its
+  transport failure and any other exception it raises are all that channel's outcome: the
+  senders after it still run, the loans the earlier ones delivered are still stamped, and
+  the run is still recorded. The limit is everything outside a sender, which is selecting
+  the loans, building the digest, stamping and committing: a failure there belongs to no
+  channel, stops the run, records nothing, and on the hourly run reaches only the container
+  log. A cancellation is not caught, so stopping the app still stops a send.
 - **A channel that has been failing is reported, and the bar for interrupting somebody is
   deliberately high.** This used to be a gap and was the wrong disposition: for a household
   running the published image, "read the container log" is not a worse form of alerting, it
@@ -1972,10 +2008,11 @@ Worth knowing before exposing this beyond a private network:
   depend on an admin pressing "Send now" before the ticker gets there. What is still a
   judgement rather than a fact is when to say a channel is **broken**: a refusal the app
   decided itself (`NO_URL`, `MISCONFIGURED`, all raised before a socket is opened) is
-  reported at once, and a transport failure only after 24 hours and at least two
-  consecutive failures. One failed send is a network; every send failing for a day is a
-  configuration, and a design that cannot tell them apart is one a household switches off.
-  A channel failing once every reminder interval therefore takes two intervals to be called
+  reported at once, so is a failure the code does not anticipate (`UNEXPECTED`), and a
+  transport failure only after 24 hours and at least two consecutive failures. One failed
+  send is a network; every send failing for a day is a configuration, and a design that
+  cannot tell them apart is one a household switches off. A channel attempted once every
+  reminder interval therefore waits a whole interval, until its second failure, to be called
   broken, which is the price of not crying wolf.
 - **A channel's record is cleared by any write to that channel's settings.** Not by the
   on/off switch alone: `notifications._CONFIGURED_BY` owns every row that configures a
@@ -1999,10 +2036,10 @@ Worth knowing before exposing this beyond a private network:
   the channel's settings clears it; a later tick overwrites it only if that tick had
   something to send.
 - **The health record holds a failure's own sentence, and those sentences are curated.**
-  `detail` is either a fixed string ("The destination could not be reached.") or the message
-  from a refusal, and every refusal in `mailer.py` and `notifications.py` names the shape of
-  what is wrong rather than the value: "The Telegram bot token is not a bot token", never
-  the token. It is admin only regardless.
+  `detail` is either a fixed string, one per reason that is not a refusal ("The destination
+  could not be reached."), or the message from a refusal, and every refusal in `mailer.py`
+  and `notifications.py` names the shape of what is wrong rather than the value: "The
+  Telegram bot token is not a bot token", never the token. It is admin only regardless.
 - **The backup carries every stored secret in plaintext, except catalogue credentials.**
   `backup._TABLES` includes `settings`, so `endpaper.json` holds `mail_password`,
   `telegram_bot_token`, `overdue_webhook_secret` and `google_books_api_key` in full,

@@ -633,7 +633,15 @@ class SettingsUpdate(BaseModel):
         trimmed = value.strip()
         if not trimmed:
             return ""
-        parsed = urlparse(trimmed)
+        try:
+            parsed = urlparse(trimmed)
+            # Read for its check: `urlparse` defers the port's range until asked,
+            # and `notifications.checked_url` refuses at send what this lets in.
+            _ = parsed.port
+        except ValueError:
+            # A constant sentence, so the 422 never echoes the URL, which may
+            # carry a token.
+            raise ValueError("The webhook URL could not be read as a URL.") from None
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ValueError("The webhook URL must start with http:// or https://")
         return trimmed
@@ -679,7 +687,7 @@ class OverdueNotifyResult(BaseModel):
     loans: int = Field(default=0, ge=0)
     #: Overdue loans left out because the book is private. See decisions.md.
     skipped_private: int = Field(default=0, ge=0)
-    #: Which of the four ways nothing was sent. **Null exactly when `sent` is
+    #: Which way nothing was sent. **Null exactly when `sent` is
     #: true**, and set in every other case: `_outcome` in `notifications.py` is
     #: the only thing that builds a not-sent result, so a new exit cannot omit
     #: it.
@@ -742,9 +750,8 @@ class SenderHealth(BaseModel):
     #: has never run.
     failures: int = Field(default=0, ge=0)
     #: Whether this is worth interrupting somebody about, which is a decision
-    #: rather than a fact and is made by `notifications._is_broken`: a refusal
-    #: at once, a transport failure only after it has persisted. **One failed
-    #: send is a network, every send failing for a day is a configuration.**
+    #: rather than a fact. `notifications._is_broken` makes it and states the
+    #: rules; they are not restated here, where a copy would drift.
     broken: bool = False
 
 

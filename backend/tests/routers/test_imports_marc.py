@@ -414,6 +414,7 @@ class TestTheExportIsPagedRatherThanWhole:
 
         assert sorted(written) == sorted([*expected[:-1], "Aardvark"])
 
+    @pytest.mark.answers_500(raises=(RuntimeError,))
     def test_a_failure_part_way_through_leaves_a_document_no_parser_accepts(
         self, admin, db, monkeypatch, small_pages
     ):
@@ -453,6 +454,7 @@ class TestTheExportIsPagedRatherThanWhole:
         with pytest.raises(ElementTree.ParseError):
             ElementTree.fromstring(res.content)
 
+    @pytest.mark.answers_500(raises=(RuntimeError,))
     def test_a_failure_before_the_first_page_is_also_a_200(
         self, admin, db, monkeypatch, small_pages
     ):

@@ -6,12 +6,15 @@ enrichment adds what is missing and does not overrule what a member typed.
 """
 
 import logging
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import httpx
 import pytest
 import respx
+from hypothesis import given
+from hypothesis import strategies as st
 
 import covers
 import fetch
@@ -20,6 +23,7 @@ from google_books import (
     VOLUME_ID,
     GoogleBooksError,
     _series_from_title,
+    _series_in_parentheses,
     _volume_to_fields,
     is_a_volume_id,
     join_categories,
@@ -446,6 +450,68 @@ class TestTheSignatureIsTheBound:
             merge_into(book, _volume_to_fields(VOLUME), overwrite=False)  # type: ignore[arg-type]
 
         assert book.page_count is None
+
+
+#: The expression the parenthesised series rule used to be, its `\d` narrowed to
+#: ASCII digits as the reader's number is, kept as the oracle the linear reader is
+#: held to. **Here and nowhere in the application**: it is quadratic on a run of `(`.
+_SERIES_IN_PARENTHESES: Final = re.compile(
+    r"\(([^)]+?)[,\s]+(?:#|book\s+|bk\.?\s*)([0-9]+(?:\.[0-9]+)?)\)\s*$", re.IGNORECASE
+)
+
+#: The units the expression treats differently, plus the words it looks for and
+#: the characters whose class is not obvious: a Kelvin sign is a case blind `k`,
+#: an Arabic-Indic three is a `\d`, U+001C and U+00A0 are `\s`.
+_SERIES_UNITS: Final = [
+    "(", ")", " ", ",", "#", ".", "1", "2", "\u0663", "b", "o", "k", "B", "K",
+    "\N{KELVIN SIGN}", "\n", "\x1c", "\u00a0", "a", "book", "bk", " #", "1.5",
+]
+
+
+class TestTheParenthesisedSeriesIsReadInOnePass:
+    """`google_books._series_in_parentheses`, which replaced a quadratic expression.
+
+    **No property sees time**, so the halves are held apart, as the BnF
+    publisher rule's are: the generated one holds the answer to the old
+    expression's, and the named one is sized so the old form cannot finish
+    inside the per test ceiling. Neither is a timing assertion.
+    """
+
+    @pytest.mark.property
+    @given(
+        title=st.lists(st.sampled_from(_SERIES_UNITS), max_size=14).map("".join)
+        | st.text(max_size=24)
+    )
+    def test_it_answers_what_the_expression_answered(self, title):
+        match = _SERIES_IN_PARENTHESES.search(title)
+        expected = (match.group(1), match.group(2)) if match else None
+        assert _series_in_parentheses(title) == expected
+
+    @pytest.mark.parametrize(
+        "digit",
+        [
+            pytest.param("\N{ARABIC-INDIC DIGIT THREE}", id="Arabic-Indic"),
+            pytest.param("\N{FULLWIDTH DIGIT THREE}", id="fullwidth"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "shape", ["Dune (Dune Chronicles #{})", "Dune, Book {}"], ids=["parenthesised", "suffix"]
+    )
+    def test_a_series_numbered_in_another_scripts_digits_is_no_series(self, digit, shape):
+        """`\\d` admitted them and `float` read them, which is the quiet half of
+        the unnarrowed digit predicate this tree refuses. Both shapes the title
+        is read in, each script a separate case: the suffix shape kept `\\d`
+        after the parenthesised one was narrowed, and read both as 3.0."""
+        assert _series_from_title(shape.format(digit)) == (None, None)
+
+    @pytest.mark.parametrize("close", ["", ")"])
+    def test_a_title_as_long_as_a_response_is_read_in_one_pass(self, close):
+        """A run of `(` filling a whole response, with and without a closing
+        parenthesis. Measured at 5.06 seconds for 16,000 characters on the old
+        form, quadratic; this is a hundred and thirty times longer."""
+        title = "Z" + "(" * (fetch.MAX_RESPONSE_BYTES - 400) + close
+        fields = _volume_to_fields({"id": "x", "volumeInfo": {"title": title}})
+        assert (fields["series_name"], fields["series_index"]) == (None, None)
 
 
 class TestSeriesParsing:

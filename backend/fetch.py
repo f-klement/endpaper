@@ -52,6 +52,7 @@ import asyncio
 import ipaddress
 import json as jsonlib
 import logging
+import re
 import socket
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -504,6 +505,42 @@ async def system_resolver(host: str, port: int) -> Sequence[str]:
     return tuple(dict.fromkeys(str(info[4][0]) for info in infos))
 
 
+#: Any UTF-16 surrogate, which in a decoded `str` is always a lone one: a valid
+#: pair decodes to the one code point it encodes. See `Fetched.text`.
+_LONE_SURROGATE: Final = re.compile("[\ud800-\udfff]")
+
+
+def _without_lone_surrogates(value: Any) -> Any:
+    """A parsed JSON value with every lone surrogate in it, key or string, replaced.
+
+    **Walked with a stack, never by recursion**: the value is as deep as the
+    parser allowed, which is deeper than this function's own stack would be.
+    Containers are repaired in place, since nothing else holds them yet.
+    """
+    if isinstance(value, str):
+        return _LONE_SURROGATE.sub("\N{REPLACEMENT CHARACTER}", value)
+    stack = [value]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                if isinstance(item, str):
+                    node[index] = _LONE_SURROGATE.sub("\N{REPLACEMENT CHARACTER}", item)
+                elif isinstance(item, list | dict):
+                    stack.append(item)
+        elif isinstance(node, dict):
+            for key, item in list(node.items()):
+                if isinstance(item, str):
+                    item = _LONE_SURROGATE.sub("\N{REPLACEMENT CHARACTER}", item)
+                elif isinstance(item, list | dict):
+                    stack.append(item)
+                repaired = _LONE_SURROGATE.sub("\N{REPLACEMENT CHARACTER}", key)
+                if repaired != key:
+                    del node[key]
+                node[repaired] = item
+    return value
+
+
 @dataclass(frozen=True)
 class Fetched:
     """A response whose body has already been read, and bounded.
@@ -527,12 +564,28 @@ class Fetched:
         `errors="replace"` matches httpx, and the `LookupError` arm stands in
         for its `_is_known_encoding` guard: a catalogue is free to name a
         charset Python has never heard of, and that must cost mojibake rather
-        than an exception no caller expects.
+        than an exception no caller expects. **`ValueError` is the same
+        answer, by base type rather than by member**: `idna` refuses every
+        error handler with `UnicodeError`, found by drawing the charset from the
+        codec registry, and a name holding a NUL refuses with a plain
+        `ValueError`, which the transport does not let through today. Either was
+        a `ValueError` past every caller's `ParseError` arm.
+
+        **A lone surrogate is replaced too, because `errors="replace"` does not
+        stop four codecs producing one.** `utf_7`, `punycode`,
+        `unicode_escape` and `raw_unicode_escape` decode a body such as `+2AA-`
+        to a surrogate with no partner, which no XML parser takes:
+        `ElementTree.fromstring` raises `UnicodeEncodeError`, a `ValueError`,
+        where the catalogue lookups catch `ParseError`. So one source naming
+        one of those charsets was a 500 that dropped every other source's
+        answer. Replaced here rather than caught at each parse, for the reason
+        `json` gives below: every `str` door is covered by construction.
         """
         try:
-            return self.content.decode(self.encoding or "utf-8", errors="replace")
-        except LookupError:
-            return self.content.decode("utf-8", errors="replace")
+            text = self.content.decode(self.encoding or "utf-8", errors="replace")
+        except (LookupError, ValueError):
+            text = self.content.decode("utf-8", errors="replace")
+        return _LONE_SURROGATE.sub("\N{REPLACEMENT CHARACTER}", text)
 
     def json(self) -> Any:
         """The body as JSON. Raises `ValueError` on anything else, as httpx does.
@@ -553,14 +606,20 @@ class Fetched:
         covered before it exists. `tests/test_fetch.py` pins the conversion and
         `tests/test_house_rules.py` pins this being the only place a response
         body is parsed.
+
+        **Every string in the answer has its lone surrogates replaced, as
+        `text` does.** `json.loads` decodes a `\\ud800` escape to a surrogate
+        with no partner, and a response model carrying one fails to serialise:
+        one source's title made the lookup answer 500.
         """
         try:
-            return jsonlib.loads(self.content)
+            parsed = jsonlib.loads(self.content)
         except RecursionError as failure:
             # Not `raise ValueError(...) from failure` with the original
             # message: `json.loads` phrases this as a stack overflow, which
             # describes this process rather than the body that caused it.
             raise ValueError("Body is nested too deeply to parse as JSON") from failure
+        return _without_lone_surrogates(parsed)
 
 
 #: Who this is, for the services being asked.

@@ -57,6 +57,7 @@ import {
   countWrittenOut,
   declaresItselfInternal,
   isWhole,
+  printWhole,
   problems,
   writeInstruction,
   writeLine,
@@ -70,6 +71,18 @@ export default class CoverageRegisterReporter {
       globTestFiles?: () => Promise<{ testFiles: string[] }>;
     }[];
   } = {};
+
+  /**
+   * Where the write goes: standard output in a run, a file in the arm that
+   * drives this hook in process, because a worker's own standard output is
+   * the run's artefact too. A write printed there is read as a second write
+   * for this register and refuses the real one at merge.
+   */
+  private readonly out: number;
+
+  constructor(options: { out?: number } = {}) {
+    this.out = options.out ?? 1;
+  }
 
   onInit(vitest: typeof this.vitest): void {
     this.vitest = vitest;
@@ -175,7 +188,9 @@ export default class CoverageRegisterReporter {
     // register, so it is the one process that must not write it: a guard that
     // heals itself asserts nothing. What it does instead is put the whole
     // write on one line of the run's own output, where a separate and
-    // deliberate invocation can pick it up. Nothing here opens the register
+    // deliberate invocation can pick it up. `printWhole` is what makes that
+    // line whole at any length; its comment says what `console.log` lost
+    // here. Nothing here opens the register
     // for writing, and the global setup fails the run if anything else does.
     //
     // **And only a run about this repository's own register offers one.** A
@@ -215,7 +230,13 @@ export default class CoverageRegisterReporter {
     // the comparison holds without anything asserting that it must.
     const instruction =
       itsRegister === THIS_REGISTER ? writeInstruction(register, census) : null;
-    if (instruction !== null) console.log(writeLine(instruction));
+    // **This is the one print site, and nothing holds that it stays one.** A
+    // second print beside it is seen by no arm here, and it matters in one
+    // shape: a `console.log` of a write past 65,536 bytes, kept for debugging
+    // say, puts a cut copy beside the whole one, and the applier refuses the
+    // artefact at merge rather than the run failing. A second `printWhole`,
+    // or a shorter write, prints two identical copies, which are read as one.
+    if (instruction !== null) printWhole(writeLine(instruction), this.out);
 
     const wrong = problems(register, census);
     if (wrong.length > 0)

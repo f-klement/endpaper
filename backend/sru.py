@@ -1500,6 +1500,25 @@ def _bounded_int(value: str, name: str, *, minimum: int) -> int:
     return number
 
 
+def _check_packing(parameters: dict[str, list[str]]) -> None:
+    """Refuse a `recordPacking` other than `xml`, the one packing this answers in."""
+    if "recordPacking" in parameters:
+        packing = _single(parameters["recordPacking"], "recordPacking")
+        if packing != "xml":
+            raise SruError(
+                Diagnostic.UNSUPPORTED_XML_ESCAPING_VALUE,
+                f"recordPacking={_safe(packing)}",
+            )
+
+
+def _check_schema(parameters: dict[str, list[str]]) -> None:
+    """Refuse a `recordSchema` this server does not write records in."""
+    if "recordSchema" in parameters:
+        schema = _single(parameters["recordSchema"], "recordSchema")
+        if schema not in SCHEMA_NAMES:
+            raise SruError(Diagnostic.UNKNOWN_SCHEMA_FOR_RETRIEVAL, _safe(schema))
+
+
 def _read_request(query_string: str) -> _Request:
     """The query string as a validated request, or the diagnostic for why not."""
     parameters = parse_qs(query_string, keep_blank_values=True)
@@ -1537,21 +1556,12 @@ def _read_request(query_string: str) -> _Request:
     if version not in SUPPORTED_VERSIONS:
         raise SruError(Diagnostic.UNSUPPORTED_VERSION, _safe(version))
 
-    if "recordPacking" in parameters:
-        packing = _single(parameters["recordPacking"], "recordPacking")
-        if packing != "xml":
-            raise SruError(
-                Diagnostic.UNSUPPORTED_XML_ESCAPING_VALUE,
-                f"recordPacking={_safe(packing)}",
-            )
+    _check_packing(parameters)
 
     if operation == "explain":
         return _Request("explain", version, "", 1, 0)
 
-    if "recordSchema" in parameters:
-        schema = _single(parameters["recordSchema"], "recordSchema")
-        if schema not in SCHEMA_NAMES:
-            raise SruError(Diagnostic.UNKNOWN_SCHEMA_FOR_RETRIEVAL, _safe(schema))
+    _check_schema(parameters)
 
     if "query" not in parameters:
         raise SruError(Diagnostic.MANDATORY_PARAMETER_NOT_SUPPLIED, "query")

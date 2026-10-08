@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+import errors
 import main
 from database import Base, engine
 from enums import TagKey
@@ -207,7 +208,8 @@ class TestHealthz:
         assert "authorization" not in client.headers
         assert client.get("/api/healthz").status_code == 200
 
-    def test_it_touches_the_database(self, client, monkeypatch):
+    @pytest.mark.answers_500(raises=(OperationalError,))
+    def test_it_touches_the_database(self, client, monkeypatch, caplog):
         """Otherwise it answers 200 for a pod whose volume never mounted, which
         is exactly the failure the probes exist to catch."""
 
@@ -216,8 +218,12 @@ class TestHealthz:
 
         monkeypatch.setattr(Session, "execute", broken)
 
-        with pytest.raises(OperationalError):
-            client.get("/api/healthz")
+        # A 500 rather than the raise: the app answers a route's crash itself,
+        # so the exception no longer reaches the server, or this client. The
+        # logged record is what still names the cause.
+        assert client.get("/api/healthz").status_code == 500
+        [crash] = [r for r in caplog.records if r.getMessage().startswith("Unhandled error")]
+        assert isinstance(getattr(crash, errors.UNHANDLED), OperationalError)
 
     def test_it_reaches_the_storage_as_well_as_the_database(self, client, monkeypatch):
         """Measured during a total NFS outage: this endpoint answered 200 for 39

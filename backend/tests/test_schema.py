@@ -1471,6 +1471,59 @@ class TestKeyingTheSeededTags:
         assert keys["Stories"] is None
         assert keys["Fiction"] == "fiction"
 
+    def lose_the_name_constraint(self) -> None:
+        """Rebuild `tags` without `UNIQUE (name)`, the one thing keeping the
+        revision's refusal dead.
+
+        SQLite will not drop a constraint, nor the index behind one, so the
+        table is copied out from under it, which is what batch mode does. The
+        substitution is asserted to have happened once, so a change to the
+        table's shape fails here by name rather than leaving the constraint in
+        and the test proving nothing.
+        """
+        with engine.connect() as connection:
+            created = connection.execute(
+                text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tags'")
+            ).scalar_one()
+            loose, found = re.subn(r",\s*UNIQUE \(name\)", "", created)
+            assert found == 1, created
+            connection.execute(text(loose.replace("CREATE TABLE tags", "CREATE TABLE loose", 1)))
+            connection.execute(text("INSERT INTO loose SELECT * FROM tags"))
+            connection.execute(text("DROP TABLE tags"))
+            connection.execute(text("ALTER TABLE loose RENAME TO tags"))
+            connection.commit()
+
+    def test_two_rows_claiming_one_seeded_key_stop_it_before_anything_changes(self):
+        """The check the module docstring expects to be dead, made reachable.
+
+        Only a database that lost the name constraint can hold two rows named
+        `Computing`, and that is the database this check exists for. **The
+        last two assertions are the point**: the docstring argues the check
+        runs before the first DDL statement because SQLite makes the column
+        durable at once, and only they see a check moved below it.
+        """
+        ids = self.build_database_with_tags()
+        self.lose_the_name_constraint()
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO tags (name, category) VALUES ('Computing', 'custom')")
+            )
+            second = int(
+                connection.execute(
+                    text("SELECT MAX(id) FROM tags WHERE name = 'Computing'")
+                ).scalar_one()
+            )
+            connection.commit()
+
+        with pytest.raises(
+            RuntimeError,
+            match=f"tags {ids['Computing']} and {second} both claim the key 'computing'",
+        ):
+            schema.upgrade_to_head()
+
+        assert "key" not in {column["name"] for column in inspect(engine).get_columns("tags")}
+        assert current_revision() == self.PREVIOUS
+
     def test_two_rows_cannot_share_a_key(self):
         self.build_database_with_tags()
         schema.upgrade_to_head()

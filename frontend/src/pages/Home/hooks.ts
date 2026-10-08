@@ -462,10 +462,9 @@ export function useMyOverdue(): number {
  * from needing to know who is reading it. `retry: false` so a member costs one
  * request rather than four.
  *
- * `broken` is the server's verdict and is not recomputed here: a refusal the
- * app decided itself counts at once, a transport failure only after 24 hours
- * and at least two consecutive failures. The evidence for that lives in the
- * health record, not in this payload.
+ * `broken` is the server's verdict and is not recomputed here. The rules are
+ * `notifications._is_broken`'s, and the evidence for them lives in the health
+ * record, not in this payload.
  *
  * The record changes at most once an hour, so it is held for five minutes
  * rather than refetched on every return to the library.

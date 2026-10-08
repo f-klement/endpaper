@@ -797,6 +797,8 @@ export const de: Messages = {
     "Es wurde nichts gesendet: Ein Kanal ist eingeschaltet und seine Einstellungen sind unbrauchbar. Welcher, steht unten.",
   "settings.overdueNotSentInAppOnly":
     "Nach außen wurde nichts gesendet: Der Hinweis in der App ist der einzige eingeschaltete Kanal, und alle Mitglieder lesen ihn in der Bibliothek.",
+  "settings.overdueNotSentUnexpected":
+    "Es wurde nichts gesendet: Ein Kanal ist auf eine Weise fehlgeschlagen, mit der die App nicht gerechnet hat. Welcher, steht unten, und das Serverprotokoll nennt die Ursache.",
   "settings.overdueSenderInApp": "In der App",
   "settings.overdueSenderWebhook": "Webhook",
   "settings.overdueSenderEmail": "E-Mail",
@@ -810,6 +812,8 @@ export const de: Messages = {
     "nicht erreichbar. Es wird erneut versucht.",
   "settings.overdueRowMisconfigured": "die Einstellungen sind unbrauchbar.",
   "settings.overdueRowInAppOnly": "nach außen nichts zu senden.",
+  "settings.overdueRowUnexpected":
+    "auf unerwartete Weise fehlgeschlagen. Das Serverprotokoll nennt die Ursache.",
   "settings.overdueRowNothingSent": "nichts gesendet.",
 
   // ── Erinnerungen in der App, und ob ein Kanal funktioniert ──────────────

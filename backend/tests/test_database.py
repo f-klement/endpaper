@@ -10,8 +10,10 @@ import ssl
 import subprocess
 import sys
 import threading
+import traceback
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Final
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,13 +21,14 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
-from sqlalchemy import event, text
+from sqlalchemy import event, exc, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import QueuePool
 
 import database
 from database import Base, engine, get_db
+from tests.test_house_rules import BACKEND, _python_sources
 
 #: A Postgres URL of the one spelling this project supports, for the arms that
 #: resolve connect arguments. Nothing dials it: `_connect_args` decides the
@@ -75,6 +78,93 @@ class TestEngine:
         opened on one thread is used on another."""
         assert engine.dialect.name == "sqlite"
         assert Base.metadata.tables
+
+
+class TestAStatementErrorNamesNoValue:
+    """`hide_parameters`, on the engine every handler's database error comes
+    from. A traceback is what the 500 handler and the ticker log."""
+
+    def test_a_failed_write_renders_its_statement_and_not_its_values(self):
+        marker = "BOUND-VALUE-MARKER"
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO settings (key, value) VALUES ('probe_key', 'first')")
+            )
+            with pytest.raises(exc.IntegrityError) as raised:
+                connection.execute(
+                    text("INSERT INTO settings (key, value) VALUES (:key, :value)"),
+                    {"key": "probe_key", "value": marker},
+                )
+            connection.rollback()
+
+        rendered = "".join(traceback.format_exception(raised.value))
+        assert "INSERT INTO settings" in rendered
+        assert marker not in rendered
+
+
+#: Where this backend builds an engine, by the function that builds one. The
+#: walk below matches the name at the call, so the third rule in the class
+#: refuses importing any of them under another one.
+_ENGINE_BUILDERS: Final = frozenset(
+    {"create_engine", "create_async_engine", "engine_from_config"}
+)
+
+
+def _engine_calls() -> list[tuple[str, int, ast.Call]]:
+    """Every engine built outside the tests, as (path, line, call).
+
+    The application corpus `_python_sources` walks, which leaves out
+    `migrations/`, plus `migrations/env.py` by name: it builds the engine every
+    revision runs on and is not itself a revision.
+    """
+    found = []
+    for path in [*_python_sources(), BACKEND / "migrations" / "env.py"]:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", None)
+            if name in _ENGINE_BUILDERS:
+                found.append((str(path.relative_to(BACKEND)), node.lineno, node))
+    return found
+
+
+class TestEveryEngineHidesItsParameters:
+    """`docs/security.md` says a database error never names its bound values,
+    and that holds only while every engine sets `hide_parameters`.
+
+    Read by the name a builder is called by, so a builder bound to another name
+    by assignment (`build = create_engine`, then `build(...)`) is not seen; an
+    aliased import is refused below."""
+
+    def test_every_engine_outside_the_tests_sets_it(self):
+        def hides(call: ast.Call) -> bool:
+            return any(
+                keyword.arg == "hide_parameters"
+                and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value is True
+                for keyword in call.keywords
+            )
+
+        missing = [f"{path}:{line}" for path, line, call in _engine_calls() if not hides(call)]
+        assert missing == [], f"engines built without hide_parameters=True: {missing}"
+
+    def test_no_engine_builder_is_imported_under_another_name(self):
+        """The walk above matches the name at the call, so `create_engine as
+        build` would build an engine it never sees."""
+        renamed = [
+            f"{path.relative_to(BACKEND)}:{node.lineno}"
+            for path in [*_python_sources(), BACKEND / "migrations" / "env.py"]
+            for node in ast.walk(ast.parse(path.read_text()))
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+            if alias.name in _ENGINE_BUILDERS and alias.asname not in (None, alias.name)
+        ]
+        assert renamed == [], f"an engine builder imported under another name: {renamed}"
+
+    def test_the_walk_sees_the_engines_it_is_about(self):
+        """Anti vacuity: a walk that found nothing would pass the rule above."""
+        files = {path for path, _, _ in _engine_calls()}
+        assert files >= {"database.py", "scripts/postgres_database.py", "migrations/env.py"}
 
 
 class TestSqlitePragmas:

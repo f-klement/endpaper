@@ -6,15 +6,31 @@ crash never returns a traceback to the caller.
 """
 
 import ast
+import asyncio
 import importlib
+import logging
+import os
+import signal
+import socket
+import subprocess
+import sys
+import time
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
+import pg8000.exceptions
 import pytest
+import respx
 from fastapi import HTTPException
+from fastapi.exceptions import ResponseValidationError
+from pydantic import BaseModel, ValidationError
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError, PendingRollbackError
+from starlette.requests import ClientDisconnect
 
 import main
-from errors import is_api_path, render_error_page
+from errors import AnswerUnhandledErrors, is_api_path, render_error_page
 from tests.test_house_rules import BACKEND, _python_sources
 
 HTML = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
@@ -106,6 +122,7 @@ class TestApiErrorsStayJson:
         assert "www-authenticate" in res.headers
 
 
+@pytest.mark.answers_500(raises=(RuntimeError,))
 class TestUnhandledExceptions:
     @pytest.fixture
     def exploding_route(self):
@@ -166,6 +183,330 @@ class TestUnhandledExceptions:
 
         # The detail has to go somewhere, or the bug is invisible to operators.
         assert any("Unhandled error" in record.message for record in caplog.records)
+
+
+class _Counted(BaseModel):
+    count: int
+
+
+@pytest.mark.answers_500(raises=(ResponseValidationError, ValidationError))
+class TestAValidationErrorLogsNoValue:
+    """Both validation errors carry the value that failed, in their message
+    and in `input`, so a traceback of one writes member data to the log."""
+
+    MARKER = "INPUT-VALUE-MARKER"
+
+    @pytest.fixture
+    def invalid_routes(self):
+        """The same add, then remove in a `finally`, as `exploding_route`."""
+        import main
+
+        @main.app.get("/invalid-response-test", include_in_schema=False, response_model=_Counted)
+        def invalid_response() -> Any:
+            return {"count": self.MARKER}
+
+        @main.app.get("/invalid-model-test", include_in_schema=False)
+        def invalid_model() -> None:
+            _Counted.model_validate({"count": self.MARKER})
+
+        try:
+            yield
+        finally:
+            main.app.routes[:] = [
+                route
+                for route in main.app.routes
+                if getattr(route, "path", None)
+                not in ("/invalid-response-test", "/invalid-model-test")
+            ]
+
+    @pytest.mark.parametrize(
+        ("path", "kind"),
+        [
+            ("/invalid-response-test", "ResponseValidationError"),
+            ("/invalid-model-test", "ValidationError"),
+        ],
+    )
+    def test_the_log_names_the_type_and_where_and_never_the_value(
+        self, client, invalid_routes, caplog, path, kind
+    ):
+        from fastapi.testclient import TestClient
+
+        import main
+
+        with (
+            caplog.at_level(logging.DEBUG),
+            TestClient(main.app, raise_server_exceptions=False) as safe_client,
+        ):
+            res = safe_client.get(path, headers=JSON)
+
+        assert res.status_code == 500
+        [line] = [record for record in caplog.records if "Unhandled error" in record.message]
+        assert f": {kind} " in line.getMessage()
+        assert "'count'" in line.getMessage()
+        assert self.MARKER not in caplog.text
+
+
+def postgres_shaped_error(marker: str) -> IntegrityError:
+    """A unique violation as pg8000 hands one over: the server's fields as a dict.
+
+    Built from pg8000's own exception class with the field codes its
+    `handle_ERROR_RESPONSE` keys them by, `D` the detail and `n` the
+    constraint, because no Postgres is reachable from this suite: Postgres puts
+    the conflicting value in the detail, and pg8000 renders the dict whole.
+    """
+    original = pg8000.exceptions.DatabaseError(
+        {
+            "S": "ERROR",
+            "C": "23505",
+            "M": 'duplicate key value violates unique constraint "uq_marker_probe"',
+            "D": f"Key (email)=({marker}) already exists.",
+            "n": "uq_marker_probe",
+        }
+    )
+    return IntegrityError(
+        "INSERT INTO users (email) VALUES (%s)", (marker,), original, hide_parameters=True
+    )
+
+
+@pytest.mark.answers_500(raises=(IntegrityError, PendingRollbackError))
+class TestADatabaseErrorLogsNoRow:
+    """`hide_parameters` keeps SQLAlchemy's bound values out; the driver's own
+    message is the other half, and on Postgres it quotes the row."""
+
+    MARKER = "DETAIL-VALUE-MARKER"
+
+    @pytest.fixture
+    def failing_routes(self):
+        """The same add, then remove in a `finally`, as `exploding_route`."""
+        import main
+
+        @main.app.get("/postgres-shaped-test", include_in_schema=False)
+        def postgres_shaped() -> None:
+            raise postgres_shaped_error(self.MARKER)
+
+        @main.app.get("/pending-rollback-test", include_in_schema=False)
+        def pending_rollback() -> None:
+            # SQLAlchemy's own wording, from `Session`'s transaction: the flush
+            # error is quoted into this one's message, and wrapped by nothing.
+            raise PendingRollbackError(
+                "This Session's transaction has been rolled back due to a previous "
+                "exception during flush. To begin a new transaction with this "
+                "Session, first issue Session.rollback(). Original exception was: "
+                f"{postgres_shaped_error(self.MARKER)}",
+                code="7s2a",
+            )
+
+        @main.app.get("/sqlite-duplicate-test", include_in_schema=False)
+        def sqlite_duplicate() -> None:
+            from database import engine
+
+            with engine.connect() as connection:
+                for _ in range(2):
+                    connection.execute(
+                        text("INSERT INTO settings (key, value) VALUES ('probe_key', 'x')")
+                    )
+
+        try:
+            yield
+        finally:
+            main.app.routes[:] = [
+                route
+                for route in main.app.routes
+                if getattr(route, "path", None)
+                not in ("/postgres-shaped-test", "/pending-rollback-test", "/sqlite-duplicate-test")
+            ]
+
+    def test_a_postgres_detail_never_reaches_the_log(self, client, failing_routes, caplog):
+        with caplog.at_level(logging.DEBUG):
+            res = client.get("/postgres-shaped-test", headers=JSON)
+
+        assert res.status_code == 500
+        [line] = [r for r in caplog.records if r.getMessage().startswith("Unhandled error")]
+        assert "IntegrityError(DatabaseError) on uq_marker_probe" in line.getMessage()
+        assert self.MARKER not in caplog.text
+
+    def test_an_error_quoting_a_flush_error_never_reaches_the_log(
+        self, client, failing_routes, caplog
+    ):
+        """`PendingRollbackError` is no driver error and wraps none: it quotes
+        one. Logged by its type alone."""
+        with caplog.at_level(logging.DEBUG):
+            res = client.get("/pending-rollback-test", headers=JSON)
+
+        assert res.status_code == 500
+        [line] = [r for r in caplog.records if r.getMessage().startswith("Unhandled error")]
+        assert ": PendingRollbackError\n" in line.getMessage()
+        assert self.MARKER not in caplog.text
+
+    def test_a_sqlite_message_is_left_out_with_the_rest(self, client, failing_routes, caplog):
+        """SQLite names columns, never values, and is still left out: one rule
+        for every engine."""
+        with caplog.at_level(logging.DEBUG):
+            res = client.get("/sqlite-duplicate-test", headers=JSON)
+
+        assert res.status_code == 500
+        [line] = [r for r in caplog.records if r.getMessage().startswith("Unhandled error")]
+        assert "IntegrityError(IntegrityError)" in line.getMessage()
+        assert "UNIQUE constraint failed" not in caplog.text
+
+
+def _http_scope() -> dict[str, Any]:
+    return {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/thing",
+        "raw_path": b"/api/thing",
+        "query_string": b"",
+        "headers": [(b"accept", b"application/json")],
+        "scheme": "http",
+        "server": ("test", 80),
+    }
+
+
+async def _drive(inner: Any) -> list[dict[str, Any]]:
+    """Run `AnswerUnhandledErrors` around `inner` and return what it sent."""
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: Any) -> None:
+        sent.append(message)
+
+    await AnswerUnhandledErrors(inner)(_http_scope(), receive, send)
+    return sent
+
+
+@pytest.mark.answers_500(raises=(RuntimeError,))
+class TestAnUnhandledErrorIsAnsweredInsideTheApp:
+    """`AnswerUnhandledErrors` answers the 500 so Starlette never re-raises the
+    exception to the server, and lets through what it must not swallow."""
+
+    async def test_an_exception_before_the_response_is_answered_500_and_not_raised(self):
+        async def inner(scope: Any, receive: Any, send: Any) -> None:
+            raise RuntimeError("a route failed")
+
+        sent = await _drive(inner)
+
+        assert sent[0]["type"] == "http.response.start"
+        assert sent[0]["status"] == 500
+
+    @pytest.mark.parametrize(
+        "error",
+        [asyncio.CancelledError(), ClientDisconnect()],
+        ids=["a cancellation", "a client that disconnected"],
+    )
+    async def test_it_passes_through(self, error):
+        async def inner(scope: Any, receive: Any, send: Any) -> None:
+            raise error
+
+        with pytest.raises(type(error)):
+            await _drive(inner)
+
+    async def test_an_exception_after_the_response_started_is_raised(self):
+        """A 500 can no longer be sent, and swallowing it would end a truncated
+        body as though it were whole."""
+
+        async def inner(scope: Any, receive: Any, send: Any) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            raise RuntimeError("failed mid body")
+
+        with pytest.raises(RuntimeError, match="failed mid body"):
+            await _drive(inner)
+
+
+#: A module that adds one failing route to the shipped app, so the shipped
+#: server can be started on it: `uvicorn <module>:app`, the image's command with
+#: the module's name changed and nothing else.
+_SERVED = """
+from typing import Any
+
+from pydantic import BaseModel
+
+import main
+
+
+class Counted(BaseModel):
+    count: int
+
+
+@main.app.get("/invalid-response-test", include_in_schema=False, response_model=Counted)
+def invalid_response() -> Any:
+    return {"count": "SERVER-LOG-MARKER"}
+
+
+app = main.app
+"""
+
+
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+class TestTheServerLogsAValidation500Once:
+    """The bar on the shipped start command, which `TestClient` cannot see:
+    it has no uvicorn, and uvicorn is what logged the second copy."""
+
+    def test_one_line_and_no_value_anywhere_in_the_server_output(self, tmp_path):
+        (tmp_path / "served_probe.py").write_text(_SERVED)
+        port = _free_port()
+        env = {
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join([str(tmp_path), str(BACKEND)]),
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_URL": f"sqlite:///{tmp_path / 'served.db'}",
+        }
+        # A file rather than a pipe: the migration chain logs a line a revision
+        # at startup, and a pipe nobody reads while polling would fill and stop
+        # the server mid start.
+        log = tmp_path / "server.log"
+        with log.open("wb") as written:
+            server = subprocess.Popen(
+                [
+                    sys.executable, "-m", "uvicorn", "served_probe:app",
+                    "--host", "127.0.0.1", "--port", str(port),
+                ],
+                cwd=BACKEND,
+                env=env,
+                stdout=written,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        try:
+            answer = None
+            deadline = time.monotonic() + 60
+            # Passed through the suite's own router, which refuses every
+            # request nobody mocked: this one is the point.
+            with respx.mock(assert_all_called=False) as router:
+                router.route(host="127.0.0.1").pass_through()
+                while answer is None and time.monotonic() < deadline:
+                    try:
+                        answer = httpx.get(
+                            f"http://127.0.0.1:{port}/invalid-response-test",
+                            headers=JSON,
+                            timeout=5,
+                        )
+                    except httpx.TransportError:
+                        time.sleep(0.2)
+        finally:
+            # The group, so nothing the server started outlives the test.
+            if server.poll() is None:
+                os.killpg(server.pid, signal.SIGTERM)
+            try:
+                server.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                os.killpg(server.pid, signal.SIGKILL)
+                server.wait()
+        output = log.read_text()
+
+        assert answer is not None, output
+        assert answer.status_code == 500
+        assert output.count("Unhandled error serving GET /invalid-response-test") == 1, output
+        assert "Exception in ASGI application" not in output
+        assert "SERVER-LOG-MARKER" not in output
+        assert "SERVER-LOG-MARKER" not in answer.text
 
 
 class TestHttpExceptionHeaders:

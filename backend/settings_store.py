@@ -179,10 +179,20 @@ def get_int(db: Session, key: SettingKey, *, minimum: int, maximum: int) -> int:
 def get_json(db: Session, key: SettingKey) -> dict[str, Any]:
     """A stored JSON object, falling back to `{}` rather than raising.
 
-    Same degrade rule as `get_int` and `get_locale`, and it matters more here:
-    the one caller reads this on the hourly ticker, so a row a restore or a
-    hand edit left as `null`, a list, or half a document would otherwise raise
-    inside the background task and stop it for the life of the container.
+    Same degrade rule as `get_int` and `get_locale`, and it matters more here.
+    Two keys are read through this: the reminder senders' health, on the hourly
+    ticker, where a raise stops the task for the life of the container; and the
+    catalogue source list, on the path that adds a book and on the settings
+    screen that would repair it. A row a restore or a hand edit left as `null`,
+    a list, or half a document would otherwise raise in all of them, and keep
+    raising across restarts, since it lives in the database.
+
+    **`RecursionError` as well as `ValueError`**, because it is a
+    `RuntimeError`: a row nested past the parser's stack, which an unbounded
+    `Text` column and a restored archive can both carry, raised past the arm
+    into every caller above: read rather than driven to a route, and measured
+    at 100,000 levels. `fetch.Fetched.json` converts the same error for a
+    response body.
 
     Objects only. A list parses as valid JSON and would then be indexed by a
     string somewhere downstream, which is a `TypeError` at a distance from the
@@ -190,7 +200,7 @@ def get_json(db: Session, key: SettingKey) -> dict[str, Any]:
     """
     try:
         parsed = json.loads(get_raw(db, key))
-    except ValueError:
+    except (ValueError, RecursionError):
         return {}
     return parsed if isinstance(parsed, dict) else {}
 

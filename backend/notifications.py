@@ -34,15 +34,18 @@ import json
 import logging
 import re
 import smtplib
+import traceback
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, assert_never
 from urllib.parse import urlparse
 
 import httpx
+import idna
 from sqlalchemy import or_
 from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.elements import ColumnElement
 
+import errors
 import lending
 import mailer
 import settings_store
@@ -162,10 +165,30 @@ def checked_url(raw: str) -> str:
     trimmed = (raw or "").strip()
     if not trimmed:
         raise WebhookRefused("No webhook URL is configured.")
-    parsed = urlparse(trimmed)
+    try:
+        parsed = urlparse(trimmed)
+        # **Read for its check, not its value.** `urlparse` never looks at the
+        # port until `.port` is asked, and a port outside 0 to 65535 reaches the
+        # connect, which fails as an `ExceptionGroup` around `OverflowError`.
+        # One side effect: `:8_080`, which httpx reads as 8080, is refused here
+        # too.
+        _ = parsed.port
+    except ValueError:
+        # An unclosed IPv6 bracket raises rather than parsing, and so does a
+        # port out of range. **`_run_sender` would catch either, and the
+        # refusal still matters**: caught there it is `UNEXPECTED`, a code
+        # defect logged with its frames, where this names a setting the admin
+        # can fix and puts it on the settings screen as one.
+        raise WebhookRefused("The webhook URL could not be read as a URL.") from None
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise WebhookRefused("The webhook URL must start with http:// or https://")
     return trimmed
+
+
+#: What a host may hold beside ASCII letters and digits: dots and hyphens, the
+#: underscore some internal names carry, and an IPv6 literal's colons and
+#: brackets.
+_HOST_PUNCTUATION: Final = frozenset(".-_:[]")
 
 
 def _host(url: str) -> str:
@@ -174,11 +197,37 @@ def _host(url: str) -> str:
     Slack, Discord and every "post here" integration put the credential in the
     path or the query string, so logging the destination on a failure is how a
     secret ends up in a log aggregator.
+
+    **"unknown" unless every character is one a host has.** A malformed URL the
+    save check admits makes `urlparse` read the path as the host: after a
+    backslash, a `;`, a space or a `%40`, and after a tab, which it deletes
+    before parsing, so that one is refused on the text. The text is stripped
+    first, as `checked_url` strips it before sending: a stored row ending in a
+    newline delivers, and is named. None of the others ever delivers, which is
+    why the line that would name them is a failure line.
+
+    **An internationalised name is logged as the name httpx dials**, encoded
+    the way httpx encodes it, by the `idna` package. Python's own `idna` codec
+    is IDNA 2003 and maps `straße` to `strasse`, a different name that may
+    exist; this one keeps the sharp s, as the dial does.
     """
-    try:
-        return urlparse(url).hostname or "unknown"
-    except ValueError:
+    trimmed = url.strip()
+    if any(character in trimmed for character in "\t\r\n"):
         return "unknown"
+    try:
+        host = urlparse(trimmed).hostname or ""
+        if not host.isascii():
+            host = idna.encode(host).decode("ascii")
+    except ValueError:
+        # `idna.IDNAError`, which a name IDNA cannot encode raises, is a
+        # `UnicodeError` and so one of these.
+        return "unknown"
+    if not host or not all(
+        (character.isascii() and character.isalnum()) or character in _HOST_PUNCTUATION
+        for character in host
+    ):
+        return "unknown"
+    return host
 
 
 def reminder_days(db: Session) -> int:
@@ -672,16 +721,21 @@ def pushes_outward(sender: OverdueSender) -> bool:
 
 #: Every transport failure, from three protocols, as one clause.
 #:
+#: **Membership decides the classification, not whether the run survives.**
+#: `_run_sender` catches every `Exception`, so a member missing from here is
+#: recorded as `UNEXPECTED`: logged at error with its frames and on the banner
+#: at once, for a network blip the window exists to wait out.
+#:
 #: `UnicodeError` because a receiver answering 302 with a malformed host in
 #: `Location` raises `idna.IDNAError` from inside `client.stream`, even though
 #: redirects are not followed: httpx builds the redirect request anyway to
-#: populate `response.next_request`. Without it a webhook nobody controls 500s
-#: `POST /api/loans/overdue/notify`. `fetch._walk_hops` carries the full trace.
+#: populate `response.next_request`. That is a receiver nobody here controls
+#: answering badly, which is an outage of that receiver rather than a defect
+#: here. `fetch._walk_hops` carries the full trace.
 #:
 #: `TimeoutError` because both sends bound themselves with `asyncio.timeout`,
-#: which raises the builtin rather than `httpx.TimeoutException`. Without it a
-#: slow receiver 500s the endpoint and stops the hourly ticker, which is a worse
-#: outcome than the hang it replaced.
+#: which raises the builtin rather than `httpx.TimeoutException`. A slow
+#: receiver is the case the window is for.
 #:
 #: `OSError` for SMTP's sockets and TLS, `smtplib.SMTPException` for everything
 #: the server said no to. `TimeoutError` is an `OSError` and is named anyway,
@@ -755,11 +809,13 @@ def _destination(sender: OverdueSender, db: Session) -> str:
     operator typed; neither is a secret and both are the thing somebody reading
     a failure actually wants.
 
-    It runs on the failure path, so it is written not to add a second failure to
-    the first: `_host` swallows a URL it cannot parse, and an unset mail server
-    reads "unknown" rather than empty. The one thing it does that can raise is
-    reading the settings row, which every caller has already done before
-    reaching here.
+    `_host` swallows a URL it cannot parse, and an unset mail server reads
+    "unknown" rather than empty. The one thing it does that can raise is
+    reading the settings row, which is why `_run_sender` calls it **before** the
+    send rather than inside a handler: raised there, it would carry the send's
+    exception as `__context__`, and the ticker's `logger.exception` renders
+    that chain, where `httpx.HTTPStatusError` names the webhook's URL or
+    Telegram's bot token.
     """
     if sender is OverdueSender.WEBHOOK:
         return _host(settings_store.in_force(db, SettingKey.OVERDUE_WEBHOOK_URL))
@@ -798,8 +854,11 @@ async def _deliver(
         # `pushes_outward` says and what keeps this branch unreachable.
         #
         # A raise rather than a quiet return, because reaching it would mean
-        # `run_digest` had started treating a pull channel as a delivery, and
-        # that silently stamps `notified_at` on loans nothing chased. Pinned by
+        # `run_digest` had started treating a pull channel as a delivery, and a
+        # quiet return reports one, which stamps `notified_at` on loans nothing
+        # chased. Raised, `_run_sender` records it as `UNEXPECTED`: an error
+        # line and no stamp, and the banner only if `pushes_outward` is what
+        # changed, since the health record skips what it denies. Pinned by
         # `test_the_in_app_channel_is_never_handed_to_a_sender`.
         raise AssertionError(
             "The in app channel does not push. See notifications.pushes_outward."
@@ -829,9 +888,19 @@ async def _run_sender(
     has to mean what it says on the channel it appears on, and a single figure
     at the top would be a lie on the other two.
 
-    Every failure is caught. One sender that cannot be reached must not stop the
-    ones after it, and must not 500 the endpoint.
+    **Every `Exception` is caught.** One sender that fails must not stop the
+    ones after it, must not 500 the endpoint, and must not skip the stamp for
+    the ones before it, which would resend their digest every hour. A
+    cancellation is not an `Exception`, nor is a `BaseExceptionGroup` holding
+    one, so stopping the ticker still stops the run.
+
+    **What this does not isolate** is everything outside a sender: the
+    selection, the digest, the stamp and the commit, and the settings read
+    below. A failure there belongs to no channel, so it records none and stays
+    loud: through the ticker's own log line, or as a failed "Send now".
     """
+    # Before the send, never inside a handler: see `_destination`.
+    destination = _destination(sender, db)
     try:
         await _deliver(sender, db, digest, subject)
     except _REFUSALS as refusal:
@@ -845,7 +914,7 @@ async def _run_sender(
         logger.warning(
             "The %s reminder to %s was refused: %s",
             sender.value,
-            _destination(sender, db),
+            destination,
             refusal,
         )
         return _sender_entry(
@@ -861,7 +930,7 @@ async def _run_sender(
         logger.warning(
             "The %s reminder to %s failed, leaving %d loans to retry: %s",
             sender.value,
-            _destination(sender, db),
+            destination,
             loans,
             type(error).__name__,
         )
@@ -872,14 +941,53 @@ async def _run_sender(
             reason=OverdueNotifyReason.UNREACHABLE,
             detail="The destination could not be reached.",
         )
+    except Exception as error:  # noqa: BLE001  one channel's defect is not the run's
+        # Neither a refusal nor a transport failure: a case the code does not
+        # anticipate, so a defect to report rather than an outage to wait out.
+        # **The type and the frames, never the message**, and so never
+        # `logger.exception` or `exc_info`, which render it and every chained
+        # one: an exception nobody anticipated is one nobody checked, and
+        # `httpx.HTTPStatusError` alone renders the webhook's URL with its
+        # password and Telegram's bot token. Frames are file, line, function
+        # and source line, which is code and never a value. `detail` is a
+        # constant for the same reason: it reaches the API and every backup.
+        logger.error(
+            "The %s reminder to %s failed unexpectedly, leaving %d loans to retry: %s\n%s",
+            sender.value,
+            destination,
+            loans,
+            _shape(error),
+            "".join(traceback.format_tb(error.__traceback__)).rstrip(),
+        )
+        return _sender_entry(
+            sender,
+            loans=loans,
+            skipped_private=skipped_private,
+            reason=OverdueNotifyReason.UNEXPECTED,
+            detail="The send failed in a way the app did not expect. The server log names the cause.",
+        )
 
     logger.info(
         "The %s reminder to %s covered %d loans",
         sender.value,
-        _destination(sender, db),
+        destination,
         loans,
     )
     return _sender_entry(sender, loans=loans, skipped_private=skipped_private)
+
+
+def _shape(error: BaseException) -> str:
+    """The exception's type, and an exception group's member types, as text.
+
+    **Names only, never a message.** The members matter because the frames of a
+    group are where it was raised, which for the port case was anyio's task
+    group: `ExceptionGroup` alone says nothing, and
+    `ExceptionGroup(OverflowError)` says what to look at.
+    """
+    if isinstance(error, BaseExceptionGroup):
+        members = ", ".join(_shape(member) for member in error.exceptions)
+        return f"{type(error).__name__}({members})"
+    return type(error).__name__
 
 
 #: How long a channel must have been failing before the app interrupts anybody.
@@ -1012,11 +1120,19 @@ def _is_broken(entry: dict[str, Any], now: datetime) -> bool:
     every send failing for a day is a configuration**, and a design that cannot
     tell them apart is one a household switches off.
 
-    Two ways past it and they are different kinds of evidence.
+    Three ways past it and they are different kinds of evidence.
 
     A **refusal** is immediate, because the app refused it: see
     `_CONFIGURATION_REASONS`. Nothing was dialled, so there is no outage to wait
     out and no attempt that could succeed without somebody changing a setting.
+
+    An **unexpected failure** is immediate too, for a different reason: it is a
+    case the code does not anticipate, and nothing says it is transient. Under
+    the window it would wait a whole reminder interval beside a channel that
+    works, because the working channel stamps the loans and the broken one is
+    then attempted once an interval: its second failure, the one the window
+    needs, comes at the latest a week after its first at the default, sooner
+    if another loan falls due.
 
     A **transport failure** has to persist: at least `BROKEN_AFTER_HOURS` since
     the first failure of the current run of them, and at least
@@ -1025,7 +1141,12 @@ def _is_broken(entry: dict[str, Any], now: datetime) -> bool:
     """
     if entry.get("sent") is not False:
         return False
-    if _reason(entry.get("reason")) in _CONFIGURATION_REASONS:
+    reason = _reason(entry.get("reason"))
+    if reason in _CONFIGURATION_REASONS:
+        return True
+    # Its own line rather than a member of that set, whose name and comment
+    # say "decided before a socket was opened", which is not known here.
+    if reason is OverdueNotifyReason.UNEXPECTED:
         return True
     since = _parsed(entry.get("failing_since"))
     failures = entry.get("failures")
@@ -1288,5 +1409,14 @@ async def ticker() -> None:
         try:
             with SessionLocal() as db:
                 await run_digest(db)
+        except errors.DATABASE_ERRORS as error:
+            # The type, the constraint and the frames, never the driver's
+            # message, which on Postgres can quote the row: see
+            # `errors.database_error_summary`.
+            logger.error(
+                "The overdue ticker failed a run: %s\n%s",
+                errors.database_error_summary(error),
+                errors.frames(error),
+            )
         except Exception:
             logger.exception("The overdue ticker failed a run")

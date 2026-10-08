@@ -2,6 +2,79 @@
 
 ## Unreleased
 
+- **One reminder channel failing in a way the app did not anticipate no longer stops the
+  others.** The overdue digest goes out on the webhook, then mail, then Telegram, and a
+  failure that was neither a refused setting nor an unreachable destination used to end the
+  whole run: the channels after it sent nothing, the ones before it sent the same digest
+  again every hour, and no channel showed as broken. Such a failure is now that channel's
+  own, reported with a new reason, `unexpected`, and shown as broken at once; the server log
+  names the error's type and where it was raised, and never its message, which can carry a
+  webhook's address or a bot token. API callers reading `reason` can meet the new value.
+
+- **A mail username or password with a character outside ASCII is refused as a setting**,
+  because the mail library can send no such credential to any server. It used to read as an
+  unreachable server and reach the banner after a day at the soonest.
+
+- **A webhook address with an unclosed IPv6 bracket or a port outside 0 to 65535 is refused,
+  at save and at send.** The port used to save, and either, which a restore can also write,
+  answered 500 on the manual send and stopped the hourly digest before mail, Telegram and the
+  health record. The refusal never echoes the address. A port written with an underscore, such as `8_080`, is refused too. Separately, a
+  malformed address no longer has part of its path logged as its host, and an
+  internationalised one is logged as the name actually dialled.
+
+- **A database error no longer writes stored values to the server log.** Every engine now
+  hides the values a statement bound, so a failed write no longer logs a setting's value, a
+  bot token or the mail password among them, or a member's text. An unexpected database error
+  is logged by the app by its types and the constraint it broke, never the database's own
+  message, which on Postgres can quote the conflicting value or the whole row; that includes
+  the error a session raises after a failed write, which quotes the first one.
+
+- **A route's crash before its response starts is logged once, by the app, and a validation
+  failure without the data that failed.** The server used to log a second copy of every such
+  crash with its whole traceback, which for a validation failure carried a member's data. A
+  route's error response now also carries the same security headers as every other
+  response. A crash after the response has started is still logged by the server.
+
+- **A failed confirmation code mail is logged by its error type alone**, no longer with a
+  message that could carry the member's address or a character of the mail password.
+
+- **A damaged upload or backup is answered with its refusal rather than a 500.** A MARC upload
+  declaring an encoding Python does not know is refused as the 400 the route documents. A
+  backup whose manifest cannot be read, is not a JSON object, or nests past the parser's
+  stack is refused before anything is deleted. A cover the restore cannot read is declined
+  like a cover it cannot write, where it used to answer 500 on a library whose rows were
+  already restored. A stored setting nested past the parser's stack, which a restore can
+  write, is read as empty rather than failing every ISBN lookup and the hourly ticker.
+
+- **One catalogue's answer can no longer fail a whole lookup or stall the server.** A response
+  whose declared charset decodes to a lone surrogate, or whose JSON carries an escaped one,
+  used to answer 500 and drop every other source's answer with it; the surrogate is now
+  replaced. The BnF publisher reader and the Google Books reader of a parenthesised series
+  took time growing with the square of the field's length on the server's only event loop, a
+  32 KB answer costing over a second; both now read in one pass. A parsed XML document may
+  nest 32 elements deep at most, in an upload, a catalogue answer and an OPDS page: a deep nest
+  cost its parser about forty times its size, and three MARC uploads of it at once grew one
+  process past the 512 MiB its container is allowed.
+
+- **A series number written in another script's digits is no longer read from a Google
+  Books title**, in either the parenthesised shape or the trailing one.
+
+- **Every backend door a stranger's bytes reach is tested over generated input**, its answer
+  held to what it declares and its memory to a factor it declares; the defects above are what
+  it found. Nothing else a member sees moves.
+
+- **A suppression comment is read the way ruff reads it, and may not name a rule that polices
+  suppression comments.** Nothing a member sees moves.
+
+- **A security finding the backend waives is held by the statement it waives**, and process
+  starters no lint rule reports are refused in application code. Nothing a member sees moves.
+
+- **The coverage registers' generated write arrives whole at any length.** Nothing a member
+  sees moves.
+
+- **Tests reach the complex functions a coverage measurement ranked first**, on both sides.
+  Nothing a member sees moves.
+
 - **The exception rules family is now enforced on the backend and the tooling scripts, with two
   of its rules refused for reasons written beside them.** A rule ruff adds to the family later
   arrives enforced. The one asking for an exception class per raise site is refused as a style

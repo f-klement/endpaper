@@ -75,6 +75,45 @@ correctly and neither document pointed at the other. **Quoting that cell here wo
 it again**, which is why this paragraph describes it instead: the check reads a document
 the way a reader does and cannot tell an example from an instruction.
 
+## Generated input
+
+Both suites generate inputs for the rules that are complements of what anybody would think to
+write down, and above all for the **byte doors**: functions that turn bytes or text somebody
+other than this application wrote into a value of this application. A byte door answers that
+value, or a refusal its own module declares, and nothing else. Each suite derives its own
+population of byte doors; the rules they are held to are here, once, and an empty cell would be
+a gap stated rather than a lesson that did not travel.
+
+| Rule | Frontend | Backend |
+|---|---|---|
+| The outcome is named: the answer, or a refusal the byte door's own module declares | `expectNamedOutcome` | `strategies.answer_of`, which refuses a refusal class defined outside the module of the callable it is handed; a wrapper beside its own class passes it, so a wrapper is read by eye |
+| Where a byte door can multiply its input, counted work is held to its own declared bound, because "did not throw" passes an inflation | the meter: reads, inflation, parser input | at the three XML byte doors, `tracemalloc`'s peak against the door's `ALLOCATION_FACTOR` times its input, plus `xml_parse.ALLOCATION_FLOOR`; the archive door's bounds are its size and compression ratio checks, held by named cases, and its decompression is not metered |
+| Draw the structure and build the bytes, plus a few single byte patches | arbitraries over a builder's spec | strategies over a spec dataclass, built at the transport's seam |
+| A long run of one unit is a named atom, so it is drawn at every seed and prints as itself | named atoms at, around and far past a bound | `FAR_PAST_ANY_DEPTH`, `WIDE`, `MANIFEST_DEPTH` |
+| Every class a property's oracle depends on has a witness, asked of what the byte door did rather than of the spec where the door can be asked | per module, at a fresh seed | `strategies.witness` beside each property; the catalogue surrogate witness asks the response's bytes, since after the repair no door can show one |
+| Every bound a byte door declares has a positive control in the same file | the ledger refuses a missing one | a named case at the bound and one past it, reading the module's constant |
+| The population of byte doors is derived, not remembered | every module the six roots reach | `_BYTE_DOORS` in `tests/test_house_rules.py`, the functions calling an entry point of the XML, JSON, zip and CSV readers, each row naming the property that drives the byte door above it; `parse_qs` and the hand written CQL parser are outside it, with properties of their own |
+| A fresh seed every run; nothing cached, nothing committed | the runner prints the seed | not derandomised, no example database |
+| The examples that run are counted against a floor | `propertyBudget.test.ts` | `test_property_budget.py` |
+
+**What a counterexample becomes**, in either suite:
+
+1. A named test in the file holding the property, rebuilding the literal the runner printed
+   through the property's own builder and asserting the **exact** answer, never only that
+   nothing threw.
+2. **In the same commit as its fix, never ahead of it.** The test tree publishes, so a case
+   parked as a skipped or expected failure is a working exploit against the shipped version.
+3. Named for the behaviour, never for a seed or a run. No seed, replay path or example list
+   is pinned in a committed file, and the property stays.
+4. The spec, never opaque bytes: a bomb committed as a literal costs the mirror and reads as
+   nothing in review. A run of zeroes or of repeated text is drawn as a named atom so it prints
+   as one.
+
+**What none of this sees** is CPU spent without allocating, in either language. A pattern that
+backtracks is neither a wrong outcome nor a size, and a wall clock deadline is refused for the
+reason [`decisions.md`](decisions.md) gives under the property budget. Where one was found, its
+named case is sized so the old form cannot finish inside the per test ceiling.
+
 ## Backend
 
 `pytest`, driving the real FastAPI app through `TestClient`. Integration tests by
@@ -199,9 +238,18 @@ class carries a `strategies.witness` beside it: it searches the same strategy fo
 the class and fails by name when it cannot find one. Narrow a generator and the witness
 says so; without it the property stays green and stops testing anything.
 
-**A shrunk failure is pinned as its own deterministic test**, with what it shows attached.
-The example database is off, so nothing is cached: the defect is named in the tree or it is
-not recorded at all.
+**A shrunk failure is pinned as its own deterministic test**, by the rules under
+[Generated input](#generated-input). The example database is off, so nothing is cached: the
+defect is named in the tree or it is not recorded at all.
+
+**A property drives the byte door, never a step inside it**: `marc.read`,
+`backup.read_manifest`, `opds.read_page`, and both SRU functions with the response built as
+a `fetch.Fetched`. A string drawn directly reaches values the transport's own decoding never
+produces, which would be counterexamples to nothing. The decoders in `metadata.READERS` and
+`opds.READERS` are handed a parsed element rather than bytes, so theirs is a property of the
+contract below a byte door, and it asserts the answer's type alone. The printed literal can come out blank in the suite pod, where
+`Failing test case` lists every argument empty; replay the printed `@reproduce_failure` blob
+in one process to read it.
 
 `tests/test_property_budget.py` holds the floor under the example count and measures the
 examples that actually run, because a profile somebody lowers to one is a suite that passes
@@ -356,18 +404,8 @@ somebody decides which side of the door the new name is on.
   import under `src/` but the generated client's. A door outside what those roots reach is
   outside the rule, and the budget guard names the one there is.
 
-**What a counterexample becomes.** The same rule for any property in this tree, whatever its
-arbitrary draws:
-
-1. A named `it` in the file holding the property, calling the same contract on the literal
-   the runner printed and asserting the **exact** answer, never only that nothing threw.
-2. **In the same commit as its fix, never ahead of it.** The test tree publishes, so a case
-   parked as a skipped or expected failure is a working exploit against the shipped version.
-3. Named for the behaviour, never for a seed or a run. No seed, replay path or example list
-   is pinned in a committed file, and the property stays.
-4. The spec, never opaque bytes: a bomb committed as a literal costs the mirror and reads as
-   nothing in review. A run of zeroes or of repeated text is drawn as a named atom so it prints
-   as one.
+What a counterexample becomes is one rule for both suites, under
+[Generated input](#generated-input).
 
 ### Three render helpers, by how much context the subject needs
 

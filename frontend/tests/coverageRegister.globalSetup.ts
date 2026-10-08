@@ -105,10 +105,30 @@ function registerDigest(): string | null {
   return register === null ? null : registerReading(register);
 }
 
+/**
+ * A refusal whose printed text is built here, where it is thrown.
+ *
+ * **A stack string is built on first read**, under whichever
+ * `Error.prepareStackTrace` is installed at that moment, and an error thrown
+ * from a global setup is printed by vitest's `close()` from its `stack`, after
+ * this hook has returned and after whatever else has run since. One full run in
+ * three once printed a teardown stack where this text should have been. So the
+ * stack is read here and kept as a plain string, which a formatter installed
+ * later cannot reach. One installed before the throw still can.
+ *
+ * **Every refusal in this file goes through here**, and an arm requires every
+ * `throw` in the file to throw a call to this function.
+ */
+function refusal(message: string): Error {
+  const error = new Error(message);
+  error.stack = error.stack ?? `Error: ${message}`;
+  return error;
+}
+
 export function setup(project?: { config?: { root?: string } }): void {
   const root = project?.config?.root;
   if (typeof root !== "string")
-    throw new Error(
+    throw refusal(
       "the coverage register guard could not read this run's project root, " +
         "so it cannot say which COVERAGE.md this run is checking. It is " +
         "reading vitest's own global setup argument, so a vitest upgrade " +
@@ -126,7 +146,7 @@ export function setup(project?: { config?: { root?: string } }): void {
 export function teardown(): void {
   const marker = process.env[MARKER];
   if (marker === undefined)
-    throw new Error(
+    throw refusal(
       `${MARKER} is unset at teardown, so this run cannot say whether the ` +
         "coverage register was checked.",
     );
@@ -151,7 +171,7 @@ export function teardown(): void {
   // `setup` runs, so a self heal written in either precedes the reading. No
   // claim of unreachability is made about any of the three.
   if (moved !== began)
-    throw new Error(
+    throw refusal(
       `${named ?? "tests/COVERAGE.md"} changed while the run that checks it ` +
         `was running, from ${began ?? "absent"} to ${moved ?? "absent"}. A ` +
         "run must not write the register it is checking: a guard that heals " +
@@ -159,7 +179,7 @@ export function teardown(): void {
         "for a separate invocation to apply.",
     );
   if (!reported)
-    throw new Error(
+    throw refusal(
       "the coverage register reporter did not run, so tests/COVERAGE.md was " +
         "checked against nothing. A `--reporter` on the command line replaces " +
         "the reporters vite.config.ts configures rather than adding to them: " +

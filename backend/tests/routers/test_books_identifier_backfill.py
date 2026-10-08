@@ -51,10 +51,10 @@ async def _parked(waiting: Awaitable[bool]) -> bool:
     deadline firing, so a `wait_for` leaking one would be read as success by the
     thing under test.
 
-    The raise happens inside the request and **`TestClient` re-raises it at the
-    `client.post(...)` call with this message**, which is the behaviour to want:
-    `raise_server_exceptions` is left at its default, so the arm fails saying what
-    is wrong rather than asserting on a 500 whose cause is in a log.
+    The raise happens inside the request, the app answers it with a 500, and
+    **the suite's crash net raises it again with this message when the test
+    ends**: `a_crashing_route_fails_its_test` in `conftest.py`. So the arm fails
+    saying what is wrong rather than on a 500 whose cause is only in a log.
     """
     try:
         return await asyncio.wait_for(waiting, _WAITED_PAST_EVERY_DEADLINE_SECONDS)
@@ -875,6 +875,24 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         body = res.json()
         assert body["examined"] == 0
         assert body["remaining"] == 3
+
+    def test_a_deadline_spent_before_the_first_wave_asks_nothing(
+        self, client, admin, make_book, google_enabled, catalogues, monkeypatch
+    ):
+        """The check at the top of each wave, which the starved arms above
+        never reach: they spend their deadline parked inside a wave."""
+        self._deadline(monkeypatch, 0.0)
+        for _ in range(3):
+            imported_book(client, admin["headers"], make_book)
+        volume_route(catalogues)
+
+        body = client.post(
+            "/api/books/identifiers/backfill?after_id=0", headers=admin["headers"]
+        ).json()
+
+        assert catalogues.calls.call_count == 0
+        assert body["examined"] == 0
+        assert body["next_after_id"] == 0
 
     def test_a_run_that_gets_no_slot_leaves_the_cursor_where_it_stood(
         self, client, admin, make_book, google_enabled, catalogues, monkeypatch

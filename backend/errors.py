@@ -13,15 +13,20 @@ calling it is code.
 
 import logging
 import string
+import traceback
 from http import HTTPStatus
 from pathlib import Path
 from typing import Final
 
 from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
+from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from pydantic import ValidationError
+from sqlalchemy.exc import DBAPIError, PendingRollbackError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import ClientDisconnect
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger("endpaper.errors")
 
@@ -157,8 +162,10 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> Respo
     """Last resort for a bug in our own code.
 
     The traceback is logged and never sent: it names internal paths and can
-    quote request data back to whoever triggered it. The caller gets a generic
-    message, which is all they can act on anyway.
+    quote request data back to whoever triggered it. For a validation error or
+    a database error it is not logged either, for the reasons at those
+    branches. The caller gets a generic message, which is all they can act on
+    anyway.
     """
     # LOG004 reads the lexical position and reports this as an `.exception()`
     # outside a handler, where a traceback would be `NoneType: None`. It is an
@@ -166,14 +173,168 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> Respo
     # `exc_info=exc` is passed explicitly rather than left to the ambient one.
     # Narrowing to `.error(..., exc_info=exc)` to satisfy it would log the same
     # bytes at the same level and lose the one word that says what this is.
-    logger.exception(  # noqa: LOG004  exc_info is explicit, see above
-        "Unhandled error serving %s %s", request.method, request.url.path, exc_info=exc
-    )
+    if isinstance(exc, ResponseValidationError | ValidationError):
+        # **Not the traceback, because both carry the value that failed**, in
+        # their message and in every entry's `input`. A response model defect
+        # would log the row it failed on: a member's title, their notes, a
+        # private book. The type, where each value failed and why, and the
+        # frames are what a fix needs. The 422 handler above drops `input` for
+        # the same reason. Only these two: an exception chained to one of them
+        # still goes through the traceback below.
+        #
+        # **One line, because `AnswerUnhandledErrors` answers first.** Reached
+        # through Starlette's own last resort instead, the exception would be
+        # re-raised to the server after this answered, and uvicorn would log
+        # the whole traceback again, value included.
+        logger.error(
+            "Unhandled error serving %s %s: %s %s\n%s",
+            request.method,
+            request.url.path,
+            type(exc).__name__,
+            _without_values(exc.errors()),
+            frames(exc),
+            extra={UNHANDLED: exc},
+        )
+    elif isinstance(exc, DATABASE_ERRORS):
+        # **Not the traceback, because the driver's message can quote the
+        # row.** `hide_parameters` keeps the bound values out of SQLAlchemy's
+        # half, and Postgres puts the conflicting value in the error's own
+        # detail ("Key (email)=(...) already exists", or the whole failing
+        # row), which pg8000 renders. The type, the constraint and the frames.
+        logger.error(
+            "Unhandled error serving %s %s: %s\n%s",
+            request.method,
+            request.url.path,
+            database_error_summary(exc),
+            frames(exc),
+            extra={UNHANDLED: exc},
+        )
+    else:
+        logger.exception(  # noqa: LOG004  exc_info is explicit, see above
+            "Unhandled error serving %s %s",
+            request.method,
+            request.url.path,
+            exc_info=exc,
+            extra={UNHANDLED: exc},
+        )
     if wants_html(request):
         return render_error_page(status.HTTP_500_INTERNAL_SERVER_ERROR)
     return _json_error(
         status.HTTP_500_INTERNAL_SERVER_ERROR, HTTPStatus.INTERNAL_SERVER_ERROR.phrase
     )
+
+
+#: The log record attribute carrying the exception an "Unhandled error" line is
+#: about, whichever branch wrote it. Not rendered by any formatter: it is how the
+#: suite's crash net, `tests/conftest.py`, re-raises the route's own exception
+#: in the test that caused it, where two of the three branches log no traceback.
+UNHANDLED: Final = "unhandled_exception"
+
+
+def frames(error: BaseException) -> str:
+    """Where an exception was raised, as file, line, function and source line.
+
+    Code and never a value, which is what lets a branch above log it in place
+    of a traceback whose message would carry one.
+    """
+    return "".join(traceback.format_tb(error.__traceback__)).rstrip()
+
+
+#: The database errors logged without their message. `PendingRollbackError` is
+#: not a driver error and wraps none, and it is here because it **quotes** one:
+#: the next use of a session after a failed flush raises it with "Original
+#: exception was: ..." and the flush error's whole text, pg8000's detail
+#: included, in its own message.
+DATABASE_ERRORS: Final = (DBAPIError, PendingRollbackError)
+
+
+def database_error_summary(error: DBAPIError | PendingRollbackError) -> str:
+    """A database error as its types and the constraint it broke, never its text.
+
+    The constraint is named where the driver hands it over apart from the
+    message: pg8000 keeps the server's fields as a dict, and `n` is the
+    constraint name. SQLite has no such field, and its message, which names
+    columns rather than values, is left out with the rest: one rule for every
+    engine is the one nobody has to remember the exceptions to. An error
+    wrapping no driver exception is its type alone.
+    """
+    if not isinstance(error, DBAPIError):
+        return type(error).__name__
+    original = error.orig
+    fields = original.args[0] if original is not None and original.args else None
+    constraint = fields.get("n") if isinstance(fields, dict) else None
+    summary = f"{type(error).__name__}({type(original).__name__})"
+    return f"{summary} on {constraint}" if isinstance(constraint, str) else summary
+
+
+def _without_values(errors: object) -> list[dict[str, object]]:
+    """A validation error's entries with only `type`, `loc` and `msg` kept.
+
+    A positive list rather than dropping `input`: `ctx` carries the exception a
+    validator raised and `url` nothing a fix needs, and a key added to the
+    entries later stays out until somebody decides it belongs.
+    """
+    if not isinstance(errors, list | tuple):
+        return []
+    return [
+        {key: entry[key] for key in ("type", "loc", "msg") if key in entry}
+        for entry in errors
+        if isinstance(entry, dict)
+    ]
+
+
+class AnswerUnhandledErrors:
+    """Answer a route's unhandled exception with the 500, and do not re-raise it.
+
+    **Why this exists rather than the `Exception` handler alone.** Starlette
+    calls that handler from `ServerErrorMiddleware` and then re-raises, so that
+    a server can log the error too, and uvicorn does: "Exception in ASGI
+    application" with the whole traceback. That second copy renders the
+    exception's message, which for a validation error is the member's value
+    `unhandled_exception_handler` takes care to leave out. Caught here, the
+    exception never reaches that middleware, and the handler's line is the only
+    one. The start command is untouched.
+
+    **Added first, so innermost**: the 500 passes back out through the security
+    headers like any other answer, which the outermost last resort's never did.
+    An exception raised by a middleware outside this one still takes the old
+    path.
+
+    **Three things pass through unchanged.** A cancellation, which is not an
+    `Exception`, so stopping the server still stops a request. A client that
+    disconnected, which has nobody to answer: passed on, it reaches Starlette's
+    last resort and is logged twice as before, and it reaches only a route that
+    reads the request stream itself, because FastAPI already answers a
+    disconnect while it parses a body with a 400. And anything raised after the
+    response started, where a 500 can no longer be sent and swallowing it would
+    end a truncated body as though it were whole.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        started = False
+
+        async def noting_the_start(message: Message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, noting_the_start)
+        except ClientDisconnect:
+            raise
+        except Exception as error:
+            if started:
+                raise
+            response = await unhandled_exception_handler(Request(scope, receive), error)
+            await response(scope, receive, send)
 
 
 def register_error_handlers(app: FastAPI) -> None:

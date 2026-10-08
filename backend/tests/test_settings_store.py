@@ -118,6 +118,18 @@ class TestJsonSettings:
             settings_store.set_value(db, SettingKey.SENDER_HEALTH, stored)
             assert settings_store.get_json(db, SettingKey.SENDER_HEALTH) == {}
 
+    def test_json_nested_past_the_parsers_stack_degrades(self, db):
+        """Was `RecursionError`, which passed the `ValueError` arm. The catalogue
+        source list is read through this on the path that adds a book, so one
+        restored row nested this deep reached every such request until somebody
+        edited the database by hand. 400,000 levels is past the stack of every interpreter
+        this runs on, the suite pod's at under a megabyte and this machine's at
+        about eight; the backup archive's named case uses the same depth."""
+        settings_store.set_value(
+            db, SettingKey.CATALOGUE_SOURCES, "[" * 400_000 + "]" * 400_000
+        )
+        assert settings_store.get_json(db, SettingKey.CATALOGUE_SOURCES) == {}
+
     def test_keys_are_written_in_a_stable_order(self, db):
         """An unchanged record writes an unchanged string, which is what makes
         a settings diff readable and a backup comparison mean anything."""

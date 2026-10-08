@@ -47,6 +47,7 @@ import sources
 # here, excluding `{"tests", "migrations", ".venv"}` by name, which is the
 # directory a developer has and not the one the pipeline creates under
 # `backend/` for its uv cache.
+from tests.strategies import SURROGATE_CODECS
 from tests.test_house_rules import _source_modules
 
 # **Imported, not copied**, for the same reason one line up. "What does this
@@ -680,6 +681,62 @@ class TestDecodingMatchesWhatHttpxWouldHaveDone:
             answer = await fetch.get_once(URL)
 
         assert answer.text == "plain"
+
+    @pytest.mark.parametrize("charset", SURROGATE_CODECS)
+    def test_no_charset_hands_a_parser_a_lone_surrogate(self, charset):
+        """`replace` does not stop these codecs producing one, and every XML
+        parser refuses it with `UnicodeEncodeError`, which no catalogue
+        lookup's except clause names. The codecs are derived from what each
+        one does, in `tests/strategies.py`, so the arm grows with the registry.
+        """
+        written = "<x>\ud800</x>".encode(charset)
+        assert fetch.Fetched(200, written, charset).text == written.decode(
+            charset, "replace"
+        ).replace("\ud800", "\N{REPLACEMENT CHARACTER}")
+
+    def test_a_valid_surrogate_pair_is_still_the_character_it_encodes(self):
+        """The repair is of a surrogate with no partner. UTF-7 spells an astral
+        character as a pair, and that decodes to one code point, untouched."""
+        written = "<x>\N{GRINNING FACE}</x>".encode("utf-7")
+        assert fetch.Fetched(200, written, "utf-7").text == "<x>\N{GRINNING FACE}</x>"
+
+    def test_a_charset_that_refuses_to_replace_costs_mojibake_and_not_an_exception(self):
+        """`idna` raises `UnicodeError` for any error handler, so a body
+        labelled with it was a `ValueError` out of `.text`. Found by drawing the
+        charset from the codec registry rather than from the charsets a
+        catalogue is expected to send."""
+        answer = fetch.Fetched(200, b"<x>caf\xc3\xa9</x>", "idna")
+        assert answer.text == "<x>caf\N{LATIN SMALL LETTER E WITH ACUTE}</x>"
+
+    def test_a_charset_name_python_refuses_to_look_up_costs_mojibake(self):
+        """A NUL in the name is a `ValueError` from the codec lookup, neither a
+        `LookupError` nor a `UnicodeError`. Unreachable through h11, which
+        refuses the header; held so the arm stays a base type."""
+        assert fetch.Fetched(200, b"<x/>", "utf\x00-8").text == "<x/>"
+
+    def test_no_json_answer_carries_a_lone_surrogate_in_a_key_or_a_value(self):
+        """The repair reaches every string the parse produced, keys included, at
+        any depth the parser allowed. The route this was a 500 through is
+        `tests/routers/test_books.py`'s named case."""
+        written = b'{"\\ud800": ["\\udfff", {"a": "\\ud800x"}], "b": "\\ud83d\\ude00"}'
+        assert fetch.Fetched(200, written).json() == {
+            "\N{REPLACEMENT CHARACTER}": [
+                "\N{REPLACEMENT CHARACTER}",
+                {"a": "\N{REPLACEMENT CHARACTER}x"},
+            ],
+            "b": "\N{GRINNING FACE}",
+        }
+
+    def test_the_repair_walks_as_deep_as_the_parser_does(self):
+        """Walked with a stack: a repair that recursed would raise on an answer
+        the parser had just accepted. 3,000 is past the interpreter's default
+        recursion limit of 1,000, which a recursive repair hits, and inside what
+        the C parser takes on the suite pod's stack."""
+        written = b"[" * 3_000 + b'"\\ud800"' + b"]" * 3_000
+        value = fetch.Fetched(200, written).json()
+        for _ in range(3_000):
+            value = value[0]
+        assert value == "\N{REPLACEMENT CHARACTER}"
 
     @pytest.mark.asyncio
     async def test_json_raises_value_error_on_a_body_that_is_not_json(self):

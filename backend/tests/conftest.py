@@ -11,6 +11,7 @@ import atexit
 import contextlib
 import datetime
 import hashlib
+import logging
 import os
 import shutil
 import sys
@@ -273,6 +274,7 @@ for _pinned in config._ENV_OVERRIDES.values():
 # there is disarmed here the moment it is added, and the per-source pins are
 # generated from the same function the application uses.
 import credentials  # noqa: E402
+import errors  # noqa: E402
 from enums import CatalogueSource, VerificationProvenance  # noqa: E402
 
 for _key_variable in credentials.ENV_VARIABLES:
@@ -1035,6 +1037,73 @@ def offline_covers(monkeypatch: pytest.MonkeyPatch) -> None:
         # which is how a stub stops standing for the thing it replaces.
         lambda book_id, isbn, supplied, budget=None: None,
     )
+
+
+class _Crashes(logging.Handler):
+    """Keeps every "Unhandled error serving" record the 500 handler writes."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.ERROR)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.getMessage().startswith("Unhandled error serving"):
+            self.records.append(record)
+
+
+@pytest.fixture(autouse=True)
+def a_crashing_route_fails_its_test(request: pytest.FixtureRequest) -> Iterator[None]:
+    """A route that crashes fails the test that made it crash.
+
+    **This used to be `TestClient`'s job, and it stopped being one.** The client
+    re-raised a route's exception at the call, so every route test was also a
+    crash test for free. `errors.AnswerUnhandledErrors` answers a 500 before
+    Starlette re-raises, so a test discarding the response, or asserting only
+    what the status is not, went on passing over a crash.
+
+    So the net is the 500 handler's own log line. At teardown the route's
+    exception is raised again, which is what the client used to do and says
+    what is wrong, unless the test is marked `answers_500` with the exception
+    types it provokes on purpose. **The mark names them**, so a marked test
+    still fails on a crash it did not intend; a mark naming none is refused.
+
+    **Loud when it cannot see.** A disabled logger delivers to no handler, and
+    a net over a disabled logger is a net with every arm green. Alembic's
+    `fileConfig` disables existing loggers when it is let loose on a process.
+    Checked on both sides, so the test that disabled it is the one that fails.
+    `logging.disable` is not seen: it leaves `disabled` alone and drops records
+    below a level process wide. Its one use, in the property strategies, wraps
+    direct calls and restores itself, so no route runs under it.
+    """
+    errors_logger = logging.getLogger("endpaper.errors")
+    assert not errors_logger.disabled, (
+        "the endpaper.errors logger is disabled, so a crashing route would pass "
+        "its test: something reconfigured logging"
+    )
+    crashes = _Crashes()
+    errors_logger.addHandler(crashes)
+    try:
+        yield
+    finally:
+        errors_logger.removeHandler(crashes)
+    assert not errors_logger.disabled, (
+        "this test left the endpaper.errors logger disabled, so the crash net "
+        "saw nothing during it and would see nothing after it"
+    )
+    expected: tuple[type[BaseException], ...] = ()
+    mark = request.node.get_closest_marker("answers_500")
+    if mark is not None:
+        # A keyword, because a mark called with one class as its only
+        # positional argument decorates that class instead.
+        expected = tuple(mark.kwargs.get("raises", ()))
+        assert expected, "answers_500 names no exception type in raises=, so it would excuse any crash"
+    for record in crashes.records:
+        crash = getattr(record, errors.UNHANDLED, None)
+        if isinstance(crash, expected):
+            continue
+        if isinstance(crash, BaseException):
+            raise crash
+        pytest.fail(f"a route crashed during this test: {record.getMessage()}")
 
 
 @pytest.fixture(autouse=True)

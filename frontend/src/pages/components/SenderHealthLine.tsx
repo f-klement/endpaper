@@ -79,9 +79,8 @@ export default function SenderHealthLine({ health }: SenderHealthLineProps) {
       : "settings.overdueRowNothingSent",
   );
 
-  // Broken is the server's verdict, not a threshold recomputed here: a refusal
-  // the app decided itself counts at once, a transport failure only after a day
-  // and at least two consecutive failures. The evidence is in the record.
+  // Broken is the server's verdict, not a threshold recomputed here. The rules
+  // are `notifications._is_broken`'s and the evidence is in the record.
   if (health.broken) {
     return (
       <Line tone="loud">

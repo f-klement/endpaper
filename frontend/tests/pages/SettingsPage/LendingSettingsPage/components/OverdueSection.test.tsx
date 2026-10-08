@@ -218,6 +218,7 @@ describe("OverdueSection", () => {
     [OverdueNotifyReason.no_url, "no webhook address is stored"],
     [OverdueNotifyReason.nothing_due, "nothing is overdue"],
     [OverdueNotifyReason.unreachable, "could not be reached"],
+    [OverdueNotifyReason.unexpected, "in a way the app did not expect"],
   ])("renders its own sentence for %s", (reason, fragment) => {
     renderSection(
       {},

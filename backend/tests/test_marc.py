@@ -17,15 +17,35 @@ not do.
 """
 
 import ast
+import dataclasses
 import pathlib
 import types
+from dataclasses import dataclass
+from typing import Final
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 import marc
 import marc_fields
+import xml_parse
 from catalogue import Heading
 from enums import ClassificationScheme, HeadingKind
+from tests.strategies import (
+    FAR_PAST_ANY_DEPTH,
+    PATCHES,
+    WIDE,
+    Node,
+    answer_of,
+    declared_encodings,
+    depths,
+    marc_records,
+    patched,
+    widths,
+    witness,
+    xml_of,
+)
 from tests.test_house_rules import _is_vendored
 
 #: The kinds a stored row can actually declare, driven from the enum.
@@ -118,6 +138,56 @@ def a_record(*fields: str, leader: str = marc.LEADER) -> bytes:
 def datafield(tag: str, *subfields: tuple[str, str], ind1: str = " ", ind2: str = " ") -> str:
     inner = "".join(f'<subfield code="{code}">{value}</subfield>' for code, value in subfields)
     return f'<datafield tag="{tag}" ind1="{ind1}" ind2="{ind2}">{inner}</datafield>'
+
+
+@dataclass(frozen=True)
+class MarcDocument:
+    """An upload as a spec: what it holds, how it declares itself, what is wrong.
+
+    Drawn by the property in `TestAnUploadIsReadOrRefusedByName` and rebuilt by
+    `marc_document` in every named case it printed, so a counterexample reads
+    as a structure rather than as bytes.
+    """
+
+    records: tuple[Node, ...]
+    #: The encoding the XML declaration names, or None for no declaration.
+    declaration: str | None
+    #: The prolog item a document type declaration is placed after, or None.
+    doctype_after: str | None
+    #: Written as UTF-16, the encoding the NUL sniff refuses.
+    utf16: bool
+    #: How deep a chain of elements inside one extra record goes, 0 for none.
+    nest_depth: int
+    patches: tuple[tuple[int, int], ...]
+    #: How many empty siblings the extra record carries, 0 for none.
+    width: int = 0
+
+
+#: What may stand in a prolog before the root, each a place a doctype can follow.
+#: **Varied, never only offset zero**: a refusal written as a prefix test would
+#: pass at the start and miss the rest.
+PROLOG: Final = {"comment": "<!-- a -->", "pi": "<?x y?>", "space": "\n  "}
+
+
+def marc_document(document: MarcDocument) -> bytes:
+    """The bytes of an upload the spec describes."""
+    records = list(document.records)
+    if document.nest_depth or document.width:
+        records.append(Node("record", nest=document.nest_depth, width=document.width))
+    body = (
+        f'<collection xmlns="{MARCXML}">'
+        + "".join(xml_of(record) for record in records)
+        + "</collection>"
+    )
+    prolog = ""
+    if document.declaration is not None:
+        prolog = f'<?xml version="1.0" encoding="{document.declaration}"?>'
+    misc = "".join(PROLOG.values())
+    if document.doctype_after is not None:
+        cut = misc.index(PROLOG[document.doctype_after]) + len(PROLOG[document.doctype_after])
+        misc = misc[:cut] + "<!DOCTYPE collection>" + misc[cut:]
+    text = prolog + misc + body
+    return patched(text.encode("utf-16" if document.utf16 else "utf-8"), document.patches)
 
 
 class TestEveryFieldMapsBothWays:
@@ -607,6 +677,59 @@ class TestTheReaderRefusesAWholeFile:
         with pytest.raises(marc.MarcError, match="multi-byte"):
             marc.read(body)
 
+    def test_a_declared_encoding_python_does_not_know_is_refused_rather_than_a_500(self):
+        """`LookupError`, which is neither of the two classes the arm above
+        catches, so it was a 500 through the route. The literal the property in
+        `TestAnUploadIsReadOrRefusedByName` printed against the tree before the
+        fix."""
+        document = MarcDocument(
+            records=(),
+            declaration="A",
+            doctype_after=None,
+            utf16=False,
+            nest_depth=0,
+            patches=(),
+        )
+        with pytest.raises(marc.MarcError, match="unknown encoding: A"):
+            marc.read(marc_document(document))
+
+    def test_a_nest_far_past_any_real_document_is_refused_inside_its_bound(self):
+        """Was read, at 39.7 times its own bytes by `tracemalloc`, because an
+        element costs memory and no character: no answer it gave showed it. The
+        literal the property in `TestAnUploadIsReadOrRefusedByName` printed
+        against the tree before the depth bound."""
+        document = MarcDocument(
+            records=(),
+            declaration=None,
+            doctype_after=None,
+            utf16=False,
+            nest_depth=FAR_PAST_ANY_DEPTH,
+            patches=(),
+        )
+        data = marc_document(document)
+        got = answer_of(marc.read, data, answers=marc.ParsedMarc, refuses=marc.MarcError)
+        assert got.refusal is not None
+        assert "nested more than" in str(got.refusal)
+        assert got.peak <= marc.ALLOCATION_FACTOR * len(data) + xml_parse.ALLOCATION_FLOOR
+
+    def test_a_record_at_the_depth_bound_is_read_and_one_deeper_is_refused(self):
+        """The positive control for `xml_parse.MAX_DEPTH` at this door, at the
+        bound and one past it. The collection and the record are two levels of
+        it, so the nest inside the record may be two fewer."""
+        at_the_bound = MarcDocument(
+            records=(),
+            declaration=None,
+            doctype_after=None,
+            utf16=False,
+            nest_depth=xml_parse.MAX_DEPTH - 2,
+            patches=(),
+        )
+        parsed = marc.read(marc_document(at_the_bound))
+        assert (parsed.records, parsed.skipped) == ((), 1)
+        one_deeper = dataclasses.replace(at_the_bound, nest_depth=xml_parse.MAX_DEPTH - 1)
+        with pytest.raises(marc.MarcError, match="nested more than"):
+            marc.read(marc_document(one_deeper))
+
     def test_something_that_is_not_xml_is_refused_with_a_reason(self):
         with pytest.raises(marc.MarcError, match="not XML"):
             marc.read(b"Title,Author\nStoner,John Williams\n")
@@ -634,6 +757,141 @@ class TestTheReaderRefusesAWholeFile:
         ).encode("utf-8")
         with pytest.raises(marc.MarcError, match="Split it"):
             marc.read(many)
+
+
+MARC_DOCUMENTS: Final = st.builds(
+    MarcDocument,
+    records=st.lists(marc_records(), max_size=4).map(tuple),
+    declaration=st.none() | declared_encodings(),
+    doctype_after=st.sampled_from([None, None, None, *sorted(PROLOG)]),
+    # Each refusal ahead of the parse is drawn one time in four, so the
+    # structure atoms behind it reach the parse on most draws rather than few.
+    utf16=st.sampled_from([False, False, False, True]),
+    nest_depth=depths(xml_parse.MAX_DEPTH - 2),
+    patches=st.just(()) | PATCHES,
+    width=widths(),
+)
+
+
+def _refusal_of(document: MarcDocument) -> marc.MarcError | None:
+    """What `marc.read` refused this upload with, or None if it read it."""
+    try:
+        marc.read(marc_document(document))
+    except marc.MarcError as refusal:
+        return refusal
+    return None
+
+
+@pytest.mark.property
+class TestAnUploadIsReadOrRefusedByName:
+    """`marc.read` answers what a file holds or a `MarcError`, and nothing else.
+
+    **The upload is drawn as a spec and built as bytes**: records over the tags
+    the readers name, a declaration drawn from the codec registry and from the
+    declaration's own grammar, a doctype after each thing a prolog may hold, the
+    UTF-16 the NUL sniff refuses, a nest at and around `xml_parse.MAX_DEPTH`
+    and far past it, `WIDE` empty siblings, and a few single byte patches. Raw
+    bytes reached nothing past the parse, measured in the design round.
+    """
+
+    @given(document=MARC_DOCUMENTS)
+    def test_it_answers_records_or_a_marc_error_inside_its_allocation_bound(
+        self, document
+    ):
+        """**Three oracles, because "it did not throw" is one of the defects.**
+        The type of the outcome; the record count, which is the spec's own,
+        since an unpatched file read whole holds every record placed in it,
+        read or skipped; and the traced peak, held to the door's declared
+        factor, which is the only one of the three a nest moves."""
+        data = marc_document(document)
+        got = answer_of(marc.read, data, answers=marc.ParsedMarc, refuses=marc.MarcError)
+        assert got.peak <= marc.ALLOCATION_FACTOR * len(data) + xml_parse.ALLOCATION_FLOOR
+        if document.doctype_after is not None or document.utf16:
+            assert got.refusal is not None
+        if document.nest_depth > xml_parse.MAX_DEPTH - 2:
+            assert got.refusal is not None
+        if got.value is not None and not document.patches:
+            extra = document.nest_depth or document.width
+            placed = len(document.records) + (1 if extra else 0)
+            assert got.value.total == placed
+
+    def test_the_generator_still_reaches_records_read(self):
+        witness(
+            MARC_DOCUMENTS,
+            lambda document: _refusal_of(document) is None
+            and bool(marc.read(marc_document(document)).records),
+            reaches="an upload read into records",
+        )
+
+    def test_the_generator_still_reaches_an_encoding_python_does_not_know(self):
+        witness(
+            MARC_DOCUMENTS,
+            lambda document: isinstance(
+                getattr(_refusal_of(document), "__cause__", None), LookupError
+            ),
+            reaches="a declaration naming an encoding Python has never heard of",
+        )
+
+    def test_the_generator_still_reaches_a_doctype_past_the_start(self):
+        witness(
+            MARC_DOCUMENTS,
+            lambda document: "document type declaration" in str(_refusal_of(document)),
+            reaches="a doctype after a comment, an instruction or whitespace",
+        )
+
+    def test_the_generator_still_reaches_the_nul_sniff(self):
+        witness(
+            MARC_DOCUMENTS,
+            lambda document: "UTF-8" in str(_refusal_of(document)),
+            reaches="a file in an encoding the doctype scan cannot read",
+        )
+
+    def test_the_generator_still_reaches_a_wide_record_read(self):
+        """The allocation factor's positive control is this shape reaching the
+        parse: asked of what the door answered, since a wide record behind a
+        doctype is refused before any element is built."""
+        witness(
+            MARC_DOCUMENTS,
+            lambda document: document.width > 0 and _refusal_of(document) is None,
+            reaches="a record of `WIDE` empty siblings, read",
+        )
+
+    def test_the_width_atom_is_wide_enough_that_the_builder_sets_the_peak(self):
+        """**What the witness above cannot see: how wide `WIDE` is.** It asks
+        only for a width above none, so lowering `WIDE` to speed the properties
+        up switches the builder's control off with every arm green: measured
+        through the runner, a builder retaining 100 bytes more per element reds
+        all three allocation properties at `WIDE`, and at `WIDE = 10` passes
+        them. So a record of `WIDE` empty siblings has to cost more than
+        `xml_parse.ALLOCATION_FLOOR` on its own, which is what puts the
+        builder's cost per element, and not the floor, in charge of the peak.
+
+        **It refuses one legitimate change, on purpose**: a faster builder that
+        makes such a record cheaper than the floor reds it too. That is the
+        control losing its power, and the answer is a wider `WIDE`, never a
+        lower bar here.
+        """
+        document = MarcDocument(
+            records=(),
+            declaration=None,
+            doctype_after=None,
+            utf16=False,
+            nest_depth=0,
+            patches=(),
+            width=WIDE,
+        )
+        got = answer_of(
+            marc.read, marc_document(document), answers=marc.ParsedMarc, refuses=marc.MarcError
+        )
+        assert got.value is not None
+        assert got.peak > xml_parse.ALLOCATION_FLOOR
+
+    def test_the_generator_still_reaches_the_depth_bound(self):
+        witness(
+            MARC_DOCUMENTS,
+            lambda document: "nested more than" in str(_refusal_of(document)),
+            reaches="a nest past the depth bound",
+        )
 
 
 class TestOneBadRecordCostsOneRecord:

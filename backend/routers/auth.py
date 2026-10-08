@@ -187,10 +187,13 @@ def _send_quietly(config: mailer.MailConfig, subject: str, body: str) -> None:
     """Send, and let a failure be a log line rather than an unhandled task."""
     try:
         mailer.send(config, subject, body)
-    except Exception:
+    except Exception as error:  # noqa: BLE001  after the response, so it reaches nobody
         # Broad, because this runs after the response has gone: anything raised
         # here reaches nobody, and smtplib raises several unrelated families.
-        logger.exception("Could not send a confirmation code")
+        # **The type, never the message**, so not `logger.exception`: a refused
+        # envelope's `SMTPRecipientsRefused` renders the member's address, and
+        # any other message here is one nobody checked.
+        logger.error("Could not send a confirmation code: %s", type(error).__name__)
 
 
 def _signup_refusal() -> str:

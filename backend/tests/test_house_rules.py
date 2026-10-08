@@ -11464,7 +11464,11 @@ class TestOnlyThreeModulesTurnOutsideXmlIntoATree:
     Each of the three refuses a document type declaration before parsing and is
     capped on the bytes it reads, which is the work `defusedxml` would have been
     adopted for. The suppression is per site rather than per family so that a
-    **fourth** parse written without that refusal is loud.
+    **fourth** parse written without that refusal is loud: in any other module
+    the first arm below names it, and inside one of the three the linter
+    reports it, while a site waiver copied onto it passes the linter and fails
+    the hold the header of the lint configuration in `backend/pyproject.toml`
+    describes.
 
     **That holds only while `S314` sees every spelling, and it does not.** So the
     first arm asks which modules parse, over every spelling including the three
@@ -11538,6 +11542,40 @@ class TestOnlyThreeModulesTurnOutsideXmlIntoATree:
         # would say it was.
         assert not _xml_parse_calls("from other import ElementTree\nElementTree.XML(b)\n")
 
+    #: One literal call per member of `_XML_PARSERS`, keyed by the member.
+    #:
+    #: **Literal rows and not a loop over the set**, because a loop over the set
+    #: drops a row with its member and stays green: since the three modules
+    #: moved from `fromstring` to `XMLParser`, nothing in the tree calls
+    #: `fromstring`, so pruning it from the set reads as a tidy up, and a fourth
+    #: module calling it unrefused then passed this rule and the byte door
+    #: census together, measured. Each row now reds by name when its member goes.
+    _ONE_CALL_PER_PARSER: Final = {
+        "fromstring": "ET.fromstring(b)",
+        "parse": "ET.parse(f)",
+        "iterparse": "ET.iterparse(f)",
+        "XML": "ET.XML(b)",
+        "XMLID": "ET.XMLID(b)",
+        "fromstringlist": "ET.fromstringlist([b])",
+        "XMLParser": "ET.XMLParser()",
+        "XMLPullParser": "ET.XMLPullParser()",
+        "ElementTree": "ET.ElementTree(file=f)",
+    }
+
+    def test_each_parser_it_names_is_seen_when_called(self) -> None:
+        missed = [
+            name
+            for name, call in self._ONE_CALL_PER_PARSER.items()
+            if _xml_parse_calls(f"import xml.etree.ElementTree as ET\n{call}\n")
+            != [(2, name)]
+        ]
+        assert not missed, f"a parse entry point is not seen when called: {missed}"
+
+    def test_the_rows_are_the_parsers_it_names(self) -> None:
+        """A member added to the set without a row, or a row whose member left
+        it, is a disagreement here rather than a row that tests nothing."""
+        assert sorted(self._ONE_CALL_PER_PARSER) == sorted(_XML_PARSERS)
+
     def test_the_three_use_only_spellings_the_linter_can_report(self) -> None:
         """The alias arm, which is the one `S314` does not give you."""
         offenders = [
@@ -11551,6 +11589,298 @@ class TestOnlyThreeModulesTurnOutsideXmlIntoATree:
             f"one of {sorted(_PARSERS_THE_LINTER_SEES)}, which ruff sees, so the "
             "suppression at that site stays the thing a reader is told to check."
         )
+
+
+#: The standard library entry points that turn bytes or text into a structure,
+#: by the module that defines them. **The census of byte doors starts from here.**
+#:
+#: XML is `_XML_PARSERS`, the set the rule above holds against the linter.
+#: **Shared, and so is the corpus walk and the module tuple**: a member dropped
+#: from that set is dropped from both rules at once, which is why the XML rule
+#: holds one literal call per member. Beside it, the JSON, zip and CSV readers.
+#: **This is a census of four modules' entry points and not of every parse**:
+#: `urllib.parse.parse_qs` in the SRU request reader and the hand written CQL
+#: parser behind it are byte doors outside it, each with properties in
+#: `tests/test_sru.py`, and so is a third party's parser, one reached through a
+#: variable bound elsewhere, and `bytes.decode`.
+_PARSE_ENTRY_POINTS: Final[dict[tuple[str, ...], frozenset[str]]] = {
+    _ELEMENTTREE: _XML_PARSERS,
+    ("json",): frozenset({"loads", "load"}),
+    ("zipfile",): frozenset({"ZipFile"}),
+    ("csv",): frozenset({"reader", "DictReader"}),
+}
+
+
+def _parse_sites(source: str) -> list[tuple[str, tuple[str, ...]]]:
+    """`(enclosing function, parser module)` for every parse entry point called.
+
+    **Resolved by import prefix, as `_elementtree_names` resolves XML**, but
+    written again here for any module rather than calling it, so the XML rows of
+    this census and the XML rule above are two derivations of one fact and
+    `TestEveryByteDoorIsRegistered` asserts them against each other.
+
+    The enclosing function is the innermost `def` around the call, qualified by
+    its class: the door a register row is about. A call at module level is
+    named `<module>`.
+    """
+    tree = ast.parse(source)
+    receivers: dict[str, tuple[str, ...]] = {}
+    bare: dict[str, tuple[str, ...]] = {}
+
+    def offer(bound: str, denotes: tuple[str, ...]) -> None:
+        for module in _PARSE_ENTRY_POINTS:
+            if module[: len(denotes)] == denotes:
+                receivers[".".join((bound, *module[len(denotes) :]))] = module
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = tuple(alias.name.split("."))
+                if alias.asname:
+                    offer(alias.asname, parts)
+                else:
+                    offer(parts[0], parts[:1])
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            module = tuple(node.module.split("."))
+            for alias in node.names:
+                if alias.name in _PARSE_ENTRY_POINTS.get(module, frozenset()):
+                    bare[alias.asname or alias.name] = module
+                else:
+                    offer(alias.asname or alias.name, (*module, alias.name))
+
+    found: list[tuple[str, tuple[str, ...]]] = []
+
+    def visit(node: ast.AST, scope: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                visit(child, f"{scope}.{child.name}" if scope != "<module>" else child.name)
+                continue
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                inner = child.name if scope == "<module>" else f"{scope}.{child.name}"
+                visit(child, inner)
+                continue
+            if isinstance(child, ast.Call):
+                func = child.func
+                if isinstance(func, ast.Attribute):
+                    module = receivers.get(ast.unparse(func.value))
+                    if module is not None and func.attr in _PARSE_ENTRY_POINTS[module]:
+                        found.append((scope, module))
+                elif isinstance(func, ast.Name) and func.id in bare:
+                    found.append((scope, bare[func.id]))
+            visit(child, scope)
+
+    visit(tree, "<module>")
+    return found
+
+
+#: Every function in the application that calls a parse entry point, and what
+#: answers for it: the generated property that reaches it, or why none does.
+#:
+#: **Derived from the tree and held to it by equality both ways**, so a new
+#: parse reds until it is placed here and a row whose parse went away reds
+#: until it is removed. A value naming a test is resolved to a class holding a
+#: generated test, so a renamed property reds too. What a register cannot know
+#: is who wrote the bytes, which is the whole of the judgement in each reason.
+_BYTE_DOORS: Final[dict[str, str]] = {
+    "marc.py::_parsed": "tests/test_marc.py::TestAnUploadIsReadOrRefusedByName",
+    "metadata.py::_parsed": (
+        "tests/test_metadata.py::TestACatalogueAnswerIsReadOrRefusedByName"
+    ),
+    "opds.py::read_page": "tests/test_opds.py::TestAPageIsReadOrRefusedByName",
+    "backup.py::read_manifest": "tests/test_backup.py::TestAnArchiveIsReadOrRefusedByName",
+    "backup.py::restore": (
+        "second round: reopens what `read_manifest` read, then reads each cover "
+        "after the commit, where one it cannot read is declined alone"
+    ),
+    "backup.py::build_archive": "writes an archive, reads none",
+    "fetch.py::Fetched.json": (
+        "second round: generated at this seam with the JSON lookups behind "
+        "`metadata.NOT_DECODERS`; `RecursionError` is converted and a lone "
+        "surrogate repaired, each a named case"
+    ),
+    "csv_import.py::_read_table": (
+        "second round: any member's upload, hardened by named cases, with a "
+        "decode of its own"
+    ),
+    "csv_import.py::_headers_of": "second round, with `_read_table`",
+    "settings_store.py::get_json": (
+        "second round: a stored row, which a restore can carry, degraded to an "
+        "empty object on `ValueError` and `RecursionError`, each a named case"
+    ),
+}
+
+
+def _xml_modules_of_the_census() -> list[str]:
+    """The modules the byte door census finds parsing XML."""
+    return sorted(
+        {
+            str(path.relative_to(BACKEND))
+            for path in _every_module_but_the_tests()
+            for _, module in _parse_sites(path.read_text())
+            if module == _ELEMENTTREE
+        }
+    )
+
+
+class TestEveryByteDoorIsRegistered:
+    """A byte door is a function turning bytes or text somebody else wrote into
+    a value of this application; `docs/testing.md` holds what each must answer.
+    This keeps the population of them derived rather than remembered."""
+
+    def _found(self) -> set[str]:
+        return {
+            f"{path.relative_to(BACKEND)}::{scope}"
+            for path in _every_module_but_the_tests()
+            for scope, _ in _parse_sites(path.read_text())
+        }
+
+    def test_the_register_is_the_tree(self):
+        found = self._found()
+        assert sorted(found) == sorted(_BYTE_DOORS), (
+            f"unregistered: {sorted(found - set(_BYTE_DOORS))}; "
+            f"no longer a door: {sorted(set(_BYTE_DOORS) - found)}"
+        )
+
+    def test_its_xml_half_is_the_xml_rules_population(self):
+        """**Two resolvers of one fact**, asserted against each other: this
+        census's own and the one `TestOnlyThreeModulesTurnOutsideXmlIntoATree`
+        holds. A narrowing in either **resolver** reds here. The name set, the
+        corpus walk and the module tuple are shared, so a narrowing in any of
+        those shrinks both sides together; the name set is held by that rule's
+        literal call per member, the walk by `WHAT_EACH_WALK_REACHES`."""
+        assert _xml_modules_of_the_census() == sorted(_MODULES_THAT_PARSE_XML)
+
+    def test_it_resolves_each_parser_by_any_import_spelling(self):
+        """The diagonal: each row is a whole file and must be found."""
+        seen = {
+            "json as an alias": "import json as j\ndef f(b):\n    return j.loads(b)\n",
+            "loads imported": "from json import loads\ndef f(b):\n    return loads(b)\n",
+            "zipfile": "import zipfile\ndef f(b):\n    return zipfile.ZipFile(b)\n",
+            "csv": "import csv\ndef f(t):\n    return csv.DictReader(t)\n",
+            "a method": (
+                "import json\nclass C:\n    def f(self, b):\n        return json.load(b)\n"
+            ),
+        }
+        missed = [name for name, source in seen.items() if not _parse_sites(source)]
+        assert not missed, f"a parse is invisible to the census: {missed}"
+        assert not _parse_sites("from other import json\ndef f(b):\n    return json.loads(b)\n")
+
+    def test_every_property_it_names_exists_and_generates(self):
+        """A register row pointing at a property that was renamed or lost its
+        `@given` is a door with no property, reading as one with."""
+        named = [value for value in _BYTE_DOORS.values() if value.startswith("tests/")]
+        assert named, "the register names no property, so this arm is vacuous"
+        missing = []
+        for reference in named:
+            path, cls = reference.split("::")
+            tree = ast.parse((BACKEND / path).read_text())
+            classes = [
+                node for node in ast.walk(tree)
+                if isinstance(node, ast.ClassDef) and node.name == cls
+            ]
+            generates = any(
+                isinstance(item, ast.FunctionDef)
+                and any("given" in ast.unparse(d) for d in item.decorator_list)
+                for node in classes
+                for item in node.body
+            )
+            if not generates:
+                missing.append(reference)
+        assert not missing, f"named as a door's property and holding none: {missing}"
+
+
+#: The process starters ruff 0.16.7 reports under no rule, measured with the
+#: command taken from a request: where `subprocess.run(command, shell=True)` is
+#: a security finding, these are silent. `asyncio`'s two module functions and
+#: two event loop methods are silent under every rule ruff ships, preview
+#: included; `os.posix_spawn` and `os.posix_spawnp` under this application's
+#: configuration. `os.spawnv` and `os.execv` are reported, so they are not here.
+_UNREPORTED_PROCESS_CALLS: Final = frozenset(
+    {
+        "create_subprocess_shell", "create_subprocess_exec", "subprocess_shell",
+        "subprocess_exec", "posix_spawn", "posix_spawnp",
+    }
+)
+
+#: Modules refused whole, because the call they offer has a name too common to
+#: refuse: `pty.spawn` starts a process and reports no rule, and `spawn` alone
+#: would refuse every method of that name.
+_UNREPORTED_PROCESS_MODULES: Final = frozenset({"pty"})
+
+
+def _names_an_unreported_process_call(source: str) -> list[int]:
+    """The lines naming one of `_UNREPORTED_PROCESS_CALLS` or importing one of
+    `_UNREPORTED_PROCESS_MODULES`, by any reference: an attribute, a bare
+    name, an imported name and a string, the last because
+    `getattr(asyncio, "create_subprocess_shell")` reaches the call with no
+    attribute in sight."""
+    names = _UNREPORTED_PROCESS_CALLS | _UNREPORTED_PROCESS_MODULES
+    return sorted(
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if (isinstance(node, ast.Attribute) and node.attr in _UNREPORTED_PROCESS_CALLS)
+        or (isinstance(node, ast.Name) and node.id in _UNREPORTED_PROCESS_CALLS)
+        or (isinstance(node, ast.Import) and any(a.name in names for a in node.names))
+        or (
+            isinstance(node, ast.ImportFrom)
+            and (node.module in names or any(a.name in names for a in node.names))
+        )
+        or (isinstance(node, ast.Constant) and node.value in names)
+    )
+
+
+class TestNoModuleStartsAProcessTheLinterCannotSee:
+    """**Some ways of starting a process are invisible to the linter.** The
+    `S6` rules report a shell started through `subprocess` or `os`, so such a
+    call needs a waiver at its site, and the lint configuration's header says
+    what holds those. `asyncio.create_subprocess_shell(command)`,
+    `os.posix_spawn` and `pty.spawn` report nothing at all, so each would need
+    no waiver and nothing would read it. No application module starts a
+    process today, so the rule refuses the name rather than judging the call:
+    one that is needed is a decision written here first.
+
+    **What it does not see**: a process started through a name this module
+    does not list, such as a third party library's own wrapper; and a name
+    computed at run time, `"create_subprocess_" + "shell"` or an f-string
+    handed to `getattr`, which is deliberate obfuscation rather than a
+    spelling, and is left to review.
+    """
+
+    def test_no_application_module_names_one(self) -> None:
+        found = [
+            f"{path.relative_to(BACKEND)}:{line}"
+            for path in _every_module_but_the_tests()
+            for line in _names_an_unreported_process_call(path.read_text())
+        ]
+        assert found == [], (
+            f"{found} start a process in a way no lint rule reports. Start it "
+            "through `subprocess`, where the linter sees it, or write the decision here."
+        )
+
+    def test_every_spelling_it_names_is_read(self) -> None:
+        """The diagonal: each row is a whole module, so a miss names the
+        spelling it missed."""
+        spellings = {
+            "the module function": "import asyncio\nasyncio.create_subprocess_shell(c)\n",
+            "the exec function": "import asyncio\nasyncio.create_subprocess_exec(c)\n",
+            "imported by name": "from asyncio import create_subprocess_shell\n",
+            "imported under an alias": "from asyncio import create_subprocess_exec as run\n",
+            "the loop's shell method": "loop.subprocess_shell(p, c)\n",
+            "the loop's exec method": "loop.subprocess_exec(p, c)\n",
+            "reached by getattr": 'getattr(asyncio, "create_subprocess_shell")(c)\n',
+            "posix_spawn": "import os\nos.posix_spawn(c, [], {})\n",
+            "posix_spawnp imported by name": "from os import posix_spawnp\n",
+            "the pty module": "import pty\npty.spawn(c)\n",
+            "spawn from the pty module": "from pty import spawn\n",
+            "the pty module by string": 'importlib.import_module("pty")\n',
+        }
+        missed = [
+            name for name, source in spellings.items() if not _names_an_unreported_process_call(source)
+        ]
+        assert missed == [], f"a spelling of an unreported process call is invisible: {missed}"
+        assert _names_an_unreported_process_call(
+            "import subprocess\nsubprocess.run(c)\nworker.spawn()\n"
+        ) == []
 
 
 class TestNothingStripsAnAssertOutOfTheImage:
@@ -11819,9 +12149,13 @@ class TestNothingStripsAnAssertOutOfTheImage:
     def test_the_suppressed_asserts_are_the_eight_this_rule_was_written_for(self) -> None:
         """The arm the others do not give you, and it counts rather than names.
 
-        Nothing above looks at an `assert`. Without this, `assert user.is_admin
-        # noqa: S101  narrowing, not validation` ships green and the comment is
-        the only thing saying it is a narrowing.
+        Nothing above looks at an `assert`. This counts the text `# noqa: S101`
+        exactly as written there, so a ninth `assert user.is_admin  # noqa: S101
+        narrowing, not validation` reds here by its file. **It is narrower than
+        what ruff honours**: `# NOQA: S101` and `#noqa:S101` waive the same
+        rule and are not counted. The stricter hold reads what ruff waived
+        rather than the comment, and the header of the lint configuration in
+        `backend/pyproject.toml` says what it holds.
 
         **A set of file names was the first draft and it was the covered case.**
         A ninth suppression in a fifth module failed it; a ninth inside

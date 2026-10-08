@@ -32,6 +32,7 @@ from xml.etree import ElementTree
 import bibliographic
 import marc_fields
 import metadata
+import xml_parse
 from catalogue import Heading, Record
 from enums import ClassificationScheme, HeadingKind
 from marc_fields import Fields, Subfields
@@ -65,6 +66,17 @@ class MarcError(Exception):
 #: The same 20,000 the CSV reader allows, so one upload cannot become an
 #: unbounded import by changing format.
 MAX_RECORDS: Final = 20_000
+
+#: This door's half of its allocation bound: a call of `read` peaks, by
+#: `tracemalloc`, under this times the bytes uploaded plus
+#: `xml_parse.ALLOCATION_FLOOR`, which says what the bound is and what holds it.
+#:
+#: Measured on CPython 3.14.0: a record of empty `datafield` elements back to
+#: back, the costliest shape per byte that is still a file to read, peaked at
+#: 25.7 times its size; ordinary records near 12. A nest past
+#: `xml_parse.MAX_DEPTH` is refused within one chunk, and what one costs
+#: unrefused is said there.
+ALLOCATION_FACTOR: Final = 32
 
 #: How many Books the export holds at once.
 #:
@@ -732,14 +744,23 @@ def _parsed(content: bytes) -> ElementTree.Element:
     if _DOCTYPE_BYTES in content:
         raise MarcError("That file carries a document type declaration, which is refused.")
     try:
-        return ElementTree.fromstring(content)  # noqa: S314  doctype refused above, bytes capped
-    except (ElementTree.ParseError, ValueError) as error:
+        parser = ElementTree.XMLParser(target=xml_parse.DepthBoundedTree())  # noqa: S314  doctype refused above, bytes capped, depth bounded
+        return xml_parse.fed(parser, content)
+    except (ElementTree.ParseError, ValueError, LookupError) as error:
         # **`ValueError` as well as `ParseError`, and it is not defensive.**
         # `ElementTree.fromstring` raises `ValueError("multi-byte encodings are
         # not supported")` for any XML declaration naming one, EUC-JP, Shift_JIS,
         # gb2312, big5 and UTF-7 among them. Measured through the route: without
         # this arm a 92 byte body is a **500** with a traceback, where the
         # documented answer to an encoding this reader refuses is a 400.
+        #
+        # **`LookupError` for the declaration naming an encoding Python has
+        # never heard of**, which is neither of the other two and was the same
+        # 500. Found by generating the declaration rather than listing it: the
+        # `ValueError` arm covered one member of the class, the multi-byte
+        # codecs, and nothing covered the rest. The upload is parsed from
+        # bytes, so the declaration is read; the catalogue and feed doors parse
+        # text, where a declaration names nothing and this cannot arise.
         raise MarcError(f"That file is not XML this reader can take: {error}") from error
 
 

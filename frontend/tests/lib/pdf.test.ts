@@ -35,6 +35,7 @@ import {
   latin,
   object,
   pdfSpec,
+  predict,
   streamObject,
   streamPdf,
   text,
@@ -112,6 +113,17 @@ async function read(bytes: Uint8Array<ArrayBuffer>) {
  */
 function startxrefOf(bytes: Uint8Array): number {
   return Number(/startxref\s+(\d+)/.exec(text(bytes.subarray(-64)))![1]);
+}
+
+/** A type 1 row's first two fields under `/W [1 4 ...]`, high byte first. */
+function typeAndOffset(offset: number): number[] {
+  return [
+    1,
+    (offset >>> 24) & 0xff,
+    (offset >>> 16) & 0xff,
+    (offset >>> 8) & 0xff,
+    offset & 0xff,
+  ];
 }
 
 /** The failure or the title, so one assertion covers both arms. */
@@ -523,6 +535,411 @@ describe("a cross reference this reader has to follow", () => {
     );
 
     expect(verdict(await read(updated))).toBe("read: Second Edition");
+  });
+});
+
+/**
+ * **Why these are examples and not more draws of the property below.** The
+ * property asserts that a file is read or refused by name within budget, so a
+ * reader that decodes one of these shapes wrongly and still names an outcome is
+ * green there whether or not a draw reaches it. Each arm below asserts the
+ * answer instead.
+ *
+ * Reach is the smaller half, and it is rarity rather than impossibility. Every
+ * file `buildPdf` makes writes its cross reference stream in one shape: `/W
+ * [1 4 2]`, no `/Index`, one `/Filter` named directly, `/DecodeParms` a
+ * dictionary, and every row under filter 0. A single byte patch does reach a
+ * few of these arms, a stream keyword's newline turned to a space or a
+ * predictor digit changed, but as a draw among many and never with its answer
+ * checked.
+ */
+function rewritten(
+  bytes: Uint8Array,
+  from: string | RegExp,
+  to: string,
+): Uint8Array<ArrayBuffer> {
+  const before = text(bytes);
+  const after = before.replace(from, to);
+  // A rewrite that matched nothing would test the unrewritten file and pass
+  // for the wrong reason.
+  if (after === before) throw new Error(`nothing matched ${String(from)}`);
+  return latin(after);
+}
+
+/** A document with a metadata stream, as object 3, written from `stream`. */
+function withMetadataObject(body: Uint8Array | string) {
+  return classicPdf(
+    [
+      object(1, "<< /Title (Packet) >>"),
+      object(2, "<< /Type /Catalog /Metadata 3 0 R >>"),
+      object(3, body),
+    ],
+    "/Info 1 0 R /Root 2 0 R",
+  );
+}
+
+/** The language a reading found, or its failure. */
+function language(reading: Awaited<ReturnType<typeof readPdf>>): string {
+  return reading.ok
+    ? `read: ${String(reading.metadata.language)}`
+    : reading.failure;
+}
+
+describe("a cross reference stream under each PNG row filter", () => {
+  const objects = [
+    object(1, "<< /Title (Learning Spark) >>"),
+    object(2, "<< /Type /Catalog >>"),
+  ];
+  const trailer = "/Info 1 0 R /Root 2 0 R";
+
+  it.each([
+    { filter: 1, name: "Sub" },
+    { filter: 2, name: "Up" },
+    { filter: 3, name: "Average" },
+    { filter: 4, name: "Paeth" },
+  ])("undoes the $name filter", async ({ filter }) => {
+    const bytes = await streamPdf(objects, trailer, {
+      rowFilter: () => filter,
+    });
+
+    expect(verdict(await read(bytes))).toBe("read: Learning Spark");
+  });
+
+  it("undoes a different filter on each row, as an encoder choosing per row writes", async () => {
+    const bytes = await streamPdf(objects, trailer, {
+      rowFilter: (row) => row % 5,
+    });
+
+    expect(verdict(await read(bytes))).toBe("read: Learning Spark");
+  });
+
+  it("refuses a row filter PNG does not define", async () => {
+    const bytes = await streamPdf(objects, trailer, {
+      rowFilter: (row) => (row === 1 ? 5 : 0),
+    });
+
+    expect(verdict(await read(bytes))).toBe("damaged");
+  });
+});
+
+describe("a cross reference stream's own layout", () => {
+  const objects = [
+    object(1, "<< /Title (Layout) >>"),
+    object(2, "<< /Type /Catalog >>"),
+  ];
+  const trailer = "/Info 1 0 R /Root 2 0 R";
+  const plain = () => streamPdf(objects, trailer, { predictor: false });
+
+  it.each(["7", "[1 -4 2]", "[1 (4) 2]", "[0 0 0]"])(
+    "reads no entry through a /W of %s",
+    async (widths) => {
+      // Not a guess at what was meant: a width the format does not allow, or
+      // a record of no bytes, describes no row, so the section contributes no
+      // entry and the file has no cross reference this reader can use. For
+      // `[0 0 0]` that is the answer only: the zero record check it reaches is
+      // a bound on work, which no verdict sees.
+      const bytes = rewritten(await plain(), "/W [1 4 2]", `/W ${widths}`);
+
+      expect(verdict(await read(bytes))).toBe("not-a-pdf");
+    },
+  );
+
+  // **The rows are written at the shape the /W claims**, so a reader that
+  // took the claim would read them and find the title. Rewriting a /W over
+  // rows of the default shape cannot tell the guard from its absence: an
+  // unguarded reader misreads those rows and finds nothing either.
+  it("refuses a width past eight bytes, over rows written that wide", async () => {
+    const bytes = await streamPdf(objects, trailer, {
+      predictor: false,
+      widths: [1, 9, 2],
+    });
+
+    expect(verdict(await read(bytes))).toBe("not-a-pdf");
+  });
+
+  it("refuses a /W of four entries, over rows of the first three", async () => {
+    const bytes = rewritten(await plain(), "/W [1 4 2]", "/W [1 4 2 0]");
+
+    expect(verdict(await read(bytes))).toBe("not-a-pdf");
+  });
+
+  it("refuses a fractional width, over rows the next whole width would read", async () => {
+    const bytes = rewritten(
+      await streamPdf(objects, trailer, {
+        predictor: false,
+        widths: [1, 5, 2],
+      }),
+      "/W [1 5 2]",
+      "/W [1 4.5 2]",
+    );
+
+    expect(verdict(await read(bytes))).toBe("not-a-pdf");
+  });
+
+  it("reads every row as type 1 when /W gives the type no bytes", async () => {
+    // The format's default for a zero width first field, and the only way to
+    // write it: there is no byte to say anything else.
+    const bytes = await streamPdf(objects, trailer, { widths: [0, 4, 2] });
+
+    expect(verdict(await read(bytes))).toBe("read: Layout");
+  });
+
+  it("numbers each run an explicit /Index names from that run's own start", async () => {
+    // Two runs, the second starting at 1, so the title's row is numbered by
+    // its run's start rather than by its place in the stream. A split after
+    // it would leave the title in a run starting at 0 and number it right
+    // either way.
+    const whole = await plain();
+    const size = Number(/\/Size (\d+)/.exec(text(whole))![1]);
+
+    const bytes = rewritten(
+      whole,
+      "/W [1 4 2]",
+      `/Index [0 1 1 ${size - 1}] /W [1 4 2]`,
+    );
+
+    expect(verdict(await read(bytes))).toBe("read: Layout");
+  });
+
+  it("reads the rows a stream holds when /Index promises more", async () => {
+    // The answer only. The rows past the end are bounded by the end of data
+    // check in `crossReferenceStream`, which also decides the case below; what
+    // this row reaches there is work, which no verdict can see.
+    const bytes = rewritten(
+      await plain(),
+      "/W [1 4 2]",
+      "/Index [0 900] /W [1 4 2]",
+    );
+
+    expect(verdict(await read(bytes))).toBe("read: Layout");
+  });
+
+  it.each([
+    [2, "read: Layout"],
+    [1, "read: null"],
+  ])(
+    "reads the last row only when the stream holds all of it: %i generation bytes",
+    async (generation, expected) => {
+      // Written by hand, unfiltered, so the information dictionary's row can
+      // come last and be cut. Cut inside its generation field, its type and
+      // offset are whole, and a reader without the end of data check takes
+      // them. The whole row is the control: the file is sound, and only the
+      // cut changes the answer.
+      const header = "%PDF-1.5\n";
+      const info = concat("1 0 obj\n<< /Title (Layout) >>\nendobj\n");
+      const catalog = concat("2 0 obj\n<< /Type /Catalog >>\nendobj\n");
+      const infoAt = latin(header).length;
+      const catalogAt = infoAt + info.length;
+      const xrefAt = catalogAt + catalog.length;
+      const data = new Uint8Array([
+        ...typeAndOffset(catalogAt),
+        0,
+        0,
+        ...typeAndOffset(infoAt),
+        ...Array.from({ length: generation }, () => 0),
+      ]);
+      const xref = streamObject(
+        3,
+        "<< /Type /XRef /Size 4 /W [1 4 2] /Index [2 1 1 1] /Info 1 0 R /Root 2 0 R >>",
+        data,
+      );
+      const bytes = concat(
+        header,
+        info,
+        catalog,
+        "3 0 obj\n",
+        xref.body,
+        "\nendobj\n",
+        `startxref\n${xrefAt}\n%%EOF\n`,
+      );
+
+      expect(verdict(await read(bytes))).toBe(expected);
+    },
+  );
+
+  it("is written by a fixture that refuses a row its /W cannot hold", async () => {
+    // The free row's generation is 65535, which one byte would write as 255.
+    // The fixture throws rather than hand a test a number it did not ask for.
+    await expect(
+      streamPdf(objects, trailer, { widths: [1, 4, 1] }),
+    ).rejects.toThrow("does not fit a /W width of 1");
+  });
+
+  it.each(["[0 -1]", "[0 900000]", "[0 /Many]", "[-1 3]"])(
+    "refuses an /Index of %s as damaged",
+    async (index) => {
+      // A run a file put in a parsed array, so unlike a classic table's header
+      // it can be negative, huge or not a number at all.
+      const bytes = rewritten(
+        await plain(),
+        "/W [1 4 2]",
+        `/Index ${index} /W [1 4 2]`,
+      );
+
+      expect(verdict(await read(bytes))).toBe("damaged");
+    },
+  );
+
+  it("stops at a run that is not a whole number", async () => {
+    const bytes = rewritten(
+      await plain(),
+      "/W [1 4 2]",
+      "/Index [0 2.5] /W [1 4 2]",
+    );
+
+    expect(verdict(await read(bytes))).toBe("not-a-pdf");
+  });
+
+  it("reads no entry when /Size is not a number and no /Index says otherwise", async () => {
+    const bytes = rewritten(await plain(), /\/Size \d+/, "/Size (many)");
+
+    expect(verdict(await read(bytes))).toBe("not-a-pdf");
+  });
+});
+
+describe("the filter and parameters a stream declares", () => {
+  const objects = [
+    object(1, "<< /Title (Filters) >>"),
+    object(2, "<< /Type /Catalog >>"),
+  ];
+  const trailer = "/Info 1 0 R /Root 2 0 R";
+
+  it("reads /Filter written as an array of one", async () => {
+    const bytes = rewritten(
+      await streamPdf(objects, trailer),
+      "/Filter /FlateDecode",
+      "/Filter [/FlateDecode]",
+    );
+
+    expect(verdict(await read(bytes))).toBe("read: Filters");
+  });
+
+  it("skips an entry in a filter array that is not a name", async () => {
+    const bytes = rewritten(
+      await streamPdf(objects, trailer),
+      "/Filter /FlateDecode",
+      "/Filter [null 5 [/Inner] /FlateDecode]",
+    );
+
+    expect(verdict(await read(bytes))).toBe("read: Filters");
+  });
+
+  it("reads /DecodeParms written as an array of one", async () => {
+    const bytes = rewritten(
+      await streamPdf(objects, trailer),
+      /\/DecodeParms (<< [^>]* >>)/,
+      "/DecodeParms [$1]",
+    );
+
+    expect(verdict(await read(bytes))).toBe("read: Filters");
+  });
+
+  it("reads an empty /DecodeParms array as no parameters", async () => {
+    const bytes = rewritten(
+      await streamPdf(objects, trailer, { predictor: false }),
+      "/Filter /FlateDecode",
+      "/DecodeParms [] /Filter /FlateDecode",
+    );
+
+    expect(verdict(await read(bytes))).toBe("read: Filters");
+  });
+
+  it("reads /Predictor 1 as the no prediction it means", async () => {
+    // Below 10 is not a PNG predictor, and undoing one anyway would turn
+    // literal rows into differences.
+    const bytes = rewritten(
+      await streamPdf(objects, trailer, { predictor: false }),
+      "/Filter /FlateDecode",
+      "/DecodeParms << /Predictor 1 >> /Filter /FlateDecode",
+    );
+
+    expect(verdict(await read(bytes))).toBe("read: Filters");
+  });
+
+  it("reads a predictor that names no columns as one column, the format's default", async () => {
+    const packet = latin(xmpPacket({ language: "fr" }));
+    const bytes = withMetadataObject(
+      streamObject(
+        3,
+        "<< /Type /Metadata /Filter /FlateDecode /DecodeParms << /Predictor 12 >> >>",
+        await deflate(predict(packet, 1, () => 2)),
+      ).body,
+    );
+
+    expect(language(await read(bytes))).toBe("read: fr");
+  });
+
+  it("undoes Paeth where up and up left tie, which the cross reference arms above never reach", async () => {
+    // Paeth's tie order is the format's. `streamPdf` rows can tie up against up
+    // left at the right offsets, but no arm above places objects there; a packet
+    // at four columns ties without arranging offsets.
+    const raw = xmpPacket({ language: "fr" });
+    const packet = latin(raw + " ".repeat((4 - (raw.length % 4)) % 4));
+    const bytes = withMetadataObject(
+      streamObject(
+        3,
+        "<< /Type /Metadata /Filter /FlateDecode /DecodeParms << /Predictor 12 /Columns 4 >> >>",
+        await deflate(predict(packet, 4, () => 4)),
+      ).body,
+    );
+
+    expect(language(await read(bytes))).toBe("read: fr");
+  });
+
+  it("leaves a stream encoded twice unread, as a field absent rather than a broken file", async () => {
+    // The packet is deflated once and declares a second filter after it.
+    // Applying the first alone would hand back bytes that look like data.
+    const packet = await deflate(latin(xmpPacket({ language: "fr" })));
+    const reading = await read(
+      withMetadataObject(
+        streamObject(
+          3,
+          "<< /Type /Metadata /Filter [/FlateDecode /ASCIIHexDecode] >>",
+          packet,
+        ).body,
+      ),
+    );
+
+    expect(verdict(reading)).toBe("read: Packet");
+    expect(language(reading)).toBe("read: null");
+  });
+});
+
+describe("where a stream's bytes begin and end", () => {
+  it("refuses a stream keyword with no line break after it", async () => {
+    const bytes = withMetadataObject(
+      concat(
+        "<< /Type /Metadata /Length 10 >>\nstream ",
+        "0123456789",
+        "\nendstream",
+      ),
+    );
+
+    expect(verdict(await read(bytes))).toBe("damaged");
+  });
+
+  it("refuses a stream with neither a usable /Length nor an endstream", async () => {
+    const bytes = withMetadataObject(
+      concat(
+        "<< /Type /Metadata >>\nstream\n",
+        latin(xmpPacket({ language: "fr" })),
+      ),
+    );
+
+    expect(verdict(await read(bytes))).toBe("damaged");
+  });
+
+  it("reads a stream longer than the window its header was read through", async () => {
+    // The object's dictionary is parsed out of a 64 kB window and the stream's
+    // own bytes are fetched against `/Length` when they run past it. The
+    // packet sits after the padding, so a reader that kept to the window would
+    // lose the packet and not only padding.
+    const packet = latin(" ".repeat(70 * 1024) + xmpPacket({ language: "fr" }));
+    const bytes = withMetadataObject(
+      streamObject(3, "<< /Type /Metadata >>", packet).body,
+    );
+
+    expect(language(await read(bytes))).toBe("read: fr");
   });
 });
 

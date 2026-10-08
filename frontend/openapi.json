@@ -4843,7 +4843,8 @@
           "nothing_due",
           "unreachable",
           "misconfigured",
-          "in_app_only"
+          "in_app_only",
+          "unexpected"
         ],
         "title": "OverdueNotifyReason",
         "type": "string"

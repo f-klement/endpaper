@@ -145,40 +145,45 @@
     ],
 
     // ---- Refused, permanently. The rule is wrong about this codebase. ----
-
-    // 47 sites. Every bulk write here is sequential BY DESIGN: a 300 book batch
-    // would otherwise open 300 concurrent requests against one SQLite writer.
-    // `lib/bulkWrite.ts` exists to own that rule and `docs/decisions.md` records
-    // it twice. Enabling this rule would flag the architecture.
-    "no-await-in-loop": "off",
-
-    // 2 sites. In `lib/safeHref.ts` the U+0000 to U+0020 character class IS
-    // the URL sanitisation logic, so the rule fires on the security control
-    // itself. In `lib/pdf.ts` a second class strips the control characters a
-    // PDF producer pads its metadata with, which is the point of that
-    // function.
     //
-    // **The second site is masked by an inline disable directive and this
-    // entry said one site for as long as that was true.** So the count read as
-    // one easy fix: turn the rule on, repair `safeHref.ts`, and leave a second
-    // site silently suppressed by a comment.
-    //
-    // **Nothing holds the site count, here or at the two refusals below that
-    // also argue from named sites.** The rule is off across the tree, so a
-    // third site anywhere needs no directive and is suppressed by a reason
-    // that does not cover it, with every arm green.
-    "no-control-regex": "off",
+    // **Two kinds, and the difference is whether a new site is covered.** A
+    // refusal argued about the codebase covers every site by its argument, so
+    // it carries no count. One argued from its sites covers those sites
+    // alone, so it carries its count the way a backlog row does, held EQUAL
+    // over the same blanked copy, and the ratchet test holds the files they
+    // sit in as well. So a new site reds at the run that adds it, rather than
+    // arriving under a reason written about the others, **unless a counted
+    // site in the same file goes in the same change**: the count and the set
+    // of files are held, and no single site is.
 
-    // 1 site, `lib/sqlite.ts`: a zero width space inside a docstring's glob
-    // pattern, so that the star slash does not close the comment.
-    "no-irregular-whitespace": "off",
+    // Argued from its sites, by kind, because concurrency is a live choice here
+    // and a serial await that should not be one is a real defect: the
+    // application awaits `Promise.all` where order does not matter. Every site
+    // counted when this was argued is one where order does. The bulk write in
+    // `lib/bulkWrite.ts`, sequential BY DESIGN because a 300 book batch would
+    // otherwise open 300 concurrent requests against one SQLite writer, which
+    // `docs/decisions.md` records. A parser following a chain whose next offset
+    // the last read gives, or a stream read chunk by chunk, in `lib/pdf.ts`,
+    // `lib/audiobook.ts` and `lib/zip.ts`. Files read in order, one at a time,
+    // in `lib/takeout.ts` and the scan and library settings hooks. A lookup
+    // paced against a rate limit, in the scan hooks. And the test tree,
+    // awaiting its own fixtures and steps in the order the arm is about.
+    "no-await-in-loop": "off", // 61
 
-    // 1 site, `lib/bookBounds.ts`. The rule is RIGHT: 9223372036854775807 is
-    // SQLite's max int64 and JS rounds it to ...808. It stays because the value
-    // is a declaration mirroring the backend's bound rather than arithmetic, and
-    // no collection id can reach it. If that stops being true this is a defect,
-    // not a suppression.
-    "no-loss-of-precision": "off",
+    // Argued from its sites. In `lib/safeHref.ts` the U+0000 to U+0020
+    // character class IS the URL sanitisation logic, so the rule fires on the
+    // security control itself. In `lib/pdf.ts` a second class strips the
+    // control characters a PDF producer pads its metadata with, which is the
+    // point of that function. The second is masked by an inline disable
+    // directive, which the blanked copy the count reads removes.
+    "no-control-regex": "off", // 2
+
+    // Argued from its site, `lib/bookBounds.ts`. The rule is RIGHT:
+    // 9223372036854775807 is SQLite's max int64 and JS rounds it to ...808. It
+    // stays because the value is a declaration mirroring the backend's bound
+    // rather than arithmetic, and no collection id can reach it. If that stops
+    // being true this is a defect, not a suppression.
+    "no-loss-of-precision": "off", // 1
 
     // The rule is WRONG about this tree rather than unpaid, at every JSX site. It
     // requires React in scope for JSX, which the automatic runtime removed.

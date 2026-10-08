@@ -9,6 +9,7 @@ ordinary round trips.
 
 import dataclasses
 import hashlib
+import sys
 from pathlib import Path
 from types import MappingProxyType
 
@@ -17,6 +18,7 @@ import keyring
 import keyring.backend
 import keyring.errors
 import pytest
+from sqlalchemy.exc import OperationalError
 
 import credentials
 import targets
@@ -81,6 +83,30 @@ def keychain():
     fake = _InMemoryKeyring()
     keyring.set_keyring(fake)
     yield fake
+    keyring.set_keyring(previous)
+
+
+class _LockedKeyring(keyring.backend.KeyringBackend):
+    """A keychain that exists and refuses, as a locked one does."""
+
+    priority = 1
+
+    def get_password(self, service: str, username: str) -> str | None:
+        raise keyring.errors.KeyringLocked("locked")
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        raise keyring.errors.PasswordSetError("locked")
+
+    def delete_password(self, service: str, username: str) -> None:
+        raise keyring.errors.PasswordDeleteError("locked")
+
+
+@pytest.fixture
+def locked_keychain():
+    """A keychain that refuses for the length of one test, then the failing one back."""
+    previous = keyring.get_keyring()
+    keyring.set_keyring(_LockedKeyring())
+    yield
     keyring.set_keyring(previous)
 
 
@@ -389,6 +415,17 @@ class TestAKeyIsKeptWhereTheMachineCanKeepIt:
             credentials.store_key(credentials.generate_phrase())
         assert "CREDENTIAL_ENCRYPTION_KEY" in str(refusal.value)
 
+    def test_forgetting_a_key_kept_in_the_keychain_takes_it_out_of_the_keychain(
+        self, keychain
+    ):
+        """`forget_key` clears every store it reads a key from, and on a desktop
+        that is the keychain. Answering one store cleared while the key stayed
+        in force is the silent success the function exists to refuse."""
+        credentials.store_key(credentials.generate_phrase())
+
+        assert credentials.forget_key() == 1
+        assert credentials.key_material() is None
+
     def test_a_named_key_file_is_read_where_one_is_named(self, monkeypatch, tmp_path):
         phrase = credentials.generate_phrase()
         named = tmp_path / "somewhere" / "key"
@@ -396,6 +433,49 @@ class TestAKeyIsKeptWhereTheMachineCanKeepIt:
         named.write_text(phrase)
         monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(named))
         assert credentials.key_material() == credentials.phrase_to_key(phrase)
+
+
+class TestAStoreThatCannotAnswerIsNeverReadAsEmpty:
+    """Empty means "no key here", and the sentence that follows it on a screen
+    is "generate one", which replaces the key that opens every stored login.
+    So a store that exists and refused says so, and only a store that is not
+    there at all answers empty."""
+
+    def test_a_build_without_the_keychain_package_keeps_its_key_in_a_file(
+        self, db, monkeypatch
+    ):
+        """The published image, which leaves the package out on purpose. The
+        suite installs it, so this is the one arm that runs the image's path."""
+        monkeypatch.setitem(sys.modules, "keyring", None)
+
+        phrase, where = credentials.generate_key(db)
+
+        assert where == "file"
+        assert credentials.key_material() == credentials.phrase_to_key(phrase)
+
+    def test_a_locked_keychain_is_reported_rather_than_read_as_no_key(
+        self, locked_keychain
+    ):
+        with pytest.raises(credentials.KeyConfigurationError, match="Unlock it"):
+            credentials.key_material()
+
+    def test_a_locked_keychain_refuses_a_new_key_rather_than_passing_it_to_a_file(
+        self, locked_keychain
+    ):
+        """It exists, so it is where the key belongs: a file written instead
+        would be found beside whatever the keychain holds once it unlocks."""
+        with pytest.raises(credentials.KeyConfigurationError, match="refused to store"):
+            credentials.store_key(credentials.generate_phrase())
+        assert not credentials.key_file().exists()
+
+    def test_a_key_file_that_exists_and_cannot_be_read_is_reported(
+        self, monkeypatch, tmp_path
+    ):
+        """A directory where the file should be is the read error every
+        account can produce, root included."""
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(tmp_path))
+        with pytest.raises(credentials.KeyConfigurationError, match="could not be read"):
+            credentials.key_material()
 
 
 class TestAKeyIsShownOnceAndNeverAgain:
@@ -666,6 +746,24 @@ class TestAnEnvelopeSealedBeforeTheBindingIsOpenedAndCarriedForward:
         after = credentials.stored_envelope(db, "bne")
         assert after.split(".")[0] == credentials.VERSION
         assert credentials.stored(db, "bne", BNE_URL) == ("a", "b")
+
+    def test_a_re_seal_that_cannot_be_written_still_answers_the_read(
+        self, db, key: bytes, monkeypatch
+    ):
+        """A failure to write is not a failure to read: the old envelope stays,
+        and the next read tries again."""
+        credentials.store_key(credentials.key_to_phrase(key))
+        old = sealed_before_the_origin_was_bound(key, "bne", "a:b")
+        db.add(CatalogueCredential(source="bne", envelope=old))
+        db.commit()
+
+        def locked():
+            raise OperationalError("SAVEPOINT", {}, Exception("database is locked"))
+
+        monkeypatch.setattr(db, "begin_nested", locked)
+
+        assert credentials.stored(db, "bne", BNE_URL) == ("a", "b")
+        assert credentials.stored_envelope(db, "bne") == old
 
     def test_and_the_carried_forward_envelope_is_bound_to_the_address(self, db, key: bytes):
         """Which is the whole point of carrying it forward rather than keeping it."""
@@ -1486,6 +1584,23 @@ class TestTheStoreSealsWhatItIsGiven:
         credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         credentials.put(db, "bne", BNE_URL, "bob", "correcthorse")
         assert credentials.stored(db, "bne", BNE_URL) == ("bob", "correcthorse")
+
+    def test_reading_a_source_nothing_was_stored_for_says_so(self, db):
+        credentials.generate_key(db)
+        with pytest.raises(credentials.UnreadableCredential, match="No credential is stored"):
+            credentials.stored(db, "bne", BNE_URL)
+
+    def test_a_state_resolved_over_two_disagreeing_stores_refuses_naming_them(
+        self, db, monkeypatch
+    ):
+        """Not as "no key", which tells an admin to type the login in again when
+        the thing to fix is the second store."""
+        credentials.generate_key(db)
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", credentials.generate_phrase())
+        state = credentials.key_state()
+        assert state.material is None
+        with pytest.raises(credentials.KeyConfigurationError, match="Different encryption keys"):
+            credentials.stored(db, "bne", BNE_URL, state)
 
     def test_a_username_with_a_colon_is_refused(self, db):
         credentials.generate_key(db)

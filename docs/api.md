@@ -1289,13 +1289,16 @@ because the switch is spelled "show overdue loans in the app" and this is what i
 The loans list is not affected: a list of the household's loans is not the reminder
 channel.
 
-`reason` is `disabled`, `no_url`, `nothing_due`, `unreachable`, `misconfigured` or
-`in_app_only`, and is **null exactly when `sent` is true**. It is a closed set because a
-client has to render the difference and cannot branch on prose; `detail` is the same outcome
-as a sentence, for a log or a caller with no message catalogue. A 200 with `sent: false` is
-the ordinary answer for all six: none of them is an error in the request. `in_app_only` is
-the run where the in app notice is the only channel on, so nothing was sent anywhere and
-nothing was meant to be.
+`reason` is `disabled`, `no_url`, `nothing_due`, `unreachable`, `misconfigured`,
+`in_app_only` or `unexpected`, and is **null exactly when `sent` is true**. It is a closed
+set because a client has to render the difference and cannot branch on prose; `detail` is the
+same outcome as a sentence, for a log or a caller with no message catalogue. A 200 with
+`sent: false` is the ordinary answer for all seven: none of them is an error in the request.
+`in_app_only` is the run where the in app notice is the only channel on, so nothing was sent
+anywhere and nothing was meant to be. `unexpected` is a sender that failed in a way the code
+does not anticipate, neither refused nor unreachable: it is that channel's failure, the
+others still run, and the server log names the exception's type and where it was raised.
+Its `detail` is a fixed sentence, never the exception's message.
 
 `senders` holds one `{sender, sent, loans, skipped_private, reason, detail}` per channel this
 run had something to report, in the order in app, webhook, email, Telegram. A pushing sender
@@ -1323,12 +1326,13 @@ that is switched on. Every run writes it, the manual one included, so a failure 
 run that produced it rather than living only in the container log. `sent` is null until the
 channel has run at all, because "not yet" and "fine" are different answers.
 
-`broken` is a judgement rather than a fact, and it is two rules. A refusal the app made
+`broken` is a judgement rather than a fact, and it is three rules. A refusal the app made
 itself (`no_url`, `misconfigured`) counts at once, since all of those are raised before a
-socket is opened and nothing will work until a setting changes. A destination that could not
-be reached counts only after **24 hours** and at least **two** consecutive failures: one
-failed send is a network, every send failing for a day is a configuration, and a design that
-cannot tell them apart is one a household switches off.
+socket is opened and nothing will work until a setting changes. An `unexpected` failure
+counts at once too: it is a case the code does not anticipate, and nothing says it will pass.
+A destination that could not be reached counts only after **24 hours** and at least **two**
+consecutive failures: one failed send is a network, every send failing for a day is a
+configuration, and a design that cannot tell them apart is one a household switches off.
 
 **Any write to a channel's own settings clears its record**, not the on/off switch alone.
 Replacing an expired bot token, or correcting a mail server, port or encryption choice, is

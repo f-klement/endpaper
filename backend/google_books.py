@@ -279,20 +279,21 @@ def _series_from(info: dict[str, Any]) -> tuple[str | None, float | None]:
     return name, index
 
 
-_SERIES_PATTERNS = (
-    # "Dune (Dune Chronicles #1)" and "Dune (Dune Chronicles, Book 1)"
-    re.compile(r"\(([^)]+?)[,\s]+(?:#|book\s+|bk\.?\s*)(\d+(?:\.\d+)?)\)\s*$", re.IGNORECASE),
-    # "Dune, Book 1"
-    re.compile(r"^(?P<ignored>.*?),\s*book\s+(\d+(?:\.\d+)?)\s*$", re.IGNORECASE),
+#: "Dune, Book 1". The parenthesised shape is `_series_in_parentheses`, read
+#: without an expression for the reason it gives. The number is `[0-9]` for the
+#: reason it gives too: `\d` reads another script's digits as a number.
+_BOOK_SUFFIX: Final = re.compile(
+    r"^(?P<ignored>.*?),\s*book\s+([0-9]+(?:\.[0-9]+)?)\s*$", re.IGNORECASE
 )
 
 
 def _series_from_title(title: str) -> tuple[str | None, float | None]:
-    match = _SERIES_PATTERNS[0].search(title)
-    if match:
-        return match.group(1).strip(), _to_index(match.group(2))
+    found = _series_in_parentheses(title)
+    if found is not None:
+        name, number = found
+        return name.strip(), _to_index(number)
 
-    match = _SERIES_PATTERNS[1].match(title)
+    match = _BOOK_SUFFIX.match(title)
     if match:
         # This shape names no series, only a position in one. Reporting the
         # number without a name would put the book in a nameless series, so
@@ -300,6 +301,103 @@ def _series_from_title(title: str) -> tuple[str | None, float | None]:
         return None, _to_index(match.group(2))
 
     return None, None
+
+
+def _series_in_parentheses(title: str) -> tuple[str, str] | None:
+    """The series name and number in "Dune (Dune Chronicles #1)", raw, or None.
+
+    **The answer of the expression
+    `\\(([^)]+?)[,\\s]+(?:#|book\\s+|bk\\.?\\s*)([0-9]+(?:\\.[0-9]+)?)\\)\\s*$`,
+    case blind, searched, read in one pass rather than by backtracking.** That
+    expression tried every `(` and, from each, every length of the name, so a
+    title of 16,000 characters cost 5.06 seconds, measured on CPython 3.14.0,
+    on the event loop where a search's deadline cannot interrupt it. Google
+    writes the title, and nothing ahead of this bounds it.
+
+    Read from the close inwards, because the expression is anchored there: the
+    number, then the marker right before it, then the separators before that,
+    as many as there are, since the name is matched lazily. The name runs from
+    the first `(` after any earlier `)` to those separators. Held to the
+    expression's answer over generated titles in `tests/test_google_books.py`,
+    which keeps it as the oracle: `str.isspace` and `lower` are the classes
+    `\\s` and the case blind letters are, measured over every code point.
+
+    **The number is ASCII digits, where the expression it replaced said `\\d`**,
+    which admits every script's decimal digits and which `float` then accepts.
+    That is the quiet half of the defect `tests/test_house_rules.py` refuses an
+    unnarrowed digit predicate for, so a title numbering its series in another
+    script's digits now reads as no series rather than as a number nobody typed.
+    """
+    body = title.rstrip()
+    if not body.endswith(")"):
+        return None
+    close = len(body) - 1
+    # The number: digits, or digits, a point and digits, ending at the close.
+    end = close
+    start = end
+    while start > 0 and _is_ascii_digit(body[start - 1]):
+        start -= 1
+    if start == end:
+        return None
+    if start >= 2 and body[start - 1] == "." and _is_ascii_digit(body[start - 2]):
+        whole = start - 1
+        while whole > 0 and _is_ascii_digit(body[whole - 1]):
+            whole -= 1
+        start = whole
+    number = body[start:end]
+    # The marker right before it: `#`, `book` and whitespace, or `bk`, an
+    # optional point and optional whitespace.
+    at = start
+    if at >= 1 and body[at - 1] == "#":
+        marker = at - 1
+    else:
+        spaces = at
+        while spaces > 0 and body[spaces - 1].isspace():
+            spaces -= 1
+        if spaces < at and spaces >= 4 and _folds_to(body[spaces - 4 : spaces], "book"):
+            marker = spaces - 4
+        else:
+            point = spaces - 1 if spaces >= 1 and body[spaces - 1] == "." else spaces
+            if point >= 2 and _folds_to(body[point - 2 : point], "bk"):
+                marker = point - 2
+            else:
+                return None
+    # The separators before the marker, as many as there are.
+    run = marker
+    while run > 0 and _is_separator(body[run - 1]):
+        run -= 1
+    if run == marker:
+        return None
+    # The opening parenthesis: the first after the last `)` before the close.
+    opening = body.find("(", body.rfind(")", 0, close) + 1, run)
+    if opening == -1:
+        return None
+    if opening + 1 < run:
+        return body[opening + 1 : run], number
+    # The parenthesis opens straight onto the separators: the name is the
+    # first of them, if one is left over for the separator.
+    if marker - run >= 2:
+        return body[run], number
+    return None
+
+
+def _is_ascii_digit(character: str) -> bool:
+    """A character `[0-9]` matches."""
+    return character.isascii() and character.isdecimal()
+
+
+def _is_separator(character: str) -> bool:
+    """A character `[,\\s]` matches."""
+    return character == "," or character.isspace()
+
+
+def _folds_to(text: str, word: str) -> bool:
+    """Whether `text` is `word` with any letter in either case.
+
+    `lower` rather than a comparison of ASCII, because a case blind expression
+    also matches the Kelvin sign for `k`, and so does this.
+    """
+    return len(text) == len(word) and all(a.lower() == b for a, b in zip(text, word, strict=True))
 
 
 def _to_index(raw: str) -> float | None:

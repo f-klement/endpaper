@@ -36,13 +36,17 @@ import math
 import random
 import re
 from base64 import b64encode
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final, Literal
+from unittest import mock
 from xml.etree import ElementTree
 
 import httpx
 import pytest
 import respx
+from hypothesis import given
+from hypothesis import strategies as st
 
 import bibliographic
 import covers
@@ -54,6 +58,7 @@ import marc_fields
 import metadata
 import sources
 import targets
+import xml_parse
 import z3950
 from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
 from enums import (
@@ -80,6 +85,19 @@ from tests.helpers import (
     silence_other_lookup_catalogues,
     silence_sru_catalogues,
     sru_response,
+)
+from tests.strategies import (
+    Node,
+    answer_of,
+    charsets,
+    depths,
+    encoded,
+    marc_records,
+    text_around,
+    widths,
+    witness,
+    xml_characters,
+    xml_of,
 )
 from tests.test_house_rules import _python_sources
 
@@ -1491,17 +1509,30 @@ class TestSearchMatches:
 class TestCatalogueXml:
     """Every catalogue response goes through one reader."""
 
+    #: A well formed document that declares an entity. It parses cleanly when
+    #: nothing refuses it, which is what makes it a witness for the refusal.
+    HOSTILE = (
+        '<?xml version="1.0"?>'
+        '<!DOCTYPE searchRetrieveResponse [<!ENTITY a "aaaaaaaaaa">]>'
+        '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+        "<records/></searchRetrieveResponse>"
+    )
+
+    def test_the_reader_refuses_a_doctype_before_parsing(self):
+        """The refusal itself, which the arm below cannot see: its body holds
+        no record, so a lookup that parsed it would find nothing either way,
+        and deleting the refusal left that arm green, measured. Matched on the
+        refusal's own message, since a parser error would also be a
+        `ParseError`."""
+        with pytest.raises(ElementTree.ParseError, match="carrying a doctype"):
+            _parsed(self.HOSTILE)
+
     @pytest.mark.asyncio
     async def test_a_response_carrying_a_doctype_is_refused(self):
         """`xml.etree` expands internal entities, so a doctype is a body whose
         size says nothing about what it costs to parse: ten characters nested
         three deep expand to 1,000. It degrades to "unavailable", not a 500."""
-        hostile = (
-            '<?xml version="1.0"?>'
-            '<!DOCTYPE searchRetrieveResponse [<!ENTITY a "aaaaaaaaaa">]>'
-            '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
-            "<records/></searchRetrieveResponse>"
-        )
+        hostile = self.HOSTILE
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
@@ -6429,6 +6460,273 @@ class TestTheDublinCoreAndModsSourcesRefuseInTheirOwnTerms:
         )
 
         assert _loc_record(mods, source="loc") is None
+
+
+#: The expression the BnF publisher rule used to be, kept as the oracle the
+#: linear rule is held to. **Here and nowhere in the application**, which is the
+#: point: it is quadratic on a run of `(` or of spaces.
+_BNF_PLACE: Final = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+class TestTheBnfPublisherRuleIsLinear:
+    """`metadata._without_trailing_place`, which replaced a quadratic expression.
+
+    **No property sees time**, and none is built: `docs/decisions.md` refuses a
+    wall clock deadline. So the two halves are held separately. The generated
+    one holds the answer to the old expression's on every value; the named one
+    is sized so the old form cannot finish inside the suite's per test ceiling,
+    which is how it was red before the fix and is not a timing assertion.
+    """
+
+    @pytest.mark.property
+    @given(
+        publisher=st.text(
+            st.sampled_from(["(", ")", " ", "\t", "\n", "\u00a0", "a", "Z", ","]),
+            max_size=24,
+        )
+        | st.text(max_size=24)
+    )
+    def test_it_answers_what_the_expression_answered(self, publisher):
+        """Drawn over the expression's own units, the characters it treats
+        differently, plus anything, so a disagreement is reachable rather than
+        sampled for. Exact, never a predicate: the rule's whole job is one
+        string."""
+        assert metadata._without_trailing_place(publisher) == (
+            _BNF_PLACE.sub("", publisher).strip()
+        )
+
+    def test_the_leftmost_parenthesis_after_the_last_closed_one_is_where_it_cuts(self):
+        """The input on which the obvious linear form, the last `(`, differs
+        from the expression. The expression's leftmost match wins."""
+        assert metadata._without_trailing_place("Z ((a)") == "Z"
+        assert metadata._without_trailing_place("Minard, Lettres modernes (Paris)") == (
+            "Minard, Lettres modernes"
+        )
+
+    @pytest.mark.parametrize("unit", ["(", " "])
+    def test_a_publisher_as_long_as_a_response_is_read_in_one_pass(self, unit):
+        """A run of one unit filling a whole response, through the decoder.
+
+        The two shapes the old expression backtracked on, each followed by the
+        one character that keeps its match alive longest. At this length it
+        cost of the order of an hour on the event loop; the publisher is then
+        too wide for its column, so the record keeps its title and drops it.
+        """
+        run = unit * (fetch.MAX_RESPONSE_BYTES - 400)
+        element = ElementTree.fromstring(
+            '<record xmlns:dc="http://purl.org/dc/elements/1.1/">'
+            "<dc:title>Un livre</dc:title>"
+            f"<dc:publisher>Z{run}(x</dc:publisher></record>"
+        )
+        record = metadata.READERS[decoders.Reader.DUBLIN_CORE](
+            element, decoders.Decoding(source="bnf", reader=decoders.Reader.DUBLIN_CORE)
+        )
+        assert record is not None
+        assert record.title == "Un livre"
+        assert record.publisher is None
+
+
+@dataclass(frozen=True)
+class CatalogueAnswer:
+    """An SRU response as a spec: its records, some free text, and its charset.
+
+    Drawn by the property in `TestACatalogueAnswerIsReadOrRefusedByName` and
+    rebuilt by `a_catalogue_answer` in every named case it printed.
+    """
+
+    records: tuple[Node, ...]
+    #: Text placed in the envelope outside any record, where a surrogate is drawn.
+    extra: str
+    #: The charset the response is labelled with and written in.
+    charset: str
+    #: How deep a chain of elements inside the free text's element goes.
+    nest: int = 0
+    #: How many empty siblings that element carries.
+    width: int = 0
+
+
+def a_catalogue_answer(answer: CatalogueAnswer) -> fetch.Fetched:
+    """The response the spec describes, as the transport hands it to a lookup.
+
+    **Built at the `fetch.Fetched` seam and never as a `str`**: a door reading
+    `.text` can only ever see what that decoding produces, and a string drawn
+    directly reaches values it cannot, which would be counterexamples to
+    nothing.
+    """
+    inner = "".join(
+        "<record><recordData>"
+        f'<collection xmlns="{marc_fields.NAMESPACE}">{xml_of(record)}</collection>'
+        "</recordData></record>"
+        for record in answer.records
+    )
+    text = (
+        '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+        f"<numberOfRecords>{len(answer.records)}</numberOfRecords>"
+        f"<records>{inner}</records>"
+        + xml_of(
+            Node("extraResponseData", text=answer.extra, nest=answer.nest, width=answer.width)
+        )
+        + "</searchRetrieveResponse>"
+    )
+    return fetch.Fetched(200, encoded(text, answer.charset), answer.charset)
+
+
+#: The Unicode category of a surrogate, named as a category for the reason
+#: `strategies.INVISIBLE_CATEGORIES` gives.
+SURROGATES: Final[tuple[Literal["Cs"]]] = ("Cs",)
+
+#: A catalogue's answer, drawn: MARC records, free text that sometimes carries
+#: a surrogate, and a charset.
+#:
+#: **The surrogate is drawn around ordinary text rather than as one more
+#: character of it.** Alternated with `xml_characters` inside one `text`, it was
+#: never drawn: measured, none in 400 draws. Hypothesis merges a union of
+#: character strategies, and the UTF-8 filter on one side reaching the other is
+#: the likely reason; it was not traced further.
+CATALOGUE_ANSWERS: Final = st.builds(
+    CatalogueAnswer,
+    records=st.lists(marc_records(), max_size=2).map(tuple),
+    extra=st.text(xml_characters(), max_size=8)
+    | text_around(st.text(st.characters(categories=SURROGATES), min_size=1, max_size=2), padding=4),
+    charset=charsets(),
+    # The envelope and the free text's element are two levels of the bound.
+    nest=depths(xml_parse.MAX_DEPTH - 2),
+    width=widths(),
+)
+
+#: Every seeded SRU target that answers a lookup, and every one that answers a
+#: search, in a fixed order so a printed counterexample names the same row.
+_SRU_LOOKUPS: Final = sorted(
+    (
+        target
+        for target in targets.SEEDED.values()
+        if target.transport is targets.Transport.SRU and target.can(Capability.ANSWERS_ISBN)
+    ),
+    key=lambda target: target.source,
+)
+_SRU_SEARCHES: Final = sorted(
+    (
+        target
+        for target in targets.SEEDED.values()
+        if target.transport is targets.Transport.SRU
+        and target.can(Capability.ANSWERS_TITLE_SEARCH)
+    ),
+    key=lambda target: target.source,
+)
+
+
+def _parses(response: fetch.Fetched) -> bool:
+    """Whether the catalogue parse builds a tree from this response's text."""
+    try:
+        _parsed(response.text)
+    except ElementTree.ParseError:
+        return False
+    return True
+
+
+def asked(
+    response: fetch.Fetched, looked_up: targets.Target, searched: targets.Target
+) -> tuple[metadata.Lookup, list[Record]]:
+    """What one SRU lookup and one SRU search answer when this is the response.
+
+    Patched with `mock` rather than `monkeypatch` because a generated test may
+    not take a function scoped fixture: every example would share one.
+    """
+
+    async def get_once(*_args: object, **_kwargs: object) -> fetch.Fetched:
+        return response
+
+    with mock.patch.object(fetch, "get_once", get_once):
+        lookup = asyncio.run(metadata._sru_lookup(looked_up, "9783161484100", None))
+        found = asyncio.run(metadata._sru_search(searched, "der zauberberg", 5, None))
+    return lookup, found
+
+
+class TestACatalogueAnswerIsReadOrRefusedByName:
+    """The catalogue response path: an SRU lookup and an SRU search, which
+    declare no refusal at all. Any exception out of either is a 500 that, through
+    the fan out's `gather`, costs every other source's answer too."""
+
+    @pytest.mark.property
+    @given(
+        answer=CATALOGUE_ANSWERS,
+        looked_up=st.sampled_from(_SRU_LOOKUPS),
+        searched=st.sampled_from(_SRU_SEARCHES),
+    )
+    def test_both_answer_and_neither_raises_inside_the_allocation_bound(
+        self, answer, looked_up, searched
+    ):
+        """**Generated at the `fetch.Fetched` seam, as `(bytes, charset)`**: the
+        charset from the codec registry, weighted to the ones that decode to a
+        lone surrogate, and the text built with one in it, which is the only
+        way the class is reached. The value is the spec's: a search cannot
+        answer more books than the response held."""
+        response = a_catalogue_answer(answer)
+        got = answer_of(asked, response, looked_up, searched, answers=tuple, refuses=None)
+        assert got.value is not None
+        lookup, found = got.value
+        assert isinstance(lookup, metadata.Lookup)
+        assert len(found) <= len(answer.records)
+        assert got.peak <= (
+            metadata.ALLOCATION_FACTOR * len(response.content) + xml_parse.ALLOCATION_FLOOR
+        )
+
+    def test_the_generator_still_reaches_a_charset_that_yields_a_lone_surrogate(self):
+        """Asked of the raw decode the seam repairs, which is the input the class
+        is about; after the repair no `.text` carries one, by construction."""
+        witness(
+            CATALOGUE_ANSWERS,
+            lambda answer: any(
+                0xD800 <= ord(character) <= 0xDFFF
+                for character in a_catalogue_answer(answer).content.decode(
+                    answer.charset, "replace"
+                )
+            )
+            if answer.charset != "idna"
+            else False,
+            reaches="a response whose charset decodes to a lone surrogate",
+        )
+
+    def test_the_generator_still_reaches_a_wide_response_parsed(self):
+        """The builder's positive control at this door is a wide element
+        reaching the parse, asked of what the parse did: a wide response the
+        charset garbles is refused before any element is built."""
+        witness(
+            CATALOGUE_ANSWERS,
+            lambda answer: answer.width > 0 and _parses(a_catalogue_answer(answer)),
+            reaches="a response carrying `WIDE` empty siblings, parsed",
+        )
+
+    def test_the_generator_still_reaches_a_book_found_by_a_search(self):
+        witness(
+            st.tuples(CATALOGUE_ANSWERS, st.sampled_from(_SRU_SEARCHES)),
+            lambda pair: bool(
+                asked(a_catalogue_answer(pair[0]), _SRU_LOOKUPS[0], pair[1])[1]
+            ),
+            reaches="a record a search reader accepts",
+        )
+
+    def test_a_charset_decoding_to_a_lone_surrogate_costs_one_source_nothing(self):
+        """Was `UnicodeEncodeError` out of both functions. The literal the
+        property printed against the tree before the fix: one surrogate, and a
+        charset whose decoding hands it to the parser unpaired."""
+        answer = CatalogueAnswer(records=(), extra="\ud800", charset="punycode")
+        lookup, found = asked(
+            a_catalogue_answer(answer),
+            targets.SEEDED[CatalogueSource.BNA],
+            targets.SEEDED[CatalogueSource.BNF],
+        )
+        assert lookup.outcome is Outcome.NOT_FOUND
+        assert found == []
+
+    def test_a_response_at_the_depth_bound_parses_and_one_deeper_is_refused(self):
+        """The positive control for `xml_parse.MAX_DEPTH` at the catalogue parse,
+        as a `ParseError`, which both SRU functions turn into an unavailable
+        source rather than a 500."""
+        depth = xml_parse.MAX_DEPTH
+        assert _parsed("<a>" * depth + "</a>" * depth).tag == "a"
+        with pytest.raises(ElementTree.ParseError, match="nested more than"):
+            _parsed("<a>" * (depth + 1) + "</a>" * (depth + 1))
 
 
 class TestEverySourceSetsTheIsbnItWasAskedFor:

@@ -15,6 +15,7 @@ book it very likely has, so discarding a cover on that would lose it to a blip.
 import ast
 import asyncio
 import gzip
+import logging
 from pathlib import Path
 from time import monotonic
 from typing import Final
@@ -963,6 +964,23 @@ class TestStoring:
         assert list(covers_dir.iterdir()) == []
         assert covers.outcome_counts()[covers.CoverOutcome.DOWNLOAD_FAILED.value] == 1
 
+    def test_a_volume_that_refuses_the_write_stores_nothing_and_says_so(
+        self, covers_dir, monkeypatch, caplog
+    ):
+        """The book is already saved, so a full disk costs its cover and not
+        the add: counted as a failed download rather than raised."""
+
+        def full(book_id, data):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(cover_store, "save", full)
+        with caplog.at_level(logging.WARNING), respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
+            assert covers.store(7, covers.open_library_url(ENGLISH)) is None
+
+        assert covers.outcome_counts()[covers.CoverOutcome.DOWNLOAD_FAILED.value] == 1
+        assert "Could not write the cover for book 7" in caplog.text
+
     def test_the_name_comes_from_the_bytes_not_the_url(self, covers_dir):
         """The URL is a third party's. `portal.dnb.de/opac/mvb/cover?isbn=` has
         no extension in it at all, and a `.jpg` in a path is not evidence.
@@ -1164,6 +1182,16 @@ class TestTheInteractiveBudget:
         with respx.mock:
             assert await_resolve_with_deadline(ENGLISH, 0.0) is None
 
+    def test_a_check_with_no_budget_left_answers_unknown_without_asking(self):
+        """Unknown and not absent: the caller keeps the URL rather than
+        discarding a cover nobody was asked about."""
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
+
+            assert _await(_check_one(covers.open_library_url(ENGLISH), budget=0.0)) is None
+
+        assert route.call_count == 0
+
     def test_a_check_of_a_trickling_service_answers_inside_the_budget(self):
         """The arm that was missing, and the one that cost the most.
 
@@ -1344,6 +1372,8 @@ class TestWhatThisServerMayConnectTo:
             "http://archive.org/x",
             "https://xarchive.org/x",
             "https://notus.archive.org/x",
+            # No host at all, which parses and names nothing to connect to.
+            "https:///b/isbn/x-L.jpg",
         ],
     )
     def test_everything_else_is_not(self, url):
@@ -1378,6 +1408,17 @@ class TestWhatThisServerMayConnectTo:
         service rather than one bad request."""
         assert covers.is_fetchable(url) is False
         assert covers.download(url) is None
+
+    def test_a_url_with_no_host_is_refused_whatever_the_list_holds(self, monkeypatch):
+        """The empty host refusal, which the shipped list makes look redundant.
+
+        Every entry today parses to a hostname, so an empty host can match
+        nothing. An entry without a scheme parses to none, and the comparison
+        is then `"" == ""`: a host source the policy accepts, one edit away.
+        """
+        monkeypatch.setattr(covers, "COVER_HOSTS", (*covers.COVER_HOSTS, "covers.example.org"))
+
+        assert covers.is_fetchable("https:///x.jpg") is False
 
     def test_a_renderable_url_is_not_automatically_fetchable(self):
         """`storable` has to keep admitting any https URL: that is the hotlink
@@ -1526,6 +1567,35 @@ class TestFetchesAreRefusedBeforeTheyHappen:
                 )
             )
             assert covers.download(covers.open_library_url(ENGLISH)) is None
+
+    def test_a_check_gives_up_on_a_redirect_loop_too_and_keeps_the_url(self):
+        """The checking walk, which the arm above does not reach. Unknown
+        rather than absent, so a service looping for a minute costs no cover."""
+        with respx.mock(assert_all_called=False) as mock:
+            hops = mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
+                return_value=httpx.Response(
+                    302, headers={"location": covers.open_library_url(ENGLISH)}
+                )
+            )
+
+            assert _await(_check_one(covers.open_library_url(ENGLISH))) is None
+
+        assert hops.call_count == covers.MAX_REDIRECTS + 1
+
+    def test_a_redirect_with_an_empty_location_is_followed_by_neither_walk(self):
+        """A `Location` that is present and empty: a redirect with nowhere to go,
+        which the check answers as unknown and the download as nothing."""
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
+                return_value=httpx.Response(302, headers={"location": ""})
+            )
+
+            assert _await(_check_one(covers.open_library_url(ENGLISH))) is None
+            # One request each, counted: a walk that followed the empty
+            # `Location` would loop to the hop limit and answer the same.
+            assert route.call_count == 1
+            assert covers.download(covers.open_library_url(ENGLISH)) is None
+            assert route.call_count == 2
 
 
 class TestWhereAListedHostAnswers:

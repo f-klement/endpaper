@@ -526,6 +526,19 @@ class TestOverdueWebhookSettings:
         )
         assert res.status_code == 422
 
+    def test_it_refuses_a_port_out_of_range_without_echoing_the_url(self, client, admin):
+        """`urlparse` checks a port's range only when asked, and the send then
+        fails inside the connect, which reads as a code defect rather than a
+        setting to fix. The 422 is a constant sentence, so the token in the path
+        never comes back."""
+        res = client.put(
+            "/api/settings",
+            json={"overdue_webhook_url": "https://127.0.0.1:99999/hooks/t/abcdef"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
+        assert "abcdef" not in res.text
+
     def test_an_empty_url_clears_it(self, client, admin):
         client.put(
             "/api/settings",

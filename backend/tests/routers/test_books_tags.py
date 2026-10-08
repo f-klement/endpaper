@@ -288,6 +288,23 @@ class TestPuttingOneOnABook:
         assert res.status_code == 200
         assert len(res.json()["tags"]) == MAX_TAGS_PER_BOOK
 
+    def test_a_book_at_its_ceiling_refuses_another_by_name(
+        self, client, admin, make_book, db
+    ):
+        """The picker's other door, which names the tag rather than its id."""
+        book = make_book(admin["headers"])
+        self.fill(db, book["id"], MAX_TAGS_PER_BOOK)
+
+        res = client.post(
+            f"/api/books/{book['id']}/tags",
+            json={"name": "Holiday reads"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 400
+        detail = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
+        assert "Holiday reads" not in [carried["name"] for carried in detail["tags"]]
+
     def test_a_full_book_still_answers_for_a_tag_it_already_has(
         self, client, admin, make_book, db
     ):

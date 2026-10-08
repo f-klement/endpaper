@@ -1170,6 +1170,11 @@ class TestNamingAHiddenFieldByItsId:
 
         assert res.status_code == 204
 
+    def test_deleting_a_field_that_does_not_exist_is_a_404(self, client, admin):
+        res = client.delete("/api/books/custom-fields/99999", headers=admin["headers"])
+
+        assert res.status_code == 404
+
     def test_its_owner_may_still_rename_it(self, client, member, hidden_field):
         """The gate is the viewer's, not the field's: the member whose book
         carries it reaches it exactly as before."""
